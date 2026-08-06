@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -15,7 +15,7 @@
 [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md),
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md), and
 [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
-**Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U9 through NUI-U15
+**Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U9 through NUI-U14, NUI-U17, then NUI-U15 and NUI-U16
 
 ## Context
 
@@ -46,7 +46,10 @@ flowchart LR
     Packet[nara_ui_render owned packet]
     Backend[Presentation backend]
     Receipt[Presentation receipt]
+    Presented[Presented frame behavior receipt session]
     Input[Normalized input timeline]
+    Transaction[Interaction transaction]
+    Intent[Bounded semantic intent journal]
 
     Text --> Kernel
     Kernel --> Widgets
@@ -55,8 +58,13 @@ flowchart LR
     Editor --> Kernel
     Editor --> Widgets
     Kernel --> Packet --> Backend --> Receipt
-    Input --> Kernel
-    Receipt --> Kernel
+    Kernel --> Presented
+    Runtime --> Presented
+    Receipt --> Presented
+    Input --> Transaction
+    Presented --> Transaction
+    Widgets --> Transaction
+    Transaction --> Intent
 ```
 
 - The physical dependency direction is `nara_text <- nara_ui_kernel <- nara_ui_widgets`.
@@ -78,9 +86,38 @@ flowchart LR
 - A presenter returns a `UiPresentationReceipt` only after the exact packet was accepted and
   submitted by the backend for the matching surface/environment revision. The receipt proves
   backend submission of that immutable packet; it does not claim that a player actually saw the
-  pixels. Input dispatch targets an exact retained frame/receipt pair; compilation alone never
-  grants interaction authority. The adapter retains the current pair plus two prior pairs and
-  rejects routes that resolve to a retired pair.
+  pixels. Input dispatch targets one exact retained presented session containing the immutable
+  frame, the immutable behavior snapshot compiled with it, and the receipt. Compilation alone never
+  grants interaction authority. The adapter retains the current session plus two prior sessions and
+  rejects routes that resolve to retired history.
+- Runtime UI physically separates authoring projection, per-surface compiled candidates, presented
+  history, one interaction transaction coordinator, and bounded intent-journal storage. These are
+  concrete private modules inside `nara_ui` until dependency isolation or a second adapter justifies
+  another crate. Presented history owns publication only. Intent-journal storage owns entries,
+  cursors, acknowledgements, and reclamation only. The transaction coordinator is the sole owner of
+  atomic interaction, reducer, journal-admission, and input-finalization commit.
+- Every surface has independent candidate, presented-history, interaction, and widget-reducer state.
+  A root-local compatible last-good visual may enter a newer candidate only as inert paint with no
+  hit, focus, action, or semantic authority. A failed or unpresented candidate leaves the prior
+  presented session unchanged and cannot replace its behavior. No hover, press, focus, enabled,
+  reducer, or action state is shared across surfaces.
+- Timeline routing returns one closed disposition. `PassThrough` performs no UI mutation and keeps an
+  event eligible for gameplay only when it is proven not to target UI. `Consumed` atomically commits
+  interaction state, widget-reducer state, admitted intents, and input finalization.
+  `RejectedClosed` commits no UI or intent state, records a bounded rejection, and finalizes the event
+  so gameplay cannot consume it. Stale or retired history, route mismatch, invalid projection, route
+  conflict, and capacity failure are rejected closed.
+- Semantic intents enter a bounded monotonic journal with bounded registered consumers and
+  independent cursors. Late registration begins at the current tail unless the owning product
+  installs the consumer before input starts; no implicit replay exists. The journal reclaims only the
+  prefix acknowledged by every registered consumer, never overwrites an unacknowledged entry, and
+  preflights capacity before any interaction or reducer mutation. A slow consumer causes typed
+  producer rejection rather than a silent gap. Pause retains both the consumer cursor and unobserved
+  intents; explicit unregister releases only that consumer's retention obligation.
+- A window/seat endpoint has at most one active surface owner. Republishing the same owner is
+  idempotent. A different owner receives a typed conflict without changing the existing route,
+  presentation epoch, or revision. Only retirement of the matching surface or endpoint detachment
+  releases ownership; no insertion-order or implicit focus-stack policy exists.
 - The first authoring vocabulary is closed: root, node/style, visual, display text, controlled
   button, optional semantics, immutable theme, bounded action ID, and typed semantic intent. It has
   no callback with World/Editor authority, property bag, generic Widget component, CSS selector
@@ -91,6 +128,10 @@ flowchart LR
 - Kernel routing owns capture/target/bubble, pointer capture, focus scopes, modal inertness,
   navigation, semantics, and geometry-coupled session state. `nara_ui_widgets` owns controlled
   behavior reducers and emits typed intents only.
+- Public scheduling exposes semantic registration for local command producers and only the immutable
+  current-tick consume and post-consume capture anchors required by independent products. Input
+  projection, UI route finalization, local-action mapping, command admission, acknowledgement, and
+  other technical phases remain private or doc-hidden engine-integration details.
 - Runtime and future Editor adapters share text, kernel, widget state machines, semantic
   vocabulary, and presentation infrastructure. They do not share persistent authoring identity,
   session persistence, Host authority, or domain commands.
@@ -123,6 +164,12 @@ and a narrow public API.
   and public extraction/batching DTOs are replaced rather than wrapped.
 - Three workspace-internal crates are admitted early to machine-enforce ownership in this
   AI-developed project. Their APIs remain consumer-driven and may break before 1.0.
+- The runtime adapter uses several private lifecycle modules and one transaction coordinator rather
+  than one state aggregate or a new public framework. The Reference Game migrates to the bounded
+  intent cursor but does not define these shared contracts.
+- Frame-local UI action buffers and silent window/seat route replacement are removed. Slow intent
+  consumers produce typed backpressure; they cannot lose entries or leak rejected UI input into
+  gameplay.
 - Editable text, rich spans, localization, project fonts, virtual collections, docking, and native
   multi-window Editor policy remain deferred.
 - Headless tests require an explicit test presenter when they exercise interaction; a compiled
@@ -134,8 +181,13 @@ and a narrow public API.
 |---|---:|---|
 | Frame authorities for paint/hit/focus/semantics | 1 | Kernel snapshots and routing tests |
 | Interaction against unsubmitted or stale geometry | 0 activations | Receipt-journal failure tests |
+| Presented behavior taken from a newer unpresented candidate | 0 activations | Presented-session behavior tests |
+| UI-targeted rejected input reaching gameplay | 0 edges | Routing-disposition and capacity-failure tests |
+| Unacknowledged semantic intents lost across pause or capacity pressure | 0 intents | Journal cursor, backpressure, and resume tests |
+| Active window/seat route overwritten by another surface | 0 routes | Route conflict, idempotent republish, retirement, and reclaim tests |
 | Kernel dependencies on ECS/Host/Editor/WGPU | 0 | Cargo graph and independent-consumer checks |
 | World-mutating widget callbacks | 0 | Public API inspection and compile tests |
+| Product code binding to technical input/command phases | 0 systems | Schedule-extension consumer tests |
 | Reference product parity | HUD, terminal, Retry, accessibility, package, and headless gates pass | Reference-game verification contract |
 
 ## Risks and Mitigations
@@ -145,5 +197,8 @@ and a narrow public API.
 | The neutral kernel becomes a public type warehouse | High | High | Expose only validated snapshot construction, compile, frame access, and dispatch; keep IR private. |
 | Stable-key collisions route actions to the wrong node | Critical | Low | Compare bounded exact key content, diagnose duplicates, and exclude invalid nodes from interaction and semantics. |
 | Last-good visuals remain accidentally interactive | Critical | Medium | Require a matching presentation receipt and make fallback visuals semantic/action inert. |
+| Transaction ownership is split across presented history and intent storage | Critical | Medium | Give one private coordinator the only commit path; history and journal owners expose preflighted storage operations only. |
+| A slow or abandoned consumer pins the intent journal | High | Medium | Use bounded registration, explicit unregister, typed producer backpressure, and reclaim only the globally acknowledged prefix. |
+| Surface replacement cannot reclaim a window/seat route | High | Medium | Make same-owner republish idempotent and release ownership only on exact matching retirement or endpoint detach. |
 | Editor requirements distort game persistence | High | Medium | Keep separate adapters and defer Editor migration until heterogeneous panel evidence exists. |
 | Text or atlas work becomes unbounded | High | Medium | Enforce owner-local input, glyph, page, upload, retention, and diagnostic limits. |

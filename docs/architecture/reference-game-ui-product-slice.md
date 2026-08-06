@@ -1,7 +1,8 @@
 # Reference-Game UI Product Slice
 
-**Status**: Decision checkpoint for NUI-U9 through NUI-U13
+**Status**: Decision checkpoint for NUI-U9 through NUI-U14, NUI-U17, and NUI-U15
 **Date**: 2026-08-05
+**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint
 **Authority**: ADR 0102 and the NUI implementation plan
 **Scope**: The first complete data-driven runtime UI proof for the reference game
 
@@ -15,14 +16,18 @@ The reference game uses one 16:9 game surface with a fixed logical design space 
 adapter maps the logical space to the actual surface and preserves the authored safe-area insets.
 The acceptance captures use these three physical targets:
 
-| Target | Physical surface | Logical scale | Proof purpose |
+| Target | Physical surface | Render scale | Proof purpose |
 |---|---:|---:|---|
 | Compact desktop | 1280 x 720 | 1.333... | Minimum readable HUD and pointer hit targets |
 | Standard desktop | 1920 x 1080 | 2.0 | Primary visual and interaction baseline |
 | High-density desktop | 2560 x 1440 | 2.666... | Text raster, snapping, and packet residency proof |
 
 The logical layout must remain unchanged across the three targets. Only the adapter's physical
-mapping, pixel snapping, and bounded text raster revision may differ.
+mapping, pixel snapping, and bounded text raster revision may differ. The Host derives
+`render_scale` from physical extent divided by the fixed design extent. It owns a separate
+`input_scale_factor` that converts platform-logical coordinates into the authored design space.
+The OS scale factor never becomes the render scale, and product code never rescales pointer
+coordinates itself.
 
 ## Authoring Structure
 
@@ -30,26 +35,31 @@ The runtime UI is one ordered Scene/Prefab projection with these roots:
 
 ```text
 reference-hud (layer: gameplay)
-  health-group
-    health-track
+  health-track
     health-fill
     health-label
   wave-status
   score-status
+  movement-status
+  autofire-status
 
 terminal-overlay (layer: modal)
+  modal-dim
   terminal-panel
     outcome-label
     run-summary
     retry-button
-    dismiss-button
-  input-hint
+    input-hint
 ```
 
 `reference-hud` remains visible while the wave is running. `terminal-overlay` is inert and absent
 from hit/focus/semantics while hidden. When shown, it owns the modal scope and the gameplay HUD is
 visually retained but input-inert. The structure, ordering, style roles, labels, and button names
 are Scene/Prefab data; the Rust adapter supplies only typed facts and consumes typed intents.
+`retry-button` carries `UiVisual` for its normal shape/background and `UiButtonVisuals` for its
+normal text plus hover, pressed, focus, and disabled theme roles. Disabled suppresses activation
+styling, pressed overrides the hover background, and the non-color-only focus outline composes with
+hover or pressed.
 
 ## Visual Direction
 
@@ -59,9 +69,9 @@ The first visual pass is restrained and high-contrast so the game state is scann
 - Wave and score use short text rows with a shared theme role, not hand-positioned draw calls.
 - The terminal panel uses a solid dark surface with a thin warm border. It is a framed modal tool,
   not a page-level card and not a translucent full-screen decoration.
-- Retry is the primary action. Dismiss is secondary and remains available only when the product
-  facts permit leaving the terminal state.
+- Retry is the only terminal action in this slice.
 - Focus is visible without relying on color alone: a two-pixel outline and a changed text role.
+  The outline composes with hover or pressed backgrounds instead of replacing those states.
 
 The initial palette is deliberately mixed: charcoal surfaces, cool cyan structural accents, green
 health, amber progress, and warm red terminal failure. Exact color values belong to the immutable
@@ -71,25 +81,29 @@ health, amber progress, and warm red terminal failure. Exact color values belong
 
 | Product state | HUD | Overlay | Primary intent | Input/semantics |
 |---|---|---|---|---|
-| Running | Visible and interactive only for admitted gameplay controls | Hidden, absent from hit/focus | None | Gameplay actions route normally; UI roots remain in the frame |
+| Running | Visible and interactive only for admitted gameplay controls | Hidden, absent from hit/focus | None | Gameplay actions route normally; health, wave/enemy progress, score, movement, and auto-fire facts remain in the frame |
 | Paused | Visible but inert | Optional pause treatment is out of this slice | None | Observation and UI cancellation remain pause-safe |
-| Completed | Visible but inert | Visible with completion facts and Retry | `Activate(retry)` | Modal scope traps focus; Dismiss is enabled if admitted |
-| Defeated | Visible but inert | Visible with defeat facts and Retry | `Activate(retry)` | Same modal contract, different theme/status role |
-| Retry pending | Last submitted terminal frame remains authoritative | Retry disabled with pending status | None | Duplicate activation is rejected and cannot enqueue a second command |
-| Retry rejected | Last-good terminal frame remains visible | Error text is data-driven; Retry re-enabled | `Activate(retry)` | Typed rejection is announced in semantics; no partial replacement is shown |
+| Completed | Visible but inert | Visible with completion facts and Retry | `Activate(retry)` | Modal entry focuses Retry and traps focus |
+| Defeated | Visible but inert | Visible with defeat facts and Retry | `Activate(retry)` | Same modal and initial-focus contract, different theme/status role |
+| Retry pending | Last submitted terminal frame remains authoritative | Retry disabled with pending status | None | Focus identity remains on Retry, activation is disabled, and duplicate submission cannot occur |
+| Retry rejected | Last-good terminal frame remains visible | Error text is data-driven; Retry re-enabled | `Activate(retry)` | The same control regains enabled focus and one semantic status node changes; no separate live-announcement event or partial replacement is introduced |
+| Retry applied | New-generation HUD is authoritative | Removed immediately from paint, hit, focus, and semantics | None | No transient success frame is published; the prior valid focus target is restored or focus is cleared, and exactly one new run generation is visible |
 
-Every state is captured in four interaction variants: default, hover, pressed, and keyboard focus.
-Disabled and hidden variants are also captured for Retry pending, stale roots, and modal teardown.
-The variants change theme roles and semantic state, not the structural order or logical keys.
+The six capture states are Running, Completed, Defeated, Retry pending, Retry rejected, and Retry
+applied. Paused is a transport/lifecycle safety condition, not a seventh visual capture state. At the
+canonical target, enabled Retry covers default, hover, pressed, and keyboard-focus variants once;
+pending supplies the disabled variant and applied supplies direct removal. Other physical targets
+prove layout, readability, and snapping without repeating the state-by-input matrix. The variants
+change theme roles and semantic state, not structural order or logical keys.
 
 ## Ownership Boundary
 
 | Concern | Owner | Rust responsibility |
 |---|---|---|
-| Root/node order, layout, theme roles, labels, accessibility names | Scene/Prefab data and UI kernel | Validate and project typed authoring data |
+| Root/node order, layout, `UiButtonVisuals` theme roles, labels, accessibility names | Scene/Prefab data and UI kernel | Validate and project typed authoring data |
 | Health, wave, score, terminal outcome, retry status | Reference-game domain | Publish immutable facts for the current frame |
-| Hover, focus, capture, modal scope, last-good frame | UI kernel/session | Reduce input against the exact retained frame/receipt pair |
-| Retry and dismiss behavior | Reference-game command adapter | Map typed `UiIntent` to an existing domain command |
+| Hover, focus, capture, modal scope, last-good frame | UI kernel/session | Reduce input against the exact retained frame/behavior/receipt session |
+| Retry behavior | Reference-game command adapter | Map typed `UiIntent` to the existing Retry domain command |
 | Image/glyph residency and backend submission | UI/render presentation owners | Build an owned packet and return a submission receipt |
 
 Changing HUD geometry, text, theme roles, modal structure, or labels must be possible by editing
@@ -98,18 +112,72 @@ rule is introduced.
 
 ## Acceptance Captures
 
-For each physical target, the product proof captures `running`, `completed`, `defeated`, `retry
-pending`, and `retry rejected`. Each capture records the logical frame revision, environment
-revision, structural key sequence, semantic tree, packet result, and pixel/snapshot hash. A receipt
-is recorded as backend acceptance and submission of the exact packet; it is never described as proof
-that a human saw the frame.
+The canonical 1,920 x 1,080 target captures all six product states and the complete Retry interaction
+path. Each capture records structured frame and environment revisions, structural key sequence, and
+semantic state. The 1,280 x 720 and 2,560 x 1,440 targets record layout/readability assertions for
+the longest HUD and terminal content. One canonical-target case uses a representative fractional
+`input_scale_factor` to prove coordinate conversion independently from render scale. The product
+slice does not require a target-by-state packet, pixel, hash, or digest matrix.
 
-The first implementation may use a bounded test presenter for headless captures. Desktop captures
-must use the ordinary presentation recipe and the same authoring data. Any difference between the
-three targets is limited to physical mapping, snapping, and admitted raster generations.
+The first implementation may use a bounded test presenter for headless frame and semantic captures.
+Desktop GPU/readback evidence must use the ordinary presentation recipe and the same authoring
+data. Source and packaged desktop readiness requires an actual resident glyph texture/binding, not
+only a submitted sprite frame. NUI-U14 owns one representative nonblank GPU readback and exact
+packet outcome; NUI-U15 consumes that boundary without duplicating it for each product state. A
+receipt records backend acceptance and submission of the exact packet and never claims that a human
+saw the frame. Any difference between the three targets is limited to physical mapping, snapping,
+and admitted raster generations.
+
+## Unit Boundary Decision
+
+```mermaid
+flowchart LR
+  U13[NUI-U13 authoring adapter]
+  U5B[NUI-U5B UI composition split]
+  U14[NUI-U14 owned packet and WGPU]
+  U17[NUI-U17 runtime ownership]
+  U15[NUI-U15 focused product proof]
+  U13 --> U5B --> U14 --> U17 --> U15
+```
+
+The product proof is dependency-ordered rather than one atomic implementation unit:
+
+| Unit | Required proof | Explicitly deferred |
+|---|---|---|
+| NUI-U13 | Scene/ECS authoring adapter, stable keys and structural order, headless frame/action projection, and reference-game migration away from the Rust-built tree | Paint-packet outcomes, GPU pixels, and the complete state/resolution matrix |
+| NUI-U5B | `runtime-ui` is content/authoring-only and `presentation-ui` is selected explicitly by presentation Hosts | Backend packet correctness and product captures |
+| NUI-U14 | Exact immutable image/glyph packet ownership, closed presentation outcomes, backend readiness containment, and representative nonblank GPU readback | Reference-game state and interaction coverage |
+| NUI-U17 | Presented frame/behavior/receipt sessions, transactional routing, pause-safe intent journal, route lifecycle, and narrow schedule interfaces; includes only the smallest Reference Game consumer migration | Product layout, package, and full input acceptance |
+| NUI-U15 | Six canonical-target capture states, three-target layout/readability coverage, one representative fractional input scale, all admitted Retry inputs once, package parity, and presentation-free headless Retry | Editor UI and deferred general-purpose UI features |
+
+### Alternatives Considered
+
+- **Chosen: staged closure.** Each unit closes only evidence owned by its dependency layer. This keeps
+  the authoring adapter testable headlessly and prevents packet or product acceptance from becoming
+  a prerequisite of its own dependency.
+- **Rejected: keep the full product matrix in NUI-U13.** This creates a U13 -> U14/U17/U15 -> U13
+  dependency cycle because packet results, exact presented behavior, and product states belong to
+  later owners.
+- **Rejected: merge NUI-U13 through NUI-U17 and NUI-U15.** A single large atomic unit would hide
+  whether a failure belongs to authoring, product composition, packet ownership, transactional input,
+  backend submission, or the reference product.
+
+## Risks And Mitigations
+
+| Risk | Consequence | Mitigation |
+|---|---|---|
+| Unit evidence drifts from implementation order | An active registration can claim U13 while code silently depends on unfinished U14 behavior | Update the ledger and engineering-memory registration at every unit boundary; never use later-unit evidence to close an earlier unit |
+| Physical-target wording is confused with logical layout | A 4:3 surface is treated as an ordinary 16:9 baseline and produces contradictory acceptance results | Keep one 960 x 540 logical design space and the three declared 16:9 physical targets; admit any future 4:3 constrained fallback as a separate product decision |
+| Retry success is represented only by command acceptance | Old modal roots or stale frames can remain interactive after replacement | Capture the new run generation and prove the prior overlay is absent from paint, hit, focus, and semantics |
+| Product captures become architecture authority | Reference-game state or test convenience leaks into public engine interfaces | Keep NUI-U17 independent of product layout/package proof and admit shared contracts only from module invariants or an independent consumer |
 
 ## Exit Criteria
 
 NUI-U9/U10 may start after this document, ADR 0102's checkpoint amendment, and the identity rule
-are referenced by their evidence records. NUI-U13 cannot close until the current Rust-built HUD is
-replaced by this data boundary and all five product states pass the matrix above.
+are referenced by their evidence records. NUI-U13 closes when the current Rust-built HUD is replaced
+by this Scene/Prefab data boundary and the new adapter proves stable identity/order plus headless
+frame/action projection. NUI-U14 adds exact packet outcomes and representative GPU readback. NUI-U15
+does not start until NUI-U17 closes the presented-session, routing, journal, route, and schedule
+contracts. NUI-U15 closes after all six canonical-target capture states, the separate paused safety
+condition, three-target layout/readability coverage, one representative fractional input scale, the
+complete Retry input path, package parity, and headless parity pass without a Cartesian proof matrix.

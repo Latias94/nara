@@ -3,6 +3,7 @@ title: Ordered UI Kernel and Engine Boundary Correction - Plan
 type: refactor
 date: 2026-08-04
 deepened: 2026-08-04
+amended: 2026-08-06
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution_state: active
@@ -19,10 +20,11 @@ operator_execution_authority: external-control-plane
 
 ## Goal Capsule
 
-- **Objective:** Replace the UI-local ordering patch with one persistent ordered structure contract, build a small renderer-neutral UI kernel with dedicated text and headless-widget modules, remove confirmed false extension surfaces and duplicate authorities, and prove the result through the reference game's readable HUD, terminal overlay, Retry interaction, packaged desktop path, and truly presentation-free headless path.
+- **Objective:** Replace the UI-local ordering patch with one persistent ordered structure contract, establish deep renderer-neutral UI modules and narrow interfaces before product expansion, remove confirmed false extension surfaces and duplicate authorities, and use the reference game only as the bounded acceptance carrier for readable HUD, terminal, Retry, package, and presentation-free headless workflows.
 - **Authority:** Accepted ADRs remain durable authority. NUI-U1 must admit the focused ordered-structure and UI-topology decisions, atomically activate this plan, and supersede the current RUI plan before any behavior-bearing unit starts. Until then, the current RUI plan remains the sole active execution authority.
 - **Product contract:** This plan implements the scope confirmed in the 2026-08-04 design discussion. It intentionally combines the UI product slice with the already verified foundation defects that would otherwise preserve duplicate authority, false extensibility, mutable render-resource reads, or headless/presentation coupling.
-- **Reference UI input:** [Reference-Game UI Product Slice](../architecture/reference-game-ui-product-slice.md) fixes the HUD, terminal overlay, Retry modal, three target resolutions, state matrix, and data-versus-Rust boundary used by NUI-U9 through NUI-U15.
+- **Design authority:** Shared UI contracts come from domain ownership and invariants, corroborated by independent conformance cases and common pressure across mature reference systems. A Reference Game requirement may expose a missing seam, but it cannot by itself admit a general public abstraction.
+- **Reference UI input:** [Reference-Game UI Product Slice](../architecture/reference-game-ui-product-slice.md) fixes the bounded HUD, terminal overlay, Retry modal, three target resolutions, state matrix, and data-versus-Rust acceptance fixture used by NUI-U9 through NUI-U14, NUI-U17, and NUI-U15. NUI-U13 uses it only as an early integration probe; NUI-U15 owns the complete product acceptance proof.
 - **Execution profile:** This is pre-1.0 fearless refactoring. Rust APIs, Cargo features, plugin recipes, and in-repository persistent fixtures may break. The executor removes obsolete paths instead of adding compatibility wrappers, performs proof-first or characterization-first changes, runs Cargo commands serially with `CARGO_BUILD_JOBS=1`, and may create precise Conventional Commits between coherent units.
 - **Stop conditions:** Stop the affected path and reconcile authority if ordered placement cannot produce an exact inverse, the UI kernel requires ECS/Scene/Host/WGPU ownership, the presented-frame revision cannot govern both render and interaction, a headless content recipe still installs presentation infrastructure, or a P0/P1 review finding contradicts a requirement or Accepted ADR.
 - **Tail ownership:** `ce-work` or an equivalent executor owns implementation, review, commits, verification, and final cleanup. Progress is recorded outside this file. The plan remains a decision artifact and is not mutated into a status ledger.
@@ -72,14 +74,14 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 #### UI Kernel And Authoring
 
 - R11. The physical dependency DAG is `nara_text <- nara_ui_kernel <- nara_ui_widgets`, with `nara_ui` depending on the kernel/widgets plus ECS/Scene/input adapters, `nara_ui_render` depending directly on the kernel and `nara_text` raster boundary rather than ECS UI authoring types, and `nara_render_wgpu` depending on backend-neutral render/UI packets. `nara_ui_kernel` knows no ECS, Scene, Editor, Host, window backend, or WGPU type; `nara_input` remains below UI and does not acquire text, kernel, window-backend, render, or WGPU dependencies.
-- R12. A backend-neutral `UiSurfaceId` is allocated and retired by the owning Host/window adapter, is stable and non-reused for one surface lifetime, and never derives from a native handle, render target, view index, or ECS entity. Its immutable environment snapshot owns logical viewport size, finite positive scale factor, route/presentation revision, theme revision, and font revision. The platform adapter records the explicit `WindowId`/surface mapping; typed root layers remain authored UI facts. ECS authoring does not read `ExtractedViews` or renderer-owned target data during kernel compilation.
+- R12. A backend-neutral `UiSurfaceId` is allocated and retired by the owning Host/window adapter, is stable and non-reused for one surface lifetime, and never derives from a native handle, render target, view index, or ECS entity. Its Host-owned surface descriptor owns logical viewport size, a finite positive `render_scale` from authored logical units to physical pixels, a separate finite positive `input_scale_factor` from platform-logical coordinates to the authored design space, route/presentation revision, theme revision, and font revision. The kernel environment receives `render_scale` but never infers it from the OS scale factor. The platform adapter records the explicit `WindowId`/surface mapping; typed root layers remain authored UI facts. ECS authoring does not read `ExtractedViews` or renderer-owned target data during kernel compilation.
 - R13. Every stable root has a unique adapter-supplied `UiRootKey`, and every authored interactive or stateful node projects an exact logical `UiKey` scoped beneath it. Keys are validated segmented values capped at 256 UTF-8 bytes and compare by exact content rather than a collision-prone digest. A persistent Scene root derives its root key from an opaque stable source `SceneEntityId` plus a structured `PrefabProjectionPath`; descendants extend that path with typed source-entity segments. The path separates source identity from projection location and remains opaque to the kernel. Runtime-created roots/nodes must carry explicit caller/domain keys. No key derives from runtime `SceneInstanceId`, `Entity::to_bits()`, query order, source location, or sibling index. Private generated fragments extend their owner's lineage with a typed local tag. Missing required keys and duplicates on one surface produce bounded diagnostics and cannot participate in interaction or semantics.
 - R14. The kernel accepts a bounded validated `UiAuthoringSnapshot` through one concrete fallible builder, privately normalizes it, and compiles it with the environment into an immutable revisioned `UiFrame` containing resolved logical geometry, typed root layers, stacking contexts, clip chains, one paint stream, a reverse hit index, focus/navigation facts, semantic nodes, and bounded diagnostics. Cross-crate API is limited to concrete snapshot construction, compile, and presented-frame dispatch; normalized IR nodes, cache records, layout internals, and generated fragment types remain private.
 - R15. Compilation is failure-atomic per stable root. A failed root may retain a last-good visual only when `UiSurfaceId` and the complete layout/presentation environment revision, including logical extent, scale, theme, and font, still match; an authored-source revision may differ, but that visual is explicitly non-interactive and contributes no semantic actions. A root with no compatible snapshot is absent, other valid roots continue, and no failure publishes a partial root frame.
 - R16. Painter and hit order derive only from `surface -> typed root layer -> ancestor stacking context -> local z -> persistent structural order -> private fragment order`. Roots sharing one layer use the snapshot's explicit ordered root sequence, projected from persistent root placement or the runtime hierarchy writer; the compiler never reconstructs root order from ECS query iteration or key sorting. Draw walks forward, hit testing walks backward, clipping follows the same fragment lineage, and batching may merge only adjacent compatible primitives.
 - R17. State ownership is explicit: Scene/ECS owns authored state; the game or tooling domain owns product values; the kernel owns geometry-coupled hover, focus, capture, navigation, scroll, and modal-scope state; and `nara_ui_widgets` owns behavior-local reducer state. Adapters store these opaque session values but do not reinterpret them. Every ephemeral value is bounded and keyed by stable lineage. Editor session state never enters a game Scene/Prefab document.
-- R18. Authoring uses logical pixels. Percent values resolve against the containing logical box, text sizes are logical, input coordinates normalize to logical space at ingress, and render submission converts to physical pixels with a documented snapping policy. Layout and text caches include logical size, scale factor, theme, font, wrapping width, and content revisions. The first layout surface is Flex plus Absolute; Grid and CSS selectors are not implicit promises.
-- R19. The first game authoring vocabulary is closed and concrete: `UiRoot`, `UiNode` with `UiStyle`, `UiVisual`, `UiText`, controlled `UiButton`, optional non-widget `UiSemantics`, immutable `UiTheme`, bounded `UiActionId`, and emitted `UiIntent`. Typed style/theme snapshots cover layout, inherited text properties, brushes, borders, radii, spacing, visibility, overflow, focus visuals, and disabled state. Theme resolution is a kernel responsibility, not a separate crate, generic Widget component, stringly typed property bag, callback, data-binding engine, or Unity/Godot-style second object model. Persistent components keep canonical unsuffixed names and schema version 1; first-party sources are rewritten and old `UiRoot` render-target fields, panel-material shape, missing required keys, and field-default interaction flags are rejected rather than compatibility-decoded.
+- R18. Authoring uses logical pixels. Percent values resolve against the containing logical box, text sizes are logical, platform-logical input coordinates divide by the Host-owned `input_scale_factor` exactly once, and render submission multiplies logical coordinates by `render_scale` before applying the documented physical-pixel snapping policy. A change to either mapping invalidates the route revision; a `render_scale` change also invalidates the presentation revision and layout/text/raster cache keys. Layout and text caches include logical size, render scale, theme, font, wrapping width, and content revisions. The first layout surface is Flex plus Absolute; Grid and CSS selectors are not implicit promises.
+- R19. The first game authoring vocabulary is closed and concrete: `UiRoot`, `UiNode` with `UiStyle`, `UiVisual`, `UiText`, controlled `UiButton` plus `UiButtonVisuals`, optional non-widget `UiSemantics`, immutable `UiTheme`, bounded `UiActionId`, and emitted `UiIntent`. Typed style/theme snapshots cover layout, inherited text properties, brushes, borders, radii, spacing, visibility, overflow, focus visuals, disabled state, and button visual roles for normal, hover, pressed, focus, and disabled. Disabled suppresses activation styling, pressed overrides the hover background, and focus remains a non-color-only overlay that composes with hover or pressed. Theme resolution is a kernel responsibility, not a separate crate, generic Widget component, stringly typed property bag, callback, data-binding engine, or Unity/Godot-style second object model. Persistent components keep canonical unsuffixed names and schema version 1; first-party sources are rewritten and old `UiRoot` render-target fields, panel-material shape, missing required keys, and field-default interaction flags are rejected rather than compatibility-decoded.
 - R20. Runtime UI and future Editor UI share only the kernel, text engine, widget state machines, semantic vocabulary, and backend-neutral presentation infrastructure. Runtime keeps ECS/Scene authoring and game actions; Editor keeps read-only tooling models, session persistence, and domain commands. Docking, native multi-window policy, and an editor-shell migration are deferred.
 - R21. Nara does not depend on Open-GPUI at runtime and does not copy its App/Window/Entity/Element lifecycle. Behavioral ideas may be reimplemented from tests and documented contracts. Any future source-level reuse requires per-file provenance, Apache-2.0/NOTICE compliance, and proof that no adjacent GPL lineage entered the copy.
 
@@ -94,10 +96,18 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 
 - R26. `nara_input` owns one globally ordered platform-event timeline retaining at most 4,096 fixed-size entries with a non-wrapping monotonic `u64` sequence. Entries use a low-level opaque `InputRouteStamp`, so input has no UI dependency. Pointer, button, wheel, key, gamepad, focus, leave, resize, scale-factor, accessibility-action, and close entries retain route/window/surface/seat/pointer identity, event-time logical position where applicable, the current opaque presentation epoch captured at ingress, and a typed cancellation or invalidation reason. The UI adapter maps that stamp to `UiSurfaceId` and a presentation receipt. Pointer events stamp their surface directly; keyboard/accessibility/gamepad routing uses the seat's focused-surface snapshot; an unstamped event remains available to gameplay but cannot target UI.
 - R27. Platform ingress performs one capacity/sequence preflight before publishing any projections of an event. Admission failure is a typed bounded ingress outcome, never a silent drop or partial update. Frame observation, UI routing, and gameplay action resolution use independent cursors. Observation plus UI routing/cancellation run on a documented pause-safe stage. While paused, the action cursor advances over entries that cannot affect a registered ActionMap but retains action-bearing button edges unresolved for the first resumed action pass; UI-consumed edges are skipped then. Surface retirement still fails UI closed even if the bounded timeline cannot admit another lifecycle entry.
-- R28. UI dispatch reads only a `UiFrame` paired with a matching `UiPresentationReceipt`. A presenter emits the receipt only after the exact frame packet was accepted and submitted by the backend for its surface/environment revision; the receipt does not claim that a player saw the pixels. A rejected packet never advances authority, and headless tests must use an explicit test presenter rather than treating compilation as submission. The runtime adapter retains the current plus two prior receipt/frame pairs through bounded shared ownership. The event's ingress route stamp selects an exact retained pair; an older retired pair fails with a typed non-activation outcome. A route mismatch, stale geometry, duplicate key, hidden/inert target, or retired root also fails closed, so layout compiled or submitted after an event cannot retroactively receive it.
+- R28. UI dispatch reads only an exact presented session: one immutable `UiFrame`, the immutable behavior snapshot compiled with that frame, and the matching `UiPresentationReceipt`. A presenter emits the receipt only after the exact frame packet was accepted and submitted by the backend for its surface/environment revision; the receipt does not claim that a player saw the pixels. A rejected packet never advances authority, and headless tests must use an explicit test presenter rather than treating compilation as submission. The runtime adapter retains the current plus two prior presented sessions through bounded shared ownership. The event's ingress route stamp selects one exact retained session; an older retired session fails with a typed non-activation outcome. A route mismatch, stale geometry, duplicate key, hidden/inert target, or retired root also fails closed, so layout compiled or submitted after an event cannot retroactively receive it.
 - R29. The kernel owns capture-target-bubble routing, pointer capture, focus scopes, modal underlay inertness, focus restoration, keyboard/gamepad navigation, and generic routed press/release/cancel facts. `nara_ui_widgets` owns the headless controlled Button reducer and its behavior-local state first, and emits no closure that can mutate a World or tooling model.
 - R30. Widgets emit bounded typed semantic intents such as Activate, ValueChanged, Submit, and Dismiss. Runtime and Editor adapters map intents to their own domain commands. A supported local-command collection anchor lets the reference game coalesce Enter and Retry activation to at most one existing `retry_draft()` submission without depending on the engine-private `GameplayCommandSet::MapLocalActions` phase.
 - R31. Every submitted frame includes an accessibility semantic tree with stable keys, roles, names, values, enabled/selected/expanded state, supported actions, focus, and logical geometry. The desktop adapter may run a bounded AccessKit integration trial that maps this snapshot and accessibility actions; AccessKit types and availability remain outside the formal kernel, widget, packet, and headless contracts. Semantic facts never come from a separate widget tree.
+
+#### Runtime Adapter Ownership
+
+- R39. `nara_ui` physically separates ECS/Scene authoring projection, per-surface compiled candidates, presented history, one interaction transaction coordinator, and intent-journal storage behind concrete private interfaces. A new crate is admitted only when dependency isolation or a second adapter requires it; otherwise these owners remain internal modules rather than one growing runtime file or a family of speculative public traits.
+- R40. Each `UiSurfaceId` owns an independent compiled candidate, presented history, interaction session, and widget-reducer state. A successful candidate atomically pairs one immutable `UiFrame` with the immutable behavior snapshot used to compile it. Presentation retains that exact pair with its receipt, and dispatch resolves behavior from the selected presented epoch. A root-local compatible last-good visual may appear in a newer candidate only as inert paint with no hit, focus, action, or semantic authority; a failed or unpresented candidate leaves the prior presented session unchanged and fully governed by its own receipt. Hover, press, focus, enabled state, reducer state, and actions never leak between surfaces.
+- R41. Timeline routing returns a typed `PassThrough`, `Consumed`, or `RejectedClosed` disposition. `PassThrough` performs no UI mutation and leaves the event eligible for gameplay only when the event is proven not to target UI. `Consumed` atomically commits the speculative interaction state, widget-reducer state, admitted intent batch, and input finalization. `RejectedClosed` commits none of those UI or intent changes, records a bounded rejection, and finalizes the event so gameplay cannot consume it. A stamped UI route returns `RejectedClosed` on stale geometry, retired history, route mismatch, invalid projection, route conflict, or capacity failure.
+- R42. UI semantic intents enter a bounded monotonic journal with bounded registered consumers and independent cursors. A consumer registered after runtime start begins at the current tail unless an owning product explicitly installs it before input admission; there is no implicit replay. An intent prefix is reclaimed only after every registered consumer acknowledges past it, unregistering a consumer releases only that cursor, and the producer never overwrites an unacknowledged entry. Capacity is preflighted before any interaction or reducer mutation; a slow consumer therefore causes typed producer rejection and `RejectedClosed`, not a silent gap. Pause leaves the registered consumer and unobserved entries intact, so resume observes each retained intent exactly once. Window/seat route publication is idempotent for the same surface, rejects a different active surface without changing the existing owner or revisions, and releases ownership only when the matching surface retires or the endpoint detaches; the first implementation adds no implicit multi-surface focus stack.
+- R43. The ordinary public schedule surface is limited to the semantic local-command registration helper plus the immutable current-tick `GameplayCommandSet::Consume` and post-consume `GameplayCommandSet::Capture` anchors required by independent products. Input projection, UI routing finalization, local-action mapping, command admission, acknowledgement, and their technical system sets remain private or doc-hidden engine-integration details. Independent consumers prove that product code composes through the helper and the two retained semantic anchors only.
 
 #### Render Ownership And Failure Classification
 
@@ -107,8 +117,8 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 
 #### Reference Product And Closure
 
-- R35. The running reference game presents readable wave, health, score, enemy, movement, and auto-fire facts from its existing gameplay snapshot in a compact safe-margin HUD. Terminal state presents a centered dim modal overlay above an inert underlay, VICTORY or DEFEAT, final score, visible failure/retry state, a focusable Retry button, and an Enter-to-Retry affordance. At 640 x 480, 1,280 x 720, and 1,920 x 1,080 logical viewports and the scale factors in AE4, text and controls remain inside the viewport without overlap or truncation; Retry has at least a 44 x 36 logical hit target and visually distinct normal, focused, pressed, disabled/pending, rejection, and success/removal states.
-- R36. Pointer, keyboard, gamepad, and accessibility activation of Retry enter the same typed intent path. Pending Retry disables repeated activation. A rejected Retry keeps terminal state and surfaces a bounded reason. A successful Retry removes terminal UI with the new run generation. Concurrent Enter and button activation submit at most one command.
+- R35. The running reference game presents readable wave, health, score, enemy, movement, and auto-fire facts from its existing gameplay snapshot in a compact safe-margin HUD. Terminal state presents a centered dim modal overlay above an inert underlay, VICTORY or DEFEAT, final score, visible failure/retry state, a focusable Retry button, and an Enter-to-Retry affordance. One fixed 960 x 540 logical design space maps to 1,280 x 720, 1,920 x 1,080, and 2,560 x 1,440 physical targets with render scales `4 / 3`, `2`, and `8 / 3`; the independent OS/input scale is not one of those product-target render scales. Text and controls remain inside the logical viewport without overlap or truncation. Retry has at least a 44 x 36 logical hit target and visually distinct normal, hovered, pressed, focused, disabled/pending, and rejected states. Modal entry focuses Retry; pending retains that focus identity while activation is disabled; rejection re-enables the same focused control; successful root removal restores the prior valid focus target or clears focus. Applied Retry is proven by removal and the new run generation, not by a transient success visual. A future 640 x 480 surface is a separate constrained 4:3 fallback decision, not an ordinary target in this slice.
+- R36. Pointer, keyboard, gamepad, and accessibility activation of Retry enter the same typed intent path. Pending Retry disables repeated activation. A rejected Retry keeps terminal state, re-enables Retry, and updates one bounded semantic status node; this slice does not add a separate backend-neutral live-announcement event. A successful Retry removes terminal UI immediately with the new run generation and publishes no intermediate success frame. Concurrent Enter and button activation submit at most one command.
 - R37. Source desktop and packaged desktop products embed the exact font and render equivalent nonblank glyph output from arbitrary current working directories. The headless product uses the same game content and Retry authority but resolves no window, render, image-preparation, sprite-submission, UI-render, WGPU, or Editor tooling plugin.
 - R38. Public APIs, crate features, migration notes, ADR ledger rows, architecture maps, examples, independent consumers, tests, and verification evidence describe only the landed boundaries. Closure requires no unresolved P0/P1 review finding, no entity-allocation ordering fallback, no abandoned experiment, and no compatibility surface for removed pre-1.0 contracts.
 
@@ -168,16 +178,16 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
   - **Given:** A prior experimental scene encodes `parent` on entity records and has no ordered placement closure.
   - **When:** The source is loaded after NUI-U6.
   - **Then:** Publication fails with a bounded migration diagnostic and never guesses sibling order or rewrites the file.
-- AE4. Fractional scale factors
+- AE4. Fractional render scales
   - **Covers:** R12, R18, R22-R25
-  - **Given:** The same UI content is compiled at scale factors 1.0, 1.25, 1.5, and 2.0.
+  - **Given:** The same UI content is compiled at independent kernel render scales 1.0, 1.25, 1.5, and 2.0 while the platform input scale remains fixed.
   - **When:** Layout, hit testing, text measurement, rasterization, and physical snapping run.
   - **Then:** Logical layout and hit regions remain equivalent, physical pixels follow the declared snapping rule, and no stale cache crosses an environment revision.
 - AE5. Failed root with last-good visual
   - **Covers:** R15, R28, R34
   - **Given:** A presented root has a valid last-good frame.
   - **When:** New authoring introduces a duplicate key or invalid finite value.
-  - **Then:** The compatible old visual may remain, the new source revision cannot receive interaction or semantic actions, and other roots update normally.
+  - **Then:** A new candidate may carry the compatible old visual only as inert paint while other roots update normally. If candidate publication or presentation fails instead, the prior presented session remains unchanged and continues to dispatch only for its own retained receipt.
 - AE6. Resize between press and release
   - **Covers:** R26-R30
   - **Given:** A press captures the Retry button on one presented surface revision.
@@ -213,11 +223,26 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
   - **Given:** A packaged desktop candidate is launched outside the repository and user home.
   - **When:** The HUD and terminal render.
   - **Then:** The embedded font resolves without filesystem discovery and the glyph readback is nonblank and equivalent to the source candidate within the declared target scope.
-- AE13. Supported viewport readability
+- AE13. Supported physical-target readability
   - **Covers:** R18-R19, R29, R31, R35-R36
-  - **Given:** The running HUD or terminal modal is presented at each supported logical viewport and fractional scale factor.
-  - **When:** Content reaches its longest first-party label, Retry changes through every interaction state, and the viewport resizes between supported sizes.
-  - **Then:** Text remains legible and unclipped, facts do not overlap, the terminal stays centered above an inert underlay, Retry retains its minimum hit target, and focus/pressed/disabled/rejection state is visually and semantically distinguishable.
+  - **Given:** The 960 x 540 logical design space is presented once at each supported 16:9 physical target, and one canonical target is also exercised with one representative fractional platform input scale.
+  - **When:** Content reaches its longest first-party label, the canonical target covers every Retry interaction state, and the physical surface resizes between supported targets.
+  - **Then:** Text remains legible and unclipped, facts do not overlap, the terminal stays centered above an inert underlay, Retry retains its minimum hit target, coordinate mapping remains exact, and focus/pressed/disabled/rejection state is visually and semantically distinguishable without a target-by-state Cartesian matrix.
+- AE14. Exact presented behavior survives a newer candidate
+  - **Covers:** R28-R30, R39-R41
+  - **Given:** Epoch E presents a button whose action is A, and a later compiled candidate changes that action to B without receiving a presentation receipt.
+  - **When:** Input stamped for epoch E activates the button.
+  - **Then:** Dispatch uses A and the reducer state paired with epoch E; B cannot execute or alter the presented interaction state.
+- AE15. Pause-safe semantic intent delivery
+  - **Covers:** R27, R30, R41-R42
+  - **Given:** UI routing remains active while the gameplay command consumer is paused.
+  - **When:** A presented control emits one accepted semantic intent during the pause and the runtime later resumes.
+  - **Then:** The intent remains journaled, gameplay does not receive the consumed raw edge, and the resumed consumer observes and acknowledges the intent exactly once.
+- AE16. Conflicting surface ownership fails closed
+  - **Covers:** R26, R41-R42
+  - **Given:** One active surface owns a window/seat route.
+  - **When:** The same surface republishes, another surface attempts to claim the endpoint, and the original surface later retires.
+  - **Then:** Same-owner publication is idempotent, conflicting publication returns a typed failure without changing the existing route or revisions, retirement releases only the matching owner, and the replacement surface can claim the released endpoint.
 
 ### Success Criteria
 
@@ -225,7 +250,7 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 |---|---|
 | One structural authority | Scene/Prefab canonical fixtures encode ordered roots/children, no persistent `parent`, exact Patch inverse tests pass, and UI has no sibling-order field. |
 | One frame authority | A serialized/headless `UiFrame` snapshot proves layout, paint, hit, focus, and semantics share one revision and stable keys. |
-| Deep module boundaries | The crate graph matches R11, kernel internals stay out of root preludes, and independently locked consumers compile against intended surfaces. |
+| Deep module boundaries | The crate graph matches R11, runtime projection/candidate/presentation/intent owners match R39-R43, kernel internals stay out of root preludes, and independently locked consumers compile against intended surfaces. |
 | Product readability | Desktop and packaged reference-game tests observe real text pixels, supported-viewport HUD/modal geometry, distinct Retry states, and one Retry command across pointer/keyboard/gamepad/accessibility paths. |
 | Headless integrity | The headless resolved plugin plan contains content/simulation only and completes the same gameplay/Retry workflow without presentation resources. |
 | Render snapshot ownership | WGPU submit paths consume captured image/glyph snapshots and tests prove live asset mutation cannot alter an already captured frame. |
@@ -240,6 +265,7 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 - Removal of the four verified false/duplicate surfaces and affected facade/dependency cleanup.
 - Content/presentation product composition split for 2D and UI paths.
 - Dedicated `nara_text`, `nara_ui_kernel`, and `nara_ui_widgets` crates with small intentional cross-crate interfaces.
+- Private runtime-adapter modules for authoring projection, per-surface candidates, exact presented sessions, and pause-safe intent delivery.
 - Separate locked Scene and UI/text consumer workspaces that prove those module boundaries without widening the root facade.
 - Flex/Absolute layout, logical units, typed theme/style, display text, modal Button behavior, pointer/keyboard/gamepad navigation, semantic actions, accessibility projection, and owned WGPU submission.
 - Reference-game source, packaged desktop, and headless workflow proof.
@@ -282,6 +308,9 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 - KTD16. **Expose a validated snapshot, not compiler IR.** Runtime and future Editor adapters build one concrete bounded `UiAuthoringSnapshot`; the kernel privately normalizes it. This keeps the physical crate boundary usable without publishing Taffy nodes, cache records, lifecycle hooks, or provider traits.
 - KTD17. **Commit presentation explicitly.** Compilation and packet construction do not imply that pixels reached a surface. Only a matching `UiPresentationReceipt` enters the bounded three-frame journal and advances interaction authority, which makes resize, surface loss, packet rejection, earlier-event routing, and retired-frame failure testable.
 - KTD18. **Start with bounded first-party defaults.** Text, event, atlas, upload, retention, and diagnostic limits are concrete typed policies sized well above the reference workflow, injectable downward in tests, and kept out of persistent schemas and ordinary preludes until a product needs configuration.
+- KTD19. **Split growth by owner before adding product breadth.** (session-settled: user-directed — chosen over extending the current runtime adapter until the Reference Game passes: authoring candidates, presented authority, interaction state, and intent delivery have different lifecycles and are expensive to disentangle later.) Physical crates enforce dependency direction; internal modules enforce lifecycle ownership inside one crate.
+- KTD20. **Treat the Reference Game as pressure, not architecture authority.** (session-settled: user-directed — chosen over product-first public API growth: the game may reveal a missing capability, but shared contracts require a module invariant, comparative engine pressure, or a second independent consumer.) Product-specific HUD, modal, copy, and command facts remain outside engine modules.
+- KTD21. **Keep proof proportional to the contract.** (session-settled: user-directed — chosen over expanding smoke, snapshot, hash, digest, and Cartesian product matrices: tests should prove module invariants and critical cross-layer boundaries.) Hashes and digests remain only where byte identity, provenance, or package integrity is the contract; one representative pixel/readback proof is enough for a render boundary unless a distinct failure mode requires more.
 
 ### High-Level Technical Design
 
@@ -316,12 +345,24 @@ flowchart TB
 | `nara_text` | Validated face plus bounded shape/measure/raster requests -> immutable text results | Font admission, shaping, line layout, glyph keys, raster masks and diagnostics | UI tree, ECS, atlas residency, GPU resources or system discovery |
 | `nara_ui_kernel` | Concrete fallible `UiAuthoringSnapshot` builder; compile; presented-frame dispatch; read-only `UiFrame` accessors | Private normalized IR, layout, stacking, clipping, hit/focus routing, semantic projection and geometry-coupled session state | ECS/Scene/Host/window/WGPU types, widget catalogue, callbacks or public lifecycle stages |
 | `nara_ui_widgets` | Controlled widget specs/reducers over kernel primitives -> typed semantic intents | Button behavior-local state, widget composition and reusable interaction fixtures | Product values, World/tooling mutation, rendering or platform authority |
-| `nara_ui` | ECS/Scene projection plus opaque kernel/widget sessions -> game UI actions | Authoring component codecs, stable entity/key mapping, surface-session storage and game-action adaptation | Compiler IR, Editor persistence or GPU submission |
+| `nara_ui` | ECS/Scene projection -> per-surface candidate -> presented history -> interaction transaction -> bounded intent journal | Authoring codecs, stable entity/key mapping, candidate publication, surface-local widget state, receipt-bound behavior, transactional routing and game-action adaptation | Compiler IR, Editor persistence, GPU submission or product-specific HUD commands |
 | future `nara_tooling_ui` | Read-only tooling views plus Editor session state -> tooling commands | Editor-specific projection and command adaptation | Game documents, Host persistence/mutation, docking or native-window policy |
 | `nara_ui_render` | Read-only `UiFrame` -> owned backend-neutral packet | Private bounded text-raster requests, primitive lowering, CPU glyph-atlas allocation/snapshots and captured resource references | ECS queries, live asset recovery, surface presentation or public extract/queue/batch stages |
 | `nara_render_wgpu` | Owned packet plus device/surface state -> kernel-defined presentation receipt | GPU cache/upload, surface submission and backend failure classification | Gameplay World reads, UI authoring or synthetic receipts for rejected packets |
 
 The two behavior-bearing kernel operations are compile and dispatch. Snapshot construction is a concrete validated input path, not an extensibility protocol. Dispatch receives an immutable frame, its matching presentation receipt, normalized event entries, and opaque session state; it returns bounded state deltas, routed widget events, typed intents, and diagnostics. Adapters store the opaque state and map intents but cannot bypass the kernel's routing or reinterpret widget reducers.
+
+#### Runtime Adapter Modules
+
+| Internal owner | Input | Output | Commit boundary |
+|---|---|---|---|
+| Authoring projection | ECS/Scene components plus completed structural order | Validated kernel snapshot and immutable behavior description | No runtime authority changes; diagnostics are bounded observations |
+| Compiled candidate | Snapshot plus one surface environment and prior surface-local reducer state | One atomic frame/behavior candidate for that surface | Replace only that surface's candidate after complete compilation succeeds |
+| Presented history | Exact candidate plus backend acceptance epoch | Retained frame/receipt/behavior sessions | Publish one exact session after receipt validation; never mutate interaction, reducer, or intent state |
+| Interaction transaction | Selected presented session, normalized input, current surface-local interaction/reducer state, and preflighted timeline/journal capacity | One speculative interaction/reducer delta, routed intent batch, diagnostic, and routing disposition | One coordinator applies all state, journal, and input-finalization changes without further failure, or applies only `RejectedClosed` plus its diagnostic |
+| Intent journal | Admitted intent batches plus bounded consumer registration/acknowledgement operations | Monotonic entries, cursor observations, typed capacity outcomes, and reclaimable prefix | Own storage and cursor reclamation only; never coordinate kernel or timeline mutation |
+
+These are physical modules before NUI-U15 grows product code. They use concrete private types. They do not introduce provider traits, callbacks, registries, or a second retained UI object model.
 
 #### Initial Game Authoring Vocabulary
 
@@ -332,6 +373,7 @@ The two behavior-bearing kernel operations are compile and dispatch. Snapshot co
 | `UiVisual` | Owns typed solid or image brush, border, radius and theme roles. It replaces `UiPanel`/`UiPanelMaterial` rather than wrapping them. |
 | `UiText` | Owns the bounded display-text contract in R24 and inherited text theme roles; it does not imply editable text, rich spans or a project font handle. |
 | `UiButton` | Owns controlled enabled state, bounded `UiActionId`, accessible name and Button semantics. It composes `UiNode`/visual/text facts and emits `UiIntent::Activate`; it stores no callback or domain command. |
+| `UiButtonVisuals` | Selects typed normal, hover, pressed, focus, and disabled theme roles. Disabled suppresses activation styling, pressed overrides hover background, and focus is a composable non-color-only overlay. Product pending/rejected facts select these roles but do not add engine-specific states. |
 | `UiSemantics` | Adds role/name/value/state/actions only for a non-widget node that needs explicit semantics; widget and text defaults do not require a duplicate component. |
 | `UiTheme` | Is an immutable revisioned runtime snapshot with one built-in first-party default; persistent nodes select typed roles, not arbitrary property names. |
 | Runtime-only key binding | Programmatically created roots/stateful nodes receive explicit `UiRootKey`/`UiKey` through the runtime authoring bundle. Persistent Scene/Prefab nodes use R13 source identity and do not persist a second key hierarchy. |
@@ -344,20 +386,20 @@ The ordinary root prelude exposes only these authoring concepts, the UI plugin, 
 flowchart TB
   Source[Scene Prefab runtime ECS authoring]
   Structure[Ordered runtime hierarchy]
-  Adapter[nara_ui projection]
+  Adapter[nara_ui authoring projection]
   Compiler[nara_ui_kernel compile]
-  Frame[Immutable compiled UiFrame]
+  Candidate[Per-surface frame and behavior candidate]
   Packet[Owned UI paint packet]
   Backend[WGPU surface]
   Receipt[Presentation receipt]
+  Presented[Exact presented session]
   Platform[Platform event timeline]
-  Dispatch[Kernel dispatch]
-  Intent[Typed semantic intents]
+  Decision[Typed UI routing decision]
+  Intent[Bounded semantic intent journal]
   Domain[Game or tooling commands]
-  Source --> Structure --> Adapter --> Compiler --> Frame --> Packet --> Backend --> Receipt
-  Platform --> Dispatch
-  Frame --> Dispatch
-  Receipt --> Dispatch --> Intent --> Domain --> Source
+  Source --> Structure --> Adapter --> Compiler --> Candidate --> Packet --> Backend --> Receipt --> Presented
+  Candidate --> Presented
+  Platform --> Decision --> Presented --> Intent --> Domain --> Source
 ```
 
 #### Persistent Placement Shape
@@ -412,7 +454,7 @@ stateDiagram-v2
 | ADR | First implementation owners | Closure owner |
 |---|---|---|
 | 0101 ordered persistent placement/runtime projection | NUI-U6 through NUI-U8, consumed by NUI-U13 | NUI-U16 |
-| 0102 UI/text/widget/presented-frame topology | NUI-U9 through NUI-U15 | NUI-U16 |
+| 0102 UI/text/widget/presented-frame topology | NUI-U9 through NUI-U14, NUI-U17, and NUI-U15 | NUI-U16 |
 | 0103 concrete domain-owned asset import | NUI-U3 | NUI-U16 |
 | 0104 Host-owned Editor workspace installation | NUI-U2 | NUI-U16 |
 | 0105 closed first-party render plan | NUI-U4 and NUI-U14 | NUI-U16 |
@@ -425,8 +467,10 @@ stateDiagram-v2
 3. Migrate persistent ordered placement through Scene, Prefab, Patch, tooling, runtime hierarchy, and reference content.
 4. Build text, kernel, input, widgets, and semantics as headless modules with snapshot tests.
 5. Replace the runtime ECS adapter, complete the UI content/presentation split, and replace the render submission path end-to-end.
-6. Prove the reference-game desktop, packaged, accessibility, and headless workflows.
-7. Tighten public surfaces, independent consumers, evidence, and documentation only after the product flow passes.
+6. Before any NUI-U17 code change, validate and commit the landed NUI-U13, NUI-U5B, and NUI-U14 base, amend ADR 0102, align the implementation ledger and product input, replace the active NUI-U15 registration with NUI-U17, and regenerate derived engineering state.
+7. Before expanding the product proof, split runtime projection, candidates, presented history, interaction transactions, and intent-journal storage into deep modules and close their interfaces.
+8. Prove the reference-game desktop, packaged, accessibility, and headless workflows without widening shared contracts from product-only facts.
+9. Tighten public surfaces, independent consumers, evidence, and documentation only after the product flow passes.
 
 ### Implementation Constraints
 
@@ -437,6 +481,8 @@ stateDiagram-v2
 - Keep `repo-ref/` read-only. Copy only the selected OFL font plus its license in NUI-U9; reimplement Open-GPUI behavior without a source dependency.
 - Do not add scripts that parse Rust source or mirror compiler behavior to prove APIs. Use compile tests, independent consumers, runtime assertions, snapshots, and product workflows.
 - Do not add provider traits, backend registries, stringly typed style properties, generic callbacks, public layout-node lifecycles, or a RenderGraph to make the new crate topology appear complete.
+- Split a physical crate when dependency isolation or reuse across Runtime, Editor, or presentation adapters requires it. Split an internal module when one crate still owns the behavior but candidate, presented, session, or delivery lifecycles differ. Do not create a crate or trait only to reduce file length.
+- Keep tests contract-shaped. Migrate unique behavioral assertions before deleting obsolete or orphan modules, remove duplicate implementation-coupled fixtures, and avoid repeating the same behavior across every resolution, input device, host, and packaging permutation.
 
 ### System-Wide Impact
 
@@ -461,6 +507,8 @@ stateDiagram-v2
 |---|---|---|
 | Ordered document migration expands beyond UI | Scene, Prefab, Patch, tooling, and reference fixtures can diverge. | Finish NUI-U6 through NUI-U8 before the runtime UI adapter and require canonical round-trip plus exact inverse evidence. |
 | Early crates become shallow type warehouses | The dependency graph looks clean while behavior remains scattered. | Give each crate one deep responsibility, keep internals private, and reject APIs without a unit's real consumer. |
+| The runtime adapter remains a god module | Candidate compilation, presentation authority, interaction state, and intent delivery acquire incompatible commit rules and force a later rewrite. | Complete NUI-U17 before NUI-U15 and require one owner plus one atomic commit boundary for each lifecycle. |
+| Reference-game fixtures become architecture authority | HUD-specific facts or test convenience leak into public engine types and schedules. | Keep NUI-U15 downstream of NUI-U17, require R39-R43 conformance without reference-game dependencies, and admit shared APIs only through KTD20. |
 | Taffy/text dependencies exceed Rust 1.95 or change behavior | The plan cannot compile reproducibly across locked workspaces. | Verify exact locked versions and MSRV in NUI-U9/NUI-U10 before public types land; stop rather than silently change algorithms. |
 | Stable keys duplicate persistent entity identity | Two identity systems drift. | Treat `UiKey` as adapter-projected logical identity with one documented source per node; never persist a second hierarchy or parent relation. |
 | Last-good visuals accept stale input | Players activate controls that are no longer authored. | Bind dispatch to presented source/environment revisions and make stale roots visual-only per R15/R28. |
@@ -471,6 +519,7 @@ stateDiagram-v2
 | Content failure poisons WGPU | One missing glyph or image disables the renderer. | Implement the closed R34 classification and assert backend state after every content failure case. |
 | Headless feature split breaks existing recipes | Product capabilities compile but install the wrong services. | Update root, reference-game, module-consumer, and host parity fixtures in the same unit; no compatibility feature aliases. |
 | One master plan loses execution clarity | Units become partially complete or reviews mix unrelated deltas. | Keep unit ownership narrow, dependency-order execution, per-unit commits/evidence, and one active unit registration. |
+| Validation volume substitutes for design evidence | Smoke binaries, snapshots, digests, and Cartesian matrices grow while module invariants remain unproven. | Apply KTD21, retain one representative cross-layer proof, and delete redundant or orphan verification after its unique assertion moves to the owning module. |
 | Open-GPUI copying contaminates license posture | Apache/GPL provenance becomes ambiguous under Nara's dual license. | Clean-room behavior reimplementation by default; only the OFL font copy is authorized in this plan. |
 
 ---
@@ -485,7 +534,7 @@ stateDiagram-v2
 | NUI-U2 | Remove duplicate runtime tooling authority | `crates/nara_tooling`, `src/product.rs`, host tests | NUI-U1 |
 | NUI-U3 | Retire the unconsumed importer registry | `crates/nara_asset`, `crates/nara_image`, asset examples/tests | NUI-U1 |
 | NUI-U4 | Close render/UI internals and clean dependency edges | `crates/nara_render`, `crates/nara_ui_render`, manifests, facade | NUI-U1 |
-| NUI-U5 | Split content from presentation composition in two dependency-ordered checkpoints | root features/product recipes, project capabilities, image preparation, reference game | NUI-U2, NUI-U4; final UI closure after NUI-U13 |
+| NUI-U5 | Split content from presentation composition in two dependency-ordered checkpoints | root features/product recipes, project capabilities, image preparation, reference game | U5A: NUI-U2 and NUI-U4; U5B: NUI-U13 |
 | NUI-U6 | Publish canonical ordered Scene/Prefab documents | `crates/nara_scene` document/format/validation/migration | NUI-U1 |
 | NUI-U7 | Add exact ordered placement Patch and tooling commands | Scene Patch/authoring, tooling Inspector/persistence | NUI-U6 |
 | NUI-U8 | Lower ordered placement into runtime hierarchy | `crates/nara_hierarchy`, Scene spawn/export/prefab, content fixtures | NUI-U7 |
@@ -494,9 +543,10 @@ stateDiagram-v2
 | NUI-U11 | Establish one normalized input timeline | `crates/nara_input`, `crates/nara_winit`, schedules/gameplay anchor | NUI-U1, NUI-U4 |
 | NUI-U12 | Build headless widgets, focus, and semantics | new `crates/nara_ui_widgets`, kernel dispatch, accessibility adapter | NUI-U10, NUI-U11 |
 | NUI-U13 | Replace the ECS runtime UI adapter | `crates/nara_ui`, codecs, examples, runtime authoring tests | NUI-U8, NUI-U10, NUI-U12 |
-| NUI-U14 | Publish owned UI/image packets through WGPU | UI render, render prepare, image, WGPU backend/cache/tests | NUI-U3, NUI-U4, NUI-U5, NUI-U9, NUI-U13 |
-| NUI-U15 | Complete the reference-game product proof | `reference-game`, packaged probes, headless/desktop tests | NUI-U5, NUI-U11, NUI-U12, NUI-U13, NUI-U14 |
-| NUI-U16 | Close public surfaces and evidence | facade/features, module consumer, docs, ledger, full gates | NUI-U2 through NUI-U15 |
+| NUI-U14 | Publish owned UI/image packets through WGPU | UI render, render prepare, image, WGPU backend/cache/tests | NUI-U3, NUI-U4, NUI-U5B, NUI-U9, NUI-U13 |
+| NUI-U17 | Deepen runtime UI ownership and interfaces | `crates/nara_ui`, `crates/nara_input`, `crates/nara_gameplay`, schedule consumer | NUI-U13, NUI-U14 |
+| NUI-U15 | Complete the reference-game product proof | `reference-game`, one packaged boundary probe, focused headless/desktop tests | NUI-U5B, NUI-U11 through NUI-U14, NUI-U17 |
+| NUI-U16 | Close public surfaces and evidence | facade/features, module consumer, docs, ledger, full gates | NUI-U2 through NUI-U15, NUI-U17 |
 
 ### NUI-U1. Activate Decisions And Successor Authority
 
@@ -624,37 +674,55 @@ stateDiagram-v2
 - **Requirements:** R6, R10-R20, R24, R28-R31, R38.
 - **Dependencies:** NUI-U8, NUI-U10, NUI-U12.
 - **Files:** `crates/nara_ui/src/{lib.rs,codec.rs,style.rs,layout.rs,interaction.rs,tests.rs}` with modules deleted/replaced as needed; root plugin composition; `examples/runtime_ui_panel.rs`; Scene component fixtures and reference-game authoring helpers.
-- **Approach:** Replace `ComputedUiLayouts`, ECS hit testing, `UiPointerRoute`, entity tie-breaks, coarse visibility/focus flags, `UiPanel`/`UiPanelMaterial`, and renderer-bound `UiRoot` fields with R19's closed authoring vocabulary plus private projection/frame state. Keep corrected component schemas at canonical version 1, reject legacy missing/defaulted shapes, derive structural order from hierarchy, project stable keys, compile by surface environment, dispatch presented input, and publish typed actions.
-- **Test scenarios:** Exact component catalogue and canonical version-1 codecs; old root/panel/interaction shape rejection; runtime-created and Scene-authored root-key provenance; repeated Scene/Prefab instances; stable keys/order after allocation/rebuild/Retry; missing/oversized/duplicate key/root failure; surface and presented-journal revision; UI action publication; visibility/overflow/theme/text changes; no renderer-owned query in compile; no technical compiler types in ordinary prelude.
-- **Verification:** Focused UI/Scene/plugin tests, runtime UI example, public-surface checks, and API diff pass.
+- **Approach:** Replace `ComputedUiLayouts`, ECS hit testing, `UiPointerRoute`, entity tie-breaks, coarse visibility/focus flags, `UiPanel`/`UiPanelMaterial`, and renderer-bound `UiRoot` fields with R19's closed authoring vocabulary plus private projection/frame state. Keep corrected component schemas at canonical version 1, reject legacy missing/defaulted shapes, derive structural order from hierarchy, project stable keys, compile by surface environment, dispatch presented input, and publish typed actions. Migrate the reference game from a Rust-built UI tree to the Scene/Prefab authoring adapter in this unit.
+- **Test scenarios:** Exact component catalogue and canonical version-1 codecs; old root/panel/interaction shape rejection; runtime-created and Scene-authored root-key provenance; repeated Scene/Prefab instances; stable keys/order after allocation/rebuild/Retry; missing/oversized/duplicate key/root failure; surface and presented-journal revision; headless frame/action projection; reference-game data-authoring boot; UI action publication; visibility/overflow/theme/text changes; no renderer-owned query in compile; no technical compiler types in ordinary prelude.
+- **Verification:** Focused UI/Scene/plugin and reference-game authoring/headless tests, runtime UI example, public-surface checks, and API diff pass. U13 closure does not require paint-packet outcomes, GPU pixel/readback evidence, or the complete product state/resolution matrix; those belong to NUI-U14 and NUI-U15 respectively.
 
 ### NUI-U14. Publish Owned UI And Image Packets Through WGPU
 
 - **Goal:** Submit the exact immutable UI and image resources captured for a frame without live World reads.
 - **Requirements:** R25, R32-R34, R37-R38.
-- **Dependencies:** NUI-U3, NUI-U4, NUI-U5, NUI-U9, NUI-U13.
+- **Dependencies:** NUI-U3, NUI-U4, NUI-U5B, NUI-U9, NUI-U13.
 - **Files:** `crates/nara_ui_render/src`; `crates/nara_render/src/{lib.rs,prepare.rs}`; `crates/nara_image/src`; `crates/nara_render_wgpu/src/{lib.rs,backend.rs,quad.rs,ui.rs,sprite.rs,texture.rs,telemetry.rs}`; focused GPU/readback tests.
 - **Approach:** Admit Guillotiere 0.7.0 in `nara_ui_render`, resolve `UiFrame` glyph requests through `nara_text`'s bounded raster API, build one ordered paint packet, allocate and snapshot CPU R8 atlas pages, capture `Arc`-backed prepared image pixels and pages with exact generations, remove submit-time `Assets<ImageAsset>` reads, cache GPU resources by snapshot/device epoch, enforce R25's CPU/GPU/raster/upload/retention matrix, classify failures per R34, and emit a receipt only after the exact packet reaches presentation.
 - **Test scenarios:** Solid/image/glyph interleaving and clipping; unchanged snapshot reuse; asset replacement after capture always uses the captured generation; missing/stale/mismatched packet resource; atlas first-load/replacement saturation; raster/upload deferral; surface mismatch produces no receipt; device epoch reset; bounded eviction/retirement; content error leaves backend ready; nonblank glyph and image readback.
 - **Verification:** UI-render, render-prepare, image, WGPU sprite/UI submitter, telemetry, fallback-adapter readback, and desktop render tests pass.
 
+### NUI-U17. Deepen Runtime UI Ownership And Interfaces
+
+- **Goal:** Turn the runtime UI adapter into deep lifecycle modules before product UI expansion, while making presented behavior, input arbitration, and semantic-intent delivery exact and pause-safe.
+- **Requirements:** R17, R26-R31, R39-R43.
+- **Dependencies:** NUI-U13, NUI-U14.
+- **Entry gate:** Before code changes, NUI-U13, NUI-U5B, and NUI-U14 exist as reviewed commits; ADR 0102, this plan, the Reference-Game UI Product Slice, the implementation ledger, and the derived engineering registration all agree that NUI-U17 is active and NUI-U15 is blocked on it.
+- **Files:** `crates/nara_ui/src/runtime.rs`; new private modules under `crates/nara_ui/src/runtime/` and `crates/nara_ui/src/interaction/`; `crates/nara_ui/src/adapter_tests.rs`; `crates/nara_input/src/{lib.rs,timeline.rs,timeline/types.rs}`; `crates/nara_gameplay/src`; `reference-game/src/runtime_ui.rs` plus its smallest adapter-focused compile/test target; `tests/fixtures/schedule-extension/renamed-root/src/lib.rs`; focused schedule/UI/input tests.
+- **Approach:**
+  1. Move ECS/Scene projection, per-surface candidate publication, presented history, interaction transactions, and intent-journal storage into physical private modules with concrete types and one owner each.
+  2. Retain the immutable behavior snapshot with the exact presented frame/receipt session, key interaction and reducer state by surface lineage, and keep presented-history publication independent from input-state mutation.
+  3. Add one private interaction transaction coordinator that computes speculative kernel/widget deltas, preflights timeline and journal capacity, and then performs one no-fail commit or one `RejectedClosed` finalization.
+  4. Replace frame-local `UiActionEvents` clearing with the R42 bounded journal, explicit consumer registration, acknowledgement, reclamation, unregister, and typed producer-backpressure rules; migrate the Reference Game consumer to a cursor without retaining a compatibility event buffer.
+  5. Make route republish/conflict/release lifecycle explicit, return the R41 disposition from routing, and replace public technical schedule phases with the R43 helper plus retained `Consume`/`Capture` anchors.
+  6. Migrate the unique assertions from obsolete or orphan test modules, then delete those modules and any redundant smoke or digest proof that no longer owns a distinct contract.
+- **Test scenarios:** A previously presented action A remains authoritative after an unpresented candidate changes it to B; a failed or unpresented candidate leaves the prior presented session unchanged while a root-local last-good visual in a newer candidate is inert; hover, press, focus, enabled state, and reducer state on surface A cannot affect surface B; a reducer or intent-capacity failure commits no interaction, reducer, or intent state, returns `RejectedClosed`, and cannot reach gameplay; stale, retired, mismatched, and invalid stamped UI routes return `RejectedClosed`; an unstamped non-UI event returns `PassThrough`; a paused intent survives until one resumed consumer acknowledgement; a late consumer starts at the current tail; acknowledgement and unregister reclaim only the globally safe prefix; journal overflow is typed; same-surface route publication is idempotent, a second surface cannot overwrite an active route, retirement releases only its own route, and the released endpoint can be reclaimed; an independent schedule consumer composes only through the local-command helper and `Consume`/`Capture`.
+- **Verification:** Focused `nara_ui`, `nara_ui_kernel`, `nara_ui_widgets`, `nara_input`, and `nara_gameplay` nextest suites, the schedule-extension consumer, and one Reference Game library compile or adapter-focused test pass without running the product, package, resolution, or pixel matrix.
+
 ### NUI-U15. Complete The Reference-Game Product Proof
 
 - **Goal:** Deliver readable runtime feedback and one semantic Retry path across source, package, desktop, accessibility, and headless Hosts.
-- **Requirements:** R5, R26-R38.
-- **Dependencies:** NUI-U5, NUI-U11, NUI-U12, NUI-U13, NUI-U14.
-- **Files:** `reference-game/{Cargo.toml,src,tests,scenes,prefabs}`; root packaging/launch fixtures; selected font packaging inputs; desktop render/readback and headless parity probes.
+- **Requirements:** R35-R38, with focused integration probes for R5, R28, and R31 rather than re-closing their owning units.
+- **Dependencies:** NUI-U5B, NUI-U11 through NUI-U14, NUI-U17.
+- **Files:** `reference-game/{Cargo.toml,src,tests,scenes,prefabs}`; root packaging/launch fixtures; selected font packaging inputs; one packaged arbitrary-CWD probe; focused desktop and headless parity tests.
 - **Approach:** Build the safe-margin HUD and centered terminal UI from gameplay snapshots, use typed root layers and Button intent, map Enter/button/gamepad/accessibility through one coalescer to `retry_draft()`, expose every interaction state in R35, embed the exact font/license, and compose desktop versus headless capabilities explicitly.
-- **Test scenarios:** Running HUD facts; victory/defeat terminal; 640 x 480, 1,280 x 720 and 1,920 x 1,080 layout at every declared scale factor; longest labels and minimum Retry target; pointer/keyboard/gamepad/accessibility Retry; concurrent intent coalescing; pending/rejected/successful Retry; resize/scale/capture cancel; unrelated allocation; source/package arbitrary-CWD glyph equivalence; headless run/Retry without presentation owners.
-- **Verification:** Reference-game default, desktop, editor/host parity, render, first-wave, headless CLI/snapshot/tracer, packaged candidate, and manual desktop workflow gates pass.
+- **Admission boundary:** Product-specific facts, recipes, copy, and visual choices remain in reference-game data or adapters. A newly discovered shared capability must satisfy a module invariant, independent conformance pressure, or a second real consumer before it widens a public UI contract.
+- **Test scenarios:** Six capture states—running, completed, defeated, pending, rejected, and applied/removal—run at one canonical logical surface; paused routing is a separate lifecycle-safety condition rather than a seventh visual capture state. The three physical targets prove layout/readability once each, and one canonical target uses one representative fractional `input_scale_factor` without multiplying every behavior case. Pointer, keyboard, gamepad, and accessibility each prove the same Retry intent path once; concurrent intent coalescing, direct applied-state root removal, resize/capture cancellation, one arbitrary-CWD package launch, and headless Retry parity remain covered.
+- **Verification:** Focused Reference Game default, desktop, host-parity, packaged arbitrary-CWD, and headless gates pass. A behavior already proven by NUI-U17 is not repeated across every resolution, host, or input permutation.
 
 ### NUI-U16. Close Public Surfaces And Evidence
 
 - **Goal:** Make the landed code, public product boundary, documentation, and completion evidence say the same thing.
-- **Requirements:** R1-R5, R11, R20-R21, R37-R38.
-- **Dependencies:** NUI-U2 through NUI-U15.
+- **Requirements:** R1-R5, R11, R20-R21, R37-R43.
+- **Dependencies:** NUI-U2 through NUI-U15, NUI-U17.
 - **Files:** root facade/features/preludes; all affected crate docs/examples; existing Scene-only `module-consumer`; new separately locked `ui-module-consumer`; architecture ADRs/map/foundation/open questions/ledger; migration guide; plan/memory verification evidence; CI/feature fixtures where already owned.
-- **Approach:** Remove dead experiments and obsolete exports, keep kernel internals out of ordinary preludes, preserve `module-consumer` as the direct Scene-domain regression fixture, add a separate excluded workspace that directly consumes renamed `nara_text`/kernel/widgets dependencies, update only implementation evidence proven by the final commit, close the active registration, and leave deferred Editor/virtualization/text features trigger-gated.
+- **Approach:** Remove dead experiments and obsolete exports, keep kernel internals out of ordinary preludes, preserve `module-consumer` as the direct Scene-domain regression fixture, add a separate excluded workspace that directly consumes renamed `nara_text`/kernel/widgets dependencies, update only implementation evidence proven by the final commit, close the active registration, record the focused UI-foundation-conformance successor scope without creating or activating that plan here, and leave deferred Editor/virtualization/text features trigger-gated.
 - **Test scenarios:** Minimal and all-feature facade compilation; direct module consumption with renamed root where applicable; no old type/feature/plan pointers; docs links and metadata; full source/package/headless flow; clean diff contains no abandoned implementation.
 - **Verification:** Every gate in the Verification Contract passes serially, final API/architecture/correctness/simplicity reviews have no P0/P1 finding, and final diff/commit/evidence inspection matches the plan scope.
 
@@ -666,6 +734,8 @@ stateDiagram-v2
 
 - Run Cargo commands one at a time with `CARGO_BUILD_JOBS=1` and reuse the repository `target` directory.
 - Start each behavior-bearing unit with its focused proof or characterization test, then run the unit gate before integration gates.
+- Run full-workspace and Reference Game matrices only at their owning integration or closure units. A focused module unit does not earn confidence by repeating package, host, pixel, or resolution smoke that proves no additional contract.
+- Use snapshots when structured output is itself the contract, hashes or digests when exact bytes/provenance/package integrity are the contract, and GPU readback when raster submission is the contract. Do not substitute any of them for semantic assertions or module-boundary tests.
 - Documentation-only authority edits do not require a workspace build. NUI-U1 uses direct pointer/link inspection plus engineering-memory validation; architecture prose is not compiled into a Rust governance test.
 - Before each behavior unit, move only its owning new ADR ledger row from `not-started` to a truthful unit-scoped `partial` statement without invented code anchors; add code/verification anchors only after the unit gate passes, and reserve `implemented` closure for NUI-U16 evidence.
 - GPU tests may use the existing fallback adapter. A genuinely unavailable adapter may skip only the hardware-specific readback with explicit evidence; CPU packet, cache, classification, and reference product proofs remain mandatory.
@@ -676,24 +746,24 @@ stateDiagram-v2
 |---|---|---|---|
 | V1 Persistent structure | `cargo nextest run --locked -p nara_scene -p nara_hierarchy -p nara_tooling --test-threads=1` | NUI-U6-NUI-U8 | Canonical placement, exact inverse, runtime projection, and tooling persistence pass. |
 | V2 Foundation boundaries | `cargo nextest run --locked -p nara_asset -p nara_image -p nara_render -p nara_tooling --test-threads=1` | NUI-U2-NUI-U5 | Removed surfaces have no consumer regression and product composition tests pass. |
-| V3 UI core | `cargo nextest run --locked -p nara_text -p nara_ui_kernel -p nara_ui_widgets -p nara_ui -p nara_input --test-threads=1` | NUI-U9-NUI-U13 | Text, frame, widget, adapter, and timeline behavior passes headlessly. |
+| V3 UI core | `cargo nextest run --locked -p nara_text -p nara_ui_kernel -p nara_ui_widgets -p nara_ui -p nara_input -p nara_gameplay --test-threads=1` | NUI-U9-NUI-U13, NUI-U17 | Text, frame, widget, adapter, timeline, and intent-delivery contracts pass headlessly. |
 | V4 Render path | `cargo nextest run --locked -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | NUI-U14 | Owned packet, cache, error classification, and GPU/fallback tests pass. |
-| V5 Root integration | `cargo nextest run --locked --workspace --all-features --test-threads=1` | NUI-U2-NUI-U16 | All root workspace tests pass without exclusions or RUI waivers. |
-| V6 Reference headless | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test-threads=1` | NUI-U5, NUI-U15-NUI-U16 | Gameplay/Retry parity passes and presentation owners are absent. |
-| V7 Reference desktop | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop --test-threads=1` | NUI-U14-NUI-U16 | HUD, terminal, input, package, and pixel proofs pass. |
+| V5 Root integration | `cargo nextest run --locked --workspace --all-features --test-threads=1` | NUI-U16 and earlier units that change the root facade or shared runtime contract | All root workspace tests pass without exclusions or RUI waivers. |
+| V6 Reference headless | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test-threads=1` | NUI-U5B, NUI-U15-NUI-U16 | Gameplay/Retry parity passes and presentation owners are absent. |
+| V7 Reference desktop | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop --test-threads=1` | NUI-U15-NUI-U16 | HUD, terminal, input, and package behavior pass; representative raster readback remains owned by V4. |
 | V8 Reference host parity | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features host-parity --test-threads=1` | NUI-U2, NUI-U5, NUI-U15-NUI-U16 | Desktop/editor/headless Host authority remains coherent. |
 | V9 Scene module consumer | `cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --test-threads=1` | NUI-U6-NUI-U16 | The existing direct Scene-domain surface and renamed root compile independently. |
-| V10 UI module consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | NUI-U9-NUI-U16 | Direct renamed text/kernel/widget dependencies compile without the root facade or Scene-only fixture drift. |
+| V10 UI module consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | NUI-U9 through NUI-U14, plus NUI-U17 | Direct renamed text/kernel/widget dependencies compile without the root facade or Scene-only fixture drift. |
 | V11 Locked compilation | `cargo check --workspace --all-targets --all-features --locked -j 1` | Every code unit | Workspace manifests, features, examples, and targets compile with the lockfile. |
-| V12 Reference compilation | `cargo check --manifest-path reference-game/Cargo.toml --all-targets --all-features --locked -j 1` | NUI-U5, NUI-U15-NUI-U16 | Separate reference workspace compiles every supported target. |
+| V12 Reference compilation | `cargo check --manifest-path reference-game/Cargo.toml --all-targets --all-features --locked -j 1` | NUI-U5B, NUI-U15-NUI-U16 | Separate reference workspace compiles every supported target. |
 | V13 Strict lint | `cargo clippy --workspace --all-targets --all-features --locked -j 1 -- -D warnings` | NUI-U16 and risky shared units | No changed or dependent target warning remains. |
 | V14 Formatting | `cargo fmt --all -- --check` | Every Rust unit before commit | Formatting is clean and the diff contains no unrelated churn. |
 
 ### Behavioral And Review Gates
 
-- Run the packaged desktop candidate from a directory outside the repository and user home. At each supported viewport and at 1.0 plus one fractional scale, observe readable HUD and terminal glyphs, distinct focus/pressed/disabled states, the minimum Retry target, keyboard/pointer activation, and rejection/pending/success behavior.
+- Run one packaged desktop candidate from a directory outside the repository and user home. Use the canonical product surface to observe readable HUD and terminal glyphs, distinct focus/pressed/disabled states, the minimum Retry target, keyboard/pointer activation, rejection/pending behavior, and direct applied-state removal; automated layout tests own the other physical targets and one representative fractional input-scale case.
 - Inspect the resolved headless plugin plan and runtime resources to prove that presentation and tooling owners are absent rather than merely idle.
-- Capture a deterministic headless `UiFrame`/semantics snapshot and a nonblank WGPU glyph readback for the declared target environment.
+- Capture one deterministic headless `UiFrame`/semantics snapshot at the kernel boundary and one nonblank WGPU glyph readback at the render boundary. Do not add another hash, digest, smoke binary, or pixel fixture unless it proves a distinct contract not covered by structured assertions.
 - Review final changes for correctness, architecture, data integrity, performance/resource bounds, public API contracts, testing quality, and code simplicity. Resolve every P0/P1 finding before closure.
 - Inspect `git diff`, Cargo manifests, root preludes, and public docs for compatibility aliases, dead experiments, direct Open-GPUI code, obsolete plan pointers, or accidentally exported internal types.
 
@@ -704,10 +774,12 @@ stateDiagram-v2
 ### Global Completion
 
 - The Product Contract requirements and acceptance examples are implemented and traced to passing unit/integration/product evidence.
+- Completion proves the first bounded data-authored game-UI product slice and its engine seams. It does not claim that Nara already owns a general component catalogue, complete adaptive-layout system, or mature Editor UI toolkit.
 - This plan is the sole active authority during execution and is closed through immutable evidence without mutating its readiness into a progress status.
-- Persistent order, `UiFrame`, semantic actions, and render snapshots each have exactly one owner; no fallback uses ECS allocation, query iteration, duplicated parent fields, or live submit-time asset reads.
+- Persistent order, `UiFrame`, per-surface candidates, presented behavior, semantic-intent journals, and render snapshots each have exactly one owner; no fallback uses ECS allocation, query iteration, duplicated parent fields, global cross-surface widget state, or live submit-time asset reads.
 - Desktop, packaged, accessibility, and headless reference-game workflows pass through public product APIs and ordinary recipes.
 - New crates are independently understandable deep modules with narrow APIs and no speculative provider surface.
+- Runtime UI growth is partitioned by lifecycle owner before product breadth, and obsolete/orphan tests or overextended smoke/hash/digest scripts are removed after their unique contract assertions migrate.
 - Every automated and behavioral gate applicable to the final repository passes serially.
 - No P0/P1 review finding, stale active registration, obsolete compatibility path, abandoned attempt, dead code, unused dependency, or unrelated formatting change remains.
 - Final Conventional Commits are scoped, reviewable, and contain only intended files/hunks.
@@ -728,10 +800,11 @@ stateDiagram-v2
 | NUI-U10 | One immutable headless frame owns layout, paint, hit, focus, semantics, and root failure outcomes. |
 | NUI-U11 | One atomic event timeline and independent cursors preserve route facts through pause/cancel/resume. |
 | NUI-U12 | Button, focus, modal, navigation, semantic intent, and accessibility behavior agree on the presented frame. |
-| NUI-U13 | ECS/Scene authoring compiles through the kernel and old computed-layout/interaction public surfaces are removed. |
-| NUI-U14 | UI/image/glyph submission uses packet-owned snapshots and content failures cannot poison WGPU. |
-| NUI-U15 | Reference-game HUD/terminal/Retry/package/headless acceptance examples pass. |
-| NUI-U16 | Facades, independent consumers, docs, ledger, evidence, full gates, and final reviews match landed code. |
+| NUI-U13 | ECS/Scene authoring compiles through the kernel, the reference game uses the new data authoring adapter, stable keys/order survive rebuild and Retry, headless frame/actions pass, and old computed-layout/interaction public surfaces are removed. Packet, GPU-pixel, and exhaustive product-state evidence are not U13 closure requirements. |
+| NUI-U14 | UI/image/glyph submission uses packet-owned snapshots, exact presentation outcomes and representative GPU readback pass, and content failures cannot poison WGPU. |
+| NUI-U17 | Projection, per-surface candidate, presented history, interaction transaction, and intent journal are separate owners; old-frame behavior, cross-surface isolation, fail-closed routing, pause-safe delivery, route lifecycle, cursor reclamation, and semantic schedule surfaces pass without Reference Game product-matrix dependence. |
+| NUI-U15 | Six reference-game capture states plus the separate paused lifecycle condition, three physical targets, four input sources, package parity, and presentation-free headless Retry are proven by a coverage matrix that avoids their full Cartesian product. |
+| NUI-U16 | Facades, independent consumers, docs, ledger, evidence, proportionate gates, final reviews, and the recorded but non-activated UI-foundation-conformance successor scope match landed code; obsolete tests/scripts and redundant proof artifacts are absent. |
 
 ---
 
@@ -771,9 +844,11 @@ stateDiagram-v2
 - Godot contributes integrated container, focus, theme, and accessibility vocabulary, but Nara does not adopt Node/Object/Variant as a second authoring language.
 - Unity's retained visual-tree and binding experience validates declarative authoring, but Nara does not adopt UXML/USS, CSS selectors, or property bags as its persistent model.
 - Open-GPUI contributes stable element lineage, frame-journal coherence, focus/overlay cases, semantic-action ideas, and future virtualization evidence, but its public Element/App/Window lifecycle and broad neutral-core surface are rejected.
+- These repositories are comparative design pressure, not implementation authority. Foundation work is proven first through module-owned conformance fixtures; the Reference Game remains an early seam probe and late product acceptance carrier rather than the sole design oracle.
 
 ### Future Admission Triggers
 
+- A focused successor may add a component gallery and layout/resolution laboratory as conformance products. It must derive its capability matrix from domain contracts and comparative reference pressure, keep the Reference Game out of the abstraction authority chain, and use a real Editor panel as the second consumer before broadening public component or adaptive-layout APIs.
 - A real inventory, chat, hierarchy, or data-table workload with measured materialization pressure may admit virtual collections and reveal/overscan APIs.
 - A complete Editor panel followed by a heterogeneous editor workload may admit `nara_tooling_ui`, broader editor dogfooding, docking, or multi-window policy.
 - A project custom-font workflow may admit font import, family fallback, localization, and public font handles.
