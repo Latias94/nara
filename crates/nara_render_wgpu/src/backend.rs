@@ -390,7 +390,7 @@ impl WgpuRenderBackend {
                 RenderFrameSkipReason::BackendError,
                 message,
             );
-            return Ok(());
+            return Err(WgpuRenderError::BackendUnavailable);
         }
 
         let window = packet.window();
@@ -1504,5 +1504,23 @@ mod tests {
         assert!(backend.adapter.is_none());
         assert!(backend.device.is_none());
         assert!(backend.queue.is_none());
+    }
+
+    #[test]
+    fn unavailable_backend_rejects_an_admitted_frame() {
+        let generation = test_runtime_generation();
+        let mut backend = WgpuRenderBackend {
+            state: WgpuBackendState::Unavailable,
+            runtime_generation: Some(generation.get()),
+            last_error: Some("device lost".to_owned()),
+            ..WgpuRenderBackend::default()
+        };
+
+        assert_eq!(
+            render_packet_without_surface(&mut backend, test_packet(generation, 1)),
+            Err(WgpuRenderError::BackendUnavailable)
+        );
+        assert_eq!(backend.state(), WgpuBackendState::Unavailable);
+        assert_eq!(backend.last_error(), Some("device lost"));
     }
 }

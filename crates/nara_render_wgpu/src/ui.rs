@@ -120,9 +120,9 @@ fn convert_primitive(
     else {
         return Ok(None);
     };
-    let scissor = primitive
-        .clip()
-        .and_then(|clip| scissor_rect(clip, viewport));
+    let Some(scissor) = primitive_scissor(primitive.clip(), viewport) else {
+        return Ok(None);
+    };
     let material = WgpuQuadMaterialKey {
         texture: texture.key(),
         sampler: SamplerDescriptor::default(),
@@ -177,6 +177,16 @@ fn scissor_rect(rect: UiPacketRect, viewport: ViewportRect) -> Option<WgpuScisso
     })
 }
 
+fn primitive_scissor(
+    clip: Option<UiPacketRect>,
+    viewport: ViewportRect,
+) -> Option<Option<WgpuScissorRect>> {
+    match clip {
+        Some(clip) => scissor_rect(clip, viewport).map(Some),
+        None => Some(None),
+    }
+}
+
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub(crate) enum WgpuUiPacketError {
     #[error("UI paint packet references missing image resource index {index}")]
@@ -198,6 +208,7 @@ mod tests {
         ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion, SourceHash,
         StableAssetId,
     };
+
     use nara_image::{
         ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata,
         PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
@@ -217,6 +228,15 @@ mod tests {
         },
         texture::WgpuSpriteTextureCache,
     };
+
+    #[test]
+    fn packet_clip_outside_the_viewport_culls_the_primitive() {
+        let viewport = ViewportRect::new(0, 0, 100, 100).unwrap();
+        let clip = UiPacketRect::new(120, 120, 140, 140).unwrap();
+
+        assert_eq!(primitive_scissor(Some(clip), viewport), None);
+        assert_eq!(primitive_scissor(None, viewport), Some(None));
+    }
 
     #[test]
     fn physical_ui_rect_projects_into_the_target_viewport() {

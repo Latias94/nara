@@ -247,7 +247,7 @@ fn resolve_sprite_material(
 
     let Some(texture) = sprite.material.image else {
         return Some((
-            SpriteMaterialKey::from_material(sprite.material, None),
+            SpriteMaterialKey::from_material(sprite.material),
             None,
             sprite.texture_region,
         ));
@@ -272,7 +272,7 @@ fn resolve_sprite_material(
     let snapshot = PreparedImageSnapshot::new(record.snapshot().clone(), resource.clone());
 
     Some((
-        SpriteMaterialKey::from_material(sprite.material, Some(key)),
+        SpriteMaterialKey::from_material(sprite.material),
         Some(snapshot),
         sprite.texture_region,
     ))

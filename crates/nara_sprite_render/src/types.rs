@@ -3,7 +3,7 @@ use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
 use nara_image::{ImageAsset, PreparedImageSnapshot};
 use nara_material::{AlphaMode2d, SamplerDescriptor};
-use nara_render::{RenderResourceKey, RenderTarget};
+use nara_render::RenderTarget;
 use nara_sprite::TextureRegion;
 use nara_tilemap::{TileCoord, TileIndex};
 
@@ -195,7 +195,6 @@ pub struct QueuedSpriteItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SpriteMaterialKey {
-    pub image: Option<RenderResourceKey>,
     pub sampler: SamplerDescriptor,
     pub alpha_mode: AlphaMode2d,
     pub tint: ColorKey,
@@ -203,12 +202,8 @@ pub struct SpriteMaterialKey {
 
 impl SpriteMaterialKey {
     #[must_use]
-    pub fn from_material(
-        material: ExtractedSpriteMaterial,
-        image: Option<RenderResourceKey>,
-    ) -> Self {
+    pub fn from_material(material: ExtractedSpriteMaterial) -> Self {
         Self {
-            image,
             sampler: material.sampler,
             alpha_mode: material.alpha_mode,
             tint: ColorKey::from_color(material.tint),

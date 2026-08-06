@@ -166,13 +166,19 @@ pub fn compile_ui_paint_packets(
         world.get_resource::<AssetServer>(),
         world.get_resource::<PreparedRenderResources<PreparedImageResource>>(),
     );
-    let mut packets = Vec::with_capacity(frames.len());
+    let mut packets = world
+        .resource::<UiPaintPacketStore>()
+        .packets
+        .iter()
+        .map(|packet| (packet.identity().surface_id(), Arc::clone(packet)))
+        .collect::<BTreeMap<_, _>>();
     let mut outcomes = Vec::new();
     let mut stats = UiPaintCompileStats::default();
     world.resource_scope(|_world, mut compiler: nara_ecs::Mut<UiPacketCompiler>| {
         for frame in frames {
             let identity = UiPaintPacketIdentity::from_frame(frame);
             let Some(route) = routes.get(&identity.surface_id()).copied() else {
+                packets.remove(&identity.surface_id());
                 stats.rejected_packets = stats.rejected_packets.saturating_add(1);
                 outcomes.push(UiPresentationOutcome::ContentRejected {
                     attempt: identity,
@@ -188,7 +194,7 @@ pub fn compile_ui_paint_packets(
             ) {
                 Ok(packet) => {
                     stats.admitted_packets = stats.admitted_packets.saturating_add(1);
-                    packets.push(packet);
+                    packets.insert(identity.surface_id(), packet);
                 }
                 Err(error) => {
                     stats.rejected_packets = stats.rejected_packets.saturating_add(1);
@@ -197,7 +203,7 @@ pub fn compile_ui_paint_packets(
             }
         }
     });
-    world.resource_mut::<UiPaintPacketStore>().packets = packets;
+    world.resource_mut::<UiPaintPacketStore>().packets = packets.into_values().collect();
     world
         .resource_mut::<UiPresentationOutcomes>()
         .replace(outcomes);
@@ -274,5 +280,81 @@ impl Plugin for UiRenderPlugin {
         app.init_resource::<UiPaintPacketStore>()?;
         app.init_resource::<UiPresentationOutcomes>()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_text::bundled_font_face;
+    use nara_ui_kernel::{
+        UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiImageId, UiLayer,
+        UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle, UiTheme, UiVisual,
+    };
+
+    fn frame(source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
+        let node = UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
+            .with_key(UiLocalKey::runtime("packet-retention", "node").unwrap())
+            .with_visual(visual);
+        let snapshot = UiAuthoringSnapshotBuilder::new(source_revision)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("packet-retention", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(node),
+            )
+            .build()
+            .unwrap();
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            64.0,
+            64.0,
+            1.0,
+            source_revision,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap()
+    }
+
+    fn packet_world() -> World {
+        let surface_id = UiSurfaceId::new(1).unwrap();
+        let route = UiPresentationRoute::new(surface_id, WindowId::PRIMARY).unwrap();
+        let mut routes = UiPresentationRoutes::default();
+        routes.routes.insert(surface_id, route);
+        let mut world = World::new();
+        world.insert_resource(UiPacketCompiler(UiPaintPacketBuilder::default()));
+        world.insert_resource(routes);
+        world.insert_resource(UiPaintPacketStore::default());
+        world.insert_resource(UiPresentationOutcomes::default());
+        world
+    }
+
+    #[test]
+    fn rejected_candidate_keeps_the_last_good_packet() {
+        let mut world = packet_world();
+        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
+        let admitted = frame(1, UiVisual::solid(white));
+        let first = compile_ui_paint_packets(&mut world, &[admitted]).unwrap();
+        assert_eq!(first.admitted_packets, 1);
+        let first_identity = world.resource::<UiPaintPacketStore>().packets[0].identity();
+
+        let missing_image = UiImageId::new("project://ui/missing.png").unwrap();
+        let rejected = frame(2, UiVisual::image(missing_image, white));
+        let second = compile_ui_paint_packets(&mut world, &[rejected]).unwrap();
+
+        assert_eq!(second.rejected_packets, 1);
+        assert_eq!(world.resource::<UiPaintPacketStore>().packets.len(), 1);
+        assert_eq!(
+            world.resource::<UiPaintPacketStore>().packets[0].identity(),
+            first_identity
+        );
     }
 }

@@ -64,7 +64,6 @@ mod tests {
             layer: 0,
             sort_key: 0,
             material: SpriteMaterialKey {
-                image: None,
                 sampler: SamplerDescriptor::default(),
                 alpha_mode: AlphaMode2d::Blend,
                 tint: ColorKey::from_color(Color::WHITE),

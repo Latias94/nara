@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 bytemuck = { workspace = true, optional = true }
 nara_app.workspace = true
-nara_asset = { workspace = true, optional = true }
 nara_ecs.workspace = true
 nara_image = { workspace = true, optional = true, features = ["render-prepare"] }
 nara_material = { workspace = true, optional = true }
@@ -21,6 +20,7 @@ thiserror.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
+nara_asset.workspace = true
 nara_core.workspace = true
 nara_hierarchy.workspace = true
 nara_reflect.workspace = true
@@ -34,14 +34,12 @@ raw-window-handle.workspace = true
 default = []
 sprite-submitter = [
     "dep:bytemuck",
-    "dep:nara_asset",
     "dep:nara_image",
     "dep:nara_material",
     "dep:nara_sprite_render",
 ]
 ui-submitter = [
     "dep:bytemuck",
-    "dep:nara_asset",
     "dep:nara_image",
     "dep:nara_material",
     "dep:nara_ui_render",

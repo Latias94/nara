@@ -167,7 +167,10 @@ impl UiPaintPacketBuilder {
                     let Some(rect) = packet_rect(*physical_rect) else {
                         continue;
                     };
-                    let clip = packet_clip(*clip_rect, environment.scale_factor(), rect);
+                    let Some(clip) = packet_clip(*clip_rect, environment.scale_factor(), rect)
+                    else {
+                        continue;
+                    };
                     let physical_radii = radii
                         .values()
                         .map(|value| value * environment.scale_factor());
@@ -228,7 +231,10 @@ impl UiPaintPacketBuilder {
                     let Some(text_rect) = physical_rect(*rect, environment.scale_factor()) else {
                         continue;
                     };
-                    let clip = packet_clip(*clip_rect, environment.scale_factor(), text_rect);
+                    let Some(clip) = packet_clip(*clip_rect, environment.scale_factor(), text_rect)
+                    else {
+                        continue;
+                    };
                     append_glyphs(
                         &mut primitives,
                         *rect,
@@ -334,9 +340,12 @@ fn append_glyphs(
         };
         let page_width = page.width() as f32;
         let page_height = page.height() as f32;
+        let Some(clip) = primitive_clip(clip, rect) else {
+            continue;
+        };
         primitives.push(UiPacketPrimitive::Glyph {
             rect,
-            clip: clip.and_then(|clip| clip.intersect(rect)),
+            clip,
             page_index,
             color,
             uv: UiPacketUv::new(
@@ -365,13 +374,14 @@ fn append_border(
         UiPacketRect::new(rect.min_x(), inner_top, inner_left, inner_bottom),
         UiPacketRect::new(inner_right, inner_top, rect.max_x(), inner_bottom),
     ];
-    primitives.extend(candidates.into_iter().flatten().map(|border_rect| {
-        UiPacketPrimitive::Solid {
+    primitives.extend(candidates.into_iter().flatten().filter_map(|border_rect| {
+        let clip = primitive_clip(clip, border_rect)?;
+        Some(UiPacketPrimitive::Solid {
             rect: border_rect,
-            clip: clip.and_then(|clip| clip.intersect(border_rect)),
+            clip,
             color,
             corner_radii: [0.0; 4],
-        }
+        })
     }));
 }
 
@@ -394,15 +404,60 @@ fn packet_clip(
     clip: Option<UiRect>,
     scale_factor: f32,
     primitive_rect: UiPacketRect,
-) -> Option<UiPacketRect> {
-    clip.and_then(|clip| physical_rect(clip, scale_factor))
+) -> Option<Option<UiPacketRect>> {
+    let Some(clip) = clip else {
+        return Some(None);
+    };
+    physical_rect(clip, scale_factor)
         .and_then(|clip| clip.intersect(primitive_rect))
+        .map(Some)
+}
+
+fn primitive_clip(
+    clip: Option<UiPacketRect>,
+    primitive_rect: UiPacketRect,
+) -> Option<Option<UiPacketRect>> {
+    match clip {
+        Some(clip) => clip.intersect(primitive_rect).map(Some),
+        None => Some(None),
+    }
 }
 
 fn snap_coordinate(value: f32, scale_factor: f32) -> i32 {
     (value * scale_factor)
         .round()
         .clamp(i32::MIN as f32, i32::MAX as f32) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primitive_clip_distinguishes_unclipped_from_fully_clipped() {
+        let primitive = UiPacketRect::new(10, 10, 20, 20).unwrap();
+        let outside = UiPacketRect::new(0, 0, 5, 5).unwrap();
+
+        assert_eq!(primitive_clip(None, primitive), Some(None));
+        assert_eq!(primitive_clip(Some(outside), primitive), None);
+    }
+
+    #[test]
+    fn border_segments_outside_the_visible_clip_are_omitted() {
+        let rect = UiPacketRect::new(0, 0, 10, 10).unwrap();
+        let center_clip = UiPacketRect::new(4, 4, 6, 6).unwrap();
+        let mut primitives = Vec::new();
+
+        append_border(
+            &mut primitives,
+            rect,
+            Some(center_clip),
+            1.0,
+            nara_ui_kernel::UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+        );
+
+        assert!(primitives.is_empty());
+    }
 }
 
 fn truncate_message(message: &str) -> String {
