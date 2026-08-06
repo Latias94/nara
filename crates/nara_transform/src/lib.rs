@@ -2,9 +2,9 @@
 
 mod propagation;
 
-use nara_app::{App, Plugin, PluginError, PluginPreflightContext};
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_core::{Mat3, Vec2};
-use nara_ecs::Component;
+use nara_ecs::{Component, schedule::IntoScheduleConfigs, system::ScheduleSystem};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
@@ -62,6 +62,21 @@ impl GlobalTransform2d {
     pub fn translation(&self) -> Vec2 {
         self.0.transform_point2(Vec2::ZERO)
     }
+}
+
+/// Registers fixed-tick systems that consume completed runtime 2D global transforms.
+///
+/// The transform module owns the concrete propagation set and its placement between simulation
+/// mutation and finalization. Product systems use this semantic entry point instead of depending
+/// on that private schedule topology.
+pub fn add_fixed_transform_projection_systems<'a, M>(
+    app: &'a mut App,
+    systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+) -> Result<&'a mut App, PluginError> {
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        systems.after(__private::TransformSet::Propagate),
+    )
 }
 
 #[doc(hidden)]
@@ -829,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_direct_transform_write_is_visible_to_same_tick_finalize() {
+    fn fixed_direct_transform_write_is_visible_to_same_tick_consumer() {
         let mut app = fixed_spatial_app(false);
 
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
@@ -841,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn fixed_deferred_transform_write_is_visible_to_same_tick_finalize() {
+    fn fixed_deferred_transform_write_is_visible_to_same_tick_consumer() {
         let mut app = fixed_spatial_app(true);
 
         app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
@@ -1123,11 +1138,7 @@ mod tests {
             )
             .unwrap();
         }
-        app.add_systems(
-            CoreStage::FixedUpdate,
-            observe_child_global.in_set(FixedUpdateSet::Finalize),
-        )
-        .unwrap();
+        add_fixed_transform_projection_systems(&mut app, observe_child_global).unwrap();
         app
     }
 

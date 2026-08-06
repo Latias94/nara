@@ -2,6 +2,7 @@
 
 mod action;
 mod command;
+mod local;
 mod queue;
 
 pub use action::{
@@ -17,6 +18,7 @@ pub use command::{
     MAX_GAMEPLAY_COMMAND_PAYLOAD_ITEMS, MAX_GAMEPLAY_COMMAND_PAYLOAD_KEY_BYTES,
     MAX_GAMEPLAY_COMMAND_STRING_BYTES,
 };
+pub use local::{LocalGameplayCommandError, LocalGameplayCommands, MAX_LOCAL_GAMEPLAY_COMMANDS};
 pub use nara_identity::RuntimeEntityReference;
 pub use queue::{
     GameplayCommandBatch, GameplayCommandLifecycleError, GameplayCommandLimitKind,
@@ -34,6 +36,7 @@ use nara_app::{
 use nara_ecs::{
     Res, ResMut,
     schedule::{IntoScheduleConfigs, SystemSet},
+    system::ScheduleSystem,
 };
 use nara_input::{ActionOutcomes, InputSet};
 
@@ -42,6 +45,10 @@ pub const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
 pub enum GameplayCommandSet {
+    /// Public frame-local phase for coalescing semantic intents into command drafts.
+    ///
+    /// Members run after input action resolution and before the engine drains local commands.
+    CollectLocalCommands,
     /// Lower local semantic action outcomes into commands for the next open tick.
     ///
     /// This is an engine-owned phase, not a public semantic ordering anchor.
@@ -76,6 +83,22 @@ pub enum GameplayCommandSet {
     ///
     /// This engine-owned phase is not a public semantic ordering anchor.
     Acknowledge,
+}
+
+/// Registers frame-local semantic command producers without exposing the owning core schedule.
+///
+/// The gameplay module places these systems after input action resolution and before it drains
+/// [`LocalGameplayCommands`] into the authoritative command queue. Callers may compose or order
+/// their own systems through ordinary schedule configs, but do not need to depend on
+/// [`CoreStage::PreUpdate`] or the engine-private mapping phase.
+pub fn add_local_gameplay_command_systems<'a, M>(
+    app: &'a mut App,
+    systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+) -> Result<&'a mut App, PluginError> {
+    app.add_systems(
+        CoreStage::PreUpdate,
+        systems.in_set(GameplayCommandSet::CollectLocalCommands),
+    )
 }
 
 impl __RuntimeDriverPort for GameplayCommandQueue {
@@ -136,6 +159,17 @@ impl Plugin for GameplayCommandPlugin {
         if !app.world().contains_resource::<GameplayCommandBatch>() {
             app.insert_resource(GameplayCommandBatch::new())?;
         }
+        if !app.world().contains_resource::<LocalGameplayCommands>() {
+            app.insert_resource(LocalGameplayCommands::default())?;
+        }
+        app.configure_sets(
+            CoreStage::PreUpdate,
+            (
+                GameplayCommandSet::CollectLocalCommands.after(InputSet::ResolveActions),
+                GameplayCommandSet::MapLocalActions,
+            )
+                .chain(),
+        )?;
         app.configure_sets(
             CoreStage::FixedUpdate,
             (
@@ -171,27 +205,34 @@ impl Plugin for GameplayCommandPlugin {
 fn map_action_outcomes_to_commands(
     command_map: Res<ActionCommandMap>,
     outcomes: Option<Res<ActionOutcomes>>,
+    mut local_commands: ResMut<LocalGameplayCommands>,
     mut queue: ResMut<GameplayCommandQueue>,
     faults: Res<RuntimeFaultReporter>,
 ) {
-    let Some(outcomes) = outcomes else {
-        return;
-    };
-
-    for outcome in outcomes.as_slice() {
-        for binding in
-            command_map.matching_bindings(&outcome.action, &outcome.context, outcome.phase)
-        {
-            if queue
-                .submit_local_for_next_tick(binding.command().clone())
-                .is_err()
+    if let Some(outcomes) = outcomes {
+        for outcome in outcomes.as_slice() {
+            for binding in
+                command_map.matching_bindings(&outcome.action, &outcome.context, outcome.phase)
             {
-                faults.report(RuntimeFault::engine(
-                    RuntimeFaultKind::LocalIntentLoss,
-                    "nara.gameplay.local-action",
-                ));
+                submit_local_command(&mut queue, binding.command().clone(), &faults);
             }
         }
+    }
+    for command in local_commands.drain() {
+        submit_local_command(&mut queue, command, &faults);
+    }
+}
+
+fn submit_local_command(
+    queue: &mut GameplayCommandQueue,
+    command: GameplayCommandDraft,
+    faults: &RuntimeFaultReporter,
+) {
+    if queue.submit_local_for_next_tick(command).is_err() {
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::LocalIntentLoss,
+            "nara.gameplay.local-action",
+        ));
     }
 }
 
@@ -249,7 +290,8 @@ pub mod prelude {
         GameplayCommandSettingsError, GameplayCommandSource, GameplayCommandSourceId,
         GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTarget,
         GameplayCommandTargetId, GameplayCommandTick, GameplayCommandTypeId, GameplayCommandValue,
-        MAX_ACTION_COMMAND_BINDINGS, RuntimeEntityReference,
+        LocalGameplayCommandError, LocalGameplayCommands, MAX_ACTION_COMMAND_BINDINGS,
+        MAX_LOCAL_GAMEPLAY_COMMANDS, RuntimeEntityReference, add_local_gameplay_command_systems,
     };
 }
 
@@ -287,6 +329,12 @@ mod tests {
         observed
             .0
             .push((fixed_time.tick(), batch.commands().to_vec()));
+    }
+
+    fn collect_semantic_command(mut commands: ResMut<LocalGameplayCommands>) {
+        commands
+            .push(command("semantic.retry"))
+            .expect("the test collection has capacity");
     }
 
     fn record_consume(batch: Res<GameplayCommandBatch>, mut lifecycle: ResMut<BatchLifecycle>) {
@@ -600,6 +648,46 @@ mod tests {
         assert_eq!(envelope.command_type().as_str(), "ui.select");
         assert_eq!(envelope.target(), Some(&target));
         assert_eq!(envelope.payload(), &payload);
+    }
+
+    #[test]
+    fn public_local_collection_enters_the_next_authoritative_tick_once() {
+        let mut app = App::new();
+        app.add_plugin(InputPlugin).unwrap();
+        app.add_plugin(GameplayCommandPlugin::default()).unwrap();
+        app.insert_resource(CommandsByTick::default()).unwrap();
+        add_local_gameplay_command_systems(&mut app, collect_semantic_command).unwrap();
+        app.add_systems(
+            CoreStage::FixedUpdate,
+            capture_consumed_commands.in_set(GameplayCommandSet::Consume),
+        )
+        .unwrap();
+
+        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+
+        let observed = &app.world().resource::<CommandsByTick>().0;
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].1.len(), 1);
+        assert_eq!(observed[0].1[0].command_type().as_str(), "semantic.retry");
+        assert!(app.world().resource::<LocalGameplayCommands>().is_empty());
+    }
+
+    #[test]
+    fn local_collection_rejects_the_first_item_past_its_bound() {
+        let mut commands = LocalGameplayCommands::default();
+        for index in 0..MAX_LOCAL_GAMEPLAY_COMMANDS {
+            commands
+                .push(command(&format!("semantic.{index}")))
+                .expect("items within the fixed limit should be collected");
+        }
+
+        assert_eq!(
+            commands.push(command("semantic.overflow")),
+            Err(LocalGameplayCommandError::CapacityExceeded {
+                maximum: MAX_LOCAL_GAMEPLAY_COMMANDS,
+            })
+        );
+        assert_eq!(commands.len(), MAX_LOCAL_GAMEPLAY_COMMANDS);
     }
 
     #[test]
