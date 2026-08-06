@@ -6,15 +6,15 @@ mod project_content_fixture;
 #[path = "support/child_process.rs"]
 mod child_process;
 
-use std::{process::Command, sync::Arc, time::Duration};
+use std::{process::Command, time::Duration};
 
 use child_process::{ChildOutputLimits, run_child_with_timeout};
 use nara::{
-    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
+    advanced_prelude::materialize_startup_scene,
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     },
-    core::{ByteLimit, Color},
+    core::Color,
     ecs::Entity,
     hierarchy::Parent,
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
@@ -24,7 +24,7 @@ use nara::{
     scene::SceneEntitySource,
     sprite_render::{ExtractedSprites, TextureUvRect},
     transform::{GlobalTransform2d, Transform2d},
-    ui::ComputedUiLayouts,
+    ui::{UiLayer, UiSurfaceId, latest_ui_frame},
 };
 use nara_reference_game::{
     EnemyRole, PlayerRole, ReferenceHudProjection, WaveOutcome, WaveSnapshot, Weapon,
@@ -40,11 +40,11 @@ fn desktop_projection_emits_sprites_clipped_hud_and_distinct_terminal_geometry()
 
     assert_eq!(completed.hud.health_current, 20);
     assert_eq!(completed.hud.health_maximum, 20);
-    assert_eq!(completed.hud.health_width, 240.0);
-    assert_eq!(completed.hud.progress_width, 240.0);
+    assert_eq!(completed.hud.health_width, 280.0);
+    assert_eq!(completed.hud.progress_width, 280.0);
     assert!(completed.extracted_sprites >= 1);
     assert!(completed.clipped_layouts >= 1);
-    assert!(completed.terminal_half_width > defeated.terminal_half_width);
+    assert_eq!(completed.terminal_half_width, defeated.terminal_half_width);
     assert_eq!(completed.arena_floor_sprites, 15 * 8);
     assert!(defeated.player_and_enemy_share_atlas);
     assert!(defeated.player_and_enemy_regions_are_distinct);
@@ -53,7 +53,10 @@ fn desktop_projection_emits_sprites_clipped_hud_and_distinct_terminal_geometry()
     assert_eq!(defeated.hud.health_current, 0);
     assert_eq!(defeated.hud.health_width, 0.0);
     assert_eq!(defeated.hud.outcome, WaveOutcome::Defeated);
-    assert!(defeated.terminal_half_height > completed.terminal_half_height);
+    assert_eq!(
+        defeated.terminal_half_height,
+        completed.terminal_half_height
+    );
 }
 
 #[test]
@@ -448,16 +451,26 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
         .iter()
         .filter(|sprite| sprite.material.image == player_sprite.material.image)
         .all(|sprite| sprite.material.sampler == SamplerDescriptor::NEAREST_CLAMP);
-    let layouts = world.resource::<ComputedUiLayouts>();
-    let clipped_layouts = layouts
-        .as_slice()
+    let frame = latest_ui_frame(
+        world,
+        UiSurfaceId::new(1).expect("the reference UI surface is non-zero"),
+    )
+    .expect("the runtime UI adapter should be installed")
+    .expect("the reference surface should have an immutable frame");
+    let clipped_layouts = frame
+        .layouts()
         .iter()
-        .filter(|layout| layout.visible && layout.clip_rect.is_some())
+        .filter(|layout| layout.visible() && layout.clip_rect().is_some())
         .count();
-    let terminal = layouts
-        .as_slice()
+    let terminal = frame
+        .layouts()
         .iter()
-        .find(|layout| layout.visible && layout.order == 10)
+        .find(|layout| {
+            layout.visible()
+                && layout.layer() == UiLayer::Modal
+                && layout.rect().size().width() == 360.0
+                && layout.rect().size().height() == 260.0
+        })
         .expect("terminal geometry should be laid out");
     let observation = RenderObservation {
         hud,
@@ -467,8 +480,8 @@ fn render_terminal(outcome: WaveOutcome) -> RenderObservation {
         player_and_enemy_regions_are_distinct,
         atlas_sprites_use_nearest_sampling,
         clipped_layouts,
-        terminal_half_width: terminal.rect.size.x * 0.5,
-        terminal_half_height: terminal.rect.size.y * 0.5,
+        terminal_half_width: terminal.rect().size().width() * 0.5,
+        terminal_half_height: terminal.rect().size().height() * 0.5,
     };
 
     stop_runtime(runtime);
@@ -485,14 +498,9 @@ fn render_runtime_with_admission_edit(
     let (project, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let content = loader.load(&project, &plan).unwrap();
-    let scene = content.expanded_startup_scene().clone();
+    let source = content.startup_scene_source();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = StartupSceneSource::direct(
-        Arc::new(scene),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
-    )
-    .expect("the render scene should fit the bounded direct retention limit");
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()

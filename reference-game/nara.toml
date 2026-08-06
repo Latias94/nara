@@ -35,13 +35,14 @@ cancel_timeout_ms = 250
 join_timeout_ms = 100
 
 [capabilities]
-requested = ["runtime-2d"]
+requested = ["runtime-2d", "runtime-ui"]
 
 [profiles.desktop.capabilities]
 requested = [
     "runtime-2d",
     "runtime-ui",
     "presentation-2d",
+    "presentation-ui",
     "desktop-winit",
     "render-wgpu",
 ]

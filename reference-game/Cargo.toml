@@ -9,8 +9,8 @@ publish = false
 [features]
 default = []
 desktop = [
-    "nara/runtime-ui",
     "nara/presentation-2d",
+    "nara/presentation-ui",
     "nara/desktop-winit",
     "nara/render-wgpu",
 ]
@@ -21,7 +21,7 @@ host-parity = ["desktop", "editor"]
 resolver = "3"
 
 [dependencies]
-nara = { path = "..", default-features = false, features = ["runtime-2d", "serde"] }
+nara = { path = "..", default-features = false, features = ["runtime-2d", "runtime-ui", "serde"] }
 
 [[bin]]
 name = "desktop"

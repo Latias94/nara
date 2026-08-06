@@ -6,14 +6,13 @@ use nara::{
 
 use crate::{
     MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, movement_draft, movement_release_draft,
-    retry_draft,
+    runtime_ui::REFERENCE_RETRY_ACTION,
 };
 
 const MOVE_LEFT_ACTION: &str = "reference-game.move-left";
 const MOVE_RIGHT_ACTION: &str = "reference-game.move-right";
 const MOVE_UP_ACTION: &str = "reference-game.move-up";
 const MOVE_DOWN_ACTION: &str = "reference-game.move-down";
-const RETRY_ACTION: &str = "reference-game.retry";
 
 pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
     let bindings = [
@@ -45,7 +44,10 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
         for (id, key, _) in bindings {
             action_map.bind(ActionBinding::key(action_id(id), key));
         }
-        action_map.bind(ActionBinding::key(action_id(RETRY_ACTION), KeyCode::Enter));
+        action_map.bind(ActionBinding::key(
+            action_id(REFERENCE_RETRY_ACTION),
+            KeyCode::Enter,
+        ));
     }
 
     {
@@ -65,19 +67,6 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
                 movement_release_draft(direction),
             )?;
         }
-        command_map
-            .bind(
-                ActionCommandBinding::new(
-                    action_id(RETRY_ACTION),
-                    ActionPhase::Started,
-                    retry_draft().command_type().clone(),
-                )
-                .with_command(retry_draft()),
-            )
-            .map_err(|_| PluginError::SetupFailed {
-                plugin: REFERENCE_DESKTOP_PLUGIN_ID,
-                message: "desktop retry action-command mapping was rejected".to_owned(),
-            })?;
     }
     Ok(())
 }

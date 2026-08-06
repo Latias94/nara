@@ -28,7 +28,7 @@ use nara::{
 use nara::{gameplay::GameplayCommandPlugin, project_host::project_runtime_plugins};
 use nara_reference_game::{
     EnemyRole, InitialHealth, InitialVelocity2d, PlayerRole, REFERENCE_GAME_SCHEMA_PROVIDER,
-    ReferenceGamePlugin, ReferenceWavePlugin, WaveSpawn, Weapon,
+    ReferenceGamePlugin, ReferenceRuntimeUiPlugin, ReferenceWavePlugin, WaveSpawn, Weapon,
     advanced_project_outcome_plugin_definition,
 };
 
@@ -45,6 +45,10 @@ fn game_plugin() -> PluginDefinition {
 
 fn wave_plugin() -> PluginDefinition {
     PluginDefinition::for_default::<ReferenceWavePlugin>()
+}
+
+fn runtime_ui_plugin() -> PluginDefinition {
+    PluginDefinition::for_default::<ReferenceRuntimeUiPlugin>()
 }
 
 #[cfg(feature = "desktop")]
@@ -163,7 +167,8 @@ pub fn desktop_candidate_plan_and_root()
         .disable::<TilemapPlugin>()
         .insert_after::<GameplayCommandPlugin>(game_plugin())
         .insert_after::<ReferenceGamePlugin>(wave_plugin())
-        .insert_after::<ReferenceWavePlugin>(desktop_plugin());
+        .insert_after::<ReferenceWavePlugin>(runtime_ui_plugin())
+        .insert_after::<ReferenceRuntimeUiPlugin>(desktop_plugin());
     let mut providers = built_in_schema_providers();
     providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
     let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
@@ -194,9 +199,10 @@ fn headless_wave_candidate_plan_and_root_with_test_plugin(
         .configure(nara::image::plugin(ImageImportLimits::default()))
         .disable::<TilemapPlugin>()
         .insert_after::<GameplayCommandPlugin>(game_plugin())
-        .insert_after::<ReferenceGamePlugin>(wave_plugin());
+        .insert_after::<ReferenceGamePlugin>(wave_plugin())
+        .insert_after::<ReferenceWavePlugin>(runtime_ui_plugin());
     let request = match test_plugin {
-        Some(definition) => request.insert_after::<ReferenceWavePlugin>(definition),
+        Some(definition) => request.insert_after::<ReferenceRuntimeUiPlugin>(definition),
         None => request,
     };
     let mut providers = built_in_schema_providers();
@@ -335,14 +341,20 @@ pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {
             weapon_id.clone(),
             component_record(Weapon::fixture(), &weapon_id, registry),
         );
+    let mut ui = SceneEntityRecord::new(scene_id("reference-ui"));
+    ui.prefab = Some(PrefabInstance {
+        source: AssetRef::path("reference-ui.prefab.json").unwrap(),
+        overrides: ScenePatchDocument::default(),
+    });
     SceneDocument::new(
         [
             scene_id("enemy-anchor"),
             scene_id("enemy-anchor-2"),
             scene_id("enemy-anchor-3"),
             scene_id("player"),
+            scene_id("reference-ui"),
         ],
-        [anchor, second_anchor, third_anchor, player, weapon],
+        [anchor, second_anchor, third_anchor, player, weapon, ui],
     )
 }
 

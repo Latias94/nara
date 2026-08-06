@@ -4,6 +4,7 @@ mod components;
 #[cfg(feature = "desktop")]
 mod input;
 mod resources;
+mod runtime_ui;
 mod snapshot;
 mod systems;
 #[cfg(feature = "desktop")]
@@ -13,10 +14,10 @@ use std::num::NonZeroU32;
 
 use nara::{
     ProductRecipe, ProductRecipeError, SchemaContribution,
-    advanced_prelude::StartupSceneActivationSet,
+    advanced_prelude::add_startup_scene_activation_systems,
     app::{
         PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
-        PluginPreflightContext, PluginSchemaProviderId, StartupStage,
+        PluginPreflightContext, PluginSchemaProviderId,
     },
     ecs::{SystemSet, schedule::IntoScheduleConfigs},
     fs::DirectoryCapability,
@@ -29,7 +30,7 @@ use nara::{
     image::ImageImportLimits,
     prelude::{
         App, ComponentRegistry, CoreStage, FixedUpdateSet, PersistentComponentProvider, Plugin,
-        Resource, Vec2,
+        Resource, Vec2, add_fixed_transform_projection_systems,
     },
     project_host::{HeadlessRun, HeadlessRunIntent},
     reflect::{
@@ -55,9 +56,13 @@ pub use resources::{
     MovementCommandError, MovementDirection, ProjectileId, RetryCommandError, WaveRetryPhase,
     WaveRetryRejection, WaveRetryStatus, WaveRunGeneration,
 };
+pub use runtime_ui::{
+    REFERENCE_RUNTIME_UI_PLUGIN_ID, REFERENCE_UI_SURFACE_ID, ReferenceHudProjection,
+    ReferenceRuntimeUiPlugin,
+};
 pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
 #[cfg(feature = "desktop")]
-pub use ui::{REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, ReferenceHudProjection};
+pub use ui::{REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
 pub const REFERENCE_WAVE_PLUGIN_ID: PluginId = PluginId::new("reference-game.wave");
@@ -161,17 +166,14 @@ impl Plugin for ReferenceGamePlugin {
             .insert_resource(resources::MovementIntent::default())?
             .insert_resource(WaveRunGeneration::default())?
             .insert_resource(WaveRetryStatus::default())?
-            .insert_resource(WaveSnapshot::default())?
-            .add_systems(
-                StartupStage::Runtime,
-                systems::initialize_reference_run.in_set(StartupSceneActivationSet),
-            )?;
+            .insert_resource(WaveSnapshot::default())?;
+        add_startup_scene_activation_systems(app, systems::initialize_reference_run)?;
         app.configure_sets(
             CoreStage::FixedUpdate,
             (
                 ReferenceSpatialSet::Mutate.in_set(FixedUpdateSet::Simulate),
                 ReferenceSpatialSet::Resolve
-                    .in_set(FixedUpdateSet::Finalize)
+                    .after(ReferenceSpatialSet::Mutate)
                     .before(GameplayCommandSet::Capture),
             ),
         )?;
@@ -223,9 +225,9 @@ impl Plugin for ReferenceWavePlugin {
                 .chain()
                 .after(GameplayCommandSet::Consume)
                 .in_set(ReferenceSpatialSet::Mutate),
-        )?
-        .add_systems(
-            CoreStage::FixedUpdate,
+        )?;
+        add_fixed_transform_projection_systems(
+            app,
             (
                 systems::fire_automatic_weapons,
                 systems::resolve_enemy_contacts,
@@ -235,8 +237,8 @@ impl Plugin for ReferenceWavePlugin {
             )
                 .chain()
                 .in_set(ReferenceSpatialSet::Resolve),
-        )?
-        .add_systems(
+        )?;
+        app.add_systems(
             CoreStage::FixedUpdate,
             snapshot::capture_wave_snapshot.in_set(ReferenceWaveCaptureSet::Snapshot),
         )?;
@@ -304,7 +306,8 @@ pub fn project_recipe() -> Result<ProductRecipe, ProductRecipeError> {
 pub fn wave_recipe() -> Result<ProductRecipe, ProductRecipeError> {
     ProductRecipe::new()
         .add_contribution(reference_game_contribution()?)?
-        .add_plugin::<ReferenceWavePlugin>()
+        .add_plugin::<ReferenceWavePlugin>()?
+        .add_plugin::<ReferenceRuntimeUiPlugin>()
 }
 
 #[cfg(feature = "desktop")]
@@ -430,9 +433,12 @@ pub fn advanced_wave_desktop_intent_after<P: Plugin>(
             PluginDefinition::for_default::<ReferenceGamePlugin>(),
         )
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
-        .insert_after::<ReferenceWavePlugin>(
-            PluginDefinition::for_default::<ReferenceDesktopPlugin>(),
-        )
+        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<
+            ReferenceRuntimeUiPlugin,
+        >())
+        .insert_after::<ReferenceRuntimeUiPlugin>(PluginDefinition::for_default::<
+            ReferenceDesktopPlugin,
+        >())
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
 }
@@ -459,6 +465,9 @@ pub fn advanced_wave_editor_intent_after<P: Plugin>(
             PluginDefinition::for_default::<ReferenceGamePlugin>(),
         )
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
+        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<
+            ReferenceRuntimeUiPlugin,
+        >())
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
 }
@@ -485,6 +494,9 @@ pub fn advanced_wave_headless_intent_after<P: Plugin>(
             PluginDefinition::for_default::<ReferenceGamePlugin>(),
         )
         .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
+        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<
+            ReferenceRuntimeUiPlugin,
+        >())
         .insert_after::<P>(definition)
         .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
         .stop_when(WaveSnapshot::is_terminal)

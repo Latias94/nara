@@ -49,7 +49,7 @@ fn reference_game_is_an_isolated_consumer_of_the_public_root_crate() {
             .iter()
             .map(|feature| feature.as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["runtime-2d", "serde"]
+        ["runtime-2d", "runtime-ui", "serde"]
     );
     assert_eq!(
         manifest["features"]["desktop"]
@@ -59,8 +59,8 @@ fn reference_game_is_an_isolated_consumer_of_the_public_root_crate() {
             .map(|feature| feature.as_str().unwrap())
             .collect::<Vec<_>>(),
         [
-            "nara/runtime-ui",
             "nara/presentation-2d",
+            "nara/presentation-ui",
             "nara/desktop-winit",
             "nara/render-wgpu",
         ]

@@ -61,17 +61,14 @@ fn committed_manifest_is_opened_by_capability_and_lowers_product_settings() {
         candidate.settings().runtime_preset,
         RuntimePreset::LocalHeadless
     );
-    assert!(
+    assert_eq!(
         candidate
             .normalized_capabilities()
-            .contains(ProductCapability::RuntimeCore)
+            .iter()
+            .map(ProductCapability::as_str)
+            .collect::<Vec<_>>(),
+        ["runtime-core", "runtime-2d", "runtime-ui"]
     );
-    assert!(
-        candidate
-            .normalized_capabilities()
-            .contains(ProductCapability::Runtime2d)
-    );
-    assert_eq!(candidate.normalized_capabilities().len(), 2);
     assert_eq!(
         candidate.settings().runtime.fixed_time().timestep(),
         std::time::Duration::from_millis(20)
@@ -137,6 +134,7 @@ fn desktop_profile_requests_the_exact_content_presentation_and_adapter_set() {
             "runtime-2d",
             "runtime-ui",
             "presentation-2d",
+            "presentation-ui",
             "desktop-winit",
             "render-wgpu",
         ]

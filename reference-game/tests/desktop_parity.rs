@@ -3,14 +3,13 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use nara::{
-    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
+    advanced_prelude::materialize_startup_scene,
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeInstance, RuntimeObligationLedger,
     },
-    core::ByteLimit,
     gameplay::{GameplayCommandQueue, GameplayCommandSubmission},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     prelude::FixedTime,
@@ -76,14 +75,9 @@ fn runtime_with_scene(
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let scene = snapshot.expanded_startup_scene().clone();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = StartupSceneSource::direct(
-        Arc::new(scene),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
-    )
-    .expect("the parity scene should fit the bounded direct retention limit");
+    let source = snapshot.startup_scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut runtime = RuntimeAdmissionReservation::try_acquire()
         .unwrap()

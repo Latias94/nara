@@ -1197,7 +1197,13 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
     };
     fields.insert("damage".to_owned(), ComponentValue::I64(0));
 
-    assert_startup_rejected(plan, scene);
+    let source = StartupSceneSource::direct_with_provenance(
+        Arc::new(scene),
+        Arc::new(snapshot.expanded_startup_scene_provenance().clone()),
+        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
+    )
+    .expect("the invalid reference scene should fit the bounded direct retention limit");
+    assert_startup_rejected(plan, source);
 }
 
 #[test]
@@ -1219,14 +1225,20 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
         "the authored weapon fixture should carry its Sprite"
     );
 
-    assert_startup_rejected(plan, scene);
+    let source = StartupSceneSource::direct_with_provenance(
+        Arc::new(scene),
+        Arc::new(snapshot.expanded_startup_scene_provenance().clone()),
+        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
+    )
+    .expect("the invalid reference scene should fit the bounded direct retention limit");
+    assert_startup_rejected(plan, source);
 }
 
 fn assert_startup_rejected(
     plan: nara::project_host::RuntimePlan,
-    scene: nara::scene::SceneDocument,
+    source: StartupSceneSource,
 ) {
-    let candidate = admit_adapter_candidate(plan, scene);
+    let candidate = admit_adapter_candidate(plan, source);
     let mut failure = match candidate.complete_startup() {
         Err(failure) => failure,
         Ok(candidate) => {
@@ -1621,8 +1633,8 @@ fn build_adapter_retry_runtime(
 ) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let scene = snapshot.expanded_startup_scene().clone();
-    admit_adapter_candidate(plan, scene)
+    let source = snapshot.startup_scene_source();
+    admit_adapter_candidate(plan, source)
         .complete_startup()
         .unwrap()
         .promote()
@@ -1630,15 +1642,10 @@ fn build_adapter_retry_runtime(
 
 fn admit_adapter_candidate(
     plan: nara::project_host::RuntimePlan,
-    scene: nara::scene::SceneDocument,
+    source: StartupSceneSource,
 ) -> nara::app::RuntimeCandidate {
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = StartupSceneSource::direct(
-        Arc::new(scene),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
-    )
-    .expect("the reference scene should fit the bounded direct retention limit");
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()

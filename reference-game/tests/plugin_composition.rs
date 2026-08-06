@@ -90,6 +90,9 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
             .required_capabilities()
             .contains(ProductCapability::Runtime2d)
     );
+    assert!(!first
+        .required_capabilities()
+        .contains(ProductCapability::PresentationUi));
 
     let entries = first.plugin_plan().entries();
     for absent in [
@@ -244,6 +247,7 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         [
             ProductCapability::Runtime2d,
             ProductCapability::RuntimeUi,
+            ProductCapability::PresentationUi,
             ProductCapability::Presentation2d,
             ProductCapability::DesktopWinit,
             ProductCapability::RenderWgpu,
@@ -284,6 +288,7 @@ fn desktop_profile_configures_one_window_slot_and_preserves_source_content() {
         "nara.plugins.runtime-2d",
         "nara.plugins.presentation-2d",
         "nara.plugins.runtime-ui",
+        "nara.plugins.presentation-ui",
         "nara.plugins.desktop-winit",
         "nara.plugins.render-wgpu",
     ] {

@@ -66,7 +66,15 @@ fn assert_committed_content() {
     );
     assert!(!snapshot.source_upgrade_required());
     assert_eq!(snapshot.revision().to_hex().len(), 64);
-    assert_eq!(snapshot.prefabs().len(), 1);
+    assert_eq!(snapshot.prefabs().len(), 2);
+    assert_eq!(
+        snapshot
+            .prefabs()
+            .iter()
+            .map(|prefab| prefab.path().as_str())
+            .collect::<Vec<_>>(),
+        ["enemy.prefab.json", "reference-ui.prefab.json"],
+    );
     assert_eq!(snapshot.images().len(), 1);
     assert_eq!(
         snapshot.images()[0].path().as_str(),
@@ -95,22 +103,23 @@ fn assert_committed_content() {
         snapshot.expanded_startup_scene(),
         cloned.expanded_startup_scene(),
     ));
-    assert!(std::ptr::eq(
-        snapshot.prefabs()[0].document(),
-        cloned.prefabs()[0].document(),
-    ));
+    assert!(snapshot
+        .prefabs()
+        .iter()
+        .zip(cloned.prefabs())
+        .all(|(source, clone)| std::ptr::eq(source.document(), clone.document())));
     assert_eq!(
         snapshot.images()[0].image().pixels().as_ptr(),
         cloned.images()[0].image().pixels().as_ptr(),
     );
-    assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 4,);
+    assert_eq!(before_clone.high_water(ProjectContentBudgetKind::Files), 5,);
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::DependencyEdges),
-        7,
+        8,
     );
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::QueuedJobs),
-        1,
+        2,
     );
     assert_eq!(
         before_clone.high_water(ProjectContentBudgetKind::InFlightJobs),

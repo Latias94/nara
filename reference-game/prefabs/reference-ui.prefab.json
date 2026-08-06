@@ -1,0 +1,3340 @@
+{
+  "kind": "prefab",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "reference-hud",
+      "terminal-overlay"
+    ],
+    "entities": [
+      {
+        "id": "autofire-status",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 152.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 320.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "start"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "primary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "AUTO-FIRE ACTIVE"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 16.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "health-fill",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 32.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 280.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiVisual": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "background": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "positive"
+                    }
+                  }
+                },
+                "border_brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "solid"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": ""
+                    }
+                  }
+                },
+                "border_width": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "radii": {
+                  "type": "map",
+                  "value": {
+                    "bottom_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "bottom_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "health-label",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 22.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 10.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 5.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 260.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 2
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "start"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "primary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "HEALTH 20 / 20"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 16.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "health-track",
+        "children": [
+          "health-fill",
+          "health-label"
+        ],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 32.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "clip"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 280.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiVisual": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "background": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "panel"
+                    }
+                  }
+                },
+                "border_brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "solid"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": ""
+                    }
+                  }
+                },
+                "border_width": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "radii": {
+                  "type": "map",
+                  "value": {
+                    "bottom_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "bottom_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "input-hint",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 208.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 312.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "center"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "secondary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "Press Enter or activate Retry"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 14.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "modal-dim",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "auto"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "flow"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "auto"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiVisual": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "background": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "surface"
+                    }
+                  }
+                },
+                "border_brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "solid"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": ""
+                    }
+                  }
+                },
+                "border_width": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "radii": {
+                  "type": "map",
+                  "value": {
+                    "bottom_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "bottom_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "movement-status",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 124.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 320.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "start"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "primary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "MOVE WASD"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 16.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "outcome-label",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 40.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 312.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "center"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "warning"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "VICTORY"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 28.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "reference-hud",
+        "children": [
+          "health-track",
+          "wave-status",
+          "score-status",
+          "movement-status",
+          "autofire-status"
+        ],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "auto"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "flow"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "auto"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiRoot": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "layer": {
+                  "type": "string",
+                  "value": "base"
+                }
+              }
+            }
+          },
+          "nara.ui.UiTheme": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "palette": {
+                  "type": "map",
+                  "value": {
+                    "accent": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.8199999928474426
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.7200000286102295
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.10000000149011612
+                        }
+                      }
+                    },
+                    "danger": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.23000000417232513
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.25
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.8799999952316284
+                        }
+                      }
+                    },
+                    "disabled": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.44999998807907104
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.4300000071525574
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.4000000059604645
+                        }
+                      }
+                    },
+                    "focus": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.3100000023841858
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.8199999928474426
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.949999988079071
+                        }
+                      }
+                    },
+                    "panel": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.14000000059604645
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.11999999731779099
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.10000000149011612
+                        }
+                      }
+                    },
+                    "positive": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.3799999952316284
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.7200000286102295
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.1899999976158142
+                        }
+                      }
+                    },
+                    "primary_text": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.9700000286102295
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.9599999785423279
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.9399999976158142
+                        }
+                      }
+                    },
+                    "secondary_text": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.75
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.7200000286102295
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.6600000262260437
+                        }
+                      }
+                    },
+                    "surface": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.05999999865889549
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.05000000074505806
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.03999999910593033
+                        }
+                      }
+                    },
+                    "warning": {
+                      "type": "map",
+                      "value": {
+                        "alpha": {
+                          "type": "f64",
+                          "value": 1.0
+                        },
+                        "blue": {
+                          "type": "f64",
+                          "value": 0.18000000715255737
+                        },
+                        "green": {
+                          "type": "f64",
+                          "value": 0.6600000262260437
+                        },
+                        "red": {
+                          "type": "f64",
+                          "value": 0.9300000071525574
+                        }
+                      }
+                    }
+                  }
+                },
+                "revision": {
+                  "type": "u64",
+                  "value": 1
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "retry-button",
+        "children": [],
+        "components": {
+          "nara.ui.UiButton": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "action": {
+                  "type": "string",
+                  "value": "reference-game.retry"
+                },
+                "enabled": {
+                  "type": "bool",
+                  "value": true
+                },
+                "label": {
+                  "type": "string",
+                  "value": "Retry"
+                },
+                "logical_text_size": {
+                  "type": "f64",
+                  "value": 18.0
+                }
+              }
+            }
+          },
+          "nara.ui.UiButtonVisuals": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "disabled_background": {
+                  "type": "string",
+                  "value": "disabled"
+                },
+                "disabled_text": {
+                  "type": "string",
+                  "value": "secondary_text"
+                },
+                "focus_border_width": {
+                  "type": "f64",
+                  "value": 2.0
+                },
+                "focused_border": {
+                  "type": "string",
+                  "value": "focus"
+                },
+                "focused_text": {
+                  "type": "string",
+                  "value": "focus"
+                },
+                "hovered_background": {
+                  "type": "string",
+                  "value": "accent"
+                },
+                "hovered_text": {
+                  "type": "string",
+                  "value": "surface"
+                },
+                "normal_text": {
+                  "type": "string",
+                  "value": "primary_text"
+                },
+                "pressed_background": {
+                  "type": "string",
+                  "value": "positive"
+                },
+                "pressed_text": {
+                  "type": "string",
+                  "value": "surface"
+                }
+              }
+            }
+          },
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 48.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 96.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 140.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 168.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiVisual": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "background": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "panel"
+                    }
+                  }
+                },
+                "border_brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "solid"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": ""
+                    }
+                  }
+                },
+                "border_width": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "radii": {
+                  "type": "map",
+                  "value": {
+                    "bottom_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "bottom_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "run-summary",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 44.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 76.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 312.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "center"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "primary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "FINAL SCORE 000000"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 18.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "score-status",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 96.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 320.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "start"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "primary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "SCORE 000000"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 16.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "terminal-overlay",
+        "children": [
+          "modal-dim",
+          "terminal-panel"
+        ],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "auto"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "flow"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "auto"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiRoot": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "layer": {
+                  "type": "string",
+                  "value": "modal"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "terminal-panel",
+        "children": [
+          "outcome-label",
+          "run-summary",
+          "retry-button",
+          "input-hint"
+        ],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 260.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 300.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 140.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 360.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiVisual": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "background": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "panel"
+                    }
+                  }
+                },
+                "border_brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "warning"
+                    }
+                  }
+                },
+                "border_width": {
+                  "type": "f64",
+                  "value": 2.0
+                },
+                "radii": {
+                  "type": "map",
+                  "value": {
+                    "bottom_left": {
+                      "type": "f64",
+                      "value": 8.0
+                    },
+                    "bottom_right": {
+                      "type": "f64",
+                      "value": 8.0
+                    },
+                    "top_left": {
+                      "type": "f64",
+                      "value": 8.0
+                    },
+                    "top_right": {
+                      "type": "f64",
+                      "value": 8.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "wave-status",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 24.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 68.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 320.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiText": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "alignment": {
+                  "type": "string",
+                  "value": "start"
+                },
+                "brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "role"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "reference": {
+                      "type": "string",
+                      "value": "primary_text"
+                    }
+                  }
+                },
+                "content": {
+                  "type": "string",
+                  "value": "WAVE 0 / 0"
+                },
+                "has_semantic_text": {
+                  "type": "bool",
+                  "value": false
+                },
+                "logical_size": {
+                  "type": "f64",
+                  "value": 16.0
+                },
+                "overflow": {
+                  "type": "string",
+                  "value": "clip"
+                },
+                "semantic_text": {
+                  "type": "string",
+                  "value": ""
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

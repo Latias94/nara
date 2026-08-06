@@ -3,15 +3,15 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
-use std::{num::NonZeroU64, sync::Arc, time::Duration};
+use std::{num::NonZeroU64, time::Duration};
 
 use nara::{
-    advanced_prelude::{StartupSceneSource, materialize_startup_scene},
+    advanced_prelude::materialize_startup_scene,
     app::{
         RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeFaultKind, RuntimeInstance,
         RuntimeObligationLedger, RuntimeState,
     },
-    core::{ByteLimit, ItemLimit},
+    core::ItemLimit,
     gameplay::{GameplayCommandQueue, GameplayCommandQueueSettings},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     prelude::{FixedTime, Transform2d},
@@ -198,7 +198,7 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
             .world()
             .resource::<WaveRetryStatus>()
             .last_rejection(),
-        Some(WaveRetryRejection::WhileRunning)
+        None
     );
     stop_runtime(running);
 
@@ -299,14 +299,9 @@ fn rejected_physical_local_command_faults_the_managed_runtime() {
     let (project, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
-    let scene = snapshot.expanded_startup_scene().clone();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = StartupSceneSource::direct(
-        Arc::new(scene),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
-    )
-    .expect("the desktop scene should fit the bounded direct retention limit");
+    let source = snapshot.startup_scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()
@@ -361,14 +356,9 @@ fn desktop_runtime() -> RuntimeInstance {
     let (candidate, plan, root) = desktop_candidate_plan_and_root();
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&candidate, &plan).unwrap();
-    let scene = snapshot.expanded_startup_scene().clone();
     let runtime_time = plan.settings().runtime.runtime_time_settings();
     let fixed_time = plan.settings().runtime.fixed_time();
-    let source = StartupSceneSource::direct(
-        Arc::new(scene),
-        ByteLimit::new(16 * 1024 * 1024).expect("the direct retained-scene limit is non-zero"),
-    )
-    .expect("the desktop scene should fit the bounded direct retention limit");
+    let source = snapshot.startup_scene_source();
     let sealed = plan.plugin_plan().instantiate().unwrap();
     let mut candidate = RuntimeAdmissionReservation::try_acquire()
         .unwrap()

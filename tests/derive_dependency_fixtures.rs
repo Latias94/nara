@@ -53,7 +53,7 @@ fn reference_game_depends_only_on_the_public_root_package() {
     assert_eq!(dependency["uses_default_features"], false);
     assert_eq!(
         dependency["features"],
-        serde_json::json!(["runtime-2d", "serde"])
+        serde_json::json!(["runtime-2d", "runtime-ui", "serde"])
     );
 
     let dependency_path = dependency["path"]
@@ -82,6 +82,7 @@ fn canonical_project_fixtures_are_checked_out_with_lf() {
         "reference-game/nara.toml",
         "reference-game/scenes/startup.scene.json",
         "reference-game/prefabs/enemy.prefab.json",
+        "reference-game/prefabs/reference-ui.prefab.json",
         "reference-game/assets/textures/player.png.meta",
         "reference-game/assets/textures/tiny-dungeon.png.meta",
         "reference-game/schema/component-schema-v1.json",

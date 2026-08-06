@@ -209,7 +209,7 @@ impl Plugin for EditorJourneyProbePlugin {
             retry_submitted: false,
             retry_reported: false,
         })?
-        .add_systems(CoreStage::Last, observe_editor_journey)?;
+        .add_systems(CoreStage::Cleanup, observe_editor_journey)?;
         Ok(())
     }
 }

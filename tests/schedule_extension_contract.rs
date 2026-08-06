@@ -124,6 +124,9 @@ fn reference_game_uses_only_documented_schedule_anchors() {
     assert!(surface.contains_path(&["CoreStage", "FixedUpdate"]));
     assert!(surface.contains_path(&["CoreStage", "Cleanup"]));
     assert!(surface.contains_path(&["FixedUpdateSet", "Simulate"]));
+    assert!(surface.contains_identifier("add_fixed_transform_projection_systems"));
+    assert!(surface.contains_identifier("add_local_gameplay_command_systems"));
+    assert!(surface.contains_identifier("add_startup_scene_activation_systems"));
     assert_only_documented_schedule_variants("reference game", repository, &surface);
     assert_only_documented_schedule_variants("reference game tests", repository, &test_surface);
     for private_schedule_type in ["StartupStage", "TaskUpdateSet", "AssetTaskUpdateSet"] {

@@ -11,7 +11,8 @@
       "enemy-anchor",
       "enemy-anchor-2",
       "enemy-anchor-3",
-      "player"
+      "player",
+      "reference-ui"
     ],
     "entities": [
       {
@@ -544,6 +545,21 @@
                 }
               }
             }
+          }
+        }
+      },
+      {
+        "id": "reference-ui",
+        "children": [],
+        "components": {},
+        "prefab": {
+          "source": {
+            "kind": "path",
+            "value": "reference-ui.prefab.json"
+          },
+          "overrides": {
+            "format_version": 1,
+            "operations": []
           }
         }
       }

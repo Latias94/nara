@@ -4,13 +4,15 @@ use nara::ecs as bevy_ecs;
 use nara::{
     advanced_prelude::{
         SceneProductOverlayWriter, SceneProductTransactionLimits, StartupSceneActivation,
-        replace_scene_with_product,
+        replace_scene_with_product_and_provenance,
     },
     app::RuntimeFaultReporter,
     core::ItemLimit,
     ecs::{Entity, Mut, With, Without, error::BevyError, system::SystemParam},
     gameplay::{GameplayCommandBatch, GameplayCommandValue},
-    hierarchy::Parent,
+    hierarchy::{
+        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter, Parent,
+    },
     identity::{EntityLookup, SpawnedSceneInstance, spawn_identity_entity},
     prelude::{
         Commands, ComponentRegistry, ComponentSchema, ComponentTypeId, FixedTime,
@@ -452,7 +454,7 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
 
     world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
         let last_rejection = world.resource::<WaveRetryStatus>().last_rejection();
-        let replacement = owner.source().with_document(|source| {
+        let replacement = owner.source().with_expanded_scene(|source, provenance| {
             let prepared = prepare_reference_run(
                 source,
                 next_generation,
@@ -466,10 +468,11 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
             );
             let retirements = owner.projectile_tokens().to_vec();
             let baseline = prepared.baseline.clone();
-            let report = replace_scene_with_product(
+            let report = replace_scene_with_product_and_provenance(
                 world,
                 &registry,
                 source,
+                provenance,
                 owner.receipt(),
                 limits,
                 &retirements,
@@ -1046,6 +1049,12 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
         let velocity = Vec2::new(axis_velocity(offset.x, 2.0), axis_velocity(offset.y, 2.0));
         let token = spawn_identity_entity(world)
             .map_err(|_| BevyError::error(ReferenceSimulationError::ProjectileIdentity))?;
+        HierarchyWriter::new(world)
+            .apply(HierarchyOperation::Place {
+                entity: token.entity(),
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            })
+            .map_err(|_| BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy))?;
         world.entity_mut(token.entity()).insert((
             ProjectileRole,
             projectile_id,
@@ -1325,6 +1334,12 @@ fn retire_expired_entities_inner(world: &mut World) -> Result<(), BevyError> {
                 .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityRetirement))?;
         }
         for (_, token) in expired_projectiles {
+            let placement = HierarchyPlacement::current(world, token.entity()).ok_or_else(|| {
+                BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy)
+            })?;
+            HierarchyWriter::new(world)
+                .remove(token.entity(), placement)
+                .map_err(|_| BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy))?;
             if !world.despawn(token.entity()) || !owner.forget_projectile(token) {
                 return Err(BevyError::error(
                     ReferenceSimulationError::ProjectileDespawn,

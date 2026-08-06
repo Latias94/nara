@@ -14,9 +14,21 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     let loaded = load_project_content();
     let expected_scene = expected_startup_scene(&loaded.plan);
     let expected_prefab = expected_enemy_prefab(&loaded.plan);
+    let enemy_prefab = loaded
+        .snapshot
+        .prefabs()
+        .iter()
+        .find(|prefab| prefab.path().as_str() == "enemy.prefab.json")
+        .unwrap();
+    let ui_prefab = loaded
+        .snapshot
+        .prefabs()
+        .iter()
+        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .unwrap();
 
     assert_eq!(loaded.snapshot.startup_scene(), &expected_scene);
-    assert_eq!(loaded.snapshot.prefabs()[0].document(), &expected_prefab);
+    assert_eq!(enemy_prefab.document(), &expected_prefab);
     assert_eq!(
         format!(
             "{}\n",
@@ -27,10 +39,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     assert_eq!(
         format!(
             "{}\n",
-            loaded.snapshot.prefabs()[0]
-                .document()
-                .to_json_string()
-                .unwrap(),
+            enemy_prefab.document().to_json_string().unwrap(),
         ),
         include_str!("../prefabs/enemy.prefab.json"),
     );
@@ -50,13 +59,10 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
             "enemy-anchor-3",
             "player",
             "player-weapon",
+            "reference-ui",
         ]
     );
-    assert_eq!(
-        loaded.snapshot.prefabs()[0].path().as_str(),
-        "enemy.prefab.json"
-    );
-    let prefab_ids = loaded.snapshot.prefabs()[0]
+    let prefab_ids = enemy_prefab
         .document()
         .entities
         .iter()
@@ -81,7 +87,32 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
             "enemy-anchor/enemy",
             "player",
             "player-weapon",
+            "reference-ui",
+            "reference-ui/autofire-status",
+            "reference-ui/health-fill",
+            "reference-ui/health-label",
+            "reference-ui/health-track",
+            "reference-ui/input-hint",
+            "reference-ui/modal-dim",
+            "reference-ui/movement-status",
+            "reference-ui/outcome-label",
+            "reference-ui/reference-hud",
+            "reference-ui/retry-button",
+            "reference-ui/run-summary",
+            "reference-ui/score-status",
+            "reference-ui/terminal-overlay",
+            "reference-ui/terminal-panel",
+            "reference-ui/wave-status",
         ],
+    );
+    assert_eq!(
+        ui_prefab
+            .document()
+            .roots
+            .iter()
+            .map(|entity| entity.as_str())
+            .collect::<Vec<_>>(),
+        ["reference-hud", "terminal-overlay"],
     );
     let player = expanded
         .entities
