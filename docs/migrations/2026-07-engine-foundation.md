@@ -3366,9 +3366,8 @@ mutually exclusive visual. Host-owned `UiSurfaceDescriptor::with_surface_mapping
 scale and the platform-logical-to-authored input scale; the presentation bridge derives both from
 the physical window and OS scale factor. Gamepad and accessibility drivers enter the same bounded
 input timeline as pointer and keyboard events. Presentation probes require a real resident glyph
-texture and binding before reporting a submitted frame. This entry records the already-landed
-public API break; NUI-U17 still must bind the exact behavior snapshot to the presented receipt and
-replace frame-local action delivery with the pause-safe intent journal before the unit closes.
+texture and binding before reporting a submitted frame. This entry records the earlier public API
+break; NUI-U17-2 closes the exact presented-session and pause-safe action-delivery contracts.
 
 **Before**:
 
@@ -3413,9 +3412,68 @@ because either choice makes the product proof diverge from authored data and Hos
 
 **Verification anchors**: `crates/nara_ui/src/{authoring,codec,interaction,runtime,
 adapter_tests}.rs`, `src/ui_presentation.rs`, `reference-game/prefabs/reference-ui.prefab.json`,
-`reference-game/tests/{desktop_flow,plugin_composition,desktop_render}.rs`, and the future NUI-U17
-verification shard prove canonical state-role round trips, composable visual variants, exact
-logical/physical mapping, one coalesced input path, and presentation-free headless composition.
+`reference-game/tests/{desktop_flow,plugin_composition,desktop_render}.rs`, and the
+[NUI-U17 verification shard](../knowledge/engineering/verification/2026-08/2026-08-06T181000Z-nui-u17-deep-runtime-ui-ownership-3eb9a95fdf4a43caa78aea9fad953e13.md)
+prove canonical state-role round trips, composable visual variants, exact logical/physical
+mapping, one coalesced input path, and presentation-free headless composition.
+
+## NUI-U17-2: Exact Presented UI Sessions And Pause-Safe Action Delivery
+
+**Removed contract**: `UiActionEvents` is no longer a frame-local buffer, and ordinary callers may
+not invoke a public technical `dispatch_presented_ui_input` function or read mutable interaction
+state independently of the presented frame. A candidate that has not been presented cannot change
+the behavior of the frame the user is operating. A stale, retired, mismatched, or blocked route is
+closed rather than falling through to gameplay.
+
+**Canonical replacement or deletion rationale**: `nara_ui` now owns private projection, candidate,
+presented-history, transaction, timeline, and journal modules. A `UiPresentedSession` couples the
+exact `UiFrame`, presentation receipt, surface descriptor, and immutable behavior snapshot used by
+both rendering and interaction. `UiActionJournal` provides bounded monotonic sequences with
+explicit consumer registration, acknowledgement, safe-prefix reclamation, unregister, and typed
+backpressure. Route outcomes are `PassThrough`, `Consumed`, or `RejectedClosed`; only an explicit
+non-UI route may pass to gameplay. The Reference Game consumes actions with a generation-bound
+cursor and unregisters it during plugin shutdown.
+
+**Before**:
+
+```rust
+let events = world.resource::<UiActionEvents>();
+let action = events.as_slice().iter().find(|event| event.action() == "retry");
+```
+
+**After**:
+
+```rust
+let cursor = world
+    .resource_mut::<UiActionJournal>()
+    .register_consumer(UiActionConsumerId::new("gameplay-ui")?)?;
+let pending = world.resource::<UiActionJournal>().pending(&cursor)?;
+// Acknowledge only after the product command has been admitted.
+```
+
+**User action**: migrate each product or adapter consumer to one registered cursor. Retain the
+cursor until its shutdown obligation has successfully unregistered it. Do not cache a behavior
+snapshot separately from the exact presented session, and do not acknowledge an action before the
+downstream command queue accepts it.
+
+**Source action**: `manual-rewrite`. There is no compatibility event buffer or public dispatch
+wrapper.
+
+**Cache action**: `delete` stale interaction/frame-derived state after changing a surface
+descriptor, route endpoint, or authored UI revision; packet and journal state are rebuilt or
+reclaimed through their owning lifecycle.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert the complete runtime UI ownership and consumer migration commits together.
+Do not restore frame-local events, global button behavior, or public technical schedule phases.
+
+**Verification anchors**: the private modules under `crates/nara_ui/src/runtime/` and
+`crates/nara_ui/src/interaction/`,
+`crates/nara_ui/src/adapter_tests.rs`, `crates/nara_ui_kernel/src/interaction/session.rs`,
+`reference-game/src/runtime_ui.rs`, and the NUI-U17 verification shard prove exact old-frame
+authority, cross-surface isolation, fail-closed routing, pause/resume exactly-once delivery, route
+ownership, cursor reclamation, and independent schedule composition.
 
 ## Persistent Format Matrix
 
