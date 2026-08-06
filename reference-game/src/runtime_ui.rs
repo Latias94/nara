@@ -2,15 +2,17 @@ use nara::ecs::schedule::IntoScheduleConfigs;
 use nara::{
     app::{
         CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
-        PluginProductCapability, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
+        PluginProductCapability, PluginShutdownContext, PluginShutdownObligationId, RuntimeFault,
+        RuntimeFaultKind, RuntimeFaultReporter,
     },
-    ecs::{Entity, Query, Res, ResMut, Resource},
+    ecs::{Entity, Mut, Query, Res, ResMut, Resource},
     gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
     input::{ActionOutcomes, ActionPhase, InputSeatId, InputWindowId},
     scene::SceneEntitySource,
     ui::{
-        UiActionEvents, UiBrush, UiButton, UiColorRole, UiNode, UiStyle, UiSurfaceDescriptor,
-        UiSurfaceId, UiText, UiTextAlignment, UiTextOverflow, UiVisual, install_ui_surface,
+        UiActionConsumerId, UiActionCursor, UiActionJournal, UiBrush, UiButton, UiColorRole,
+        UiNode, UiStyle, UiSurfaceDescriptor, UiSurfaceId, UiText, UiTextAlignment, UiTextOverflow,
+        UiVisual, install_ui_surface,
     },
 };
 
@@ -22,6 +24,9 @@ use crate::{
 pub const REFERENCE_RUNTIME_UI_PLUGIN_ID: PluginId = PluginId::new("reference-game.runtime-ui");
 pub(crate) const REFERENCE_RETRY_ACTION: &str = "reference-game.retry";
 pub const REFERENCE_UI_SURFACE_ID: u64 = 1;
+const REFERENCE_UI_ACTION_CONSUMER: &str = "reference-game.runtime-ui";
+const REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("reference-game.runtime-ui.action-consumer");
 const LOGICAL_WIDTH: f32 = 960.0;
 const LOGICAL_HEIGHT: f32 = 540.0;
 const HEALTH_BAR_WIDTH: f32 = 280.0;
@@ -34,10 +39,13 @@ const REFERENCE_RUNTIME_UI_REQUIREMENTS: &[PluginId] = &[
 ];
 const REFERENCE_RUNTIME_UI_PRODUCT_REQUIREMENTS: &[PluginProductCapability] =
     &[PluginProductCapability::new("runtime-ui")];
+const REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATIONS: &[PluginShutdownObligationId] =
+    &[REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION];
 const REFERENCE_RUNTIME_UI_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(REFERENCE_RUNTIME_UI_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(REFERENCE_RUNTIME_UI_REQUIREMENTS)
-        .requires_product_capabilities(REFERENCE_RUNTIME_UI_PRODUCT_REQUIREMENTS);
+        .requires_product_capabilities(REFERENCE_RUNTIME_UI_PRODUCT_REQUIREMENTS)
+        .shutdown_obligations(REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATIONS);
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReferenceRuntimeUiPlugin;
@@ -70,9 +78,50 @@ impl Plugin for ReferenceRuntimeUiPlugin {
             CoreStage::FixedUpdate,
             project_runtime_ui.in_set(ReferenceWaveCaptureSet::Presentation),
         )?;
+        let consumer = UiActionConsumerId::new(REFERENCE_UI_ACTION_CONSUMER)
+            .map_err(|error| setup_error(error.to_string()))?;
+        if app.world().contains_resource::<ReferenceUiActionCursor>() {
+            return Err(setup_error(
+                "reference UI action consumer is already installed".to_owned(),
+            ));
+        }
+        app.register_plugin_shutdown_obligation(REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION)?;
+        let cursor = app
+            .world_mut()?
+            .get_resource_mut::<UiActionJournal>()
+            .ok_or_else(|| setup_error("UI action journal is not installed".to_owned()))?
+            .register_consumer(consumer)
+            .map_err(|error| setup_error(error.to_string()))?;
+        app.insert_resource(ReferenceUiActionCursor(cursor))?;
+        Ok(())
+    }
+
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        if !context.world().contains_resource::<ReferenceUiActionCursor>() {
+            return Ok(());
+        }
+        if !context.world().contains_resource::<UiActionJournal>() {
+            return Err(setup_error("UI action journal is not installed".to_owned()));
+        }
+        context.world_mut().resource_scope(
+            |world, mut journal: Mut<UiActionJournal>| -> Result<(), PluginError> {
+                let cursor = world
+                    .get_resource::<ReferenceUiActionCursor>()
+                    .expect("validated UI action cursor remains installed");
+                journal
+                    .unregister_consumer(&cursor.0)
+                    .map_err(|error| setup_error(error.to_string()))
+            },
+        )?;
+        context
+            .world_mut()
+            .remove_resource::<ReferenceUiActionCursor>();
         Ok(())
     }
 }
+
+#[derive(Debug, Resource)]
+struct ReferenceUiActionCursor(UiActionCursor);
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Resource)]
 pub struct ReferenceHudProjection {
@@ -290,29 +339,48 @@ fn retry_hint(retry: WaveRetryStatus) -> &'static str {
 
 fn collect_retry_intents(
     outcomes: Option<Res<ActionOutcomes>>,
-    ui_actions: Res<UiActionEvents>,
+    mut ui_actions: ResMut<UiActionJournal>,
+    ui_cursor: Res<ReferenceUiActionCursor>,
     snapshot: Res<WaveSnapshot>,
     retry: Res<WaveRetryStatus>,
     mut commands: ResMut<LocalGameplayCommands>,
     faults: Res<RuntimeFaultReporter>,
 ) {
-    if !snapshot.is_terminal() || retry.phase() == WaveRetryPhase::Pending {
-        return;
-    }
     let keyboard = outcomes.is_some_and(|outcomes| {
         outcomes.as_slice().iter().any(|outcome| {
             outcome.action.as_str() == REFERENCE_RETRY_ACTION
                 && outcome.phase == ActionPhase::Started
         })
     });
-    let semantic = ui_actions
-        .as_slice()
-        .iter()
-        .any(|event| event.action().as_str() == REFERENCE_RETRY_ACTION);
-    if (keyboard || semantic) && commands.push(retry_draft()).is_err() {
+    let (semantic, last_sequence) = match ui_actions.pending(&ui_cursor.0) {
+        Ok(pending) => (
+            pending
+                .iter()
+                .any(|event| event.action().as_str() == REFERENCE_RETRY_ACTION),
+            pending.last().map(|event| event.sequence()),
+        ),
+        Err(_) => {
+            faults.report(RuntimeFault::engine(
+                RuntimeFaultKind::System,
+                "reference-game.ui-action-cursor",
+            ));
+            return;
+        }
+    };
+    let retry_is_eligible = snapshot.is_terminal() && retry.phase() != WaveRetryPhase::Pending;
+    if retry_is_eligible && (keyboard || semantic) && commands.push(retry_draft()).is_err() {
         faults.report(RuntimeFault::engine(
             RuntimeFaultKind::LocalIntentLoss,
             "reference-game.retry-intent",
+        ));
+        return;
+    }
+    if let Some(sequence) = last_sequence
+        && ui_actions.acknowledge(&ui_cursor.0, sequence).is_err()
+    {
+        faults.report(RuntimeFault::engine(
+            RuntimeFaultKind::System,
+            "reference-game.ui-action-acknowledgement",
         ));
     }
 }
