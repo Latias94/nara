@@ -216,7 +216,8 @@ pub mod prelude {
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{
-        UiActionEvent, UiActionEvents, UiActionId, UiAlign, UiBorder, UiBrush, UiButton, UiColor,
+        UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionId,
+        UiActionJournal, UiActionSequence, UiAlign, UiBorder, UiBrush, UiButton, UiColor,
         UiColorRole, UiCornerRadii, UiDimension, UiEdges, UiFlexDirection, UiImageId, UiJustify,
         UiLayer, UiNode, UiOverflow, UiPlugin, UiPositionMode, UiRoot, UiRuntimeKey,
         UiSemanticRole, UiSemantics, UiStyle, UiText, UiTextAlignment, UiTextOverflow, UiTheme,
@@ -352,9 +353,10 @@ pub mod advanced_prelude {
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{
-        UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiPresentationReceipt,
-        UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId, active_ui_surface_descriptors,
-        commit_ui_presentation, dispatch_presented_ui_input, install_ui_surface, latest_ui_frame,
+        UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue,
+        UiPresentationReceipt, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog,
+        UiRouteRejectionRecord, UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId,
+        active_ui_surface_descriptors, commit_ui_presentation, install_ui_surface, latest_ui_frame,
         retire_ui_surface, ui_semantic_snapshot,
     };
 }

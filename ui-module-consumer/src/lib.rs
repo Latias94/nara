@@ -69,6 +69,7 @@ pub fn activate_retry_button() -> Result<UiIntent, StatusLabelError> {
                     &root_key,
                     UiStyle::absolute(100.0, 60.0, 120.0, 44.0),
                     UiVisual::role(nara_ui_kernel::UiColorRole::Accent),
+                    nara_ui_kernel::UiBrush::Role(nara_ui_kernel::UiColorRole::PrimaryText),
                     18.0,
                 )?,
             ),

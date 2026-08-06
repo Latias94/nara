@@ -1,12 +1,19 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use nara_app::App;
+use nara_app::{
+    App, CoreStage, RuntimeAdmissionReservation, RuntimeClosePolicy, RuntimeControl,
+    RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
+};
 use nara_asset::AssetRef;
-use nara_ecs::{Entity, World};
+use nara_core::Vec2;
+use nara_ecs::{Entity, ResMut, Resource, World};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
-use nara_input::{InputSeatId, InputWindowId};
+use nara_input::{
+    ButtonDriverInput, InputPointerId, InputSeatId, InputTimeline, InputWindowId, MouseButton,
+    PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+};
 use nara_reflect::{
     ComponentRegistry, ComponentRegistryPlugin, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue,
@@ -16,15 +23,18 @@ use nara_scene::{
     SceneEntityRecord, SceneEntitySource, ScenePatchDocument, spawn_scene_with_prefab_resolver,
 };
 use nara_ui_kernel::{
-    UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer, UiLocalKey, UiPoint,
-    UiPointerButton, UiPointerId, UiRootKey, UiRouteStamp, UiSeatId, UiSurfaceId,
+    UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer, UiLocalKey, UiNonActivation,
+    UiPoint, UiPointerButton, UiPointerId, UiRootKey, UiRootStatus, UiRouteStamp, UiSeatId,
+    UiSurfaceId,
 };
 
+use crate::interaction::dispatch_presented_ui_input;
 use crate::{
-    UiActionEvents, UiActionId, UiAdapterError, UiButtonVisuals, UiColor, UiColorRole, UiNode,
-    UiPlugin, UiRoot, UiRuntimeKey, UiStyle, UiSurfaceDescriptor, UiVisual, commit_ui_presentation,
-    dispatch_presented_ui_input, install_ui_surface, latest_ui_frame, register_ui_components,
-    retire_ui_surface, ui_semantic_snapshot,
+    UiActionAdmissionError, UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal,
+    UiAdapterError, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin, UiRoot,
+    UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRuntimeKey, UiStyle,
+    UiSurfaceDescriptor, UiVisual, commit_ui_presentation, install_ui_surface, latest_ui_frame,
+    register_ui_components, retire_ui_surface, ui_semantic_snapshot,
 };
 
 const TEST_DOMAIN: &str = "nara.test.ui";
@@ -39,6 +49,31 @@ fn ui_app() -> App {
     ))
     .expect("UI test plugins should install");
     app
+}
+
+fn start_runtime(app: App) -> RuntimeInstance {
+    RuntimeAdmissionReservation::try_acquire()
+        .unwrap()
+        .admit(
+            app.seal().unwrap(),
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+        .unwrap()
+        .complete_startup()
+        .unwrap()
+        .promote()
+}
+
+fn stop_runtime(runtime: &mut RuntimeInstance) {
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Stop),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    if runtime.state() == RuntimeState::Stopping {
+        runtime.drive(Duration::ZERO).unwrap();
+    }
 }
 
 fn surface_id() -> UiSurfaceId {
@@ -279,6 +314,42 @@ fn surface_mapping_invalidates_exact_routes_and_render_revisions_independently()
     );
 }
 
+#[test]
+fn duplicate_input_endpoint_is_rejected_before_any_presentation() {
+    let mut app = ui_app();
+    install_test_surface(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        1,
+    );
+    let conflicting_surface = UiSurfaceId::new(8).unwrap();
+    let conflicting = UiSurfaceDescriptor::new(
+        conflicting_surface,
+        InputWindowId::new(11),
+        InputSeatId::PRIMARY,
+        200.0,
+        100.0,
+        1.0,
+        1,
+        1,
+        1,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        install_ui_surface(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            conflicting,
+        ),
+        Err(UiAdapterError::InputEndpointConflict {
+            window: 11,
+            seat: 0,
+            surface: 7,
+        })
+    ));
+}
+
 fn compiled_order(reverse_allocation: bool) -> (Vec<UiKey>, Vec<UiKey>, UiKey) {
     let mut app = ui_app();
     install_test_surface(
@@ -355,7 +426,11 @@ fn hierarchy_structural_order_drives_layout_paint_and_hit_independent_of_allocat
     assert_eq!(forward.2, upper);
 }
 
-fn build_button_app() -> (App, Entity) {
+fn build_unstarted_button_app() -> (App, Entity) {
+    build_unstarted_button_app_with_layer(UiLayer::Base)
+}
+
+fn build_unstarted_button_app_with_layer(layer: UiLayer) -> (App, Entity) {
     let mut app = ui_app();
     install_test_surface(
         app.world_mut()
@@ -367,7 +442,7 @@ fn build_button_app() -> (App, Entity) {
         .expect("test App should allow world mutation");
     let root = world
         .spawn((
-            UiRoot::new(UiLayer::Base),
+            UiRoot::new(layer),
             UiNode::new(UiStyle::fill()),
             UiRuntimeKey::new(TEST_DOMAIN, "root").expect("test key should be valid"),
         ))
@@ -380,13 +455,110 @@ fn build_button_app() -> (App, Entity) {
         ))
         .id();
     place_ui_tree(world, root, &[button]);
+    (app, button)
+}
+
+fn build_button_app() -> (App, Entity) {
+    let (mut app, button) = build_unstarted_button_app();
     app.update().expect("UI test frame should update");
     (app, button)
 }
 
 #[test]
+fn invalid_controlled_child_rejects_its_complete_root_instead_of_publishing_a_partial_tree() {
+    let (mut app, invalid_button) = build_unstarted_button_app();
+    let root = app
+        .world()
+        .iter_entities()
+        .find(|entity| entity.contains::<UiRoot>())
+        .expect("test UI root should exist")
+        .id();
+    let valid_button = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .spawn(button_bundle(
+            "secondary",
+            "secondary-action",
+            UiColor::rgba(0.3, 0.7, 0.4, 1.0),
+        ))
+        .id();
+    HierarchyWriter::new(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+    )
+    .place(valid_button, child_last(root))
+    .unwrap();
+    app.update().expect("valid UI root should compile");
+    let initial = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("valid UI root should publish");
+    assert_eq!(initial.semantics().len(), 2);
+
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .entity_mut(invalid_button)
+        .remove::<UiVisual>();
+    app.update()
+        .expect("invalid root should fail closed without aborting the frame");
+    let rejected = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("root rejection should still publish a bounded frame");
+
+    assert!(rejected.semantics().is_empty());
+    assert!(
+        rejected
+            .root_outcomes()
+            .iter()
+            .all(|outcome| outcome.status() != UiRootStatus::Published)
+    );
+}
+
+fn dispatch_pointer_click(app: &mut App, route: UiRouteStamp) -> Vec<UiRouteDisposition> {
+    let seat = UiSeatId::PRIMARY;
+    let pointer = UiPointerId::PRIMARY;
+    let point = UiPoint::new(10.0, 10.0);
+    [
+        UiInputEvent::PointerMoved {
+            seat,
+            pointer,
+            position: point,
+        },
+        UiInputEvent::PointerButton {
+            seat,
+            pointer,
+            button: UiPointerButton::Primary,
+            phase: UiButtonPhase::Pressed,
+            position: Some(point),
+        },
+        UiInputEvent::PointerButton {
+            seat,
+            pointer,
+            button: UiPointerButton::Primary,
+            phase: UiButtonPhase::Released,
+            position: Some(point),
+        },
+    ]
+    .into_iter()
+    .map(|input| {
+        dispatch_presented_ui_input(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            route,
+            input,
+        )
+    })
+    .collect()
+}
+
+#[test]
 fn presented_button_dispatch_publishes_one_typed_action_and_semantics() {
     let (mut app, _button) = build_button_app();
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("adapter-test").unwrap())
+        .expect("test action consumer should register");
     let frame = latest_ui_frame(app.world(), surface_id())
         .expect("UI runtime should be available")
         .expect("UI frame should compile");
@@ -406,7 +578,7 @@ fn presented_button_dispatch_publishes_one_typed_action_and_semantics() {
                 position: point,
             },
         ),
-        Err(UiAdapterError::Dispatch(_))
+        UiRouteDisposition::RejectedClosed(UiRouteRejection::PresentedHistory(_))
     ));
 
     let receipt = commit_ui_presentation(
@@ -440,31 +612,704 @@ fn presented_button_dispatch_publishes_one_typed_action_and_semantics() {
             position: Some(point),
         },
     ] {
-        dispatch_presented_ui_input(
-            app.world_mut()
-                .expect("test App should allow world mutation"),
-            route,
-            input,
-        )
-        .expect("presented UI input should dispatch");
+        assert!(matches!(
+            dispatch_presented_ui_input(
+                app.world_mut()
+                    .expect("test App should allow world mutation"),
+                route,
+                input,
+            ),
+            UiRouteDisposition::Consumed(_)
+        ));
     }
 
-    let events = app.world().resource::<UiActionEvents>();
-    assert_eq!(events.as_slice().len(), 1);
-    let event = &events.as_slice()[0];
-    assert_eq!(event.target(), &expected_runtime_node("root", "retry"));
-    assert_eq!(event.action().as_str(), "retry-draft");
-    assert_eq!(event.source(), UiActivationSource::Pointer);
+    let (event_target, event_sequence) = {
+        let events = app
+            .world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .expect("test action cursor should remain registered");
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.input_sequence(), None);
+        assert_eq!(event.surface_id(), surface_id());
+        assert_eq!(event.presentation_epoch(), 1);
+        assert_eq!(event.frame_revision(), frame.revision().get());
+        assert_eq!(event.target(), &expected_runtime_node("root", "retry"));
+        assert_eq!(event.action().as_str(), "retry-draft");
+        assert_eq!(event.source(), UiActivationSource::Pointer);
+        (event.target().clone(), event.sequence())
+    };
 
     let semantics = ui_semantic_snapshot(app.world(), surface_id(), 1, seat)
         .expect("presented frame should publish semantics");
     let retry = semantics
         .nodes()
         .iter()
-        .find(|node| node.key() == event.target())
+        .find(|node| node.key() == &event_target)
         .expect("Retry semantics should share the action key");
     assert_eq!(retry.name(), "retry");
     assert!(retry.state().enabled());
+
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .acknowledge(&cursor, event_sequence)
+        .expect("test action should acknowledge");
+}
+
+#[test]
+fn unpresented_candidate_cannot_replace_presented_behavior_authority() {
+    let (mut app, button) = build_button_app();
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("presented-authority-test").unwrap())
+        .unwrap();
+    let first = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("first candidate should compile");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        Arc::clone(&first),
+        1,
+    )
+    .unwrap();
+
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .entity_mut(button)
+        .insert(
+            crate::UiButton::new(
+                "retry",
+                UiActionId::new("replacement-action").unwrap(),
+                16.0,
+            )
+            .unwrap(),
+        );
+    app.update().expect("replacement candidate should compile");
+    let second = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("replacement candidate should exist");
+    assert_ne!(first.revision(), second.revision());
+
+    assert!(
+        dispatch_pointer_click(&mut app, UiRouteStamp::new(surface_id(), 1))
+            .iter()
+            .all(|disposition| matches!(disposition, UiRouteDisposition::Consumed(_)))
+    );
+    let pending = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].action().as_str(), "retry-draft");
+    assert_eq!(pending[0].presentation_epoch(), 1);
+    assert_eq!(pending[0].frame_revision(), first.revision().get());
+    let first_sequence = pending[0].sequence();
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .acknowledge(&cursor, first_sequence)
+        .unwrap();
+
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        Arc::clone(&second),
+        2,
+    )
+    .unwrap();
+    assert!(
+        dispatch_pointer_click(&mut app, UiRouteStamp::new(surface_id(), 1))
+            .iter()
+            .all(|disposition| matches!(disposition, UiRouteDisposition::Consumed(_)))
+    );
+    let retained = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!(retained[0].action().as_str(), "retry-draft");
+    assert_eq!(retained[0].presentation_epoch(), 1);
+    assert_eq!(retained[0].frame_revision(), first.revision().get());
+}
+
+#[test]
+fn rejected_retirement_reconciliation_clears_capture_before_the_next_presented_frame() {
+    let (mut app, button) = build_button_app();
+    let root = app
+        .world()
+        .iter_entities()
+        .find(|entity| entity.contains::<UiRoot>())
+        .expect("test UI root should exist")
+        .id();
+    let first = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("first frame should compile");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        Arc::clone(&first),
+        1,
+    )
+    .unwrap();
+    let point = UiPoint::new(10.0, 10.0);
+    for input in [
+        UiInputEvent::PointerMoved {
+            seat: UiSeatId::PRIMARY,
+            pointer: UiPointerId::PRIMARY,
+            position: point,
+        },
+        UiInputEvent::PointerButton {
+            seat: UiSeatId::PRIMARY,
+            pointer: UiPointerId::PRIMARY,
+            button: UiPointerButton::Primary,
+            phase: UiButtonPhase::Pressed,
+            position: Some(point),
+        },
+    ] {
+        assert!(matches!(
+            dispatch_presented_ui_input(
+                app.world_mut()
+                    .expect("test App should allow world mutation"),
+                UiRouteStamp::new(surface_id(), 1),
+                input,
+            ),
+            UiRouteDisposition::Consumed(_)
+        ));
+    }
+
+    let previous = HierarchyPlacement::current(app.world(), button).unwrap();
+    HierarchyWriter::new(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+    )
+    .remove(button, previous)
+    .unwrap();
+    app.update().expect("retired-button frame should compile");
+    let second = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("retired-button frame should exist");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        second,
+        2,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        dispatch_presented_ui_input(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            UiRouteStamp::new(surface_id(), 1),
+            UiInputEvent::PointerMoved {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                position: point,
+            },
+        ),
+        UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
+            UiNonActivation::TargetRetired { .. }
+        ))
+    ));
+
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .entity_mut(button)
+        .insert((
+            UiRuntimeKey::new(TEST_DOMAIN, "replacement").unwrap(),
+            crate::UiButton::new(
+                "replacement",
+                UiActionId::new("replacement-action").unwrap(),
+                16.0,
+            )
+            .unwrap(),
+        ));
+    HierarchyWriter::new(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+    )
+    .place(button, child_last(root))
+    .unwrap();
+    app.update().expect("replacement frame should compile");
+    let third = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("replacement frame should exist");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        third,
+        3,
+    )
+    .unwrap();
+
+    assert!(
+        dispatch_pointer_click(&mut app, UiRouteStamp::new(surface_id(), 3))
+            .iter()
+            .all(|disposition| matches!(disposition, UiRouteDisposition::Consumed(_)))
+    );
+}
+
+#[test]
+fn modal_presented_session_rejects_unhandled_wheel_input_before_gameplay() {
+    let (mut app, _) = build_unstarted_button_app_with_layer(UiLayer::Modal);
+    app.update().expect("modal frame should compile");
+    let frame = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("modal frame should exist");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        frame,
+        1,
+    )
+    .unwrap();
+    let admission = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<InputTimeline>()
+        .admit_wheel(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            Vec2::new(0.0, 1.0),
+        )
+        .unwrap();
+    assert_eq!(admission.admitted(), 1);
+
+    app.update()
+        .expect("modal wheel routing should fail closed without aborting the frame");
+    let rejection = app
+        .world()
+        .resource::<UiRouteRejectionLog>()
+        .as_slice()
+        .first()
+        .expect("modal wheel input should record one rejection");
+    assert_eq!(
+        rejection.rejection(),
+        &UiRouteRejection::UnhandledInputBlocked
+    );
+}
+
+#[test]
+fn interaction_and_reducer_visual_state_are_isolated_per_surface() {
+    let (mut app, _button) = build_button_app();
+    let second_surface = UiSurfaceId::new(8).unwrap();
+    install_ui_surface(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        UiSurfaceDescriptor::new(
+            second_surface,
+            InputWindowId::new(12),
+            InputSeatId::PRIMARY,
+            200.0,
+            100.0,
+            1.0,
+            1,
+            1,
+            1,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    app.update()
+        .expect("both surface candidates should compile");
+    let first_before = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let second_before = latest_ui_frame(app.world(), second_surface)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_before.paint(), second_before.paint());
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        first_before.clone(),
+        1,
+    )
+    .unwrap();
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        second_before.clone(),
+        1,
+    )
+    .unwrap();
+
+    for input in [
+        UiInputEvent::PointerMoved {
+            seat: UiSeatId::PRIMARY,
+            pointer: UiPointerId::PRIMARY,
+            position: UiPoint::new(10.0, 10.0),
+        },
+        UiInputEvent::PointerButton {
+            seat: UiSeatId::PRIMARY,
+            pointer: UiPointerId::PRIMARY,
+            button: UiPointerButton::Primary,
+            phase: UiButtonPhase::Pressed,
+            position: Some(UiPoint::new(10.0, 10.0)),
+        },
+    ] {
+        assert!(matches!(
+            dispatch_presented_ui_input(
+                app.world_mut()
+                    .expect("test App should allow world mutation"),
+                UiRouteStamp::new(surface_id(), 1),
+                input,
+            ),
+            UiRouteDisposition::Consumed(_)
+        ));
+    }
+    app.update()
+        .expect("surface-local reducer state should recompile");
+    let first_after = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let second_after = latest_ui_frame(app.world(), second_surface)
+        .unwrap()
+        .unwrap();
+    assert_ne!(first_before.paint(), first_after.paint());
+    assert_eq!(second_before.paint(), second_after.paint());
+}
+
+#[test]
+fn intent_backpressure_rejects_closed_without_partial_interaction_commit() {
+    let (mut app, _button) = build_button_app();
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .insert_resource(UiActionJournal::with_limits(1, 1).unwrap());
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("backpressure-test").unwrap())
+        .unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        frame,
+        1,
+    )
+    .unwrap();
+    let route = UiRouteStamp::new(surface_id(), 1);
+    assert!(
+        dispatch_pointer_click(&mut app, route)
+            .iter()
+            .all(|disposition| matches!(disposition, UiRouteDisposition::Consumed(_)))
+    );
+
+    let point = UiPoint::new(10.0, 10.0);
+    assert!(matches!(
+        dispatch_presented_ui_input(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            route,
+            UiInputEvent::PointerButton {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                button: UiPointerButton::Primary,
+                phase: UiButtonPhase::Pressed,
+                position: Some(point),
+            },
+        ),
+        UiRouteDisposition::Consumed(_)
+    ));
+    assert!(matches!(
+        dispatch_presented_ui_input(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            route,
+            UiInputEvent::PointerButton {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                button: UiPointerButton::Primary,
+                phase: UiButtonPhase::Released,
+                position: Some(point),
+            },
+        ),
+        UiRouteDisposition::RejectedClosed(UiRouteRejection::IntentJournal(
+            UiActionAdmissionError::CapacityExceeded { .. }
+        ))
+    ));
+
+    let first_sequence = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap()[0]
+        .sequence();
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .acknowledge(&cursor, first_sequence)
+        .unwrap();
+    assert!(matches!(
+        dispatch_presented_ui_input(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            route,
+            UiInputEvent::PointerButton {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                button: UiPointerButton::Primary,
+                phase: UiButtonPhase::Released,
+                position: Some(point),
+            },
+        ),
+        UiRouteDisposition::Consumed(_)
+    ));
+    let pending = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].sequence().get(), 2);
+}
+
+#[derive(Resource)]
+struct MappingReplacementProbe {
+    replacement: UiSurfaceDescriptor,
+    completed: bool,
+}
+
+fn present_then_replace_surface_mapping(world: &mut World) {
+    if world.resource::<MappingReplacementProbe>().completed {
+        return;
+    }
+    let frame = latest_ui_frame(world, surface_id())
+        .unwrap()
+        .expect("first runtime frame should compile before the Last-stage test presenter");
+    commit_ui_presentation(world, frame, 1).unwrap();
+    let replacement = world.resource::<MappingReplacementProbe>().replacement;
+    install_ui_surface(world, replacement).unwrap();
+    world.resource_mut::<MappingReplacementProbe>().completed = true;
+}
+
+#[test]
+fn retained_presented_epoch_uses_its_exact_input_mapping() {
+    let (mut app, _button) = build_unstarted_button_app();
+    let presented_descriptor = UiSurfaceDescriptor::new(
+        surface_id(),
+        InputWindowId::new(11),
+        InputSeatId::PRIMARY,
+        200.0,
+        100.0,
+        1.0,
+        1,
+        1,
+        1,
+    )
+    .unwrap()
+    .with_surface_mapping(1.0, 2.0)
+    .unwrap();
+    install_ui_surface(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        presented_descriptor,
+    )
+    .unwrap();
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("mapping-history-test").unwrap())
+        .unwrap();
+    app.insert_resource(MappingReplacementProbe {
+        replacement: presented_descriptor.with_surface_mapping(1.0, 0.5).unwrap(),
+        completed: false,
+    })
+    .unwrap()
+    .add_systems(CoreStage::Last, present_then_replace_surface_mapping)
+    .unwrap();
+    let mut runtime = start_runtime(app);
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(
+        runtime
+            .world()
+            .resource::<MappingReplacementProbe>()
+            .completed
+    );
+    runtime
+        .with_driver_scope(|scope| {
+            apply_pointer_driver_input_at(
+                scope,
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(150.0, 10.0)),
+            )?;
+            apply_mouse_driver_input_at(
+                scope,
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )?;
+            apply_mouse_driver_input_at(
+                scope,
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Release(MouseButton::Left),
+            )?;
+            Ok::<(), nara_input::ButtonInputDriverError>(())
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let pending = runtime
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].action().as_str(), "retry-draft");
+    assert_eq!(pending[0].input_sequence(), Some(3));
+    stop_runtime(&mut runtime);
+}
+
+#[derive(Resource)]
+struct PauseSafeActionConsumer {
+    cursor: UiActionCursor,
+    consumed: usize,
+}
+
+#[derive(Default, Resource)]
+struct PauseSafePresentation {
+    committed: bool,
+}
+
+fn commit_pause_safe_presentation(world: &mut World) {
+    if world.resource::<PauseSafePresentation>().committed {
+        return;
+    }
+    let frame = latest_ui_frame(world, surface_id())
+        .unwrap()
+        .expect("the first runtime frame should compile before presentation");
+    commit_ui_presentation(world, frame, 1).unwrap();
+    world.resource_mut::<PauseSafePresentation>().committed = true;
+}
+
+fn consume_pause_safe_actions(
+    mut journal: ResMut<UiActionJournal>,
+    mut consumer: ResMut<PauseSafeActionConsumer>,
+) {
+    let (pending_count, latest_sequence) = {
+        let pending = journal.pending(&consumer.cursor).unwrap();
+        (pending.len(), pending.last().map(|event| event.sequence()))
+    };
+    if let Some(latest_sequence) = latest_sequence {
+        journal
+            .acknowledge(&consumer.cursor, latest_sequence)
+            .unwrap();
+        consumer.consumed += pending_count;
+    }
+}
+
+#[test]
+fn paused_ui_actions_resume_through_the_journal_exactly_once() {
+    let (mut app, _button) = build_unstarted_button_app();
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("pause-safe-test").unwrap())
+        .unwrap();
+    app.insert_resource(PauseSafeActionConsumer {
+        cursor,
+        consumed: 0,
+    })
+    .unwrap()
+    .init_resource::<PauseSafePresentation>()
+    .unwrap()
+    .add_systems(CoreStage::PreUpdate, consume_pause_safe_actions)
+    .unwrap()
+    .add_systems(CoreStage::Last, commit_pause_safe_presentation)
+    .unwrap();
+
+    let mut runtime = start_runtime(app);
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(
+        runtime
+            .world()
+            .resource::<PauseSafePresentation>()
+            .committed
+    );
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Pause),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Paused);
+
+    runtime
+        .with_driver_scope(|scope| {
+            apply_pointer_driver_input_at(
+                scope,
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(10.0, 10.0)),
+            )?;
+            apply_mouse_driver_input_at(
+                scope,
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )?;
+            apply_mouse_driver_input_at(
+                scope,
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Release(MouseButton::Left),
+            )?;
+            Ok::<(), nara_input::ButtonInputDriverError>(())
+        })
+        .unwrap()
+        .unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let paused_world = runtime.world();
+    let consumer = paused_world.resource::<PauseSafeActionConsumer>();
+    assert_eq!(consumer.consumed, 0);
+    assert_eq!(
+        paused_world
+            .resource::<UiActionJournal>()
+            .pending(&consumer.cursor)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    assert!(matches!(
+        runtime.request_control(RuntimeControl::Resume),
+        RuntimeControlRequestResult::Accepted(_)
+    ));
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), RuntimeState::Running);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<PauseSafeActionConsumer>()
+            .consumed,
+        1
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<PauseSafeActionConsumer>()
+            .consumed,
+        1
+    );
+    stop_runtime(&mut runtime);
 }
 
 #[test]
@@ -508,6 +1353,19 @@ fn stale_frames_and_retired_surface_identities_fail_closed() {
         )
         .expect("surface retirement should succeed")
     );
+    assert!(matches!(
+        dispatch_presented_ui_input(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            UiRouteStamp::new(surface_id(), 1),
+            UiInputEvent::PointerMoved {
+                seat: UiSeatId::PRIMARY,
+                pointer: UiPointerId::PRIMARY,
+                position: UiPoint::new(10.0, 10.0),
+            },
+        ),
+        UiRouteDisposition::RejectedClosed(UiRouteRejection::RetiredSurface { surface: 7 })
+    ));
     let descriptor = UiSurfaceDescriptor::new(
         surface_id(),
         InputWindowId::new(11),

@@ -16,7 +16,12 @@ pub use authoring::{
     UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
 };
 pub use codec::register_ui_components;
-pub use interaction::{UiActionEvent, UiActionEvents, dispatch_presented_ui_input};
+pub use interaction::{
+    MAX_UI_ACTION_CONSUMERS, MAX_UI_ACTION_JOURNAL_ENTRIES, UiActionAdmissionError,
+    UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionJournal,
+    UiActionSequence, UiInputProjectionIssue, UiRouteDisposition, UiRouteRejection,
+    UiRouteRejectionLog, UiRouteRejectionRecord,
+};
 pub use nara_ui_kernel::{
     UiActionId, UiActivationSource, UiPresentationReceipt, UiRouteStamp, UiSeatId, UiSurfaceId,
 };
@@ -95,7 +100,8 @@ impl Plugin for UiPlugin {
             }
         })?)?;
         app.init_resource::<UiAdapterDiagnostics>()?;
-        app.init_resource::<UiActionEvents>()?;
+        app.init_resource::<UiActionJournal>()?;
+        app.init_resource::<UiRouteRejectionLog>()?;
         app.add_systems(
             CoreStage::First,
             interaction::route_timeline_ui_input.in_set(nara_input::__private::InputSet::RouteUi),
@@ -112,20 +118,22 @@ impl Plugin for UiPlugin {
 /// Ordinary runtime authoring surface. Compiler, journal, and session types stay out of this prelude.
 pub mod prelude {
     pub use crate::{
-        UiActionEvent, UiActionEvents, UiActionId, UiAlign, UiBorder, UiBrush, UiButton,
-        UiButtonVisuals, UiColor, UiColorRole, UiCornerRadii, UiDimension, UiEdges,
-        UiFlexDirection, UiImageId, UiJustify, UiLayer, UiNode, UiOverflow, UiPlugin,
-        UiPositionMode, UiRoot, UiRuntimeKey, UiSemanticRole, UiSemantics, UiStyle, UiText,
-        UiTextAlignment, UiTextOverflow, UiTheme, UiThemePalette, UiVisual,
+        UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionId,
+        UiActionJournal, UiActionSequence, UiAlign, UiBorder, UiBrush, UiButton, UiButtonVisuals,
+        UiColor, UiColorRole, UiCornerRadii, UiDimension, UiEdges, UiFlexDirection, UiImageId,
+        UiJustify, UiLayer, UiNode, UiOverflow, UiPlugin, UiPositionMode, UiRoot, UiRuntimeKey,
+        UiSemanticRole, UiSemantics, UiStyle, UiText, UiTextAlignment, UiTextOverflow, UiTheme,
+        UiThemePalette, UiVisual,
     };
 }
 
 /// Exact presentation and presented-input boundary for first-party product integrations.
 pub mod advanced {
     pub use crate::{
-        UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiPresentationReceipt,
-        UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId, UiSurfaceMappingError,
-        active_ui_surface_descriptors, commit_ui_presentation, dispatch_presented_ui_input,
+        UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue,
+        UiPresentationReceipt, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog,
+        UiRouteRejectionRecord, UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId,
+        UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
         install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface,
         ui_semantic_snapshot,
     };

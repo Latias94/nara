@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     UiFrame, UiFrameJournal, UiJournalError, UiLimits, UiLimitsError, UiPoint, UiRouteStamp,
-    UiSurfaceId,
+    UiRouteTarget, UiSurfaceId,
 };
 
 /// Bounded geometry-coupled state for presented-frame interaction.
@@ -43,6 +43,23 @@ impl UiInteractionSession {
     ) -> Result<UiDispatchBatch, UiDispatchError> {
         let target = journal.resolve(route)?;
         let latest = journal.latest(route.surface_id())?;
+        self.dispatch_resolved(&target, &latest, route, input)
+    }
+
+    /// Routes one normalized event against already resolved exact presented targets.
+    pub fn dispatch_resolved(
+        &mut self,
+        target: &UiRouteTarget,
+        latest: &UiRouteTarget,
+        route: UiRouteStamp,
+        input: UiInputEvent,
+    ) -> Result<UiDispatchBatch, UiDispatchError> {
+        if target.receipt().surface_id() != route.surface_id()
+            || target.receipt().presentation_epoch() != route.presentation_epoch()
+            || latest.receipt().surface_id() != route.surface_id()
+        {
+            return Err(UiDispatchError::ResolvedRouteMismatch);
+        }
         self.preflight_surface(route.surface_id())?;
 
         let mut candidate = self
@@ -343,6 +360,8 @@ pub enum UiDispatchError {
     PointerLimitExceeded { maximum: usize },
     #[error("UI pointer position must be finite")]
     NonFinitePointerPosition,
+    #[error("resolved UI targets do not match the requested route")]
+    ResolvedRouteMismatch,
     #[error("UI dispatch exceeds {maximum} routed events")]
     RoutedEventLimitExceeded { maximum: usize },
     #[error("semantic snapshot requested epoch {requested}, but latest is {latest}")]
