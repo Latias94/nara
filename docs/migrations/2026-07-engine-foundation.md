@@ -3157,6 +3157,266 @@ second runtime ordering authority.
 deep/wide bounds, atomic rollback, export equality, deterministic replacement/retirement, and
 explicit runtime-created HUD roots.
 
+## NUI-U13-1: Renderer-Neutral Runtime UI Authoring Adapter
+
+**Removed contract**: `UiPanel`, `UiPanelMaterial`, `ComputedUiLayouts`, `UiPointerRoute`, ECS-owned
+hit/focus state, renderer-bearing `UiRoot` fields, `UiNode::with_sibling_order`, and the legacy
+extract/queue/batch authoring path are removed. Old component maps that omit required version-1
+fields or encode the retired root/panel shapes are rejected.
+
+**Canonical replacement or deletion rationale**: `nara_ui` now owns only the ECS/Scene authoring
+adapter. Persistent content uses `UiRoot`, `UiNode`, `UiVisual`, `UiText`, `UiButton`,
+`UiSemantics`, and `UiTheme`; runtime-created stateful nodes add an explicit `UiRuntimeKey`.
+Ordered `HierarchyRoots`/`Children` supply structure once, structured Scene/Prefab provenance
+supplies persistent identity, and the adapter compiles immutable `UiFrame` values per explicit
+`UiSurfaceDescriptor`. Presented-frame dispatch publishes bounded typed `UiActionEvent` values;
+callers do not query computed ECS layout or pointer-route resources.
+
+**Before**:
+
+```rust
+commands.spawn((
+    UiRoot::window(0),
+    UiPanel::new(UiPanelMaterial::solid(color)),
+    UiNode::new(style).with_sibling_order(10),
+));
+let layouts = world.resource::<ComputedUiLayouts>();
+```
+
+**After**:
+
+```rust
+commands.spawn((
+    UiRoot::new(UiLayer::Base),
+    UiNode::new(style),
+    UiVisual::solid(color),
+    UiRuntimeKey::new("hud", "root")?,
+));
+let descriptor = UiSurfaceDescriptor::new(
+    surface,
+    InputWindowId::new(1),
+    InputSeatId::PRIMARY,
+    960.0,
+    540.0,
+    1.0,
+    1,
+    1,
+    1,
+)?;
+install_ui_surface(world, descriptor)?;
+let frame = latest_ui_frame(world, surface)?;
+```
+
+Scene/Prefab data must carry the same canonical version-1 components. Runtime code supplies only
+typed product facts and consumes typed actions; it must not rebuild the persistent UI tree in Rust.
+
+**User action**: replace panel/material pairs with `UiVisual`, replace renderer-specific root data
+with a semantic root layer plus Host-installed surface descriptor, and replace all computed-layout
+or pointer-route reads with immutable frame/semantic/action APIs. Add `UiRuntimeKey` only for
+runtime-created roots or stateful nodes; persistent nodes derive identity from structured Scene
+provenance.
+
+**Source action**: `manual-rewrite`. There is no legacy codec, deprecated alias, defaulted shape,
+or entity/query-order fallback.
+
+**Cache action**: `delete` any derived UI frame/layout/batch snapshots and rebuild Rust artifacts.
+Authored Scene/Prefab sources must be rewritten if they contain the removed component shapes.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert the complete NUI-U13 adapter and its Scene/Prefab source migration together.
+Do not restore only `UiPanel`, a sibling rank, or a computed-layout resource because each would
+reintroduce a second authoring, ordering, or frame authority.
+
+**Verification anchors**: `crates/nara_ui/src/{authoring,codec,runtime,adapter_tests}.rs`,
+`crates/nara_ui_kernel/tests`, `crates/nara_ui_widgets/tests`, `examples/runtime_ui_panel.rs`,
+`reference-game/prefabs/reference-ui.prefab.json`, `reference-game/src/runtime_ui.rs`, and
+`reference-game/tests/{first_wave,desktop_flow,desktop_render,prefab_startup}.rs` prove canonical
+codecs, stable projected identity/order, headless frame/action behavior, data-authored product UI,
+Retry generation replacement, and removal of the old public execution tree.
+
+## NUI-U5B-1: Runtime UI Content And Presentation Composition
+
+**Removed contract**: the `runtime-ui` feature no longer installs render ownership, image
+preparation, UI packet compilation, or a WGPU-facing presentation bridge. A project capability
+cannot imply both UI authoring and UI presentation through one bit.
+
+**Canonical replacement or deletion rationale**: `runtime-ui` installs only the renderer-neutral
+authoring adapter. The new `presentation-ui` feature and `PresentationUiPlugins` group depend on
+`runtime-ui` and explicitly add render/image preparation, `nara_ui_render`, and the root-owned
+surface-to-packet bridge. `ProductCapability::RuntimeUi` and
+`ProductCapability::PresentationUi` are distinct; headless/server plans reject the latter.
+
+**Before**:
+
+```toml
+[features]
+desktop = ["nara/runtime-ui", "nara/render-wgpu"]
+```
+
+**After**:
+
+```toml
+[features]
+headless = ["nara/runtime-ui"]
+desktop = ["nara/presentation-ui", "nara/render-wgpu"]
+```
+
+```rust
+app.add_plugins(RuntimeUiPlugins)?; // authoring/headless
+app.add_plugins(PresentationUiPlugins)?; // explicit presentation product
+```
+
+**User action**: keep `runtime-ui` for content, headless simulation, and immutable frame/action
+projection. Add `presentation-ui` only to desktop or other presentation products and select the
+platform/backend adapter explicitly in the owning Host recipe.
+
+**Source action**: `manual-rewrite`. The old feature meaning has no compatibility alias.
+
+**Cache action**: `keep` content assets; regenerate Cargo lockfiles and product/plugin-plan
+snapshots whose feature or capability closure changed.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert the feature, capability, product recipe, independent fixture, and Host-plan
+changes together. Do not make `runtime-ui` presentation-bearing again.
+
+**Verification anchors**: `Cargo.toml`, `src/product.rs`, `src/project_host/composition.rs`,
+`crates/nara_project/src/{capability,tests}.rs`, `tests/{product_capabilities,
+plugin_composition}.rs`, `tests/fixtures/product-slices/presentation-ui`, and
+`reference-game/{Cargo.toml,nara.toml,src/lib.rs}` prove the physical dependency split, exact
+capability closure, presentation-free headless recipe, and explicit desktop presentation.
+
+## NUI-U14-1: Resource-Complete UI And Sprite Presentation Packets
+
+**Removed contract**: the old UI extract/queue/types DTO surface, submit-time image lookup through
+live `Assets<ImageAsset>`, public Sprite material image keys, and ambiguous `None` clipping are
+removed. A backend may not repair a stale or incomplete packet by reading newer World or asset
+state, and a fully clipped primitive may not degrade to an unclipped draw.
+
+**Canonical replacement or deletion rationale**: `nara_ui_render` compiles one immutable
+`UiPaintPacket` that owns exact frame identity, prepared image snapshots, bounded glyph-atlas page
+snapshots, and ordered primitives. Sprite batches retain the prepared image snapshot as their only
+image identity authority; `SpriteMaterialKey` contains renderer state only. WGPU resolves private
+GPU residency from the captured snapshot and returns one closed outcome: `Presented`,
+`ContentRejected`, `Deferred`, or `BackendFault`. A rejected candidate preserves the prior
+last-good packet until a replacement is admitted or the Host retires its route.
+
+**Before**:
+
+```rust
+let key = SpriteMaterialKey {
+    image: Some(image_key),
+    sampler,
+    alpha_mode,
+    tint,
+};
+// The backend could recover image bytes from live asset state.
+```
+
+**After**:
+
+```rust
+let key = SpriteMaterialKey {
+    sampler,
+    alpha_mode,
+    tint,
+};
+let snapshot = batch.image.as_ref();
+// The packet-owned snapshot is the only image identity and byte authority.
+```
+
+**User action**: remove `SpriteMaterialKey::image` reads and construction. Consumers that need
+resource identity must read it from the retained `PreparedImageSnapshot`. Replace old UI
+extract/queue/batch imports with the explicit advanced paint-packet integration API only when
+implementing a Host or backend adapter; ordinary gameplay code should import `UiRenderPlugin`
+only.
+
+**Source action**: `manual-rewrite`. No compatibility alias preserves the old technical DTOs or
+the duplicate Sprite image key.
+
+**Cache action**: `delete` derived UI/Sprite packets and backend texture caches; keep source and
+prepared content, then rebuild exact snapshots for the next admitted frame.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert the packet compiler, image preparation, Sprite batching, WGPU adapter, and
+product composition changes together. Do not restore live asset reads, duplicate image identity,
+or ambiguous clipping independently.
+
+**Verification anchors**: `crates/nara_ui_render/src/{packet,atlas,compiler,integration,
+packet_tests}.rs`, `crates/nara_sprite_render/src/{queue,types,tests}.rs`,
+`crates/nara_render_wgpu/src/{backend,sprite,texture,ui}.rs`,
+`reference-game/tests/desktop_render.rs`, and
+`docs/knowledge/engineering/verification/2026-08/2026-08-06T052759Z-nui-u14-owned-ui-and-image-packet-through-wgpu-059e76de3be74d5894fe41135b3c7670.md`
+prove exact packet ownership, last-good retention, closed outcomes, fail-closed clipping, and real
+image/glyph submission.
+
+## NUI-U17-1: Data-Owned Interaction Visuals And Surface Mapping
+
+**Removed contract**: runtime UI no longer relies on a Rust-only `Accent`/`Positive`/
+`Focus` button palette, assumes platform-logical pointer coordinates already equal authored design
+coordinates, or treats source-only desktop submission as proof of packaged glyph residency.
+
+**Canonical replacement or deletion rationale**: persistent UI authoring adds the version-1
+`nara.ui.UiButtonVisuals` component. It stores theme roles for normal, hover, pressed, focused, and
+disabled text/background/border states while `UiVisual` remains the authored normal background and
+shape. The adapter composes focus borders with hover/pressed backgrounds instead of selecting one
+mutually exclusive visual. Host-owned `UiSurfaceDescriptor::with_surface_mapping` records render
+scale and the platform-logical-to-authored input scale; the presentation bridge derives both from
+the physical window and OS scale factor. Gamepad and accessibility drivers enter the same bounded
+input timeline as pointer and keyboard events. Presentation probes require a real resident glyph
+texture and binding before reporting a submitted frame. This entry records the already-landed
+public API break; NUI-U17 still must bind the exact behavior snapshot to the presented receipt and
+replace frame-local action delivery with the pause-safe intent journal before the unit closes.
+
+**Before**:
+
+```rust
+let visual = UiVisual::role(UiColorRole::Accent);
+// Hover, press, focus, and coordinate scaling were selected outside authored product data.
+```
+
+**After**:
+
+```rust
+let visuals = UiButtonVisuals::new()
+    .with_normal_text(UiColorRole::PrimaryText)
+    .with_hovered(UiColorRole::Accent, UiColorRole::Surface)
+    .with_pressed(UiColorRole::Positive, UiColorRole::Surface)
+    .with_focused(UiColorRole::Focus, UiColorRole::Focus, 2.0)?
+    .with_disabled(UiColorRole::Disabled, UiColorRole::SecondaryText);
+let descriptor = descriptor.with_surface_mapping(render_scale, input_scale)?;
+```
+
+The same `UiButtonVisuals` fields are persisted in Scene/Prefab component data. Product adapters
+change typed facts and enabled state only; they do not reconstruct the state palette.
+
+**User action**: add `UiButtonVisuals` to authored Button entities and choose roles from the
+`UiTheme` palette. Do not add state colors to the Rust product adapter. Treat physical resize and
+OS scale events as Host mapping updates; pointer drivers may continue to submit platform-logical
+coordinates because the Host now records their conversion explicitly.
+
+**Source action**: `manual-rewrite`. Existing Button records without `UiButtonVisuals` remain valid
+and use the bounded default mapping; a product that requires data-authored state roles must add the
+component. A present `UiButtonVisuals` record is an exact canonical shape with no missing/defaulted
+fields or compatibility aliases.
+
+**Cache action**: `delete` derived UI frames and render packets after changing the authored visual
+component or surface mapping; keep source image/font assets and regenerate packet/GPU caches.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert the complete product UI authoring, input-driver, surface-mapping, and desktop
+probe changes together. Do not restore a Rust-only palette or divide coordinates by a fixed scale,
+because either choice makes the product proof diverge from authored data and Host ownership.
+
+**Verification anchors**: `crates/nara_ui/src/{authoring,codec,interaction,runtime,
+adapter_tests}.rs`, `src/ui_presentation.rs`, `reference-game/prefabs/reference-ui.prefab.json`,
+`reference-game/tests/{desktop_flow,plugin_composition,desktop_render}.rs`, and the future NUI-U17
+verification shard prove canonical state-role round trips, composable visual variants, exact
+logical/physical mapping, one coalesced input path, and presentation-free headless composition.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do
