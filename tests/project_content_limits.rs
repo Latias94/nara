@@ -30,14 +30,14 @@ const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
 #[cfg(all(target_pointer_width = "64", target_os = "windows"))]
 const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
     (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 7_379),
+    (ProjectContentBudgetKind::RetainedBytes, 7_972),
     (ProjectContentBudgetKind::AggregateBytes, 393_081_408),
 ];
 
 #[cfg(all(target_pointer_width = "64", target_os = "linux"))]
 const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
     (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 7_371),
+    (ProjectContentBudgetKind::RetainedBytes, 7_964),
     // The aggregate peak precedes final retained publication for this fixture.
     (ProjectContentBudgetKind::AggregateBytes, 393_081_408),
 ];

@@ -48,7 +48,9 @@ pub use prefab::{
     PrefabExpansionOptions, PrefabExpansionReport, PrefabInstance, PrefabInstantiationReport,
     PrefabSourceResolver,
 };
-pub use provenance::{PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance};
+pub use provenance::{
+    PrefabProjectionPath, PrefabProjectionStep, SceneEntityProvenance, SceneEntityProvenanceMap,
+};
 /// Provisional APIs for advanced product integrations.
 ///
 /// These contracts have a real reference-game consumer but are not ordinary scene-authoring
@@ -57,7 +59,7 @@ pub mod advanced {
     pub use crate::product_transaction::{
         SceneProductOverlayWriter, SceneProductResource, SceneProductTransactionLimits,
     };
-    pub use crate::spawn::replace_scene_with_product;
+    pub use crate::spawn::{replace_scene_with_product, replace_scene_with_product_and_provenance};
 }
 pub use scene_components::{
     Name, SCENE_COMPONENTS_PLUGIN_DECLARATION, SCENE_COMPONENTS_PLUGIN_ID,
@@ -70,5 +72,5 @@ pub use spawn::{
     retire_and_despawn_scene_entity, spawn_prefab, spawn_prefab_with_asset_database,
     spawn_prefab_with_patch, spawn_prefab_with_patch_and_asset_database, spawn_scene,
     spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
-    spawn_scene_with_prefab_resolver_and_asset_database,
+    spawn_scene_with_prefab_resolver_and_asset_database, spawn_scene_with_provenance,
 };

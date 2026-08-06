@@ -1077,7 +1077,7 @@ fn meta_contains_path_override(meta: &syn::Meta) -> bool {
 }
 
 fn assert_snapshot_field_allowlist(sources: &[(std::path::PathBuf, String, syn::File)]) {
-    const EXPECTED_FIELDS: [(&str, &str); 11] = [
+    const EXPECTED_FIELDS: [(&str, &str); 12] = [
         ("lineage", "ProjectSettingsLineage"),
         ("schema_fingerprint", "SchemaCompositionFingerprint"),
         ("schema_authority", "ComponentRegistrySnapshotWitness"),
@@ -1086,6 +1086,10 @@ fn assert_snapshot_field_allowlist(sources: &[(std::path::PathBuf, String, syn::
         ("source_upgrade_required", "bool"),
         ("startup_scene", "Arc<SceneDocument>"),
         ("expanded_startup_scene", "Arc<SceneDocument>"),
+        (
+            "expanded_startup_scene_provenance",
+            "Arc<SceneEntityProvenanceMap>",
+        ),
         ("prefabs", "Box<[ProjectPrefabContent]>"),
         ("images", "Box<[ProjectImageContent]>"),
         ("_lease", "ProjectContentLease"),
@@ -1133,7 +1137,7 @@ fn assert_snapshot_field_allowlist(sources: &[(std::path::PathBuf, String, syn::
 }
 
 fn assert_snapshot_public_api_allowlist(sources: &[(std::path::PathBuf, String, syn::File)]) {
-    const EXPECTED_METHODS: [(&str, &str); 9] = [
+    const EXPECTED_METHODS: [(&str, &str); 11] = [
         ("lineage", "ProjectSettingsLineage"),
         ("schema_fingerprint", "SchemaCompositionFingerprint"),
         ("revision", "ProjectContentRevision"),
@@ -1141,8 +1145,13 @@ fn assert_snapshot_public_api_allowlist(sources: &[(std::path::PathBuf, String, 
         ("source_upgrade_required", "bool"),
         ("startup_scene", "&SceneDocument"),
         ("expanded_startup_scene", "&SceneDocument"),
+        (
+            "expanded_startup_scene_provenance",
+            "&SceneEntityProvenanceMap",
+        ),
         ("prefabs", "&[ProjectPrefabContent]"),
         ("images", "&[ProjectImageContent]"),
+        ("startup_scene_source", "StartupSceneSource"),
     ];
 
     let public_snapshots = sources
@@ -1371,7 +1380,7 @@ fn path_shape(path: &syn::Path) -> String {
 }
 
 fn assert_snapshot_import_identities(source_path: &std::path::Path, syntax: &syn::File) {
-    let expected_imports: [(&str, &[&str]); 8] = [
+    let expected_imports: [(&str, &[&str]); 10] = [
         ("Arc", &["std", "sync", "Arc"]),
         ("ContentDigest", &["nara_fs", "ContentDigest"]),
         (
@@ -1392,10 +1401,18 @@ fn assert_snapshot_import_identities(source_path: &std::path::Path, syntax: &syn
         ),
         ("SceneDocument", &["nara_scene", "SceneDocument"]),
         (
+            "SceneEntityProvenanceMap",
+            &["nara_scene", "SceneEntityProvenanceMap"],
+        ),
+        (
             "ProjectSettingsLineage",
             &["crate", "project_host", "ProjectSettingsLineage"],
         ),
         ("ProjectContentLease", &["budget", "ProjectContentLease"]),
+        (
+            "StartupSceneSource",
+            &["crate", "startup_scene", "StartupSceneSource"],
+        ),
     ];
     let imports = collect_use_imports(syntax);
     for (binding, expected_path) in expected_imports {

@@ -33,8 +33,8 @@ use nara_reflect::{
 };
 use nara_scene::{
     PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, SceneDocument,
-    SceneDocumentCandidate, SceneEntityRecord, SceneFormatError, ScenePatchDocument,
-    ScenePatchOperation,
+    SceneDocumentCandidate, SceneEntityProvenanceMap, SceneEntityRecord, SceneFormatError,
+    ScenePatchDocument, ScenePatchOperation,
 };
 
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
@@ -133,6 +133,7 @@ struct ProjectContentSnapshotInner {
     source_upgrade_required: bool,
     startup_scene: Arc<SceneDocument>,
     expanded_startup_scene: Arc<SceneDocument>,
+    expanded_startup_scene_provenance: Arc<SceneEntityProvenanceMap>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
     _lease: ProjectContentLease,
@@ -179,6 +180,12 @@ impl ProjectContentSnapshot {
         &self.inner.expanded_startup_scene
     }
 
+    /// Returns the structured source identity paired with the expanded startup document.
+    #[must_use]
+    pub fn expanded_startup_scene_provenance(&self) -> &SceneEntityProvenanceMap {
+        &self.inner.expanded_startup_scene_provenance
+    }
+
     #[must_use]
     pub fn prefabs(&self) -> &[ProjectPrefabContent] {
         &self.inner.prefabs
@@ -196,12 +203,18 @@ impl ProjectContentSnapshot {
             .and_then(|content| content.image.share_retained())
     }
 
-    pub(crate) fn startup_scene_source(&self) -> StartupSceneSource {
+    /// Retains the exact expanded startup source for one runtime materialization.
+    #[must_use]
+    pub fn startup_scene_source(&self) -> StartupSceneSource {
         StartupSceneSource::from_project_content(
             Arc::clone(&self.inner.expanded_startup_scene),
+            Arc::clone(&self.inner.expanded_startup_scene_provenance),
             self.inner._lease.clone(),
-            startup_scene_retained_bytes(&self.inner.expanded_startup_scene)
-                .expect("an admitted startup scene already has a valid retained-byte plan"),
+            startup_scene_retained_bytes(
+                &self.inner.expanded_startup_scene,
+                &self.inner.expanded_startup_scene_provenance,
+            )
+            .expect("an admitted startup scene already has a valid retained-byte plan"),
         )
     }
 
@@ -218,11 +231,13 @@ impl ProjectContentSnapshot {
             &resolver,
             nara_scene::PrefabExpansionOptions::default(),
         );
-        let expanded = expansion.document.ok_or_else(|| {
-            map_scene_diagnostics(
-                ProjectContentErrorKind::PrefabExpansion,
-                expansion.diagnostics,
-            )
+        let nara_scene::PrefabExpansionReport {
+            document,
+            diagnostics,
+            provenance,
+        } = expansion;
+        let expanded = document.ok_or_else(|| {
+            map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
         })?;
         let diagnostics = expanded.validate(registry);
         if diagnostics.has_errors() {
@@ -231,7 +246,7 @@ impl ProjectContentSnapshot {
                 diagnostics,
             ));
         }
-        let retained_bytes = editor_startup_scene_retained_bytes(&expanded)?;
+        let retained_bytes = editor_startup_scene_retained_bytes(&expanded, &provenance)?;
         let lease = self
             .inner
             ._lease
@@ -239,6 +254,7 @@ impl ProjectContentSnapshot {
             .map_err(ProjectContentError::budget)?;
         Ok(StartupSceneSource::from_project_content(
             Arc::new(expanded),
+            Arc::new(provenance),
             lease,
             retained_bytes,
         ))
@@ -681,13 +697,15 @@ impl<'a> LoadContext<'a> {
             nara_scene::PrefabExpansionOptions::default()
                 .with_limits(self.loader.limits.prefab_expansion()),
         );
-        let expanded = expansion.document.ok_or_else(|| {
-            map_scene_diagnostics(
-                ProjectContentErrorKind::PrefabExpansion,
-                expansion.diagnostics,
-            )
+        let nara_scene::PrefabExpansionReport {
+            document,
+            diagnostics,
+            provenance,
+        } = expansion;
+        let expanded = document.ok_or_else(|| {
+            map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
         })?;
-        let expanded_retained = scene_retained_bytes(&expanded)?;
+        let expanded_retained = startup_scene_retained_bytes(&expanded, &provenance)?;
         self.commit_work_as_retained(work_before, expanded_retained)?;
 
         let asset_refs = self.collect_image_candidates(&expanded)?;
@@ -712,6 +730,7 @@ impl<'a> LoadContext<'a> {
 
         let startup_scene = Arc::new(startup_scene);
         let expanded_startup_scene = Arc::new(expanded);
+        let expanded_startup_scene_provenance = Arc::new(provenance);
         let mut prefab_values = Vec::new();
         prefab_values
             .try_reserve_exact(loaded_prefabs.len())
@@ -755,6 +774,7 @@ impl<'a> LoadContext<'a> {
                 source_upgrade_required: self.source_upgrade_required,
                 startup_scene,
                 expanded_startup_scene,
+                expanded_startup_scene_provenance,
                 prefabs,
                 images,
                 _lease: lease,
@@ -1684,22 +1704,25 @@ fn prefab_expansion_work_plan(
 
 pub(crate) fn startup_scene_retained_bytes(
     document: &SceneDocument,
+    provenance: &SceneEntityProvenanceMap,
 ) -> Result<usize, ProjectContentError> {
-    crate::scene_retention::scene_retained_bytes(document)
+    crate::scene_retention::startup_scene_retained_bytes(document, provenance)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn editor_startup_scene_retained_bytes(
     document: &SceneDocument,
+    provenance: &SceneEntityProvenanceMap,
 ) -> Result<usize, ProjectContentError> {
-    crate::scene_retention::direct_startup_scene_retained_bytes(document)
+    crate::scene_retention::direct_startup_scene_retained_bytes(document, provenance)
         .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))?
         .checked_add(SNAPSHOT_LEASE_OVERHEAD)
         .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn scene_retained_bytes(document: &SceneDocument) -> Result<usize, ProjectContentError> {
-    startup_scene_retained_bytes(document)
+    crate::scene_retention::scene_retained_bytes(document)
+        .map_err(|_| overflow_budget(ProjectContentBudgetKind::RetainedBytes))
 }
 
 fn prefab_retained_bytes(document: &PrefabDocument) -> Result<usize, ProjectContentError> {
@@ -1772,7 +1795,7 @@ fn snapshot_retained_overhead(
         [
             size_of::<ProjectContentSnapshotInner>(),
             ARC_CONTROL_BLOCK_BYTES,
-            2 * ARC_CONTROL_BLOCK_BYTES,
+            3 * ARC_CONTROL_BLOCK_BYTES,
             SNAPSHOT_LEASE_OVERHEAD,
             if images.is_empty() {
                 0

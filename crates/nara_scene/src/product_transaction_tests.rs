@@ -11,7 +11,7 @@ use nara_ecs::{
 };
 use nara_hierarchy::{
     __private::completed_topology_generation, HierarchyOperation, HierarchyPlacement,
-    HierarchyPlacementOwner, HierarchyPlugin, HierarchyWriter, Parent,
+    HierarchyPlacementOwner, HierarchyPlugin, HierarchyRoots, HierarchyWriter, Parent,
 };
 use nara_identity::{
     EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
@@ -702,7 +702,7 @@ fn deferred_persistent_registration_is_part_of_the_validated_baseline() {
 }
 
 #[test]
-fn additional_retirement_rejects_missing_persistent_hierarchy_and_lifecycle_ownership() {
+fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
     let mut fixture = ReplacementFixture::new();
 
     let missing = spawn_retirement_token(&mut fixture.world);
@@ -745,44 +745,6 @@ fn additional_retirement_rejects_missing_persistent_hierarchy_and_lifecycle_owne
         EntityLookup::Resolved(persistent.entity())
     );
 
-    let hierarchy_parent = fixture.world.spawn_empty().id();
-    let hierarchy_child = spawn_retirement_token(&mut fixture.world);
-    HierarchyWriter::new(&mut fixture.world)
-        .apply_batch(&[
-            HierarchyOperation::Place {
-                entity: hierarchy_parent,
-                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-            },
-            HierarchyOperation::Place {
-                entity: hierarchy_child.entity(),
-                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
-                    parent: hierarchy_parent,
-                }),
-            },
-        ])
-        .unwrap();
-    fixture.world.flush();
-    let hierarchy_report = replace_scene_with_product(
-        &mut fixture.world,
-        &fixture.registry,
-        &fixture.replacement,
-        &fixture.current,
-        transaction_limits(1, 1),
-        &[hierarchy_child],
-        |_| {},
-    );
-    assert!(has_diagnostic(
-        &hierarchy_report,
-        "scene.product-retirement-hierarchy-linked"
-    ));
-    assert_eq!(
-        fixture
-            .world
-            .get::<Parent>(hierarchy_child.entity())
-            .map(Parent::parent),
-        Some(hierarchy_parent)
-    );
-
     fixture.world.init_resource::<LifecycleCanary>();
     let lifecycle = spawn_retirement_token(&mut fixture.world);
     fixture.world.spawn(
@@ -799,10 +761,61 @@ fn additional_retirement_rejects_missing_persistent_hierarchy_and_lifecycle_owne
         &[lifecycle],
         |_| {},
     );
-    assert!(has_diagnostic(
-        &lifecycle_report,
-        "scene.product-retirement-lifecycle-active"
-    ));
+    assert!(
+        has_diagnostic(
+            &lifecycle_report,
+            "scene.product-retirement-lifecycle-active"
+        ),
+        "lifecycle rejection diagnostics: {:#?}",
+        lifecycle_report.diagnostics
+    );
     assert_eq!(fixture.world.resource::<LifecycleCanary>().0, 0);
     assert!(fixture.world.get_entity(lifecycle.entity()).is_ok());
+}
+
+#[test]
+fn additional_retirement_commits_runtime_hierarchy_and_promotes_survivors() {
+    let mut fixture = ReplacementFixture::new();
+    let runtime_root = spawn_retirement_token(&mut fixture.world);
+    let surviving_child = fixture.world.spawn_empty().id();
+    HierarchyWriter::new(&mut fixture.world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: runtime_root.entity(),
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            },
+            HierarchyOperation::Place {
+                entity: surviving_child,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent {
+                    parent: runtime_root.entity(),
+                }),
+            },
+        ])
+        .unwrap();
+    fixture.world.flush();
+
+    let report = replace_scene_with_product(
+        &mut fixture.world,
+        &fixture.registry,
+        &fixture.replacement,
+        &fixture.current,
+        transaction_limits(1, 1),
+        &[runtime_root],
+        |_| {},
+    );
+
+    assert!(
+        !report.diagnostics.has_errors(),
+        "product replacement diagnostics: {:#?}",
+        report.diagnostics
+    );
+    assert_eq!(report.retired_entities(), 2);
+    assert!(fixture.world.get_entity(runtime_root.entity()).is_err());
+    assert!(fixture.world.get_entity(surviving_child).is_ok());
+    assert!(fixture.world.get::<Parent>(surviving_child).is_none());
+    let replacement_root = spawned_entity(&fixture.world, &report, &fixture.target);
+    assert_eq!(
+        fixture.world.resource::<HierarchyRoots>().as_slice(),
+        &[replacement_root, surviving_child]
+    );
 }

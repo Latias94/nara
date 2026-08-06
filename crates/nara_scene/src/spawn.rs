@@ -6,9 +6,7 @@ use nara_ecs::{
     __private::validate_registered_persistent_component_apply, Component, Entity,
     LifecycleFreeInsertionPlan, Mut, World, prepare_lifecycle_free_despawn,
 };
-use nara_hierarchy::{
-    __private::prepare_construction_batch, Children, HierarchyRoots, Parent, validate_hierarchy,
-};
+use nara_hierarchy::{__private::prepare_construction_batch, Children, Parent, validate_hierarchy};
 use nara_identity::{
     __private::{
         AdditionalRetirementIdentityError, IdentitySupportTopologyError,
@@ -31,16 +29,15 @@ use nara_reflect::{
 
 use crate::{
     PrefabDocument, PrefabExpansionReport, PrefabProjectionPath, PrefabSourceResolver,
-    SceneDocument, SceneEntityId, ScenePatchDocument,
+    SceneDocument, SceneEntityId, SceneEntityProvenanceMap, ScenePatchDocument,
     diagnostics::{error as diagnostic_error, with_codec_error, with_public_locator},
     product_transaction::{
         PreparedSceneProductOverlay, SceneProductOverlayError, SceneProductOverlayWriter,
         SceneProductTransactionLimits,
     },
     runtime_hierarchy::{
-        PreparedSceneEntityRetirement, PreparedSceneHierarchyRetirement,
-        build_scene_hierarchy_operations, combine_scene_hierarchy_operations,
-        prepare_scene_hierarchy_retirement,
+        PreparedSceneEntityRetirement, build_scene_hierarchy_operations,
+        combine_scene_hierarchy_operations, prepare_scene_hierarchy_retirement,
     },
     validation::{PreparedScene, preflight_scene_with_context},
 };
@@ -132,8 +129,6 @@ enum PrepareSceneProductTransactionError {
     Overlay(SceneProductOverlayError),
     Identity(AdditionalRetirementIdentityError),
     SceneOwnedRetirement,
-    HierarchyLinkedRetirement,
-    LifecycleRetirement,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -149,7 +144,6 @@ enum PreparedSceneIdentityCommit {
     },
     Replace {
         replacement: PreparedSceneInstanceReplacement,
-        hierarchy: PreparedSceneHierarchyRetirement,
     },
 }
 
@@ -167,11 +161,6 @@ impl PreparedSceneIdentityCommit {
             Self::Replace { replacement, .. } => replacement.retiring_entities(),
         }
     }
-}
-
-enum PrepareSceneIdentityCommitError {
-    Identity(IdentityDomainError),
-    Hierarchy,
 }
 
 impl SceneSpawner {
@@ -632,7 +621,7 @@ impl SceneSpawner {
             new_identity_domain,
         ) {
             Ok(prepared) => prepared,
-            Err(PrepareSceneIdentityCommitError::Identity(error)) => {
+            Err(error) => {
                 diagnostics.push(crate::diagnostics::with_identity_error(
                     match commit {
                         SceneIdentityCommit::Register => diagnostic_error(
@@ -653,34 +642,63 @@ impl SceneSpawner {
                     retired_entities: 0,
                 };
             }
-            Err(PrepareSceneIdentityCommitError::Hierarchy) => {
-                diagnostics.push(diagnostic_error(
-                    "scene.hierarchy-retirement-ineligible",
-                    "Scene hierarchy could not be prepared for exact retirement",
-                ));
-                rollback_spawn_transaction(world, &spawned_entities);
-                return SceneSpawnReport {
-                    instance: None,
-                    diagnostics,
-                    retired_entities: 0,
-                };
-            }
         };
 
         let scene_retirements = prepared_identity.retiring_entities().to_vec();
-        let hierarchy_operations = match &prepared_identity {
-            PreparedSceneIdentityCommit::Register { .. } => new_hierarchy_operations.clone(),
-            PreparedSceneIdentityCommit::Replace { hierarchy, .. } => {
-                combine_scene_hierarchy_operations(
-                    world,
-                    hierarchy,
-                    &new_hierarchy_operations,
-                    &scene_retirements,
-                )
+        let mut retired_entities = scene_retirements.clone();
+        retired_entities.extend(additional_retirements.iter().copied());
+        let prepared_hierarchy_retirement = match &prepared_identity {
+            PreparedSceneIdentityCommit::Register { .. } => None,
+            PreparedSceneIdentityCommit::Replace { .. } => {
+                match prepare_scene_hierarchy_retirement(world, &retired_entities) {
+                    Ok(retirement) => Some(retirement),
+                    Err(_) => {
+                        diagnostics.push(diagnostic_error(
+                            "scene.hierarchy-retirement-ineligible",
+                            "Scene hierarchy could not be prepared for exact retirement",
+                        ));
+                        rollback_spawn_transaction(world, &spawned_entities);
+                        return SceneSpawnReport {
+                            instance: None,
+                            diagnostics,
+                            retired_entities: 0,
+                        };
+                    }
+                }
             }
         };
-        let mut retired_entities = scene_retirements.clone();
-        retired_entities.extend(additional_retirements);
+        let hierarchy_operations = match &prepared_identity {
+            PreparedSceneIdentityCommit::Register { .. } => new_hierarchy_operations.clone(),
+            PreparedSceneIdentityCommit::Replace { .. } => combine_scene_hierarchy_operations(
+                world,
+                prepared_hierarchy_retirement
+                    .as_ref()
+                    .expect("prepared scene replacement requires hierarchy retirement"),
+                &new_hierarchy_operations,
+                &scene_retirements,
+            ),
+        };
+        if !additional_retirements.is_empty()
+            && PreparedSceneEntityRetirement::prepare(
+                world,
+                &additional_retirements,
+                prepared_hierarchy_retirement
+                    .as_ref()
+                    .expect("product replacement requires hierarchy retirement"),
+            )
+            .is_err()
+        {
+            diagnostics.push(diagnostic_error(
+                "scene.product-retirement-lifecycle-active",
+                "Scene product retirement would run unsupported lifecycle work",
+            ));
+            rollback_spawn_transaction(world, &spawned_entities);
+            return SceneSpawnReport {
+                instance: None,
+                diagnostics,
+                retired_entities: 0,
+            };
+        }
         if let Err(error) = validate_scene_identity_support(world, &retired_entities) {
             diagnostics.push(crate::diagnostics::with_identity_support_error(
                 diagnostic_error(
@@ -716,11 +734,14 @@ impl SceneSpawner {
         }
 
         let prepared_retirement = match &prepared_identity {
-            PreparedSceneIdentityCommit::Replace {
-                replacement: _,
-                hierarchy,
-            } => {
-                match PreparedSceneEntityRetirement::prepare(world, &retired_entities, hierarchy) {
+            PreparedSceneIdentityCommit::Replace { replacement: _ } => {
+                match PreparedSceneEntityRetirement::prepare(
+                    world,
+                    &retired_entities,
+                    prepared_hierarchy_retirement
+                        .as_ref()
+                        .expect("prepared scene replacement requires hierarchy retirement"),
+                ) {
                     Ok(retirement) => Some(retirement),
                     Err(_) => {
                         diagnostics.push(diagnostic_error(
@@ -826,10 +847,7 @@ impl SceneSpawner {
                     registration.commit(&mut domain)
                 }),
             },
-            PreparedSceneIdentityCommit::Replace {
-                replacement,
-                hierarchy: _,
-            } => {
+            PreparedSceneIdentityCommit::Replace { replacement } => {
                 let mut domain = world
                     .remove_resource::<WorldIdentityDomain>()
                     .expect("prepared scene replacement requires its identity domain");
@@ -998,7 +1016,35 @@ pub fn replace_scene_with_product<F>(
 where
     F: FnOnce(&mut SceneProductOverlayWriter<'_>),
 {
-    SceneSpawner::new().spawn_with_asset_context_and_product(
+    replace_scene_with_product_and_provenance(
+        world,
+        registry,
+        document,
+        &SceneEntityProvenanceMap::new(),
+        current,
+        limits,
+        additional_retirements,
+        configure,
+    )
+}
+
+/// Replaces one active Scene Instance while preserving the source provenance of an already
+/// expanded document.
+#[must_use]
+pub fn replace_scene_with_product_and_provenance<F>(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    document: &SceneDocument,
+    provenance: &SceneEntityProvenanceMap,
+    current: &SpawnedSceneInstance,
+    limits: SceneProductTransactionLimits,
+    additional_retirements: &[WorldEntityToken],
+    configure: F,
+) -> SceneSpawnReport
+where
+    F: FnOnce(&mut SceneProductOverlayWriter<'_>),
+{
+    let mut report = SceneSpawner::new().spawn_with_asset_context_and_product(
         world,
         registry,
         document,
@@ -1009,7 +1055,9 @@ where
             additional_retirements,
             configure: Box::new(configure),
         }),
-    )
+    );
+    apply_scene_provenance(world, &mut report, provenance);
+    report
 }
 
 fn prepare_scene_product_transaction(
@@ -1061,18 +1109,7 @@ fn validate_scene_product_baseline(
         if world.get::<SceneEntitySource>(entity).is_some() {
             return Err(PrepareSceneProductTransactionError::SceneOwnedRetirement);
         }
-        if world.get::<Parent>(entity).is_some()
-            || world.get::<Children>(entity).is_some()
-            || world
-                .get_resource::<HierarchyRoots>()
-                .is_some_and(|roots| roots.contains(entity))
-        {
-            return Err(PrepareSceneProductTransactionError::HierarchyLinkedRetirement);
-        }
     }
-    let retirement = prepare_lifecycle_free_despawn(world, &additional_retirements)
-        .map_err(|_| PrepareSceneProductTransactionError::LifecycleRetirement)?;
-    let world = retirement.cancel();
     product
         .overlay
         .validate_resources(world)
@@ -1209,16 +1246,6 @@ fn scene_product_rejection(
         ) => (
             "scene.product-retirement-persistent-owned",
             "Scene product retirement contains a persistent-identity-owned entity",
-            None,
-        ),
-        PrepareSceneProductTransactionError::HierarchyLinkedRetirement => (
-            "scene.product-retirement-hierarchy-linked",
-            "Scene product retirement contains a structurally linked entity",
-            None,
-        ),
-        PrepareSceneProductTransactionError::LifecycleRetirement => (
-            "scene.product-retirement-lifecycle-active",
-            "Scene product retirement would run unsupported lifecycle work",
             None,
         ),
     };
@@ -1432,7 +1459,7 @@ fn prepare_scene_identity_commit(
     identity_tokens: &BTreeMap<SceneEntityId, WorldEntityToken>,
     commit: SceneIdentityCommit<'_>,
     new_domain: Option<WorldIdentityDomain>,
-) -> Result<PreparedSceneIdentityCommit, PrepareSceneIdentityCommitError> {
+) -> Result<PreparedSceneIdentityCommit, IdentityDomainError> {
     let entries = identity_tokens
         .iter()
         .map(|(entity_id, token)| (entity_id.clone(), *token))
@@ -1442,8 +1469,7 @@ fn prepare_scene_identity_commit(
             if let Some(domain) = new_domain {
                 debug_assert!(!world.contains_resource::<WorldIdentityDomain>());
                 let registration =
-                    prepare_exact_scene_instance_registration(&domain, world, &entries)
-                        .map_err(PrepareSceneIdentityCommitError::Identity)?;
+                    prepare_exact_scene_instance_registration(&domain, world, &entries)?;
                 return Ok(PreparedSceneIdentityCommit::Register {
                     domain: Some(domain),
                     registration,
@@ -1451,8 +1477,7 @@ fn prepare_scene_identity_commit(
             }
             world.resource_scope(|world, domain: Mut<WorldIdentityDomain>| {
                 let registration =
-                    prepare_exact_scene_instance_registration(&domain, world, &entries)
-                        .map_err(PrepareSceneIdentityCommitError::Identity)?;
+                    prepare_exact_scene_instance_registration(&domain, world, &entries)?;
                 Ok(PreparedSceneIdentityCommit::Register {
                     domain: None,
                     registration,
@@ -1466,15 +1491,8 @@ fn prepare_scene_identity_commit(
                 current,
                 &entries,
                 TombstoneCause::Replaced,
-            )
-            .map_err(PrepareSceneIdentityCommitError::Identity)?;
-            let hierarchy =
-                prepare_scene_hierarchy_retirement(world, replacement.retiring_entities())
-                    .map_err(|_| PrepareSceneIdentityCommitError::Hierarchy)?;
-            Ok(PreparedSceneIdentityCommit::Replace {
-                replacement,
-                hierarchy,
-            })
+            )?;
+            Ok(PreparedSceneIdentityCommit::Replace { replacement })
         }
     }
 }
@@ -1525,6 +1543,39 @@ pub fn spawn_scene(
     document: &SceneDocument,
 ) -> SceneSpawnReport {
     SceneSpawner::new().spawn(world, registry, document)
+}
+
+/// Materializes an already expanded scene and restores its structured source provenance.
+#[must_use]
+pub fn spawn_scene_with_provenance(
+    world: &mut World,
+    registry: &ComponentRegistry,
+    document: &SceneDocument,
+    provenance: &SceneEntityProvenanceMap,
+) -> SceneSpawnReport {
+    let mut report = spawn_scene(world, registry, document);
+    apply_scene_provenance(world, &mut report, provenance);
+    report
+}
+
+fn apply_scene_provenance(
+    world: &mut World,
+    report: &mut SceneSpawnReport,
+    provenance: &SceneEntityProvenanceMap,
+) {
+    let Some(instance) = &report.instance else {
+        return;
+    };
+    for (entity_id, source) in provenance {
+        let EntityLookup::Resolved(entity) = instance.resolve(world, entity_id) else {
+            panic!("successful expanded scene spawn must resolve every provenance entry");
+        };
+        let mut target = world
+            .get_mut::<SceneEntitySource>(entity)
+            .expect("successful expanded scene spawn must attach scene provenance");
+        target.source_entity_id = source.source_entity_id().clone();
+        target.projection_path = source.projection_path().cloned();
+    }
 }
 
 #[must_use]

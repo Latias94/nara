@@ -1,5 +1,10 @@
+use std::collections::BTreeMap;
+
 use nara_asset::AssetRef;
 use nara_identity::SceneEntityId;
+
+/// Stable provenance for every entity in one expanded scene document.
+pub type SceneEntityProvenanceMap = BTreeMap<SceneEntityId, SceneEntityProvenance>;
 
 /// One source document/entity step in a concrete prefab projection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,10 +90,11 @@ impl SceneEntityProvenance {
         }
     }
 
-    pub(crate) const fn projected(
+    pub(crate) fn projected(
         source_entity_id: SceneEntityId,
-        projection_path: PrefabProjectionPath,
+        mut projection_path: PrefabProjectionPath,
     ) -> Self {
+        projection_path.source_chain.shrink_to_fit();
         Self {
             source_entity_id,
             projection_path: Some(projection_path),

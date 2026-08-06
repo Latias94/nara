@@ -4,8 +4,9 @@ use nara_asset::AssetRef;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use nara_scene::PrefabDocument;
 use nara_scene::{
-    PrefabInstance, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementAnchor, ScenePlacementOwner,
+    PrefabInstance, PrefabProjectionPath, SceneDocument, SceneEntityId, SceneEntityProvenanceMap,
+    SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+    ScenePlacementAnchor, ScenePlacementOwner,
 };
 
 pub(crate) const STRING_ALLOCATION_OVERHEAD: usize = 2 * size_of::<usize>();
@@ -30,8 +31,44 @@ pub(crate) fn scene_retained_bytes(
 
 pub(crate) fn direct_startup_scene_retained_bytes(
     document: &SceneDocument,
+    provenance: &SceneEntityProvenanceMap,
 ) -> Result<usize, SceneRetentionOverflow> {
-    checked_sum([scene_retained_bytes(document)?, ARC_CONTROL_BLOCK_BYTES])
+    checked_sum([
+        startup_scene_retained_bytes(document, provenance)?,
+        2 * ARC_CONTROL_BLOCK_BYTES,
+    ])
+}
+
+pub(crate) fn startup_scene_retained_bytes(
+    document: &SceneDocument,
+    provenance: &SceneEntityProvenanceMap,
+) -> Result<usize, SceneRetentionOverflow> {
+    checked_sum([
+        scene_retained_bytes(document)?,
+        scene_provenance_retained_bytes(provenance)?,
+    ])
+}
+
+pub(crate) fn scene_provenance_retained_bytes(
+    provenance: &SceneEntityProvenanceMap,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = size_of::<SceneEntityProvenanceMap>();
+    for (expanded_entity, source) in provenance {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                size_of_val(expanded_entity),
+                size_of_val(source),
+                BTREE_ENTRY_OVERHEAD,
+                string_retained_bytes(expanded_entity.as_str())?,
+                string_retained_bytes(source.source_entity_id().as_str())?,
+            ])?,
+        )?;
+        if let Some(path) = source.projection_path() {
+            checked_add_to(&mut total, projection_path_retained_bytes(path)?)?;
+        }
+    }
+    Ok(total)
 }
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
@@ -103,11 +140,37 @@ fn scene_entity_ids_retained_bytes(
 fn prefab_instance_retained_bytes(
     instance: &PrefabInstance,
 ) -> Result<usize, SceneRetentionOverflow> {
-    let source = match &instance.source {
-        AssetRef::Path(path) => string_retained_bytes(path.as_str())?,
-        AssetRef::StableId(_) => 16,
-    };
+    let source = asset_ref_retained_bytes(&instance.source)?;
     checked_sum([source, patch_retained_bytes(&instance.overrides)?])
+}
+
+fn projection_path_retained_bytes(
+    path: &PrefabProjectionPath,
+) -> Result<usize, SceneRetentionOverflow> {
+    let mut total = checked_sum([
+        string_retained_bytes(path.root_anchor().as_str())?,
+        checked_product(
+            path.source_chain().len(),
+            size_of::<nara_scene::PrefabProjectionStep>(),
+        )?,
+    ])?;
+    for step in path.source_chain() {
+        checked_add_to(
+            &mut total,
+            checked_sum([
+                asset_ref_retained_bytes(step.source_document())?,
+                string_retained_bytes(step.source_entity().as_str())?,
+            ])?,
+        )?;
+    }
+    Ok(total)
+}
+
+fn asset_ref_retained_bytes(reference: &AssetRef) -> Result<usize, SceneRetentionOverflow> {
+    match reference {
+        AssetRef::Path(path) => string_retained_bytes(path.as_str()),
+        AssetRef::StableId(_) => Ok(16),
+    }
 }
 
 pub(crate) fn patch_retained_bytes(

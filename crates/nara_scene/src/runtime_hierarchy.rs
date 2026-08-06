@@ -56,10 +56,20 @@ pub(crate) fn prepare_scene_hierarchy_retirement(
     world: &World,
     retirements: &[Entity],
 ) -> Result<PreparedSceneHierarchyRetirement, SceneHierarchyRetirementError> {
-    let operations =
-        retirement_operations(world, retirements).map_err(|_| SceneHierarchyRetirementError)?;
+    let roots = world.get_resource::<HierarchyRoots>();
+    let structural_retirements = retirements
+        .iter()
+        .copied()
+        .filter(|entity| {
+            world.get::<Parent>(*entity).is_some()
+                || world.get::<Children>(*entity).is_some()
+                || roots.is_some_and(|roots| roots.contains(*entity))
+        })
+        .collect::<Vec<_>>();
+    let operations = retirement_operations(world, &structural_retirements)
+        .map_err(|_| SceneHierarchyRetirementError)?;
     let mut affected_entities = Vec::new();
-    for entity in retirements.iter().copied() {
+    for entity in structural_retirements {
         if let Some(parent) = world.get::<Parent>(entity).map(Parent::parent) {
             affected_entities.push(entity);
             affected_entities.push(parent);

@@ -23,12 +23,14 @@ use nara_ecs::{
     error::BevyError,
     query::FilteredAccessSet,
     schedule::IntoScheduleConfigs,
-    system::{ReadOnlySystemParam, SystemMeta, SystemParam, SystemParamValidationError},
+    system::{
+        ReadOnlySystemParam, ScheduleSystem, SystemMeta, SystemParam, SystemParamValidationError,
+    },
     world::unsafe_world_cell::UnsafeWorldCell,
 };
 use nara_identity::SpawnedSceneInstance;
 use nara_reflect::{ComponentRegistry, component_registry, validate_component_registry_authority};
-use nara_scene::{SceneDocument, spawn_scene};
+use nara_scene::{SceneDocument, SceneEntityProvenanceMap, spawn_scene_with_provenance};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 use crate::project_content::ProjectContentLease;
@@ -84,6 +86,7 @@ enum StartupSceneRetention {
 /// materialization consumes exactly one source owner.
 pub struct StartupSceneSource {
     document: Arc<SceneDocument>,
+    provenance: Arc<SceneEntityProvenanceMap>,
     retention: StartupSceneRetention,
 }
 
@@ -96,6 +99,7 @@ pub struct StartupSceneSource {
 #[derive(Clone)]
 pub struct StartupSceneSourceView {
     document: Weak<SceneDocument>,
+    provenance: Weak<SceneEntityProvenanceMap>,
     retained_bytes: usize,
 }
 
@@ -108,7 +112,8 @@ impl StartupSceneSource {
         document: Arc<SceneDocument>,
         retained_byte_limit: ByteLimit,
     ) -> Result<Self, StartupSceneSourceError> {
-        let retained_bytes = direct_startup_scene_retained_bytes(&document)
+        let provenance = Arc::new(SceneEntityProvenanceMap::new());
+        let retained_bytes = direct_startup_scene_retained_bytes(&document, &provenance)
             .map_err(|_| StartupSceneSourceError::RetainedBytesOverflow)?;
         let limit = retained_byte_limit.get();
         if retained_bytes > limit {
@@ -119,6 +124,32 @@ impl StartupSceneSource {
         }
         Ok(Self {
             document,
+            provenance,
+            retention: StartupSceneRetention::Direct {
+                retained_bytes,
+                _limit: limit,
+            },
+        })
+    }
+
+    /// Binds an owned already-expanded source together with its structured prefab provenance.
+    pub fn direct_with_provenance(
+        document: Arc<SceneDocument>,
+        provenance: Arc<SceneEntityProvenanceMap>,
+        retained_byte_limit: ByteLimit,
+    ) -> Result<Self, StartupSceneSourceError> {
+        let retained_bytes = direct_startup_scene_retained_bytes(&document, &provenance)
+            .map_err(|_| StartupSceneSourceError::RetainedBytesOverflow)?;
+        let limit = retained_byte_limit.get();
+        if retained_bytes > limit {
+            return Err(StartupSceneSourceError::RetainedBytesExceeded {
+                required: retained_bytes,
+                limit,
+            });
+        }
+        Ok(Self {
+            document,
+            provenance,
             retention: StartupSceneRetention::Direct {
                 retained_bytes,
                 _limit: limit,
@@ -129,11 +160,13 @@ impl StartupSceneSource {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     pub(crate) fn from_project_content(
         document: Arc<SceneDocument>,
+        provenance: Arc<SceneEntityProvenanceMap>,
         lease: ProjectContentLease,
         retained_bytes: usize,
     ) -> Self {
         Self {
             document,
+            provenance,
             retention: StartupSceneRetention::Project {
                 _lease: lease,
                 retained_bytes,
@@ -194,6 +227,16 @@ impl StartupSceneSourceView {
             .map(|document| inspect(document.as_ref()))
     }
 
+    /// Borrows the exact expanded document and its immutable structured provenance together.
+    pub fn with_expanded_scene<R>(
+        &self,
+        inspect: impl FnOnce(&SceneDocument, &SceneEntityProvenanceMap) -> R,
+    ) -> Option<R> {
+        let document = self.document.upgrade()?;
+        let provenance = self.provenance.upgrade()?;
+        Some(inspect(document.as_ref(), provenance.as_ref()))
+    }
+
     /// Returns the logical retained-byte charge owned by the root activation authority.
     #[must_use]
     pub(crate) const fn retained_bytes(&self) -> usize {
@@ -249,6 +292,7 @@ impl StartupSceneActivation<'_> {
     pub fn source_view(&self) -> StartupSceneSourceView {
         StartupSceneSourceView {
             document: Arc::downgrade(&self.owner.source.document),
+            provenance: Arc::downgrade(&self.owner.source.provenance),
             retained_bytes: self.owner.source.retained_bytes(),
         }
     }
@@ -342,6 +386,21 @@ enum StartupSceneActivationPhase {
 /// afterward. Those internal phases are deliberately not public schedule anchors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub struct StartupSceneActivationSet;
+
+/// Registers product initialization that consumes the one-shot startup-scene activation window.
+///
+/// The startup-scene module owns the concrete startup schedule and ordering set. Product plugins
+/// use this semantic entry point instead of depending on [`StartupStage::Runtime`] or the internal
+/// consume/finalize phases.
+pub fn add_startup_scene_activation_systems<'a, M>(
+    app: &'a mut App,
+    systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
+) -> Result<&'a mut App, PluginError> {
+    app.add_systems(
+        StartupStage::Runtime,
+        systems.in_set(StartupSceneActivationSet),
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 enum StartupSceneActivationInternalSet {
@@ -439,7 +498,8 @@ pub fn materialize_startup_scene(
             )
         })?;
 
-    let mut report = spawn_scene(world, &registry, source.document());
+    let mut report =
+        spawn_scene_with_provenance(world, &registry, source.document(), &source.provenance);
     if report.diagnostics.has_errors() {
         return Err(StartupSceneMaterializeError::new(report.diagnostics));
     }
@@ -554,7 +614,9 @@ mod tests {
     #[test]
     fn direct_source_enforces_its_exact_retained_byte_limit() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
-        let required = direct_startup_scene_retained_bytes(&document).unwrap();
+        let required =
+            direct_startup_scene_retained_bytes(&document, &SceneEntityProvenanceMap::new())
+                .unwrap();
         assert!(required > 1);
 
         let source =
@@ -582,6 +644,7 @@ mod tests {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
         let view = StartupSceneSourceView {
             document: Arc::downgrade(&document),
+            provenance: Weak::new(),
             retained_bytes: 17,
         };
         let clone = view.clone();
