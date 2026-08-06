@@ -539,6 +539,70 @@ pub fn apply_pointer_driver_input_at(
     Ok((output.admission, output.released_mouse_buttons))
 }
 
+pub fn apply_gamepad_driver_input(
+    scope: &mut RuntimeDriverScope<'_>,
+    gamepad: u16,
+    button: u16,
+    phase: ButtonTransitionPhase,
+) -> Result<InputAdmission, ButtonInputDriverError> {
+    apply_gamepad_driver_input_at(
+        scope,
+        InputWindowId::UNSPECIFIED,
+        InputSeatId::PRIMARY,
+        gamepad,
+        button,
+        phase,
+    )
+}
+
+pub fn apply_gamepad_driver_input_at(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    gamepad: u16,
+    button: u16,
+    phase: ButtonTransitionPhase,
+) -> Result<InputAdmission, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::Gamepad {
+            window,
+            seat,
+            gamepad,
+            button,
+            phase,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output.admission)
+}
+
+pub fn apply_accessibility_driver_action(
+    scope: &mut RuntimeDriverScope<'_>,
+    action: u32,
+) -> Result<InputAdmission, ButtonInputDriverError> {
+    apply_accessibility_driver_action_at(
+        scope,
+        InputWindowId::UNSPECIFIED,
+        InputSeatId::PRIMARY,
+        action,
+    )
+}
+
+pub fn apply_accessibility_driver_action_at(
+    scope: &mut RuntimeDriverScope<'_>,
+    window: InputWindowId,
+    seat: InputSeatId,
+    action: u32,
+) -> Result<InputAdmission, ButtonInputDriverError> {
+    let output = scope
+        .__apply_port::<InputTimeline>(__InputDriverEvent::Accessibility {
+            window,
+            seat,
+            action,
+        })
+        .map_err(ButtonInputDriverError::WorldAccess)??;
+    Ok(output.admission)
+}
+
 pub fn apply_window_input_driver_event(
     scope: &mut RuntimeDriverScope<'_>,
     window: InputWindowId,

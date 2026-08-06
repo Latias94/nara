@@ -500,6 +500,18 @@ pub enum __InputDriverEvent {
         pointer: InputPointerId,
         input: PointerDriverInput,
     },
+    Gamepad {
+        window: InputWindowId,
+        seat: InputSeatId,
+        gamepad: u16,
+        button: u16,
+        phase: ButtonTransitionPhase,
+    },
+    Accessibility {
+        window: InputWindowId,
+        seat: InputSeatId,
+        action: u32,
+    },
     Window {
         window: InputWindowId,
         seat: InputSeatId,

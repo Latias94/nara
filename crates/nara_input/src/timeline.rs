@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use nara_app::__RuntimeDriverPort;
+use nara_app::{__RuntimeDriverPort, RuntimeState};
 use nara_core::Vec2;
 use nara_ecs::Resource;
 
@@ -249,6 +249,22 @@ impl InputTimeline {
                 pointer,
                 input,
             } => self.apply_pointer(window, seat, pointer, input),
+            __InputDriverEvent::Gamepad {
+                window,
+                seat,
+                gamepad,
+                button,
+                phase,
+            } => self
+                .admit_gamepad_button(window, seat, gamepad, button, phase)
+                .map(__InputDriverOutput::new),
+            __InputDriverEvent::Accessibility {
+                window,
+                seat,
+                action,
+            } => self
+                .admit_accessibility_action(window, seat, action)
+                .map(__InputDriverOutput::new),
             __InputDriverEvent::Window {
                 window,
                 seat,
@@ -875,6 +891,20 @@ impl __RuntimeDriverPort for InputTimeline {
     type Input = __InputDriverEvent;
     type Output = Result<__InputDriverOutput, InputIngressError>;
 
+    fn accepts_driver_input(state: RuntimeState, input: &Self::Input) -> bool {
+        matches!(state, RuntimeState::Running | RuntimeState::Paused)
+            || matches!(
+                (state, input),
+                (
+                    RuntimeState::Faulted | RuntimeState::Stopping | RuntimeState::CloseIncomplete,
+                    __InputDriverEvent::Window {
+                        event: InputWindowEvent::SurfaceRetired,
+                        ..
+                    }
+                )
+            )
+    }
+
     fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
         self.apply_driver_event(input)
     }
@@ -913,6 +943,35 @@ mod tests {
         timeline.stage_actions(&ActionMap::default());
         timeline.reclaim_completed();
         timeline
+    }
+
+    #[test]
+    fn fault_retirement_admits_only_surface_retirement_input() {
+        let retired = __InputDriverEvent::Window {
+            window: InputWindowId::new(1),
+            seat: InputSeatId::PRIMARY,
+            event: InputWindowEvent::SurfaceRetired,
+        };
+        let focused = __InputDriverEvent::Window {
+            window: InputWindowId::new(1),
+            seat: InputSeatId::PRIMARY,
+            event: InputWindowEvent::Focused(false),
+        };
+
+        for state in [
+            RuntimeState::Faulted,
+            RuntimeState::Stopping,
+            RuntimeState::CloseIncomplete,
+        ] {
+            assert!(<InputTimeline as __RuntimeDriverPort>::accepts_driver_input(state, &retired));
+            assert!(!<InputTimeline as __RuntimeDriverPort>::accepts_driver_input(state, &focused));
+        }
+        assert!(
+            <InputTimeline as __RuntimeDriverPort>::accepts_driver_input(
+                RuntimeState::Running,
+                &focused,
+            )
+        );
     }
 
     #[test]

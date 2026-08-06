@@ -819,6 +819,11 @@ pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
         matches!(state, RuntimeState::Running | RuntimeState::Paused)
     }
 
+    #[must_use]
+    fn accepts_driver_input(state: RuntimeState, _input: &Self::Input) -> bool {
+        Self::accepts_driver_state(state)
+    }
+
     fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output;
 }
 
@@ -864,7 +869,7 @@ impl RuntimeDriverScope<'_> {
         &mut self,
         input: R::Input,
     ) -> Result<R::Output, RuntimeWorldAccessError> {
-        if !R::accepts_driver_state(self.state) {
+        if !R::accepts_driver_input(self.state, &input) {
             return Err(RuntimeWorldAccessError::PortUnavailable {
                 type_name: type_name::<R>(),
                 state: self.state,
