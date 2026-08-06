@@ -17,7 +17,8 @@ pub use types::{
     InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
     InputIngressError, InputInvalidationReason, InputPointerId, InputPresentationEpoch,
     InputRouteStamp, InputSeatId, InputSurfaceId, InputTimelineEntry, InputUiCursorError,
-    InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
+    InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
+    MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +137,19 @@ impl InputTimeline {
                 limit: MAX_INPUT_ROUTES,
             });
         }
+        if let Some(current) = self.routes.get(&key) {
+            if current.surface != surface {
+                return Err(InputIngressError::RouteConflict {
+                    window,
+                    seat,
+                    current_surface: current.surface,
+                    requested_surface: surface,
+                });
+            }
+            if current.presentation_epoch == presentation_epoch {
+                return Ok(self.pointer_route(window, seat, None));
+            }
+        }
         let generation = self.next_route_generation.checked_add(1).ok_or_else(|| {
             self.poison_routes();
             InputIngressError::RouteGenerationExhausted
@@ -152,7 +166,12 @@ impl InputTimeline {
         Ok(self.pointer_route(window, seat, None))
     }
 
-    pub fn mark_ui_consumed(&mut self, sequence: u64) -> Result<(), InputUiCursorError> {
+    #[doc(hidden)]
+    pub fn __finalize_ui_entry(
+        &mut self,
+        sequence: u64,
+        disposition: InputUiDisposition,
+    ) -> Result<(), InputUiCursorError> {
         let Some(retained) = self
             .retained
             .iter_mut()
@@ -164,8 +183,35 @@ impl InputTimeline {
             return Err(InputUiCursorError::AlreadyFinalized { sequence });
         }
         retained.ui_pending = false;
-        retained.ui_consumed = true;
+        retained.ui_consumed = matches!(
+            disposition,
+            InputUiDisposition::Consumed | InputUiDisposition::RejectedClosed
+        );
         Ok(())
+    }
+
+    /// Releases one endpoint only when it is still owned by the matching surface.
+    pub fn release_presented_route(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        surface: InputSurfaceId,
+    ) -> Result<bool, InputIngressError> {
+        let key = (window, seat);
+        if !self
+            .routes
+            .get(&key)
+            .is_some_and(|route| route.surface == surface)
+        {
+            return Ok(false);
+        }
+        let generation = self.next_route_generation.checked_add(1).ok_or_else(|| {
+            self.poison_routes();
+            InputIngressError::RouteGenerationExhausted
+        })?;
+        self.next_route_generation = generation;
+        self.routes.remove(&key);
+        Ok(true)
     }
 
     pub fn admit_wheel(
@@ -1061,6 +1107,65 @@ mod tests {
     }
 
     #[test]
+    fn presented_route_ownership_is_idempotent_conflict_safe_and_releasable() {
+        let mut timeline = InputTimeline::default();
+        let window = InputWindowId::new(3);
+        let seat = InputSeatId::new(4);
+        let first = InputSurfaceId::new(10);
+        let second = InputSurfaceId::new(20);
+        let epoch = InputPresentationEpoch::new(7).unwrap();
+
+        let initial = timeline
+            .publish_presented_route(window, first, seat, epoch)
+            .unwrap();
+        let repeated = timeline
+            .publish_presented_route(window, first, seat, epoch)
+            .unwrap();
+        assert_eq!(repeated, initial);
+
+        let advanced = timeline
+            .publish_presented_route(window, first, seat, InputPresentationEpoch::new(8).unwrap())
+            .unwrap();
+        assert!(advanced.route_generation() > initial.route_generation());
+
+        assert_eq!(
+            timeline.publish_presented_route(
+                window,
+                second,
+                seat,
+                InputPresentationEpoch::new(9).unwrap(),
+            ),
+            Err(InputIngressError::RouteConflict {
+                window,
+                seat,
+                current_surface: first,
+                requested_surface: second,
+            })
+        );
+        assert_eq!(timeline.pointer_route(window, seat, None), advanced);
+        assert!(
+            !timeline
+                .release_presented_route(window, seat, second)
+                .unwrap()
+        );
+        assert!(
+            timeline
+                .release_presented_route(window, seat, first)
+                .unwrap()
+        );
+
+        let reclaimed = timeline
+            .publish_presented_route(
+                window,
+                second,
+                seat,
+                InputPresentationEpoch::new(9).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(reclaimed.surface(), Some(second));
+    }
+
+    #[test]
     fn windows_seats_and_pointers_keep_distinct_event_time_routes() {
         let mut timeline = InputTimeline::default();
         let first_window = InputWindowId::new(1);
@@ -1285,7 +1390,9 @@ mod tests {
         assert_eq!(timeline.cursors().observation(), 3);
         assert_eq!(timeline.cursors().ui(), 1);
 
-        timeline.mark_ui_consumed(3).unwrap();
+        timeline
+            .__finalize_ui_entry(3, InputUiDisposition::Consumed)
+            .unwrap();
         timeline.finalize_ui_routing();
         timeline.stage_actions(&actions);
         let cursors = timeline.cursors();

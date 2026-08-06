@@ -333,7 +333,8 @@ struct GameplayCommandCounters {
 /// Bounded authoritative gameplay intent waiting for fixed-tick admission.
 ///
 /// Producers submit local semantic actions in `PreUpdate` or explicit replay/AI/external commands
-/// before `GameplayCommandSet::Admit`. The queue retains accepted intent across zero-tick frames.
+/// before the engine-owned admission stage. The queue retains accepted intent across zero-tick
+/// frames.
 /// `Admit` moves one tick into `GameplayCommandBatch`; `Acknowledge` retires it after replay capture.
 /// A lifecycle fault terminally poisons ingress, hides the public batch, and moves any admitted
 /// envelopes into a queue-owned quarantine for inspection. Rejections and numeric statistics are

@@ -1,7 +1,8 @@
 use nara_core::Vec2;
 use nara_ecs::{Mut, Resource, World};
 use nara_input::{
-    ButtonTransitionPhase, InputEventKind, InputTimeline, InputTimelineEntry, KeyCode, MouseButton,
+    ButtonTransitionPhase, InputEventKind, InputTimeline, InputTimelineEntry, InputUiDisposition,
+    KeyCode, MouseButton,
 };
 use nara_ui_kernel::{
     UiActionId, UiActivationSource, UiButtonPhase, UiDispatchBatch, UiInputEvent, UiKey,
@@ -101,7 +102,7 @@ pub(crate) fn route_timeline_ui_input(world: &mut World) {
                     .extend_intents(intents.intents());
                 let _ = world
                     .resource_mut::<InputTimeline>()
-                    .mark_ui_consumed(entry.sequence());
+                    .__finalize_ui_entry(entry.sequence(), InputUiDisposition::Consumed);
             }
         }
     });

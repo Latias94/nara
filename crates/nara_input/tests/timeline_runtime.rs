@@ -5,9 +5,10 @@ use nara_app::{
     RuntimeControlRequestResult, RuntimeInstance, RuntimeObligationLedger, RuntimeState,
 };
 use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
+use nara_input::__private::InputSet;
 use nara_input::{
     ActionId, ActionMap, ActionOutcomes, ButtonDriverInput, InputEventKind, InputFrameObservations,
-    InputPresentationEpoch, InputSeatId, InputSet, InputSurfaceId, InputTimeline, InputWindowEvent,
+    InputPresentationEpoch, InputSeatId, InputSurfaceId, InputTimeline, InputWindowEvent,
     InputWindowId, KeyCode, apply_keyboard_driver_input_at, apply_window_input_driver_event,
 };
 
@@ -32,7 +33,9 @@ fn consume_enter_for_ui(mut timeline: ResMut<InputTimeline>) {
         })
         .collect::<Vec<_>>();
     for sequence in consumed {
-        timeline.mark_ui_consumed(sequence).unwrap();
+        timeline
+            .__finalize_ui_entry(sequence, nara_input::InputUiDisposition::Consumed)
+            .unwrap();
     }
 }
 

@@ -12,13 +12,12 @@ use nara_app::{
     RuntimeWorldAccessError,
 };
 use nara_core::Vec2;
-use nara_ecs::{
-    Res, ResMut, Resource,
-    error::BevyError,
-    schedule::{IntoScheduleConfigs, SystemSet},
-};
+use nara_ecs::{Res, ResMut, Resource, error::BevyError, schedule::IntoScheduleConfigs};
 
+mod schedule;
 mod timeline;
+
+use schedule::InputSet;
 
 #[doc(hidden)]
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
@@ -26,18 +25,9 @@ pub use timeline::{
     InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
     InputIngressError, InputInvalidationReason, InputPointerId, InputPresentationEpoch,
     InputRouteStamp, InputSeatId, InputSurfaceId, InputTimeline, InputTimelineEntry,
-    InputUiCursorError, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
+    InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
     MAX_INPUT_TIMELINE_ENTRIES,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
-pub enum InputSet {
-    ProjectTimeline,
-    PublishObservations,
-    RouteUi,
-    StageActions,
-    ResolveActions,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -67,6 +57,11 @@ pub enum MouseButton {
 /// Paused frames still finish frame observation but defer action resolution, so one bounded
 /// retention interval can span multiple platform frames.
 pub const MAX_RETAINED_BUTTON_TRANSITIONS: usize = MAX_INPUT_TIMELINE_ENTRIES;
+
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::schedule::InputSet;
+}
 
 /// Physical edge recorded for a retained button state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

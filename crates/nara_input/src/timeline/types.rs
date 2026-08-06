@@ -305,6 +305,12 @@ pub enum InputIngressError {
     RouteCapacityExceeded {
         limit: usize,
     },
+    RouteConflict {
+        window: InputWindowId,
+        seat: InputSeatId,
+        current_surface: InputSurfaceId,
+        requested_surface: InputSurfaceId,
+    },
     RouteGenerationExhausted,
     NonFinitePosition,
     InvalidLogicalSize,
@@ -380,6 +386,19 @@ impl Display for InputIngressError {
             Self::RouteCapacityExceeded { limit } => {
                 write!(formatter, "input route limit {limit} was exceeded")
             }
+            Self::RouteConflict {
+                window,
+                seat,
+                current_surface,
+                requested_surface,
+            } => write!(
+                formatter,
+                "input endpoint ({}, {}) is owned by surface {}; surface {} cannot replace it without retirement",
+                window.get(),
+                seat.get(),
+                current_surface.get(),
+                requested_surface.get(),
+            ),
             Self::RouteGenerationExhausted => {
                 formatter.write_str("input route generation was exhausted")
             }
@@ -395,6 +414,13 @@ impl Display for InputIngressError {
 }
 
 impl Error for InputIngressError {}
+
+/// Final UI decision for one retained input entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputUiDisposition {
+    Consumed,
+    RejectedClosed,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputUiCursorError {

@@ -98,7 +98,7 @@ impl Plugin for UiPlugin {
         app.init_resource::<UiActionEvents>()?;
         app.add_systems(
             CoreStage::First,
-            interaction::route_timeline_ui_input.in_set(nara_input::InputSet::RouteUi),
+            interaction::route_timeline_ui_input.in_set(nara_input::__private::InputSet::RouteUi),
         )?;
         app.add_systems(
             CoreStage::Extract,

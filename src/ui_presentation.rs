@@ -41,7 +41,7 @@ impl Plugin for UiPresentationBridgePlugin {
             CoreStage::First,
             synchronize_runtime_ui_surface_metrics
                 .after(nara_window::WindowSet::ApplyEvents)
-                .before(nara_input::InputSet::RouteUi),
+                .before(nara_input::__private::InputSet::RouteUi),
         )?;
         app.add_systems(CoreStage::Queue, compile_runtime_ui_packets)?;
         app.add_systems(CoreStage::Cleanup, commit_runtime_ui_presentations)?;

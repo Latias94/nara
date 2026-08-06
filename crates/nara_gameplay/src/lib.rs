@@ -4,6 +4,7 @@ mod action;
 mod command;
 mod local;
 mod queue;
+mod schedule;
 
 pub use action::{
     ActionCommandBinding, ActionCommandMap, ActionCommandMapError, MAX_ACTION_COMMAND_BINDINGS,
@@ -27,63 +28,20 @@ pub use queue::{
     MAX_GAMEPLAY_COMMAND_FUTURE_TICKS, MAX_GAMEPLAY_COMMAND_RETAINED_BYTES,
     MAX_GAMEPLAY_COMMAND_RETAINED_COMMANDS,
 };
+pub use schedule::GameplayCommandSet;
 
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, FixedTime, FixedUpdateSet, Plugin, PluginError,
     RuntimeDriverScope, RuntimeFault, RuntimeFaultKind, RuntimeFaultReporter,
     RuntimeWorldAccessError,
 };
-use nara_ecs::{
-    Res, ResMut,
-    schedule::{IntoScheduleConfigs, SystemSet},
-    system::ScheduleSystem,
-};
-use nara_input::{ActionOutcomes, InputSet};
+use nara_ecs::{Res, ResMut, schedule::IntoScheduleConfigs, system::ScheduleSystem};
+use nara_input::ActionOutcomes;
+
+use crate::schedule::GameplayCommandInternalSet;
 
 pub const GAMEPLAY_COMMAND_PLUGIN_ID: nara_app::PluginId =
     nara_app::PluginId::new("nara.gameplay.commands");
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
-pub enum GameplayCommandSet {
-    /// Public frame-local phase for coalescing semantic intents into command drafts.
-    ///
-    /// Members run after input action resolution and before the engine drains local commands.
-    CollectLocalCommands,
-    /// Lower local semantic action outcomes into commands for the next open tick.
-    ///
-    /// This is an engine-owned phase, not a public semantic ordering anchor.
-    MapLocalActions,
-    /// Close and admit the current authoritative tick.
-    ///
-    /// This is an engine-owned phase, not a public semantic ordering anchor.
-    Admit,
-    /// Public joinable phase for reading the immutable current-tick command batch.
-    ///
-    /// The phase runs in `CoreStage::FixedUpdate` after command admission and only while the batch
-    /// belongs to the current fixed tick. Members see the admitted batch for the whole phase; an
-    /// admission/lifecycle failure reports a domain fault and makes the phase's run condition false.
-    /// Ordinary deferred commands from members are applied before [`GameplayCommandSet::Capture`]
-    /// begins.
-    ///
-    /// The batch remains retained and active after this phase. Member errors follow the App's
-    /// configured system-error policy; managed-runtime escalation is owned by `nara_app`.
-    Consume,
-    /// Public joinable phase for replay/debug capture after command consumption.
-    ///
-    /// The phase runs in `CoreStage::FixedUpdate` only for a current batch and begins after all
-    /// [`GameplayCommandSet::Consume`] members and their ordinary deferred commands complete.
-    /// Members still see the same retained immutable batch. Their ordinary deferred commands are
-    /// applied before engine acknowledgement; after the complete fixed schedule returns, healthy
-    /// acknowledgement has retired the batch and released its retained command budget.
-    ///
-    /// Lifecycle faults make the phase's run condition false. Member errors follow the App's
-    /// configured system-error policy; managed-runtime escalation is owned by `nara_app`.
-    Capture,
-    /// Retire the batch and release its retained budget.
-    ///
-    /// This engine-owned phase is not a public semantic ordering anchor.
-    Acknowledge,
-}
 
 /// Registers frame-local semantic command producers without exposing the owning core schedule.
 ///
@@ -97,7 +55,7 @@ pub fn add_local_gameplay_command_systems<'a, M>(
 ) -> Result<&'a mut App, PluginError> {
     app.add_systems(
         CoreStage::PreUpdate,
-        systems.in_set(GameplayCommandSet::CollectLocalCommands),
+        systems.in_set(GameplayCommandInternalSet::CollectLocalCommands),
     )
 }
 
@@ -165,38 +123,39 @@ impl Plugin for GameplayCommandPlugin {
         app.configure_sets(
             CoreStage::PreUpdate,
             (
-                GameplayCommandSet::CollectLocalCommands.after(InputSet::ResolveActions),
-                GameplayCommandSet::MapLocalActions,
+                GameplayCommandInternalSet::CollectLocalCommands
+                    .after(nara_input::__private::InputSet::ResolveActions),
+                GameplayCommandInternalSet::MapLocalActions,
             )
                 .chain(),
         )?;
         app.configure_sets(
             CoreStage::FixedUpdate,
             (
-                GameplayCommandSet::Admit.in_set(FixedUpdateSet::Prepare),
+                GameplayCommandInternalSet::Admit.in_set(FixedUpdateSet::Prepare),
                 GameplayCommandSet::Consume
                     .in_set(FixedUpdateSet::Simulate)
                     .run_if(gameplay_command_batch_is_current),
                 GameplayCommandSet::Capture
                     .in_set(FixedUpdateSet::Finalize)
                     .run_if(gameplay_command_batch_is_current),
-                GameplayCommandSet::Acknowledge.in_set(FixedUpdateSet::Finalize),
+                GameplayCommandInternalSet::Acknowledge.in_set(FixedUpdateSet::Finalize),
             )
                 .chain(),
         )?
         .add_systems(
             CoreStage::PreUpdate,
             map_action_outcomes_to_commands
-                .after(InputSet::ResolveActions)
-                .in_set(GameplayCommandSet::MapLocalActions),
+                .after(nara_input::__private::InputSet::ResolveActions)
+                .in_set(GameplayCommandInternalSet::MapLocalActions),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            admit_gameplay_commands.in_set(GameplayCommandSet::Admit),
+            admit_gameplay_commands.in_set(GameplayCommandInternalSet::Admit),
         )?
         .add_systems(
             CoreStage::FixedUpdate,
-            acknowledge_gameplay_commands.in_set(GameplayCommandSet::Acknowledge),
+            acknowledge_gameplay_commands.in_set(GameplayCommandInternalSet::Acknowledge),
         )?;
         Ok(())
     }
@@ -1648,7 +1607,7 @@ mod tests {
             .unwrap()
             .add_systems(
                 CoreStage::FixedUpdate,
-                record_after_ack.after(GameplayCommandSet::Acknowledge),
+                record_after_ack.after(GameplayCommandInternalSet::Acknowledge),
             )
             .unwrap();
         app.world_mut()
