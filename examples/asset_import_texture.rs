@@ -81,7 +81,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let batches = app.world().resource::<nara::sprite_render::SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(
-        batches.as_slice()[0].material.image,
+        batches.as_slice()[0]
+            .image
+            .as_ref()
+            .map(|image| image.identity().key()),
         Some(image_resource_key(texture))
     );
     assert_eq!(
