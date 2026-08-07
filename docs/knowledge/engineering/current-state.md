@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "be9255fd95d713bebd9279801f19cc7b7c866c6a386953326f79dfbda473e912"
+source_fingerprint: "95dee6bf7fbebe85c6e02dba94723bae6f94af46c46f2df04d05538986f4ef5f"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "be9255fd95d713bebd9279801f19cc7b7c866c6a386953326f79dfbda47
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `be9255fd95d713bebd9279801f19cc7b7c866c6a386953326f79dfbda473e912`
-- Immutable records: 373
+- Source fingerprint: `95dee6bf7fbebe85c6e02dba94723bae6f94af46c46f2df04d05538986f4ef5f`
+- Immutable records: 374
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Ordered UI kernel correction: NUI-U15 bounded product proof active](registry/2026-08/2026-08-06T182000Z-engine-foundation-contract-completion-codex-root-38a88f6cfc644db99ebd546baedebd69.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Ordered UI kernel correction: NUI-U15A UI foundation conformance active](registry/2026-08/2026-08-07T010500Z-engine-foundation-contract-completion-codex-root-b47fe204c2fb4706a00429c0d8ee86c8.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)

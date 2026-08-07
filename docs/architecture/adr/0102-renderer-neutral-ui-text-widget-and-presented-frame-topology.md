@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -15,7 +15,7 @@
 [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md),
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md), and
 [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
-**Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U9 through NUI-U14, NUI-U17, then NUI-U15 and NUI-U16
+**Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U9 through NUI-U14, NUI-U17, NUI-U15A, NUI-U15B, then NUI-U16
 
 ## Context
 
@@ -26,9 +26,11 @@ and submitted. Editor UI has a
 different persistence and command authority, so a shared top-level object model would couple two
 products while still leaving their common algorithms shallow.
 
-The reference-game HUD, terminal overlay, Retry control, packaged desktop path, and headless path
-form one complete consumer. They justify early physical boundaries for text, frame compilation,
-and controlled widgets, but not a provider ecosystem or an Editor-shell migration.
+Neutral layered conformance examples first prove the public text/frame, runtime interaction, and
+presentation seams without product facts. The reference-game HUD, terminal overlay, Retry control,
+packaged desktop path, and headless path then form one complete product consumer through those
+frozen seams. The game may reveal a missing capability, but it cannot alone admit a public provider,
+component, layout, or Editor-shell abstraction.
 
 ## Decision
 
@@ -132,6 +134,22 @@ flowchart LR
   current-tick consume and post-consume capture anchors required by independent products. Input
   projection, UI route finalization, local-action mapping, command admission, acknowledgement, and
   other technical phases remain private or doc-hidden engine-integration details.
+- Shared UI interfaces are proven before product integration by three thin neutral consumers: a
+  kernel layout/frame gallery, an ECS/Scene runtime interaction lab, and a root-facade presentation
+  gallery. The runtime lab proves the formal semantic tree and typed accessibility-action interface
+  without taking a dependency on the bounded AccessKit adapter trial. The presentation gallery owns
+  one neutral public-only projection, exact candidate, owned packet, matching receipt, presented
+  commit, and typed-activation round trip without adding a product or device matrix. They use only
+  intended public modules and introduce no shared example framework, registry, alternate authoring
+  model, product vocabulary, or duplicate pixel/hash matrix.
+- The conformance checkpoint freezes a recorded baseline: public-interface inventory, named shared
+  semantic invariants, exact example assertions, and the commit that proved them. Product integration
+  must reopen and refreeze this checkpoint before changing shared UI behavior or an assertion, even if
+  signatures remain unchanged. A post-product neutral case may reproduce a gap but cannot alone admit
+  a shared change; the focused amendment must cite a pre-freeze named invariant, independent
+  comparative pressure, or a second independent consumer.
+- After that checkpoint, the Reference Game consumes the frozen baseline; a shared gap stops for
+  independent evidence and a focused plan amendment instead of silently widening the engine.
 - Runtime and future Editor adapters share text, kernel, widget state machines, semantic
   vocabulary, and presentation infrastructure. They do not share persistent authoring identity,
   session persistence, Host authority, or domain commands.
@@ -188,6 +206,7 @@ and a narrow public API.
 | Kernel dependencies on ECS/Host/Editor/WGPU | 0 | Cargo graph and independent-consumer checks |
 | World-mutating widget callbacks | 0 | Public API inspection and compile tests |
 | Product code binding to technical input/command phases | 0 systems | Schedule-extension consumer tests |
+| Conformance examples importing Reference Game or private integration modules | 0 imports | Example manifests, public API review, and focused example execution |
 | Reference product parity | HUD, terminal, Retry, accessibility, package, and headless gates pass | Reference-game verification contract |
 
 ## Risks and Mitigations
@@ -201,4 +220,6 @@ and a narrow public API.
 | A slow or abandoned consumer pins the intent journal | High | Medium | Use bounded registration, explicit unregister, typed producer backpressure, and reclaim only the globally acknowledged prefix. |
 | Surface replacement cannot reclaim a window/seat route | High | Medium | Make same-owner republish idempotent and release ownership only on exact matching retirement or endpoint detach. |
 | Editor requirements distort game persistence | High | Medium | Keep separate adapters and defer Editor migration until heterogeneous panel evidence exists. |
+| Conformance examples become a second framework | High | Medium | Keep each example local to one owner, move reusable behavior into the deep module, and forbid shared scenario registries or alternate authoring lifecycles. |
+| Product integration widens frozen seams opportunistically | High | Medium | Keep product facts in Reference Game data/adapters and require independent evidence plus a focused plan amendment for any shared interface change. |
 | Text or atlas work becomes unbounded | High | Medium | Enforce owner-local input, glyph, page, upload, retention, and diagnostic limits. |

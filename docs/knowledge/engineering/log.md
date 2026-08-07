@@ -4,6 +4,9 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-07
+* **Work Registration**: [Ordered UI kernel correction: NUI-U15A UI foundation conformance active](registry/2026-08/2026-08-07T010500Z-engine-foundation-contract-completion-codex-root-b47fe204c2fb4706a00429c0d8ee86c8.md) - Activates neutral layered UI conformance examples and the shared-interface freeze before Reference Game product integration.
+
 ## 2026-08-06
 * **Work Registration**: [Ordered UI kernel correction: NUI-U15 bounded product proof active](registry/2026-08/2026-08-06T182000Z-engine-foundation-contract-completion-codex-root-38a88f6cfc644db99ebd546baedebd69.md) - Activates the Reference-Game product proof only after the runtime UI module and interface checkpoint has closed.
 * **Work Registration**: [Ordered UI kernel correction: NUI-U17 runtime ownership checkpoint completed](registry/2026-08/2026-08-06T181500Z-engine-foundation-contract-completion-codex-root-54b90cb0a87a424b8340f002394a2755.md) - Closes the deep runtime UI lifecycle and interface checkpoint before any reference-game product-matrix expansion.
@@ -146,4 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game runtime authority and delivery: U10 rerun awaiting authorization](registry/2026-07/2026-07-26T030358Z-engine-foundation-contract-completion-codex-root-6b6df8de23764d76b5756d5e8f75723a.md) - Records final hosted CI success after the candidate and release-verifier repairs while preserving the separately authorized U10 rerun gate.
 * **Verification Evidence**: [RGD-U8 final hosted CI after candidate capacity repair](verification/2026-07/2026-07-26T030317Z-rgd-u8-final-hosted-ci-after-candidate-capacity-repair-73cf3d9e548743eb9462aec8acbcfec1.md) - Re-establishes the six-cell hosted CI baseline after the candidate capacity and release-verifier pin repairs.
 * **Work Registration**: [Reference-game runtime authority and delivery: U10 release alignment repaired](registry/2026-07/2026-07-26T025113Z-engine-foundation-contract-completion-codex-root-427f191683c748e486e1e5b51618957d.md) - Records the completed local release-verifier alignment repair and the remaining hosted CI and separately authorized U10 rerun gates.
-* **Verification Evidence**: [RGD-U12 release verifier pin follows candidate layout](verification/2026-07/2026-07-26T025029Z-rgd-u12-release-verifier-pin-follows-candidate-layout-651c8156185f48a080d52cd1c0b68247.md) - Records the reviewed ancestor, blob, and SHA-256 binding that keeps release validation aligned with the repaired candidate layout.

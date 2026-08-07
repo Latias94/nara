@@ -3,7 +3,7 @@ title: Ordered UI Kernel and Engine Boundary Correction - Plan
 type: refactor
 date: 2026-08-04
 deepened: 2026-08-04
-amended: 2026-08-06
+amended: 2026-08-07
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution_state: active
@@ -20,11 +20,12 @@ operator_execution_authority: external-control-plane
 
 ## Goal Capsule
 
-- **Objective:** Replace the UI-local ordering patch with one persistent ordered structure contract, establish deep renderer-neutral UI modules and narrow interfaces before product expansion, remove confirmed false extension surfaces and duplicate authorities, and use the reference game only as the bounded acceptance carrier for readable HUD, terminal, Retry, package, and presentation-free headless workflows.
+- **Objective:** Replace the UI-local ordering patch with one persistent ordered structure contract, establish deep renderer-neutral UI modules and narrow interfaces before product expansion, remove confirmed false extension surfaces and duplicate authorities, prove and freeze the shared UI interfaces through neutral layered conformance examples, and only then use the reference game as the bounded acceptance carrier for readable HUD, terminal, Retry, package, and presentation-free headless workflows.
 - **Authority:** Accepted ADRs remain durable authority. NUI-U1 must admit the focused ordered-structure and UI-topology decisions, atomically activate this plan, and supersede the current RUI plan before any behavior-bearing unit starts. Until then, the current RUI plan remains the sole active execution authority.
 - **Product contract:** This plan implements the scope confirmed in the 2026-08-04 design discussion. It intentionally combines the UI product slice with the already verified foundation defects that would otherwise preserve duplicate authority, false extensibility, mutable render-resource reads, or headless/presentation coupling.
+- **Product-contract preservation:** The 2026-08-07 amendment does not widen the shipped UI slice. It splits the former NUI-U15 tail into NUI-U15A interface conformance and NUI-U15B product integration; every HUD, terminal, Retry, resolution, package, accessibility, and headless product obligation remains in NUI-U15B.
 - **Design authority:** Shared UI contracts come from domain ownership and invariants, corroborated by independent conformance cases and common pressure across mature reference systems. A Reference Game requirement may expose a missing seam, but it cannot by itself admit a general public abstraction.
-- **Reference UI input:** [Reference-Game UI Product Slice](../architecture/reference-game-ui-product-slice.md) is a late product-consumer contract for the bounded HUD, terminal overlay, Retry modal, target resolutions, state matrix, and data-versus-Rust acceptance fixture. NUI-U13 and NUI-U17 may use only the smallest adapter/lifecycle probe needed to prove their module invariants; NUI-U15 owns the complete product acceptance proof. No product visual, resolution matrix, smoke script, digest, or pixel target may widen an engine contract before its owning unit has independent evidence.
+- **Reference UI input:** [Reference-Game UI Product Slice](../architecture/reference-game-ui-product-slice.md) is a late product-consumer contract for the bounded HUD, terminal overlay, Retry modal, target resolutions, state matrix, and data-versus-Rust acceptance fixture. NUI-U13 and NUI-U17 may use only the smallest adapter/lifecycle probe needed to prove their module invariants; NUI-U15A independently proves and freezes the shared interfaces, and NUI-U15B owns the complete product acceptance proof. No product visual, resolution matrix, smoke script, digest, or pixel target may widen an engine contract before its owning unit has independent evidence.
 - **Execution profile:** This is pre-1.0 fearless refactoring. Rust APIs, Cargo features, plugin recipes, and in-repository persistent fixtures may break. The executor removes obsolete paths instead of adding compatibility wrappers, performs proof-first or characterization-first changes, runs Cargo commands serially with `CARGO_BUILD_JOBS=1`, and may create precise Conventional Commits between coherent units.
 - **Stop conditions:** Stop the affected path and reconcile authority if ordered placement cannot produce an exact inverse, the UI kernel requires ECS/Scene/Host/WGPU ownership, the presented-frame revision cannot govern both render and interaction, a headless content recipe still installs presentation infrastructure, or a P0/P1 review finding contradicts a requirement or Accepted ADR.
 - **Tail ownership:** `ce-work` or an equivalent executor owns implementation, review, commits, verification, and final cleanup. Progress is recorded outside this file. The plan remains a decision artifact and is not mutated into a status ledger.
@@ -109,6 +110,11 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 - R42. UI semantic intents enter a bounded monotonic journal with bounded registered consumers and independent cursors. A consumer registered after runtime start begins at the current tail unless an owning product explicitly installs it before input admission; there is no implicit replay. An intent prefix is reclaimed only after every registered consumer acknowledges past it, unregistering a consumer releases only that cursor, and the producer never overwrites an unacknowledged entry. Capacity is preflighted before any interaction or reducer mutation; a slow consumer therefore causes typed producer rejection and `RejectedClosed`, not a silent gap. Pause leaves the registered consumer and unobserved entries intact, so resume observes each retained intent exactly once. Window/seat route publication is idempotent for the same surface, rejects a different active surface without changing the existing owner or revisions, and releases ownership only when the matching surface retires or the endpoint detaches; the first implementation adds no implicit multi-surface focus stack.
 - R43. The ordinary public schedule surface is limited to the semantic local-command registration helper plus the immutable current-tick `GameplayCommandSet::Consume` and post-consume `GameplayCommandSet::Capture` anchors required by independent products. Input projection, UI routing finalization, local-action mapping, command admission, acknowledgement, and their technical system sets remain private or doc-hidden engine-integration details. Independent consumers prove that product code composes through the helper and the two retained semantic anchors only.
 
+#### Example-First Interface Proof
+
+- R44. Before the complete Reference Game product matrix runs, three neutral layered conformance examples consume only intended public interfaces: `nara_ui_kernel` owns a layout/frame gallery, `nara_ui` owns an ECS/Scene interaction lab, and the root presentation facade owns a presentation gallery. The interaction lab includes the platform-neutral semantic tree and typed accessibility-action boundary without depending on AccessKit. The presentation gallery also owns one public-only vertical handshake from neutral ECS/Scene projection through exact frame/behavior candidate, owned packet, matching receipt, presented-history commit, and one typed activation; it adds no product state, resolution, input-device, or presenter matrix. Each example proves a distinct boundary with neutral semantic keys and facts; none depends on Reference Game code, private integration modules, a shared example framework, a scenario registry, dynamic loading, or per-resolution hashes.
+- R45. NUI-U15A may fearlessly refactor the owning modules and public interfaces when a neutral example exposes a shared invariant or dependency-direction defect. Its completion freezes one recorded baseline containing the public-interface inventory, named shared semantic invariants, exact conformance assertions, and commit that proved them. NUI-U15B must reopen, rerun, and refreeze U15A before changing shared UI behavior or a U15A assertion, even when signatures stay unchanged; a private refactor may proceed only when the frozen invariants and assertions remain identical. A product-only need remains in Reference Game data or adapters. A genuinely shared gap discovered during NUI-U15B stops the affected path and requires a focused plan amendment with non-circular provenance: a module invariant must already be named in the U15A baseline, while comparative pressure or a second consumer must cite an independent source. A conformance case derived after the product gap may reproduce the failure but cannot alone admit an engine public-interface or shared-semantic change.
+
 #### Render Ownership And Failure Classification
 
 - R32. `nara_ui_render` consumes `UiFrame` and produces one owned backend-neutral paint packet containing ordered solid, image, and glyph primitives plus exact frame, clip, environment, and surface revisions. The kernel defines the backend-neutral `UiPresentationReceipt`; only the concrete presentation backend returns one for the exact packet it successfully presents. `nara_ui_render` neither queries ECS UI components nor exports extract/queue/sort/batch functions or mutable intermediate resources as ordinary API.
@@ -119,7 +125,7 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 
 - R35. The running reference game presents readable wave, health, score, enemy, movement, and auto-fire facts from its existing gameplay snapshot in a compact safe-margin HUD. Terminal state presents a centered dim modal overlay above an inert underlay, VICTORY or DEFEAT, final score, visible failure/retry state, a focusable Retry button, and an Enter-to-Retry affordance. One fixed 960 x 540 logical design space maps to 1,280 x 720, 1,920 x 1,080, and 2,560 x 1,440 physical targets with render scales `4 / 3`, `2`, and `8 / 3`; the independent OS/input scale is not one of those product-target render scales. Text and controls remain inside the logical viewport without overlap or truncation. Retry has at least a 44 x 36 logical hit target and visually distinct normal, hovered, pressed, focused, disabled/pending, and rejected states. Modal entry focuses Retry; pending retains that focus identity while activation is disabled; rejection re-enables the same focused control; successful root removal restores the prior valid focus target or clears focus. Applied Retry is proven by removal and the new run generation, not by a transient success visual. A future 640 x 480 surface is a separate constrained 4:3 fallback decision, not an ordinary target in this slice.
 - R36. Pointer, keyboard, gamepad, and accessibility activation of Retry enter the same typed intent path. Pending Retry disables repeated activation. A rejected Retry keeps terminal state, re-enables Retry, and updates one bounded semantic status node; this slice does not add a separate backend-neutral live-announcement event. A successful Retry removes terminal UI immediately with the new run generation and publishes no intermediate success frame. Concurrent Enter and button activation submit at most one command.
-- R37. Source desktop and packaged desktop products embed the exact font and render equivalent nonblank glyph output from arbitrary current working directories. The headless product uses the same game content and Retry authority but resolves no window, render, image-preparation, sprite-submission, UI-render, WGPU, or Editor tooling plugin.
+- R37. Source desktop and packaged desktop products embed the exact font. The packaged candidate resolves that identity without repository-relative discovery and displays manually observed readable nonblank glyph output from an arbitrary current working directory; V4 remains the only automated GPU glyph readback, and this slice requires no source-versus-package pixel-equivalence proof. The headless product uses the same game content and Retry authority but resolves no window, render, image-preparation, sprite-submission, UI-render, WGPU, or Editor tooling plugin.
 - R38. Public APIs, crate features, migration notes, ADR ledger rows, architecture maps, examples, independent consumers, tests, and verification evidence describe only the landed boundaries. Closure requires no unresolved P0/P1 review finding, no entity-allocation ordering fallback, no abandoned experiment, and no compatibility surface for removed pre-1.0 contracts.
 
 ### Key Flows
@@ -160,6 +166,12 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
   - **Steps:** The adapter projects tooling views into kernel input and maps semantic intents back to tooling commands while the Editor Host retains persistence and mutation authority.
   - **Outcome:** Runtime and Editor share the deep UI engine without sharing product state or top-level interfaces.
   - **Covered by:** R17, R20-R21
+- F7. Neutral conformance to product integration
+  - **Trigger:** NUI-U17 has closed the runtime ownership and interaction seams.
+  - **Actors:** A1, A3, A5
+  - **Steps:** The kernel layout gallery, runtime interaction lab, and presentation gallery exercise their public boundaries without product facts; maintainers correct shared ownership or interface defects, freeze the admitted surface, and only then integrate the Reference Game through that surface.
+  - **Outcome:** Expensive shared seams are proven independently before product-specific state, packaging, and visual acceptance begin.
+  - **Covered by:** R38, R44-R45
 
 ### Acceptance Examples
 
@@ -222,7 +234,7 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
   - **Covers:** R22, R35-R38
   - **Given:** A packaged desktop candidate is launched outside the repository and user home.
   - **When:** The HUD and terminal render.
-  - **Then:** The embedded font resolves without filesystem discovery and the glyph readback is nonblank and equivalent to the source candidate within the declared target scope.
+  - **Then:** The exact embedded font identity resolves without filesystem discovery, the ordinary packaged presentation binds resident glyph resources, and one manual observation confirms readable nonblank HUD and terminal text. No second GPU readback or source-versus-package pixel-equivalence fixture is added.
 - AE13. Supported physical-target readability
   - **Covers:** R18-R19, R29, R31, R35-R36
   - **Given:** The 960 x 540 logical design space is presented once at each supported 16:9 physical target, and one canonical target is also exercised with one representative fractional platform input scale.
@@ -243,6 +255,16 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
   - **Given:** One active surface owns a window/seat route.
   - **When:** The same surface republishes, another surface attempts to claim the endpoint, and the original surface later retires.
   - **Then:** Same-owner publication is idempotent, conflicting publication returns a typed failure without changing the existing route or revisions, retirement releases only the matching owner, and the replacement surface can claim the released endpoint.
+- AE17. Layered examples prove public seams without product facts
+  - **Covers:** R11, R38, R44
+  - **Given:** Neutral kernel, runtime, and presentation examples use only their documented public dependencies.
+  - **When:** They compile and execute their owner-specific layout, interaction, packet, scale, and lifecycle scenarios.
+  - **Then:** Each example proves a distinct contract, no example imports Reference Game or private integration code, and no shared example framework or duplicate pixel/hash matrix is introduced.
+- AE18. Product-only pressure cannot silently widen the engine
+  - **Covers:** R45
+  - **Given:** NUI-U15A has frozen the public UI interfaces and NUI-U15B encounters a new HUD, Retry, or packaging need.
+  - **When:** The need lacks an independent module invariant or second consumer.
+  - **Then:** The implementation remains local to Reference Game data/adapters; a shared change pauses the affected path and returns to a focused evidence-backed amendment.
 
 ### Success Criteria
 
@@ -251,6 +273,7 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 | One structural authority | Scene/Prefab canonical fixtures encode ordered roots/children, no persistent `parent`, exact Patch inverse tests pass, and UI has no sibling-order field. |
 | One frame authority | A serialized/headless `UiFrame` snapshot proves layout, paint, hit, focus, and semantics share one revision and stable keys. |
 | Deep module boundaries | The crate graph matches R11, runtime projection/candidate/presentation/intent owners match R39-R43, kernel internals stay out of root preludes, and independently locked consumers compile against intended surfaces. |
+| Example-first interface proof | Three neutral layered examples execute through public kernel, runtime, and presentation boundaries, own non-duplicated proof, and freeze the shared UI surface before Reference Game product integration. |
 | Product readability | Desktop and packaged reference-game tests observe real text pixels, supported-viewport HUD/modal geometry, distinct Retry states, and one Retry command across pointer/keyboard/gamepad/accessibility paths. |
 | Headless integrity | The headless resolved plugin plan contains content/simulation only and completes the same gameplay/Retry workflow without presentation resources. |
 | Render snapshot ownership | WGPU submit paths consume captured image/glyph snapshots and tests prove live asset mutation cannot alter an already captured frame. |
@@ -267,6 +290,7 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 - Dedicated `nara_text`, `nara_ui_kernel`, and `nara_ui_widgets` crates with small intentional cross-crate interfaces.
 - Private runtime-adapter modules for authoring projection, per-surface candidates, exact presented sessions, and pause-safe intent delivery.
 - Separate locked Scene and UI/text consumer workspaces that prove those module boundaries without widening the root facade.
+- Three thin, neutral conformance examples for kernel layout/frame compilation, runtime authoring/interaction, and root presentation composition before Reference Game product integration.
 - Flex/Absolute layout, logical units, typed theme/style, display text, modal Button behavior, pointer/keyboard/gamepad navigation, semantic actions, accessibility projection, and owned WGPU submission.
 - Reference-game source, packaged desktop, and headless workflow proof.
 
@@ -309,8 +333,9 @@ Several adjacent foundation surfaces would preserve the same ownership error dur
 - KTD17. **Commit presentation explicitly.** Compilation and packet construction do not imply that pixels reached a surface. Only a matching `UiPresentationReceipt` enters the bounded three-frame journal and advances interaction authority, which makes resize, surface loss, packet rejection, earlier-event routing, and retired-frame failure testable.
 - KTD18. **Start with bounded first-party defaults.** Text, event, atlas, upload, retention, and diagnostic limits are concrete typed policies sized well above the reference workflow, injectable downward in tests, and kept out of persistent schemas and ordinary preludes until a product needs configuration.
 - KTD19. **Split growth by owner before adding product breadth.** (session-settled: user-directed — chosen over extending the current runtime adapter until the Reference Game passes: authoring candidates, presented authority, interaction state, and intent delivery have different lifecycles and are expensive to disentangle later.) Physical crates enforce dependency direction; internal modules enforce lifecycle ownership inside one crate.
-- KTD20. **Treat the Reference Game as pressure, not architecture authority.** (session-settled: user-directed — chosen over product-first public API growth: the game may reveal a missing capability, but shared contracts require a module invariant, comparative engine pressure, or a second independent consumer.) Product-specific HUD, modal, copy, and command facts remain outside engine modules.
+- KTD20. **Treat the Reference Game as pressure, not architecture authority.** (session-settled: user-directed — chosen over product-first public API growth: the game may reveal a missing capability, but shared contracts require a pre-freeze named module invariant, independently cited comparative pressure, or a second independent consumer.) A neutral case derived from the product may reproduce a gap but cannot by itself justify a shared contract. Product-specific HUD, modal, copy, and command facts remain outside engine modules.
 - KTD21. **Keep proof proportional to the contract.** (session-settled: user-directed — chosen over expanding smoke, snapshot, hash, digest, and Cartesian product matrices: tests should prove module invariants and critical cross-layer boundaries.) Hashes and digests remain only where byte identity, provenance, or package integrity is the contract; one representative pixel/readback proof is enough for a render boundary unless a distinct failure mode requires more.
+- KTD22. **Prove and freeze shared UI seams with neutral layered examples before product integration.** (session-settled: user-approved — chosen over letting the Reference Game remain the primary interface-design oracle: focused examples concentrate public-interface proof and prevent product-only facts from shaping expensive engine seams.) The examples are ordinary thin consumers, not a new framework, registry, component catalogue, or alternate authoring model.
 
 ### High-Level Technical Design
 
@@ -362,7 +387,7 @@ The two behavior-bearing kernel operations are compile and dispatch. Snapshot co
 | Interaction transaction | Selected presented session, normalized input, current surface-local interaction/reducer state, and preflighted timeline/journal capacity | One speculative interaction/reducer delta, routed intent batch, diagnostic, and routing disposition | One coordinator applies all state, journal, and input-finalization changes without further failure, or applies only `RejectedClosed` plus its diagnostic |
 | Intent journal | Admitted intent batches plus bounded consumer registration/acknowledgement operations | Monotonic entries, cursor observations, typed capacity outcomes, and reclaimable prefix | Own storage and cursor reclamation only; never coordinate kernel or timeline mutation |
 
-These are physical modules before NUI-U15 grows product code. They use concrete private types. They do not introduce provider traits, callbacks, registries, or a second retained UI object model.
+These are physical modules before NUI-U15A grows conformance consumers and NUI-U15B grows product code. They use concrete private types. They do not introduce provider traits, callbacks, registries, or a second retained UI object model.
 
 #### Initial Game Authoring Vocabulary
 
@@ -398,9 +423,24 @@ flowchart TB
   Intent[Bounded semantic intent journal]
   Domain[Game or tooling commands]
   Source --> Structure --> Adapter --> Compiler --> Candidate --> Packet --> Backend --> Receipt --> Presented
-  Candidate --> Presented
   Platform --> Decision --> Presented --> Intent --> Domain --> Source
 ```
+
+#### Proof Ordering
+
+```mermaid
+flowchart LR
+  Modules[Module-owned tests]
+  KernelExample[Kernel layout gallery]
+  RuntimeExample[Runtime interaction lab]
+  PresentationExample[Presentation gallery]
+  Freeze[Public UI interface freeze]
+  Product[Reference Game integration]
+  Closure[NUI-U16 closure]
+  Modules --> KernelExample --> RuntimeExample --> PresentationExample --> Freeze --> Product --> Closure
+```
+
+The three examples are dependency-ordered consumers, not successive abstractions. Shared complexity stays in the owning deep module; examples contain only scenario construction, assertions, and concise observable output.
 
 #### Persistent Placement Shape
 
@@ -454,11 +494,11 @@ stateDiagram-v2
 | ADR | First implementation owners | Closure owner |
 |---|---|---|
 | 0101 ordered persistent placement/runtime projection | NUI-U6 through NUI-U8, consumed by NUI-U13 | NUI-U16 |
-| 0102 UI/text/widget/presented-frame topology | NUI-U9 through NUI-U14, NUI-U17, and NUI-U15 | NUI-U16 |
+| 0102 UI/text/widget/presented-frame topology | NUI-U9 through NUI-U14, NUI-U17, NUI-U15A, and NUI-U15B | NUI-U16 |
 | 0103 concrete domain-owned asset import | NUI-U3 | NUI-U16 |
 | 0104 Host-owned Editor workspace installation | NUI-U2 | NUI-U16 |
 | 0105 closed first-party render plan | NUI-U4 and NUI-U14 | NUI-U16 |
-| 0106 content/presentation product composition | NUI-U5 and NUI-U15 | NUI-U16 |
+| 0106 content/presentation product composition | NUI-U5 and NUI-U15B | NUI-U16 |
 
 ### Sequencing
 
@@ -467,10 +507,11 @@ stateDiagram-v2
 3. Migrate persistent ordered placement through Scene, Prefab, Patch, tooling, runtime hierarchy, and reference content.
 4. Build text, kernel, input, widgets, and semantics as headless modules with snapshot tests.
 5. Replace the runtime ECS adapter, complete the UI content/presentation split, and replace the render submission path end-to-end.
-6. Before any NUI-U17 code change, validate and commit the landed NUI-U13, NUI-U5B, and NUI-U14 base, amend ADR 0102, align the implementation ledger and product input, replace the active NUI-U15 registration with NUI-U17, and regenerate derived engineering state.
+6. Before any NUI-U17 code change, validate and commit the landed NUI-U13, completed NUI-U5 including its internal U5B checkpoint, and NUI-U14 base, amend ADR 0102, align the implementation ledger and product input, replace the then-active undivided NUI-U15 registration with NUI-U17, and regenerate derived engineering state.
 7. Before expanding the product proof, split runtime projection, candidates, presented history, interaction transactions, and intent-journal storage into deep modules and close their interfaces. Keep this checkpoint independent of the product-state, resolution, package, pixel, digest, and smoke matrix; the Reference Game may provide only an adapter or lifecycle consumer.
-8. Prove the reference-game desktop, packaged, accessibility, and headless workflows without widening shared contracts from product-only facts.
-9. Tighten public surfaces, independent consumers, evidence, and documentation only after the product flow passes.
+8. Build and run the three neutral layered conformance examples. Fearlessly correct the owning module or public seam only when an example exposes a shared invariant or dependency defect, then freeze the admitted interface without adding an example framework.
+9. Integrate and prove the reference-game desktop, packaged, accessibility, and headless workflows through the frozen interfaces. Product-only facts remain local; a shared gap reopens a focused evidence checkpoint instead of being patched into the engine opportunistically.
+10. Tighten public surfaces, independent consumers, evidence, and documentation only after both the conformance and product flows pass.
 
 ### Implementation Constraints
 
@@ -483,6 +524,8 @@ stateDiagram-v2
 - Do not add provider traits, backend registries, stringly typed style properties, generic callbacks, public layout-node lifecycles, or a RenderGraph to make the new crate topology appear complete.
 - Split a physical crate when dependency isolation or reuse across Runtime, Editor, or presentation adapters requires it. Split an internal module when one crate still owns the behavior but candidate, presented, session, or delivery lifecycles differ. Do not create a crate or trait only to reduce file length.
 - Keep tests contract-shaped. Migrate unique behavioral assertions before deleting obsolete or orphan modules, remove duplicate implementation-coupled fixtures, and avoid repeating the same behavior across every resolution, input device, host, and packaging permutation.
+- Keep NUI-U15A examples thin and public-only. Do not add a shared example harness, scenario DSL, dynamic registry, private integration hook, Reference Game dependency, or product-specific semantic vocabulary.
+- Treat NUI-U15A completion as the public UI interface freeze for NUI-U15B. A product integration need may change engine interfaces only after the affected path stops and this plan records independent shared evidence.
 
 ### System-Wide Impact
 
@@ -496,9 +539,10 @@ stateDiagram-v2
 | Product composition | 2D/UI content and presentation features/plugins split. | Feature-matrix tests and headless plugin-plan inspection. |
 | Input and gameplay | Platform events retain route/revision facts and UI actions join local command collection. | Atomic ingress, independent cursors, pause/cancel tests, exactly-once Retry. |
 | UI and text | Three new crates replace ECS execution-tree and panel-only assumptions. | Dependency DAG checks, bounded inputs, stable key snapshots, no third-party facade leakage. |
+| UI conformance | Three neutral examples consume the kernel, runtime adapter, and presentation facade in dependency order. | Public-only imports, owner-specific assertions, no shared example framework, and an explicit interface freeze before product integration. |
 | Rendering | UI and image resources become packet-owned snapshots. | Generation/device-epoch tests, capacity matrices, transient/content/backend error separation. |
 | Accessibility | Presented semantics and actions join platform adapters. | Stable-key parity, focus/action tests, no separate semantic tree. |
-| Reference product | HUD, terminal, package, and headless paths change together. | Source/package pixel proof, host parity, arbitrary-CWD launch, headless capability proof. |
+| Reference product | HUD, terminal, package, and headless paths change together. | Exact font/package identity, one manual package readability observation, host parity, arbitrary-CWD launch, and headless capability proof; V4 remains the sole automated GPU glyph readback. |
 | Public ecosystem | Features, preludes, examples, and module consumers break intentionally. | Canonical unsuffixed APIs, independent locked consumers, migration notes, strict Clippy/docs. |
 
 ### Risks And Dependencies
@@ -507,8 +551,10 @@ stateDiagram-v2
 |---|---|---|
 | Ordered document migration expands beyond UI | Scene, Prefab, Patch, tooling, and reference fixtures can diverge. | Finish NUI-U6 through NUI-U8 before the runtime UI adapter and require canonical round-trip plus exact inverse evidence. |
 | Early crates become shallow type warehouses | The dependency graph looks clean while behavior remains scattered. | Give each crate one deep responsibility, keep internals private, and reject APIs without a unit's real consumer. |
-| The runtime adapter remains a god module | Candidate compilation, presentation authority, interaction state, and intent delivery acquire incompatible commit rules and force a later rewrite. | Complete NUI-U17 before NUI-U15 and require one owner plus one atomic commit boundary for each lifecycle. |
-| Reference-game fixtures become architecture authority | HUD-specific facts or test convenience leak into public engine types and schedules. | Keep NUI-U15 downstream of NUI-U17, require R39-R43 conformance without reference-game dependencies, and admit shared APIs only through KTD20. |
+| The runtime adapter remains a god module | Candidate compilation, presentation authority, interaction state, and intent delivery acquire incompatible commit rules and force a later rewrite. | Complete NUI-U17 before NUI-U15A and require one owner plus one atomic commit boundary for each lifecycle. |
+| Conformance examples become a mini-framework | Scenario infrastructure creates another public lifecycle, registry, or authoring language and hides the real module API. | Keep each example local to one layer, share no example framework, and move reusable behavior only into its owning deep module after independent invariant evidence. |
+| Examples prove compilation but not behavior | Interfaces appear clean while ordering, routing, packet ownership, or recovery semantics remain unexercised. | Give each example owner-specific executable assertions and concise observables; retain module tests for edge cases and one representative presentation run for the backend boundary. |
+| Reference-game fixtures become architecture authority | HUD-specific facts or test convenience leak into public engine types and schedules. | Keep NUI-U15B downstream of NUI-U15A, require R39-R45 conformance without reference-game dependencies, and admit shared APIs only through KTD20/KTD22 plus a focused amendment. |
 | Taffy/text dependencies exceed Rust 1.95 or change behavior | The plan cannot compile reproducibly across locked workspaces. | Verify exact locked versions and MSRV in NUI-U9/NUI-U10 before public types land; stop rather than silently change algorithms. |
 | Stable keys duplicate persistent entity identity | Two identity systems drift. | Treat `UiKey` as adapter-projected logical identity with one documented source per node; never persist a second hierarchy or parent relation. |
 | Last-good visuals accept stale input | Players activate controls that are no longer authored. | Bind dispatch to presented source/environment revisions and make stale roots visual-only per R15/R28. |
@@ -543,10 +589,11 @@ stateDiagram-v2
 | NUI-U11 | Establish one normalized input timeline | `crates/nara_input`, `crates/nara_winit`, schedules/gameplay anchor | NUI-U1, NUI-U4 |
 | NUI-U12 | Build headless widgets, focus, and semantics | new `crates/nara_ui_widgets`, kernel dispatch, accessibility adapter | NUI-U10, NUI-U11 |
 | NUI-U13 | Replace the ECS runtime UI adapter | `crates/nara_ui`, codecs, examples, runtime authoring tests | NUI-U8, NUI-U10, NUI-U12 |
-| NUI-U14 | Publish owned UI/image packets through WGPU | UI render, render prepare, image, WGPU backend/cache/tests | NUI-U3, NUI-U4, NUI-U5B, NUI-U9, NUI-U13 |
+| NUI-U14 | Publish owned UI/image packets through WGPU | UI render, render prepare, image, WGPU backend/cache/tests | NUI-U3, NUI-U4, completed NUI-U5 after its U5B checkpoint, NUI-U9, NUI-U13 |
 | NUI-U17 | Deepen runtime UI ownership and interfaces | `crates/nara_ui`, `crates/nara_input`, `crates/nara_gameplay`, schedule consumer | NUI-U13, NUI-U14 |
-| NUI-U15 | Complete the reference-game product proof | `reference-game`, one packaged boundary probe, focused headless/desktop tests | NUI-U5B, NUI-U11 through NUI-U14, NUI-U17 |
-| NUI-U16 | Close public surfaces and evidence | facade/features, module consumer, docs, ledger, full gates | NUI-U2 through NUI-U15, NUI-U17 |
+| NUI-U15A | Prove and freeze UI foundation interfaces with layered conformance examples | kernel/runtime/presentation examples, affected module boundaries and focused tests | completed NUI-U5 after its U5B checkpoint, NUI-U9 through NUI-U14, NUI-U17 |
+| NUI-U15B | Complete the reference-game product integration | `reference-game`, one packaged boundary probe, focused headless/desktop tests | NUI-U15A |
+| NUI-U16 | Close public surfaces and evidence | facade/features, module consumer, docs, ledger, full gates | NUI-U2 through NUI-U14, NUI-U17, NUI-U15A, NUI-U15B |
 
 ### NUI-U1. Activate Decisions And Successor Authority
 
@@ -676,13 +723,13 @@ stateDiagram-v2
 - **Files:** `crates/nara_ui/src/{lib.rs,codec.rs,style.rs,layout.rs,interaction.rs,tests.rs}` with modules deleted/replaced as needed; root plugin composition; `examples/runtime_ui_panel.rs`; Scene component fixtures and reference-game authoring helpers.
 - **Approach:** Replace `ComputedUiLayouts`, ECS hit testing, `UiPointerRoute`, entity tie-breaks, coarse visibility/focus flags, `UiPanel`/`UiPanelMaterial`, and renderer-bound `UiRoot` fields with R19's closed authoring vocabulary plus private projection/frame state. Keep corrected component schemas at canonical version 1, reject legacy missing/defaulted shapes, derive structural order from hierarchy, project stable keys, compile by surface environment, dispatch presented input, and publish typed actions. Migrate the reference game from a Rust-built UI tree to the Scene/Prefab authoring adapter in this unit.
 - **Test scenarios:** Exact component catalogue and canonical version-1 codecs; old root/panel/interaction shape rejection; runtime-created and Scene-authored root-key provenance; repeated Scene/Prefab instances; stable keys/order after allocation/rebuild/Retry; missing/oversized/duplicate key/root failure; surface and presented-journal revision; headless frame/action projection; reference-game data-authoring boot; UI action publication; visibility/overflow/theme/text changes; no renderer-owned query in compile; no technical compiler types in ordinary prelude.
-- **Verification:** Focused UI/Scene/plugin and reference-game authoring/headless tests, runtime UI example, public-surface checks, and API diff pass. U13 closure does not require paint-packet outcomes, GPU pixel/readback evidence, or the complete product state/resolution matrix; those belong to NUI-U14 and NUI-U15 respectively.
+- **Verification:** Focused UI/Scene/plugin and reference-game authoring/headless tests, runtime UI example, public-surface checks, and API diff pass. U13 closure does not require paint-packet outcomes, GPU pixel/readback evidence, or the complete product state/resolution matrix; those belong to NUI-U14 and NUI-U15B respectively.
 
 ### NUI-U14. Publish Owned UI And Image Packets Through WGPU
 
 - **Goal:** Submit the exact immutable UI and image resources captured for a frame without live World reads.
 - **Requirements:** R25, R32-R34, R37-R38.
-- **Dependencies:** NUI-U3, NUI-U4, NUI-U5B, NUI-U9, NUI-U13.
+- **Dependencies:** NUI-U3, NUI-U4, completed NUI-U5 after its U5B checkpoint, NUI-U9, NUI-U13.
 - **Files:** `crates/nara_ui_render/src`; `crates/nara_render/src/{lib.rs,prepare.rs}`; `crates/nara_image/src`; `crates/nara_render_wgpu/src/{lib.rs,backend.rs,quad.rs,ui.rs,sprite.rs,texture.rs,telemetry.rs}`; focused GPU/readback tests.
 - **Approach:** Admit Guillotiere 0.7.0 in `nara_ui_render`, resolve `UiFrame` glyph requests through `nara_text`'s bounded raster API, build one ordered paint packet, allocate and snapshot CPU R8 atlas pages, capture `Arc`-backed prepared image pixels and pages with exact generations, remove submit-time `Assets<ImageAsset>` reads, cache GPU resources by snapshot/device epoch, enforce R25's CPU/GPU/raster/upload/retention matrix, classify failures per R34, and emit a receipt only after the exact packet reaches presentation.
 - **Test scenarios:** Solid/image/glyph interleaving and clipping; unchanged snapshot reuse; asset replacement after capture always uses the captured generation; missing/stale/mismatched packet resource; atlas first-load/replacement saturation; raster/upload deferral; surface mismatch produces no receipt; device epoch reset; bounded eviction/retirement; content error leaves backend ready; nonblank glyph and image readback.
@@ -693,7 +740,7 @@ stateDiagram-v2
 - **Goal:** Turn the runtime UI adapter into deep lifecycle modules before product UI expansion, while making presented behavior, input arbitration, and semantic-intent delivery exact and pause-safe.
 - **Requirements:** R17, R26-R31, R39-R43.
 - **Dependencies:** NUI-U13, NUI-U14.
-- **Entry gate:** Before code changes, NUI-U13, NUI-U5B, and NUI-U14 exist as reviewed commits; ADR 0102, this plan, the Reference-Game UI Product Slice, the implementation ledger, and the derived engineering registration all agree that NUI-U17 is active and NUI-U15 is blocked on it.
+- **Entry gate:** Before code changes, NUI-U13, completed NUI-U5 including its U5B checkpoint, and NUI-U14 exist as reviewed commits; ADR 0102, this plan, the Reference-Game UI Product Slice, the implementation ledger, and the derived engineering registration all agree that NUI-U17 is active and the then-undivided NUI-U15 product proof is blocked on it.
 - **Files:** `crates/nara_ui/src/runtime.rs`; new private modules under `crates/nara_ui/src/runtime/` and `crates/nara_ui/src/interaction/`; `crates/nara_ui/src/adapter_tests.rs`; `crates/nara_input/src/{lib.rs,timeline.rs,timeline/types.rs}`; `crates/nara_gameplay/src`; `reference-game/src/runtime_ui.rs` plus its smallest adapter-focused compile/test target; `tests/fixtures/schedule-extension/renamed-root/src/lib.rs`; focused schedule/UI/input tests.
 - **Approach:**
   1. Move ECS/Scene projection, per-surface candidate publication, presented history, interaction transactions, and intent-journal storage into physical private modules with concrete types and one owner each.
@@ -706,26 +753,37 @@ stateDiagram-v2
 - **Test scenarios:** A previously presented action A remains authoritative after an unpresented candidate changes it to B; a failed or unpresented candidate leaves the prior presented session unchanged while a root-local last-good visual in a newer candidate is inert; hover, press, focus, enabled state, and reducer state on surface A cannot affect surface B; a reducer or intent-capacity failure commits no interaction, reducer, or intent state, returns `RejectedClosed`, and cannot reach gameplay; stale, retired, mismatched, and invalid stamped UI routes return `RejectedClosed`; an unstamped non-UI event returns `PassThrough`; a paused intent survives until one resumed consumer acknowledgement; a late consumer starts at the current tail; acknowledgement and unregister reclaim only the globally safe prefix; journal overflow is typed; same-surface route publication is idempotent, a second surface cannot overwrite an active route, retirement releases only its own route, and the released endpoint can be reclaimed; an independent schedule consumer composes only through the local-command helper and `Consume`/`Capture`.
 - **Verification:** Focused `nara_ui`, `nara_ui_kernel`, `nara_ui_widgets`, `nara_input`, and `nara_gameplay` nextest suites, the schedule-extension consumer, and one Reference Game library compile or adapter-focused test pass without running the product, package, resolution, or pixel matrix.
 
-### NUI-U15. Complete The Reference-Game Product Proof
+### NUI-U15A. Prove And Freeze UI Foundation Interfaces
+
+- **Goal:** Prove the kernel, runtime adapter, and presentation facade as independently usable deep-module interfaces before product-specific integration and freeze the admitted public inventory plus shared semantic contract for NUI-U15B.
+- **Requirements:** R11, R19-R21, R28-R34, R38-R45, using focused conformance rather than re-closing every earlier owner.
+- **Dependencies:** completed NUI-U5 after its U5B checkpoint, NUI-U9 through NUI-U14, NUI-U17.
+- **Files:** `crates/nara_ui_kernel/{Cargo.toml,examples/layout_gallery.rs,src}`; `crates/nara_ui/{Cargo.toml,examples/interaction_lab.rs,src}`; root `Cargo.toml`; `examples/ui_presentation_gallery.rs`; affected public API docs, focused module tests, and module-consumer fixtures when a boundary changes; mechanically affected Reference Game imports/adapters only when a shared public surface changes; implementation ledger and immutable U15A verification/registration records.
+- **Approach:** Build three neutral thin consumers. The kernel layout gallery constructs bounded Flex/Absolute, percentage, nested, text, clipping, root-layer, scale, and immutable-frame scenarios directly through `nara_ui_kernel`. The runtime interaction lab projects ordinary ECS/Scene authoring, stable structural order, controlled Button states, modal/focus/capture, exact presented-session dispatch, multi-surface isolation, pause-safe intent cursors, typed routing dispositions, and the formal `UiFrame` semantic tree plus typed accessibility `Activate` entry through `nara_ui`. It proves stable key, role, name, enabled, focus, and supported-action facts without depending on AccessKit, which remains only the bounded desktop adapter trial. The presentation gallery composes the root facade and owned frame-to-packet path for solid/image/glyph/clip/order, resize, render/input scale separation, surface retirement/recovery, and one representative windowed recipe; one thin neutral vertical case continues from ordinary ECS/Scene projection through an exact candidate, owned packet, matching receipt, presented-history commit, and typed activation. Use neutral keys such as `primary-action` and `dialog-confirm`. If a shared invariant fails, refactor the owning module or public seam fearlessly; do not hide complexity in an example harness. When that refactor changes a public UI API or feature surface, mechanically migrate only the affected Reference Game imports/adapters and keep its complete product-state, package, resolution, input, and visual acceptance in NUI-U15B. After the conformance gates and API audit pass, record the exact commit, public-interface inventory, named shared semantic invariants, and exact conformance assertions as the immutable U15A baseline, then activate NUI-U15B through a successor registration.
+- **Admission boundary:** Examples import only intended public modules and never Reference Game code or private integration internals. They introduce no shared framework, registry, dynamic scenario loader, new component catalogue, generic adaptive-layout policy, or repeated pixel/hash matrix. U15A may keep the existing first-party Reference Game compiling after a shared public-interface change, but that mechanical migration is not product evidence and cannot shape the shared interface. NUI-U15A closes only after the verification record establishes the frozen public inventory, named semantic invariants, assertions, and commit consumed by NUI-U15B.
+- **Test scenarios:** Kernel layout and traversal remain stable across allocation-independent neutral trees and representative scales; runtime routing proves hover/press/focus/modal/capture, exact old-versus-new presented behavior, `PassThrough`/`Consumed`/`RejectedClosed`, multi-surface isolation, pause retention, and cursor acknowledgement; the exact presented semantic tree exposes stable key, role, name, enabled, focus, and supported actions, while typed accessibility activation emits the same semantic intent as pointer/keyboard and disabled, retired, or stale targets fail closed; presentation proves ordered solid/image/glyph primitives, clip ownership, scale mapping, surface retirement/recovery, one representative nonblank windowed result, and one end-to-end neutral matching-receipt activation round trip. Module tests retain exhaustive edge cases; examples do not duplicate them.
+- **Verification:** Run the three conformance gates V15-V17 plus the affected focused V3/V4 tests, V10 when a direct boundary changes, V11, and V14. Run V12 in this unit only when a shared public UI API or feature surface changes, so the existing first-party consumer cannot be left uncompilable. Review manifests and imports to prove public-only example consumption and confirm that no Reference Game or private integration dependency exists, then validate that the U15A verification record names the public inventory, shared invariants, exact assertions, and commit before activating the U15B successor registration.
+
+### NUI-U15B. Complete The Reference-Game Product Integration
 
 - **Goal:** Deliver readable runtime feedback and one semantic Retry path across source, package, desktop, accessibility, and headless Hosts.
-- **Requirements:** R35-R38, with focused integration probes for R5, R28, and R31 rather than re-closing their owning units.
-- **Dependencies:** NUI-U5B, NUI-U11 through NUI-U14, NUI-U17.
+- **Requirements:** R35-R38 and R45, with focused integration probes for R5, R28, and R31 rather than re-closing their owning units.
+- **Dependencies:** NUI-U15A.
 - **Files:** `reference-game/{Cargo.toml,src,tests,scenes,prefabs}`; root packaging/launch fixtures; selected font packaging inputs; one packaged arbitrary-CWD probe; focused desktop and headless parity tests.
 - **Approach:** Build the safe-margin HUD and centered terminal UI from gameplay snapshots, use typed root layers and Button intent, map Enter/button/gamepad/accessibility through one coalescer to `retry_draft()`, expose every interaction state in R35, embed the exact font/license, and compose desktop versus headless capabilities explicitly.
-- **Admission boundary:** Product-specific facts, recipes, copy, and visual choices remain in reference-game data or adapters. A newly discovered shared capability must satisfy a module invariant, independent conformance pressure, or a second real consumer before it widens a public UI contract.
+- **Admission boundary:** Product-specific facts, recipes, copy, and visual choices remain in reference-game data or adapters. NUI-U15B consumes the frozen NUI-U15A interface, named semantic invariants, and conformance assertions. Any shared UI behavior or U15A assertion change stops the affected path and reopens U15A even when the public signature is unchanged. A newly discovered shared capability requires a focused plan amendment with the non-circular provenance in R45 before it widens a public UI contract; a product-derived neutral case is reproduction evidence only.
 - **Test scenarios:** Six capture states—running, completed, defeated, pending, rejected, and applied/removal—run at one canonical logical surface; paused routing is a separate lifecycle-safety condition rather than a seventh visual capture state. The three physical targets prove layout/readability once each, and one canonical target uses one representative fractional `input_scale_factor` without multiplying every behavior case. Pointer, keyboard, gamepad, and accessibility each prove the same Retry intent path once; concurrent intent coalescing, direct applied-state root removal, resize/capture cancellation, one arbitrary-CWD package launch, and headless Retry parity remain covered.
-- **Verification:** Focused Reference Game default, desktop, host-parity, packaged arbitrary-CWD, and headless gates pass. A behavior already proven by NUI-U17 is not repeated across every resolution, host, or input permutation.
+- **Verification:** Focused Reference Game default, desktop, host-parity, packaged arbitrary-CWD, and headless gates pass. A behavior already proven by NUI-U17 or NUI-U15A is not repeated across every resolution, host, or input permutation.
 
-### NUI-U16. Close Public Surfaces And Evidence
+### NUI-U16. Close Frozen Surfaces And Evidence
 
-- **Goal:** Make the landed code, public product boundary, documentation, and completion evidence say the same thing.
-- **Requirements:** R1-R5, R11, R20-R21, R37-R43.
-- **Dependencies:** NUI-U2 through NUI-U15, NUI-U17.
-- **Files:** root facade/features/preludes; all affected crate docs/examples; existing Scene-only `module-consumer`; new separately locked `ui-module-consumer`; architecture ADRs/map/foundation/open questions/ledger; migration guide; plan/memory verification evidence; CI/feature fixtures where already owned.
-- **Approach:** Remove dead experiments and obsolete exports, keep kernel internals out of ordinary preludes, preserve `module-consumer` as the direct Scene-domain regression fixture, add a separate excluded workspace that directly consumes renamed `nara_text`/kernel/widgets dependencies, update only implementation evidence proven by the final commit, close the active registration, record the focused UI-foundation-conformance successor scope without creating or activating that plan here, and leave deferred Editor/virtualization/text features trigger-gated.
-- **Test scenarios:** Minimal and all-feature facade compilation; direct module consumption with renamed root where applicable; no old type/feature/plan pointers; docs links and metadata; full source/package/headless flow; clean diff contains no abandoned implementation.
-- **Verification:** Every gate in the Verification Contract passes serially, final API/architecture/correctness/simplicity reviews have no P0/P1 finding, and final diff/commit/evidence inspection matches the plan scope.
+- **Goal:** Make the landed code, frozen public product boundary, documentation, and completion evidence say the same thing without changing behavior after product validation.
+- **Requirements:** R1-R5, R11, R20-R21, R37-R45.
+- **Dependencies:** NUI-U2 through NUI-U14, NUI-U17, NUI-U15A, NUI-U15B.
+- **Files:** root facade/features/preludes; all affected crate docs/examples; existing Scene-only `module-consumer`; separately locked `ui-module-consumer`; architecture ADRs/map/foundation/open questions/ledger; migration guide; plan/memory verification evidence; CI/feature fixtures where already owned.
+- **Approach:** Perform non-behavioral closure only: remove private dead experiments, unused dependencies, obsolete tests/scripts, and redundant evidence that are outside the U15A-frozen baseline; keep kernel internals out of ordinary preludes; preserve `module-consumer` as the direct Scene-domain regression fixture; preserve the separately locked UI/text consumer; verify that the three conformance examples still consume the frozen public inventory and retain the named invariants and assertions unchanged; update only implementation evidence proven by the final commit; close the active registration; and leave deferred Editor/virtualization/text features trigger-gated. U16 must not add, remove, rename, or semantically change a U15A-frozen public UI interface or shared behavior, nor rewrite a U15A assertion. If closure discovers that such a change is required, stop the affected path, reopen U15A, refactor and refreeze the baseline, rerun U15B product integration, and only then return to U16.
+- **Test scenarios:** Minimal and all-feature facade compilation; direct module consumption with renamed root where applicable; no public-inventory, named-invariant, or conformance-assertion diff from the U15A freeze; no old type/feature/plan pointers; docs links and metadata; full source/package/headless flow; clean diff contains no abandoned private implementation.
+- **Verification:** Every gate in the Verification Contract passes serially, the final baseline audit matches the recorded U15A public inventory, named invariants, assertions, and commit, final API/architecture/correctness/simplicity reviews have no P0/P1 finding, and final diff/commit/evidence inspection matches the plan scope.
 
 ---
 
@@ -747,21 +805,25 @@ stateDiagram-v2
 |---|---|---|---|
 | V1 Persistent structure | `cargo nextest run --locked -p nara_scene -p nara_hierarchy -p nara_tooling --test-threads=1` | NUI-U6-NUI-U8 | Canonical placement, exact inverse, runtime projection, and tooling persistence pass. |
 | V2 Foundation boundaries | `cargo nextest run --locked -p nara_asset -p nara_image -p nara_render -p nara_tooling --test-threads=1` | NUI-U2-NUI-U5 | Removed surfaces have no consumer regression and product composition tests pass. |
-| V3 UI core | `cargo nextest run --locked -p nara_text -p nara_ui_kernel -p nara_ui_widgets -p nara_ui -p nara_input -p nara_gameplay --test-threads=1` | NUI-U9-NUI-U13, NUI-U17 | Text, frame, widget, adapter, timeline, and intent-delivery contracts pass headlessly. |
-| V4 Render path | `cargo nextest run --locked -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | NUI-U14 | Owned packet, cache, error classification, and GPU/fallback tests pass. |
+| V3 UI core | `cargo nextest run --locked -p nara_text -p nara_ui_kernel -p nara_ui_widgets -p nara_ui -p nara_input -p nara_gameplay --test-threads=1` | NUI-U9-NUI-U13, NUI-U17, NUI-U15A when shared UI code changes | Text, frame, widget, adapter, timeline, and intent-delivery contracts pass headlessly. |
+| V4 Render path | `cargo nextest run --locked -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | NUI-U14 and NUI-U15A when presentation code changes | Owned packet, cache, error classification, and GPU/fallback tests pass. |
 | V5 Root integration | `cargo nextest run --locked --workspace --all-features --test-threads=1` | NUI-U16 and earlier units that change the root facade or shared runtime contract | All root workspace tests pass without exclusions or RUI waivers. |
-| V6 Reference headless | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test-threads=1` | NUI-U5B, NUI-U15-NUI-U16 | Gameplay/Retry parity passes and presentation owners are absent. |
-| V7 Reference desktop | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop --test-threads=1` | NUI-U15-NUI-U16 | HUD, terminal, input, and package behavior pass; representative raster readback remains owned by V4. |
-| V8 Reference host parity | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features host-parity --test-threads=1` | NUI-U2, NUI-U5, NUI-U15-NUI-U16 | Desktop/editor/headless Host authority remains coherent. |
+| V6 Reference headless | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test-threads=1` | NUI-U5 after its U5B checkpoint; NUI-U15B; NUI-U16 | Gameplay/Retry parity passes and presentation owners are absent. |
+| V7 Reference desktop | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop --test-threads=1` | NUI-U15B, NUI-U16 | HUD, terminal, input, and package behavior pass; representative raster readback remains owned by V4. |
+| V8 Reference host parity | `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features host-parity --test-threads=1` | NUI-U2, NUI-U5, NUI-U15B, NUI-U16 | Desktop/editor/headless Host authority remains coherent. |
 | V9 Scene module consumer | `cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --test-threads=1` | NUI-U6-NUI-U16 | The existing direct Scene-domain surface and renamed root compile independently. |
-| V10 UI module consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | NUI-U9 through NUI-U14, plus NUI-U17 | Direct renamed text/kernel/widget dependencies compile without the root facade or Scene-only fixture drift. |
+| V10 UI module consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | NUI-U9 through NUI-U14, NUI-U17, NUI-U15A, NUI-U16 | Direct renamed text/kernel/widget dependencies compile without the root facade or Scene-only fixture drift. |
 | V11 Locked compilation | `cargo check --workspace --all-targets --all-features --locked -j 1` | Every code unit | Workspace manifests, features, examples, and targets compile with the lockfile. |
-| V12 Reference compilation | `cargo check --manifest-path reference-game/Cargo.toml --all-targets --all-features --locked -j 1` | NUI-U5B, NUI-U15-NUI-U16 | Separate reference workspace compiles every supported target. |
+| V12 Reference compilation | `cargo check --manifest-path reference-game/Cargo.toml --all-targets --all-features --locked -j 1` | NUI-U5 after its U5B checkpoint; NUI-U15A only after a shared public UI API/feature change; NUI-U15B; NUI-U16 | Separate reference workspace compiles every supported target; the conditional U15A run proves only mechanical API migration, not product acceptance. |
 | V13 Strict lint | `cargo clippy --workspace --all-targets --all-features --locked -j 1 -- -D warnings` | NUI-U16 and risky shared units | No changed or dependent target warning remains. |
 | V14 Formatting | `cargo fmt --all -- --check` | Every Rust unit before commit | Formatting is clean and the diff contains no unrelated churn. |
+| V15 Kernel conformance example | `cargo run --locked -p nara_ui_kernel --example layout_gallery` | NUI-U15A | The neutral public kernel example asserts layout, clipping, traversal, scale, text, and immutable-frame facts without ECS, window, renderer, or product dependencies. |
+| V16 Runtime conformance example | `cargo run --locked -p nara_ui --example interaction_lab` | NUI-U15A | The neutral public runtime example asserts stable projection, presented-session interaction, modal/focus/capture, typed dispositions, multi-surface isolation, pause-safe intent delivery, the formal semantic tree, and platform-neutral typed accessibility activation without AccessKit. |
+| V17 Presentation conformance example | `cargo check --locked --example ui_presentation_gallery --features presentation-ui,desktop-winit,render-wgpu -j 1` | NUI-U15A | The root public facade example proves one neutral projection-to-packet-to-matching-receipt-to-presented-activation round trip and compiles the scale, surface lifecycle, and representative windowed recipe; one representative manual run owns visual observation. Presentation-free product composition remains owned by NUI-U5 and NUI-U15B. |
 
 ### Behavioral And Review Gates
 
+- Run the kernel and runtime conformance examples headlessly, then run the presentation gallery once on one representative desktop surface. Inspect their manifests/imports and neutral scenario vocabulary; do not multiply the gallery across product states, devices, resolutions, pixels, hashes, or packages.
 - Run one packaged desktop candidate from a directory outside the repository and user home. Use the canonical product surface to observe readable HUD and terminal glyphs, distinct focus/pressed/disabled states, the minimum Retry target, keyboard/pointer activation, rejection/pending behavior, and direct applied-state removal; automated layout tests own the other physical targets and one representative fractional input-scale case.
 - Inspect the resolved headless plugin plan and runtime resources to prove that presentation and tooling owners are absent rather than merely idle.
 - Capture one deterministic headless `UiFrame`/semantics snapshot at the kernel boundary and one nonblank WGPU glyph readback at the render boundary. Do not add another hash, digest, smoke binary, or pixel fixture unless it proves a distinct contract not covered by structured assertions.
@@ -775,12 +837,13 @@ stateDiagram-v2
 ### Global Completion
 
 - The Product Contract requirements and acceptance examples are implemented and traced to passing unit/integration/product evidence.
-- Completion proves the first bounded data-authored game-UI product slice and its engine seams. It does not claim that Nara already owns a general component catalogue, complete adaptive-layout system, or mature Editor UI toolkit.
+- Completion proves the shared UI seams first through neutral layered examples and then proves the first bounded data-authored game-UI product slice through those frozen seams. It does not claim that Nara already owns a general component catalogue, complete adaptive-layout system, or mature Editor UI toolkit.
 - This plan is the sole active authority during execution and is closed through immutable evidence without mutating its readiness into a progress status.
 - Persistent order, `UiFrame`, per-surface candidates, presented behavior, semantic-intent journals, and render snapshots each have exactly one owner; no fallback uses ECS allocation, query iteration, duplicated parent fields, global cross-surface widget state, or live submit-time asset reads.
 - Desktop, packaged, accessibility, and headless reference-game workflows pass through public product APIs and ordinary recipes.
 - New crates are independently understandable deep modules with narrow APIs and no speculative provider surface.
 - Runtime UI growth is partitioned by lifecycle owner before product breadth, and obsolete/orphan tests or overextended smoke/hash/digest scripts are removed after their unique contract assertions migrate.
+- The kernel, runtime, and presentation conformance examples remain thin public consumers with distinct proof; Reference Game product integration does not silently widen their frozen interfaces.
 - Every automated and behavioral gate applicable to the final repository passes serially.
 - No P0/P1 review finding, stale active registration, obsolete compatibility path, abandoned attempt, dead code, unused dependency, or unrelated formatting change remains.
 - Final Conventional Commits are scoped, reviewable, and contain only intended files/hunks.
@@ -804,8 +867,9 @@ stateDiagram-v2
 | NUI-U13 | ECS/Scene authoring compiles through the kernel, the reference game uses the new data authoring adapter, stable keys/order survive rebuild and Retry, headless frame/actions pass, and old computed-layout/interaction public surfaces are removed. Packet, GPU-pixel, and exhaustive product-state evidence are not U13 closure requirements. |
 | NUI-U14 | UI/image/glyph submission uses packet-owned snapshots, exact presentation outcomes and representative GPU readback pass, and content failures cannot poison WGPU. |
 | NUI-U17 | Projection, per-surface candidate, presented history, interaction transaction, and intent journal are separate owners; old-frame behavior, cross-surface isolation, fail-closed routing, pause-safe delivery, route lifecycle, cursor reclamation, and semantic schedule surfaces pass without Reference Game product-matrix dependence. |
-| NUI-U15 | Six reference-game capture states plus the separate paused lifecycle condition, three physical targets, four input sources, package parity, and presentation-free headless Retry are proven by a coverage matrix that avoids their full Cartesian product. |
-| NUI-U16 | Facades, independent consumers, docs, ledger, evidence, proportionate gates, final reviews, and the recorded but non-activated UI-foundation-conformance successor scope match landed code; obsolete tests/scripts and redundant proof artifacts are absent. |
+| NUI-U15A | Three neutral layered examples consume only intended public interfaces, prove distinct kernel/runtime/presentation behavior including the formal semantic tree, platform-neutral typed accessibility activation, and one matching-receipt vertical round trip, keep the first-party Reference Game compiling after any shared API change, and record the exact public inventory, shared invariants, assertions, and commit used by product integration without creating an example framework. |
+| NUI-U15B | Six reference-game capture states plus the separate paused lifecycle condition, three physical targets, four input sources, package parity, and presentation-free headless Retry are proven through the frozen interfaces by a coverage matrix that avoids their full Cartesian product. |
+| NUI-U16 | Facades, conformance examples, independent consumers, docs, ledger, evidence, proportionate gates, and final reviews match landed code without changing the U15A-frozen public inventory, named invariants, or assertions; obsolete private tests/scripts and redundant proof artifacts are absent. |
 
 ---
 
@@ -849,7 +913,7 @@ stateDiagram-v2
 
 ### Future Admission Triggers
 
-- A focused successor may add a component gallery and layout/resolution laboratory as conformance products. It must derive its capability matrix from domain contracts and comparative reference pressure, keep the Reference Game out of the abstraction authority chain, and use a real Editor panel as the second consumer before broadening public component or adaptive-layout APIs.
+- NUI-U15A provides the bounded initial layout gallery, interaction lab, and presentation gallery, but it does not admit a general component catalogue, reusable example framework, or adaptive-layout policy. A real Editor panel remains the required second heterogeneous consumer before broadening public component, responsive-layout, or tooling-oriented UI APIs.
 - A real inventory, chat, hierarchy, or data-table workload with measured materialization pressure may admit virtual collections and reveal/overscan APIs.
 - A complete Editor panel followed by a heterogeneous editor workload may admit `nara_tooling_ui`, broader editor dogfooding, docking, or multi-window policy.
 - A project custom-font workflow may admit font import, family fallback, localization, and public font handles.

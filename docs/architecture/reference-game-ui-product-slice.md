@@ -1,14 +1,16 @@
 # Reference-Game UI Product Slice
 
-**Status**: Decision checkpoint for NUI-U9 through NUI-U14, NUI-U17, and NUI-U15
+**Status**: Decision checkpoint for NUI-U9 through NUI-U14, NUI-U17, NUI-U15A, and NUI-U15B
 **Date**: 2026-08-05
-**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint
+**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint; 2026-08-07 for the example-first NUI-U15A/NUI-U15B split
 **Authority**: ADR 0102 and the NUI implementation plan
 **Scope**: The first complete data-driven runtime UI proof for the reference game
 
 This document is a product input for the renderer-neutral UI work. It is intentionally narrower
 than an editor design system: it describes one shippable game surface, its states, and its ownership
 boundaries. It does not introduce a general widget registry, docking model, or Editor object tree.
+It becomes an integration contract only after NUI-U15A proves and freezes the shared UI interfaces
+through neutral layered examples; this product slice cannot independently admit an engine abstraction.
 
 ## Product Surface
 
@@ -123,7 +125,7 @@ The first implementation may use a bounded test presenter for headless frame and
 Desktop GPU/readback evidence must use the ordinary presentation recipe and the same authoring
 data. Source and packaged desktop readiness requires an actual resident glyph texture/binding, not
 only a submitted sprite frame. NUI-U14 owns one representative nonblank GPU readback and exact
-packet outcome; NUI-U15 consumes that boundary without duplicating it for each product state. A
+packet outcome; NUI-U15B consumes that boundary without duplicating it for each product state. A
 receipt records backend acceptance and submission of the exact packet and never claims that a human
 saw the frame. Any difference between the three targets is limited to physical mapping, snapping,
 and admitted raster generations.
@@ -133,11 +135,12 @@ and admitted raster generations.
 ```mermaid
 flowchart LR
   U13[NUI-U13 authoring adapter]
-  U5B[NUI-U5B UI composition split]
+  U5B[NUI-U5 internal U5B checkpoint]
   U14[NUI-U14 owned packet and WGPU]
   U17[NUI-U17 runtime ownership]
-  U15[NUI-U15 focused product proof]
-  U13 --> U5B --> U14 --> U17 --> U15
+  U15A[NUI-U15A conformance examples and interface freeze]
+  U15B[NUI-U15B focused product integration]
+  U13 --> U5B --> U14 --> U17 --> U15A --> U15B
 ```
 
 The product proof is dependency-ordered rather than one atomic implementation unit:
@@ -145,22 +148,26 @@ The product proof is dependency-ordered rather than one atomic implementation un
 | Unit | Required proof | Explicitly deferred |
 |---|---|---|
 | NUI-U13 | Scene/ECS authoring adapter, stable keys and structural order, headless frame/action projection, and reference-game migration away from the Rust-built tree | Paint-packet outcomes, GPU pixels, and the complete state/resolution matrix |
-| NUI-U5B | `runtime-ui` is content/authoring-only and `presentation-ui` is selected explicitly by presentation Hosts | Backend packet correctness and product captures |
+| NUI-U5 after internal U5B checkpoint | `runtime-ui` is content/authoring-only and `presentation-ui` is selected explicitly by presentation Hosts | Backend packet correctness and product captures |
 | NUI-U14 | Exact immutable image/glyph packet ownership, closed presentation outcomes, backend readiness containment, and representative nonblank GPU readback | Reference-game state and interaction coverage |
 | NUI-U17 | Presented frame/behavior/receipt sessions, transactional routing, pause-safe intent journal, route lifecycle, and narrow schedule interfaces; includes only the smallest Reference Game consumer migration | Product layout, package, and full input acceptance |
-| NUI-U15 | Six canonical-target capture states, three-target layout/readability coverage, one representative fractional input scale, all admitted Retry inputs once, package parity, and presentation-free headless Retry | Editor UI and deferred general-purpose UI features |
+| NUI-U15A | Neutral kernel layout gallery, runtime interaction lab, and presentation gallery consume only public interfaces; prove distinct owner-specific behavior including the platform-neutral semantic tree, typed accessibility action, and one matching-receipt vertical round trip; and freeze the public inventory, named shared invariants, exact assertions, and proving commit | Reference-game facts, package proof, AccessKit adapter acceptance, a reusable example framework, a general component catalogue, and adaptive-layout policy |
+| NUI-U15B | Six canonical-target capture states, three-target layout/readability coverage, one representative fractional input scale, all admitted Retry inputs once, package parity, and presentation-free headless Retry through the frozen interfaces | Editor UI and deferred general-purpose UI features |
 
 ### Alternatives Considered
 
 - **Chosen: staged closure.** Each unit closes only evidence owned by its dependency layer. This keeps
   the authoring adapter testable headlessly and prevents packet or product acceptance from becoming
   a prerequisite of its own dependency.
-- **Rejected: keep the full product matrix in NUI-U13.** This creates a U13 -> U14/U17/U15 -> U13
+- **Rejected: keep the full product matrix in NUI-U13.** This creates a U13 -> U14/U17/U15B -> U13
   dependency cycle because packet results, exact presented behavior, and product states belong to
   later owners.
-- **Rejected: merge NUI-U13 through NUI-U17 and NUI-U15.** A single large atomic unit would hide
+- **Rejected: merge NUI-U13 through NUI-U17, NUI-U15A, and NUI-U15B.** A single large atomic unit would hide
   whether a failure belongs to authoring, product composition, packet ownership, transactional input,
-  backend submission, or the reference product.
+  backend submission, public-interface conformance, or the reference product.
+- **Rejected: let the Reference Game design the shared interfaces directly.** Product-specific state,
+  layout, copy, and packaging pressure would become the cheapest path to widen expensive engine seams.
+  NUI-U15A instead proves those seams with neutral consumers before product integration begins.
 
 ## Risks And Mitigations
 
@@ -169,15 +176,19 @@ The product proof is dependency-ordered rather than one atomic implementation un
 | Unit evidence drifts from implementation order | An active registration can claim U13 while code silently depends on unfinished U14 behavior | Update the ledger and engineering-memory registration at every unit boundary; never use later-unit evidence to close an earlier unit |
 | Physical-target wording is confused with logical layout | A 4:3 surface is treated as an ordinary 16:9 baseline and produces contradictory acceptance results | Keep one 960 x 540 logical design space and the three declared 16:9 physical targets; admit any future 4:3 constrained fallback as a separate product decision |
 | Retry success is represented only by command acceptance | Old modal roots or stale frames can remain interactive after replacement | Capture the new run generation and prove the prior overlay is absent from paint, hit, focus, and semantics |
-| Product captures become architecture authority | Reference-game state or test convenience leaks into public engine interfaces | Keep NUI-U17 independent of product layout/package proof and admit shared contracts only from module invariants or an independent consumer |
+| Product captures become architecture authority | Reference-game state or test convenience leaks into public engine interfaces or shared semantics | Close NUI-U15A first, freeze its public inventory, named invariants, assertions, and commit, and require non-circular independent evidence plus a focused amendment before NUI-U15B changes that baseline |
 
 ## Exit Criteria
 
 NUI-U9/U10 may start after this document, ADR 0102's checkpoint amendment, and the identity rule
 are referenced by their evidence records. NUI-U13 closes when the current Rust-built HUD is replaced
 by this Scene/Prefab data boundary and the new adapter proves stable identity/order plus headless
-frame/action projection. NUI-U14 adds exact packet outcomes and representative GPU readback. NUI-U15
+frame/action projection. NUI-U14 adds exact packet outcomes and representative GPU readback. NUI-U15A
 does not start until NUI-U17 closes the presented-session, routing, journal, route, and schedule
-contracts. NUI-U15 closes after all six canonical-target capture states, the separate paused safety
-condition, three-target layout/readability coverage, one representative fractional input scale, the
-complete Retry input path, package parity, and headless parity pass without a Cartesian proof matrix.
+contracts. NUI-U15A closes when the three neutral layered examples prove their distinct public seams
+and one matching-receipt vertical round trip, any required module refactor is complete, and the public
+inventory, named shared invariants, exact assertions, and proving commit are frozen without an example
+framework. NUI-U15B then closes after all six canonical-target capture states, the separate paused
+safety condition, three-target layout/readability coverage, one representative fractional input scale,
+the complete Retry input path, package parity, and headless parity pass without a Cartesian proof matrix
+or an unreviewed engine-interface change.
