@@ -1169,7 +1169,13 @@ fn modal_letterbox_input_blocks_underlay_before_and_after_pointer_cancellation()
             .pressed()
     );
 
-    app.world_mut()
+    let rejection_count = app
+        .world()
+        .resource::<UiRouteRejectionLog>()
+        .as_slice()
+        .len();
+    let release = app
+        .world_mut()
         .unwrap()
         .resource_mut::<InputTimeline>()
         .admit_mouse_button(
@@ -1179,15 +1185,23 @@ fn modal_letterbox_input_blocks_underlay_before_and_after_pointer_cancellation()
             ButtonDriverInput::Release(MouseButton::Left),
         )
         .unwrap();
+    let release_sequence = release
+        .first_sequence()
+        .expect("the modal release should enter the exact UI route");
+    assert_eq!(release.last_sequence(), Some(release_sequence));
     app.update().unwrap();
+    let rejections = app.world().resource::<UiRouteRejectionLog>();
+    assert_eq!(rejections.as_slice().len(), rejection_count + 1);
+    let release_rejection = rejections
+        .as_slice()
+        .first()
+        .expect("the modal release should record a new fail-closed decision");
+    assert_eq!(release_rejection.input_sequence(), Some(release_sequence));
     assert!(matches!(
-        app.world()
-            .resource::<UiRouteRejectionLog>()
-            .as_slice()
-            .first()
-            .map(|record| record.rejection()),
-        Some(UiRouteRejection::UnhandledInputBlocked)
+        release_rejection.rejection(),
+        UiRouteRejection::UnhandledInputBlocked
     ));
+    assert!(app.world().resource::<InputTimeline>().cursors().ui() >= release_sequence);
     assert!(
         app.world()
             .resource::<UiActionJournal>()
@@ -2747,6 +2761,64 @@ fn distinct_surface_routes_keep_geometry_focus_capture_and_actions_isolated() {
         .unwrap();
     let first_receipt = commit_ui_presentation(app.world_mut().unwrap(), first, 1).unwrap();
     let second_receipt = commit_ui_presentation(app.world_mut().unwrap(), second, 1).unwrap();
+    let first_initial =
+        ui_semantic_snapshot(app.world(), first_receipt, UiSeatId::PRIMARY).unwrap();
+    let second_initial =
+        ui_semantic_snapshot(app.world(), second_receipt, UiSeatId::PRIMARY).unwrap();
+    let second_retry = second_initial
+        .nodes()
+        .iter()
+        .find(|node| node.name() == "retry")
+        .unwrap()
+        .key()
+        .clone();
+    assert!(
+        !first_initial
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
+    assert!(
+        !second_initial
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
+    assert!(matches!(
+        dispatch_ui_accessibility_input(
+            app.world_mut().unwrap(),
+            UiAccessibilityInput::focus_target(second_receipt, UiSeatId::PRIMARY, second_retry,),
+        ),
+        UiRouteDisposition::Consumed(_)
+    ));
+    let first_after_second_focus =
+        ui_semantic_snapshot(app.world(), first_receipt, UiSeatId::PRIMARY).unwrap();
+    let second_after_second_focus =
+        ui_semantic_snapshot(app.world(), second_receipt, UiSeatId::PRIMARY).unwrap();
+    assert!(
+        !first_after_second_focus
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
+    assert!(
+        second_after_second_focus
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
     let cursor = app
         .world_mut()
         .unwrap()
@@ -2804,6 +2876,15 @@ fn distinct_surface_routes_keep_geometry_focus_capture_and_actions_isolated() {
             .pressed()
     );
     assert!(
+        first_semantics
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
+    assert!(
         second_semantics
             .nodes()
             .iter()
@@ -2812,11 +2893,54 @@ fn distinct_surface_routes_keep_geometry_focus_capture_and_actions_isolated() {
             .state()
             .pressed()
     );
+    assert!(
+        second_semantics
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
 
     retire_ui_surface(app.world_mut().unwrap(), surface_id())
         .unwrap()
         .unwrap();
-    assert!(ui_semantic_snapshot(app.world(), second_receipt, UiSeatId::PRIMARY).is_ok());
+    let surviving_semantics =
+        ui_semantic_snapshot(app.world(), second_receipt, UiSeatId::PRIMARY).unwrap();
+    assert!(
+        surviving_semantics
+            .nodes()
+            .iter()
+            .find(|node| node.name() == "retry")
+            .unwrap()
+            .state()
+            .focused()
+    );
+    let retained_before_retired_release = app.world().resource::<InputTimeline>().retained_len();
+    let retired_release = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .admit_mouse_button(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            ButtonDriverInput::Release(MouseButton::Left),
+        )
+        .unwrap();
+    assert!(retired_release.is_ignored());
+    assert_eq!(
+        app.world().resource::<InputTimeline>().retained_len(),
+        retained_before_retired_release
+    );
+    assert!(
+        app.world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .unwrap()
+            .is_empty()
+    );
     app.world_mut()
         .unwrap()
         .resource_mut::<InputTimeline>()
@@ -2836,6 +2960,43 @@ fn distinct_surface_routes_keep_geometry_focus_capture_and_actions_isolated() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].surface_id(), second_surface);
     assert_eq!(pending[0].presentation_epoch(), 1);
+}
+
+#[test]
+fn retirement_route_mismatch_preserves_surface_session_and_identity() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let receipt = commit_ui_presentation(app.world_mut().unwrap(), frame, 1).unwrap();
+    let replacement_route = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .publish_presented_route(InputPresentedRoute::new(
+            InputWindowId::new(11),
+            InputSurfaceId::new(surface_id().get()),
+            InputSeatId::PRIMARY,
+            InputPresentationEpoch::new(2).unwrap(),
+            InputSlotGeneration::new(receipt.slot_generation().get()).unwrap(),
+            InputRouteGeneration::new(receipt.route_revision().get()).unwrap(),
+            InputGeometryGeneration::new(receipt.geometry_generation().get()).unwrap(),
+        ))
+        .unwrap();
+    assert_ne!(replacement_route.presentation_epoch().unwrap().get(), 1);
+
+    assert!(matches!(
+        retire_ui_surface(app.world_mut().unwrap(), surface_id()),
+        Err(UiAdapterError::Input(
+            nara_input::InputIngressError::PresentedRouteMismatch {
+                window,
+                seat,
+            }
+        )) if window == InputWindowId::new(11) && seat == InputSeatId::PRIMARY
+    ));
+    let state = app.world().resource::<crate::runtime::UiRuntimeState>();
+    assert!(state.surface(surface_id()).is_some());
+    assert!(!state.is_retired(surface_id()));
+    assert_eq!(active_ui_surface_slots(app.world()).unwrap().len(), 1);
+    assert!(ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).is_ok());
 }
 
 #[test]

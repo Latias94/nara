@@ -7,8 +7,8 @@ use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActionId, UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment,
     UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiKey, UiLayer, UiLocalKey,
-    UiNode, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiSemanticRole, UiSemantics, UiStyle,
-    UiSurfaceId, UiTheme,
+    UiNode, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiSemanticRole, UiSemantics, UiSize,
+    UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
 use nara_winit::{WinitAccessibilityBridge, WinitAccessibilityError};
 
@@ -223,6 +223,7 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
         )
         .unwrap();
     let successor_prepared = bridge.prepare_update(&successor_semantics).unwrap();
+    let obsolete_successor = bridge.prepare_update(&successor_semantics).unwrap();
     assert_eq!(successor_prepared.route(), successor_route);
     assert_eq!(
         bridge
@@ -241,6 +242,10 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
         )
     );
     bridge.commit_update(successor_prepared).unwrap();
+    assert_eq!(
+        bridge.commit_update(obsolete_successor).unwrap_err(),
+        WinitAccessibilityError::PreparedUpdateObsolete
+    );
     assert_eq!(
         bridge
             .map_action(&ActionRequest {
@@ -261,6 +266,52 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
         bridge.prepare_update(&semantics),
         Err(WinitAccessibilityError::StaleSnapshot { .. })
     ));
+
+    let foreign_surface = UiSurfaceId::new(42).unwrap();
+    let foreign_frame = compiler
+        .compile(
+            &successor_snapshot,
+            UiEnvironment::new(foreign_surface, 320.0, 180.0, 2.0, 1, 1, 1, 1).unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+    let mut foreign_journal = UiFrameJournal::default();
+    foreign_journal.install_surface(foreign_surface, 1).unwrap();
+    let foreign_receipt = foreign_journal.submit(foreign_frame, 8).unwrap();
+    let foreign_semantics = UiInteractionSession::default()
+        .semantic_snapshot_with_action_authority(
+            &foreign_journal,
+            UiRouteStamp::from_receipt(foreign_receipt),
+            UiSeatId::PRIMARY,
+            |key, action| key == &retry_key && action == &continue_action,
+        )
+        .unwrap();
+    let foreign_prepared = WinitAccessibilityBridge::new(foreign_surface)
+        .prepare_update(&foreign_semantics)
+        .unwrap();
+    assert_eq!(
+        bridge.commit_update(foreign_prepared).unwrap_err(),
+        WinitAccessibilityError::SurfaceMismatch {
+            expected: surface,
+            actual: foreign_surface,
+        }
+    );
+    assert_eq!(
+        bridge
+            .map_action(&ActionRequest {
+                action: Action::Click,
+                target_tree: TreeId::ROOT,
+                target_node: retry_id,
+                data: None,
+            })
+            .unwrap(),
+        UiAccessibilityInput::semantic_action(
+            successor_receipt,
+            UiSeatId::PRIMARY,
+            retry_key.clone(),
+            continue_action.clone(),
+        )
+    );
 
     let conflicting_frame = compiler
         .compile(
@@ -354,10 +405,61 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
         WinitAccessibilityError::FocusUnavailable { node: retry_id }
     );
 
+    let mut old_generation_journal = UiFrameJournal::default();
+    old_generation_journal.install_surface(surface, 1).unwrap();
+    let old_retirement = old_generation_journal
+        .retire_surface(surface, 2)
+        .unwrap()
+        .unwrap();
+
     journal.advance_surface_slot(surface, 1, 2).unwrap();
+    let slot_two_frame = compiler
+        .compile(
+            &disabled_snapshot,
+            UiEnvironment::for_surface(
+                surface,
+                UiSurfaceContentTransform::direct(UiSize::new(320.0, 180.0).unwrap(), 2.0).unwrap(),
+                UiSurfaceGenerations::new(2, 2, 1, 2).unwrap(),
+                1,
+                1,
+            )
+            .unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+    let slot_two_receipt = journal.submit(slot_two_frame, 10).unwrap();
+    let slot_two_semantics = session
+        .semantic_snapshot_with_action_authority(
+            &journal,
+            UiRouteStamp::from_receipt(slot_two_receipt),
+            UiSeatId::PRIMARY,
+            |key, action| key == &retry_key && action == &retry_action,
+        )
+        .unwrap();
+    let slot_two_prepared = bridge.prepare_update(&slot_two_semantics).unwrap();
+    bridge.commit_update(slot_two_prepared).unwrap();
+    assert_eq!(
+        bridge.retire(old_retirement).unwrap_err(),
+        WinitAccessibilityError::RetirementGenerationMismatch {
+            expected: slot_two_receipt.slot_generation(),
+            actual: old_retirement.slot_generation(),
+        }
+    );
+    assert_eq!(
+        bridge.prepare_update(&slot_two_semantics).unwrap().route(),
+        UiRouteStamp::from_receipt(slot_two_receipt)
+    );
+
+    let prepared_before_retirement = bridge.prepare_update(&slot_two_semantics).unwrap();
     let retirement = journal.retire_surface(surface, 3).unwrap().unwrap();
     assert_eq!(retirement.slot_generation().get(), 2);
     bridge.retire(retirement).unwrap();
+    assert_eq!(
+        bridge
+            .commit_update(prepared_before_retirement)
+            .unwrap_err(),
+        WinitAccessibilityError::SurfaceRetired { surface }
+    );
     assert_eq!(
         bridge.prepare_update(&disabled_semantics).unwrap_err(),
         WinitAccessibilityError::SurfaceRetired { surface }
