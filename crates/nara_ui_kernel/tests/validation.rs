@@ -263,3 +263,81 @@ fn shaped_glyph_and_logical_paint_budgets_are_candidate_wide() {
         })
     ));
 }
+
+#[test]
+fn text_measurement_reuses_an_exact_layout_request() {
+    let text = "Nara";
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(
+                UiRootKey::runtime("test", "text-cache").unwrap(),
+                UiLayer::Base,
+                UiStyle::fill(),
+            )
+            .with_text(UiText::new(text, 12.0).unwrap()),
+        )
+        .build()
+        .unwrap();
+    let text_limits = TextLimits {
+        max_text_bytes: text.len(),
+        max_glyphs: text.chars().count(),
+        ..TextLimits::default()
+    };
+    let mut compiler = UiCompiler::with_text_limits(
+        bundled_font_face().unwrap(),
+        UiLimits::default(),
+        text_limits,
+    )
+    .unwrap();
+
+    let frame = compiler
+        .compile(
+            &snapshot,
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 100.0, 100.0, 1.0, 1, 1, 1, 1)
+                .unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+
+    assert_eq!(frame.paint().len(), 1);
+}
+
+#[test]
+fn text_work_bytes_are_candidate_wide() {
+    let text_root = |name: &str, text: &str| {
+        UiRoot::new(
+            UiRootKey::runtime("test", name).unwrap(),
+            UiLayer::Base,
+            UiStyle::fill(),
+        )
+        .with_text(UiText::new(text, 12.0).unwrap())
+    };
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(text_root("one", "A"))
+        .with_root(text_root("two", "B"))
+        .build()
+        .unwrap();
+    let text_limits = TextLimits {
+        max_text_bytes: 1,
+        ..TextLimits::default()
+    };
+    let mut compiler = UiCompiler::with_text_limits(
+        bundled_font_face().unwrap(),
+        UiLimits::default(),
+        text_limits,
+    )
+    .unwrap();
+
+    assert!(matches!(
+        compiler.compile(
+            &snapshot,
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 100.0, 100.0, 1.0, 1, 1, 1, 1)
+                .unwrap(),
+            UiTheme::default(),
+        ),
+        Err(UiCompileError::TextWorkLimitExceeded {
+            actual: 2,
+            maximum: 1
+        })
+    ));
+}

@@ -13,16 +13,19 @@ use self::{
     cache::{RootCache, RootVisual},
     order::{FrameOrder, FrameOrdered},
     root::{CompiledRoot, RootBudget, RootCompileError},
+    text::TextCompileSession,
 };
 
 mod cache;
 mod order;
 mod root;
+mod text;
 
 /// Stateful owner of text measurement, bounded last-good roots, and frame revisions.
 pub struct UiCompiler {
     text_engine: TextEngine,
     limits: UiLimits,
+    max_text_work_bytes: usize,
     max_shaped_glyphs: usize,
     next_frame_revision: u64,
     cache_clock: u64,
@@ -40,10 +43,12 @@ impl UiCompiler {
         text_limits: TextLimits,
     ) -> Result<Self, UiCompileError> {
         limits.validate()?;
+        let max_text_work_bytes = text_limits.max_text_bytes;
         let max_shaped_glyphs = text_limits.max_glyphs;
         Ok(Self {
             text_engine: TextEngine::new(font_face, text_limits)?,
             limits,
+            max_text_work_bytes,
             max_shaped_glyphs,
             next_frame_revision: 1,
             cache_clock: 0,
@@ -81,6 +86,8 @@ impl UiCompiler {
         let mut node_count = 0usize;
         let mut shaped_glyphs = 0usize;
         let mut paint_count = 0usize;
+        let mut text_session =
+            TextCompileSession::new(self.max_text_work_bytes, self.max_shaped_glyphs);
 
         for envelope in &snapshot.envelopes {
             let compiled = match envelope.body() {
@@ -90,6 +97,7 @@ impl UiCompiler {
                     environment,
                     theme,
                     self.limits,
+                    &mut text_session,
                     RootBudget::new(
                         shaped_glyphs,
                         self.max_shaped_glyphs,
@@ -120,6 +128,9 @@ impl UiCompiler {
                 }
                 Err(RootCompileError::ShapedGlyphLimitExceeded { actual, maximum }) => {
                     return Err(UiCompileError::ShapedGlyphLimitExceeded { actual, maximum });
+                }
+                Err(RootCompileError::TextWorkLimitExceeded { actual, maximum }) => {
+                    return Err(UiCompileError::TextWorkLimitExceeded { actual, maximum });
                 }
                 Err(RootCompileError::LogicalPaintLimitExceeded { actual, maximum }) => {
                     return Err(UiCompileError::LogicalPaintLimitExceeded { actual, maximum });
@@ -454,6 +465,8 @@ pub enum UiCompileError {
     CandidateNodeLimitExceeded { actual: usize, maximum: usize },
     #[error("UI candidate has {actual} shaped glyphs; maximum is {maximum}")]
     ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate text shaping reads {actual} source bytes; maximum is {maximum}")]
+    TextWorkLimitExceeded { actual: usize, maximum: usize },
     #[error("UI candidate has {actual} logical paint primitives; maximum is {maximum}")]
     LogicalPaintLimitExceeded { actual: usize, maximum: usize },
     #[error("modal root {key:?} has no compatible retained visual or barrier")]

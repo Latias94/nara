@@ -17,6 +17,7 @@ use crate::{
 use super::{
     cache::{RootLayoutFact, RootVisual},
     order::{RootOrder, RootOrdered},
+    text::{TextCompileError, TextCompileSession},
 };
 
 #[derive(Clone, Debug)]
@@ -30,6 +31,7 @@ pub(super) struct CompiledRoot {
 #[derive(Debug)]
 pub(super) enum RootCompileError {
     Local(UiRootDiagnostic),
+    TextWorkLimitExceeded { actual: usize, maximum: usize },
     ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
     LogicalPaintLimitExceeded { actual: usize, maximum: usize },
 }
@@ -64,6 +66,7 @@ pub(super) fn compile_root(
     environment: UiEnvironment,
     theme: UiTheme,
     limits: UiLimits,
+    text_session: &mut TextCompileSession,
     budget: RootBudget,
 ) -> Result<CompiledRoot, RootCompileError> {
     let flat = flatten_root(root, limits).map_err(RootCompileError::Local)?;
@@ -102,6 +105,9 @@ pub(super) fn compile_root(
             height: AvailableSpace::Definite(environment.logical_size().height()),
         },
         |known, available, _node_id, context, _style| {
+            if measurement_error.is_some() {
+                return TaffySize::ZERO;
+            }
             let Some(index) = context.map(|index| *index) else {
                 return TaffySize::ZERO;
             };
@@ -111,14 +117,15 @@ pub(super) fn compile_root(
             let wrap_width = known.width.or_else(|| definite(available.width));
             match text
                 .request(wrap_width, scale_factor)
-                .and_then(|request| text_engine.layout(&request))
+                .map_err(TextCompileError::Layout)
+                .and_then(|request| text_session.layout(text_engine, request))
             {
                 Ok(layout) => TaffySize {
                     width: known.width.unwrap_or_else(|| layout.width()),
                     height: known.height.unwrap_or_else(|| layout.height()),
                 },
                 Err(error) => {
-                    measurement_error.get_or_insert(error);
+                    measurement_error.get_or_insert(text_compile_error(error));
                     TaffySize::ZERO
                 }
             }
@@ -130,7 +137,7 @@ pub(super) fn compile_root(
         })
     })?;
     if let Some(error) = measurement_error {
-        return Err(text_error(error));
+        return Err(error);
     }
 
     let mut layout_entries = Vec::with_capacity(flat.len());
@@ -238,8 +245,12 @@ pub(super) fn compile_root(
             let wrap_width = (text.overflow == UiTextOverflow::Wrap)
                 .then_some(rect.size().width())
                 .filter(|width| *width > 0.0);
-            let request = text.request(wrap_width, scale_factor).map_err(text_error)?;
-            let text_layout = text_engine.layout(&request).map_err(text_error)?;
+            let request = text
+                .request(wrap_width, scale_factor)
+                .map_err(|error| text_compile_error(TextCompileError::Layout(error)))?;
+            let text_layout = text_session
+                .layout(text_engine, request)
+                .map_err(text_compile_error)?;
             let candidate_glyphs = budget
                 .used_shaped_glyphs
                 .saturating_add(shaped_glyphs)
@@ -271,7 +282,7 @@ pub(super) fn compile_root(
                             }));
                         }
                     },
-                    layout: Arc::new(text_layout),
+                    layout: text_layout,
                 },
             ));
             ensure_paint_capacity(budget.used_paint, paint_entries.len(), budget.max_paint)?;
@@ -373,6 +384,18 @@ fn text_error(error: TextLayoutError) -> RootCompileError {
         error => RootCompileError::Local(UiRootDiagnostic::TextRejected {
             message: error.to_string(),
         }),
+    }
+}
+
+fn text_compile_error(error: TextCompileError) -> RootCompileError {
+    match error {
+        TextCompileError::SourceBytesLimitExceeded { actual, maximum } => {
+            RootCompileError::TextWorkLimitExceeded { actual, maximum }
+        }
+        TextCompileError::ShapedGlyphLimitExceeded { actual, maximum } => {
+            RootCompileError::ShapedGlyphLimitExceeded { actual, maximum }
+        }
+        TextCompileError::Layout(error) => text_error(error),
     }
 }
 

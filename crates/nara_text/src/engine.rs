@@ -59,7 +59,21 @@ impl TextEngine {
     }
 
     pub fn layout(&mut self, request: &TextLayoutRequest) -> Result<TextLayout, TextLayoutError> {
+        self.layout_with_glyph_limit(request, self.limits.max_glyphs)
+    }
+
+    /// Shapes one request while respecting both the engine policy and a caller-owned allowance.
+    ///
+    /// The effective allowance is never wider than the limits used to construct this engine. A
+    /// caller may use this narrower limit to compose several layout operations under one shared
+    /// budget without creating a second text engine.
+    pub fn layout_with_glyph_limit(
+        &mut self,
+        request: &TextLayoutRequest,
+        max_glyphs: usize,
+    ) -> Result<TextLayout, TextLayoutError> {
         self.validate_request(request)?;
+        let max_glyphs = max_glyphs.min(self.limits.max_glyphs);
         let diagnostics = missing_glyph_diagnostics(&self.face, request.text(), self.limits);
         let family_name = self.face.family_name();
         let mut builder =
@@ -124,10 +138,10 @@ impl TextEngine {
                 let glyph_start = glyphs.len();
                 let physical_size = run.font_size() * request.scale_factor();
                 for glyph in glyph_run.positioned_glyphs() {
-                    if glyphs.len() == self.limits.max_glyphs {
+                    if glyphs.len() == max_glyphs {
                         return Err(TextLayoutError::GlyphLimitExceeded {
                             actual: glyphs.len() + 1,
-                            maximum: self.limits.max_glyphs,
+                            maximum: max_glyphs,
                         });
                     }
                     let glyph_id = u16::try_from(glyph.id)
