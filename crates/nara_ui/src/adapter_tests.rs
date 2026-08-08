@@ -155,6 +155,23 @@ fn button_bundle(
     )
 }
 
+fn place_invalid_button_modal(world: &mut World, root_local: &str, button_local: &str) {
+    let modal = world
+        .spawn((
+            UiRoot::new(UiLayer::Modal),
+            UiNode::new(UiStyle::fill()),
+            UiRuntimeKey::new(TEST_DOMAIN, root_local).unwrap(),
+        ))
+        .id();
+    let (button, node, _visual, key) = button_bundle(
+        button_local,
+        "invalid-modal-action",
+        UiColor::rgba(0.8, 0.2, 0.2, 1.0),
+    );
+    let invalid_child = world.spawn((button, node, key)).id();
+    place_ui_tree(world, modal, &[invalid_child]);
+}
+
 fn frozen_ui_registry() -> ComponentRegistry {
     let mut registry = ComponentRegistry::new();
     register_ui_components(&mut registry).expect("UI component registration should succeed");
@@ -663,6 +680,259 @@ fn invalid_controlled_child_rejects_its_complete_root_instead_of_publishing_a_pa
             .iter()
             .all(|outcome| outcome.status() != UiRootStatus::Published)
     );
+}
+
+#[test]
+fn rejected_projected_root_keeps_its_envelope_without_suppressing_a_valid_sibling() {
+    let mut app = ui_app();
+    install_test_surface(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+    );
+    let world = app
+        .world_mut()
+        .expect("test App should allow world mutation");
+    let rejected_root = world
+        .spawn((
+            UiRoot::new(UiLayer::Base),
+            UiNode::new(UiStyle::fill()),
+            UiRuntimeKey::new(TEST_DOMAIN, "rejected").unwrap(),
+        ))
+        .id();
+    let (button, node, _visual, key) = button_bundle(
+        "missing-visual",
+        "missing-visual-action",
+        UiColor::rgba(0.8, 0.2, 0.2, 1.0),
+    );
+    let rejected_child = world.spawn((button, node, key)).id();
+    let published_root = world
+        .spawn((
+            UiRoot::new(UiLayer::Base),
+            UiNode::new(UiStyle::fill()),
+            UiVisual::solid(UiColor::rgba(0.2, 0.7, 0.3, 1.0)),
+            UiRuntimeKey::new(TEST_DOMAIN, "published").unwrap(),
+        ))
+        .id();
+    place_ui_tree(world, rejected_root, &[rejected_child]);
+    place_ui_tree(world, published_root, &[]);
+
+    app.update()
+        .expect("a rejected root should not abort a valid sibling");
+    let frame = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("the mixed candidate should publish");
+    let rejected = frame
+        .root_outcomes()
+        .iter()
+        .find(|outcome| outcome.key() == &expected_runtime_root("rejected"))
+        .unwrap();
+    let published = frame
+        .root_outcomes()
+        .iter()
+        .find(|outcome| outcome.key() == &expected_runtime_root("published"))
+        .unwrap();
+
+    assert_eq!(rejected.status(), UiRootStatus::Absent);
+    assert_eq!(published.status(), UiRootStatus::Published);
+    assert_eq!(frame.paint().len(), 1);
+}
+
+#[test]
+fn retained_modal_projection_is_inert_but_keeps_the_current_barrier() {
+    let (mut app, button) = build_unstarted_button_app_with_layer(UiLayer::Modal);
+    app.update().expect("modal baseline should compile");
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .entity_mut(button)
+        .remove::<UiVisual>();
+    app.update()
+        .expect("a compatible modal visual should be retained");
+    let retained = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("retained modal candidate should publish");
+
+    assert_eq!(
+        retained.root_outcomes()[0].status(),
+        UiRootStatus::RetainedVisual
+    );
+    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
+        &retained
+    ));
+    assert!(retained.hit_regions().is_empty());
+    assert!(retained.focus_order().is_empty());
+    assert!(retained.semantics().is_empty());
+
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        retained,
+        1,
+    )
+    .unwrap();
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<InputTimeline>()
+        .admit_wheel(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            Vec2::new(0.0, 1.0),
+        )
+        .unwrap();
+    app.update()
+        .expect("retained modal wheel routing should remain fail-closed");
+    let rejection = app
+        .world()
+        .resource::<UiRouteRejectionLog>()
+        .as_slice()
+        .first()
+        .expect("retained modal should block unhandled wheel input");
+    assert_eq!(
+        rejection.rejection(),
+        &UiRouteRejection::UnhandledInputBlocked
+    );
+}
+
+#[test]
+fn rejected_modal_without_fallback_discards_the_unpresented_candidate() {
+    let (mut app, _) = build_button_app();
+    let stale = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("baseline candidate should exist");
+    place_invalid_button_modal(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        "modal-without-fallback",
+        "invalid-modal-button",
+    );
+
+    app.update()
+        .expect("modal candidate rejection should remain adapter-local");
+    assert!(
+        latest_ui_frame(app.world(), surface_id())
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        commit_ui_presentation(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            stale,
+            1,
+        ),
+        Err(UiAdapterError::FrameNotLatest { surface: 7 })
+    ));
+}
+
+#[test]
+fn missing_root_identity_rejects_the_whole_projection() {
+    let (mut app, _) = build_button_app();
+    let stale = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("baseline candidate should exist");
+    let missing_identity = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .spawn((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())))
+        .id();
+    HierarchyWriter::new(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+    )
+    .place(missing_identity, root_last())
+    .unwrap();
+
+    app.update()
+        .expect("identity rejection should remain adapter-local");
+    assert!(
+        latest_ui_frame(app.world(), surface_id())
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        commit_ui_presentation(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            stale,
+            1,
+        ),
+        Err(UiAdapterError::FrameNotLatest { surface: 7 })
+    ));
+}
+
+#[test]
+fn whole_candidate_rejection_discards_new_work_but_preserves_presented_authority() {
+    let (mut app, button) = build_button_app();
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("candidate-rejection-test").unwrap())
+        .unwrap();
+    let presented = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("baseline candidate should exist");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        presented,
+        1,
+    )
+    .unwrap();
+
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .entity_mut(button)
+        .insert(
+            crate::UiButton::new(
+                "retry",
+                UiActionId::new("unpresented-replacement").unwrap(),
+                16.0,
+            )
+            .unwrap(),
+        );
+    app.update()
+        .expect("replacement candidate should compile without being presented");
+    let unpresented = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("replacement candidate should exist");
+    place_invalid_button_modal(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        "later-invalid-modal",
+        "later-invalid-button",
+    );
+
+    app.update()
+        .expect("whole-candidate rejection should preserve the presented session");
+    assert!(
+        latest_ui_frame(app.world(), surface_id())
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        commit_ui_presentation(
+            app.world_mut()
+                .expect("test App should allow world mutation"),
+            unpresented,
+            2,
+        ),
+        Err(UiAdapterError::FrameNotLatest { surface: 7 })
+    ));
+
+    assert!(
+        dispatch_pointer_click(&mut app, UiRouteStamp::new(surface_id(), 1))
+            .iter()
+            .all(|disposition| matches!(disposition, UiRouteDisposition::Consumed(_)))
+    );
+    let pending = app
+        .world()
+        .resource::<UiActionJournal>()
+        .pending(&cursor)
+        .unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].action().as_str(), "retry-draft");
+    assert_eq!(pending[0].presentation_epoch(), 1);
 }
 
 fn dispatch_pointer_click(app: &mut App, route: UiRouteStamp) -> Vec<UiRouteDisposition> {

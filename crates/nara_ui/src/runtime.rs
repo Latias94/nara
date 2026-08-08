@@ -134,6 +134,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
         let mut diagnostics = Vec::new();
         if nara_hierarchy::__private::completed_topology_generation(world).is_none() {
+            state.discard_all_candidates();
             push_diagnostic(
                 &mut diagnostics,
                 "hierarchy-incomplete",
@@ -145,6 +146,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
             return;
         }
         let Some(order) = world.get_resource::<HierarchyOrder>() else {
+            state.discard_all_candidates();
             push_diagnostic(
                 &mut diagnostics,
                 "hierarchy-order-missing",
@@ -159,6 +161,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
         let theme = projection::select_theme(world, &ordered_entities, &mut diagnostics);
         let source_revision = state.source_revision();
         if state.advance_source_revision().is_err() {
+            state.discard_all_candidates();
             push_diagnostic(
                 &mut diagnostics,
                 "source-revision-exhausted",
@@ -178,6 +181,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                 surface.reducer_states(),
                 &mut diagnostics,
             ) else {
+                surface.discard_candidate();
                 continue;
             };
             let environment = match surface.descriptor().environment(theme.revision().get()) {
@@ -188,6 +192,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                         "surface-environment-rejected",
                         &error.to_string(),
                     );
+                    surface.discard_candidate();
                     continue;
                 }
             };
@@ -201,11 +206,13 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                         staging.reducers(),
                         &mut diagnostics,
                     ) else {
+                        surface.discard_candidate();
                         continue;
                     };
                     if let Err(error) =
                         surface.finish_candidate(staging, projected, environment, theme.kernel())
                     {
+                        surface.discard_candidate();
                         push_diagnostic(
                             &mut diagnostics,
                             "candidate-reprojection-rejected",
@@ -213,11 +220,14 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                         );
                     }
                 }
-                Err(error) => push_diagnostic(
-                    &mut diagnostics,
-                    "candidate-preparation-rejected",
-                    &error.to_string(),
-                ),
+                Err(error) => {
+                    surface.discard_candidate();
+                    push_diagnostic(
+                        &mut diagnostics,
+                        "candidate-preparation-rejected",
+                        &error.to_string(),
+                    );
+                }
             }
         }
         world

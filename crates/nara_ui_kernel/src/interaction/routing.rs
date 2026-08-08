@@ -1,7 +1,5 @@
 use super::{UiNonActivation, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind};
-use crate::{
-    UiDispatchBatch, UiFrame, UiHitRegion, UiKey, UiLayer, UiPoint, UiRootKey, UiRootStatus,
-};
+use crate::{UiDispatchBatch, UiFrame, UiHitRegion, UiKey, UiPoint, UiRootKey, UiRootStatus};
 
 pub(super) fn hit_target(
     frame: &UiFrame,
@@ -84,16 +82,7 @@ pub(super) fn is_interactive_key(
 }
 
 pub(super) fn active_modal_root(frame: &UiFrame) -> Option<UiRootKey> {
-    frame
-        .layouts()
-        .iter()
-        .rev()
-        .find(|layout| {
-            layout.layer() == UiLayer::Modal
-                && layout.visible()
-                && root_is_published(frame, layout.root_key())
-        })
-        .map(|layout| layout.root_key().clone())
+    frame.active_modal_root().cloned()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,29 +1,32 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 use nara_text::{FontFace, TextEngine, TextEngineCreateError, TextLimits};
-use taffy::{
-    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, JustifyContent,
-    LengthPercentage, LengthPercentageAuto, Overflow, Point as TaffyPoint, Position,
-    Rect as TaffyRect, Size as TaffySize, Style as TaffyStyle, TaffyTree,
-};
 use thiserror::Error;
 
 use crate::{
-    UiAlign, UiAuthoringSnapshot, UiCompileError::FrameRevisionExhausted, UiDiagnostic,
-    UiDimension, UiEnvironment, UiFlexDirection, UiFocusFact, UiFrame, UiFrameRevision,
-    UiHitRegion, UiJustify, UiKey, UiLayer, UiLayoutFact, UiLimits, UiLimitsError, UiNode,
-    UiOverflow, UiPaintPrimitive, UiPoint, UiPositionMode, UiRect, UiResolvedBorder, UiRoot,
-    UiRootDiagnostic, UiRootKey, UiRootOutcome, UiRootStatus, UiSemanticNode, UiSemanticRole,
-    UiStyle, UiTextOverflow, UiTheme, authoring::duplicate_root_keys,
+    UiAuthoringSnapshot, UiDiagnostic, UiEnvironment, UiFocusFact, UiFrame, UiFrameRevision,
+    UiHitRegion, UiLayer, UiLimits, UiLimitsError, UiPaintPrimitive, UiRootDiagnostic, UiRootKey,
+    UiRootOutcome, UiRootStatus, UiSemanticNode, UiTheme,
 };
+
+use self::{
+    cache::{RootCache, RootVisual},
+    order::{FrameOrder, FrameOrdered},
+    root::{CompiledRoot, RootBudget, RootCompileError},
+};
+
+mod cache;
+mod order;
+mod root;
 
 /// Stateful owner of text measurement, bounded last-good roots, and frame revisions.
 pub struct UiCompiler {
     text_engine: TextEngine,
     limits: UiLimits,
+    max_shaped_glyphs: usize,
     next_frame_revision: u64,
     cache_clock: u64,
-    cache: Vec<CachedRoot>,
+    cache: RootCache,
 }
 
 impl UiCompiler {
@@ -37,12 +40,14 @@ impl UiCompiler {
         text_limits: TextLimits,
     ) -> Result<Self, UiCompileError> {
         limits.validate()?;
+        let max_shaped_glyphs = text_limits.max_glyphs;
         Ok(Self {
             text_engine: TextEngine::new(font_face, text_limits)?,
             limits,
+            max_shaped_glyphs,
             next_frame_revision: 1,
             cache_clock: 0,
-            cache: Vec::new(),
+            cache: RootCache::default(),
         })
     }
 
@@ -59,78 +64,104 @@ impl UiCompiler {
                 theme: theme.revision().get(),
             });
         }
-        if snapshot.roots.len() > self.limits.max_roots {
-            return Err(UiCompileError::SnapshotRootLimitExceeded {
-                actual: snapshot.roots.len(),
-                maximum: self.limits.max_roots,
-            });
-        }
-        let revision = UiFrameRevision::new(self.next_frame_revision);
-        self.next_frame_revision = self
+
+        let authored_keys = self.preflight_snapshot(snapshot)?;
+        let frame_revision = UiFrameRevision::new(self.next_frame_revision);
+        let next_frame_revision = self
             .next_frame_revision
             .checked_add(1)
-            .ok_or(FrameRevisionExhausted)?;
-        self.cache_clock = self
+            .ok_or(UiCompileError::FrameRevisionExhausted)?;
+        let next_cache_clock = self
             .cache_clock
             .checked_add(1)
             .ok_or(UiCompileError::CacheRevisionExhausted)?;
 
-        let duplicate_roots = duplicate_root_keys(&snapshot.roots);
-        let authored_keys = snapshot
-            .roots
-            .iter()
-            .map(|root| root.key.clone())
-            .collect::<BTreeSet<_>>();
-        self.cache
-            .retain(|entry| authored_keys.contains(&entry.key));
+        let mut candidates = Vec::with_capacity(snapshot.envelopes.len());
+        let mut touched = BTreeSet::new();
+        let mut node_count = 0usize;
+        let mut shaped_glyphs = 0usize;
+        let mut paint_count = 0usize;
 
-        let mut outcomes = Vec::with_capacity(snapshot.roots.len());
-        let mut included_fallbacks = BTreeSet::new();
-        let mut compiled_roots = Vec::with_capacity(snapshot.roots.len());
-        let mut remaining_paint = self.limits.max_paint_primitives;
-
-        for (root_sequence, root) in snapshot.roots.iter().enumerate() {
-            let forced_error = duplicate_roots
-                .contains(&root.key)
-                .then_some(UiRootDiagnostic::DuplicateRootKey);
-            let candidate = match forced_error {
-                Some(error) => Err(error),
-                None => self.compile_root(root, root_sequence, environment, theme, remaining_paint),
+        for envelope in &snapshot.envelopes {
+            let compiled = match envelope.body() {
+                crate::authoring::UiRootEnvelopeBody::Ready(index) => root::compile_root(
+                    &mut self.text_engine,
+                    &snapshot.roots[*index],
+                    environment,
+                    theme,
+                    self.limits,
+                    RootBudget::new(
+                        shaped_glyphs,
+                        self.max_shaped_glyphs,
+                        paint_count,
+                        self.limits.max_paint_primitives,
+                    ),
+                ),
+                crate::authoring::UiRootEnvelopeBody::Rejected(diagnostic) => {
+                    Err(RootCompileError::Local(diagnostic.clone()))
+                }
             };
 
-            match candidate {
+            let (status, diagnostic, body) = match compiled {
                 Ok(compiled) => {
-                    remaining_paint = remaining_paint.saturating_sub(compiled.paint.len());
-                    let compiled = Arc::new(compiled);
-                    self.store_last_good(root.key.clone(), environment, Arc::clone(&compiled));
-                    outcomes.push(UiRootOutcome {
-                        key: root.key.clone(),
-                        status: UiRootStatus::Published,
-                        diagnostic: None,
-                    });
-                    compiled_roots.push((compiled, true));
+                    account_visual(
+                        &mut node_count,
+                        &mut shaped_glyphs,
+                        &mut paint_count,
+                        &compiled.visual,
+                        self.limits,
+                        self.max_shaped_glyphs,
+                    )?;
+                    (
+                        UiRootStatus::Published,
+                        None,
+                        CandidateBody::Published(compiled),
+                    )
                 }
-                Err(diagnostic) => {
-                    let fallback = if included_fallbacks.insert(root.key.clone()) {
-                        self.compatible_last_good(&root.key, environment)
-                            .filter(|root| root.paint.len() <= remaining_paint)
-                    } else {
-                        None
-                    };
-                    let status = if let Some(fallback) = fallback {
-                        remaining_paint = remaining_paint.saturating_sub(fallback.paint.len());
-                        compiled_roots.push((fallback, false));
-                        UiRootStatus::RetainedVisual
-                    } else {
-                        UiRootStatus::Absent
-                    };
-                    outcomes.push(UiRootOutcome {
-                        key: root.key.clone(),
-                        status,
-                        diagnostic: Some(diagnostic),
-                    });
+                Err(RootCompileError::ShapedGlyphLimitExceeded { actual, maximum }) => {
+                    return Err(UiCompileError::ShapedGlyphLimitExceeded { actual, maximum });
                 }
-            }
+                Err(RootCompileError::LogicalPaintLimitExceeded { actual, maximum }) => {
+                    return Err(UiCompileError::LogicalPaintLimitExceeded { actual, maximum });
+                }
+                Err(RootCompileError::Local(diagnostic)) => {
+                    let fallback = self.cache.compatible(envelope.key(), environment);
+                    if let Some(visual) = fallback {
+                        account_visual(
+                            &mut node_count,
+                            &mut shaped_glyphs,
+                            &mut paint_count,
+                            &visual,
+                            self.limits,
+                            self.max_shaped_glyphs,
+                        )?;
+                        touched.insert(envelope.key().clone());
+                        (
+                            UiRootStatus::RetainedVisual,
+                            Some(diagnostic),
+                            CandidateBody::Retained(visual),
+                        )
+                    } else if envelope.layer() == UiLayer::Modal {
+                        return Err(UiCompileError::ModalFallbackUnavailable {
+                            key: envelope.key().clone(),
+                        });
+                    } else {
+                        (
+                            UiRootStatus::Absent,
+                            Some(diagnostic),
+                            CandidateBody::Absent,
+                        )
+                    }
+                }
+            };
+            candidates.push(CandidateRoot {
+                key: envelope.key().clone(),
+                layer: envelope.layer(),
+                ordinal: envelope.ordinal(),
+                status,
+                diagnostic,
+                body,
+            });
         }
 
         let mut layouts = Vec::new();
@@ -138,15 +169,46 @@ impl UiCompiler {
         let mut hits = Vec::new();
         let mut focus = Vec::new();
         let mut semantics = Vec::new();
-        for (root, interactive) in compiled_roots {
-            layouts.extend(root.layouts.iter().cloned());
-            paint.extend(root.paint.iter().cloned());
-            if interactive {
-                hits.extend(root.hits.iter().cloned());
-                focus.extend(root.focus.iter().cloned());
-                semantics.extend(root.semantics.iter().cloned());
+        let mut outcomes = Vec::with_capacity(candidates.len());
+
+        for candidate in &candidates {
+            outcomes.push(UiRootOutcome {
+                key: candidate.key.clone(),
+                layer: candidate.layer,
+                status: candidate.status,
+                diagnostic: candidate.diagnostic.clone(),
+            });
+            match &candidate.body {
+                CandidateBody::Published(compiled) => {
+                    bind_visual(
+                        &mut layouts,
+                        &mut paint,
+                        &compiled.visual,
+                        candidate.layer,
+                        candidate.ordinal,
+                    );
+                    bind_interactive(
+                        &mut hits,
+                        &mut focus,
+                        &mut semantics,
+                        compiled,
+                        candidate.layer,
+                        candidate.ordinal,
+                    );
+                }
+                CandidateBody::Retained(visual) => {
+                    bind_visual(
+                        &mut layouts,
+                        &mut paint,
+                        visual,
+                        candidate.layer,
+                        candidate.ordinal,
+                    );
+                }
+                CandidateBody::Absent => {}
             }
         }
+
         layouts.sort_by(|left, right| left.order.cmp(&right.order));
         paint.sort_by(|left, right| left.order.cmp(&right.order));
         hits.sort_by(|left, right| right.order.cmp(&left.order));
@@ -154,8 +216,8 @@ impl UiCompiler {
         semantics.sort_by(|left, right| left.order.cmp(&right.order));
 
         let diagnostics = bounded_diagnostics(&outcomes, self.limits.max_diagnostics);
-        let frame = UiFrame {
-            revision,
+        let frame = Arc::new(UiFrame {
+            revision: frame_revision,
             source_revision: snapshot.source_revision,
             environment,
             root_outcomes: outcomes,
@@ -165,576 +227,171 @@ impl UiCompiler {
             focus: focus.into_iter().map(|entry| entry.value).collect(),
             semantics: semantics.into_iter().map(|entry| entry.value).collect(),
             diagnostics,
-        };
-        Ok(Arc::new(frame))
+        });
+
+        let published = candidates.iter().filter_map(|candidate| {
+            let CandidateBody::Published(compiled) = &candidate.body else {
+                return None;
+            };
+            Some((
+                candidate.key.clone(),
+                environment,
+                Arc::clone(&compiled.visual),
+            ))
+        });
+        self.cache.commit(
+            next_cache_clock,
+            self.limits.max_cache_roots,
+            &authored_keys,
+            &touched,
+            published,
+        );
+        self.next_frame_revision = next_frame_revision;
+        self.cache_clock = next_cache_clock;
+        Ok(frame)
     }
 
-    fn compile_root(
-        &mut self,
-        root: &UiRoot,
-        root_sequence: usize,
-        environment: UiEnvironment,
-        theme: UiTheme,
-        remaining_paint: usize,
-    ) -> Result<CompiledRoot, UiRootDiagnostic> {
-        let flat = flatten_root(root, self.limits)?;
-        let mut tree = TaffyTree::<usize>::with_capacity(flat.len());
-        tree.disable_rounding();
-        let mut node_ids = vec![None; flat.len()];
-        for index in (0..flat.len()).rev() {
-            let children = flat[index]
-                .children
-                .iter()
-                .map(|child| node_ids[*child].expect("child node is created before its parent"))
-                .collect::<Vec<_>>();
-            let style = taffy_style(flat[index].node.style, index == 0, environment);
-            let id = if children.is_empty() && flat[index].node.text.is_some() {
-                tree.new_leaf_with_context(style, index)
-            } else if children.is_empty() {
-                tree.new_leaf(style)
-            } else {
-                tree.new_with_children(style, &children)
-            }
-            .map_err(|error| UiRootDiagnostic::LayoutRejected {
-                message: error.to_string(),
-            })?;
-            node_ids[index] = Some(id);
-        }
-
-        let root_id = node_ids[0].expect("a flattened root always has one Taffy node");
-        let mut measurement_error = None;
-        let scale_factor = environment.scale_factor();
-        tree.compute_layout_with_measure(
-            root_id,
-            TaffySize {
-                width: AvailableSpace::Definite(environment.logical_size().width()),
-                height: AvailableSpace::Definite(environment.logical_size().height()),
-            },
-            |known, available, _node_id, context, _style| {
-                let Some(index) = context.map(|index| *index) else {
-                    return TaffySize::ZERO;
-                };
-                let Some(text) = flat[index].node.text.as_ref() else {
-                    return TaffySize::ZERO;
-                };
-                let wrap_width = known.width.or_else(|| definite(available.width));
-                match text
-                    .request(wrap_width, scale_factor)
-                    .and_then(|request| self.text_engine.layout(&request))
-                {
-                    Ok(layout) => TaffySize {
-                        width: known.width.unwrap_or_else(|| layout.width()),
-                        height: known.height.unwrap_or_else(|| layout.height()),
-                    },
-                    Err(error) => {
-                        measurement_error.get_or_insert_with(|| error.to_string());
-                        TaffySize::ZERO
-                    }
-                }
-            },
-        )
-        .map_err(|error| UiRootDiagnostic::LayoutRejected {
-            message: error.to_string(),
-        })?;
-        if let Some(message) = measurement_error {
-            return Err(UiRootDiagnostic::TextRejected { message });
-        }
-
-        let mut layout_entries = Vec::with_capacity(flat.len());
-        let mut paint_entries = Vec::new();
-        let mut hit_entries = Vec::new();
-        let mut focus_entries = Vec::new();
-        let mut semantic_entries = Vec::new();
-        let mut origins = vec![UiPoint::new(0.0, 0.0); flat.len()];
-        let mut clips = vec![ClipState::Unclipped; flat.len()];
-        let mut visible = vec![false; flat.len()];
-
-        for (index, node) in flat.iter().enumerate() {
-            let layout = tree
-                .layout(node_ids[index].expect("Taffy node exists for each flat node"))
-                .map_err(|error| UiRootDiagnostic::LayoutRejected {
-                    message: error.to_string(),
-                })?;
-            let parent_origin = node
-                .parent
-                .map_or(UiPoint::new(0.0, 0.0), |parent| origins[parent]);
-            let origin = UiPoint::new(
-                parent_origin.x() + layout.location.x,
-                parent_origin.y() + layout.location.y,
-            );
-            let rect = UiRect::from_origin_size(
-                origin.x(),
-                origin.y(),
-                layout.size.width,
-                layout.size.height,
-            )
-            .ok_or_else(|| UiRootDiagnostic::LayoutRejected {
-                message: "Taffy produced non-finite or negative geometry".to_owned(),
-            })?;
-            origins[index] = origin;
-            let inherited_clip = node
-                .parent
-                .map_or(ClipState::Unclipped, |parent| clips[parent]);
-            let parent_visible = node.parent.is_none_or(|parent| visible[parent]);
-            let intersects_clip = match inherited_clip {
-                ClipState::Unclipped => true,
-                ClipState::Rect(clip) => rect.intersect(clip).is_some(),
-                ClipState::Empty => false,
-            };
-            let node_visible = parent_visible
-                && node.node.style.visible
-                && !rect.size().is_empty()
-                && intersects_clip;
-            visible[index] = node_visible;
-            clips[index] = if node.node.style.overflow == UiOverflow::Clip {
-                inherited_clip.intersect(rect)
-            } else {
-                inherited_clip
-            };
-
-            let order = PaintOrder::for_node(root.layer, root_sequence, node, 0);
-            let layout_fact = UiLayoutFact {
-                key: node.key.clone(),
-                route_parent: node.keyed_parent.clone(),
-                root_key: root.key.clone(),
-                layer: root.layer,
-                structural_index: node.structural_index,
-                local_z: node.node.style.z_index,
-                rect,
-                physical_rect: environment.snap(rect),
-                clip_rect: inherited_clip.rect(),
-                visible: node_visible,
-            };
-            layout_entries.push(Ordered::new(order.clone(), layout_fact));
-
-            if !node_visible {
-                continue;
-            }
-            if let Some(visual) = &node.node.visual {
-                let brush = visual
-                    .background
-                    .as_ref()
-                    .map(|background| background.resolve(theme));
-                let border = visual.border.as_ref().map(|border| {
-                    let crate::UiResolvedBrush::Solid(color) = border.brush().resolve(theme) else {
-                        unreachable!("image brushes are not admitted for borders")
-                    };
-                    UiResolvedBorder::new(border.width(), color)
-                });
-                if brush.is_some() || border.is_some() {
-                    paint_entries.push(Ordered::new(
-                        order.clone(),
-                        UiPaintPrimitive::Rect {
-                            key: node.key.clone(),
-                            rect,
-                            physical_rect: environment.snap(rect),
-                            clip_rect: inherited_clip.rect(),
-                            brush,
-                            border,
-                            radii: visual.radii,
-                        },
-                    ));
-                }
-            }
-            if let Some(text) = &node.node.text {
-                let wrap_width = (text.overflow == UiTextOverflow::Wrap)
-                    .then_some(rect.size().width())
-                    .filter(|width| *width > 0.0);
-                let request = text.request(wrap_width, scale_factor).map_err(|error| {
-                    UiRootDiagnostic::TextRejected {
-                        message: error.to_string(),
-                    }
-                })?;
-                let text_layout = self.text_engine.layout(&request).map_err(|error| {
-                    UiRootDiagnostic::TextRejected {
-                        message: error.to_string(),
-                    }
-                })?;
-                let text_clip = if text.overflow == UiTextOverflow::Clip {
-                    inherited_clip.intersect(rect).rect()
-                } else {
-                    inherited_clip.rect()
-                };
-                paint_entries.push(Ordered::new(
-                    PaintOrder::for_node(root.layer, root_sequence, node, 1),
-                    UiPaintPrimitive::Text {
-                        key: node.key.clone(),
-                        rect,
-                        physical_rect: environment.snap(rect),
-                        clip_rect: text_clip,
-                        color: match text.brush.resolve(theme) {
-                            crate::UiResolvedBrush::Solid(color) => color,
-                            crate::UiResolvedBrush::Image { .. } => {
-                                return Err(UiRootDiagnostic::InvalidStyle {
-                                    message: "text brushes cannot reference images".to_owned(),
-                                });
-                            }
-                        },
-                        layout: Arc::new(text_layout),
-                    },
-                ));
-            }
-            if node.node.interaction.hit_testable {
-                hit_entries.push(Ordered::new(
-                    PaintOrder::for_node(root.layer, root_sequence, node, u8::MAX),
-                    UiHitRegion {
-                        key: node
-                            .key
-                            .clone()
-                            .expect("required interaction key is validated"),
-                        rect,
-                        clip_rect: inherited_clip.rect(),
-                        enabled: node.node.interaction.enabled,
-                    },
-                ));
-            }
-            if node.node.interaction.focusable {
-                focus_entries.push(Ordered::new(
-                    PaintOrder::for_node(root.layer, root_sequence, node, u8::MAX),
-                    UiFocusFact {
-                        key: node.key.clone().expect("required focus key is validated"),
-                        rect,
-                        enabled: node.node.interaction.enabled,
-                    },
-                ));
-            }
-            if let Some(semantics) = &node.node.semantics {
-                semantic_entries.push(Ordered::new(
-                    PaintOrder::for_node(root.layer, root_sequence, node, u8::MAX),
-                    UiSemanticNode {
-                        key: node
-                            .key
-                            .clone()
-                            .expect("required semantic key is validated"),
-                        parent: node.semantic_parent.clone(),
-                        role: semantics.role,
-                        name: semantics.name.clone(),
-                        value: semantics.value.clone(),
-                        enabled: semantic_enabled(node.node),
-                        selected: semantics.selected,
-                        expanded: semantics.expanded,
-                        actions: semantics.actions.clone(),
-                        rect,
-                    },
-                ));
-            } else if let (Some(text), Some(key)) = (&node.node.text, &node.key) {
-                semantic_entries.push(Ordered::new(
-                    PaintOrder::for_node(root.layer, root_sequence, node, u8::MAX),
-                    UiSemanticNode {
-                        key: key.clone(),
-                        parent: node.semantic_parent.clone(),
-                        role: UiSemanticRole::Text,
-                        name: text
-                            .semantic_text
-                            .clone()
-                            .unwrap_or_else(|| text.content.clone()),
-                        value: None,
-                        enabled: true,
-                        selected: None,
-                        expanded: None,
-                        actions: Vec::new(),
-                        rect,
-                    },
-                ));
-            }
-        }
-
-        if paint_entries.len() > remaining_paint {
-            return Err(UiRootDiagnostic::PaintLimitExceeded {
-                maximum: remaining_paint,
+    fn preflight_snapshot(
+        &self,
+        snapshot: &UiAuthoringSnapshot,
+    ) -> Result<BTreeSet<UiRootKey>, UiCompileError> {
+        if snapshot.envelopes.len() > self.limits.max_roots {
+            return Err(UiCompileError::SnapshotRootLimitExceeded {
+                actual: snapshot.envelopes.len(),
+                maximum: self.limits.max_roots,
             });
         }
-        Ok(CompiledRoot {
-            layouts: layout_entries,
-            paint: paint_entries,
-            hits: hit_entries,
-            focus: focus_entries,
-            semantics: semantic_entries,
-        })
-    }
-
-    fn store_last_good(
-        &mut self,
-        key: UiRootKey,
-        environment: UiEnvironment,
-        root: Arc<CompiledRoot>,
-    ) {
-        if let Some(entry) = self.cache.iter_mut().find(|entry| entry.key == key) {
-            entry.environment = environment;
-            entry.root = root;
-            entry.last_used = self.cache_clock;
-            return;
+        let mut authored_keys = BTreeSet::new();
+        let mut ready_indices = BTreeSet::new();
+        let mut node_count = 0usize;
+        for (expected_ordinal, envelope) in snapshot.envelopes.iter().enumerate() {
+            if envelope.ordinal() != expected_ordinal {
+                return Err(UiCompileError::SnapshotOrderInvalid {
+                    expected: expected_ordinal,
+                    actual: envelope.ordinal(),
+                });
+            }
+            if !authored_keys.insert(envelope.key().clone()) {
+                return Err(UiCompileError::SnapshotDuplicateRootKey {
+                    key: envelope.key().clone(),
+                });
+            }
+            if let crate::authoring::UiRootEnvelopeBody::Ready(index) = envelope.body() {
+                let Some(root) = snapshot.roots.get(*index) else {
+                    return Err(UiCompileError::SnapshotEnvelopeMismatch {
+                        ordinal: expected_ordinal,
+                    });
+                };
+                if !ready_indices.insert(*index)
+                    || root.key() != envelope.key()
+                    || root.layer() != envelope.layer()
+                {
+                    return Err(UiCompileError::SnapshotEnvelopeMismatch {
+                        ordinal: expected_ordinal,
+                    });
+                }
+            }
+            if envelope.key().encoded_len() > self.limits.max_key_bytes {
+                return Err(UiCompileError::SnapshotKeyLimitExceeded {
+                    actual: envelope.key().encoded_len(),
+                    maximum: self.limits.max_key_bytes,
+                });
+            }
+            node_count = node_count.saturating_add(envelope.node_count());
+            if node_count > self.limits.max_nodes {
+                return Err(UiCompileError::SnapshotNodeLimitExceeded {
+                    actual: node_count,
+                    maximum: self.limits.max_nodes,
+                });
+            }
         }
-        self.cache.push(CachedRoot {
-            key,
-            environment,
-            root,
-            last_used: self.cache_clock,
-        });
-        if self.cache.len() > self.limits.max_cache_roots
-            && let Some((oldest, _)) = self
-                .cache
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, entry)| (entry.last_used, entry.key.clone()))
-        {
-            self.cache.remove(oldest);
+        if ready_indices.len() != snapshot.roots.len() {
+            return Err(UiCompileError::SnapshotEnvelopeMismatch {
+                ordinal: snapshot.envelopes.len(),
+            });
         }
-    }
-
-    fn compatible_last_good(
-        &mut self,
-        key: &UiRootKey,
-        environment: UiEnvironment,
-    ) -> Option<Arc<CompiledRoot>> {
-        let entry = self
-            .cache
-            .iter_mut()
-            .find(|entry| &entry.key == key && entry.environment == environment)?;
-        entry.last_used = self.cache_clock;
-        Some(Arc::clone(&entry.root))
+        Ok(authored_keys)
     }
 }
 
-fn flatten_root<'a>(
-    root: &'a UiRoot,
+fn account_visual(
+    node_count: &mut usize,
+    shaped_glyphs: &mut usize,
+    paint_count: &mut usize,
+    visual: &RootVisual,
     limits: UiLimits,
-) -> Result<Vec<FlatNode<'a>>, UiRootDiagnostic> {
-    let root_key =
-        UiKey::root(root.key.clone()).map_err(|error| UiRootDiagnostic::InvalidStyle {
-            message: error.to_string(),
-        })?;
-    let mut nodes = Vec::new();
-    let mut keys = BTreeSet::new();
-    visit_node(
-        &root.node,
-        &root.key,
-        Some(root_key),
-        None,
-        1,
-        Vec::new(),
-        None,
-        None,
-        &mut nodes,
-        &mut keys,
-        limits,
-    )?;
-    Ok(nodes)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn visit_node<'a>(
-    node: &'a UiNode,
-    root_key: &UiRootKey,
-    forced_key: Option<UiKey>,
-    parent: Option<usize>,
-    depth: usize,
-    stacking_ancestors: Vec<(i32, usize)>,
-    semantic_parent: Option<UiKey>,
-    keyed_parent: Option<UiKey>,
-    nodes: &mut Vec<FlatNode<'a>>,
-    keys: &mut BTreeSet<UiKey>,
-    limits: UiLimits,
-) -> Result<usize, UiRootDiagnostic> {
-    if nodes.len() == limits.max_nodes {
-        return Err(UiRootDiagnostic::NodeLimitExceeded {
+    max_shaped_glyphs: usize,
+) -> Result<(), UiCompileError> {
+    *node_count = node_count.saturating_add(visual.node_count());
+    if *node_count > limits.max_nodes {
+        return Err(UiCompileError::CandidateNodeLimitExceeded {
+            actual: *node_count,
             maximum: limits.max_nodes,
         });
     }
-    if depth > limits.max_depth {
-        return Err(UiRootDiagnostic::LayoutRejected {
-            message: format!("root depth exceeds {}", limits.max_depth),
+    *shaped_glyphs = shaped_glyphs.saturating_add(visual.shaped_glyphs);
+    if *shaped_glyphs > max_shaped_glyphs {
+        return Err(UiCompileError::ShapedGlyphLimitExceeded {
+            actual: *shaped_glyphs,
+            maximum: max_shaped_glyphs,
         });
     }
-    node.style
-        .validate()
-        .map_err(|error| UiRootDiagnostic::InvalidStyle {
-            message: error.to_string(),
-        })?;
-    if let Some(visual) = &node.visual {
-        visual
-            .validate()
-            .map_err(|error| UiRootDiagnostic::InvalidStyle {
-                message: error.to_string(),
-            })?;
-    }
-    if let Some(text) = &node.text {
-        text.validate()
-            .map_err(|error| UiRootDiagnostic::InvalidStyle {
-                message: error.to_string(),
-            })?;
-    }
-    let key = match forced_key {
-        Some(key) => Some(key),
-        None => node
-            .key
-            .as_ref()
-            .map(|local| UiKey::scoped(root_key.clone(), local.clone()))
-            .transpose()
-            .map_err(|error| UiRootDiagnostic::InvalidStyle {
-                message: error.to_string(),
-            })?,
-    };
-    if key
-        .as_ref()
-        .is_some_and(|key| key.encoded_len() > limits.max_key_bytes)
-    {
-        return Err(UiRootDiagnostic::InvalidStyle {
-            message: format!("key exceeds {} encoded bytes", limits.max_key_bytes),
+    *paint_count = paint_count.saturating_add(visual.paint_count());
+    if *paint_count > limits.max_paint_primitives {
+        return Err(UiCompileError::LogicalPaintLimitExceeded {
+            actual: *paint_count,
+            maximum: limits.max_paint_primitives,
         });
     }
-    let requires_key = node.interaction.hit_testable
-        || node.interaction.focusable
-        || node.semantics.is_some()
-        || node.text.is_some();
-    if requires_key && key.is_none() {
-        return Err(UiRootDiagnostic::MissingRequiredKey {
-            structural_index: nodes.len(),
-        });
-    }
-    if let Some(key) = &key
-        && !keys.insert(key.clone())
-    {
-        return Err(UiRootDiagnostic::DuplicateNodeKey { key: key.clone() });
-    }
-
-    let index = nodes.len();
-    let establishes_semantics = node.semantics.is_some() || (node.text.is_some() && key.is_some());
-    let child_semantic_parent = if establishes_semantics {
-        key.clone()
-    } else {
-        semantic_parent.clone()
-    };
-    let child_keyed_parent = key.clone().or_else(|| keyed_parent.clone());
-    let mut child_stacking = stacking_ancestors.clone();
-    if node.style.stacking_context {
-        child_stacking.push((node.style.z_index, index));
-    }
-    nodes.push(FlatNode {
-        node,
-        parent,
-        children: Vec::new(),
-        key,
-        structural_index: index,
-        stacking_ancestors,
-        semantic_parent,
-        keyed_parent,
-    });
-    for child in &node.children {
-        let child_index = visit_node(
-            child,
-            root_key,
-            None,
-            Some(index),
-            depth + 1,
-            child_stacking.clone(),
-            child_semantic_parent.clone(),
-            child_keyed_parent.clone(),
-            nodes,
-            keys,
-            limits,
-        )?;
-        nodes[index].children.push(child_index);
-    }
-    Ok(index)
+    Ok(())
 }
 
-fn taffy_style(style: UiStyle, is_root: bool, environment: UiEnvironment) -> TaffyStyle {
-    let width = if is_root && style.width == UiDimension::Auto {
-        Dimension::length(environment.logical_size().width())
-    } else {
-        dimension(style.width)
-    };
-    let height = if is_root && style.height == UiDimension::Auto {
-        Dimension::length(environment.logical_size().height())
-    } else {
-        dimension(style.height)
-    };
-    let overflow = match style.overflow {
-        UiOverflow::Visible => Overflow::Visible,
-        UiOverflow::Clip => Overflow::Clip,
-    };
-    TaffyStyle {
-        display: if style.visible {
-            Display::Flex
-        } else {
-            Display::None
-        },
-        position: match style.position_mode {
-            UiPositionMode::Flow => Position::Relative,
-            UiPositionMode::Absolute => Position::Absolute,
-        },
-        inset: TaffyRect {
-            left: inset(style.left),
-            right: LengthPercentageAuto::auto(),
-            top: inset(style.top),
-            bottom: LengthPercentageAuto::auto(),
-        },
-        size: TaffySize { width, height },
-        padding: TaffyRect {
-            left: LengthPercentage::length(style.padding.left()),
-            right: LengthPercentage::length(style.padding.right()),
-            top: LengthPercentage::length(style.padding.top()),
-            bottom: LengthPercentage::length(style.padding.bottom()),
-        },
-        gap: TaffySize {
-            width: LengthPercentage::length(style.gap),
-            height: LengthPercentage::length(style.gap),
-        },
-        align_items: Some(match style.align_items {
-            UiAlign::Start => AlignItems::Start,
-            UiAlign::Center => AlignItems::Center,
-            UiAlign::End => AlignItems::End,
-            UiAlign::Stretch => AlignItems::Stretch,
-        }),
-        justify_content: Some(match style.justify_content {
-            UiJustify::Start => JustifyContent::Start,
-            UiJustify::Center => JustifyContent::Center,
-            UiJustify::End => JustifyContent::End,
-            UiJustify::SpaceBetween => JustifyContent::SpaceBetween,
-        }),
-        flex_direction: match style.flex_direction {
-            UiFlexDirection::Row => FlexDirection::Row,
-            UiFlexDirection::Column => FlexDirection::Column,
-        },
-        flex_grow: style.flex_grow,
-        flex_shrink: style.flex_shrink,
-        overflow: TaffyPoint {
-            x: overflow,
-            y: overflow,
-        },
-        ..Default::default()
+fn bind_visual(
+    layouts: &mut Vec<FrameOrdered<crate::UiLayoutFact>>,
+    paint: &mut Vec<FrameOrdered<UiPaintPrimitive>>,
+    visual: &RootVisual,
+    layer: UiLayer,
+    root_ordinal: usize,
+) {
+    for entry in &visual.layouts {
+        layouts.push(FrameOrdered::new(
+            FrameOrder::bind(layer, root_ordinal, &entry.order),
+            entry.value.bind(layer),
+        ));
+    }
+    for entry in &visual.paint {
+        paint.push(FrameOrdered::new(
+            FrameOrder::bind(layer, root_ordinal, &entry.order),
+            entry.value.clone(),
+        ));
     }
 }
 
-fn dimension(value: UiDimension) -> Dimension {
-    match value {
-        UiDimension::Auto => Dimension::auto(),
-        UiDimension::Px(value) => Dimension::length(value),
-        UiDimension::Percent(value) => Dimension::percent(value),
+fn bind_interactive(
+    hits: &mut Vec<FrameOrdered<UiHitRegion>>,
+    focus: &mut Vec<FrameOrdered<UiFocusFact>>,
+    semantics: &mut Vec<FrameOrdered<UiSemanticNode>>,
+    compiled: &CompiledRoot,
+    layer: UiLayer,
+    root_ordinal: usize,
+) {
+    for entry in &compiled.hits {
+        hits.push(FrameOrdered::new(
+            FrameOrder::bind(layer, root_ordinal, &entry.order),
+            entry.value.clone(),
+        ));
     }
-}
-
-fn inset(value: UiDimension) -> LengthPercentageAuto {
-    match value {
-        UiDimension::Auto => LengthPercentageAuto::auto(),
-        UiDimension::Px(value) => LengthPercentageAuto::length(value),
-        UiDimension::Percent(value) => LengthPercentageAuto::percent(value),
+    for entry in &compiled.focus {
+        focus.push(FrameOrdered::new(
+            FrameOrder::bind(layer, root_ordinal, &entry.order),
+            entry.value.clone(),
+        ));
     }
-}
-
-fn definite(value: AvailableSpace) -> Option<f32> {
-    match value {
-        AvailableSpace::Definite(value) if value.is_finite() && value > 0.0 => Some(value),
-        _ => None,
-    }
-}
-
-fn semantic_enabled(node: &UiNode) -> bool {
-    if node.interaction.hit_testable || node.interaction.focusable {
-        node.interaction.enabled
-    } else {
-        true
+    for entry in &compiled.semantics {
+        semantics.push(FrameOrdered::new(
+            FrameOrder::bind(layer, root_ordinal, &entry.order),
+            entry.value.clone(),
+        ));
     }
 }
 
@@ -756,95 +413,21 @@ fn bounded_diagnostics(outcomes: &[UiRootOutcome], maximum: usize) -> Vec<UiDiag
     diagnostics
 }
 
-#[derive(Clone, Debug)]
-struct CachedRoot {
+#[derive(Debug)]
+enum CandidateBody {
+    Published(CompiledRoot),
+    Retained(Arc<RootVisual>),
+    Absent,
+}
+
+#[derive(Debug)]
+struct CandidateRoot {
     key: UiRootKey,
-    environment: UiEnvironment,
-    root: Arc<CompiledRoot>,
-    last_used: u64,
-}
-
-#[derive(Clone, Debug)]
-struct CompiledRoot {
-    layouts: Vec<Ordered<UiLayoutFact>>,
-    paint: Vec<Ordered<UiPaintPrimitive>>,
-    hits: Vec<Ordered<UiHitRegion>>,
-    focus: Vec<Ordered<UiFocusFact>>,
-    semantics: Vec<Ordered<UiSemanticNode>>,
-}
-
-#[derive(Clone, Debug)]
-struct FlatNode<'a> {
-    node: &'a UiNode,
-    parent: Option<usize>,
-    children: Vec<usize>,
-    key: Option<UiKey>,
-    structural_index: usize,
-    stacking_ancestors: Vec<(i32, usize)>,
-    semantic_parent: Option<UiKey>,
-    keyed_parent: Option<UiKey>,
-}
-
-#[derive(Clone, Copy, Debug)]
-enum ClipState {
-    Unclipped,
-    Rect(UiRect),
-    Empty,
-}
-
-impl ClipState {
-    fn intersect(self, rect: UiRect) -> Self {
-        match self {
-            Self::Unclipped => Self::Rect(rect),
-            Self::Rect(clip) => clip.intersect(rect).map_or(Self::Empty, Self::Rect),
-            Self::Empty => Self::Empty,
-        }
-    }
-
-    const fn rect(self) -> Option<UiRect> {
-        match self {
-            Self::Rect(rect) => Some(rect),
-            Self::Unclipped | Self::Empty => None,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct PaintOrder {
     layer: UiLayer,
-    root_sequence: usize,
-    stacking_path: Vec<(i32, usize)>,
-    fragment_index: u8,
-}
-
-impl PaintOrder {
-    fn for_node(
-        layer: UiLayer,
-        root_sequence: usize,
-        node: &FlatNode<'_>,
-        fragment_index: u8,
-    ) -> Self {
-        let mut stacking_path = node.stacking_ancestors.clone();
-        stacking_path.push((node.node.style.z_index, node.structural_index));
-        Self {
-            layer,
-            root_sequence,
-            stacking_path,
-            fragment_index,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct Ordered<T> {
-    order: PaintOrder,
-    value: T,
-}
-
-impl<T> Ordered<T> {
-    const fn new(order: PaintOrder, value: T) -> Self {
-        Self { order, value }
-    }
+    ordinal: usize,
+    status: UiRootStatus,
+    diagnostic: Option<UiRootDiagnostic>,
+    body: CandidateBody,
 }
 
 #[derive(Debug, Error)]
@@ -857,6 +440,24 @@ pub enum UiCompileError {
     ThemeRevisionMismatch { environment: u64, theme: u64 },
     #[error("UI snapshot has {actual} roots; compiler maximum is {maximum}")]
     SnapshotRootLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot has {actual} nodes; compiler maximum is {maximum}")]
+    SnapshotNodeLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot root key has {actual} encoded bytes; compiler maximum is {maximum}")]
+    SnapshotKeyLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot contains duplicate root key {key:?}")]
+    SnapshotDuplicateRootKey { key: UiRootKey },
+    #[error("UI snapshot root ordinal is {actual}; expected {expected}")]
+    SnapshotOrderInvalid { expected: usize, actual: usize },
+    #[error("UI snapshot root envelope at ordinal {ordinal} does not match its ready body")]
+    SnapshotEnvelopeMismatch { ordinal: usize },
+    #[error("UI candidate has {actual} nodes; compiler maximum is {maximum}")]
+    CandidateNodeLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate has {actual} shaped glyphs; maximum is {maximum}")]
+    ShapedGlyphLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI candidate has {actual} logical paint primitives; maximum is {maximum}")]
+    LogicalPaintLimitExceeded { actual: usize, maximum: usize },
+    #[error("modal root {key:?} has no compatible retained visual or barrier")]
+    ModalFallbackUnavailable { key: UiRootKey },
     #[error("UI frame revision is exhausted")]
     FrameRevisionExhausted,
     #[error("UI cache revision is exhausted")]

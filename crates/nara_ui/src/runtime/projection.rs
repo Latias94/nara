@@ -1,11 +1,11 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use nara_ecs::{Entity, World};
 use nara_hierarchy::Children;
 use nara_scene::{PrefabProjectionPath, SceneEntitySource};
 use nara_ui_kernel::{
     UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiKey, UiKeyError, UiLocalKey, UiOpaqueId,
-    UiPersistentIdentity, UiProjectionPath, UiProjectionStep, UiRootKey,
+    UiPersistentIdentity, UiProjectionPath, UiProjectionStep, UiRootDiagnostic, UiRootKey,
 };
 use nara_ui_widgets::{
     UiButton as KernelButton, UiButtonState, UiButtonVisualState, UiWidgetError,
@@ -37,6 +37,8 @@ enum ProjectionError {
     ButtonVisualMissing,
     #[error("a controlled UI button conflicts with separately authored text or semantics")]
     ButtonAuthoringConflict,
+    #[error("a controlled UI button cannot be authored on the UiRoot entity")]
+    RootButtonUnsupported,
 }
 
 /// One surface-specific authored snapshot and the behavior descriptions compiled with it.
@@ -58,34 +60,113 @@ pub(super) fn project_authoring(
     reducer_states: &BTreeMap<UiKey, UiButtonState>,
     diagnostics: &mut Vec<UiAdapterDiagnostic>,
 ) -> Option<UiProjectedAuthoring> {
-    let mut builder = UiAuthoringSnapshotBuilder::new(source_revision);
-    let mut buttons = BTreeMap::new();
-    let mut projected_nodes = 0usize;
+    let mut roots = Vec::new();
+    let mut root_keys = BTreeSet::new();
     for entity in ordered_entities.iter().copied() {
         let Some(root) = world.get::<UiRoot>(entity).copied() else {
             continue;
         };
-        let remaining_nodes = MAX_PROJECTED_NODES.saturating_sub(projected_nodes);
+        let root_key = match project_root_key(world, entity) {
+            Ok(Some(key)) => key,
+            Ok(None) => {
+                push_diagnostic(
+                    diagnostics,
+                    "root-key-missing",
+                    "A runtime UiRoot requires UiRuntimeKey; a persistent UiRoot requires SceneEntitySource",
+                );
+                return None;
+            }
+            Err(error) => {
+                push_diagnostic(diagnostics, "root-key-rejected", &error.to_string());
+                return None;
+            }
+        };
+        if !root_keys.insert(root_key.clone()) {
+            push_diagnostic(
+                diagnostics,
+                "root-key-duplicate",
+                "Every projected UiRoot must have a unique stable root key",
+            );
+            return None;
+        }
+        roots.push((entity, root, root_key));
+    }
+
+    let mut preflighted_roots = Vec::with_capacity(roots.len());
+    let mut candidate_nodes = 0usize;
+    for (entity, root, root_key) in roots {
+        let remaining_nodes = MAX_PROJECTED_NODES.saturating_sub(candidate_nodes);
+        let root_nodes = match count_projected_root_nodes(world, entity, remaining_nodes) {
+            Ok(count) => count,
+            Err(error) => {
+                push_diagnostic(
+                    diagnostics,
+                    "snapshot-capacity-rejected",
+                    &error.to_string(),
+                );
+                return None;
+            }
+        };
+        candidate_nodes = candidate_nodes.saturating_add(root_nodes);
+        preflighted_roots.push((entity, root, root_key, root_nodes));
+    }
+
+    let mut builder = UiAuthoringSnapshotBuilder::new(source_revision);
+    let mut buttons = BTreeMap::new();
+    for (entity, root, root_key, source_node_count) in preflighted_roots {
+        let Some(node) = world.get::<UiNode>(entity).copied() else {
+            let message = "Every UiRoot entity must also carry UiNode authoring data";
+            push_diagnostic(diagnostics, "root-node-missing", message);
+            builder = nara_ui_kernel::__private::with_rejected_root(
+                builder,
+                root_key,
+                root.layer(),
+                0,
+                UiRootDiagnostic::AuthoringRejected {
+                    message: message.to_owned(),
+                },
+            );
+            continue;
+        };
         let mut root_buttons = BTreeMap::new();
         let mut root_nodes = 0usize;
         match project_root(
             world,
             entity,
             root,
+            node,
+            &root_key,
             reducer_states,
             &mut root_buttons,
             &mut root_nodes,
-            remaining_nodes,
+            source_node_count,
             diagnostics,
         ) {
-            Ok(Some(root)) => {
-                projected_nodes += root_nodes;
+            Ok(root) => {
+                if root_nodes != source_node_count {
+                    push_diagnostic(
+                        diagnostics,
+                        "root-node-count-mismatch",
+                        "UI root projection did not consume its preflighted node count",
+                    );
+                    return None;
+                }
                 buttons.extend(root_buttons);
                 builder = builder.with_root(root);
             }
-            Ok(None) => {}
             Err(error) => {
-                push_diagnostic(diagnostics, "root-projection-rejected", &error.to_string())
+                let message = error.to_string();
+                push_diagnostic(diagnostics, "root-projection-rejected", &message);
+                if matches!(error, ProjectionError::NodeLimitExceeded { .. }) {
+                    return None;
+                }
+                builder = nara_ui_kernel::__private::with_rejected_root(
+                    builder,
+                    root_key,
+                    root.layer(),
+                    source_node_count,
+                    UiRootDiagnostic::AuthoringRejected { message },
+                );
             }
         }
     }
@@ -97,6 +178,28 @@ pub(super) fn project_authoring(
             None
         }
     }
+}
+
+fn count_projected_root_nodes(
+    world: &World,
+    root: Entity,
+    maximum_nodes: usize,
+) -> Result<usize, ProjectionError> {
+    let mut projected_nodes = 0usize;
+    let mut pending = vec![root];
+    while let Some(entity) = pending.pop() {
+        if entity != root && world.get::<UiRoot>(entity).is_some() {
+            continue;
+        }
+        if world.get::<UiNode>(entity).is_none() {
+            continue;
+        }
+        admit_projected_node(&mut projected_nodes, maximum_nodes)?;
+        if let Some(children) = world.get::<Children>(entity) {
+            pending.extend(children.iter().rev());
+        }
+    }
+    Ok(projected_nodes)
 }
 
 pub(super) fn select_theme(
@@ -130,28 +233,14 @@ fn project_root(
     world: &World,
     entity: Entity,
     root: UiRoot,
+    node: UiNode,
+    root_key: &UiRootKey,
     reducer_states: &BTreeMap<UiKey, UiButtonState>,
     buttons: &mut BTreeMap<UiKey, KernelButton>,
     projected_nodes: &mut usize,
     maximum_nodes: usize,
     diagnostics: &mut Vec<UiAdapterDiagnostic>,
-) -> Result<Option<nara_ui_kernel::UiRoot>, ProjectionError> {
-    let Some(node) = world.get::<UiNode>(entity).copied() else {
-        push_diagnostic(
-            diagnostics,
-            "root-node-missing",
-            "Every UiRoot entity must also carry UiNode authoring data",
-        );
-        return Ok(None);
-    };
-    let Some(root_key) = project_root_key(world, entity)? else {
-        push_diagnostic(
-            diagnostics,
-            "root-key-missing",
-            "A runtime UiRoot requires UiRuntimeKey; a persistent UiRoot requires SceneEntitySource",
-        );
-        return Ok(None);
-    };
+) -> Result<nara_ui_kernel::UiRoot, ProjectionError> {
     admit_projected_node(projected_nodes, maximum_nodes)?;
 
     if world.get::<UiButton>(entity).is_some() {
@@ -160,7 +249,7 @@ fn project_root(
             "button-root-rejected",
             "A controlled UiButton must be a root-scoped descendant, not the UiRoot entity",
         );
-        return Ok(None);
+        return Err(ProjectionError::RootButtonUnsupported);
     }
     let mut projected = nara_ui_kernel::UiRoot::new(root_key.clone(), root.layer(), node.style());
     if let Some(visual) = world.get::<UiVisual>(entity) {
@@ -175,7 +264,7 @@ fn project_root(
     let children = project_children(
         world,
         entity,
-        &root_key,
+        root_key,
         reducer_states,
         buttons,
         projected_nodes,
@@ -183,7 +272,7 @@ fn project_root(
         diagnostics,
         1,
     )?;
-    Ok(Some(projected.with_children(children)))
+    Ok(projected.with_children(children))
 }
 
 #[allow(clippy::too_many_arguments)]

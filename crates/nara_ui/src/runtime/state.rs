@@ -92,9 +92,14 @@ impl UiSurfaceRuntime {
 
     pub(super) fn replace_descriptor(&mut self, descriptor: UiSurfaceDescriptor) {
         if self.descriptor != descriptor {
-            self.candidate = None;
+            self.discard_candidate();
             self.descriptor = descriptor;
         }
+    }
+
+    /// Retires work that has not acquired presentation authority.
+    pub(super) fn discard_candidate(&mut self) {
+        self.candidate = None;
     }
 
     pub(crate) fn reducer_states(&self) -> &BTreeMap<UiKey, UiButtonState> {
@@ -261,7 +266,7 @@ impl UiSurfaceRuntime {
     ) {
         self.interaction = interaction;
         self.reducers = reducers;
-        self.candidate = None;
+        self.discard_candidate();
     }
 
     pub(super) fn semantic_snapshot(
@@ -454,6 +459,12 @@ impl UiRuntimeState {
             .get_mut(&descriptor.surface_id())
             .expect("validated UI surface remains installed")
             .replace_descriptor(descriptor);
+    }
+
+    pub(super) fn discard_all_candidates(&mut self) {
+        for surface in self.surfaces.values_mut() {
+            surface.discard_candidate();
+        }
     }
 
     pub(super) fn retire_surface(&mut self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {

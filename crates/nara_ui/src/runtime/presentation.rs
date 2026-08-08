@@ -3,8 +3,8 @@ use std::{collections::VecDeque, sync::Arc};
 use super::candidate::{UiBehaviorSnapshot, UiCompiledCandidate};
 use super::surface::UiSurfaceDescriptor;
 use nara_ui_kernel::{
-    UiFrameJournal, UiJournalError, UiKey, UiLayer, UiLimits, UiPresentationReceipt, UiRootStatus,
-    UiRouteStamp, UiRouteTarget,
+    UiFrameJournal, UiJournalError, UiKey, UiLimits, UiPresentationReceipt, UiRouteStamp,
+    UiRouteTarget,
 };
 
 #[derive(Clone, Debug)]
@@ -130,11 +130,5 @@ impl UiPresentedHistory {
 }
 
 fn frame_blocks_unhandled_input(frame: &nara_ui_kernel::UiFrame) -> bool {
-    frame.layouts().iter().rev().any(|layout| {
-        layout.layer() == UiLayer::Modal
-            && layout.visible()
-            && frame.root_outcomes().iter().any(|outcome| {
-                outcome.key() == layout.root_key() && outcome.status() == UiRootStatus::Published
-            })
-    })
+    nara_ui_kernel::__private::frame_blocks_unhandled_input(frame)
 }

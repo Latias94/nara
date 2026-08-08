@@ -412,11 +412,11 @@ impl UiSemanticNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiRootDiagnostic {
-    DuplicateRootKey,
     DuplicateNodeKey { key: UiKey },
     MissingRequiredKey { structural_index: usize },
-    NodeLimitExceeded { maximum: usize },
-    PaintLimitExceeded { maximum: usize },
+    DepthLimitExceeded { maximum: usize },
+    AuthoringRejected { message: String },
+    KeyRejected { message: String },
     InvalidStyle { message: String },
     TextRejected { message: String },
     LayoutRejected { message: String },
@@ -432,6 +432,7 @@ pub enum UiRootStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiRootOutcome {
     pub(crate) key: UiRootKey,
+    pub(crate) layer: UiLayer,
     pub(crate) status: UiRootStatus,
     pub(crate) diagnostic: Option<UiRootDiagnostic>,
 }
@@ -440,6 +441,11 @@ impl UiRootOutcome {
     #[must_use]
     pub const fn key(&self) -> &UiRootKey {
         &self.key
+    }
+
+    #[must_use]
+    pub const fn layer(&self) -> UiLayer {
+        self.layer
     }
 
     #[must_use]
@@ -534,6 +540,26 @@ impl UiFrame {
     pub fn hit_test(&self, point: UiPoint) -> Option<&UiHitRegion> {
         self.hits.iter().find(|region| region.contains(point))
     }
+
+    pub(crate) fn blocks_unhandled_input(&self) -> bool {
+        self.active_modal_root().is_some()
+    }
+
+    pub(crate) fn active_modal_root(&self) -> Option<&UiRootKey> {
+        self.root_outcomes
+            .iter()
+            .rev()
+            .find(|outcome| {
+                outcome.layer == UiLayer::Modal && outcome.status != UiRootStatus::Absent
+            })
+            .map(|outcome| &outcome.key)
+    }
+}
+
+/// Returns whether a first-party adapter must stop unhandled input at this frame's modal barrier.
+#[doc(hidden)]
+pub fn frame_blocks_unhandled_input(frame: &UiFrame) -> bool {
+    frame.blocks_unhandled_input()
 }
 
 /// Evidence that the exact immutable frame packet was accepted and submitted by a presenter.

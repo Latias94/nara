@@ -17,6 +17,8 @@ mod style;
 /// First-party cross-crate implementation seams that are not product API.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::authoring::with_rejected_root;
+    pub use crate::frame::frame_blocks_unhandled_input;
     pub use crate::interaction::UiCandidateReconciliation;
 }
 

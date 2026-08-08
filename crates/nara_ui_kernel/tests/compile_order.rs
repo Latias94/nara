@@ -2,7 +2,7 @@ use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiCompiler, UiDimension, UiEdges, UiEnvironment, UiFlexDirection,
     UiImageId, UiInteraction, UiLayer, UiLocalKey, UiNode, UiOverflow, UiPoint, UiResolvedBrush,
-    UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+    UiRoot, UiRootKey, UiRootStatus, UiStyle, UiSurfaceId, UiTheme, UiVisual,
 };
 
 fn environment(scale_factor: f32) -> UiEnvironment {
@@ -43,6 +43,12 @@ fn hit_root(name: &str, color: f32) -> UiRoot {
     .with_interaction(UiInteraction::hit_target())
 }
 
+fn invalid_root(name: &str, layer: UiLayer) -> UiRoot {
+    let duplicate =
+        || UiNode::new(UiStyle::absolute(0.0, 0.0, 20.0, 20.0)).with_key(key("duplicate"));
+    UiRoot::new(root_key(name), layer, UiStyle::fill()).with_children([duplicate(), duplicate()])
+}
+
 #[test]
 fn same_layer_root_sequence_is_explicit_and_not_key_sorted() {
     let snapshot = UiAuthoringSnapshotBuilder::new(1)
@@ -70,6 +76,87 @@ fn same_layer_root_sequence_is_explicit_and_not_key_sorted() {
             .key()
             .root_key(),
         &root_key("a-second")
+    );
+}
+
+#[test]
+fn retained_visual_rebinds_to_the_current_root_ordinal() {
+    let mut compiler = compiler();
+    let baseline = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(hit_root("b", 0.1))
+        .with_root(hit_root("c", 0.2))
+        .with_root(hit_root("a", 0.3))
+        .build()
+        .unwrap();
+    compiler
+        .compile(&baseline, environment(1.0), UiTheme::default())
+        .unwrap();
+
+    let reordered = UiAuthoringSnapshotBuilder::new(2)
+        .with_root(invalid_root("a", UiLayer::Base))
+        .with_root(hit_root("b", 0.1))
+        .with_root(hit_root("c", 0.2))
+        .build()
+        .unwrap();
+    let frame = compiler
+        .compile(&reordered, environment(1.0), UiTheme::default())
+        .unwrap();
+    let paint_roots = frame
+        .paint()
+        .iter()
+        .map(|primitive| primitive.key().unwrap().root_key())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        frame.root_outcomes()[0].status(),
+        UiRootStatus::RetainedVisual
+    );
+    assert_eq!(
+        paint_roots,
+        vec![&root_key("a"), &root_key("b"), &root_key("c")]
+    );
+    assert!(
+        frame
+            .hit_regions()
+            .iter()
+            .all(|region| region.key().root_key() != &root_key("a"))
+    );
+}
+
+#[test]
+fn retained_visual_rebinds_to_the_current_layer_and_modal_barrier() {
+    let mut compiler = compiler();
+    let baseline = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(hit_root("a", 0.1))
+        .with_root(hit_root("b", 0.2))
+        .build()
+        .unwrap();
+    compiler
+        .compile(&baseline, environment(1.0), UiTheme::default())
+        .unwrap();
+
+    let current = UiAuthoringSnapshotBuilder::new(2)
+        .with_root(invalid_root("a", UiLayer::Modal))
+        .with_root(hit_root("b", 0.2))
+        .build()
+        .unwrap();
+    let frame = compiler
+        .compile(&current, environment(1.0), UiTheme::default())
+        .unwrap();
+
+    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
+        &frame
+    ));
+    assert!(
+        frame
+            .layouts()
+            .iter()
+            .filter(|layout| layout.root_key() == &root_key("a"))
+            .all(|layout| layout.layer() == UiLayer::Modal)
+    );
+    assert_eq!(
+        frame.paint().last().unwrap().key().unwrap().root_key(),
+        &root_key("a")
     );
 }
 

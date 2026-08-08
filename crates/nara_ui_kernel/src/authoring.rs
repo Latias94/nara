@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use thiserror::Error;
 
 use crate::{
-    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiRevision, UiRootKey, UiStyle,
-    UiStyleError, UiText, UiVisual,
+    UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiRevision, UiRootDiagnostic,
+    UiRootKey, UiStyle, UiStyleError, UiText, UiVisual,
 };
 
 /// Closed root layers shared by paint, hit, focus, and semantic order.
@@ -300,6 +300,7 @@ impl UiRoot {
 pub struct UiAuthoringSnapshot {
     pub(crate) source_revision: UiRevision,
     pub(crate) roots: Vec<UiRoot>,
+    pub(crate) envelopes: Vec<UiRootEnvelope>,
 }
 
 impl UiAuthoringSnapshot {
@@ -309,9 +310,65 @@ impl UiAuthoringSnapshot {
     }
 
     #[must_use]
+    /// Returns root bodies that passed root-local authoring validation.
+    ///
+    /// Rejected root envelopes remain part of compilation order and appear in the compiled
+    /// frame's root outcomes, but do not expose an invalid `UiRoot` body here.
     pub fn roots(&self) -> &[UiRoot] {
         &self.roots
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct UiRootEnvelope {
+    key: UiRootKey,
+    layer: UiLayer,
+    ordinal: usize,
+    node_count: usize,
+    body: UiRootEnvelopeBody,
+}
+
+impl UiRootEnvelope {
+    pub(crate) const fn key(&self) -> &UiRootKey {
+        &self.key
+    }
+
+    pub(crate) const fn layer(&self) -> UiLayer {
+        self.layer
+    }
+
+    pub(crate) const fn ordinal(&self) -> usize {
+        self.ordinal
+    }
+
+    pub(crate) const fn node_count(&self) -> usize {
+        self.node_count
+    }
+
+    pub(crate) const fn body(&self) -> &UiRootEnvelopeBody {
+        &self.body
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum UiRootEnvelopeBody {
+    Ready(usize),
+    Rejected(UiRootDiagnostic),
+}
+
+#[derive(Clone, Debug)]
+struct PendingRootEnvelope {
+    key: UiRootKey,
+    layer: UiLayer,
+    ordinal: usize,
+    node_count: usize,
+    body: PendingRootEnvelopeBody,
+}
+
+#[derive(Clone, Debug)]
+enum PendingRootEnvelopeBody {
+    Ready,
+    Rejected(UiRootDiagnostic),
 }
 
 /// Concrete fallible construction boundary for one authoring snapshot.
@@ -319,7 +376,8 @@ impl UiAuthoringSnapshot {
 pub struct UiAuthoringSnapshotBuilder {
     source_revision: u64,
     limits: UiLimits,
-    roots: Vec<UiRoot>,
+    ready_roots: Vec<UiRoot>,
+    envelopes: Vec<PendingRootEnvelope>,
 }
 
 impl UiAuthoringSnapshotBuilder {
@@ -328,7 +386,8 @@ impl UiAuthoringSnapshotBuilder {
         Self {
             source_revision,
             limits: UiLimits::default(),
-            roots: Vec::new(),
+            ready_roots: Vec::new(),
+            envelopes: Vec::new(),
         }
     }
 
@@ -340,7 +399,16 @@ impl UiAuthoringSnapshotBuilder {
 
     #[must_use]
     pub fn with_root(mut self, root: UiRoot) -> Self {
-        self.roots.push(root);
+        let node_count = count_nodes(&root.node);
+        let ordinal = self.envelopes.len();
+        self.envelopes.push(PendingRootEnvelope {
+            key: root.key.clone(),
+            layer: root.layer,
+            ordinal,
+            node_count,
+            body: PendingRootEnvelopeBody::Ready,
+        });
+        self.ready_roots.push(root);
         self
     }
 
@@ -348,71 +416,181 @@ impl UiAuthoringSnapshotBuilder {
         self.limits.validate()?;
         let source_revision =
             UiRevision::new(self.source_revision).ok_or(UiAuthoringError::ZeroSourceRevision)?;
-        if self.roots.len() > self.limits.max_roots {
+        if self.envelopes.len() > self.limits.max_roots {
             return Err(UiAuthoringError::RootLimitExceeded {
-                actual: self.roots.len(),
+                actual: self.envelopes.len(),
                 maximum: self.limits.max_roots,
             });
         }
 
+        let mut root_keys = BTreeSet::new();
         let mut node_count = 0usize;
-        for root in &self.roots {
+        for root in &self.envelopes {
             if root.key.encoded_len() > self.limits.max_key_bytes {
                 return Err(UiAuthoringError::KeyLimitExceeded {
                     actual: root.key.encoded_len(),
                     maximum: self.limits.max_key_bytes,
                 });
             }
-            let root_key = UiKey::root(root.key.clone()).map_err(UiAuthoringError::Key)?;
-            validate_node(&root.node, &root_key, 1, &mut node_count, self.limits)?;
+            UiKey::root(root.key.clone()).map_err(UiAuthoringError::Key)?;
+            if !root_keys.insert(root.key.clone()) {
+                return Err(UiAuthoringError::DuplicateRootKey {
+                    key: root.key.clone(),
+                });
+            }
+            node_count = node_count.saturating_add(root.node_count);
+            if node_count > self.limits.max_nodes {
+                return Err(UiAuthoringError::NodeLimitExceeded {
+                    actual: node_count,
+                    maximum: self.limits.max_nodes,
+                });
+            }
         }
+
+        let limits = self.limits;
+        let mut pending_roots = self.ready_roots.into_iter();
+        let mut roots = Vec::new();
+        let envelopes = self
+            .envelopes
+            .into_iter()
+            .map(|envelope| {
+                let body = match envelope.body {
+                    PendingRootEnvelopeBody::Ready => {
+                        let root = pending_roots
+                            .next()
+                            .expect("each ready envelope owns one pending root");
+                        match validate_root(&root, limits) {
+                            Ok(()) => {
+                                let index = roots.len();
+                                roots.push(root);
+                                UiRootEnvelopeBody::Ready(index)
+                            }
+                            Err(diagnostic) => UiRootEnvelopeBody::Rejected(diagnostic),
+                        }
+                    }
+                    PendingRootEnvelopeBody::Rejected(diagnostic) => {
+                        UiRootEnvelopeBody::Rejected(diagnostic)
+                    }
+                };
+                UiRootEnvelope {
+                    key: envelope.key,
+                    layer: envelope.layer,
+                    ordinal: envelope.ordinal,
+                    node_count: envelope.node_count,
+                    body,
+                }
+            })
+            .collect();
+        debug_assert!(pending_roots.next().is_none());
         Ok(UiAuthoringSnapshot {
             source_revision,
-            roots: self.roots,
+            roots,
+            envelopes,
         })
     }
 }
 
-fn validate_node(
-    root: &UiNode,
-    root_key: &UiKey,
-    root_depth: usize,
-    node_count: &mut usize,
-    limits: UiLimits,
-) -> Result<(), UiAuthoringError> {
-    let mut pending = vec![(root, root_depth)];
-    while let Some((node, depth)) = pending.pop() {
-        *node_count = node_count.saturating_add(1);
-        if *node_count > limits.max_nodes {
-            return Err(UiAuthoringError::NodeLimitExceeded {
-                actual: *node_count,
-                maximum: limits.max_nodes,
-            });
-        }
+/// Adds a root whose stable envelope is known even though its adapter-owned body was rejected.
+#[doc(hidden)]
+pub fn with_rejected_root(
+    mut builder: UiAuthoringSnapshotBuilder,
+    key: UiRootKey,
+    layer: UiLayer,
+    node_count: usize,
+    diagnostic: UiRootDiagnostic,
+) -> UiAuthoringSnapshotBuilder {
+    let ordinal = builder.envelopes.len();
+    builder.envelopes.push(PendingRootEnvelope {
+        key,
+        layer,
+        ordinal,
+        node_count,
+        body: PendingRootEnvelopeBody::Rejected(diagnostic),
+    });
+    builder
+}
+
+fn count_nodes(root: &UiNode) -> usize {
+    let mut count = 0usize;
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        count = count.saturating_add(1);
+        pending.extend(node.children.iter());
+    }
+    count
+}
+
+fn validate_root(root: &UiRoot, limits: UiLimits) -> Result<(), UiRootDiagnostic> {
+    let root_key =
+        UiKey::root(root.key.clone()).map_err(|error| UiRootDiagnostic::KeyRejected {
+            message: error.to_string(),
+        })?;
+    let mut keys = BTreeSet::new();
+    let mut structural_index = 0usize;
+    let mut pending = vec![(&root.node, 1usize, Some(root_key))];
+    while let Some((node, depth, forced_key)) = pending.pop() {
         if depth > limits.max_depth {
-            return Err(UiAuthoringError::DepthLimitExceeded {
-                actual: depth,
+            return Err(UiRootDiagnostic::DepthLimitExceeded {
                 maximum: limits.max_depth,
             });
         }
-        node.style.validate()?;
+        node.style
+            .validate()
+            .map_err(|error| UiRootDiagnostic::InvalidStyle {
+                message: error.to_string(),
+            })?;
         if let Some(visual) = &node.visual {
-            visual.validate()?;
+            visual
+                .validate()
+                .map_err(|error| UiRootDiagnostic::InvalidStyle {
+                    message: error.to_string(),
+                })?;
         }
         if let Some(text) = &node.text {
-            text.validate()?;
+            text.validate()
+                .map_err(|error| UiRootDiagnostic::InvalidStyle {
+                    message: error.to_string(),
+                })?;
         }
-        if let Some(local) = &node.key {
-            let key = UiKey::scoped(root_key.root_key().clone(), local.clone())
-                .map_err(UiAuthoringError::Key)?;
+        let key = match forced_key {
+            Some(key) => Some(key),
+            None => node
+                .key
+                .as_ref()
+                .map(|local| UiKey::scoped(root.key.clone(), local.clone()))
+                .transpose()
+                .map_err(|error| UiRootDiagnostic::KeyRejected {
+                    message: error.to_string(),
+                })?,
+        };
+        if let Some(key) = &key {
             if key.encoded_len() > limits.max_key_bytes {
-                return Err(UiAuthoringError::KeyLimitExceeded {
-                    actual: key.encoded_len(),
-                    maximum: limits.max_key_bytes,
+                return Err(UiRootDiagnostic::KeyRejected {
+                    message: format!(
+                        "key has {} encoded bytes; maximum is {}",
+                        key.encoded_len(),
+                        limits.max_key_bytes
+                    ),
                 });
             }
+            if !keys.insert(key.clone()) {
+                return Err(UiRootDiagnostic::DuplicateNodeKey { key: key.clone() });
+            }
         }
-        pending.extend(node.children.iter().rev().map(|child| (child, depth + 1)));
+        let requires_key = node.interaction.hit_testable
+            || node.interaction.focusable
+            || node.semantics.is_some()
+            || node.text.is_some();
+        if requires_key && key.is_none() {
+            return Err(UiRootDiagnostic::MissingRequiredKey { structural_index });
+        }
+        structural_index = structural_index.saturating_add(1);
+        pending.extend(
+            node.children
+                .iter()
+                .rev()
+                .map(|child| (child, depth + 1, None)),
+        );
     }
     Ok(())
 }
@@ -431,17 +609,6 @@ fn validate_semantic_text(field: &'static str, value: &str) -> Result<(), UiAuth
     Ok(())
 }
 
-pub(crate) fn duplicate_root_keys(roots: &[UiRoot]) -> BTreeSet<UiRootKey> {
-    let mut seen = BTreeSet::new();
-    let mut duplicates = BTreeSet::new();
-    for root in roots {
-        if !seen.insert(root.key.clone()) {
-            duplicates.insert(root.key.clone());
-        }
-    }
-    duplicates
-}
-
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum UiAuthoringError {
     #[error(transparent)]
@@ -454,10 +621,10 @@ pub enum UiAuthoringError {
     ZeroSourceRevision,
     #[error("UI snapshot has {actual} roots; maximum is {maximum}")]
     RootLimitExceeded { actual: usize, maximum: usize },
+    #[error("UI snapshot contains duplicate root key {key:?}")]
+    DuplicateRootKey { key: UiRootKey },
     #[error("UI snapshot has at least {actual} nodes; maximum is {maximum}")]
     NodeLimitExceeded { actual: usize, maximum: usize },
-    #[error("UI snapshot depth is at least {actual}; maximum is {maximum}")]
-    DepthLimitExceeded { actual: usize, maximum: usize },
     #[error("UI key has {actual} encoded bytes; configured maximum is {maximum}")]
     KeyLimitExceeded { actual: usize, maximum: usize },
     #[error("UI semantic {field} is empty")]

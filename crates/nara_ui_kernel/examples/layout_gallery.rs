@@ -4,8 +4,8 @@ use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiColorRole, UiCompiler, UiDimension, UiEdges,
     UiEnvironment, UiFlexDirection, UiInteraction, UiLayer, UiLocalKey, UiNode, UiOverflow,
-    UiPaintPrimitive, UiRoot, UiRootKey, UiSemanticRole, UiSemantics, UiStyle, UiSurfaceId, UiText,
-    UiTheme, UiVisual,
+    UiPaintPrimitive, UiRoot, UiRootKey, UiRootStatus, UiSemanticRole, UiSemantics, UiStyle,
+    UiSurfaceId, UiText, UiTheme, UiVisual,
 };
 
 const DOMAIN: &str = "nara.example.layout-gallery";
@@ -17,8 +17,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let unit_scale = compiler.compile(&snapshot, environment(1.0)?, UiTheme::default())?;
     let frozen_layouts = unit_scale.layouts().to_vec();
     let fractional_scale = compiler.compile(&snapshot, environment(1.25)?, UiTheme::default())?;
+    let degraded = degraded_gallery_snapshot(&snapshot)?;
+    let retained = compiler.compile(&degraded, environment(1.25)?, UiTheme::default())?;
 
     assert_gallery_contract(&unit_scale, &fractional_scale);
+    assert_root_envelope_contract(&retained);
     assert_eq!(unit_scale.layouts(), frozen_layouts);
 
     println!(
@@ -29,6 +32,35 @@ fn main() -> Result<(), Box<dyn Error>> {
         unit_scale.semantics().len(),
     );
     Ok(())
+}
+
+fn degraded_gallery_snapshot(
+    baseline: &UiAuthoringSnapshot,
+) -> Result<UiAuthoringSnapshot, Box<dyn Error>> {
+    let base_key = root_key("base")?;
+    let overlay_key = root_key("overlay")?;
+    let base = baseline
+        .roots()
+        .iter()
+        .find(|root| root.key() == &base_key)
+        .expect("baseline gallery contains its base root")
+        .clone();
+    let overlay = baseline
+        .roots()
+        .iter()
+        .find(|root| root.key() == &overlay_key)
+        .expect("baseline gallery contains its overlay root")
+        .clone();
+    let duplicate_key = local_key("invalid-modal-node")?;
+    let duplicate = || UiNode::new(UiStyle::fill()).with_key(duplicate_key.clone());
+    let invalid_modal = UiRoot::new(root_key("modal")?, UiLayer::Modal, UiStyle::fill())
+        .with_children([duplicate(), duplicate()]);
+
+    Ok(UiAuthoringSnapshotBuilder::new(2)
+        .with_root(invalid_modal)
+        .with_root(base)
+        .with_root(overlay)
+        .build()?)
 }
 
 fn gallery_snapshot() -> Result<UiAuthoringSnapshot, Box<dyn Error>> {
@@ -208,6 +240,42 @@ fn assert_gallery_contract(
             .semantics()
             .iter()
             .any(|node| node.name() == "Activate gallery action")
+    );
+}
+
+fn assert_root_envelope_contract(frame: &Arc<nara_ui_kernel::UiFrame>) {
+    let modal = root_key("modal").expect("static gallery root key is valid");
+    let base = root_key("base").expect("static gallery root key is valid");
+    let overlay = root_key("overlay").expect("static gallery root key is valid");
+    assert_eq!(frame.root_outcomes().len(), 3);
+    assert_eq!(frame.root_outcomes()[0].key(), &modal);
+    assert_eq!(
+        frame.root_outcomes()[0].status(),
+        UiRootStatus::RetainedVisual
+    );
+    assert!(
+        frame
+            .root_outcomes()
+            .iter()
+            .filter(|outcome| outcome.key() == &base || outcome.key() == &overlay)
+            .all(|outcome| outcome.status() == UiRootStatus::Published)
+    );
+    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
+        frame
+    ));
+    assert!(frame.hit_regions().is_empty());
+    assert!(frame.focus_order().is_empty());
+    assert!(
+        frame
+            .semantics()
+            .iter()
+            .all(|node| node.name() != "Activate gallery action")
+    );
+    assert!(
+        frame
+            .paint()
+            .iter()
+            .any(|primitive| primitive.key().is_some_and(|key| key.root_key() == &modal))
     );
 }
 
