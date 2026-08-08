@@ -1,15 +1,15 @@
 # Reference-Game UI Product Slice
 
-**Status**: Decision checkpoint for NUI-U9 through NUI-U14, NUI-U17, NUI-U15A, and NUI-U15B
+**Status**: Runtime UI product contract; implementation paused pending UIF conformance baseline
 **Date**: 2026-08-05
-**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint; 2026-08-07 for the example-first NUI-U15A/NUI-U15B split
-**Authority**: ADR 0102 and the NUI implementation plan
+**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint; 2026-08-07 for the example-first NUI-U15A/NUI-U15B split; 2026-08-08 for the UIF/RUP rebaseline
+**Authority**: ADR 0102 and ADR 0107-0109; execution belongs to the inactive [Runtime UI Product Slice plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) after UIF publishes a pinned conformance baseline
 **Scope**: The first complete data-driven runtime UI proof for the reference game
 
 This document is a product input for the renderer-neutral UI work. It is intentionally narrower
 than an editor design system: it describes one shippable game surface, its states, and its ownership
 boundaries. It does not introduce a general widget registry, docking model, or Editor object tree.
-It becomes an integration contract only after NUI-U15A proves and freezes the shared UI interfaces
+It becomes an integration contract only after UIF-U5 publishes a Foundation Conformance Baseline
 through neutral layered examples; this product slice cannot independently admit an engine abstraction.
 
 ## Product Surface
@@ -24,12 +24,11 @@ The acceptance captures use these three physical targets:
 | Standard desktop | 1920 x 1080 | 2.0 | Primary visual and interaction baseline |
 | High-density desktop | 2560 x 1440 | 2.666... | Text raster, snapping, and packet residency proof |
 
-The logical layout must remain unchanged across the three targets. Only the adapter's physical
-mapping, pixel snapping, and bounded text raster revision may differ. The Host derives
-`render_scale` from physical extent divided by the fixed design extent. It owns a separate
-`input_scale_factor` that converts platform-logical coordinates into the authored design space.
-The OS scale factor never becomes the render scale, and product code never rescales pointer
-coordinates itself.
+The logical layout must remain unchanged across the three targets. Only the Host-owned
+`SurfaceContentTransform`, pixel snapping and bounded text raster revision may differ. That transform
+uniformly fits the design extent into the safe physical area, owns content origin plus forward/inverse
+mapping, and maps paint, input and semantic bounds through one revision. Product code never rescales
+or clamps pointer coordinates itself.
 
 ## Authoring Structure
 
@@ -112,25 +111,37 @@ Changing HUD geometry, text, theme roles, modal structure, or labels must be pos
 Scene/Prefab data and assets. Rust changes are required only when a new typed fact, intent, or domain
 rule is introduced.
 
+## Required Product Trajectory
+
+One ordinary Runtime adapter trace must start from the authored Scene/Prefab, update HUD facts from
+gameplay, present the read-only terminal/Retry overlay, activate Retry through each admitted input,
+emit exactly one typed game command, and publish the new run generation only with the next matching
+receipt. Desktop and headless use that same adapter. A separate authoring roundtrip changes geometry,
+copy/theme role or modal structure in source data and proves desktop, headless and packaged
+arbitrary-CWD consumption without a Rust edit or test-private hook.
+
 ## Acceptance Captures
 
 The canonical 1,920 x 1,080 target captures all six product states and the complete Retry interaction
 path. Each capture records structured frame and environment revisions, structural key sequence, and
 semantic state. The 1,280 x 720 and 2,560 x 1,440 targets record layout/readability assertions for
 the longest HUD and terminal content. One canonical-target case uses a representative fractional
-`input_scale_factor` to prove coordinate conversion independently from render scale. The product
+platform scale to prove the exact `SurfaceContentTransform` inverse mapping. The product
 slice does not require a target-by-state packet, pixel, hash, or digest matrix.
 
 The first implementation may use a bounded test presenter for headless frame and semantic captures.
 Desktop GPU/readback evidence must use the ordinary presentation recipe and the same authoring
 data. Source and packaged desktop readiness requires an actual resident glyph texture/binding, not
-only a submitted sprite frame. NUI-U14 owns one representative nonblank GPU readback and exact
-packet outcome; NUI-U15B consumes that boundary without duplicating it for each product state. A
+only a submitted sprite frame. UIF-U3 owns one representative nonblank GPU readback and exact packet
+outcome; RUP consumes that boundary without duplicating it for each product state. A
 receipt records backend acceptance and submission of the exact packet and never claims that a human
 saw the frame. Any difference between the three targets is limited to physical mapping, snapping,
 and admitted raster generations.
 
-## Unit Boundary Decision
+## Historical NUI Unit Boundary (Superseded)
+
+This section preserves why the earlier NUI units were split. It is audit evidence, not current
+execution authority; UIF owns shared correction and RUP owns the product proof.
 
 ```mermaid
 flowchart LR
@@ -178,7 +189,9 @@ The product proof is dependency-ordered rather than one atomic implementation un
 | Retry success is represented only by command acceptance | Old modal roots or stale frames can remain interactive after replacement | Capture the new run generation and prove the prior overlay is absent from paint, hit, focus, and semantics |
 | Product captures become architecture authority | Reference-game state or test convenience leaks into public engine interfaces or shared semantics | Close NUI-U15A first, freeze its public inventory, named invariants, assertions, and commit, and require non-circular independent evidence plus a focused amendment before NUI-U15B changes that baseline |
 
-## Exit Criteria
+## Historical Exit Criteria
+
+The criteria below describe the superseded NUI execution lineage and cannot activate work.
 
 NUI-U9/U10 may start after this document, ADR 0102's checkpoint amendment, and the identity rule
 are referenced by their evidence records. NUI-U13 closes when the current Rust-built HUD is replaced

@@ -3,14 +3,15 @@ title: Ordered UI Kernel and Engine Boundary Correction - Plan
 type: refactor
 date: 2026-08-04
 deepened: 2026-08-04
-amended: 2026-08-07
+amended: 2026-08-08
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
-execution_state: active
+execution_state: superseded
 product_contract_source: ce-plan-bootstrap
 execution: code
 origin: docs/plans/2026-08-04-001-feat-readable-runtime-ui-and-deterministic-text-plan.md
 supersedes: docs/plans/2026-08-04-001-feat-readable-runtime-ui-and-deterministic-text-plan.md
+superseded_by: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 plan_id: ordered-ui-kernel-engine-boundaries-2026-08
 unit_namespace: NUI
 operator_execution_authority: external-control-plane

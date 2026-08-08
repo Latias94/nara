@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -15,7 +15,10 @@
 [ADR 0056](0056-headless-runtime-and-dedicated-server-readiness.md),
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md), and
 [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
-**Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U9 through NUI-U14, NUI-U17, NUI-U15A, NUI-U15B, then NUI-U16
+**Refined By**: [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md),
+[ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md), and
+[ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md)
+**Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), followed by the inactive [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md)
 
 ## Context
 
@@ -37,6 +40,12 @@ component, layout, or Editor-shell abstraction.
 Nara compiles bounded authoring snapshots into one immutable renderer-neutral frame. Text and
 widget behavior are separate deep modules; Runtime and future Editor products use separate
 adapters.
+
+The 2026-08-08 rebaseline narrows this broad topology into three deep Interfaces: compile an
+immutable candidate, present an owned capability-closed packet, and atomically dispatch against the
+exact presented receipt. ADR 0107 owns the product-layer split, ADR 0108 owns Surface Slot/session
+atomicity, and ADR 0109 owns root-local compilation and frame-global presentation closure. The
+superseded master plan remains implementation history and no longer orders product integration.
 
 ```mermaid
 flowchart LR
@@ -103,6 +112,10 @@ flowchart LR
   hit, focus, action, or semantic authority. A failed or unpresented candidate leaves the prior
   presented session unchanged and cannot replace its behavior. No hover, press, focus, enabled,
   reducer, or action state is shared across surfaces.
+  ADR 0109 refines modal safety: current modal membership/barrier is root-envelope policy rather than
+  cached body behavior. An inert retained modal visual still blocks underlay UI and gameplay; if the
+  current candidate cannot establish a safe modal barrier/fallback, compilation rejects the complete
+  candidate and retains the prior presented session.
 - Timeline routing returns one closed disposition. `PassThrough` performs no UI mutation and keeps an
   event eligible for gameplay only when it is proven not to target UI. `Consumed` atomically commits
   interaction state, widget-reducer state, admitted intents, and input finalization.
@@ -130,6 +143,12 @@ flowchart LR
 - Kernel routing owns capture/target/bubble, pointer capture, focus scopes, modal inertness,
   navigation, semantics, and geometry-coupled session state. `nara_ui_widgets` owns controlled
   behavior reducers and emits typed intents only.
+- Focus identity is distinct from current navigation and activation eligibility. A stable focused
+  key that remains present in its active modal scope survives a temporary disabled state, while
+  enabled-only navigation skips it and pointer, keyboard, gamepad, and semantic activation reject
+  it as disabled. Hiding or removing the key, retiring its surface, invalidating its modal scope, or
+  cancelling its seat still clears or restores focus through the ordinary session rules. This
+  preserves pending-control continuity without making disabled controls interactive.
 - Public scheduling exposes semantic registration for local command producers and only the immutable
   current-tick consume and post-consume capture anchors required by independent products. Input
   projection, UI route finalization, local-action mapping, command admission, acknowledgement, and

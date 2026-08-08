@@ -6,7 +6,8 @@
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
-UI, Text, Widget, and Presented-Frame Topology
+UI, Text, Widget, and Presented-Frame Topology; [ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md):
+UI Surface, Presented Session, and Atomic Interaction
 
 ## ADR 0095 Refinement
 

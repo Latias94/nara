@@ -8,9 +8,9 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The active [ordered UI kernel and engine boundary correction
-   plan](../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md)
-   owns current execution order.
+3. The active [UI Foundation Correction
+   plan](../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md) owns current execution
+   order. The [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and
    must not authorize implementation by themselves.
@@ -29,6 +29,7 @@ an index, not another source of architecture decisions.
 | [Render Capability Demand and Pressure Matrix](render-capability-pressure-matrix.md) | Render evidence/admission appendix | Evaluates whether a capability deserves a tracer; it is not a renderer roadmap. |
 | [Render Extension Capability Interface Design](render-extension-capability-interface-design.md) | Future render canonical harness | Inactive and needs rebaseline; the RGF closure architecture handoff owns activation against the landed render owners and evidence. |
 | [UI Product Boundaries, Editor Dogfooding, and Porting Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md) | UI boundary canonical draft | Evidence-gated; it does not select a final editor toolkit or a shared game/editor widget core. |
+| [UI Foundation Design](ui-foundation-design.md) | UI deep-module design blueprint | Non-normative module map, reference-pressure matrix, component admission map, and scale vocabulary. ADR 0102 and ADR 0107-0109 own durable decisions. |
 
 `Canonical harness` means the primary non-normative scenario workbench for one subject. `Appendix`
 means a focused specialization that cannot redefine its canonical harness. `Guide` explains the

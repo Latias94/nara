@@ -152,3 +152,6 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace Installation
 - [ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
 - [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product Composition
+- [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md): Shared UI Foundation and Independent Product Layers
+- [ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md): UI Surface, Presented Session, and Atomic Interaction
+- [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md): Root-Local UI Compilation and Presentation Closure

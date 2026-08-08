@@ -3,7 +3,9 @@
 **Status**: Accepted
 **Date**: 2026-07-10
 **Refines**: ADR 0009, ADR 0048, ADR 0049, ADR 0056
-**Refined By**: ADR 0099: Decision-Local Product Evidence and Publication Admission
+**Refined By**: ADR 0099: Decision-Local Product Evidence and Publication Admission;
+[ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md): Root-Local UI Compilation
+and Presentation Closure
 
 ## Context
 

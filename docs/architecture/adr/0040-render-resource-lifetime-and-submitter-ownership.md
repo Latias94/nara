@@ -12,7 +12,8 @@ Execution Boundary and Evidence-Gated Extensions; ADR 0096: Evidence-Gated Rende
 Upload Policy;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
 UI, Text, Widget, and Presented-Frame Topology; [ADR 0105](0105-closed-first-party-render-plan.md):
-Closed First-Party Render Plan
+Closed First-Party Render Plan; [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md):
+Root-Local UI Compilation and Presentation Closure
 
 ## ADR 0096 Refinement
 
