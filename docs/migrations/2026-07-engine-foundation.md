@@ -58,7 +58,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | NUI-U5A-1 | NUI-U5A | `2f0bd69` | `cargo-feature/rust-api/project-manifest/behavior` | Implicit 2D presentation through `runtime-2d` and `Runtime2dPlugins` | Keep headless content on `runtime-2d`; add `presentation-2d` plus `Presentation2dPlugins` to presented products and explicitly request both capabilities. |
 | NUI-U6-U7-1 | NUI-U6/U7 | `7c2c5ba`, `53d6678` | `serialized-format/rust-api/behavior` | Record-owned `parent`, implicit root order, placement-free add/remove, and bare `Reparent` | Rewrite Scene/Prefab documents to ordered `roots` plus parent-owned `children`; express Patch mutations with `ScenePlacement`, `MoveEntity { from, to }`, and exact subtree `RestoreEntity`. |
 | NUI-U8-1 | NUI-U8 | `4b2146a`, `fc3a0b8` | `rust-api/behavior` | Construction-only hierarchy attachment and runtime order inferred from entity allocation | Register every structural root and child with `HierarchyWriter` using exact ordered placements; consume the completed `HierarchyOrder` for structural layout, hit testing, and drawing. |
-| UIF-U1-1 | UIF-U1 | `UIF-U1` | `rust-api/behavior` | Dispatch batches that mixed routed events with rejection and invalidation releases that entered activation | Match the closed `UiDispatchOutcome`; reduce widgets only for `Consumed`, and treat lifecycle cleanup as a consumed reconciliation. |
+| UIF-U1-1 | UIF-U1 | `c2806a5` | `rust-api/behavior` | Dispatch batches that mixed routed events with rejection and invalidation releases that entered activation | Match the closed `UiDispatchOutcome`; reduce widgets only for `Consumed`, and treat lifecycle cleanup as a consumed reconciliation. |
 
 ## Entry Contract
 
