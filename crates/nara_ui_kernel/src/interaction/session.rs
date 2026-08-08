@@ -3,9 +3,9 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{
-    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiInputEvent, UiNonActivation,
-    UiPointerButton, UiSemanticFact, UiSemanticSnapshot, UiSemanticState,
-    focus::{activate_target, effective_focus, is_focusable_key, navigate_focus, set_focus},
+    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchOutcome, UiInputEvent,
+    UiNonActivation, UiPointerButton, UiSemanticFact, UiSemanticSnapshot, UiSemanticState,
+    focus::{activate_target, committed_focus, is_focusable_key, navigate_focus, set_focus},
     pointer::{pointer_press, pointer_release, set_hover},
     routing::{KeyAvailability, active_modal_root, hit_target, key_availability, target_rejection},
     state::{
@@ -40,7 +40,7 @@ impl UiInteractionSession {
         journal: &UiFrameJournal,
         route: UiRouteStamp,
         input: UiInputEvent,
-    ) -> Result<UiDispatchBatch, UiDispatchError> {
+    ) -> Result<UiDispatchOutcome, UiDispatchError> {
         let target = journal.resolve(route)?;
         let latest = journal.latest(route.surface_id())?;
         self.dispatch_resolved(&target, &latest, route, input)
@@ -53,7 +53,7 @@ impl UiInteractionSession {
         latest: &UiRouteTarget,
         route: UiRouteStamp,
         input: UiInputEvent,
-    ) -> Result<UiDispatchBatch, UiDispatchError> {
+    ) -> Result<UiDispatchOutcome, UiDispatchError> {
         if target.receipt().surface_id() != route.surface_id()
             || target.receipt().presentation_epoch() != route.presentation_epoch()
             || latest.receipt().surface_id() != route.surface_id()
@@ -62,48 +62,64 @@ impl UiInteractionSession {
         }
         self.preflight_surface(route.surface_id())?;
 
-        let mut candidate = self
+        let initial = self
             .surfaces
             .get(&route.surface_id())
             .cloned()
             .unwrap_or_default();
-        if candidate
-            .invalidated_epoch
-            .is_some_and(|epoch| route.presentation_epoch() > epoch)
-        {
-            candidate.invalidated_epoch = None;
-        }
-
-        let mut batch = UiDispatchBatch::new(target.revision(), route.presentation_epoch());
         if matches!(
             input,
             UiInputEvent::PointerButton { button, .. } if button != UiPointerButton::Primary
         ) {
-            batch.reject(UiNonActivation::UnsupportedPointerButton);
-            return Ok(batch);
+            return Ok(UiDispatchOutcome::Rejected(
+                UiNonActivation::UnsupportedPointerButton,
+            ));
         }
-        if is_stale_geometry(&candidate, route, &input) {
-            batch.reject(UiNonActivation::StaleGeometry);
-            return Ok(batch);
+        if is_stale_geometry(&initial, route, &input) {
+            return Ok(UiDispatchOutcome::Rejected(UiNonActivation::StaleGeometry));
         }
-        preflight_input_identity(&mut candidate, &input)?;
-        reconcile_surface(&mut candidate, target.frame(), latest.frame(), &mut batch);
 
-        let remove_surface = apply_input(
+        let mut reconciled = initial;
+        let mut reconciliation =
+            UiDispatchBatch::new(target.revision(), route.presentation_epoch());
+        reconcile_surface(
+            &mut reconciled,
+            target.frame(),
+            latest.frame(),
+            &mut reconciliation,
+        );
+        let reconciliation_has_events = !reconciliation.events().is_empty();
+
+        let mut candidate = reconciled.clone();
+        preflight_input_identity(&mut candidate, &input)?;
+        let mut input_batch = UiDispatchBatch::new(target.revision(), route.presentation_epoch());
+        let application = apply_input(
             &mut candidate,
             target.frame(),
             latest.frame(),
             route,
             input,
-            &mut batch,
+            &mut input_batch,
         )?;
-        self.ensure_event_limit(&batch)?;
-        if remove_surface {
-            self.surfaces.remove(&route.surface_id());
-        } else {
-            self.commit_surface(route.surface_id(), candidate);
+
+        match application {
+            UiInputApplication::Applied { remove_surface } => {
+                reconciliation.extend(input_batch);
+                self.ensure_event_limit(&reconciliation)?;
+                if remove_surface {
+                    self.surfaces.remove(&route.surface_id());
+                } else {
+                    self.commit_surface(route.surface_id(), candidate);
+                }
+                Ok(UiDispatchOutcome::Consumed(reconciliation))
+            }
+            UiInputApplication::Rejected(_) if reconciliation_has_events => {
+                self.ensure_event_limit(&reconciliation)?;
+                self.commit_surface(route.surface_id(), reconciled);
+                Ok(UiDispatchOutcome::Consumed(reconciliation))
+            }
+            UiInputApplication::Rejected(reason) => Ok(UiDispatchOutcome::Rejected(reason)),
         }
-        Ok(batch)
     }
 
     /// Projects semantics from the latest submitted frame and current interaction state.
@@ -126,7 +142,7 @@ impl UiInteractionSession {
         let latest_frame = latest.frame();
         let state = self.surfaces.get(&route.surface_id());
         let modal_root = active_modal_root(frame);
-        let focused = effective_focus(state, seat, frame, latest_frame, modal_root.as_ref());
+        let focused = committed_focus(state, seat, frame, latest_frame, modal_root.as_ref());
         let nodes = frame
             .semantics()
             .iter()
@@ -209,7 +225,7 @@ fn apply_input(
     route: UiRouteStamp,
     input: UiInputEvent,
     batch: &mut UiDispatchBatch,
-) -> Result<bool, UiDispatchError> {
+) -> Result<UiInputApplication, UiDispatchError> {
     match input {
         UiInputEvent::PointerMoved {
             seat,
@@ -224,10 +240,7 @@ fn apply_input(
                 .position = Some(position);
             let hovered = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
                 Ok(target) => target,
-                Err(reason) => {
-                    batch.reject(reason);
-                    None
-                }
+                Err(reason) => return Ok(UiInputApplication::Rejected(reason)),
             };
             set_hover(state, seat, pointer, hovered, frame, batch);
         }
@@ -248,10 +261,15 @@ fn apply_input(
             }
             match phase {
                 UiButtonPhase::Pressed => {
-                    pointer_press(state, seat, pointer, frame, latest, batch);
+                    if let Err(reason) = pointer_press(state, seat, pointer, frame, latest, batch) {
+                        return Ok(UiInputApplication::Rejected(reason));
+                    }
                 }
                 UiButtonPhase::Released => {
-                    pointer_release(state, seat, pointer, frame, latest, batch);
+                    if let Err(reason) = pointer_release(state, seat, pointer, frame, latest, batch)
+                    {
+                        return Ok(UiInputApplication::Rejected(reason));
+                    }
                 }
             }
         }
@@ -259,14 +277,15 @@ fn apply_input(
             cancel_pointer(state, seat, pointer, frame, batch, true);
         }
         UiInputEvent::Navigate { seat, direction } => {
-            navigate_focus(state, seat, direction, frame, latest, batch);
+            if let Err(reason) = navigate_focus(state, seat, direction, frame, latest, batch) {
+                return Ok(UiInputApplication::Rejected(reason));
+            }
         }
         UiInputEvent::ActivateFocused { seat, source } => {
             let Some(target) = state.seats.get(&seat).and_then(|seat| seat.focused.clone()) else {
-                batch.reject(UiNonActivation::NoFocusTarget);
-                return Ok(false);
+                return Ok(UiInputApplication::Rejected(UiNonActivation::NoFocusTarget));
             };
-            activate_target(
+            if let Err(reason) = activate_target(
                 &target,
                 None,
                 source,
@@ -274,7 +293,9 @@ fn apply_input(
                 latest,
                 state.modal_root.as_ref(),
                 batch,
-            );
+            ) {
+                return Ok(UiInputApplication::Rejected(reason));
+            }
         }
         UiInputEvent::FocusTarget { seat, target } => {
             if is_focusable_key(frame, latest, state.modal_root.as_ref(), &target) {
@@ -282,15 +303,17 @@ fn apply_input(
             } else if let Some(reason) =
                 target_rejection(frame, latest, state.modal_root.as_ref(), &target)
             {
-                batch.reject(reason);
+                return Ok(UiInputApplication::Rejected(reason));
             } else if frame
                 .focus_order()
                 .iter()
                 .any(|fact| fact.key() == &target && !fact.enabled())
             {
-                batch.reject(UiNonActivation::TargetDisabled { target });
+                return Ok(UiInputApplication::Rejected(
+                    UiNonActivation::TargetDisabled { target },
+                ));
             } else {
-                batch.reject(UiNonActivation::NoFocusTarget);
+                return Ok(UiInputApplication::Rejected(UiNonActivation::NoFocusTarget));
             }
         }
         UiInputEvent::SemanticAction {
@@ -298,7 +321,7 @@ fn apply_input(
             target,
             action,
         } => {
-            activate_target(
+            if let Err(reason) = activate_target(
                 &target,
                 Some(action),
                 UiActivationSource::Accessibility,
@@ -306,7 +329,9 @@ fn apply_input(
                 latest,
                 state.modal_root.as_ref(),
                 batch,
-            );
+            ) {
+                return Ok(UiInputApplication::Rejected(reason));
+            }
         }
         UiInputEvent::SeatCancelled { seat } => {
             cancel_seat(state, seat, frame, batch);
@@ -317,10 +342,19 @@ fn apply_input(
         }
         UiInputEvent::SurfaceCancelled => {
             cancel_surface(state, frame, batch);
-            return Ok(true);
+            return Ok(UiInputApplication::Applied {
+                remove_surface: true,
+            });
         }
     }
-    Ok(false)
+    Ok(UiInputApplication::Applied {
+        remove_surface: false,
+    })
+}
+
+enum UiInputApplication {
+    Applied { remove_surface: bool },
+    Rejected(UiNonActivation),
 }
 
 fn is_stale_geometry(state: &SurfaceState, route: UiRouteStamp, input: &UiInputEvent) -> bool {

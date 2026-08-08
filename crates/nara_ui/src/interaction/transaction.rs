@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use nara_ecs::{Mut, Resource, World};
 use nara_input::{InputTimeline, InputUiCursorError, InputUiDisposition};
 use nara_ui_kernel::{
-    UiDispatchBatch, UiDispatchError, UiInputEvent, UiInteractionSession, UiJournalError, UiKey,
-    UiNonActivation, UiRouteStamp, UiSurfaceId,
+    UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent, UiInteractionSession,
+    UiJournalError, UiKey, UiNonActivation, UiRouteStamp, UiSurfaceId,
 };
 use nara_ui_widgets::{UiButtonState, UiIntent, UiIntentBatch};
 use thiserror::Error;
@@ -38,15 +38,10 @@ pub(crate) fn execute(
                     return UiRouteDisposition::RejectedClosed(rejection);
                 }
             };
-            let input_disposition = if transaction.is_rejected() {
-                InputUiDisposition::RejectedClosed
-            } else {
-                InputUiDisposition::Consumed
-            };
             if let Some(sequence) = input_sequence
                 && let Err(error) = world
                     .resource_mut::<InputTimeline>()
-                    .__finalize_ui_entry(sequence, input_disposition)
+                    .__finalize_ui_entry(sequence, InputUiDisposition::Consumed)
             {
                 return UiRouteDisposition::RejectedClosed(UiRouteRejection::InputFinalization(
                     error,
@@ -180,7 +175,6 @@ pub(crate) struct UiInteractionTransaction {
     reducers: BTreeMap<UiKey, UiButtonState>,
     journal: UiActionJournal,
     dispatch: UiDispatchBatch,
-    rejection: Option<UiRouteRejection>,
 }
 
 impl UiInteractionTransaction {
@@ -206,56 +200,55 @@ impl UiInteractionTransaction {
             .resolve_presented(route)
             .map_err(map_adapter_error)?;
         let mut interaction = surface.interaction().clone();
-        let dispatch =
-            interaction.dispatch_resolved(presented.target(), presented.latest(), route, input)?;
-        let rejection = dispatch
-            .non_activation()
-            .cloned()
-            .map(UiRouteRejection::NonActivation);
+        let dispatch = match interaction.dispatch_resolved(
+            presented.target(),
+            presented.latest(),
+            route,
+            input,
+        )? {
+            UiDispatchOutcome::Consumed(dispatch) => dispatch,
+            UiDispatchOutcome::Rejected(reason) => {
+                return Err(UiRouteRejection::NonActivation(reason));
+            }
+        };
 
         let mut reducers = surface.reducer_states().clone();
         let mut intents = UiIntentBatch::default();
         let mut targets = BTreeSet::new();
         targets.extend(dispatch.events().iter().map(|event| event.target().clone()));
-        if rejection.is_none() {
-            for target in targets {
-                let button = presented.behavior().button(&target).ok_or_else(|| {
-                    UiRouteRejection::PresentedBehaviorMissing {
-                        surface: surface_id.get(),
-                        presentation_epoch: route.presentation_epoch(),
-                        target: Some(target.clone()),
-                    }
-                })?;
-                reducers
-                    .entry(target)
-                    .or_default()
-                    .reduce_batch(button, &dispatch, &mut intents)
-                    .map_err(|error| UiRouteRejection::Widget(error.to_string()))?;
-            }
+        for target in targets {
+            let button = presented.behavior().button(&target).ok_or_else(|| {
+                UiRouteRejection::PresentedBehaviorMissing {
+                    surface: surface_id.get(),
+                    presentation_epoch: route.presentation_epoch(),
+                    target: Some(target.clone()),
+                }
+            })?;
+            reducers
+                .entry(target)
+                .or_default()
+                .reduce_batch(button, &dispatch, &mut intents)
+                .map_err(|error| UiRouteRejection::Widget(error.to_string()))?;
         }
 
-        let drafts = if rejection.is_none() {
-            intents
-                .intents()
-                .iter()
-                .map(|intent| match intent {
-                    UiIntent::Activate {
-                        target,
-                        action,
-                        source,
-                    } => UiActionDraft::new(
-                        input_sequence,
-                        route,
-                        dispatch.frame_revision().get(),
-                        target.clone(),
-                        action.clone(),
-                        *source,
-                    ),
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
+        let drafts = intents
+            .intents()
+            .iter()
+            .map(|intent| match intent {
+                UiIntent::Activate {
+                    target,
+                    action,
+                    source,
+                } => UiActionDraft::new(
+                    input_sequence,
+                    route,
+                    dispatch.frame_revision().get(),
+                    target.clone(),
+                    action.clone(),
+                    *source,
+                ),
+            })
+            .collect::<Vec<_>>();
         let mut journal = journal.clone();
         journal.admit(&drafts)?;
 
@@ -265,12 +258,7 @@ impl UiInteractionTransaction {
             reducers,
             journal,
             dispatch,
-            rejection,
         })
-    }
-
-    pub(crate) const fn is_rejected(&self) -> bool {
-        self.rejection.is_some()
     }
 
     pub(crate) fn commit(
@@ -284,17 +272,13 @@ impl UiInteractionTransaction {
             reducers,
             journal: candidate_journal,
             dispatch,
-            rejection,
         } = self;
         state
             .surface_mut(surface_id)
             .expect("a prepared UI transaction retains its surface")
             .commit_interaction(interaction, reducers);
         *journal = candidate_journal;
-        rejection.map_or_else(
-            || UiRouteDisposition::Consumed(dispatch),
-            UiRouteDisposition::RejectedClosed,
-        )
+        UiRouteDisposition::Consumed(dispatch)
     }
 }
 

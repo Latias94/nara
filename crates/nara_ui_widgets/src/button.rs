@@ -157,7 +157,9 @@ impl UiButtonState {
         if !button.enabled {
             self.hovered = false;
             self.pressed = false;
-            self.focused = false;
+            if let UiRoutedEventKind::FocusChanged { focused } = event.kind() {
+                self.focused = *focused;
+            }
             return None;
         }
         match event.kind() {

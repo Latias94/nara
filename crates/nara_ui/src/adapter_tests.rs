@@ -11,8 +11,8 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ButtonDriverInput, InputPointerId, InputSeatId, InputTimeline, InputWindowId, MouseButton,
-    PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+    ButtonDriverInput, InputPointerId, InputSeatId, InputTimeline, InputWindowEvent, InputWindowId,
+    MouseButton, PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
 };
 use nara_reflect::{
     ComponentRegistry, ComponentRegistryPlugin, ComponentSchemaVersion, ComponentTypeId,
@@ -24,8 +24,8 @@ use nara_scene::{
 };
 use nara_ui_kernel::{
     UiActivationSource, UiButtonPhase, UiInputEvent, UiKey, UiLayer, UiLocalKey, UiNonActivation,
-    UiPoint, UiPointerButton, UiPointerId, UiRootKey, UiRootStatus, UiRouteStamp, UiSeatId,
-    UiSurfaceId,
+    UiPoint, UiPointerButton, UiPointerId, UiRootKey, UiRootStatus, UiRouteStamp,
+    UiRoutedEventKind, UiSeatId, UiSurfaceId,
 };
 
 use crate::interaction::dispatch_presented_ui_input;
@@ -725,6 +725,94 @@ fn presented_button_dispatch_publishes_one_typed_action_and_semantics() {
 }
 
 #[test]
+fn resize_while_pressed_cancels_without_activating_the_button() {
+    let (mut app, _) = build_button_app();
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("resize-cancellation-test").unwrap())
+        .unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("test frame should compile");
+    commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        frame,
+        1,
+    )
+    .unwrap();
+
+    {
+        let mut timeline = app
+            .world_mut()
+            .expect("test App should allow world mutation")
+            .resource_mut::<InputTimeline>();
+        timeline
+            .admit_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(10.0, 10.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+    }
+    app.update().unwrap();
+    let pressed = ui_semantic_snapshot(app.world(), surface_id(), 1, UiSeatId::PRIMARY).unwrap();
+    assert!(
+        pressed
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &expected_runtime_node("root", "retry"))
+            .unwrap()
+            .state()
+            .pressed()
+    );
+
+    let admission = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<InputTimeline>()
+        .admit_window_event(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputWindowEvent::Resized {
+                logical_size: Vec2::new(640.0, 360.0),
+            },
+        )
+        .unwrap();
+    assert_eq!(admission.admitted(), 3);
+    app.update().unwrap();
+
+    assert!(
+        app.world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .unwrap()
+            .is_empty()
+    );
+    let cancelled = ui_semantic_snapshot(app.world(), surface_id(), 1, UiSeatId::PRIMARY).unwrap();
+    assert!(
+        !cancelled
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &expected_runtime_node("root", "retry"))
+            .unwrap()
+            .state()
+            .pressed()
+    );
+}
+
+#[test]
 fn unpresented_candidate_cannot_replace_presented_behavior_authority() {
     let (mut app, button) = build_button_app();
     let cursor = app
@@ -806,7 +894,7 @@ fn unpresented_candidate_cannot_replace_presented_behavior_authority() {
 }
 
 #[test]
-fn rejected_retirement_reconciliation_clears_capture_before_the_next_presented_frame() {
+fn retirement_reconciliation_is_consumed_before_retired_route_rejection() {
     let (mut app, button) = build_button_app();
     let root = app
         .world()
@@ -869,16 +957,29 @@ fn rejected_retirement_reconciliation_clears_capture_before_the_next_presented_f
     )
     .unwrap();
 
+    let retired_move = UiInputEvent::PointerMoved {
+        seat: UiSeatId::PRIMARY,
+        pointer: UiPointerId::PRIMARY,
+        position: point,
+    };
+    let UiRouteDisposition::Consumed(reconciliation) = dispatch_presented_ui_input(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        UiRouteStamp::new(surface_id(), 1),
+        retired_move.clone(),
+    ) else {
+        panic!("retirement cleanup must be a consumed transaction");
+    };
+    assert!(reconciliation.events().iter().any(|event| {
+        event.target() == &expected_runtime_node("root", "retry")
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
     assert!(matches!(
         dispatch_presented_ui_input(
             app.world_mut()
                 .expect("test App should allow world mutation"),
             UiRouteStamp::new(surface_id(), 1),
-            UiInputEvent::PointerMoved {
-                seat: UiSeatId::PRIMARY,
-                pointer: UiPointerId::PRIMARY,
-                position: point,
-            },
+            retired_move,
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::NonActivation(
             UiNonActivation::TargetRetired { .. }

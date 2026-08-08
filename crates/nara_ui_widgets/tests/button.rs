@@ -78,7 +78,7 @@ fn pointer_sequence_is_controlled_and_activates_only_on_release_inside() {
     ] {
         let dispatch = session.dispatch(&journal, route, input).unwrap();
         state
-            .reduce_batch(&button, &dispatch, &mut intents)
+            .reduce_batch(&button, dispatch.consumed().unwrap(), &mut intents)
             .unwrap();
     }
     assert!(state.hovered());
@@ -99,7 +99,7 @@ fn pointer_sequence_is_controlled_and_activates_only_on_release_inside() {
         )
         .unwrap();
     state
-        .reduce_batch(&button, &moved_outside, &mut intents)
+        .reduce_batch(&button, moved_outside.consumed().unwrap(), &mut intents)
         .unwrap();
     let released_outside = session
         .dispatch(
@@ -109,7 +109,7 @@ fn pointer_sequence_is_controlled_and_activates_only_on_release_inside() {
         )
         .unwrap();
     state
-        .reduce_batch(&button, &released_outside, &mut intents)
+        .reduce_batch(&button, released_outside.consumed().unwrap(), &mut intents)
         .unwrap();
     assert!(!state.hovered());
     assert!(!state.pressed());
@@ -121,7 +121,7 @@ fn pointer_sequence_is_controlled_and_activates_only_on_release_inside() {
     ] {
         let dispatch = session.dispatch(&journal, route, input).unwrap();
         state
-            .reduce_batch(&button, &dispatch, &mut intents)
+            .reduce_batch(&button, dispatch.consumed().unwrap(), &mut intents)
             .unwrap();
     }
     assert_eq!(
@@ -149,7 +149,9 @@ fn keyboard_gamepad_and_accessibility_share_the_typed_intent_path() {
             },
         )
         .unwrap();
-    state.reduce_batch(&button, &focus, &mut intents).unwrap();
+    state
+        .reduce_batch(&button, focus.consumed().unwrap(), &mut intents)
+        .unwrap();
     assert_eq!(state.visual_state(&button), UiButtonVisualState::Focused);
 
     for input in [
@@ -169,7 +171,7 @@ fn keyboard_gamepad_and_accessibility_share_the_typed_intent_path() {
     ] {
         let dispatch = session.dispatch(&journal, route, input).unwrap();
         state
-            .reduce_batch(&button, &dispatch, &mut intents)
+            .reduce_batch(&button, dispatch.consumed().unwrap(), &mut intents)
             .unwrap();
     }
     let sources = intents
@@ -190,7 +192,7 @@ fn keyboard_gamepad_and_accessibility_share_the_typed_intent_path() {
 }
 
 #[test]
-fn disabled_control_rejects_an_activation_from_an_older_authored_frame() {
+fn disabled_control_retains_focus_but_rejects_activation_from_an_older_frame() {
     let (button, journal, route, mut session) = fixture();
     let focus = session
         .dispatch(
@@ -215,13 +217,15 @@ fn disabled_control_rejects_an_activation_from_an_older_authored_frame() {
     let disabled = button.clone().with_enabled(false);
     let mut state = UiButtonState::default();
     let mut intents = UiIntentBatch::default();
-    state.reduce_batch(&disabled, &focus, &mut intents).unwrap();
     state
-        .reduce_batch(&disabled, &activation, &mut intents)
+        .reduce_batch(&disabled, focus.consumed().unwrap(), &mut intents)
+        .unwrap();
+    state
+        .reduce_batch(&disabled, activation.consumed().unwrap(), &mut intents)
         .unwrap();
     assert_eq!(state.visual_state(&disabled), UiButtonVisualState::Disabled);
-    assert!(!state.focused());
-    assert_eq!(state.visual_state(&button), UiButtonVisualState::Idle);
+    assert!(state.focused());
+    assert_eq!(state.visual_state(&button), UiButtonVisualState::Focused);
     assert!(intents.intents().is_empty());
 }
 
@@ -251,12 +255,12 @@ fn intent_capacity_failure_does_not_partially_mutate_the_batch() {
     let mut state = UiButtonState::default();
     let mut intents = UiIntentBatch::with_maximum(1).unwrap();
     state
-        .reduce_batch(&button, &activation, &mut intents)
+        .reduce_batch(&button, activation.consumed().unwrap(), &mut intents)
         .unwrap();
     assert_eq!(intents.intents().len(), 1);
     assert_eq!(
         state
-            .reduce_batch(&button, &activation, &mut intents)
+            .reduce_batch(&button, activation.consumed().unwrap(), &mut intents)
             .unwrap_err(),
         UiIntentBatchError::LimitExceeded {
             actual: 2,

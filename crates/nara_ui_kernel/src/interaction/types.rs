@@ -196,13 +196,12 @@ pub enum UiNonActivation {
     ActionUnavailable { target: UiKey, action: UiActionId },
 }
 
-/// Atomic routing result for one normalized event.
+/// Events committed by one consumed normalized input transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UiDispatchBatch {
     frame_revision: UiFrameRevision,
     presentation_epoch: u64,
     events: Vec<UiRoutedEvent>,
-    non_activation: Option<UiNonActivation>,
 }
 
 impl UiDispatchBatch {
@@ -211,7 +210,6 @@ impl UiDispatchBatch {
             frame_revision,
             presentation_epoch,
             events: Vec::new(),
-            non_activation: None,
         }
     }
 
@@ -230,18 +228,41 @@ impl UiDispatchBatch {
         &self.events
     }
 
-    #[must_use]
-    pub const fn non_activation(&self) -> Option<&UiNonActivation> {
-        self.non_activation.as_ref()
-    }
-
     pub(crate) fn push(&mut self, event: UiRoutedEvent) {
         self.events.push(event);
     }
 
-    pub(crate) fn reject(&mut self, reason: UiNonActivation) {
-        if self.non_activation.is_none() {
-            self.non_activation = Some(reason);
+    pub(crate) fn extend(&mut self, other: Self) {
+        debug_assert_eq!(self.frame_revision, other.frame_revision);
+        debug_assert_eq!(self.presentation_epoch, other.presentation_epoch);
+        self.events.extend(other.events);
+    }
+}
+
+/// Closed result of routing one normalized event against an exact presented session.
+///
+/// A rejected result cannot carry routed events or a candidate session, so callers cannot
+/// accidentally commit interaction state while reporting `RejectedClosed`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UiDispatchOutcome {
+    Consumed(UiDispatchBatch),
+    Rejected(UiNonActivation),
+}
+
+impl UiDispatchOutcome {
+    #[must_use]
+    pub const fn consumed(&self) -> Option<&UiDispatchBatch> {
+        match self {
+            Self::Consumed(batch) => Some(batch),
+            Self::Rejected(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn rejection(&self) -> Option<&UiNonActivation> {
+        match self {
+            Self::Consumed(_) => None,
+            Self::Rejected(reason) => Some(reason),
         }
     }
 }

@@ -58,6 +58,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | NUI-U5A-1 | NUI-U5A | `2f0bd69` | `cargo-feature/rust-api/project-manifest/behavior` | Implicit 2D presentation through `runtime-2d` and `Runtime2dPlugins` | Keep headless content on `runtime-2d`; add `presentation-2d` plus `Presentation2dPlugins` to presented products and explicitly request both capabilities. |
 | NUI-U6-U7-1 | NUI-U6/U7 | `7c2c5ba`, `53d6678` | `serialized-format/rust-api/behavior` | Record-owned `parent`, implicit root order, placement-free add/remove, and bare `Reparent` | Rewrite Scene/Prefab documents to ordered `roots` plus parent-owned `children`; express Patch mutations with `ScenePlacement`, `MoveEntity { from, to }`, and exact subtree `RestoreEntity`. |
 | NUI-U8-1 | NUI-U8 | `4b2146a`, `fc3a0b8` | `rust-api/behavior` | Construction-only hierarchy attachment and runtime order inferred from entity allocation | Register every structural root and child with `HierarchyWriter` using exact ordered placements; consume the completed `HierarchyOrder` for structural layout, hit testing, and drawing. |
+| UIF-U1-1 | UIF-U1 | `UIF-U1` | `rust-api/behavior` | Dispatch batches that mixed routed events with rejection and invalidation releases that entered activation | Match the closed `UiDispatchOutcome`; reduce widgets only for `Consumed`, and treat lifecycle cleanup as a consumed reconciliation. |
 
 ## Entry Contract
 
@@ -3474,6 +3475,68 @@ Do not restore frame-local events, global button behavior, or public technical s
 `reference-game/src/runtime_ui.rs`, and the NUI-U17 verification shard prove exact old-frame
 authority, cross-surface isolation, fail-closed routing, pause/resume exactly-once delivery, route
 ownership, cursor reclamation, and independent schedule composition.
+
+## UIF-U1-1: Atomic Presented-Session Interaction And Invalidation
+
+**Removed contract**: `UiInteractionSession::dispatch` no longer returns a batch that can contain
+both routed events and an optional `UiNonActivation`. That shape allowed a rejected input to carry
+candidate focus, hover or capture changes into the runtime adapter. Input-timeline synthetic mouse
+releases produced during resize, scale-factor changes, focus loss, pointer leave or retirement also
+must not enter the ordinary release/activation path.
+
+**Canonical replacement**: the kernel now returns the closed
+`UiDispatchOutcome::Consumed(UiDispatchBatch) | UiDispatchOutcome::Rejected(UiNonActivation)`.
+Only `Consumed` carries routed events and a commit-capable candidate. `Rejected` drops the cloned
+session before the adapter can replace session, widget reducers or the action journal. When a new
+presented frame requires capture/hover cleanup, that cleanup is a successful consumed
+reconciliation; a later input against the retired or disabled target is then rejected without a
+second state mutation. Semantic snapshots project only committed focus and never synthesize a
+first-focus fallback.
+
+**Before**:
+
+```rust
+let dispatch = session.dispatch(&journal, route, input)?;
+if let Some(reason) = dispatch.non_activation() {
+    record_rejection(reason);
+}
+reduce_widgets(&dispatch);
+```
+
+**After**:
+
+```rust
+match session.dispatch(&journal, route, input)? {
+    UiDispatchOutcome::Consumed(batch) => reduce_widgets(&batch),
+    UiDispatchOutcome::Rejected(reason) => record_rejection(&reason),
+}
+```
+
+**User action**: update direct kernel consumers and neutral examples to match on the closed
+outcome. Do not reintroduce a compatibility alias or manually clear widget state after a rejected
+route. Product adapters should continue to consume typed journal entries only after downstream
+command admission.
+
+**Source action**: `manual-rewrite`; this is an intentional pre-1.0 Rust API and observable input
+semantics break.
+
+**Cache action**: `delete` interaction/session state after changing the dispatch outcome or
+geometry invalidation contract; presented frame and action journal history remain owned by their
+existing lifecycle and are not reconstructed from a rejected candidate.
+
+**Compatibility window**: none (fearless refactor before 1.0).
+
+**Rollback**: revert the complete UIF-U1 kernel outcome, runtime transaction, timeline projection,
+widget test and adapter migration together. Do not restore batch-level rejection or ordinary
+release handling for invalidated input.
+
+**Verification anchors**: `crates/nara_ui_kernel/src/interaction/{session,types,state,pointer,
+focus}.rs`, `crates/nara_ui/src/interaction/{transaction,timeline}.rs`,
+`crates/nara_ui_kernel/tests/interaction.rs`, `crates/nara_ui/src/adapter_tests.rs`,
+`crates/nara_ui_widgets/tests/button.rs`, `crates/nara_winit/tests/accessibility.rs`, and the
+`interaction_lab` example prove rejection atomicity, pointer-capacity preservation, fresh
+geometry coordinates, committed semantic focus, disabled-focus navigation, retirement cleanup,
+and resize cancellation without activation.
 
 ## Persistent Format Matrix
 

@@ -13,33 +13,29 @@ pub(super) fn pointer_press(
     frame: &UiFrame,
     latest: &UiFrame,
     batch: &mut UiDispatchBatch,
-) {
+) -> Result<(), UiNonActivation> {
     let pointer_key = (seat, pointer);
     let pointer_state = state
         .pointers
         .get(&pointer_key)
         .expect("pointer preflight creates state");
     if let Some(target) = &pointer_state.captured {
-        batch.reject(UiNonActivation::PointerAlreadyCaptured {
+        return Err(UiNonActivation::PointerAlreadyCaptured {
             target: target.clone(),
         });
-        return;
     }
     let Some(position) = pointer_state.position else {
-        batch.reject(UiNonActivation::MissingPointerPosition);
-        return;
+        return Err(UiNonActivation::MissingPointerPosition);
     };
     let target = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
         Ok(Some(target)) => target,
         Ok(None) => {
             set_hover(state, seat, pointer, None, frame, batch);
-            batch.reject(UiNonActivation::NoPointerTarget);
-            return;
+            return Err(UiNonActivation::NoPointerTarget);
         }
         Err(reason) => {
             set_hover(state, seat, pointer, None, frame, batch);
-            batch.reject(reason);
-            return;
+            return Err(reason);
         }
     };
     set_hover(state, seat, pointer, Some(target.clone()), frame, batch);
@@ -52,6 +48,7 @@ pub(super) fn pointer_press(
         set_focus(state, seat, Some(target.clone()), frame, batch);
     }
     route_event(frame, &target, UiRoutedEventKind::Pressed, batch);
+    Ok(())
 }
 
 pub(super) fn pointer_release(
@@ -61,7 +58,7 @@ pub(super) fn pointer_release(
     frame: &UiFrame,
     latest: &UiFrame,
     batch: &mut UiDispatchBatch,
-) {
+) -> Result<(), UiNonActivation> {
     let pointer_key = (seat, pointer);
     let (captured, position) = {
         let pointer = state
@@ -71,26 +68,17 @@ pub(super) fn pointer_release(
         (pointer.captured.take(), pointer.position)
     };
     let Some(target) = captured else {
-        batch.reject(UiNonActivation::NoPointerCapture);
-        return;
+        return Err(UiNonActivation::NoPointerCapture);
     };
     let Some(position) = position else {
         route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
-        batch.reject(UiNonActivation::MissingPointerPosition);
-        return;
+        return Ok(());
     };
-    if let Some(reason) = target_rejection(frame, latest, state.modal_root.as_ref(), &target) {
+    if target_rejection(frame, latest, state.modal_root.as_ref(), &target).is_some() {
         route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
-        batch.reject(reason);
-        return;
+        return Ok(());
     }
-    let hovered = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
-        Ok(hovered) => hovered,
-        Err(reason) => {
-            batch.reject(reason);
-            None
-        }
-    };
+    let hovered = hit_target(frame, latest, state.modal_root.as_ref(), position).unwrap_or(None);
     let inside = hovered.as_ref() == Some(&target);
     route_event(
         frame,
@@ -99,6 +87,7 @@ pub(super) fn pointer_release(
         batch,
     );
     set_hover(state, seat, pointer, hovered, frame, batch);
+    Ok(())
 }
 
 pub(super) fn set_hover(

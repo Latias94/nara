@@ -30,10 +30,10 @@ pub use identity::{
     UiProjectionPath, UiProjectionStep, UiRootKey,
 };
 pub use interaction::{
-    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchError, UiInputEvent,
-    UiInteractionSession, UiNavigation, UiNonActivation, UiPointerButton, UiPointerId,
-    UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiSeatId, UiSemanticFact, UiSemanticSnapshot,
-    UiSemanticState,
+    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchError, UiDispatchOutcome,
+    UiInputEvent, UiInteractionSession, UiNavigation, UiNonActivation, UiPointerButton,
+    UiPointerId, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiSeatId, UiSemanticFact,
+    UiSemanticSnapshot, UiSemanticState,
 };
 pub use journal::{UiFrameJournal, UiJournalError, UiRouteStamp, UiRouteTarget, UiSurfaceId};
 pub use limits::{UiLimits, UiLimitsError};

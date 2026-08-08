@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use super::{
     UiInputEvent, UiPointerId, UiRoutedEventKind, UiSeatId,
-    focus::{first_focus, is_focusable_key, set_focus},
-    routing::{active_modal_root, is_interactive_key, route_event, target_rejection},
+    focus::{can_retain_focus, first_focus, is_focusable_key, set_focus},
+    routing::{active_modal_root, is_interactive_key, route_event},
     session::UiDispatchError,
 };
 use crate::{UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRootKey};
@@ -11,20 +11,20 @@ use crate::{UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRootKey};
 const MAX_SEATS_PER_SURFACE: usize = 8;
 const MAX_POINTERS_PER_SURFACE: usize = 32;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct PointerState {
     pub(super) position: Option<UiPoint>,
     pub(super) hovered: Option<UiKey>,
     pub(super) captured: Option<UiKey>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct SeatState {
     pub(super) focused: Option<UiKey>,
     pub(super) restore_after_modal: Option<UiKey>,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct SurfaceState {
     pub(super) invalidated_epoch: Option<u64>,
     pub(super) modal_root: Option<UiRootKey>,
@@ -104,11 +104,6 @@ pub(super) fn reconcile_surface(
             && !is_interactive_key(frame, latest, state.modal_root.as_ref(), &target)
         {
             route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
-            if let Some(reason) =
-                target_rejection(frame, latest, state.modal_root.as_ref(), &target)
-            {
-                batch.reject(reason);
-            }
             if let Some(pointer) = state.pointers.get_mut(&(seat, pointer)) {
                 pointer.captured = None;
             }
@@ -132,7 +127,7 @@ pub(super) fn reconcile_surface(
     for seat in seats {
         let focused = state.seats.get(&seat).and_then(|seat| seat.focused.clone());
         if focused.as_ref().is_some_and(|target| {
-            !is_focusable_key(frame, latest, state.modal_root.as_ref(), target)
+            !can_retain_focus(frame, latest, state.modal_root.as_ref(), target)
         }) {
             let next = first_focus(frame, latest, state.modal_root.as_ref());
             set_focus(state, seat, next, frame, batch);
@@ -205,6 +200,7 @@ pub(super) fn cancel_pointer(
             batch,
         );
     }
+    pointer_state.position = None;
     if !remove {
         state.pointers.insert((seat, pointer), pointer_state);
     }

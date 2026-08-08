@@ -9,8 +9,8 @@ use nara_input::{
 };
 use nara_ui::{
     advanced::{
-        UiActivationSource, UiFrame, UiKey, UiRouteRejection, UiSeatId, UiSurfaceId,
-        latest_ui_frame, ui_semantic_snapshot,
+        UiActivationSource, UiFrame, UiKey, UiPresentationReceipt, UiRouteRejection, UiSeatId,
+        UiSurfaceId, latest_ui_frame, ui_semantic_snapshot,
     },
     prelude::{UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal, UiSemanticRole},
 };
@@ -160,7 +160,26 @@ pub(super) fn prove_modal_rejection(app: &mut App) -> Result<(), Box<dyn Error>>
     Ok(())
 }
 
-pub(super) fn prove_disabled_rejection(app: &mut App) -> Result<(), Box<dyn Error>> {
+pub(super) fn prove_disabled_rejection(
+    app: &mut App,
+    receipt: UiPresentationReceipt,
+    primary_key: &UiKey,
+) -> Result<(), Box<dyn Error>> {
+    let semantics = ui_semantic_snapshot(
+        app.world(),
+        receipt.surface_id(),
+        receipt.presentation_epoch(),
+        UiSeatId::PRIMARY,
+    )?;
+    let primary = semantics
+        .nodes()
+        .iter()
+        .find(|node| node.key() == primary_key)
+        .expect("the disabled primary action should retain semantic identity");
+    assert!(!primary.state().enabled());
+    assert!(!primary.state().focusable());
+    assert!(primary.state().focused());
+
     admit_pointer(app, PRIMARY_WINDOW, Vec2::new(30.0, 30.0))?;
     app.update()?;
     assert!(matches!(
@@ -169,6 +188,41 @@ pub(super) fn prove_disabled_rejection(app: &mut App) -> Result<(), Box<dyn Erro
             nara_ui::advanced::UiNonActivation::TargetDisabled { .. }
         ))
     ));
+    let reconciled = ui_semantic_snapshot(
+        app.world(),
+        receipt.surface_id(),
+        receipt.presentation_epoch(),
+        UiSeatId::PRIMARY,
+    )?;
+    let primary = reconciled
+        .nodes()
+        .iter()
+        .find(|node| node.key() == primary_key)
+        .expect("disabled reconciliation should preserve the primary semantic identity");
+    assert!(!primary.state().enabled());
+    assert!(primary.state().focused());
+    Ok(())
+}
+
+pub(super) fn prove_reenabled_focus(
+    app: &App,
+    receipt: UiPresentationReceipt,
+    primary_key: &UiKey,
+) -> Result<(), Box<dyn Error>> {
+    let semantics = ui_semantic_snapshot(
+        app.world(),
+        receipt.surface_id(),
+        receipt.presentation_epoch(),
+        UiSeatId::PRIMARY,
+    )?;
+    let primary = semantics
+        .nodes()
+        .iter()
+        .find(|node| node.key() == primary_key)
+        .expect("the re-enabled primary action should preserve semantic identity");
+    assert!(primary.state().enabled());
+    assert!(primary.state().focusable());
+    assert!(primary.state().focused());
     Ok(())
 }
 

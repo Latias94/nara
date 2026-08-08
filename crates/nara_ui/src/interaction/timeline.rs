@@ -60,6 +60,20 @@ pub(crate) fn project_timeline_entry(
     let pointer = input_route
         .pointer()
         .map(|pointer| UiPointerId::new(pointer.get()));
+    if entry.invalidation().is_some()
+        && matches!(
+            entry.kind(),
+            InputEventKind::PointerButton { .. } | InputEventKind::PointerLeft
+        )
+    {
+        let Some(pointer) = pointer else {
+            return rejected_projection(UiInputProjectionIssue::MissingPointer);
+        };
+        return UiTimelineProjection::Routed {
+            route,
+            input: UiInputEvent::PointerCancelled { seat, pointer },
+        };
+    }
     let position = match project_point(entry.logical_position(), descriptor.input_scale_factor()) {
         Ok(position) => position,
         Err(error) => {

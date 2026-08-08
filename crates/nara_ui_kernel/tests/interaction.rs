@@ -39,12 +39,151 @@ fn button(name: &str, label: &str, action: &str, x: f32, y: f32, enabled: bool) 
 }
 
 fn base_root() -> UiRoot {
+    base_root_with_first_enabled(true)
+}
+
+fn base_root_with_first_enabled(first_enabled: bool) -> UiRoot {
     UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
-        button("first", "First", "first", 10.0, 10.0, true),
+        button("first", "First", "first", 10.0, 10.0, first_enabled),
         button("second", "Second", "second", 110.0, 10.0, true),
         button("disabled", "Disabled", "disabled", 10.0, 70.0, false),
         hidden_button(),
     ])
+}
+
+#[test]
+fn disabled_focus_identity_survives_reconciliation_and_reenable() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            UiInputEvent::Navigate {
+                seat: SEAT,
+                direction: UiNavigation::Next,
+            },
+        )
+        .unwrap();
+
+    let disabled_snapshot = UiAuthoringSnapshotBuilder::new(4)
+        .with_root(base_root_with_first_enabled(false))
+        .build()
+        .unwrap();
+    let disabled_route = submit(
+        &mut journal,
+        compile(&mut compiler, &disabled_snapshot, 2),
+        11,
+    );
+    let retained = session
+        .semantic_snapshot(&journal, disabled_route, SEAT)
+        .unwrap();
+    let first = retained
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &exact_key("base", "first"))
+        .unwrap();
+    assert!(!first.state().enabled());
+    assert!(!first.state().focusable());
+    assert!(first.state().focused());
+
+    let reenabled_snapshot = UiAuthoringSnapshotBuilder::new(5)
+        .with_root(base_root_with_first_enabled(true))
+        .build()
+        .unwrap();
+    let reenabled_route = submit(
+        &mut journal,
+        compile(&mut compiler, &reenabled_snapshot, 3),
+        12,
+    );
+    let reenabled = session
+        .semantic_snapshot(&journal, reenabled_route, SEAT)
+        .unwrap();
+    let first = reenabled
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &exact_key("base", "first"))
+        .unwrap();
+    assert!(first.state().enabled());
+    assert!(first.state().focusable());
+    assert!(first.state().focused());
+}
+
+#[test]
+fn disabled_middle_focus_remains_the_origin_for_sequential_and_directional_navigation() {
+    for (direction, expected) in [
+        (UiNavigation::Next, "last"),
+        (UiNavigation::Previous, "first"),
+        (UiNavigation::Right, "last"),
+    ] {
+        let mut compiler = compiler();
+        let mut journal = UiFrameJournal::default();
+        let initial = navigation_snapshot(6, true);
+        let initial_route = submit(&mut journal, compile(&mut compiler, &initial, 1), 10);
+        let mut session = UiInteractionSession::default();
+        session
+            .dispatch(
+                &journal,
+                initial_route,
+                UiInputEvent::FocusTarget {
+                    seat: SEAT,
+                    target: exact_key("navigation", "middle"),
+                },
+            )
+            .unwrap();
+
+        let disabled = navigation_snapshot(7, false);
+        let disabled_route = submit(&mut journal, compile(&mut compiler, &disabled, 2), 11);
+        let retained = session
+            .semantic_snapshot(&journal, disabled_route, SEAT)
+            .unwrap();
+        let middle = retained
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &exact_key("navigation", "middle"))
+            .unwrap();
+        assert!(!middle.state().enabled());
+        assert!(middle.state().focused());
+
+        session
+            .dispatch(
+                &journal,
+                disabled_route,
+                UiInputEvent::Navigate {
+                    seat: SEAT,
+                    direction,
+                },
+            )
+            .unwrap();
+        let navigated = session
+            .semantic_snapshot(&journal, disabled_route, SEAT)
+            .unwrap();
+        let destination = navigated
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &exact_key("navigation", expected))
+            .unwrap();
+        assert!(destination.state().focused(), "{direction:?}");
+    }
+}
+
+fn navigation_snapshot(revision: u64, middle_enabled: bool) -> UiAuthoringSnapshot {
+    UiAuthoringSnapshotBuilder::new(revision)
+        .with_root(
+            UiRoot::new(root_key("navigation"), UiLayer::Base, UiStyle::fill()).with_children([
+                button("first", "First", "first", 10.0, 10.0, true),
+                button("middle", "Middle", "middle", 110.0, 10.0, middle_enabled),
+                button("last", "Last", "last", 210.0, 10.0, true),
+            ]),
+        )
+        .build()
+        .unwrap()
 }
 
 fn hidden_button() -> UiNode {
@@ -149,6 +288,8 @@ fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
         )
         .unwrap();
     let press_route = pressed
+        .consumed()
+        .unwrap()
         .events()
         .iter()
         .filter(|event| event.kind() == &UiRoutedEventKind::Pressed)
@@ -163,7 +304,7 @@ fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
     let moved = session
         .dispatch(&journal, route, move_pointer(UiPoint::new(300.0, 170.0)))
         .unwrap();
-    assert!(moved.events().iter().any(|event| {
+    assert!(moved.consumed().unwrap().events().iter().any(|event| {
         event.target() == &first
             && event.phase() == UiRoutePhase::Target
             && event.kind() == &UiRoutedEventKind::HoverChanged { hovered: false }
@@ -175,7 +316,7 @@ fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
             pointer_button(UiButtonPhase::Released, UiPoint::new(300.0, 170.0)),
         )
         .unwrap();
-    assert!(released.events().iter().any(|event| {
+    assert!(released.consumed().unwrap().events().iter().any(|event| {
         event.target() == &first
             && event.phase() == UiRoutePhase::Target
             && event.kind() == &UiRoutedEventKind::Released { inside: false }
@@ -198,7 +339,7 @@ fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
             },
         )
         .unwrap();
-    assert!(cancelled.events().iter().any(|event| {
+    assert!(cancelled.consumed().unwrap().events().iter().any(|event| {
         event.target() == &first
             && event.phase() == UiRoutePhase::Target
             && event.kind() == &UiRoutedEventKind::Cancelled
@@ -221,7 +362,7 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
         )
         .unwrap();
     assert_eq!(
-        disabled.non_activation(),
+        disabled.rejection(),
         Some(&UiNonActivation::TargetDisabled {
             target: exact_key("base", "disabled")
         })
@@ -238,7 +379,7 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
         )
         .unwrap();
     assert_eq!(
-        hidden.non_activation(),
+        hidden.rejection(),
         Some(&UiNonActivation::TargetHidden {
             target: exact_key("base", "hidden")
         })
@@ -253,7 +394,7 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
         )
         .unwrap();
     assert_eq!(
-        inert.non_activation(),
+        inert.rejection(),
         Some(&UiNonActivation::TargetOutsideModal {
             target: exact_key("base", "first")
         })
@@ -301,7 +442,7 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
             },
         )
         .unwrap();
-    assert!(second.events().iter().any(|event| {
+    assert!(second.consumed().unwrap().events().iter().any(|event| {
         event.target() == &exact_key("base", "second")
             && event.phase() == UiRoutePhase::Target
             && event.kind()
@@ -322,7 +463,7 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
             },
         )
         .unwrap();
-    assert!(retry.events().iter().any(|event| {
+    assert!(retry.consumed().unwrap().events().iter().any(|event| {
         event.target() == &exact_key("modal", "retry")
             && event.phase() == UiRoutePhase::Target
             && matches!(
@@ -349,7 +490,7 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
             },
         )
         .unwrap();
-    assert!(restored.events().iter().any(|event| {
+    assert!(restored.consumed().unwrap().events().iter().any(|event| {
         event.target() == &exact_key("base", "second")
             && event.phase() == UiRoutePhase::Target
             && matches!(event.kind(), UiRoutedEventKind::ActivateRequested { .. })
@@ -379,7 +520,7 @@ fn retired_targets_and_invalidated_geometry_cannot_activate() {
         )
         .unwrap();
     assert_eq!(
-        retired.non_activation(),
+        retired.rejection(),
         Some(&UiNonActivation::TargetRetired {
             target: exact_key("base", "first")
         })
@@ -402,10 +543,7 @@ fn retired_targets_and_invalidated_geometry_cannot_activate() {
             pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
         )
         .unwrap();
-    assert_eq!(
-        stale.non_activation(),
-        Some(&UiNonActivation::StaleGeometry)
-    );
+    assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleGeometry));
     let newer = submit(
         &mut fresh_journal,
         compile(&mut compiler, &snapshot(false), 4),
@@ -418,7 +556,7 @@ fn retired_targets_and_invalidated_geometry_cannot_activate() {
             pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
         )
         .unwrap();
-    assert!(active.non_activation().is_none());
+    assert!(active.rejection().is_none());
 }
 
 #[test]
@@ -475,7 +613,36 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
         .find(|node| node.key() == &exact_key("modal", "retry"))
         .unwrap();
     assert!(!disabled_retry.state().enabled());
+    assert!(!disabled_retry.state().focusable());
+    assert!(disabled_retry.state().focused());
     assert!(!disabled_retry.state().pressed());
+    let disabled_activation = session
+        .dispatch(
+            &journal,
+            latest_route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    assert!(disabled_activation.consumed().is_some());
+    let rejected_activation = session
+        .dispatch(
+            &journal,
+            latest_route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        rejected_activation.rejection(),
+        Some(&UiNonActivation::TargetDisabled {
+            target: exact_key("modal", "retry")
+        })
+    );
     assert_eq!(
         session
             .semantic_snapshot(&journal, route, SEAT)
@@ -510,7 +677,7 @@ fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
             )
             .unwrap();
         assert_eq!(
-            rejected.non_activation(),
+            rejected.rejection(),
             Some(&UiNonActivation::UnsupportedPointerButton)
         );
     }
@@ -528,5 +695,146 @@ fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
             },
         )
         .unwrap();
-    assert!(accepted.non_activation().is_none());
+    assert!(accepted.rejection().is_none());
+}
+
+#[test]
+fn rejected_missing_positions_do_not_consume_pointer_capacity() {
+    let mut compiler = compiler();
+    let frame = compile(&mut compiler, &snapshot(false), 1);
+    let mut journal = UiFrameJournal::default();
+    let route = submit(&mut journal, frame, 10);
+    let mut session = UiInteractionSession::default();
+
+    for pointer in 0..64 {
+        let rejected = session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::PointerButton {
+                    seat: SEAT,
+                    pointer: UiPointerId::new(pointer),
+                    button: UiPointerButton::Primary,
+                    phase: UiButtonPhase::Pressed,
+                    position: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            rejected.rejection(),
+            Some(&UiNonActivation::MissingPointerPosition)
+        );
+    }
+
+    let accepted = session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::PointerButton {
+                seat: SEAT,
+                pointer: UiPointerId::new(1_000),
+                button: UiPointerButton::Primary,
+                phase: UiButtonPhase::Pressed,
+                position: Some(UiPoint::new(20.0, 20.0)),
+            },
+        )
+        .unwrap();
+    assert!(accepted.consumed().is_some());
+}
+
+#[test]
+fn geometry_invalidation_requires_a_fresh_pointer_position() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(&journal, route, move_pointer(UiPoint::new(20.0, 20.0)))
+        .unwrap();
+    session
+        .dispatch(&journal, route, UiInputEvent::GeometryInvalidated)
+        .unwrap();
+
+    let newer = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 2),
+        11,
+    );
+    let rejected = session
+        .dispatch(
+            &journal,
+            newer,
+            UiInputEvent::PointerButton {
+                seat: SEAT,
+                pointer: POINTER,
+                button: UiPointerButton::Primary,
+                phase: UiButtonPhase::Pressed,
+                position: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        Some(&UiNonActivation::MissingPointerPosition)
+    );
+    assert!(rejected.consumed().is_none());
+}
+
+#[test]
+fn semantic_snapshot_reports_only_committed_focus() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+
+    let initial = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+    assert!(initial.nodes().iter().all(|node| !node.state().focused()));
+
+    let rejected = session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    assert_eq!(rejected.rejection(), Some(&UiNonActivation::NoFocusTarget));
+    let after_rejection = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+    assert!(
+        after_rejection
+            .nodes()
+            .iter()
+            .all(|node| !node.state().focused())
+    );
+
+    let navigated = session
+        .dispatch(
+            &journal,
+            route,
+            UiInputEvent::Navigate {
+                seat: SEAT,
+                direction: UiNavigation::Next,
+            },
+        )
+        .unwrap();
+    assert!(navigated.consumed().is_some());
+    let committed = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+    assert_eq!(
+        committed
+            .nodes()
+            .iter()
+            .filter(|node| node.state().focused())
+            .count(),
+        1
+    );
 }

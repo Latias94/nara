@@ -15,8 +15,8 @@ use probes::{
     acknowledge_latest, activate_accessibility, assert_latest_action, assert_structural_order,
     invalidate_geometry, latest_rejection, prove_disabled_rejection, prove_modal_rejection,
     prove_non_modal_pass_through, prove_pointer_activation,
-    prove_pointer_capture_and_surface_isolation, queue_secondary_pointer, register_consumers,
-    required_frame, semantic_key,
+    prove_pointer_capture_and_surface_isolation, prove_reenabled_focus, queue_secondary_pointer,
+    register_consumers, required_frame, semantic_key,
 };
 
 const DOMAIN: &str = "nara.example.interaction-lab";
@@ -88,15 +88,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         .insert(UiButton::new("Primary action", updated_action, 16.0)?.with_enabled(false));
     app.update()?;
     let disabled_frame = required_frame(&app, primary_surface)?;
-    commit_ui_presentation(app.world_mut()?, disabled_frame, 3)?;
-    prove_disabled_rejection(&mut app)?;
+    let disabled_receipt = commit_ui_presentation(app.world_mut()?, disabled_frame, 3)?;
+    prove_disabled_rejection(&mut app, disabled_receipt, &primary_key)?;
+
+    app.world_mut()?
+        .entity_mut(entities.primary_button)
+        .insert(UiButton::new(
+            "Primary action",
+            UiActionId::new(UPDATED_ACTION)?,
+            16.0,
+        )?);
+    app.update()?;
+    let reenabled_frame = required_frame(&app, primary_surface)?;
+    let reenabled_receipt = commit_ui_presentation(app.world_mut()?, reenabled_frame, 4)?;
+    prove_reenabled_focus(&app, reenabled_receipt, &primary_key)?;
 
     app.world_mut()?
         .entity_mut(entities.scene_overlay)
         .insert(UiRoot::new(UiLayer::Modal));
     app.update()?;
     let modal_frame = required_frame(&app, primary_surface)?;
-    commit_ui_presentation(app.world_mut()?, modal_frame, 4)?;
+    commit_ui_presentation(app.world_mut()?, modal_frame, 5)?;
     prove_modal_rejection(&mut app)?;
 
     let retained = app

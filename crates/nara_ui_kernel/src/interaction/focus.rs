@@ -42,45 +42,75 @@ pub(super) fn navigate_focus(
     frame: &UiFrame,
     latest: &UiFrame,
     batch: &mut UiDispatchBatch,
-) {
+) -> Result<(), UiNonActivation> {
     let candidates = focus_candidates(frame, latest, state.modal_root.as_ref());
     if candidates.is_empty() {
-        batch.reject(UiNonActivation::NoFocusTarget);
-        return;
+        return Err(UiNonActivation::NoFocusTarget);
     }
     let current = state
         .seats
         .get(&seat)
         .and_then(|seat| seat.focused.as_ref());
     let next = match direction {
-        UiNavigation::Next | UiNavigation::Previous => {
-            let current_index = current.and_then(|current| {
-                candidates
-                    .iter()
-                    .position(|candidate| candidate.key() == current)
-            });
-            let index = match (direction, current_index) {
-                (UiNavigation::Next, Some(index)) => (index + 1) % candidates.len(),
-                (UiNavigation::Previous, Some(0)) => candidates.len() - 1,
-                (UiNavigation::Previous, Some(index)) => index - 1,
-                (UiNavigation::Previous, None) => candidates.len() - 1,
-                _ => 0,
-            };
-            candidates[index].key().clone()
-        }
+        UiNavigation::Next | UiNavigation::Previous => sequential_focus(
+            current,
+            direction,
+            frame,
+            latest,
+            state.modal_root.as_ref(),
+            &candidates,
+        ),
         UiNavigation::Up | UiNavigation::Down | UiNavigation::Left | UiNavigation::Right => current
-            .and_then(|current| directional_focus(current, direction, &candidates))
+            .and_then(|current| directional_focus(current, direction, frame, &candidates))
             .unwrap_or_else(|| candidates[0].key().clone()),
     };
     set_focus(state, seat, Some(next), frame, batch);
+    Ok(())
+}
+
+fn sequential_focus(
+    current: Option<&UiKey>,
+    direction: UiNavigation,
+    frame: &UiFrame,
+    latest: &UiFrame,
+    modal_root: Option<&UiRootKey>,
+    candidates: &[&UiFocusFact],
+) -> UiKey {
+    let order = frame.focus_order();
+    let current_index = current.and_then(|current| {
+        order
+            .iter()
+            .position(|candidate| candidate.key() == current)
+    });
+    let next = match (direction, current_index) {
+        (UiNavigation::Next, Some(index)) => order[index + 1..]
+            .iter()
+            .chain(order[..index].iter())
+            .find(|candidate| is_focus_destination(frame, latest, modal_root, candidate)),
+        (UiNavigation::Previous, Some(index)) => order[..index]
+            .iter()
+            .rev()
+            .chain(order[index + 1..].iter().rev())
+            .find(|candidate| is_focus_destination(frame, latest, modal_root, candidate)),
+        _ => None,
+    };
+    next.or_else(|| match direction {
+        UiNavigation::Previous => candidates.last().copied(),
+        _ => candidates.first().copied(),
+    })
+    .expect("navigation requires at least one focus destination")
+    .key()
+    .clone()
 }
 
 fn directional_focus(
     current: &UiKey,
     direction: UiNavigation,
+    frame: &UiFrame,
     candidates: &[&UiFocusFact],
 ) -> Option<UiKey> {
-    let current_rect = candidates
+    let current_rect = frame
+        .focus_order()
         .iter()
         .find(|candidate| candidate.key() == current)?
         .rect();
@@ -123,42 +153,37 @@ pub(super) fn activate_target(
     latest: &UiFrame,
     modal_root: Option<&UiRootKey>,
     batch: &mut UiDispatchBatch,
-) {
+) -> Result<(), UiNonActivation> {
     if let Some(reason) = target_rejection(frame, latest, modal_root, target) {
-        batch.reject(reason);
-        return;
+        return Err(reason);
     }
     let Some(semantic) = frame
         .semantics()
         .iter()
         .find(|semantic| semantic.key() == target)
     else {
-        batch.reject(UiNonActivation::NoSupportedAction {
+        return Err(UiNonActivation::NoSupportedAction {
             target: target.clone(),
         });
-        return;
     };
     if !semantic.enabled() {
-        batch.reject(UiNonActivation::TargetDisabled {
+        return Err(UiNonActivation::TargetDisabled {
             target: target.clone(),
         });
-        return;
     }
     let action = if let Some(action) = requested_action {
         if !semantic.actions().contains(&action) {
-            batch.reject(UiNonActivation::ActionUnavailable {
+            return Err(UiNonActivation::ActionUnavailable {
                 target: target.clone(),
                 action,
             });
-            return;
         }
         action
     } else {
         let Some(action) = semantic.actions().first().cloned() else {
-            batch.reject(UiNonActivation::NoSupportedAction {
+            return Err(UiNonActivation::NoSupportedAction {
                 target: target.clone(),
             });
-            return;
         };
         action
     };
@@ -168,6 +193,7 @@ pub(super) fn activate_target(
         UiRoutedEventKind::ActivateRequested { action, source },
         batch,
     );
+    Ok(())
 }
 
 pub(super) fn is_focusable_key(
@@ -177,10 +203,19 @@ pub(super) fn is_focusable_key(
     target: &UiKey,
 ) -> bool {
     target_rejection(frame, latest, modal_root, target).is_none()
-        && frame
-            .focus_order()
-            .iter()
-            .any(|fact| fact.key() == target && fact.enabled())
+        && frame.focus_order().iter().any(|fact| {
+            fact.key() == target && is_focus_destination(frame, latest, modal_root, fact)
+        })
+}
+
+pub(super) fn can_retain_focus(
+    frame: &UiFrame,
+    latest: &UiFrame,
+    modal_root: Option<&UiRootKey>,
+    target: &UiKey,
+) -> bool {
+    target_rejection(frame, latest, modal_root, target).is_none()
+        && frame.focus_order().iter().any(|fact| fact.key() == target)
 }
 
 fn focus_candidates<'a>(
@@ -191,9 +226,17 @@ fn focus_candidates<'a>(
     frame
         .focus_order()
         .iter()
-        .filter(|fact| fact.enabled())
-        .filter(|fact| target_rejection(frame, latest, modal_root, fact.key()).is_none())
+        .filter(|fact| is_focus_destination(frame, latest, modal_root, fact))
         .collect()
+}
+
+fn is_focus_destination(
+    frame: &UiFrame,
+    latest: &UiFrame,
+    modal_root: Option<&UiRootKey>,
+    fact: &UiFocusFact,
+) -> bool {
+    fact.enabled() && target_rejection(frame, latest, modal_root, fact.key()).is_none()
 }
 
 pub(super) fn first_focus(
@@ -206,21 +249,15 @@ pub(super) fn first_focus(
         .map(|fact| fact.key().clone())
 }
 
-pub(super) fn effective_focus(
+pub(super) fn committed_focus(
     state: Option<&SurfaceState>,
     seat: UiSeatId,
     frame: &UiFrame,
     latest: &UiFrame,
     modal_root: Option<&UiRootKey>,
 ) -> Option<UiKey> {
-    let seat_state = state.and_then(|state| state.seats.get(&seat));
-    seat_state
+    state
+        .and_then(|state| state.seats.get(&seat))
         .and_then(|seat| seat.focused.clone())
-        .filter(|target| is_focusable_key(frame, latest, modal_root, target))
-        .or_else(|| {
-            seat_state
-                .and_then(|seat| seat.restore_after_modal.clone())
-                .filter(|target| is_focusable_key(frame, latest, modal_root, target))
-        })
-        .or_else(|| first_focus(frame, latest, modal_root))
+        .filter(|target| can_retain_focus(frame, latest, modal_root, target))
 }
