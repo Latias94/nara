@@ -319,8 +319,10 @@ pub(crate) fn map_adapter_error(error: UiAdapterError) -> UiRouteRejection {
         | UiAdapterError::SurfaceLimitExceeded
         | UiAdapterError::SurfaceIdentitySpaceExhausted
         | UiAdapterError::InputEndpointConflict { .. }
+        | UiAdapterError::SurfaceAlreadyInstalled { .. }
         | UiAdapterError::FrameNotLatest { .. }
         | UiAdapterError::Environment(_)
+        | UiAdapterError::SurfaceMapping(_)
         | UiAdapterError::Input(_) => UiRouteRejection::InvalidRouteStamp,
     }
 }

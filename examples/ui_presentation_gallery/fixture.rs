@@ -1,113 +1,90 @@
 use std::error::Error;
 
 use image::ImageEncoder;
+use nara::advanced_prelude::*;
 use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
-use nara::input::{InputSeatId, InputWindowId};
-use nara::{advanced_prelude::*, backend_prelude::*};
+use nara::image::PreparedImageSnapshot;
 
-#[path = "support/runtime_retirement.rs"]
-mod runtime_retirement;
-use runtime_retirement::finish_runtime_after_winit;
+use super::{ACTIVATE_ACTION, DOMAIN, UI_TEXTURE_STABLE_ID};
 
-const UI_TEXTURE_STABLE_ID: &str = "f7d2d9c7-2b13-49fe-8b89-83d0f98f0c3f";
+#[derive(Resource)]
+pub(super) struct GalleryImage(pub(super) Handle<ImageAsset>);
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let mut app = App::new();
-    app.add_plugins((
-        RuntimeUiPlugins,
-        PresentationUiPlugins,
-        WindowPlugin {
-            primary_window: Some(Window::new(
-                "nara runtime ui",
-                WindowResolution::new(960, 540),
-            )),
-        },
-        WgpuBackendPlugins,
-    ))?;
-    app.add_systems(StartupStage::Scene, setup_scene)?;
-    app.world_mut()?.insert_resource(AssetServer::new());
-    install_ui_surface(
-        app.world_mut()?,
-        UiSurfaceDescriptor::new(
-            UiSurfaceId::new(1).expect("the example surface ID is non-zero"),
-            InputWindowId::new(WindowId::PRIMARY.get()),
-            InputSeatId::PRIMARY,
-            960.0,
-            540.0,
-            1.0,
-            1,
-            1,
-            1,
-        )?,
-    )?;
-    let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
-        app.seal()?,
-        nara::app::RuntimeObligationLedger::new(),
-        nara::app::RuntimeClosePolicy::default(),
-    )?;
-    let mut runtime = candidate.complete_startup()?.promote();
-    let run_result = WinitRunner::default().run(&mut runtime);
-    finish_runtime_after_winit(run_result, runtime)
-}
-
-fn setup_scene(
+pub(super) fn setup_gallery(
     mut commands: Commands,
     mut asset_server: ResMut<AssetServer>,
     mut images: ResMut<Assets<ImageAsset>>,
     mut states: ResMut<AssetStates>,
 ) {
-    let _image = import_ui_texture(&mut asset_server, &mut images, &mut states);
+    let image = import_ui_texture(&mut asset_server, &mut images, &mut states);
+    commands.insert_resource(GalleryImage(image));
 
     commands.spawn((
         Name::new("camera"),
         Transform2d::default(),
         Camera2d {
             clear_color: Some(Color::rgb(0.06, 0.07, 0.08)),
-            viewport_height: 540.0,
+            viewport_height: 270.0,
             ..Camera2d::default()
         },
     ));
 
     let root = commands
         .spawn((
-            Name::new("ui root"),
+            Name::new("gallery root"),
             UiRoot::new(UiLayer::Base),
             UiNode::new(UiStyle::fill()),
-            UiRuntimeKey::new("nara.example.runtime-ui", "root").unwrap(),
+            UiRuntimeKey::new(DOMAIN, "root").unwrap(),
+            UiSemantics::new(UiSemanticRole::Group, "Presentation gallery").unwrap(),
         ))
         .id();
-    let background = commands
+    let panel = commands
         .spawn((
-            Name::new("panel background"),
+            Name::new("clipped panel"),
             UiNode::new(
-                UiStyle::absolute(32.0, 32.0, 320.0, 160.0).with_overflow(UiOverflow::Clip),
+                UiStyle::absolute(24.0, 24.0, 280.0, 180.0).with_overflow(UiOverflow::Clip),
             ),
-            UiVisual::solid(UiColor::rgba(0.12, 0.14, 0.16, 0.92)),
-            UiRuntimeKey::new("nara.example.runtime-ui", "background").unwrap(),
+            UiVisual::solid(UiColor::rgba(0.12, 0.14, 0.16, 0.96)),
+            UiRuntimeKey::new(DOMAIN, "panel").unwrap(),
         ))
         .id();
     let accent = commands
         .spawn((
-            Name::new("accent image"),
-            UiNode::new(UiStyle::absolute(56.0, 56.0, 96.0, 96.0).with_z_index(1)),
+            Name::new("clipped image"),
+            UiNode::new(UiStyle::absolute(220.0, 18.0, 96.0, 96.0).with_z_index(1)),
             UiVisual::image(
                 UiImageId::new(UI_TEXTURE_STABLE_ID).unwrap(),
                 UiColor::rgba(1.0, 1.0, 1.0, 1.0),
             ),
-            UiRuntimeKey::new("nara.example.runtime-ui", "accent").unwrap(),
+            UiRuntimeKey::new(DOMAIN, "image").unwrap(),
         ))
         .id();
     let status = commands
         .spawn((
-            Name::new("status strip"),
-            UiNode::new(UiStyle::absolute(168.0, 72.0, 152.0, 48.0).with_z_index(2)),
+            Name::new("packet status"),
+            UiNode::new(UiStyle::absolute(18.0, 18.0, 188.0, 44.0).with_z_index(2)),
             UiVisual::solid(UiColor::rgba(0.22, 0.58, 0.86, 0.88)),
-            UiText::new("Immutable UI packet", 16.0)
+            UiText::new("Owned packet primitives", 16.0)
                 .unwrap()
                 .with_brush(UiBrush::Solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
-            UiRuntimeKey::new("nara.example.runtime-ui", "status").unwrap(),
+            UiRuntimeKey::new(DOMAIN, "status").unwrap(),
+        ))
+        .id();
+    let button = commands
+        .spawn((
+            Name::new("activation button"),
+            UiButton::new(
+                "Activate packet",
+                UiActionId::new(ACTIVATE_ACTION).unwrap(),
+                16.0,
+            )
+            .unwrap(),
+            UiButtonVisuals::default(),
+            UiNode::new(UiStyle::absolute(18.0, 84.0, 160.0, 48.0).with_z_index(2)),
+            UiVisual::solid(UiColor::rgba(0.24, 0.62, 0.46, 0.96)),
+            UiRuntimeKey::new(DOMAIN, "activate").unwrap(),
         ))
         .id();
     commands.apply_hierarchy_batch(vec![
@@ -116,18 +93,44 @@ fn setup_scene(
             placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
         },
         HierarchyOperation::Place {
-            entity: background,
+            entity: panel,
             placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
         },
         HierarchyOperation::Place {
             entity: accent,
-            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: panel }),
         },
         HierarchyOperation::Place {
             entity: status,
-            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: root }),
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: panel }),
+        },
+        HierarchyOperation::Place {
+            entity: button,
+            placement: HierarchyPlacement::last(HierarchyPlacementOwner::Parent { parent: panel }),
         },
     ]);
+}
+
+pub(super) fn capture_prepared_image(
+    world: &World,
+    handle: Handle<ImageAsset>,
+) -> Result<PreparedImageSnapshot, Box<dyn Error>> {
+    let key = image_resource_key(handle);
+    let record = world
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get(key)
+        .ok_or("the gallery image was not prepared")?;
+    let resource = record
+        .resource()
+        .ok_or("the gallery image preparation did not retain a ready resource")?;
+    Ok(PreparedImageSnapshot::new(
+        record.snapshot().clone(),
+        resource.clone(),
+    ))
+}
+
+pub(super) fn surface_id(value: u64) -> UiSurfaceId {
+    UiSurfaceId::new(value).expect("gallery surface IDs are non-zero")
 }
 
 fn import_ui_texture(
@@ -137,7 +140,7 @@ fn import_ui_texture(
 ) -> Handle<ImageAsset> {
     let record = AssetRecord::new(
         StableAssetId::parse_str(UI_TEXTURE_STABLE_ID).unwrap(),
-        AssetPath::new("textures/ui-demo.png").unwrap(),
+        AssetPath::new("textures/ui-presentation-gallery.png").unwrap(),
         AssetSourceKind::Image,
     );
     let mut database = ProjectAssetDatabase::default();

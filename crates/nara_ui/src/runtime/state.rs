@@ -203,20 +203,21 @@ impl UiRuntimeState {
         Ok(())
     }
 
-    pub(super) fn prepare_new_surface(
+    pub(super) fn prepare_surface_install(
         &self,
         descriptor: UiSurfaceDescriptor,
-    ) -> Result<Option<UiSurfaceRuntime>, UiAdapterError> {
+    ) -> Result<UiSurfaceRuntime, UiAdapterError> {
         let surface_id = descriptor.surface_id();
         if self.surfaces.contains_key(&surface_id) {
-            return Ok(None);
+            return Err(UiAdapterError::SurfaceAlreadyInstalled {
+                surface: surface_id.get(),
+            });
         }
         self.identities.validate_new(surface_id)?;
         if self.surfaces.len() == MAX_RUNTIME_SURFACES {
             return Err(UiAdapterError::SurfaceLimitExceeded);
         }
         UiSurfaceRuntime::new(descriptor, self.font.clone(), self.limits)
-            .map(Some)
             .map_err(UiAdapterError::RuntimeSetup)
     }
 
@@ -235,18 +236,17 @@ impl UiRuntimeState {
     pub(super) fn commit_surface_install(
         &mut self,
         descriptor: UiSurfaceDescriptor,
-        prepared: Option<UiSurfaceRuntime>,
+        prepared: UiSurfaceRuntime,
     ) {
-        match prepared {
-            Some(surface) => {
-                self.surfaces.insert(descriptor.surface_id(), surface);
-            }
-            None => self
-                .surfaces
-                .get_mut(&descriptor.surface_id())
-                .expect("validated UI surface remains installed")
-                .replace_descriptor(descriptor),
-        }
+        let replaced = self.surfaces.insert(descriptor.surface_id(), prepared);
+        debug_assert!(replaced.is_none(), "validated UI surface must be new");
+    }
+
+    pub(super) fn replace_surface_descriptor(&mut self, descriptor: UiSurfaceDescriptor) {
+        self.surfaces
+            .get_mut(&descriptor.surface_id())
+            .expect("validated UI surface remains installed")
+            .replace_descriptor(descriptor);
     }
 
     pub(super) fn retire_surface(&mut self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {

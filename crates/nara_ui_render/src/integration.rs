@@ -132,11 +132,12 @@ pub fn replace_ui_presentation_routes(
         .into_iter()
         .map(|route| (route.surface_id(), route))
         .collect::<BTreeMap<_, _>>();
-    let Some(mut installed) = world.get_resource_mut::<UiPresentationRoutes>() else {
-        return Err(UiPresentationIntegrationError::Unavailable);
-    };
-    installed.routes = replacement.clone();
-    drop(installed);
+    {
+        let Some(mut installed) = world.get_resource_mut::<UiPresentationRoutes>() else {
+            return Err(UiPresentationIntegrationError::Unavailable);
+        };
+        installed.routes = replacement.clone();
+    }
 
     if let Some(mut store) = world.get_resource_mut::<UiPaintPacketStore>() {
         store.packets.retain(|packet| {

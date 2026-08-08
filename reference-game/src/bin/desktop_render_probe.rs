@@ -248,7 +248,7 @@ fn observe_product_render(
         .batches
         .as_slice()
         .iter()
-        .any(|batch| batch.material.image.is_some());
+        .any(|batch| batch.image.is_some());
     let submitted_frame = submitted_product_frame(&inputs.frame, &inputs.backend);
     let product_frame_ready = prepared_image && textured_batch && submitted_frame;
     match probe.phase {
@@ -334,7 +334,7 @@ fn observe_startup_present(
         .batches
         .as_slice()
         .iter()
-        .any(|batch| batch.material.image.is_some());
+        .any(|batch| batch.image.is_some());
     if prepared_image
         && textured_batch
         && submitted_product_frame(&inputs.frame, &inputs.backend)

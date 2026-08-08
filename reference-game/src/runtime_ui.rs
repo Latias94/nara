@@ -65,9 +65,6 @@ impl Plugin for ReferenceRuntimeUiPlugin {
             LOGICAL_WIDTH,
             LOGICAL_HEIGHT,
             1.0,
-            1,
-            1,
-            1,
         )
         .map_err(|error| setup_error(error.to_string()))?;
         install_ui_surface(app.world_mut()?, descriptor)

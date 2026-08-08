@@ -14,9 +14,10 @@ pub use compiler::{
     UiPreparedImages,
 };
 pub use integration::{
-    UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats, UiPresentationRoute,
-    UiPresentationRouteError, UiRenderPlugin, compile_ui_paint_packets,
-    drain_ui_presentation_outcomes, install_ui_presentation_route, retire_ui_presentation_route,
+    UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats,
+    UiPresentationIntegrationError, UiPresentationRoute, UiPresentationRouteError, UiRenderPlugin,
+    compile_ui_paint_packets, drain_ui_presentation_outcomes, install_ui_presentation_route,
+    retire_ui_presentation_route,
 };
 pub use packet::{
     UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketImage, UiPacketPrimitive, UiPacketRect,
@@ -40,10 +41,10 @@ pub mod advanced {
         UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketImage, UiPacketPrimitive,
         UiPacketRect, UiPacketUv, UiPaintCompileStats, UiPaintDiagnostic, UiPaintPacket,
         UiPaintPacketBuildError, UiPaintPacketBuilder, UiPaintPacketBuilderCreateError,
-        UiPaintPacketIdentity, UiPreparedImages, UiPresentationOutcome, UiPresentationRoute,
-        UiPresentationRouteError, UiRenderLimits, UiRenderLimitsError, compile_ui_paint_packets,
-        drain_ui_presentation_outcomes, install_ui_presentation_route,
-        retire_ui_presentation_route,
+        UiPaintPacketIdentity, UiPreparedImages, UiPresentationIntegrationError,
+        UiPresentationOutcome, UiPresentationRoute, UiPresentationRouteError, UiRenderLimits,
+        UiRenderLimitsError, compile_ui_paint_packets, drain_ui_presentation_outcomes,
+        install_ui_presentation_route, retire_ui_presentation_route,
     };
 }
 

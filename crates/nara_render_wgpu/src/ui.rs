@@ -147,6 +147,8 @@ fn ui_quad_instance(
     let center_y = (rect.min_y() as f32 + rect.max_y() as f32) * 0.5;
     let half_width = rect.width() as f32 * 0.5;
     let half_height = rect.height() as f32 * 0.5;
+    let top_left = uv.top_left();
+    let extent = uv.extent();
     Some(WgpuQuadInstance {
         center: [
             center_x / viewport_width * 2.0 - 1.0,
@@ -155,8 +157,9 @@ fn ui_quad_instance(
         x_axis: [half_width / viewport_width * 2.0, 0.0],
         y_axis: [0.0, -(half_height / viewport_height * 2.0)],
         color,
-        uv_min: uv.min(),
-        uv_size: uv.size(),
+        // Packet UVs use a top-left origin while the shared quad shader maps top vertices to v=1.
+        uv_min: [top_left[0], top_left[1] + extent[1]],
+        uv_size: [extent[0], -extent[1]],
         texture_mode,
     })
 }
@@ -252,6 +255,32 @@ mod tests {
         assert_eq!(instance.center, [-0.5, 0.5]);
         assert_eq!(instance.x_axis, [0.5, 0.0]);
         assert_eq!(instance.y_axis, [0.0, -0.5]);
+    }
+
+    #[test]
+    fn packet_uv_is_flipped_once_at_the_wgpu_ui_boundary() {
+        let packet = text_packet();
+        let uv = packet
+            .primitives()
+            .iter()
+            .find_map(|primitive| match primitive {
+                UiPacketPrimitive::Glyph { uv, .. } => Some(*uv),
+                UiPacketPrimitive::Solid { .. } | UiPacketPrimitive::Image { .. } => None,
+            })
+            .expect("text packet should contain glyph UVs");
+        let top_left = uv.top_left();
+        let extent = uv.extent();
+        let instance = ui_quad_instance(
+            UiPacketRect::new(0, 0, 50, 25).unwrap(),
+            [1.0; 4],
+            uv,
+            0,
+            ViewportRect::new(0, 0, 100, 50).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(instance.uv_min, [top_left[0], top_left[1] + extent[1]]);
+        assert_eq!(instance.uv_size, [extent[0], -extent[1]]);
     }
 
     #[test]

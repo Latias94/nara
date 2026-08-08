@@ -64,6 +64,7 @@ jobs:
           cargo check -p nara --locked --no-default-features --features runtime-2d --lib
           cargo check -p nara --locked --no-default-features --features presentation-2d --lib
           cargo check -p nara --locked --no-default-features --features runtime-ui --lib
+          cargo check -p nara --locked --no-default-features --features presentation-ui --lib
           cargo check -p nara --locked --no-default-features --features tooling --lib
           cargo check -p nara --locked --no-default-features --features asset-watch --lib
           cargo check -p nara --locked --no-default-features --features desktop-winit --lib
@@ -76,8 +77,11 @@ jobs:
           cargo check -p nara --locked --no-default-features --features tooling,runtime-2d,serde --lib
           cargo check -p nara --locked --no-default-features --features desktop-winit,render-wgpu --example windowed_clear
           cargo check -p nara --locked --no-default-features --features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites
-          cargo check -p nara --locked --no-default-features --features runtime-ui,desktop-winit,render-wgpu --example runtime_ui_panel
+          cargo run -p nara_ui_kernel --locked --example layout_gallery
+          cargo run -p nara_ui --locked --example interaction_lab
+          cargo run -p nara --locked --no-default-features --features presentation-ui,desktop-winit,render-wgpu --example ui_presentation_gallery
           CARGO_TARGET_DIR=target cargo check --manifest-path tests/fixtures/product-slices/presentation-2d/Cargo.toml --locked
+          CARGO_TARGET_DIR=target cargo check --manifest-path tests/fixtures/product-slices/presentation-ui/Cargo.toml --locked
           cargo check --workspace --locked --all-features --all-targets
       - name: Test root workspace
         shell: bash

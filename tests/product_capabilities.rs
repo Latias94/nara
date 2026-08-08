@@ -184,7 +184,7 @@ fn examples_and_optional_tests_declare_their_capability_ceiling() {
         ["presentation-2d", "desktop-winit", "render-wgpu"]
     );
     assert_eq!(
-        targets["runtime_ui_panel"],
+        targets["ui_presentation_gallery"],
         ["presentation-ui", "desktop-winit", "render-wgpu"]
     );
     assert_eq!(targets["asset_import_texture"], ["presentation-2d"]);

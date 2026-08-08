@@ -78,7 +78,7 @@ fn observe_candidate_frame(
             batches
                 .as_slice()
                 .iter()
-                .any(|batch| batch.material.image.is_some())
+                .any(|batch| batch.image.is_some())
         })
         && submitted_product_frame(&frame, &backend);
     if product_frame_ready {

@@ -237,13 +237,15 @@ impl UiPaintPacketBuilder {
                     };
                     append_glyphs(
                         &mut primitives,
-                        *rect,
-                        clip,
-                        *color,
                         layout,
-                        environment.scale_factor(),
-                        &self.atlas,
-                        &glyph_pages,
+                        GlyphAppendContext {
+                            text_rect: *rect,
+                            clip,
+                            color: *color,
+                            scale_factor: environment.scale_factor(),
+                            atlas: &self.atlas,
+                            pages: &glyph_pages,
+                        },
                     );
                 }
             }
@@ -294,16 +296,28 @@ pub enum UiPaintPacketBuildError {
     ImageLimitExceeded,
 }
 
-fn append_glyphs(
-    primitives: &mut Vec<UiPacketPrimitive>,
+struct GlyphAppendContext<'a> {
     text_rect: UiRect,
     clip: Option<UiPacketRect>,
     color: nara_ui_kernel::UiColor,
-    layout: &nara_text::TextLayout,
     scale_factor: f32,
-    atlas: &GlyphAtlas,
-    pages: &[UiGlyphAtlasPageSnapshot],
+    atlas: &'a GlyphAtlas,
+    pages: &'a [UiGlyphAtlasPageSnapshot],
+}
+
+fn append_glyphs(
+    primitives: &mut Vec<UiPacketPrimitive>,
+    layout: &nara_text::TextLayout,
+    context: GlyphAppendContext<'_>,
 ) {
+    let GlyphAppendContext {
+        text_rect,
+        clip,
+        color,
+        scale_factor,
+        atlas,
+        pages,
+    } = context;
     let origin = text_rect.origin();
     for glyph in layout.glyphs() {
         let Some(slot) = atlas.slot(glyph.key()) else {
@@ -348,7 +362,7 @@ fn append_glyphs(
             clip,
             page_index,
             color,
-            uv: UiPacketUv::new(
+            uv: UiPacketUv::from_top_left(
                 [min_x as f32 / page_width, min_y as f32 / page_height],
                 [width as f32 / page_width, height as f32 / page_height],
             ),
@@ -429,6 +443,17 @@ fn snap_coordinate(value: f32, scale_factor: f32) -> i32 {
         .clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
+fn truncate_message(message: &str) -> String {
+    if message.len() <= MAX_DIAGNOSTIC_MESSAGE_BYTES {
+        return message.to_owned();
+    }
+    let mut end = MAX_DIAGNOSTIC_MESSAGE_BYTES;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    message[..end].to_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -458,15 +483,4 @@ mod tests {
 
         assert!(primitives.is_empty());
     }
-}
-
-fn truncate_message(message: &str) -> String {
-    if message.len() <= MAX_DIAGNOSTIC_MESSAGE_BYTES {
-        return message.to_owned();
-    }
-    let mut end = MAX_DIAGNOSTIC_MESSAGE_BYTES;
-    while !message.is_char_boundary(end) {
-        end -= 1;
-    }
-    message[..end].to_owned()
 }

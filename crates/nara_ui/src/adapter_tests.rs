@@ -33,8 +33,10 @@ use crate::{
     UiActionAdmissionError, UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal,
     UiAdapterError, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin, UiRoot,
     UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRuntimeKey, UiStyle,
-    UiSurfaceDescriptor, UiVisual, commit_ui_presentation, install_ui_surface, latest_ui_frame,
-    register_ui_components, retire_ui_surface, ui_semantic_snapshot,
+    UiSurfaceDescriptor, UiVisual, active_ui_surface_descriptors, commit_ui_presentation,
+    install_ui_surface, latest_ui_frame, register_ui_components, retire_ui_surface,
+    ui_semantic_snapshot, update_ui_surface_input_endpoint, update_ui_surface_logical_size,
+    update_ui_surface_mapping,
 };
 
 const TEST_DOMAIN: &str = "nara.test.ui";
@@ -80,7 +82,7 @@ fn surface_id() -> UiSurfaceId {
     UiSurfaceId::new(7).expect("test surface ID should be non-zero")
 }
 
-fn install_test_surface(world: &mut World, presentation_revision: u64) {
+fn install_test_surface(world: &mut World) {
     install_ui_surface(
         world,
         UiSurfaceDescriptor::new(
@@ -90,9 +92,6 @@ fn install_test_surface(world: &mut World, presentation_revision: u64) {
             200.0,
             100.0,
             1.0,
-            1,
-            presentation_revision,
-            1,
         )
         .expect("test surface descriptor should be valid"),
     )
@@ -279,6 +278,7 @@ fn button_visual_roles_round_trip_as_canonical_scene_data() {
 
 #[test]
 fn surface_mapping_invalidates_exact_routes_and_render_revisions_independently() {
+    let mut app = ui_app();
     let descriptor = UiSurfaceDescriptor::new(
         surface_id(),
         InputWindowId::new(11),
@@ -286,32 +286,104 @@ fn surface_mapping_invalidates_exact_routes_and_render_revisions_independently()
         960.0,
         540.0,
         1.0,
-        7,
-        11,
-        1,
     )
     .expect("test surface descriptor should be valid");
+    let world = app
+        .world_mut()
+        .expect("test App should allow world mutation");
+    install_ui_surface(world, descriptor).unwrap();
 
-    let render_changed = descriptor
-        .with_surface_mapping(2.0, 1.0)
+    let render_changed = update_ui_surface_mapping(world, surface_id(), 2.0, 1.0)
         .expect("render mapping should update");
-    assert_eq!(render_changed.route_revision(), 8);
-    assert_eq!(render_changed.presentation_revision(), 12);
+    assert_eq!(render_changed.route_revision(), 2);
+    assert_eq!(render_changed.presentation_revision(), 2);
     assert_eq!(render_changed.scale_factor(), 2.0);
     assert_eq!(render_changed.input_scale_factor(), 1.0);
 
-    let input_changed = render_changed
-        .with_surface_mapping(2.0, 0.5)
+    let input_changed = update_ui_surface_mapping(world, surface_id(), 2.0, 0.5)
         .expect("input-only mapping should update");
-    assert_eq!(input_changed.route_revision(), 9);
-    assert_eq!(input_changed.presentation_revision(), 12);
+    assert_eq!(input_changed.route_revision(), 3);
+    assert_eq!(input_changed.presentation_revision(), 2);
     assert_eq!(input_changed.input_scale_factor(), 0.5);
     assert_eq!(
-        input_changed
-            .with_surface_mapping(2.0, 0.5)
+        update_ui_surface_mapping(world, surface_id(), 2.0, 0.5)
             .expect("an unchanged mapping should remain valid"),
         input_changed
     );
+}
+
+#[test]
+fn surface_size_and_endpoint_updates_own_exact_invalidation() {
+    let mut app = ui_app();
+    let descriptor = UiSurfaceDescriptor::new(
+        surface_id(),
+        InputWindowId::new(11),
+        InputSeatId::PRIMARY,
+        960.0,
+        540.0,
+        1.0,
+    )
+    .expect("test surface descriptor should be valid");
+    let world = app
+        .world_mut()
+        .expect("test App should allow world mutation");
+    install_ui_surface(world, descriptor).unwrap();
+
+    let resized = update_ui_surface_logical_size(world, surface_id(), 1_280.0, 720.0)
+        .expect("logical size should update");
+    assert_eq!(resized.logical_size(), (1_280.0, 720.0));
+    assert_eq!(resized.route_revision(), 2);
+    assert_eq!(resized.presentation_revision(), 2);
+
+    let moved = update_ui_surface_input_endpoint(
+        world,
+        surface_id(),
+        InputWindowId::new(12),
+        InputSeatId::PRIMARY,
+    )
+    .expect("input endpoint should update");
+    assert_eq!(moved.input_window(), InputWindowId::new(12));
+    assert_eq!(moved.route_revision(), 3);
+    assert_eq!(moved.presentation_revision(), 2);
+    assert_eq!(
+        update_ui_surface_logical_size(world, surface_id(), 1_280.0, 720.0)
+            .expect("an unchanged logical size should remain valid"),
+        moved
+    );
+}
+
+#[test]
+fn descriptor_snapshots_cannot_bypass_runtime_owned_revisions() {
+    let mut app = ui_app();
+    let descriptor = UiSurfaceDescriptor::new(
+        surface_id(),
+        InputWindowId::new(11),
+        InputSeatId::PRIMARY,
+        960.0,
+        540.0,
+        1.0,
+    )
+    .unwrap();
+    let stale_snapshot = descriptor
+        .with_surface_mapping(1.5, 1.0)
+        .unwrap()
+        .with_surface_mapping(2.0, 0.5)
+        .unwrap();
+    let world = app.world_mut().unwrap();
+    install_ui_surface(world, descriptor).unwrap();
+    let resized = update_ui_surface_logical_size(world, surface_id(), 1_280.0, 720.0).unwrap();
+    let current = update_ui_surface_mapping(world, surface_id(), 2.0, 1.0).unwrap();
+
+    assert_eq!(stale_snapshot.route_revision(), 1);
+    assert_eq!(stale_snapshot.presentation_revision(), 1);
+    assert_eq!(resized.route_revision(), 2);
+    assert_eq!(current.route_revision(), 3);
+    assert_eq!(current.presentation_revision(), 3);
+    assert!(matches!(
+        install_ui_surface(world, stale_snapshot),
+        Err(UiAdapterError::SurfaceAlreadyInstalled { surface: 7 })
+    ));
+    assert_eq!(active_ui_surface_descriptors(world).unwrap(), [current]);
 }
 
 #[test]
@@ -320,7 +392,6 @@ fn duplicate_input_endpoint_is_rejected_before_any_presentation() {
     install_test_surface(
         app.world_mut()
             .expect("test App should allow world mutation"),
-        1,
     );
     let conflicting_surface = UiSurfaceId::new(8).unwrap();
     let conflicting = UiSurfaceDescriptor::new(
@@ -330,9 +401,6 @@ fn duplicate_input_endpoint_is_rejected_before_any_presentation() {
         200.0,
         100.0,
         1.0,
-        1,
-        1,
-        1,
     )
     .unwrap();
 
@@ -355,7 +423,6 @@ fn compiled_order(reverse_allocation: bool) -> (Vec<UiKey>, Vec<UiKey>, UiKey) {
     install_test_surface(
         app.world_mut()
             .expect("test App should allow world mutation"),
-        1,
     );
     let world = app
         .world_mut()
@@ -435,7 +502,6 @@ fn build_unstarted_button_app_with_layer(layer: UiLayer) -> (App, Entity) {
     install_test_surface(
         app.world_mut()
             .expect("test App should allow world mutation"),
-        1,
     );
     let world = app
         .world_mut()
@@ -911,9 +977,6 @@ fn interaction_and_reducer_visual_state_are_isolated_per_surface() {
             200.0,
             100.0,
             1.0,
-            1,
-            1,
-            1,
         )
         .unwrap(),
     )
@@ -1072,7 +1135,8 @@ fn intent_backpressure_rejects_closed_without_partial_interaction_commit() {
 
 #[derive(Resource)]
 struct MappingReplacementProbe {
-    replacement: UiSurfaceDescriptor,
+    scale_factor: f32,
+    input_scale_factor: f32,
     completed: bool,
 }
 
@@ -1084,34 +1148,26 @@ fn present_then_replace_surface_mapping(world: &mut World) {
         .unwrap()
         .expect("first runtime frame should compile before the Last-stage test presenter");
     commit_ui_presentation(world, frame, 1).unwrap();
-    let replacement = world.resource::<MappingReplacementProbe>().replacement;
-    install_ui_surface(world, replacement).unwrap();
+    let probe = world.resource::<MappingReplacementProbe>();
+    let scale_factor = probe.scale_factor;
+    let input_scale_factor = probe.input_scale_factor;
+    update_ui_surface_mapping(world, surface_id(), scale_factor, input_scale_factor).unwrap();
     world.resource_mut::<MappingReplacementProbe>().completed = true;
 }
 
 #[test]
 fn retained_presented_epoch_uses_its_exact_input_mapping() {
     let (mut app, _button) = build_unstarted_button_app();
-    let presented_descriptor = UiSurfaceDescriptor::new(
-        surface_id(),
-        InputWindowId::new(11),
-        InputSeatId::PRIMARY,
-        200.0,
-        100.0,
-        1.0,
-        1,
-        1,
-        1,
-    )
-    .unwrap()
-    .with_surface_mapping(1.0, 2.0)
-    .unwrap();
-    install_ui_surface(
+    let presented_descriptor = update_ui_surface_mapping(
         app.world_mut()
             .expect("test App should allow world mutation"),
-        presented_descriptor,
+        surface_id(),
+        1.0,
+        2.0,
     )
     .unwrap();
+    assert_eq!(presented_descriptor.input_scale_factor(), 2.0);
+    assert_eq!(presented_descriptor.route_revision(), 2);
     let cursor = app
         .world_mut()
         .expect("test App should allow world mutation")
@@ -1119,7 +1175,8 @@ fn retained_presented_epoch_uses_its_exact_input_mapping() {
         .register_consumer(UiActionConsumerId::new("mapping-history-test").unwrap())
         .unwrap();
     app.insert_resource(MappingReplacementProbe {
-        replacement: presented_descriptor.with_surface_mapping(1.0, 0.5).unwrap(),
+        scale_factor: 1.0,
+        input_scale_factor: 0.5,
         completed: false,
     })
     .unwrap()
@@ -1373,9 +1430,6 @@ fn stale_frames_and_retired_surface_identities_fail_closed() {
         200.0,
         100.0,
         1.0,
-        2,
-        2,
-        1,
     )
     .expect("replacement descriptor should be valid");
     assert!(matches!(
@@ -1410,7 +1464,6 @@ fn repeated_prefab_roots_have_distinct_stable_keys_from_structured_provenance() 
     install_test_surface(
         app.world_mut()
             .expect("test App should allow world mutation"),
-        1,
     );
     let mut registry = ComponentRegistry::new();
     registry

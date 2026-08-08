@@ -8,7 +8,9 @@ use nara_ui_kernel::{
 };
 use nara_window::WindowId;
 
-use crate::{UiPacketPrimitive, UiPaintPacketBuilder, UiPreparedImages, UiRenderLimits};
+use crate::{
+    UiPacketPrimitive, UiPacketUv, UiPaintPacketBuilder, UiPreparedImages, UiRenderLimits,
+};
 
 fn frame(text: &str) -> Arc<nara_ui_kernel::UiFrame> {
     let node = UiNode::new(UiStyle::absolute(8.0, 6.0, 120.0, 40.0))
@@ -63,6 +65,34 @@ fn packet_preserves_solid_then_nonblank_glyph_order() {
             .flat_map(|page| page.pixels())
             .any(|byte| *byte != 0)
     );
+}
+
+#[test]
+fn packet_uv_contract_uses_top_left_origin_and_positive_extent() {
+    assert_eq!(UiPacketUv::FULL.top_left(), [0.0, 0.0]);
+    assert_eq!(UiPacketUv::FULL.extent(), [1.0, 1.0]);
+
+    let packet = UiPaintPacketBuilder::default()
+        .build(
+            frame("Nara"),
+            RenderTarget::Window(WindowId::PRIMARY),
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    let uv = packet
+        .primitives()
+        .iter()
+        .find_map(|primitive| match primitive {
+            UiPacketPrimitive::Glyph { uv, .. } => Some(*uv),
+            UiPacketPrimitive::Solid { .. } | UiPacketPrimitive::Image { .. } => None,
+        })
+        .expect("text should produce one glyph primitive");
+    let top_left = uv.top_left();
+    let extent = uv.extent();
+    assert!(top_left.into_iter().all(|coordinate| coordinate >= 0.0));
+    assert!(extent.into_iter().all(|length| length > 0.0));
+    assert!(top_left[0] + extent[0] <= 1.0);
+    assert!(top_left[1] + extent[1] <= 1.0);
 }
 
 #[test]

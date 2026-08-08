@@ -131,31 +131,35 @@ impl UiPacketRect {
 }
 
 /// Normalized texture coordinates retained by one image or glyph primitive.
+///
+/// Packet UVs use a top-left origin: `u` grows right and `v` grows down. `top_left` names that
+/// origin-relative corner and `extent` is non-negative in packet space. A backend whose shader
+/// convention differs converts this coordinate system exactly once at its packet boundary.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiPacketUv {
-    min: [f32; 2],
-    size: [f32; 2],
+    top_left: [f32; 2],
+    extent: [f32; 2],
 }
 
 impl UiPacketUv {
     pub const FULL: Self = Self {
-        min: [0.0, 0.0],
-        size: [1.0, 1.0],
+        top_left: [0.0, 0.0],
+        extent: [1.0, 1.0],
     };
 
     #[must_use]
-    pub const fn new(min: [f32; 2], size: [f32; 2]) -> Self {
-        Self { min, size }
+    pub(crate) const fn from_top_left(top_left: [f32; 2], extent: [f32; 2]) -> Self {
+        Self { top_left, extent }
     }
 
     #[must_use]
-    pub const fn min(self) -> [f32; 2] {
-        self.min
+    pub const fn top_left(self) -> [f32; 2] {
+        self.top_left
     }
 
     #[must_use]
-    pub const fn size(self) -> [f32; 2] {
-        self.size
+    pub const fn extent(self) -> [f32; 2] {
+        self.extent
     }
 }
 

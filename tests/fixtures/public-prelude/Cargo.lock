@@ -1401,7 +1401,6 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "nara_app",
- "nara_asset",
  "nara_ecs",
  "nara_image",
  "nara_material",

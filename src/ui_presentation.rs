@@ -74,16 +74,12 @@ fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
         else {
             continue;
         };
-        let updated = match descriptor.with_surface_mapping(scale_factor, input_scale_factor) {
-            Ok(updated) => updated,
-            Err(error) => {
-                record_bridge_error(world, error.to_string());
-                continue;
-            }
-        };
-        if updated != descriptor
-            && let Err(error) = nara_ui::install_ui_surface(world, updated)
-        {
+        if let Err(error) = nara_ui::update_ui_surface_mapping(
+            world,
+            descriptor.surface_id(),
+            scale_factor,
+            input_scale_factor,
+        ) {
             record_bridge_error(world, error.to_string());
         }
     }
@@ -220,9 +216,6 @@ mod tests {
             960.0,
             540.0,
             1.0,
-            1,
-            1,
-            1,
         )
         .expect("test surface descriptor should be valid");
 
@@ -276,9 +269,6 @@ mod tests {
                     320.0,
                     180.0,
                     1.0,
-                    1,
-                    1,
-                    1,
                 )
                 .expect("test surface descriptor should be valid"),
             )

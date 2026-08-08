@@ -214,6 +214,59 @@ impl InputTimeline {
         Ok(true)
     }
 
+    /// Admits one normalized keyboard transition into the global timeline.
+    ///
+    /// Deterministic direct-App and headless hosts use this entry directly. Native platform
+    /// adapters should use the runtime-scoped driver helpers so runtime-state gating and their
+    /// local device state stay coupled to the same admission.
+    pub fn admit_keyboard(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        input: ButtonDriverInput<KeyCode>,
+    ) -> Result<InputAdmission, InputIngressError> {
+        self.apply_keyboard(window, seat, input)
+            .map(|output| output.admission)
+    }
+
+    /// Admits one normalized mouse-button transition for a deterministic direct-App or headless
+    /// host. Native managed adapters use the runtime-scoped driver helpers instead.
+    pub fn admit_mouse_button(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+        input: ButtonDriverInput<MouseButton>,
+    ) -> Result<InputAdmission, InputIngressError> {
+        self.apply_mouse(window, seat, pointer, input)
+            .map(|output| output.admission)
+    }
+
+    /// Admits one normalized pointer movement or leave event for a deterministic direct-App or
+    /// headless host. Native managed adapters use the runtime-scoped driver helpers instead.
+    pub fn admit_pointer(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        pointer: InputPointerId,
+        input: PointerDriverInput,
+    ) -> Result<InputAdmission, InputIngressError> {
+        self.apply_pointer(window, seat, pointer, input)
+            .map(|output| output.admission)
+    }
+
+    /// Admits one normalized window lifecycle event for a deterministic direct-App or headless
+    /// host. Native managed adapters use the runtime-scoped driver helpers instead.
+    pub fn admit_window_event(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        event: InputWindowEvent,
+    ) -> Result<InputAdmission, InputIngressError> {
+        self.apply_window(window, seat, event)
+            .map(|output| output.admission)
+    }
+
     pub fn admit_wheel(
         &mut self,
         window: InputWindowId,

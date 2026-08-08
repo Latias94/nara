@@ -29,6 +29,7 @@ pub use runtime::{
     UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceDescriptor,
     UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
     install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface, ui_semantic_snapshot,
+    update_ui_surface_input_endpoint, update_ui_surface_logical_size, update_ui_surface_mapping,
 };
 pub use style::*;
 
@@ -130,14 +131,15 @@ pub mod prelude {
 /// Exact presentation and presented-input boundary for first-party product integrations.
 pub mod advanced {
     pub use crate::{
-        UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue,
-        UiPresentationReceipt, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog,
-        UiRouteRejectionRecord, UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId,
-        UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
+        UiActivationSource, UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError,
+        UiInputProjectionIssue, UiPresentationReceipt, UiRouteDisposition, UiRouteRejection,
+        UiRouteRejectionLog, UiRouteRejectionRecord, UiRouteStamp, UiSeatId, UiSurfaceDescriptor,
+        UiSurfaceId, UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
         install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface,
-        ui_semantic_snapshot,
+        ui_semantic_snapshot, update_ui_surface_input_endpoint, update_ui_surface_logical_size,
+        update_ui_surface_mapping,
     };
-    pub use nara_ui_kernel::{UiFrame, UiInputEvent, UiSemanticSnapshot};
+    pub use nara_ui_kernel::{UiFrame, UiKey, UiNonActivation, UiSemanticSnapshot};
 }
 
 #[cfg(test)]
