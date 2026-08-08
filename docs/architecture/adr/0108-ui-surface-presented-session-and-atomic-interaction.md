@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
+**Amended**: 2026-08-08 by the UIF-U1 presentation-reconciliation correction
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
@@ -92,6 +93,20 @@ Interaction has exactly three dispositions:
 If geometry invalidation, retirement or a disabled/removed target requires capture or hover cleanup,
 the kernel emits a successful consumed reconciliation transaction. It is not represented as a
 rejection that partially mutates state.
+
+Reconciliation against an unpresented candidate is a staged operation: it returns a candidate
+session and cleanup batch without mutating the presented session. The owning adapter may adopt that
+session only together with successfully reduced widget state and matching candidate paint/semantic
+facts. Any committed input invalidates an already compiled candidate. Equivalent presentation facts
+may rebind an in-flight pointer gesture to the successor epoch; removal, action/enabled behavior,
+geometry or modal-scope changes cancel it. A label-only change does not cancel a gesture when the
+routing geometry and owning action remain identical.
+
+The conformance baseline admits one active seat owner and one active pointer owner per Surface Slot.
+Keyboard, gamepad and accessibility devices for the same player share that seat identity. A second
+seat or pointer fails closed before allocating session state. Independent users require distinct
+Surface Slots on distinct targets; shared-target multi-user interaction remains deferred until a
+focused model is accepted.
 
 Focus identity is independent from destination and activation eligibility. A focused stable control
 that becomes disabled retains focus identity and remains the sequential/directional navigation

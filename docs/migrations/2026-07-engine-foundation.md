@@ -3538,6 +3538,74 @@ focus}.rs`, `crates/nara_ui/src/interaction/{transaction,timeline}.rs`,
 geometry coordinates, committed semantic focus, disabled-focus navigation, retirement cleanup,
 and resize cancellation without activation.
 
+## UIF-U1-2: Presented Reconciliation, Candidate Staging, And Pointer Ownership
+
+**Removed contract**: publishing or dispatching a UI frame no longer permits interaction state to
+silently advance on a different generation. A candidate compile that requires pointer, hover,
+focus, or reducer reconciliation is not itself presented and cannot mutate the live interaction
+session. A physical pointer release is no longer allowed to leave pressed state behind solely
+because the bounded action journal cannot admit the resulting activation.
+
+**Canonical replacement**: `UiInteractionSession::stage_candidate_presentation` returns an opaque,
+documentation-hidden `UiCandidateReconciliation` containing a cloned session and a reconciliation
+batch. The runtime adapter reduces that batch against the candidate behavior, reprojects visual facts,
+and adopts the staged tuple only after the behavior and interaction facts are identical. Any input
+committed after candidate compilation invalidates the candidate and requires a fresh compile. During
+presentation reconciliation, equivalent routing facts rebind pointer capture and position to the
+new epoch; changed geometry, modal scope, removal, or action/enabled behavior emits consumed
+cleanup and retires the old gesture. The baseline admits at most one active pointer owner and one
+active seat owner per surface; distinct surfaces remain the multi-endpoint boundary.
+
+**Before**:
+
+```rust
+let cleanup = session.reconcile_candidate_presentation(
+    surface,
+    previous_frame,
+    candidate_frame,
+    invalidated_keys,
+)?;
+// `session` was already changed before dependent widget reducers could fail.
+```
+
+**After**:
+
+```rust
+let staged = session.stage_candidate_presentation(
+    surface,
+    previous_frame,
+    candidate_frame,
+    invalidated_keys,
+)?;
+let (candidate_session, cleanup) = staged.unwrap().into_parts();
+// Adopt `candidate_session` only together with successfully reduced widget state.
+```
+
+**User action**: direct kernel consumers must use the staged result for unpresented candidates and
+must not retain pointer capture across a changed presentation generation. Treat a consumed cleanup
+batch as the complete transaction; do not replay its release or cancellation event as a new user
+input. When action-journal admission rejects a pointer release, commit the physical release and
+record the typed rejection, then require a fresh press for a later activation.
+
+**Source action**: `manual-rewrite`; this is an intentional pre-1.0 API and observable input
+semantics break.
+
+**Cache action**: `delete` candidate/session/reducer state produced before an input commit or failed
+reprojection. Preserve only the last presented history through its owning journal; a failed candidate
+must not replace it.
+
+**Compatibility window**: none (fearless refactor before 1.0).
+
+**Rollback**: revert commit `d43de14` and its evidence/registration successor together. Do not
+restore an in-place candidate reconciliation method, cross-generation pointer activation, or silent
+release loss.
+
+**Verification anchors**: `crates/nara_ui_kernel/src/interaction/{session,state,pointer}.rs`,
+`crates/nara_ui/src/runtime/{candidate,state,presentation}.rs`,
+`crates/nara_ui/src/interaction/transaction.rs`,
+`crates/nara_ui_kernel/tests/interaction.rs`, `crates/nara_ui/src/adapter_tests.rs`,
+`crates/nara_ui_widgets/tests/button.rs`, and `crates/nara_ui/examples/interaction_lab.rs`.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do

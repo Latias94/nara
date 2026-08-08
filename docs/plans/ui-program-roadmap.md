@@ -26,7 +26,7 @@ Closes the shared contracts before product expansion:
 - root-local validation and last-good order rebinding;
 - frame-global resource budgets and backend capability closure;
 - Host-owned surface/session identity and bounded accessibility ingress;
-- neutral conformance examples and a versioned U15A refreeze.
+- neutral conformance examples and a versioned Foundation Conformance Baseline.
 
 ## 2. Runtime UI Product Slice
 
