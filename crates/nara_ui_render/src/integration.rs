@@ -1,4 +1,7 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::Arc,
+};
 
 use nara_app::{App, Plugin, PluginError};
 use nara_asset::AssetServer;
@@ -9,12 +12,11 @@ use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use nara_window::WindowId;
 use thiserror::Error;
 
+use crate::planner::collect_referenced_image_ids;
 use crate::{
-    UiPaintPacket, UiPaintPacketBuildError, UiPaintPacketBuilder, UiPaintPacketIdentity,
-    UiPreparedImages, UiPresentationOutcome,
+    UiPaintPacket, UiPaintPacketIdentity, UiPreparedImages, UiPresentationAttemptIdentity,
+    UiPresentationContentError, UiPresentationOutcome, UiPresentationPlanner,
 };
-
-const MAX_PRESENTATION_OUTCOMES: usize = 64;
 
 /// Host-owned explicit mapping from one stable UI surface to one render window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +48,11 @@ impl UiPresentationRoute {
     pub const fn window_id(self) -> WindowId {
         self.window_id
     }
+
+    #[must_use]
+    const fn target(self) -> RenderTarget {
+        RenderTarget::Window(self.window_id)
+    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -60,12 +67,7 @@ struct UiPresentationRoutes {
 }
 
 #[derive(Resource)]
-struct UiPacketCompiler(UiPaintPacketBuilder);
-
-#[derive(Debug, Default, Resource)]
-struct UiPaintPacketStore {
-    packets: Vec<Arc<UiPaintPacket>>,
-}
+struct UiPresentationState(UiPresentationPlanner);
 
 #[doc(hidden)]
 #[derive(Debug, Default, Resource)]
@@ -75,14 +77,11 @@ pub struct UiPresentationOutcomes {
 
 impl UiPresentationOutcomes {
     pub fn push(&mut self, outcome: UiPresentationOutcome) {
-        if self.outcomes.len() < MAX_PRESENTATION_OUTCOMES {
-            self.outcomes.push(outcome);
-        }
+        self.outcomes.push(outcome);
     }
 
     fn replace(&mut self, outcomes: Vec<UiPresentationOutcome>) {
         self.outcomes = outcomes;
-        self.outcomes.truncate(MAX_PRESENTATION_OUTCOMES);
     }
 
     fn drain(&mut self) -> Vec<UiPresentationOutcome> {
@@ -101,24 +100,38 @@ pub fn install_ui_presentation_route(
     world: &mut World,
     route: UiPresentationRoute,
 ) -> Result<Option<UiPresentationRoute>, UiPresentationIntegrationError> {
-    let Some(mut routes) = world.get_resource_mut::<UiPresentationRoutes>() else {
-        return Err(UiPresentationIntegrationError::Unavailable);
+    let previous = {
+        let Some(mut routes) = world.get_resource_mut::<UiPresentationRoutes>() else {
+            return Err(UiPresentationIntegrationError::Unavailable);
+        };
+        routes.routes.insert(route.surface_id(), route)
     };
-    Ok(routes.routes.insert(route.surface_id(), route))
+    if let Some(previous) = previous.filter(|previous| previous.target() != route.target())
+        && let Some(mut planner) = world.get_resource_mut::<UiPresentationState>()
+    {
+        planner
+            .0
+            .retire_surface_target(previous.surface_id(), previous.target());
+    }
+    Ok(previous)
 }
 
 pub fn retire_ui_presentation_route(
     world: &mut World,
     surface_id: UiSurfaceId,
 ) -> Result<Option<UiPresentationRoute>, UiPresentationIntegrationError> {
-    let Some(mut routes) = world.get_resource_mut::<UiPresentationRoutes>() else {
-        return Err(UiPresentationIntegrationError::Unavailable);
+    let removed = {
+        let Some(mut routes) = world.get_resource_mut::<UiPresentationRoutes>() else {
+            return Err(UiPresentationIntegrationError::Unavailable);
+        };
+        routes.routes.remove(&surface_id)
     };
-    let removed = routes.routes.remove(&surface_id);
-    if let Some(mut store) = world.get_resource_mut::<UiPaintPacketStore>() {
-        store
-            .packets
-            .retain(|packet| packet.identity().surface_id() != surface_id);
+    if let (Some(route), Some(mut planner)) =
+        (removed, world.get_resource_mut::<UiPresentationState>())
+    {
+        planner
+            .0
+            .retire_surface_target(route.surface_id(), route.target());
     }
     Ok(removed)
 }
@@ -132,19 +145,25 @@ pub fn replace_ui_presentation_routes(
         .into_iter()
         .map(|route| (route.surface_id(), route))
         .collect::<BTreeMap<_, _>>();
-    {
+    let previous = {
         let Some(mut installed) = world.get_resource_mut::<UiPresentationRoutes>() else {
             return Err(UiPresentationIntegrationError::Unavailable);
         };
-        installed.routes = replacement.clone();
-    }
-
-    if let Some(mut store) = world.get_resource_mut::<UiPaintPacketStore>() {
-        store.packets.retain(|packet| {
-            replacement
-                .get(&packet.identity().surface_id())
-                .is_some_and(|route| packet.target() == RenderTarget::Window(route.window_id()))
-        });
+        std::mem::replace(&mut installed.routes, replacement.clone())
+    };
+    let retired_targets = previous
+        .iter()
+        .filter_map(|(surface, route)| {
+            (!replacement
+                .get(surface)
+                .is_some_and(|replacement| replacement.target() == route.target()))
+            .then_some((*surface, route.target()))
+        })
+        .collect::<HashSet<_>>();
+    if let Some(mut planner) = world.get_resource_mut::<UiPresentationState>() {
+        for (surface_id, target) in retired_targets {
+            planner.0.retire_surface_target(surface_id, target);
+        }
     }
     Ok(())
 }
@@ -154,8 +173,7 @@ pub fn compile_ui_paint_packets(
     world: &mut World,
     frames: &[Arc<UiFrame>],
 ) -> Result<UiPaintCompileStats, UiPresentationIntegrationError> {
-    if !world.contains_resource::<UiPacketCompiler>()
-        || !world.contains_resource::<UiPaintPacketStore>()
+    if !world.contains_resource::<UiPresentationState>()
         || !world.contains_resource::<UiPresentationOutcomes>()
         || !world.contains_resource::<UiPresentationRoutes>()
     {
@@ -163,48 +181,64 @@ pub fn compile_ui_paint_packets(
     }
 
     let routes = world.resource::<UiPresentationRoutes>().routes.clone();
+    let target_conflicts = target_conflicts(&routes);
+    let duplicate_surfaces = duplicate_frame_surfaces(frames);
+    let referenced_images = collect_referenced_image_ids(frames);
     let image_index = UiPreparedImages::capture(
+        &referenced_images,
         world.get_resource::<AssetServer>(),
         world.get_resource::<PreparedRenderResources<PreparedImageResource>>(),
     );
-    let mut packets = world
-        .resource::<UiPaintPacketStore>()
-        .packets
-        .iter()
-        .map(|packet| (packet.identity().surface_id(), Arc::clone(packet)))
-        .collect::<BTreeMap<_, _>>();
     let mut outcomes = Vec::new();
     let mut stats = UiPaintCompileStats::default();
-    world.resource_scope(|_world, mut compiler: nara_ecs::Mut<UiPacketCompiler>| {
+    world.resource_scope(|_world, mut planner: nara_ecs::Mut<UiPresentationState>| {
         for frame in frames {
             let identity = UiPaintPacketIdentity::from_frame(frame);
+            if duplicate_surfaces.contains(&identity.surface_id()) {
+                let error = UiPresentationContentError::DuplicateSurfaceFrame {
+                    surface_id: identity.surface_id(),
+                };
+                stats.rejected_packets = stats.rejected_packets.saturating_add(1);
+                outcomes.push(match routes.get(&identity.surface_id()).copied() {
+                    Some(route) => build_rejection(identity, route.target(), error),
+                    None => UiPresentationOutcome::ContentRejected {
+                        attempt: UiPresentationAttemptIdentity::unrouted(identity),
+                        message: error.to_string(),
+                    },
+                });
+                continue;
+            }
             let Some(route) = routes.get(&identity.surface_id()).copied() else {
-                packets.remove(&identity.surface_id());
                 stats.rejected_packets = stats.rejected_packets.saturating_add(1);
                 outcomes.push(UiPresentationOutcome::ContentRejected {
-                    attempt: identity,
+                    attempt: UiPresentationAttemptIdentity::unrouted(identity),
                     message: "the Host has not installed an explicit presentation route for this UI surface"
                         .to_owned(),
                 });
                 continue;
             };
-            match compiler.0.build(
-                Arc::clone(frame),
-                RenderTarget::Window(route.window_id()),
-                &image_index,
-            ) {
-                Ok(packet) => {
+            let target = route.target();
+            if let Some((first_surface, second_surface)) = target_conflicts.get(&target).copied() {
+                let error = UiPresentationContentError::TargetRouteConflict {
+                    target,
+                    first_surface,
+                    second_surface,
+                };
+                stats.rejected_packets = stats.rejected_packets.saturating_add(1);
+                outcomes.push(build_rejection(identity, target, error));
+                continue;
+            }
+            match planner.0.plan(Arc::clone(frame), target, &image_index) {
+                Ok(_) => {
                     stats.admitted_packets = stats.admitted_packets.saturating_add(1);
-                    packets.insert(identity.surface_id(), packet);
                 }
                 Err(error) => {
                     stats.rejected_packets = stats.rejected_packets.saturating_add(1);
-                    outcomes.push(build_rejection(identity, error));
+                    outcomes.push(build_rejection(identity, target, error));
                 }
             }
         }
     });
-    world.resource_mut::<UiPaintPacketStore>().packets = packets.into_values().collect();
     world
         .resource_mut::<UiPresentationOutcomes>()
         .replace(outcomes);
@@ -226,12 +260,46 @@ pub enum UiPresentationIntegrationError {
     Unavailable,
 }
 
+fn target_conflicts(
+    routes: &BTreeMap<UiSurfaceId, UiPresentationRoute>,
+) -> HashMap<RenderTarget, (UiSurfaceId, UiSurfaceId)> {
+    let mut first_owner = HashMap::<RenderTarget, UiSurfaceId>::new();
+    let mut conflicts = HashMap::new();
+    for route in routes.values().copied() {
+        match first_owner.get(&route.target()).copied() {
+            Some(first_surface) if first_surface != route.surface_id() => {
+                conflicts
+                    .entry(route.target())
+                    .or_insert((first_surface, route.surface_id()));
+            }
+            Some(_) => {}
+            None => {
+                first_owner.insert(route.target(), route.surface_id());
+            }
+        }
+    }
+    conflicts
+}
+
+fn duplicate_frame_surfaces(frames: &[Arc<UiFrame>]) -> HashSet<UiSurfaceId> {
+    let mut seen = HashSet::new();
+    let mut duplicates = HashSet::new();
+    for frame in frames {
+        let surface_id = frame.environment().surface_id();
+        if !seen.insert(surface_id) {
+            duplicates.insert(surface_id);
+        }
+    }
+    duplicates
+}
+
 fn build_rejection(
-    attempt: UiPaintPacketIdentity,
-    error: UiPaintPacketBuildError,
+    identity: UiPaintPacketIdentity,
+    target: RenderTarget,
+    error: UiPresentationContentError,
 ) -> UiPresentationOutcome {
     UiPresentationOutcome::ContentRejected {
-        attempt,
+        attempt: UiPresentationAttemptIdentity::routed(identity, target),
         message: error.to_string(),
     }
 }
@@ -239,15 +307,15 @@ fn build_rejection(
 #[doc(hidden)]
 #[derive(SystemParam)]
 pub struct UiPaintPacketReader<'w> {
-    packets: Option<Res<'w, UiPaintPacketStore>>,
+    state: Option<Res<'w, UiPresentationState>>,
 }
 
 impl UiPaintPacketReader<'_> {
     #[must_use]
     pub fn snapshot(&self) -> Vec<Arc<UiPaintPacket>> {
-        self.packets
+        self.state
             .as_deref()
-            .map_or_else(Vec::new, |store| store.packets.clone())
+            .map_or_else(Vec::new, |state| state.0.snapshot_packets())
     }
 }
 
@@ -270,15 +338,14 @@ impl Plugin for UiRenderPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let compiler = UiPaintPacketBuilder::new(Default::default()).map_err(|error| {
+        let planner = UiPresentationPlanner::new(Default::default()).map_err(|error| {
             PluginError::SetupFailed {
                 plugin: UI_RENDER_PLUGIN_ID,
                 message: error.to_string(),
             }
         })?;
-        app.insert_resource(UiPacketCompiler(compiler))?;
+        app.insert_resource(UiPresentationState(planner))?;
         app.init_resource::<UiPresentationRoutes>()?;
-        app.init_resource::<UiPaintPacketStore>()?;
         app.init_resource::<UiPresentationOutcomes>()?;
         Ok(())
     }
@@ -293,7 +360,7 @@ mod tests {
         UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle, UiTheme, UiVisual,
     };
 
-    fn frame(source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
+    fn frame(surface: u64, source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
         let node = UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
             .with_key(UiLocalKey::runtime("packet-retention", "node").unwrap())
             .with_visual(visual);
@@ -309,7 +376,7 @@ mod tests {
             .build()
             .unwrap();
         let environment = UiEnvironment::new(
-            UiSurfaceId::new(1).unwrap(),
+            UiSurfaceId::new(surface).unwrap(),
             64.0,
             64.0,
             1.0,
@@ -331,31 +398,122 @@ mod tests {
         let mut routes = UiPresentationRoutes::default();
         routes.routes.insert(surface_id, route);
         let mut world = World::new();
-        world.insert_resource(UiPacketCompiler(UiPaintPacketBuilder::default()));
+        world.insert_resource(UiPresentationState(UiPresentationPlanner::default()));
         world.insert_resource(routes);
-        world.insert_resource(UiPaintPacketStore::default());
         world.insert_resource(UiPresentationOutcomes::default());
         world
     }
 
     #[test]
-    fn rejected_candidate_keeps_the_last_good_packet() {
+    fn rejected_candidate_keeps_the_exact_last_good_packet_arc() {
         let mut world = packet_world();
         let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
-        let admitted = frame(1, UiVisual::solid(white));
-        let first = compile_ui_paint_packets(&mut world, &[admitted]).unwrap();
-        assert_eq!(first.admitted_packets, 1);
-        let first_identity = world.resource::<UiPaintPacketStore>().packets[0].identity();
+        let admitted = frame(1, 1, UiVisual::solid(white));
+        compile_ui_paint_packets(&mut world, &[admitted]).unwrap();
+        let first = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
 
         let missing_image = UiImageId::new("project://ui/missing.png").unwrap();
-        let rejected = frame(2, UiVisual::image(missing_image, white));
-        let second = compile_ui_paint_packets(&mut world, &[rejected]).unwrap();
+        let rejected = frame(1, 2, UiVisual::image(missing_image, white));
+        let stats = compile_ui_paint_packets(&mut world, &[rejected]).unwrap();
 
-        assert_eq!(second.rejected_packets, 1);
-        assert_eq!(world.resource::<UiPaintPacketStore>().packets.len(), 1);
-        assert_eq!(
-            world.resource::<UiPaintPacketStore>().packets[0].identity(),
-            first_identity
-        );
+        assert_eq!(stats.rejected_packets, 1);
+        assert!(Arc::ptr_eq(
+            &world.resource::<UiPresentationState>().0.snapshot_packets()[0],
+            &first
+        ));
+    }
+
+    #[test]
+    fn two_surfaces_cannot_compete_for_one_target() {
+        let mut world = packet_world();
+        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
+        compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
+        let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
+        install_ui_presentation_route(
+            &mut world,
+            UiPresentationRoute::new(UiSurfaceId::new(2).unwrap(), WindowId::PRIMARY).unwrap(),
+        )
+        .unwrap();
+        let stats = compile_ui_paint_packets(
+            &mut world,
+            &[
+                frame(1, 2, UiVisual::solid(white)),
+                frame(2, 2, UiVisual::solid(white)),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(stats.admitted_packets, 0);
+        assert_eq!(stats.rejected_packets, 2);
+        assert!(Arc::ptr_eq(
+            &world.resource::<UiPresentationState>().0.snapshot_packets()[0],
+            &original
+        ));
+    }
+
+    #[test]
+    fn retiring_a_conflicting_route_does_not_release_the_target_owner() {
+        let mut world = packet_world();
+        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
+        compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
+        let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
+        let second_surface = UiSurfaceId::new(2).unwrap();
+        install_ui_presentation_route(
+            &mut world,
+            UiPresentationRoute::new(second_surface, WindowId::PRIMARY).unwrap(),
+        )
+        .unwrap();
+
+        retire_ui_presentation_route(&mut world, second_surface).unwrap();
+
+        let packets = world.resource::<UiPresentationState>().0.snapshot_packets();
+        assert_eq!(packets.len(), 1);
+        assert!(Arc::ptr_eq(&packets[0], &original));
+    }
+
+    #[test]
+    fn duplicate_surface_frames_reject_the_whole_surface_attempt() {
+        let mut world = packet_world();
+        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
+        compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
+        let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
+
+        let stats = compile_ui_paint_packets(
+            &mut world,
+            &[
+                frame(1, 2, UiVisual::solid(white)),
+                frame(1, 3, UiVisual::solid(white)),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(stats.admitted_packets, 0);
+        assert_eq!(stats.rejected_packets, 2);
+        assert!(Arc::ptr_eq(
+            &world.resource::<UiPresentationState>().0.snapshot_packets()[0],
+            &original
+        ));
+        let outcomes = drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert_eq!(outcomes.len(), 2);
+        assert!(outcomes.iter().all(|outcome| {
+            outcome
+                .message()
+                .is_some_and(|message| message.contains("more than once"))
+        }));
+    }
+
+    #[test]
+    fn outcome_journal_does_not_silently_truncate_backend_results() {
+        let frame = frame(1, 1, UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)));
+        let identity = UiPaintPacketIdentity::from_frame(&frame);
+        let mut outcomes = UiPresentationOutcomes::default();
+        for index in 0..65 {
+            outcomes.push(UiPresentationOutcome::ContentRejected {
+                attempt: UiPresentationAttemptIdentity::unrouted(identity),
+                message: index.to_string(),
+            });
+        }
+
+        assert_eq!(outcomes.drain().len(), 65);
     }
 }

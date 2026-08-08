@@ -25,6 +25,9 @@ pub enum WgpuRenderError {
     FrameAlreadyConsumed { frame_index: u64 },
     #[error("render packet content was rejected: {message}")]
     ContentRejected { message: String },
+    #[cfg(feature = "ui-submitter")]
+    #[error("resource-complete UI packet violated the WGPU adapter contract: {message}")]
+    UiPacketInvariant { message: String },
     #[error("render packet submission was deferred: {message}")]
     UploadDeferred { message: String },
     #[error("wgpu surface creation failed for window {window_id:?}: {message}")]

@@ -1,4 +1,6 @@
-use crate::quad::{WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture};
+use crate::quad::{
+    WGPU_QUAD_SHAPE_PLAIN, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
+};
 use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteInstance};
 
 pub(crate) fn collect_sprite_quad_batches(
@@ -43,6 +45,10 @@ fn sprite_quad_instance(instance: &SpriteInstance) -> WgpuQuadInstance {
         uv_min: instance.uv.min.to_array(),
         uv_size: instance.uv.size.to_array(),
         texture_mode: 0,
+        shape_mode: WGPU_QUAD_SHAPE_PLAIN,
+        rect_size: [0.0; 2],
+        corner_radius: 0.0,
+        border_width: 0.0,
     }
 }
 

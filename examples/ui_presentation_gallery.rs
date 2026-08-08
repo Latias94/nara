@@ -1,7 +1,7 @@
 use std::{env, error::Error, sync::Arc};
 
 use nara::input::{ButtonTransitionPhase, InputSeatId, InputTimeline, InputWindowId};
-use nara::ui_render::advanced::{UiPaintPacketBuilder, UiPreparedImages};
+use nara::ui_render::advanced::{UiPreparedImages, UiPresentationPlanner};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
 #[path = "ui_presentation_gallery/fixture.rs"]
@@ -69,8 +69,8 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     let image_id = UiImageId::new(UI_TEXTURE_STABLE_ID)?;
     let mut prepared_images = UiPreparedImages::new();
     prepared_images.insert(image_id, image_snapshot.clone());
-    let mut packet_builder = UiPaintPacketBuilder::default();
-    let packet = packet_builder.build(
+    let mut presentation_planner = UiPresentationPlanner::default();
+    let packet = presentation_planner.plan(
         Arc::clone(&frame),
         RenderTarget::Window(WindowId::PRIMARY),
         &prepared_images,
@@ -82,7 +82,10 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         HeadlessTestPresenter::new(RenderTarget::Window(WindowId::new(2)));
     let rejected = rejecting_presenter.accept_and_submit(Arc::clone(&packet), 6);
     assert!(rejecting_presenter.submitted().is_none());
-    assert_eq!(rejected.attempt(), Some(packet.identity()));
+    assert_eq!(
+        rejected.attempt(),
+        Some(nara_ui_render::__private::presentation_attempt(&packet))
+    );
     assert!(commit_headless_test_outcome(app.world_mut()?, rejected)?.is_none());
     assert!(
         ui_semantic_snapshot(
@@ -116,7 +119,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         .find(|node| node.name() == "Activate packet")
         .expect("the presented Button should publish formal semantics");
     let action = UiActionId::new(ACTIVATE_ACTION)?;
-    assert_eq!(button.actions(), [action.clone()]);
+    assert_eq!(button.actions(), std::slice::from_ref(&action));
     let timeline = &mut *app.world_mut()?.resource_mut::<InputTimeline>();
     assert_eq!(
         timeline

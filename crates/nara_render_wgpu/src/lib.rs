@@ -47,7 +47,7 @@ use nara_sprite_render::SpriteBatches;
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::__private::{UiPaintPacketReader, UiPresentationOutcomes};
 #[cfg(feature = "ui-submitter")]
-use nara_ui_render::{UiPaintPacket, UiPresentationOutcome};
+use nara_ui_render::{UiPaintPacket, UiPresentationBackendGeneration, UiPresentationOutcome};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, WindowSurfaceRetirementDriver, WindowSurfaceRetirementError},
@@ -210,7 +210,7 @@ impl WgpuFramePayload {
         #[cfg(feature = "ui-submitter")]
         let ui =
             ui::collect_ui_quad_batches(&self.ui_packets, target, self.primary_window_id, viewport)
-                .map_err(|error| WgpuRenderError::ContentRejected {
+                .map_err(|error| WgpuRenderError::UiPacketInvariant {
                     message: error.to_string(),
                 })?;
         #[cfg(not(feature = "ui-submitter"))]
@@ -413,12 +413,16 @@ fn render_wgpu_surfaces(
         }
     };
     #[cfg(feature = "ui-submitter")]
+    let ui_backend_generation =
+        UiPresentationBackendGeneration::new(backend.instance_id(), backend.device_epoch());
+    #[cfg(feature = "ui-submitter")]
     publish_ui_outcomes(
         ui_outcomes.as_deref_mut(),
         &ui_attempts,
         &result,
         frame.state,
         frame.index,
+        ui_backend_generation,
         status.last_skip().and_then(|skip| skip.message()),
     );
     if let Err(error) = result {
@@ -494,37 +498,70 @@ fn publish_ui_outcomes(
     result: &Result<(), WgpuRenderError>,
     frame_state: RenderFrameState,
     presentation_epoch: u64,
+    backend_generation: Option<UiPresentationBackendGeneration>,
     skip_message: Option<&str>,
 ) {
     let Some(outcomes) = outcomes else {
         return;
     };
     for packet in attempts {
+        let attempt = nara_ui_render::__private::presentation_attempt(packet);
         let outcome = match result {
-            Ok(()) if frame_state == RenderFrameState::Submitted => {
-                UiPresentationOutcome::Presented {
-                    packet: Arc::clone(packet),
+            Ok(()) if frame_state == RenderFrameState::Submitted => match backend_generation {
+                Some(backend_generation) => nara_ui_render::__private::issue_presented(
+                    Arc::clone(packet),
                     presentation_epoch,
-                }
-            }
-            Ok(()) => UiPresentationOutcome::Deferred {
-                attempt: packet.identity(),
-                message: skip_message
-                    .unwrap_or("the target surface did not submit the exact UI packet")
-                    .to_owned(),
+                    backend_generation,
+                ),
+                None => UiPresentationOutcome::BackendFault {
+                    attempt: Some(attempt),
+                    backend_generation: None,
+                    message:
+                        "the WGPU submission completed without an initialized device generation"
+                            .to_owned(),
+                },
             },
-            Err(error) if error.is_deferred() => UiPresentationOutcome::Deferred {
-                attempt: packet.identity(),
-                message: error.to_string(),
+            Ok(()) => match backend_generation {
+                Some(backend_generation) => UiPresentationOutcome::Deferred {
+                    retry: nara_ui_render::__private::presentation_retry(
+                        attempt,
+                        backend_generation,
+                    ),
+                    message: skip_message
+                        .unwrap_or("the target surface did not submit the exact UI packet")
+                        .to_owned(),
+                },
+                None => UiPresentationOutcome::BackendFault {
+                    attempt: Some(attempt),
+                    backend_generation: None,
+                    message: skip_message
+                        .unwrap_or("the UI packet has no initialized WGPU device generation")
+                        .to_owned(),
+                },
+            },
+            Err(error) if error.is_deferred() => match backend_generation {
+                Some(backend_generation) => UiPresentationOutcome::Deferred {
+                    retry: nara_ui_render::__private::presentation_retry(
+                        attempt,
+                        backend_generation,
+                    ),
+                    message: error.to_string(),
+                },
+                None => UiPresentationOutcome::BackendFault {
+                    attempt: Some(attempt),
+                    backend_generation: None,
+                    message: error.to_string(),
+                },
             },
             Err(error) if error.is_content_rejection() || error.is_packet_admission_rejection() => {
                 UiPresentationOutcome::ContentRejected {
-                    attempt: packet.identity(),
+                    attempt,
                     message: error.to_string(),
                 }
             }
             Err(error) => UiPresentationOutcome::BackendFault {
-                attempt: Some(packet.identity()),
+                attempt: Some(attempt),
+                backend_generation,
                 message: error.to_string(),
             },
         };
@@ -993,7 +1030,7 @@ mod tests {
         handle_wgpu_render_error(
             &mut backend,
             WgpuRenderError::ContentRejected {
-                message: "unsupported UI corner radii".to_owned(),
+                message: "quad instance capacity exceeded".to_owned(),
             },
             11,
             &mut status,
@@ -1006,5 +1043,146 @@ mod tests {
         let skip = status.last_skip().unwrap();
         assert_eq!(skip.frame_index(), 11);
         assert_eq!(skip.reason(), RenderFrameSkipReason::ContentRejected);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn impossible_ui_packet_state_retires_the_backend_generation() {
+        let mut backend = WgpuRenderBackend::default();
+        let mut status = RenderBackendStatus::default();
+        status.mark_ready(WGPU_RENDER_BACKEND);
+
+        handle_wgpu_render_error(
+            &mut backend,
+            WgpuRenderError::UiPacketInvariant {
+                message: "missing planner-owned image index".to_owned(),
+            },
+            12,
+            &mut status,
+            None,
+        );
+
+        assert_eq!(backend.state(), WgpuBackendState::Unavailable);
+        assert_eq!(status.state(), RenderBackendState::Unavailable);
+        assert!(status.last_error().is_some());
+        let skip = status.last_skip().unwrap();
+        assert_eq!(skip.frame_index(), 12);
+        assert_eq!(skip.reason(), RenderFrameSkipReason::BackendError);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn ui_outcomes_bind_submission_and_retry_to_the_exact_backend_generation() {
+        let packet = ui_outcome_packet();
+        let backend_generation = UiPresentationBackendGeneration::new(17, 3).unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+
+        publish_ui_outcomes(
+            Some(&mut outcomes),
+            &[Arc::clone(&packet)],
+            &Ok(()),
+            RenderFrameState::Submitted,
+            29,
+            Some(backend_generation),
+            None,
+        );
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        let mut published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        let UiPresentationOutcome::Presented(commit) = published.remove(0) else {
+            panic!("a submitted packet must issue one presentation commit");
+        };
+        assert_eq!(
+            commit.attempt(),
+            nara_ui_render::__private::presentation_attempt(&packet)
+        );
+        let (committed_packet, presentation_epoch, committed_generation) = commit.into_parts();
+        assert!(Arc::ptr_eq(&committed_packet, &packet));
+        assert_eq!(presentation_epoch, 29);
+        assert_eq!(committed_generation, backend_generation);
+
+        let mut outcomes = UiPresentationOutcomes::default();
+        let deferred = Err(WgpuRenderError::UploadDeferred {
+            message: "shared upload budget exhausted".to_owned(),
+        });
+        publish_ui_outcomes(
+            Some(&mut outcomes),
+            &[Arc::clone(&packet)],
+            &deferred,
+            RenderFrameState::Skipped,
+            30,
+            Some(backend_generation),
+            None,
+        );
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        let mut published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        let UiPresentationOutcome::Deferred { retry, .. } = published.remove(0) else {
+            panic!("retryable upload work must retain an exact retry identity");
+        };
+        assert_eq!(
+            retry.attempt(),
+            nara_ui_render::__private::presentation_attempt(&packet)
+        );
+        assert_eq!(retry.backend_generation(), backend_generation);
+
+        let mut outcomes = UiPresentationOutcomes::default();
+        publish_ui_outcomes(
+            Some(&mut outcomes),
+            &[packet],
+            &Ok(()),
+            RenderFrameState::Skipped,
+            31,
+            None,
+            Some("the surface is unavailable"),
+        );
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        let mut published = nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap();
+        assert!(matches!(
+            published.remove(0),
+            UiPresentationOutcome::BackendFault {
+                backend_generation: None,
+                ..
+            }
+        ));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn ui_outcome_packet() -> Arc<UiPaintPacket> {
+        use nara_text::bundled_font_face;
+        use nara_ui_kernel::{
+            UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
+            UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+        };
+
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("wgpu-outcome", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(
+                    UiNode::new(UiStyle::absolute(0.0, 0.0, 16.0, 16.0))
+                        .with_key(UiLocalKey::runtime("wgpu-outcome", "node").unwrap())
+                        .with_visual(UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
+                ),
+            )
+            .build()
+            .unwrap();
+        let environment =
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap();
+        let frame = UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        nara_ui_render::UiPresentationPlanner::default()
+            .plan(
+                frame,
+                RenderTarget::Window(WindowId::PRIMARY),
+                &nara_ui_render::UiPreparedImages::default(),
+            )
+            .unwrap()
     }
 }

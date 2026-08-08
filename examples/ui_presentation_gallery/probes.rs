@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use nara::image::PreparedImageSnapshot;
-use nara::ui_render::advanced::{UiPacketPrimitive, UiPaintPacket};
+use nara::ui_render::advanced::{UiPacketFill, UiPacketPrimitive, UiPaintPacket};
 use nara::{advanced_prelude::*, backend_prelude::WindowId};
 
 pub(super) fn assert_owned_packet(
@@ -29,12 +29,28 @@ pub(super) fn assert_owned_packet(
     let solid = packet
         .primitives()
         .iter()
-        .position(|primitive| matches!(primitive, UiPacketPrimitive::Solid { .. }))
+        .position(|primitive| {
+            matches!(
+                primitive,
+                UiPacketPrimitive::Rect {
+                    fill: Some(UiPacketFill::Solid { .. }),
+                    ..
+                }
+            )
+        })
         .expect("the packet should contain a solid primitive");
     let image = packet
         .primitives()
         .iter()
-        .position(|primitive| matches!(primitive, UiPacketPrimitive::Image { .. }))
+        .position(|primitive| {
+            matches!(
+                primitive,
+                UiPacketPrimitive::Rect {
+                    fill: Some(UiPacketFill::Image { .. }),
+                    ..
+                }
+            )
+        })
         .expect("the packet should contain an image primitive");
     let glyph = packet
         .primitives()
@@ -44,7 +60,11 @@ pub(super) fn assert_owned_packet(
     assert!(solid < image && image < glyph);
     assert!(matches!(
         &packet.primitives()[image],
-        UiPacketPrimitive::Image { clip: Some(_), .. }
+        UiPacketPrimitive::Rect {
+            clip: Some(_),
+            fill: Some(UiPacketFill::Image { .. }),
+            ..
+        }
     ));
     assert!(
         packet

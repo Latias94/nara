@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderTarget, ViewportRect};
-use nara_ui_render::{UiPacketPrimitive, UiPacketRect, UiPaintPacket};
+use nara_ui_render::{UiPacketFill, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket};
 use thiserror::Error;
 
 use crate::quad::{
+    WGPU_QUAD_SHAPE_PLAIN, WGPU_QUAD_SHAPE_ROUNDED_BORDER, WGPU_QUAD_SHAPE_ROUNDED_FILL,
     WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuScissorRect,
 };
 
@@ -24,77 +25,79 @@ pub(crate) fn collect_ui_quad_batches(
         .filter(|packet| packet.target().window_id(primary_window_id) == Some(target_window_id))
     {
         for primitive in packet.primitives() {
-            let Some((material, texture, scissor, instance)) =
-                convert_primitive(packet, primitive, viewport)?
-            else {
-                continue;
-            };
-            if let Some(batch) = batches.last_mut()
-                && batch.material == material
-                && batch.texture == texture
-                && batch.scissor == scissor
-            {
-                batch.instances.push(instance);
-                continue;
-            }
-            batches.push(WgpuQuadBatch {
-                material,
-                texture,
-                scissor,
-                instances: vec![instance],
-                counts_as_sprites: false,
-            });
+            append_primitive(&mut batches, packet, primitive, viewport)?;
         }
     }
     Ok(batches)
 }
 
-fn convert_primitive(
+fn append_primitive(
+    batches: &mut Vec<WgpuQuadBatch>,
     packet: &UiPaintPacket,
     primitive: &UiPacketPrimitive,
     viewport: ViewportRect,
-) -> Result<
-    Option<(
-        WgpuQuadMaterialKey,
-        WgpuQuadTexture,
-        Option<WgpuScissorRect>,
-        WgpuQuadInstance,
-    )>,
-    WgpuUiPacketError,
-> {
-    let (texture, color, uv, corner_radii, texture_mode) = match primitive {
-        UiPacketPrimitive::Solid {
-            color,
-            corner_radii,
-            ..
-        } => (
-            WgpuQuadTexture::Fallback,
-            color.components(),
-            nara_ui_render::UiPacketUv::FULL,
-            *corner_radii,
-            0,
-        ),
-        UiPacketPrimitive::Image {
-            image_index,
-            tint,
-            uv,
-            corner_radii,
+) -> Result<(), WgpuUiPacketError> {
+    let Some(scissor) = primitive_scissor(primitive.clip(), viewport) else {
+        return Ok(());
+    };
+    match primitive {
+        UiPacketPrimitive::Rect {
+            rect,
+            fill,
+            border,
+            corner_radius,
             ..
         } => {
-            let image = packet.images().get(*image_index as usize).ok_or(
-                WgpuUiPacketError::MissingImageResource {
-                    index: *image_index,
-                },
-            )?;
-            (
-                WgpuQuadTexture::Image(image.snapshot().clone()),
-                tint.components(),
-                *uv,
-                *corner_radii,
-                0,
-            )
+            if let Some(fill) = fill {
+                let (texture, color, uv) = match fill {
+                    UiPacketFill::Solid { color } => (
+                        WgpuQuadTexture::Fallback,
+                        color.components(),
+                        UiPacketUv::FULL,
+                    ),
+                    UiPacketFill::Image {
+                        image_index,
+                        tint,
+                        uv,
+                    } => {
+                        let image = packet.images().get(*image_index as usize).ok_or(
+                            WgpuUiPacketError::MissingImageResource {
+                                index: *image_index,
+                            },
+                        )?;
+                        (
+                            WgpuQuadTexture::Image(image.snapshot().clone()),
+                            tint.components(),
+                            *uv,
+                        )
+                    }
+                };
+                if let Some(instance) = ui_quad_instance(
+                    *rect,
+                    color,
+                    uv,
+                    0,
+                    WgpuUiShape::fill(*corner_radius),
+                    viewport,
+                ) {
+                    append_quad(batches, texture, scissor, instance);
+                }
+            }
+            if let Some(border) = border.filter(|border| border.width() > 0.0)
+                && let Some(instance) = ui_quad_instance(
+                    *rect,
+                    border.color().components(),
+                    UiPacketUv::FULL,
+                    0,
+                    WgpuUiShape::border(*corner_radius, border.width()),
+                    viewport,
+                )
+            {
+                append_quad(batches, WgpuQuadTexture::Fallback, scissor, instance);
+            }
         }
         UiPacketPrimitive::Glyph {
+            rect,
             page_index,
             color,
             uv,
@@ -104,31 +107,89 @@ fn convert_primitive(
                 .glyph_pages()
                 .get(usize::from(*page_index))
                 .ok_or(WgpuUiPacketError::MissingGlyphPage { index: *page_index })?;
-            (
-                WgpuQuadTexture::Glyph(page.clone()),
+            if let Some(instance) = ui_quad_instance(
+                *rect,
                 color.components(),
                 *uv,
-                [0.0; 4],
                 1,
-            )
+                WgpuUiShape::plain(),
+                viewport,
+            ) {
+                append_quad(
+                    batches,
+                    WgpuQuadTexture::Glyph(page.clone()),
+                    scissor,
+                    instance,
+                );
+            }
         }
-    };
-    if corner_radii.iter().any(|radius| *radius != 0.0) {
-        return Err(WgpuUiPacketError::UnsupportedCornerRadii);
     }
-    let Some(instance) = ui_quad_instance(primitive.rect(), color, uv, texture_mode, viewport)
-    else {
-        return Ok(None);
-    };
-    let Some(scissor) = primitive_scissor(primitive.clip(), viewport) else {
-        return Ok(None);
-    };
+    Ok(())
+}
+
+fn append_quad(
+    batches: &mut Vec<WgpuQuadBatch>,
+    texture: WgpuQuadTexture,
+    scissor: Option<WgpuScissorRect>,
+    instance: WgpuQuadInstance,
+) {
     let material = WgpuQuadMaterialKey {
         texture: texture.key(),
         sampler: SamplerDescriptor::default(),
         alpha_mode: AlphaMode2d::Blend,
     };
-    Ok(Some((material, texture, scissor, instance)))
+    if let Some(batch) = batches.last_mut()
+        && batch.material == material
+        && batch.texture == texture
+        && batch.scissor == scissor
+    {
+        batch.instances.push(instance);
+        return;
+    }
+    batches.push(WgpuQuadBatch {
+        material,
+        texture,
+        scissor,
+        instances: vec![instance],
+        counts_as_sprites: false,
+    });
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct WgpuUiShape {
+    mode: u32,
+    corner_radius: f32,
+    border_width: f32,
+}
+
+impl WgpuUiShape {
+    const fn plain() -> Self {
+        Self {
+            mode: WGPU_QUAD_SHAPE_PLAIN,
+            corner_radius: 0.0,
+            border_width: 0.0,
+        }
+    }
+
+    const fn fill(corner_radius: f32) -> Self {
+        Self {
+            mode: if corner_radius == 0.0 {
+                WGPU_QUAD_SHAPE_PLAIN
+            } else {
+                WGPU_QUAD_SHAPE_ROUNDED_FILL
+            },
+            corner_radius,
+            border_width: 0.0,
+        }
+    }
+
+    const fn border(corner_radius: f32, border_width: f32) -> Self {
+        Self {
+            mode: WGPU_QUAD_SHAPE_ROUNDED_BORDER,
+            corner_radius,
+            border_width,
+        }
+    }
 }
 
 fn ui_quad_instance(
@@ -136,6 +197,7 @@ fn ui_quad_instance(
     color: [f32; 4],
     uv: nara_ui_render::UiPacketUv,
     texture_mode: u32,
+    shape: WgpuUiShape,
     viewport: ViewportRect,
 ) -> Option<WgpuQuadInstance> {
     if viewport.physical_width == 0 || viewport.physical_height == 0 {
@@ -161,6 +223,10 @@ fn ui_quad_instance(
         uv_min: [top_left[0], top_left[1] + extent[1]],
         uv_size: [extent[0], -extent[1]],
         texture_mode,
+        shape_mode: shape.mode,
+        rect_size: [rect.width() as f32, rect.height() as f32],
+        corner_radius: shape.corner_radius,
+        border_width: shape.border_width,
     })
 }
 
@@ -196,8 +262,6 @@ pub(crate) enum WgpuUiPacketError {
     MissingImageResource { index: u32 },
     #[error("UI paint packet references missing glyph-atlas page {index}")]
     MissingGlyphPage { index: u16 },
-    #[error("the first-party WGPU UI submitter does not yet support rounded rectangles")]
-    UnsupportedCornerRadii,
 }
 
 #[cfg(test)]
@@ -219,8 +283,9 @@ mod tests {
     use nara_render::RenderResourceSnapshot;
     use nara_text::bundled_font_face;
     use nara_ui_kernel::{
-        UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiImageId, UiLayer,
-        UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
+        UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
+        UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle,
+        UiSurfaceId, UiText, UiTheme, UiVisual,
     };
     use nara_window::WindowId;
 
@@ -248,6 +313,7 @@ mod tests {
             [1.0; 4],
             nara_ui_render::UiPacketUv::FULL,
             0,
+            WgpuUiShape::plain(),
             ViewportRect::new(10, 20, 100, 50).unwrap(),
         )
         .unwrap();
@@ -265,7 +331,7 @@ mod tests {
             .iter()
             .find_map(|primitive| match primitive {
                 UiPacketPrimitive::Glyph { uv, .. } => Some(*uv),
-                UiPacketPrimitive::Solid { .. } | UiPacketPrimitive::Image { .. } => None,
+                UiPacketPrimitive::Rect { .. } => None,
             })
             .expect("text packet should contain glyph UVs");
         let top_left = uv.top_left();
@@ -275,6 +341,7 @@ mod tests {
             [1.0; 4],
             uv,
             0,
+            WgpuUiShape::plain(),
             ViewportRect::new(0, 0, 100, 50).unwrap(),
         )
         .unwrap();
@@ -345,11 +412,55 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rounded_fill_and_border_render_through_the_shared_quad_pipeline() {
+        let packet = rounded_packet();
+        let viewport = readback_viewport();
+        let target = RenderTarget::Window(WindowId::PRIMARY);
+        let batches =
+            collect_ui_quad_batches(&[packet], target, Some(WindowId::PRIMARY), viewport).unwrap();
+
+        let pixels = render_batches_to_rgba(&batches);
+        let solid_corner = readback_pixel(&pixels, 4, 4);
+        let border = readback_pixel(&pixels, 18, 5);
+        let solid_interior = readback_pixel(&pixels, 18, 18);
+        let image_corner = readback_pixel(&pixels, 36, 4);
+        let image_interior = readback_pixel(&pixels, 48, 16);
+        assert!(
+            solid_corner[3] < 32,
+            "the rounded solid corner must remain transparent"
+        );
+        assert!(
+            border[3] > 200 && border[0] > border[1],
+            "the border band must use the authored border color"
+        );
+        assert!(
+            solid_interior[3] > 200 && solid_interior[1] > solid_interior[0],
+            "the solid interior must retain the authored fill color"
+        );
+        assert!(
+            image_corner[3] < 32,
+            "the rounded image corner must remain transparent"
+        );
+        assert!(
+            image_interior[3] > 200
+                && image_interior[0] > 200
+                && image_interior[1] < 64
+                && image_interior[2] > 80,
+            "the image interior must retain the captured snapshot color"
+        );
+    }
+
     const READBACK_EXTENT: u32 = 64;
     const READBACK_BYTES_PER_PIXEL: u32 = 4;
 
     fn readback_viewport() -> ViewportRect {
         ViewportRect::new(0, 0, READBACK_EXTENT, READBACK_EXTENT).unwrap()
+    }
+
+    fn readback_pixel(pixels: &[u8], x: u32, y: u32) -> &[u8] {
+        let offset = usize::try_from((y * READBACK_EXTENT + x) * READBACK_BYTES_PER_PIXEL).unwrap();
+        &pixels[offset..offset + READBACK_BYTES_PER_PIXEL as usize]
     }
 
     fn render_batches_to_rgba(batches: &[WgpuQuadBatch]) -> Vec<u8> {
@@ -407,7 +518,7 @@ mod tests {
         let buffers = create_quad_batch_buffers(
             &device,
             &queue,
-            &batches,
+            batches,
             &texture_layout,
             &mut texture_cache,
             1,
@@ -502,8 +613,8 @@ mod tests {
             .with_key(UiLocalKey::runtime("wgpu-glyph-readback", "label").unwrap())
             .with_text(UiText::new("Nara", 20.0).unwrap());
         let frame = compile_frame("wgpu-glyph-readback", node);
-        nara_ui_render::UiPaintPacketBuilder::default()
-            .build(
+        nara_ui_render::UiPresentationPlanner::default()
+            .plan(
                 frame,
                 RenderTarget::Window(WindowId::PRIMARY),
                 &nara_ui_render::UiPreparedImages::default(),
@@ -522,8 +633,60 @@ mod tests {
         let frame = compile_frame("wgpu-image-readback", node);
         let mut prepared = nara_ui_render::UiPreparedImages::default();
         prepared.insert(image_id, captured_image_snapshot());
-        nara_ui_render::UiPaintPacketBuilder::default()
-            .build(frame, RenderTarget::Window(WindowId::PRIMARY), &prepared)
+        nara_ui_render::UiPresentationPlanner::default()
+            .plan(frame, RenderTarget::Window(WindowId::PRIMARY), &prepared)
+            .unwrap()
+    }
+
+    fn rounded_packet() -> Arc<UiPaintPacket> {
+        let solid = UiNode::new(UiStyle::absolute(4.0, 4.0, 28.0, 28.0))
+            .with_key(UiLocalKey::runtime("wgpu-rounded-readback", "solid").unwrap())
+            .with_visual(
+                UiVisual::solid(UiColor::rgba(0.0, 1.0, 0.0, 1.0))
+                    .with_border(
+                        UiBorder::new(3.0, UiBrush::Solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0)))
+                            .unwrap(),
+                    )
+                    .with_radii(UiCornerRadii::all(8.0).unwrap()),
+            );
+        let image_id = UiImageId::new("project://ui/rounded-readback.png").unwrap();
+        let image = UiNode::new(UiStyle::absolute(36.0, 4.0, 24.0, 24.0))
+            .with_key(UiLocalKey::runtime("wgpu-rounded-readback", "image").unwrap())
+            .with_visual(
+                UiVisual::image(image_id.clone(), UiColor::rgba(1.0, 1.0, 1.0, 1.0))
+                    .with_radii(UiCornerRadii::all(8.0).unwrap()),
+            );
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("wgpu-rounded-readback", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(solid)
+                .with_child(image),
+            )
+            .build()
+            .unwrap();
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            READBACK_EXTENT as f32,
+            READBACK_EXTENT as f32,
+            1.0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        let frame = UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        let mut prepared = nara_ui_render::UiPreparedImages::default();
+        prepared.insert(image_id, captured_image_snapshot());
+        nara_ui_render::UiPresentationPlanner::default()
+            .plan(frame, RenderTarget::Window(WindowId::PRIMARY), &prepared)
             .unwrap()
     }
 

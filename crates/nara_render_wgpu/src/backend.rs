@@ -22,8 +22,9 @@ use nara_window::{
 
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::{
-    WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, create_quad_batch_buffers,
-    create_quad_pipeline, create_quad_texture_bind_group_layout, quad_batch_draw_stats,
+    WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
+    create_quad_batch_buffers, create_quad_pipeline, create_quad_texture_bind_group_layout,
+    quad_batch_draw_stats,
 };
 use crate::surface::{
     SurfaceDropReason, SurfaceResizeAction, WgpuConfiguredPresentMode, WgpuSurfaceState,
@@ -811,6 +812,11 @@ impl WgpuRenderBackend {
             if batches.is_empty() {
                 return Ok(PreparedSubmitterDraw::default());
             }
+            admit_quad_instance_buffers(&batches).map_err(|error| {
+                WgpuRenderError::ContentRejected {
+                    message: error.to_string(),
+                }
+            })?;
             let alpha_modes = crate::required_alpha_modes(&batches);
             let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
             for alpha_mode in &alpha_modes {

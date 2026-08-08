@@ -269,22 +269,51 @@ impl UiPacketImage {
     }
 }
 
-/// One ordered, resource-indexed primitive in a backend-neutral packet.
+/// Renderer-neutral fill retained by one rectangular packet primitive.
 #[derive(Clone, Debug, PartialEq)]
-pub enum UiPacketPrimitive {
+pub enum UiPacketFill {
     Solid {
-        rect: UiPacketRect,
-        clip: Option<UiPacketRect>,
         color: UiColor,
-        corner_radii: [f32; 4],
     },
     Image {
-        rect: UiPacketRect,
-        clip: Option<UiPacketRect>,
         image_index: u32,
         tint: UiColor,
         uv: UiPacketUv,
-        corner_radii: [f32; 4],
+    },
+}
+
+/// Uniform physical border retained with its owning rectangle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UiPacketBorder {
+    color: UiColor,
+    width: f32,
+}
+
+impl UiPacketBorder {
+    pub(crate) const fn new(color: UiColor, width: f32) -> Self {
+        Self { color, width }
+    }
+
+    #[must_use]
+    pub const fn color(self) -> UiColor {
+        self.color
+    }
+
+    #[must_use]
+    pub const fn width(self) -> f32 {
+        self.width
+    }
+}
+
+/// One ordered, resource-indexed primitive in a backend-neutral packet.
+#[derive(Clone, Debug, PartialEq)]
+pub enum UiPacketPrimitive {
+    Rect {
+        rect: UiPacketRect,
+        clip: Option<UiPacketRect>,
+        fill: Option<UiPacketFill>,
+        border: Option<UiPacketBorder>,
+        corner_radius: f32,
     },
     Glyph {
         rect: UiPacketRect,
@@ -299,38 +328,15 @@ impl UiPacketPrimitive {
     #[must_use]
     pub const fn rect(&self) -> UiPacketRect {
         match self {
-            Self::Solid { rect, .. } | Self::Image { rect, .. } | Self::Glyph { rect, .. } => *rect,
+            Self::Rect { rect, .. } | Self::Glyph { rect, .. } => *rect,
         }
     }
 
     #[must_use]
     pub const fn clip(&self) -> Option<UiPacketRect> {
         match self {
-            Self::Solid { clip, .. } | Self::Image { clip, .. } | Self::Glyph { clip, .. } => *clip,
+            Self::Rect { clip, .. } | Self::Glyph { clip, .. } => *clip,
         }
-    }
-}
-
-/// One bounded packet-construction diagnostic.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UiPaintDiagnostic {
-    code: &'static str,
-    message: String,
-}
-
-impl UiPaintDiagnostic {
-    pub(crate) fn new(code: &'static str, message: String) -> Self {
-        Self { code, message }
-    }
-
-    #[must_use]
-    pub const fn code(&self) -> &'static str {
-        self.code
-    }
-
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
     }
 }
 
@@ -344,7 +350,6 @@ pub struct UiPaintPacket {
     primitives: Arc<[UiPacketPrimitive]>,
     images: Arc<[UiPacketImage]>,
     glyph_pages: Arc<[UiGlyphAtlasPageSnapshot]>,
-    diagnostics: Arc<[UiPaintDiagnostic]>,
 }
 
 impl UiPaintPacket {
@@ -357,7 +362,6 @@ impl UiPaintPacket {
         primitives: Vec<UiPacketPrimitive>,
         images: Vec<UiPacketImage>,
         glyph_pages: Vec<UiGlyphAtlasPageSnapshot>,
-        diagnostics: Vec<UiPaintDiagnostic>,
     ) -> Self {
         Self {
             identity,
@@ -367,7 +371,6 @@ impl UiPaintPacket {
             primitives: primitives.into(),
             images: images.into(),
             glyph_pages: glyph_pages.into(),
-            diagnostics: diagnostics.into(),
         }
     }
 
@@ -405,53 +408,11 @@ impl UiPaintPacket {
     pub fn glyph_pages(&self) -> &[UiGlyphAtlasPageSnapshot] {
         &self.glyph_pages
     }
-
-    #[must_use]
-    pub fn diagnostics(&self) -> &[UiPaintDiagnostic] {
-        &self.diagnostics
-    }
 }
 
-/// Closed presentation result classification shared by packet builders and concrete backends.
-#[derive(Clone, Debug)]
-pub enum UiPresentationOutcome {
-    Presented {
-        packet: Arc<UiPaintPacket>,
-        presentation_epoch: u64,
-    },
-    ContentRejected {
-        attempt: UiPaintPacketIdentity,
-        message: String,
-    },
-    Deferred {
-        attempt: UiPaintPacketIdentity,
-        message: String,
-    },
-    BackendFault {
-        attempt: Option<UiPaintPacketIdentity>,
-        message: String,
-    },
-}
+mod outcome;
 
-impl UiPresentationOutcome {
-    #[must_use]
-    pub fn attempt(&self) -> Option<UiPaintPacketIdentity> {
-        match self {
-            Self::Presented { packet, .. } => Some(packet.identity()),
-            Self::ContentRejected { attempt, .. } | Self::Deferred { attempt, .. } => {
-                Some(*attempt)
-            }
-            Self::BackendFault { attempt, .. } => *attempt,
-        }
-    }
-
-    #[must_use]
-    pub fn message(&self) -> Option<&str> {
-        match self {
-            Self::Presented { .. } => None,
-            Self::ContentRejected { message, .. }
-            | Self::Deferred { message, .. }
-            | Self::BackendFault { message, .. } => Some(message),
-        }
-    }
-}
+pub use outcome::{
+    OneShotPresentationCommit, UiPresentationAttemptIdentity, UiPresentationBackendGeneration,
+    UiPresentationOutcome, UiPresentationRetryIdentity,
+};

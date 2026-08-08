@@ -156,21 +156,21 @@ fn commit_runtime_ui_presentations(world: &mut World) {
     };
     for outcome in outcomes {
         match outcome {
-            nara_ui_render::UiPresentationOutcome::Presented {
-                packet,
-                presentation_epoch,
-            } => match nara_ui::commit_ui_presentation(world, packet.frame(), presentation_epoch) {
-                Ok(_) => {
-                    world
-                        .resource_mut::<UiPresentationBridgeStats>()
-                        .presented_packets += 1;
+            nara_ui_render::UiPresentationOutcome::Presented(commit) => {
+                let (packet, presentation_epoch, _backend_generation) = commit.into_parts();
+                match nara_ui::commit_ui_presentation(world, packet.frame(), presentation_epoch) {
+                    Ok(_) => {
+                        world
+                            .resource_mut::<UiPresentationBridgeStats>()
+                            .presented_packets += 1;
+                    }
+                    Err(error) => {
+                        let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
+                        bridge.receipt_rejections += 1;
+                        bridge.last_error = Some(error.to_string());
+                    }
                 }
-                Err(error) => {
-                    let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
-                    bridge.receipt_rejections += 1;
-                    bridge.last_error = Some(error.to_string());
-                }
-            },
+            }
             nara_ui_render::UiPresentationOutcome::ContentRejected { message, .. } => {
                 let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
                 bridge.content_rejections += 1;

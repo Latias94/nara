@@ -1,106 +1,10 @@
-use std::{
-    collections::{BTreeSet, HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use guillotiere::{AtlasAllocator, size2};
 use nara_text::{GlyphRaster, GlyphRasterKey, TextEngine};
 use thiserror::Error;
 
-use crate::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
-
-const DEFAULT_MAX_GLYPH_ENTRIES: usize = 4_096;
-const DEFAULT_MAX_ATLAS_PAGES: usize = 4;
-const DEFAULT_ATLAS_PAGE_EXTENT: u32 = 1_024;
-const DEFAULT_MAX_GLYPH_EXTENT: u32 = 256;
-const DEFAULT_MAX_NEW_GLYPHS_PER_PACKET: usize = 256;
-const DEFAULT_MAX_UPLOAD_BYTES_PER_PACKET: usize = 1_024 * 1_024;
-const DEFAULT_MAX_DIAGNOSTICS_PER_PACKET: usize = 64;
-
-/// Typed bounded policy for CPU glyph-atlas construction.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UiRenderLimits {
-    pub max_glyph_entries: usize,
-    pub max_atlas_pages: usize,
-    pub atlas_page_extent: u32,
-    pub max_glyph_extent: u32,
-    pub max_new_glyphs_per_packet: usize,
-    pub max_upload_bytes_per_packet: usize,
-    pub max_diagnostics_per_packet: usize,
-}
-
-impl Default for UiRenderLimits {
-    fn default() -> Self {
-        Self {
-            max_glyph_entries: DEFAULT_MAX_GLYPH_ENTRIES,
-            max_atlas_pages: DEFAULT_MAX_ATLAS_PAGES,
-            atlas_page_extent: DEFAULT_ATLAS_PAGE_EXTENT,
-            max_glyph_extent: DEFAULT_MAX_GLYPH_EXTENT,
-            max_new_glyphs_per_packet: DEFAULT_MAX_NEW_GLYPHS_PER_PACKET,
-            max_upload_bytes_per_packet: DEFAULT_MAX_UPLOAD_BYTES_PER_PACKET,
-            max_diagnostics_per_packet: DEFAULT_MAX_DIAGNOSTICS_PER_PACKET,
-        }
-    }
-}
-
-impl UiRenderLimits {
-    pub(crate) fn validate(self) -> Result<Self, UiRenderLimitsError> {
-        let page_bytes = self
-            .atlas_page_extent
-            .checked_mul(self.atlas_page_extent)
-            .and_then(|bytes| usize::try_from(bytes).ok())
-            .ok_or(UiRenderLimitsError::InvalidField {
-                field: "atlas_page_extent",
-            })?;
-        if self.max_glyph_entries == 0 {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "max_glyph_entries",
-            });
-        }
-        if self.max_atlas_pages == 0 || self.max_atlas_pages > usize::from(u16::MAX) {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "max_atlas_pages",
-            });
-        }
-        if self.atlas_page_extent == 0 || self.atlas_page_extent > i32::MAX as u32 {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "atlas_page_extent",
-            });
-        }
-        if self.max_glyph_extent == 0 || self.max_glyph_extent > self.atlas_page_extent {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "max_glyph_extent",
-            });
-        }
-        if self.max_new_glyphs_per_packet == 0 {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "max_new_glyphs_per_packet",
-            });
-        }
-        if self.max_upload_bytes_per_packet < page_bytes {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "max_upload_bytes_per_packet",
-            });
-        }
-        if self.max_diagnostics_per_packet == 0 {
-            return Err(UiRenderLimitsError::InvalidField {
-                field: "max_diagnostics_per_packet",
-            });
-        }
-        Ok(self)
-    }
-
-    pub(crate) fn page_byte_len(self) -> usize {
-        usize::try_from(self.atlas_page_extent * self.atlas_page_extent)
-            .expect("validated atlas page extent fits usize")
-    }
-}
-
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum UiRenderLimitsError {
-    #[error("UI render limit `{field}` is outside the supported bounded policy")]
-    InvalidField { field: &'static str },
-}
+use crate::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPresentationLimits};
 
 #[derive(Clone)]
 struct AtlasPage {
@@ -110,14 +14,22 @@ struct AtlasPage {
 }
 
 impl AtlasPage {
-    fn new(limits: UiRenderLimits) -> Self {
-        let extent =
-            i32::try_from(limits.atlas_page_extent).expect("validated atlas page extent fits i32");
-        Self {
+    fn try_new(limits: UiPresentationLimits) -> Result<Self, UiAtlasPlanError> {
+        let extent = i32::try_from(limits.atlas_page_extent())
+            .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+        let byte_len = limits
+            .checked_page_byte_len()
+            .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(byte_len)
+            .map_err(|_| UiAtlasPlanError::AllocationFailed)?;
+        pixels.resize(byte_len, 0);
+        Ok(Self {
             allocator: AtlasAllocator::new(size2(extent, extent)),
-            pixels: Arc::new(vec![0; limits.page_byte_len()]),
+            pixels: Arc::new(pixels),
             generation: 0,
-        }
+        })
     }
 }
 
@@ -135,13 +47,7 @@ pub(crate) enum GlyphSlot {
     },
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct AtlasDiagnostic {
-    pub(crate) code: &'static str,
-    pub(crate) message: String,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct GlyphAtlas {
     font_revision: Option<u64>,
     pages: Vec<AtlasPage>,
@@ -149,130 +55,84 @@ pub(crate) struct GlyphAtlas {
     next_generation: u64,
 }
 
-impl Default for GlyphAtlas {
-    fn default() -> Self {
-        Self {
-            font_revision: None,
-            pages: Vec::new(),
-            glyphs: HashMap::new(),
-            next_generation: 1,
-        }
-    }
-}
-
 impl GlyphAtlas {
-    pub(crate) fn prepare(
-        &mut self,
+    pub(crate) fn stage(
+        &self,
         font_revision: u64,
         requested: &[GlyphRasterKey],
         engine: &mut TextEngine,
-        limits: UiRenderLimits,
-    ) -> Vec<AtlasDiagnostic> {
+        limits: UiPresentationLimits,
+    ) -> Result<Self, UiAtlasPlanError> {
         let mut staged = if self.font_revision == Some(font_revision) {
             self.clone()
         } else {
             Self {
                 font_revision: Some(font_revision),
+                next_generation: 1,
                 ..Self::default()
             }
         };
-        let mut diagnostics = Vec::new();
-        let mut seen = HashSet::with_capacity(requested.len());
-        let mut dirty_pages = BTreeSet::new();
+        if staged.next_generation == 0 {
+            staged.next_generation = 1;
+        }
+        validate_atlas_bytes(staged.pages.len(), limits)?;
+
+        let mut dirty_pages = Vec::new();
         let mut newly_rasterized = 0_usize;
-        let mut admission_closed = false;
-
         for key in requested.iter().copied() {
-            if !seen.insert(key) || staged.glyphs.contains_key(&key) {
+            if staged.glyphs.contains_key(&key) {
                 continue;
             }
-            if admission_closed {
-                continue;
+            if staged.glyphs.len() >= limits.max_glyph_entries() {
+                return Err(UiAtlasPlanError::GlyphEntryLimitExceeded {
+                    limit: limits.max_glyph_entries(),
+                });
             }
-            if staged.glyphs.len() == limits.max_glyph_entries {
-                push_diagnostic(
-                    &mut diagnostics,
-                    limits,
-                    "glyph-cache-saturated",
-                    "the bounded glyph cache is saturated; the affected glyph was omitted",
-                );
-                continue;
+            if newly_rasterized >= limits.max_new_glyphs_per_plan() {
+                return Err(UiAtlasPlanError::NewGlyphLimitExceeded {
+                    limit: limits.max_new_glyphs_per_plan(),
+                });
             }
-            if newly_rasterized == limits.max_new_glyphs_per_packet {
-                push_diagnostic(
-                    &mut diagnostics,
-                    limits,
-                    "glyph-raster-deferred",
-                    "the per-packet glyph raster budget was exhausted; remaining new glyphs were deferred",
-                );
-                admission_closed = true;
-                continue;
-            }
-
-            let raster = match engine.rasterize(key) {
-                Ok(raster) => raster,
-                Err(error) => {
-                    push_diagnostic(
-                        &mut diagnostics,
-                        limits,
-                        "glyph-raster-rejected",
-                        &format!("glyph rasterization failed: {error}"),
-                    );
-                    continue;
-                }
-            };
-            newly_rasterized = newly_rasterized.saturating_add(1);
+            staged
+                .glyphs
+                .try_reserve(1)
+                .map_err(|_| UiAtlasPlanError::AllocationFailed)?;
+            let raster = engine
+                .rasterize(key)
+                .map_err(|error| UiAtlasPlanError::RasterizationFailed(error.to_string()))?;
+            newly_rasterized = newly_rasterized
+                .checked_add(1)
+                .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
             if raster.width() == 0 || raster.height() == 0 {
                 staged.glyphs.insert(key, GlyphSlot::Empty);
                 continue;
             }
-            if raster.width() > limits.max_glyph_extent || raster.height() > limits.max_glyph_extent
+            if raster.width() > limits.max_glyph_extent()
+                || raster.height() > limits.max_glyph_extent()
             {
-                push_diagnostic(
-                    &mut diagnostics,
-                    limits,
-                    "glyph-extent-rejected",
-                    &format!(
-                        "glyph raster {}x{} exceeds the {} pixel extent limit",
-                        raster.width(),
-                        raster.height(),
-                        limits.max_glyph_extent
-                    ),
-                );
-                continue;
+                return Err(UiAtlasPlanError::GlyphExtentLimitExceeded {
+                    width: raster.width(),
+                    height: raster.height(),
+                    limit: limits.max_glyph_extent(),
+                });
             }
-
-            match allocate_raster(&mut staged, &raster, limits, &mut dirty_pages) {
-                RasterAdmission::Admitted(slot) => {
-                    staged.glyphs.insert(key, slot);
-                }
-                RasterAdmission::Deferred => {
-                    push_diagnostic(
-                        &mut diagnostics,
-                        limits,
-                        "glyph-upload-deferred",
-                        "the per-packet atlas upload budget was exhausted; remaining new glyphs were deferred",
-                    );
-                    admission_closed = true;
-                }
-                RasterAdmission::Saturated => {
-                    push_diagnostic(
-                        &mut diagnostics,
-                        limits,
-                        "glyph-atlas-saturated",
-                        "all bounded glyph-atlas pages are saturated; the affected glyph was omitted",
-                    );
-                }
-            }
+            let slot = allocate_raster(&mut staged, &raster, limits, &mut dirty_pages)?;
+            staged.glyphs.insert(key, slot);
         }
 
+        dirty_pages.sort_unstable();
         for page_index in dirty_pages {
-            let page = &mut staged.pages[page_index];
+            let page = staged
+                .pages
+                .get_mut(page_index)
+                .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
             page.generation = staged.next_generation;
-            staged.next_generation = staged.next_generation.saturating_add(1).max(1);
+            staged.next_generation = staged
+                .next_generation
+                .checked_add(1)
+                .ok_or(UiAtlasPlanError::GenerationExhausted)?;
         }
-        *self = staged;
-        diagnostics
+        Ok(staged)
     }
 
     #[must_use]
@@ -280,78 +140,146 @@ impl GlyphAtlas {
         self.glyphs.get(&key).copied()
     }
 
-    pub(crate) fn snapshots(&self) -> Vec<UiGlyphAtlasPageSnapshot> {
-        let font_revision = self.font_revision.unwrap_or(1);
-        self.pages
-            .iter()
-            .enumerate()
-            .map(|(page_index, page)| {
-                UiGlyphAtlasPageSnapshot::new(
-                    UiGlyphAtlasPageKey::new(
-                        font_revision,
-                        u16::try_from(page_index).expect("page limit validated against u16"),
-                        page.generation,
-                    ),
-                    page_extent(&page.allocator),
-                    page_extent(&page.allocator),
-                    Arc::clone(&page.pixels),
-                )
-            })
-            .collect()
+    pub(crate) fn snapshot(
+        &self,
+        page_index: u16,
+    ) -> Result<UiGlyphAtlasPageSnapshot, UiAtlasPlanError> {
+        let page = self
+            .pages
+            .get(usize::from(page_index))
+            .ok_or(UiAtlasPlanError::MissingPage { page_index })?;
+        let extent = u32::try_from(page.allocator.size().width)
+            .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+        Ok(UiGlyphAtlasPageSnapshot::new(
+            UiGlyphAtlasPageKey::new(self.font_revision.unwrap_or(1), page_index, page.generation),
+            extent,
+            extent,
+            Arc::clone(&page.pixels),
+        ))
     }
 }
 
-enum RasterAdmission {
-    Admitted(GlyphSlot),
-    Deferred,
-    Saturated,
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub(crate) enum UiAtlasPlanError {
+    #[error("the glyph cache exceeds its {limit} entry limit")]
+    GlyphEntryLimitExceeded { limit: usize },
+    #[error("the presentation plan exceeds its {limit} new-glyph limit")]
+    NewGlyphLimitExceeded { limit: usize },
+    #[error("glyph rasterization failed: {0}")]
+    RasterizationFailed(String),
+    #[error("glyph raster {width}x{height} exceeds the {limit} pixel extent limit")]
+    GlyphExtentLimitExceeded { width: u32, height: u32, limit: u32 },
+    #[error("the glyph atlas exceeds its {limit} page limit")]
+    AtlasPageLimitExceeded { limit: usize },
+    #[error("the glyph atlas exceeds its {limit} byte retention limit")]
+    AtlasByteLimitExceeded { limit: usize },
+    #[error("the staged glyph atlas exceeds its {limit} byte mutation limit")]
+    StagedAtlasByteLimitExceeded { limit: usize },
+    #[error("glyph atlas allocation failed within the admitted hard limits")]
+    AllocationFailed,
+    #[error("glyph atlas arithmetic overflowed")]
+    ArithmeticOverflow,
+    #[error("glyph atlas generation identity was exhausted")]
+    GenerationExhausted,
+    #[error("glyph atlas page {page_index} is missing")]
+    MissingPage { page_index: u16 },
 }
 
 fn allocate_raster(
     atlas: &mut GlyphAtlas,
     raster: &GlyphRaster,
-    limits: UiRenderLimits,
-    dirty_pages: &mut BTreeSet<usize>,
-) -> RasterAdmission {
-    let page_bytes = limits.page_byte_len();
-    let upload_bytes = dirty_pages.len().saturating_mul(page_bytes);
+    limits: UiPresentationLimits,
+    dirty_pages: &mut Vec<usize>,
+) -> Result<GlyphSlot, UiAtlasPlanError> {
     let requested = size2(
-        i32::try_from(raster.width()).expect("glyph extent limit fits i32"),
-        i32::try_from(raster.height()).expect("glyph extent limit fits i32"),
+        i32::try_from(raster.width()).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
+        i32::try_from(raster.height()).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
     );
 
-    for page_index in dirty_pages.iter().copied().collect::<Vec<_>>() {
-        if let Some(allocation) = atlas.pages[page_index].allocator.allocate(requested) {
-            return write_raster(atlas, page_index, allocation.rectangle, raster);
-        }
-    }
-
-    if upload_bytes.saturating_add(page_bytes) > limits.max_upload_bytes_per_packet {
-        return RasterAdmission::Deferred;
-    }
-
     for page_index in 0..atlas.pages.len() {
-        if dirty_pages.contains(&page_index) {
-            continue;
-        }
         if let Some(allocation) = atlas.pages[page_index].allocator.allocate(requested) {
-            dirty_pages.insert(page_index);
+            admit_dirty_page(page_index, dirty_pages, limits)?;
             return write_raster(atlas, page_index, allocation.rectangle, raster);
         }
     }
 
-    if atlas.pages.len() == limits.max_atlas_pages {
-        return RasterAdmission::Saturated;
+    if atlas.pages.len() >= limits.max_atlas_pages() {
+        return Err(UiAtlasPlanError::AtlasPageLimitExceeded {
+            limit: limits.max_atlas_pages(),
+        });
     }
-
+    let next_page_count = atlas
+        .pages
+        .len()
+        .checked_add(1)
+        .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+    validate_atlas_bytes(next_page_count, limits)?;
     let page_index = atlas.pages.len();
-    atlas.pages.push(AtlasPage::new(limits));
+    admit_dirty_page(page_index, dirty_pages, limits)?;
+    atlas
+        .pages
+        .try_reserve(1)
+        .map_err(|_| UiAtlasPlanError::AllocationFailed)?;
+    atlas.pages.push(AtlasPage::try_new(limits)?);
     let allocation = atlas.pages[page_index]
         .allocator
         .allocate(requested)
-        .expect("validated glyph fits an empty atlas page");
-    dirty_pages.insert(page_index);
+        .ok_or(UiAtlasPlanError::GlyphExtentLimitExceeded {
+            width: raster.width(),
+            height: raster.height(),
+            limit: limits.max_glyph_extent(),
+        })?;
     write_raster(atlas, page_index, allocation.rectangle, raster)
+}
+
+fn admit_dirty_page(
+    page_index: usize,
+    dirty_pages: &mut Vec<usize>,
+    limits: UiPresentationLimits,
+) -> Result<(), UiAtlasPlanError> {
+    if dirty_pages.contains(&page_index) {
+        return Ok(());
+    }
+    let page_count = dirty_pages
+        .len()
+        .checked_add(1)
+        .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+    let staged_bytes = page_count
+        .checked_mul(
+            limits
+                .checked_page_byte_len()
+                .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
+        )
+        .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+    if staged_bytes > limits.max_staged_atlas_bytes() {
+        return Err(UiAtlasPlanError::StagedAtlasByteLimitExceeded {
+            limit: limits.max_staged_atlas_bytes(),
+        });
+    }
+    dirty_pages
+        .try_reserve(1)
+        .map_err(|_| UiAtlasPlanError::AllocationFailed)?;
+    dirty_pages.push(page_index);
+    Ok(())
+}
+
+fn validate_atlas_bytes(
+    page_count: usize,
+    limits: UiPresentationLimits,
+) -> Result<(), UiAtlasPlanError> {
+    let retained = page_count
+        .checked_mul(
+            limits
+                .checked_page_byte_len()
+                .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
+        )
+        .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+    if retained > limits.max_atlas_bytes() {
+        return Err(UiAtlasPlanError::AtlasByteLimitExceeded {
+            limit: limits.max_atlas_bytes(),
+        });
+    }
+    Ok(())
 }
 
 fn write_raster(
@@ -359,47 +287,60 @@ fn write_raster(
     page_index: usize,
     rectangle: guillotiere::Rectangle,
     raster: &GlyphRaster,
-) -> RasterAdmission {
-    let page = &mut atlas.pages[page_index];
-    let page_width =
-        usize::try_from(page.allocator.size().width).expect("validated page width fits usize");
-    let min_x = usize::try_from(rectangle.min.x).expect("allocator returns non-negative x");
-    let min_y = usize::try_from(rectangle.min.y).expect("allocator returns non-negative y");
-    let glyph_width = usize::try_from(raster.width()).expect("glyph width fits usize");
-    let glyph_height = usize::try_from(raster.height()).expect("glyph height fits usize");
-    let pixels = Arc::make_mut(&mut page.pixels);
-    for row in 0..glyph_height {
-        let source_start = row * glyph_width;
-        let destination_start = (min_y + row) * page_width + min_x;
-        pixels[destination_start..destination_start + glyph_width]
-            .copy_from_slice(&raster.mask()[source_start..source_start + glyph_width]);
+) -> Result<GlyphSlot, UiAtlasPlanError> {
+    let page = atlas
+        .pages
+        .get_mut(page_index)
+        .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+    if Arc::strong_count(&page.pixels) != 1 {
+        let mut copy = Vec::new();
+        copy.try_reserve_exact(page.pixels.len())
+            .map_err(|_| UiAtlasPlanError::AllocationFailed)?;
+        copy.extend_from_slice(&page.pixels);
+        page.pixels = Arc::new(copy);
     }
-    RasterAdmission::Admitted(GlyphSlot::Atlas {
-        page_index: u16::try_from(page_index).expect("page limit validated against u16"),
-        min_x: u32::try_from(min_x).expect("page coordinate fits u32"),
-        min_y: u32::try_from(min_y).expect("page coordinate fits u32"),
+    let pixels = Arc::get_mut(&mut page.pixels).ok_or(UiAtlasPlanError::AllocationFailed)?;
+    let page_width = usize::try_from(page.allocator.size().width)
+        .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+    let min_x =
+        usize::try_from(rectangle.min.x).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+    let min_y =
+        usize::try_from(rectangle.min.y).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+    let glyph_width =
+        usize::try_from(raster.width()).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+    let glyph_height =
+        usize::try_from(raster.height()).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
+    for row in 0..glyph_height {
+        let source_start = row
+            .checked_mul(glyph_width)
+            .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+        let source_end = source_start
+            .checked_add(glyph_width)
+            .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+        let destination_start = min_y
+            .checked_add(row)
+            .and_then(|row| row.checked_mul(page_width))
+            .and_then(|start| start.checked_add(min_x))
+            .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+        let destination_end = destination_start
+            .checked_add(glyph_width)
+            .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+        let source = raster
+            .mask()
+            .get(source_start..source_end)
+            .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+        let destination = pixels
+            .get_mut(destination_start..destination_end)
+            .ok_or(UiAtlasPlanError::ArithmeticOverflow)?;
+        destination.copy_from_slice(source);
+    }
+    Ok(GlyphSlot::Atlas {
+        page_index: u16::try_from(page_index).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
+        min_x: u32::try_from(min_x).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
+        min_y: u32::try_from(min_y).map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?,
         width: raster.width(),
         height: raster.height(),
         left: raster.left(),
         top: raster.top(),
     })
-}
-
-fn page_extent(allocator: &AtlasAllocator) -> u32 {
-    u32::try_from(allocator.size().width).expect("validated page extent fits u32")
-}
-
-fn push_diagnostic(
-    diagnostics: &mut Vec<AtlasDiagnostic>,
-    limits: UiRenderLimits,
-    code: &'static str,
-    message: &str,
-) {
-    if diagnostics.len() == limits.max_diagnostics_per_packet {
-        return;
-    }
-    diagnostics.push(AtlasDiagnostic {
-        code,
-        message: message.to_owned(),
-    });
 }

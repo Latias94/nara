@@ -5,9 +5,14 @@ use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderResourceKey, ViewportRect};
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
+use thiserror::Error;
 use wgpu::util::DeviceExt;
 
 const VERTICES_PER_QUAD: u32 = 6;
+const MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME: u64 = 64 * 1024 * 1024;
+pub(crate) const WGPU_QUAD_SHAPE_PLAIN: u32 = 0;
+pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_FILL: u32 = 1;
+pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_BORDER: u32 = 2;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
@@ -19,16 +24,24 @@ pub(crate) struct WgpuQuadInstance {
     pub(crate) uv_min: [f32; 2],
     pub(crate) uv_size: [f32; 2],
     pub(crate) texture_mode: u32,
+    pub(crate) shape_mode: u32,
+    pub(crate) rect_size: [f32; 2],
+    pub(crate) corner_radius: f32,
+    pub(crate) border_width: f32,
 }
 
-const QUAD_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+const QUAD_INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 11] = wgpu::vertex_attr_array![
     0 => Float32x2,
     1 => Float32x2,
     2 => Float32x2,
     3 => Float32x4,
     4 => Float32x2,
     5 => Float32x2,
-    6 => Uint32
+    6 => Uint32,
+    7 => Uint32,
+    8 => Float32x2,
+    9 => Float32,
+    10 => Float32
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -120,6 +133,13 @@ impl WgpuQuadBatchBuffer {
 pub(crate) struct WgpuQuadDrawStats {
     pub(crate) draw_calls: u32,
     pub(crate) sprites: u32,
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("quad instances require {required} bytes; per-frame instance-buffer maximum is {maximum}")]
+pub(crate) struct WgpuQuadInstanceBudgetError {
+    required: u64,
+    maximum: u64,
 }
 
 pub(crate) fn create_quad_texture_bind_group_layout(
@@ -275,6 +295,25 @@ pub(crate) fn quad_batch_draw_stats(batches: &[WgpuQuadBatch]) -> WgpuQuadDrawSt
     stats
 }
 
+pub(crate) fn admit_quad_instance_buffers(
+    batches: &[WgpuQuadBatch],
+) -> Result<u64, WgpuQuadInstanceBudgetError> {
+    let required = batches.iter().try_fold(0_u64, |total, batch| {
+        total.checked_add(quad_instance_byte_len(batch.instances.len()))
+    });
+    admit_quad_instance_bytes(required.unwrap_or(u64::MAX))
+}
+
+fn admit_quad_instance_bytes(required: u64) -> Result<u64, WgpuQuadInstanceBudgetError> {
+    if required > MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME {
+        return Err(WgpuQuadInstanceBudgetError {
+            required,
+            maximum: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME,
+        });
+    }
+    Ok(required)
+}
+
 fn quad_instance_buffer_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
     wgpu::VertexBufferLayout {
         array_stride: std::mem::size_of::<WgpuQuadInstance>() as wgpu::BufferAddress,
@@ -319,10 +358,14 @@ mod tests {
             std::mem::size_of::<WgpuQuadInstance>() as wgpu::BufferAddress
         );
         assert_eq!(layout.step_mode, wgpu::VertexStepMode::Instance);
-        assert_eq!(layout.attributes.len(), 7);
+        assert_eq!(layout.attributes.len(), 11);
         assert_eq!(layout.attributes[0].offset, 0);
         assert_eq!(layout.attributes[5].offset, 48);
         assert_eq!(layout.attributes[6].offset, 56);
+        assert_eq!(layout.attributes[7].offset, 60);
+        assert_eq!(layout.attributes[8].offset, 64);
+        assert_eq!(layout.attributes[9].offset, 72);
+        assert_eq!(layout.attributes[10].offset, 76);
         assert_eq!(quad_instance_byte_len(3), 3 * layout.array_stride);
     }
 
@@ -335,6 +378,21 @@ mod tests {
         assert_eq!(
             quad_color_target_state(wgpu::TextureFormat::Bgra8UnormSrgb, AlphaMode2d::Blend).blend,
             Some(wgpu::BlendState::ALPHA_BLENDING)
+        );
+    }
+
+    #[test]
+    fn instance_buffer_budget_is_checked_without_allocating_the_payload() {
+        assert_eq!(
+            admit_quad_instance_bytes(MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME),
+            Ok(MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME)
+        );
+        assert_eq!(
+            admit_quad_instance_bytes(MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME + 1),
+            Err(WgpuQuadInstanceBudgetError {
+                required: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME + 1,
+                maximum: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME,
+            })
         );
     }
 }

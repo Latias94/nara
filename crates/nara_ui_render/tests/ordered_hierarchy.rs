@@ -4,7 +4,7 @@ use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey, UiNode,
     UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
 };
-use nara_ui_render::{UiPacketPrimitive, UiPaintPacketBuilder, UiPreparedImages};
+use nara_ui_render::{UiPacketFill, UiPacketPrimitive, UiPreparedImages, UiPresentationPlanner};
 use nara_window::WindowId;
 
 fn packet(colors: [UiColor; 2]) -> std::sync::Arc<nara_ui_render::UiPaintPacket> {
@@ -33,8 +33,8 @@ fn packet(colors: [UiColor; 2]) -> std::sync::Arc<nara_ui_render::UiPaintPacket>
         .unwrap()
         .compile(&snapshot, environment, UiTheme::default())
         .unwrap();
-    UiPaintPacketBuilder::default()
-        .build(
+    UiPresentationPlanner::default()
+        .plan(
             frame,
             RenderTarget::Window(WindowId::PRIMARY),
             &UiPreparedImages::default(),
@@ -51,7 +51,10 @@ fn paint_packet_keeps_the_kernel_structural_sequence_without_a_backend_sort_key(
         .primitives()
         .iter()
         .filter_map(|primitive| match primitive {
-            UiPacketPrimitive::Solid { color, .. } => Some(*color),
+            UiPacketPrimitive::Rect {
+                fill: Some(UiPacketFill::Solid { color }),
+                ..
+            } => Some(*color),
             _ => None,
         })
         .collect::<Vec<_>>();

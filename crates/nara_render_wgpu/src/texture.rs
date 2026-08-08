@@ -13,10 +13,9 @@ const RGBA8_BYTES_PER_PIXEL: u32 = 4;
 #[cfg(feature = "ui-submitter")]
 const R8_BYTES_PER_PIXEL: u32 = 1;
 const DEFAULT_UNUSED_GRACE_FRAMES: u64 = 2;
-#[cfg(feature = "ui-submitter")]
-const MAX_GLYPH_UPLOAD_BYTES_PER_FRAME: usize = 1_024 * 1_024;
+const MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME: usize = 64 * 1_024 * 1_024;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct WgpuSpriteTextureCache {
     policy: WgpuTextureCachePolicy,
     stats: WgpuTextureCacheStats,
@@ -25,24 +24,7 @@ pub(crate) struct WgpuSpriteTextureCache {
     #[cfg(feature = "ui-submitter")]
     glyph_pages: BTreeMap<UiGlyphAtlasPageKey, WgpuGlyphTextureResource>,
     bindings: BTreeMap<WgpuQuadMaterialKey, WgpuTextureBinding>,
-    #[cfg(feature = "ui-submitter")]
-    glyph_upload_bytes: usize,
-}
-
-impl Default for WgpuSpriteTextureCache {
-    fn default() -> Self {
-        Self {
-            policy: WgpuTextureCachePolicy::default(),
-            stats: WgpuTextureCacheStats::default(),
-            fallback_texture: None,
-            images: BTreeMap::new(),
-            #[cfg(feature = "ui-submitter")]
-            glyph_pages: BTreeMap::new(),
-            bindings: BTreeMap::new(),
-            #[cfg(feature = "ui-submitter")]
-            glyph_upload_bytes: 0,
-        }
-    }
+    upload_bytes: usize,
 }
 
 impl WgpuSpriteTextureCache {
@@ -113,18 +95,12 @@ impl WgpuSpriteTextureCache {
         self.glyph_pages.clear();
         self.bindings.clear();
         self.stats = WgpuTextureCacheStats::default();
-        #[cfg(feature = "ui-submitter")]
-        {
-            self.glyph_upload_bytes = 0;
-        }
+        self.upload_bytes = 0;
     }
 
     pub(crate) fn begin_frame(&mut self, frame_index: u64) {
         self.stats = WgpuTextureCacheStats::default();
-        #[cfg(feature = "ui-submitter")]
-        {
-            self.glyph_upload_bytes = 0;
-        }
+        self.upload_bytes = 0;
         self.evict_unused(frame_index);
     }
 
@@ -146,7 +122,7 @@ impl WgpuSpriteTextureCache {
         }
         match texture {
             WgpuQuadTexture::Fallback => {
-                self.ensure_fallback(device, queue);
+                self.ensure_fallback(device, queue)?;
             }
             WgpuQuadTexture::Image(snapshot) => {
                 self.ensure_image(device, queue, snapshot, frame_index)?;
@@ -179,8 +155,19 @@ impl WgpuSpriteTextureCache {
         Ok(binding.bind_group.clone())
     }
 
-    fn ensure_fallback(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    fn ensure_fallback(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), WgpuTextureError> {
         if self.fallback_texture.is_none() {
+            let required = RGBA8_BYTES_PER_PIXEL as usize;
+            if self.upload_bytes.saturating_add(required) > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
+                return Err(WgpuTextureError::FallbackUploadDeferred {
+                    required,
+                    remaining: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME.saturating_sub(self.upload_bytes),
+                });
+            }
             self.fallback_texture = Some(create_texture_resource(
                 device,
                 queue,
@@ -191,7 +178,9 @@ impl WgpuSpriteTextureCache {
                 RGBA8_BYTES_PER_PIXEL,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
             ));
+            self.upload_bytes = self.upload_bytes.saturating_add(required);
         }
+        Ok(())
     }
 
     fn ensure_image(
@@ -218,6 +207,8 @@ impl WgpuSpriteTextureCache {
         };
         if action != TextureUploadAction::Reuse {
             let resource = snapshot.resource();
+            let required = resource.pixels().len();
+            self.admit_image_upload(key, required)?;
             let format = image_texture_format(resource.format(), resource.color_space());
             self.images.insert(
                 key,
@@ -247,6 +238,7 @@ impl WgpuSpriteTextureCache {
                 }
                 TextureUploadAction::Reuse => unreachable!(),
             }
+            self.upload_bytes = self.upload_bytes.saturating_add(required);
         } else {
             self.stats.reused_images = self.stats.reused_images.saturating_add(1);
         }
@@ -293,14 +285,20 @@ impl WgpuSpriteTextureCache {
                 .last_used_frame = frame_index;
             return Ok(());
         }
-        if self.glyph_upload_bytes.saturating_add(expected) > MAX_GLYPH_UPLOAD_BYTES_PER_FRAME {
+        if expected > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
+            return Err(WgpuTextureError::GlyphUploadLimitExceeded {
+                key,
+                required: expected,
+                maximum: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME,
+            });
+        }
+        if self.upload_bytes.saturating_add(expected) > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
             return Err(WgpuTextureError::GlyphUploadDeferred {
                 key,
                 required: expected,
-                remaining: MAX_GLYPH_UPLOAD_BYTES_PER_FRAME.saturating_sub(self.glyph_upload_bytes),
+                remaining: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME.saturating_sub(self.upload_bytes),
             });
         }
-        self.glyph_upload_bytes = self.glyph_upload_bytes.saturating_add(expected);
         self.glyph_pages.insert(
             key,
             WgpuGlyphTextureResource {
@@ -317,7 +315,30 @@ impl WgpuSpriteTextureCache {
                 last_used_frame: frame_index,
             },
         );
+        self.upload_bytes = self.upload_bytes.saturating_add(expected);
         self.stats.uploaded_glyph_pages = self.stats.uploaded_glyph_pages.saturating_add(1);
+        Ok(())
+    }
+
+    fn admit_image_upload(
+        &self,
+        key: RenderResourceKey,
+        required: usize,
+    ) -> Result<(), WgpuTextureError> {
+        if required > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
+            return Err(WgpuTextureError::ImageUploadLimitExceeded {
+                key,
+                required,
+                maximum: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME,
+            });
+        }
+        if self.upload_bytes.saturating_add(required) > MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME {
+            return Err(WgpuTextureError::ImageUploadDeferred {
+                key,
+                required,
+                remaining: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME.saturating_sub(self.upload_bytes),
+            });
+        }
         Ok(())
     }
 
@@ -481,6 +502,27 @@ pub(crate) enum WgpuTextureError {
         expected: usize,
         actual: usize,
     },
+    #[error("fallback texture upload requires {required} bytes with only {remaining} remaining")]
+    FallbackUploadDeferred { required: usize, remaining: usize },
+    #[error("image {key:?} upload requires {required} bytes; per-frame maximum is {maximum}")]
+    ImageUploadLimitExceeded {
+        key: RenderResourceKey,
+        required: usize,
+        maximum: usize,
+    },
+    #[error("image {key:?} upload requires {required} bytes with only {remaining} remaining")]
+    ImageUploadDeferred {
+        key: RenderResourceKey,
+        required: usize,
+        remaining: usize,
+    },
+    #[error("glyph page {key:?} upload requires {required} bytes; per-frame maximum is {maximum}")]
+    #[cfg(feature = "ui-submitter")]
+    GlyphUploadLimitExceeded {
+        key: UiGlyphAtlasPageKey,
+        required: usize,
+        maximum: usize,
+    },
     #[error("glyph page {key:?} upload requires {required} bytes with only {remaining} remaining")]
     #[cfg(feature = "ui-submitter")]
     GlyphUploadDeferred {
@@ -499,6 +541,12 @@ pub(crate) enum WgpuTextureError {
 
 impl WgpuTextureError {
     pub(crate) const fn is_deferred(&self) -> bool {
+        if matches!(
+            self,
+            Self::FallbackUploadDeferred { .. } | Self::ImageUploadDeferred { .. }
+        ) {
+            return true;
+        }
         #[cfg(feature = "ui-submitter")]
         if matches!(self, Self::GlyphUploadDeferred { .. }) {
             return true;
@@ -659,6 +707,7 @@ fn address_mode(address_mode: AddressMode) -> wgpu::AddressMode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::AssetId;
 
     #[test]
     fn cache_policy_retains_two_presented_epochs() {
@@ -675,5 +724,31 @@ mod tests {
 
         assert_eq!(cache.stats(), WgpuTextureCacheStats::default());
         assert_eq!(cache.logical_texture_bytes(), 0);
+    }
+
+    #[test]
+    fn image_upload_observes_prior_shared_upload_work() {
+        let key = RenderResourceKey::new(AssetId::from_raw(7), RenderResourceKind::IMAGE_2D);
+        let mut cache = WgpuSpriteTextureCache {
+            upload_bytes: MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME - 4,
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            cache.admit_image_upload(key, 8),
+            Err(WgpuTextureError::ImageUploadDeferred {
+                required: 8,
+                remaining: 4,
+                ..
+            })
+        ));
+        assert!(matches!(
+            cache.admit_image_upload(key, MAX_TEXTURE_UPLOAD_BYTES_PER_FRAME + 1),
+            Err(WgpuTextureError::ImageUploadLimitExceeded { .. })
+        ));
+
+        cache.begin_frame(2);
+        assert_eq!(cache.upload_bytes, 0);
+        assert!(cache.admit_image_upload(key, 8).is_ok());
     }
 }
