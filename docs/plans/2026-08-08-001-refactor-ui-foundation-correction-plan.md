@@ -245,6 +245,10 @@ capture; disabled focus remains the navigation origin but not a destination; re-
 key restores the visual focus state, including the focused-plus-disabled visual composition; semantic
 snapshots report only committed focus. A disabled current item remains the navigation origin while
 enabled candidates alone are destinations, including middle-item sequential and directional cases.
+Publishing a newer presented frame reconciles removed or changed controls before their stable keys can
+be reused, so capture, focus and reducer state cannot survive a remove/reinsert cycle. When a route has
+pending lifecycle reconciliation, that cleanup commits before an otherwise rejected input is
+classified; unsupported input cannot postpone required cleanup.
 
 **Verification:** owning nextest, the public interaction lab, and a focused regression for each
 disposition. No Reference Game matrix.
