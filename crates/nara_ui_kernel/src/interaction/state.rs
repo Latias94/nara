@@ -6,7 +6,7 @@ use super::{
     routing::{active_modal_root, is_interactive_key, route_event},
     session::UiDispatchError,
 };
-use crate::{UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRootKey};
+use crate::{UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRootKey, UiRouteStamp};
 
 const MAX_SEATS_PER_SURFACE: usize = 1;
 const MAX_POINTERS_PER_SURFACE: usize = 1;
@@ -39,10 +39,19 @@ pub(super) struct SeatState {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct SurfaceState {
     pub(super) presentation_epoch: Option<u64>,
+    pub(super) presented_route: Option<UiRouteStamp>,
     pub(super) invalidated_epoch: Option<u64>,
     pub(super) modal_root: Option<UiRootKey>,
     pub(super) seats: BTreeMap<UiSeatId, SeatState>,
     pub(super) pointers: BTreeMap<(UiSeatId, UiPointerId), PointerState>,
+}
+
+impl SurfaceState {
+    pub(super) fn has_pointer_facts(&self) -> bool {
+        self.pointers.values().any(|pointer| {
+            pointer.position.is_some() || pointer.hovered.is_some() || pointer.captured.is_some()
+        })
+    }
 }
 
 pub(super) fn preflight_seat(
@@ -171,7 +180,10 @@ pub(super) fn reconcile_presented_pointer_state(
 }
 
 fn pointer_routing_is_equivalent(previous: &UiFrame, latest: &UiFrame) -> bool {
-    previous.environment().route_revision() == latest.environment().route_revision()
+    previous.environment().slot_generation() == latest.environment().slot_generation()
+        && previous.environment().route_revision() == latest.environment().route_revision()
+        && previous.environment().geometry_generation()
+            == latest.environment().geometry_generation()
         && previous.layouts() == latest.layouts()
         && previous.hit_regions() == latest.hit_regions()
         && active_modal_root(previous) == active_modal_root(latest)

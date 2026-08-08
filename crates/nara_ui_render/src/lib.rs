@@ -11,9 +11,8 @@ mod planner;
 
 pub use integration::{
     UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats,
-    UiPresentationIntegrationError, UiPresentationRoute, UiPresentationRouteError, UiRenderPlugin,
-    compile_ui_paint_packets, drain_ui_presentation_outcomes, install_ui_presentation_route,
-    retire_ui_presentation_route,
+    UiPresentationIntegrationError, UiRenderPlugin, compile_ui_paint_packets,
+    drain_ui_presentation_outcomes,
 };
 pub use limits::{UiPresentationLimits, UiPresentationLimitsError};
 pub use packet::{
@@ -32,7 +31,8 @@ pub mod __private {
     use std::sync::Arc;
 
     pub use crate::integration::{
-        UiPaintPacketReader, UiPresentationOutcomes, replace_ui_presentation_routes,
+        UiPaintPacketReader, UiPresentationOutcomes, UiPresentationRoute, UiPresentationRouteError,
+        replace_ui_presentation_routes,
     };
 
     use crate::{
@@ -80,9 +80,7 @@ pub mod advanced {
         UiPresentationBackendGeneration, UiPresentationContentError,
         UiPresentationIntegrationError, UiPresentationLimits, UiPresentationLimitsError,
         UiPresentationOutcome, UiPresentationPlanner, UiPresentationPlannerCreateError,
-        UiPresentationRetryIdentity, UiPresentationRoute, UiPresentationRouteError,
-        compile_ui_paint_packets, drain_ui_presentation_outcomes, install_ui_presentation_route,
-        retire_ui_presentation_route,
+        UiPresentationRetryIdentity, compile_ui_paint_packets, drain_ui_presentation_outcomes,
     };
 }
 

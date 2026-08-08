@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use super::{
-    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchOutcome, UiInputEvent,
-    UiNonActivation, UiPointerButton, UiSemanticFact, UiSemanticSnapshot, UiSemanticState,
+    UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchOutcome,
+    UiInputEvent, UiNonActivation, UiPointerButton, UiSemanticFact, UiSemanticSnapshot,
+    UiSemanticState,
     focus::{activate_target, committed_focus, is_focusable_key, navigate_focus, set_focus},
     pointer::{pointer_press, pointer_release, set_hover},
     routing::{KeyAvailability, active_modal_root, hit_target, key_availability, target_rejection},
@@ -69,6 +70,16 @@ impl UiInteractionSession {
         self.dispatch_resolved(&target, &latest, route, input)
     }
 
+    /// Routes one receipt-stamped accessibility request through the same atomic transaction.
+    pub fn dispatch_accessibility(
+        &mut self,
+        journal: &UiFrameJournal,
+        action: UiAccessibilityInput,
+    ) -> Result<UiDispatchOutcome, UiDispatchError> {
+        let (route, input) = action.into_input();
+        self.dispatch(journal, route, input)
+    }
+
     /// Routes one normalized event against already resolved exact presented targets.
     pub fn dispatch_resolved(
         &mut self,
@@ -77,8 +88,7 @@ impl UiInteractionSession {
         route: UiRouteStamp,
         input: UiInputEvent,
     ) -> Result<UiDispatchOutcome, UiDispatchError> {
-        if target.receipt().surface_id() != route.surface_id()
-            || target.receipt().presentation_epoch() != route.presentation_epoch()
+        if UiRouteStamp::from_receipt(target.receipt()) != route
             || latest.receipt().surface_id() != route.surface_id()
         {
             return Err(UiDispatchError::ResolvedRouteMismatch);
@@ -113,6 +123,7 @@ impl UiInteractionSession {
             || route.presentation_epoch() != latest.receipt().presentation_epoch();
         if reconciliation_changed {
             reconciled.presentation_epoch = Some(latest.receipt().presentation_epoch());
+            reconciled.presented_route = Some(UiRouteStamp::from_receipt(latest.receipt()));
             self.ensure_event_limit(&reconciliation)?;
             if reconciliation_generation_differs || !reconciliation.events().is_empty() {
                 self.commit_surface(route.surface_id(), reconciled);
@@ -144,6 +155,7 @@ impl UiInteractionSession {
 
         let mut candidate = reconciled.clone();
         candidate.presentation_epoch = Some(latest.receipt().presentation_epoch());
+        candidate.presented_route = Some(UiRouteStamp::from_receipt(latest.receipt()));
         if let Err(error) = preflight_input_identity(&mut candidate, &input) {
             if reconciliation_changed {
                 self.commit_surface(route.surface_id(), reconciled);
@@ -212,11 +224,11 @@ impl UiInteractionSession {
             target.revision(),
             target.receipt().presentation_epoch(),
         );
-        let previous = initial.presentation_epoch.and_then(|epoch| {
+        let previous = initial.presented_route.and_then(|route| {
             journal
-                .resolve(UiRouteStamp::new(surface, epoch))
+                .resolve(route)
                 .ok()
-                .map(|target| (target, epoch))
+                .map(|target| (target, route.presentation_epoch()))
         });
         reconcile_presented_pointer_state(
             &mut candidate,
@@ -235,6 +247,7 @@ impl UiInteractionSession {
             &mut reconciliation,
         );
         candidate.presentation_epoch = Some(target.receipt().presentation_epoch());
+        candidate.presented_route = Some(UiRouteStamp::from_receipt(target.receipt()));
         if candidate == initial {
             return Ok(None);
         }
@@ -295,12 +308,27 @@ impl UiInteractionSession {
         }))
     }
 
-    /// Projects semantics from the latest submitted frame and current interaction state.
+    /// Projects descriptive semantics from the latest submitted frame and current interaction
+    /// state. Actions are omitted until an exact presented behavior owner authorizes them.
     pub fn semantic_snapshot(
         &self,
         journal: &UiFrameJournal,
         route: UiRouteStamp,
         seat: super::UiSeatId,
+    ) -> Result<UiSemanticSnapshot, UiDispatchError> {
+        self.semantic_snapshot_with_action_authority(journal, route, seat, |_, _| false)
+    }
+
+    /// Projects actionable semantics only when the exact presented behavior owner resolves them.
+    ///
+    /// The predicate is evaluated against authored semantic actions after exact receipt resolution;
+    /// returning `false` keeps the descriptive node while withholding the platform action.
+    pub fn semantic_snapshot_with_action_authority(
+        &self,
+        journal: &UiFrameJournal,
+        route: UiRouteStamp,
+        seat: super::UiSeatId,
+        mut owns_action: impl FnMut(&UiKey, &crate::UiActionId) -> bool,
     ) -> Result<UiSemanticSnapshot, UiDispatchError> {
         let target = journal.resolve(route)?;
         let latest = journal.latest(route.surface_id())?;
@@ -319,7 +347,9 @@ impl UiInteractionSession {
         let nodes = frame
             .semantics()
             .iter()
-            .map(|node| {
+            .filter_map(|node| {
+                let rect = node.visible_rect()?;
+                let physical_rect = frame.environment().physical_rect(rect)?;
                 let availability = key_availability(latest_frame, node.key());
                 let inert = modal_root
                     .as_ref()
@@ -343,8 +373,17 @@ impl UiInteractionSession {
                                 })
                         })
                     });
-                UiSemanticFact::from_frame_node(
+                let actions = node
+                    .actions()
+                    .iter()
+                    .filter(|action| owns_action(node.key(), action))
+                    .cloned()
+                    .collect();
+                Some(UiSemanticFact::from_frame_node(
                     node,
+                    rect,
+                    physical_rect,
+                    actions,
                     UiSemanticState::new(
                         node.enabled() && active,
                         inert || !active,
@@ -354,16 +393,31 @@ impl UiInteractionSession {
                         focused.as_ref() == Some(node.key()),
                         pressed,
                     ),
-                )
+                ))
             })
             .collect();
         Ok(UiSemanticSnapshot::new(
-            route.surface_id(),
+            route,
             target.revision(),
-            route.presentation_epoch(),
             seat,
             nodes,
         ))
+    }
+
+    /// Returns whether a surface retains a pointer position, hover or capture fact.
+    #[must_use]
+    pub fn has_pointer_facts(&self, surface: UiSurfaceId) -> bool {
+        self.surfaces
+            .get(&surface)
+            .is_some_and(SurfaceState::has_pointer_facts)
+    }
+
+    /// Clears every interaction fact owned by one retired platform endpoint.
+    ///
+    /// Moving a Surface Slot to another window or seat must not transfer focus, capture, pointer,
+    /// or modal session state to that new endpoint.
+    pub fn clear_surface_state(&mut self, surface: UiSurfaceId) {
+        self.surfaces.remove(&surface);
     }
 
     fn preflight_surface(&self, surface: UiSurfaceId) -> Result<(), UiDispatchError> {

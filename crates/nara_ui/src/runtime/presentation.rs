@@ -1,17 +1,17 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use super::candidate::{UiBehaviorSnapshot, UiCompiledCandidate};
-use super::surface::UiSurfaceDescriptor;
+use super::surface::UiSurfaceSlot;
 use nara_ui_kernel::{
     UiFrameJournal, UiJournalError, UiKey, UiLimits, UiPresentationReceipt, UiRouteStamp,
-    UiRouteTarget,
+    UiRouteTarget, UiSurfaceRetirementToken,
 };
 
 #[derive(Clone, Debug)]
 struct PresentedEntry {
     target: UiRouteTarget,
     behavior: Arc<UiBehaviorSnapshot>,
-    descriptor: UiSurfaceDescriptor,
+    slot: UiSurfaceSlot,
 }
 
 /// Exact frame, receipt, and behavior authority selected by one event-time route.
@@ -21,7 +21,7 @@ pub(crate) struct UiPresentedSession {
     latest: UiRouteTarget,
     behavior: Arc<UiBehaviorSnapshot>,
     latest_behavior: Arc<UiBehaviorSnapshot>,
-    descriptor: UiSurfaceDescriptor,
+    slot: UiSurfaceSlot,
 }
 
 impl UiPresentedSession {
@@ -41,8 +41,8 @@ impl UiPresentedSession {
         &self.latest_behavior
     }
 
-    pub(crate) const fn descriptor(&self) -> UiSurfaceDescriptor {
-        self.descriptor
+    pub(crate) const fn slot(&self) -> UiSurfaceSlot {
+        self.slot
     }
 
     pub(crate) fn blocks_unhandled_input(&self) -> bool {
@@ -59,9 +59,14 @@ pub(super) struct UiPresentedHistory {
 }
 
 impl UiPresentedHistory {
-    pub(super) fn with_limits(limits: UiLimits) -> Result<Self, UiJournalError> {
+    pub(super) fn with_limits(
+        limits: UiLimits,
+        slot: UiSurfaceSlot,
+    ) -> Result<Self, UiJournalError> {
+        let mut journal = UiFrameJournal::with_limits(limits)?;
+        journal.install_surface(slot.surface_id(), slot.slot_generation())?;
         Ok(Self {
-            journal: UiFrameJournal::with_limits(limits)?,
+            journal,
             entries: VecDeque::new(),
         })
     }
@@ -69,20 +74,17 @@ impl UiPresentedHistory {
     pub(super) fn submit(
         &mut self,
         candidate: &UiCompiledCandidate,
-        descriptor: UiSurfaceDescriptor,
+        slot: UiSurfaceSlot,
         presentation_epoch: u64,
     ) -> Result<UiPresentationReceipt, UiJournalError> {
         let receipt = self
             .journal
             .submit(Arc::clone(candidate.frame()), presentation_epoch)?;
-        let target = self.journal.resolve(UiRouteStamp::new(
-            candidate.frame().environment().surface_id(),
-            presentation_epoch,
-        ))?;
+        let target = self.journal.resolve(UiRouteStamp::from_receipt(receipt))?;
         self.entries.push_front(PresentedEntry {
             target,
             behavior: Arc::clone(candidate.behavior()),
-            descriptor,
+            slot,
         });
         self.entries.truncate(3);
         Ok(receipt)
@@ -109,7 +111,7 @@ impl UiPresentedHistory {
                 latest,
                 behavior: Arc::clone(&entry.behavior),
                 latest_behavior: Arc::clone(&latest_entry.behavior),
-                descriptor: entry.descriptor,
+                slot: entry.slot,
             });
         Ok(presented)
     }
@@ -126,6 +128,45 @@ impl UiPresentedHistory {
 
     pub(super) fn latest_target(&self) -> Option<&UiRouteTarget> {
         self.entries.front().map(|entry| &entry.target)
+    }
+
+    pub(super) fn latest_session(&self) -> Result<Option<UiPresentedSession>, UiJournalError> {
+        let Some(entry) = self.entries.front() else {
+            return Ok(None);
+        };
+        self.resolve(UiRouteStamp::from_receipt(entry.target.receipt()))
+    }
+
+    pub(super) fn advance_slot(
+        &mut self,
+        previous: UiSurfaceSlot,
+        next: UiSurfaceSlot,
+    ) -> Result<(), UiJournalError> {
+        self.journal.advance_surface_slot(
+            previous.surface_id(),
+            previous.slot_generation(),
+            next.slot_generation(),
+        )?;
+        self.entries.clear();
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn receipt(&self, presentation_epoch: u64) -> Option<UiPresentationReceipt> {
+        self.entries
+            .iter()
+            .map(|entry| entry.target.receipt())
+            .find(|receipt| receipt.presentation_epoch() == presentation_epoch)
+    }
+
+    pub(super) fn retire(
+        &mut self,
+        surface_id: nara_ui_kernel::UiSurfaceId,
+        retirement_generation: u64,
+    ) -> Result<Option<UiSurfaceRetirementToken>, UiJournalError> {
+        self.entries.clear();
+        self.journal
+            .retire_surface(surface_id, retirement_generation)
     }
 }
 

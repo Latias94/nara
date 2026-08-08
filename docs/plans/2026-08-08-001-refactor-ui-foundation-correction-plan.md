@@ -191,7 +191,7 @@ plan; the other remains independently eligible against the same pinned conforman
 | V1 Interaction owners | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui_widgets -p nara_ui --test-threads=1` | UIF-U1 |
 | V2 Root compiler | `cargo nextest run --locked -p nara_ui_kernel --test compile_order --test failure_atomic --test validation --test-threads=1` | UIF-U2 |
 | V3 Presentation owners | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | UIF-U3 |
-| V4 Surface/platform adapter | `cargo nextest run --locked -p nara_input -p nara_ui -p nara_winit --all-features --test-threads=1` | UIF-U4 |
+| V4 Surface/platform adapter | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui_widgets -p nara_input -p nara_ui -p nara_winit --all-features --test-threads=1` | UIF-U4 |
 | V5 Neutral examples | `cargo run --locked -p nara_ui_kernel --example layout_gallery -j 1`; `cargo run --locked -p nara_ui --example interaction_lab -j 1`; `cargo run --locked --example ui_presentation_gallery --features presentation-ui,desktop-winit,render-wgpu -j 1` | UIF-U5 |
 | V6 Independent consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | UIF-U5 |
 | V7 Compile/lint/format | serial locked check, changed-target clippy with `-D warnings`, and `cargo fmt --all -- --check` | Every code unit; full shared gate at UIF-U5 |

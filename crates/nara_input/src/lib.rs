@@ -23,8 +23,9 @@ use schedule::InputSet;
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
 pub use timeline::{
     InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
-    InputIngressError, InputInvalidationReason, InputPointerId, InputPresentationEpoch,
-    InputRouteStamp, InputSeatId, InputSurfaceId, InputTimeline, InputTimelineEntry,
+    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPointerId,
+    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputRouteStamp,
+    InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline, InputTimelineEntry,
     InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
     MAX_INPUT_TIMELINE_ENTRIES,
 };
@@ -570,34 +571,6 @@ pub fn apply_gamepad_driver_input_at(
     Ok(output.admission)
 }
 
-pub fn apply_accessibility_driver_action(
-    scope: &mut RuntimeDriverScope<'_>,
-    action: u32,
-) -> Result<InputAdmission, ButtonInputDriverError> {
-    apply_accessibility_driver_action_at(
-        scope,
-        InputWindowId::UNSPECIFIED,
-        InputSeatId::PRIMARY,
-        action,
-    )
-}
-
-pub fn apply_accessibility_driver_action_at(
-    scope: &mut RuntimeDriverScope<'_>,
-    window: InputWindowId,
-    seat: InputSeatId,
-    action: u32,
-) -> Result<InputAdmission, ButtonInputDriverError> {
-    let output = scope
-        .__apply_port::<InputTimeline>(__InputDriverEvent::Accessibility {
-            window,
-            seat,
-            action,
-        })
-        .map_err(ButtonInputDriverError::WorldAccess)??;
-    Ok(output.admission)
-}
-
 pub fn apply_window_input_driver_event(
     scope: &mut RuntimeDriverScope<'_>,
     window: InputWindowId,
@@ -1046,7 +1019,6 @@ fn project_timeline_input(
             | InputEventKind::FocusChanged { .. }
             | InputEventKind::Resized { .. }
             | InputEventKind::ScaleFactorChanged { .. }
-            | InputEventKind::AccessibilityAction { .. }
             | InputEventKind::CloseRequested
             | InputEventKind::SurfaceRetired => {}
         }

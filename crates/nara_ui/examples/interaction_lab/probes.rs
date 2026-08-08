@@ -9,8 +9,9 @@ use nara_input::{
 };
 use nara_ui::{
     advanced::{
-        UiActivationSource, UiFrame, UiKey, UiPresentationReceipt, UiRouteRejection, UiSeatId,
-        UiSurfaceId, latest_ui_frame, ui_semantic_snapshot,
+        UiAccessibilityInput, UiActivationSource, UiFrame, UiKey, UiPresentationReceipt,
+        UiRouteDisposition, UiRouteRejection, UiSeatId, UiSurfaceId,
+        dispatch_ui_accessibility_input, latest_ui_frame, ui_semantic_snapshot,
     },
     prelude::{UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal, UiSemanticRole},
 };
@@ -22,8 +23,8 @@ const SECONDARY_WINDOW: InputWindowId = InputWindowId::new(12);
 
 pub(super) fn prove_pointer_capture_and_surface_isolation(
     app: &mut App,
-    primary_surface: UiSurfaceId,
-    secondary_surface: UiSurfaceId,
+    primary_receipt: UiPresentationReceipt,
+    secondary_receipt: UiPresentationReceipt,
     primary_key: &UiKey,
     paused_cursor: &UiActionCursor,
 ) -> Result<(), Box<dyn Error>> {
@@ -35,8 +36,7 @@ pub(super) fn prove_pointer_capture_and_surface_isolation(
     )?;
     app.update()?;
 
-    let primary_semantics =
-        ui_semantic_snapshot(app.world(), primary_surface, 1, UiSeatId::PRIMARY)?;
+    let primary_semantics = ui_semantic_snapshot(app.world(), primary_receipt, UiSeatId::PRIMARY)?;
     let primary = primary_semantics
         .nodes()
         .iter()
@@ -52,7 +52,7 @@ pub(super) fn prove_pointer_capture_and_surface_isolation(
     assert_eq!(primary.actions(), [UiActionId::new(super::PRIMARY_ACTION)?]);
 
     let secondary_semantics =
-        ui_semantic_snapshot(app.world(), secondary_surface, 1, UiSeatId::PRIMARY)?;
+        ui_semantic_snapshot(app.world(), secondary_receipt, UiSeatId::PRIMARY)?;
     let secondary = secondary_semantics
         .nodes()
         .iter()
@@ -67,7 +67,7 @@ pub(super) fn prove_pointer_capture_and_surface_isolation(
         ButtonDriverInput::Release(MouseButton::Left),
     )?;
     app.update()?;
-    let released = ui_semantic_snapshot(app.world(), primary_surface, 1, UiSeatId::PRIMARY)?;
+    let released = ui_semantic_snapshot(app.world(), primary_receipt, UiSeatId::PRIMARY)?;
     let primary = released
         .nodes()
         .iter()
@@ -165,12 +165,7 @@ pub(super) fn prove_disabled_rejection(
     receipt: UiPresentationReceipt,
     primary_key: &UiKey,
 ) -> Result<(), Box<dyn Error>> {
-    let semantics = ui_semantic_snapshot(
-        app.world(),
-        receipt.surface_id(),
-        receipt.presentation_epoch(),
-        UiSeatId::PRIMARY,
-    )?;
+    let semantics = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY)?;
     let primary = semantics
         .nodes()
         .iter()
@@ -188,12 +183,7 @@ pub(super) fn prove_disabled_rejection(
             nara_ui::advanced::UiNonActivation::TargetDisabled { .. }
         ))
     ));
-    let reconciled = ui_semantic_snapshot(
-        app.world(),
-        receipt.surface_id(),
-        receipt.presentation_epoch(),
-        UiSeatId::PRIMARY,
-    )?;
+    let reconciled = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY)?;
     let primary = reconciled
         .nodes()
         .iter()
@@ -209,12 +199,7 @@ pub(super) fn prove_reenabled_focus(
     receipt: UiPresentationReceipt,
     primary_key: &UiKey,
 ) -> Result<(), Box<dyn Error>> {
-    let semantics = ui_semantic_snapshot(
-        app.world(),
-        receipt.surface_id(),
-        receipt.presentation_epoch(),
-        UiSeatId::PRIMARY,
-    )?;
+    let semantics = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY)?;
     let primary = semantics
         .nodes()
         .iter()
@@ -226,13 +211,22 @@ pub(super) fn prove_reenabled_focus(
     Ok(())
 }
 
-pub(super) fn activate_accessibility(app: &mut App) -> Result<(), Box<dyn Error>> {
-    let admission = app
-        .world_mut()?
-        .resource_mut::<InputTimeline>()
-        .admit_accessibility_action(PRIMARY_WINDOW, InputSeatId::PRIMARY, 1)?;
-    assert_eq!(admission.admitted(), 1);
-    app.update()?;
+pub(super) fn activate_accessibility(
+    app: &mut App,
+    receipt: UiPresentationReceipt,
+    target: &UiKey,
+    action: &UiActionId,
+) -> Result<(), Box<dyn Error>> {
+    let disposition = dispatch_ui_accessibility_input(
+        app.world_mut()?,
+        UiAccessibilityInput::semantic_action(
+            receipt,
+            UiSeatId::PRIMARY,
+            target.clone(),
+            action.clone(),
+        ),
+    );
+    assert!(matches!(disposition, UiRouteDisposition::Consumed(_)));
     Ok(())
 }
 
@@ -348,12 +342,11 @@ pub(super) fn assert_latest_action(
 
 pub(super) fn semantic_key(
     app: &App,
-    surface: UiSurfaceId,
-    epoch: u64,
+    receipt: UiPresentationReceipt,
     name: &str,
 ) -> Result<UiKey, Box<dyn Error>> {
     Ok(
-        ui_semantic_snapshot(app.world(), surface, epoch, UiSeatId::PRIMARY)?
+        ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY)?
             .nodes()
             .iter()
             .find(|node| node.name() == name)
@@ -401,6 +394,21 @@ pub(super) fn required_frame(
     app: &App,
     surface: UiSurfaceId,
 ) -> Result<Arc<UiFrame>, Box<dyn Error>> {
-    latest_ui_frame(app.world(), surface)?
-        .ok_or_else(|| format!("surface {} did not compile a frame", surface.get()).into())
+    latest_ui_frame(app.world(), surface)?.ok_or_else(|| {
+        let diagnostics = app
+            .world()
+            .resource::<nara_ui::UiAdapterDiagnostics>()
+            .as_slice();
+        let frames = nara_ui::advanced::latest_ui_frames(app.world()).map(|frames| {
+            frames
+                .iter()
+                .map(|frame| frame.environment().surface_id().get())
+                .collect::<Vec<_>>()
+        });
+        format!(
+            "surface {} did not compile a frame: diagnostics={diagnostics:?}, frames={frames:?}",
+            surface.get()
+        )
+        .into()
+    })
 }

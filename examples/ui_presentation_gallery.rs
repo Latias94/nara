@@ -1,6 +1,8 @@
 use std::{env, error::Error, sync::Arc};
 
-use nara::input::{ButtonTransitionPhase, InputSeatId, InputTimeline, InputWindowId};
+use nara::input::{
+    ButtonTransitionPhase, InputPointerId, InputSeatId, InputTimeline, InputWindowId,
+};
 use nara::ui_render::advanced::{UiPreparedImages, UiPresentationPlanner};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
@@ -37,24 +39,37 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     app.add_systems(StartupStage::Scene, setup_gallery)?;
     app.world_mut()?.insert_resource(AssetServer::new());
 
-    let base_descriptor = UiSurfaceDescriptor::new(
-        surface_id(1),
+    let endpoint = UiSurfaceEndpoint::new(
         InputWindowId::new(WindowId::PRIMARY.get()),
         InputSeatId::PRIMARY,
-        480.0,
-        270.0,
-        1.0,
+        InputPointerId::PRIMARY,
+    );
+    let base_slot = UiSurfaceSlot::new(
+        surface_id(1),
+        endpoint,
+        content_transform(480.0, 270.0, 480.0, 270.0, 1.0)?,
     )?;
-    install_ui_surface(app.world_mut()?, base_descriptor)?;
-    let render_mapped =
-        update_ui_surface_mapping(app.world_mut()?, base_descriptor.surface_id(), 1.5, 1.0)?;
-    assert_eq!(render_mapped.route_revision(), 2);
-    assert_eq!(render_mapped.presentation_revision(), 2);
-    let mapped_descriptor =
-        update_ui_surface_mapping(app.world_mut()?, base_descriptor.surface_id(), 1.5, 1.25)?;
-    assert_eq!(mapped_descriptor.route_revision(), 3);
-    assert_eq!(mapped_descriptor.presentation_revision(), 2);
-    assert_eq!(mapped_descriptor.input_scale_factor(), 1.25);
+    install_ui_surface(app.world_mut()?, base_slot)?;
+    let render_mapped = update_ui_surface_slot(
+        app.world_mut()?,
+        base_slot.surface_id(),
+        endpoint,
+        content_transform(480.0, 270.0, 720.0, 405.0, 1.0)?,
+    )?;
+    assert_eq!(render_mapped.slot_generation(), 2);
+    assert_eq!(render_mapped.route_generation(), 2);
+    assert_eq!(render_mapped.geometry_generation(), 2);
+    assert_eq!(render_mapped.presentation_generation(), 2);
+    let mapped_slot = update_ui_surface_slot(
+        app.world_mut()?,
+        base_slot.surface_id(),
+        endpoint,
+        content_transform(480.0, 270.0, 720.0, 405.0, 1.2)?,
+    )?;
+    assert_eq!(mapped_slot.slot_generation(), 3);
+    assert_eq!(mapped_slot.route_generation(), 3);
+    assert_eq!(mapped_slot.geometry_generation(), 3);
+    assert_eq!(mapped_slot.presentation_generation(), 3);
 
     let cursor = app
         .world_mut()?
@@ -62,7 +77,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         .register_consumer(UiActionConsumerId::new("presentation-gallery")?)?;
     app.update()?;
 
-    let frame = latest_ui_frame(app.world(), mapped_descriptor.surface_id())?
+    let frame = latest_ui_frame(app.world(), mapped_slot.surface_id())?
         .expect("the presentation gallery should compile a candidate frame");
     let handle = app.world().resource::<GalleryImage>().0;
     let image_snapshot = capture_prepared_image(app.world(), handle)?;
@@ -77,7 +92,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     )?;
     drop(prepared_images);
 
-    assert_owned_packet(&packet, &frame, &image_snapshot, mapped_descriptor);
+    assert_owned_packet(&packet, &frame, &image_snapshot, mapped_slot);
     let mut rejecting_presenter =
         HeadlessTestPresenter::new(RenderTarget::Window(WindowId::new(2)));
     let rejected = rejecting_presenter.accept_and_submit(Arc::clone(&packet), 6);
@@ -87,15 +102,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
         Some(nara_ui_render::__private::presentation_attempt(&packet))
     );
     assert!(commit_headless_test_outcome(app.world_mut()?, rejected)?.is_none());
-    assert!(
-        ui_semantic_snapshot(
-            app.world(),
-            mapped_descriptor.surface_id(),
-            6,
-            UiSeatId::PRIMARY,
-        )
-        .is_err()
-    );
+    assert!(latest_ui_frame(app.world(), mapped_slot.surface_id())?.is_some());
 
     let mut presenter = HeadlessTestPresenter::new(RenderTarget::Window(WindowId::PRIMARY));
     let presented = presenter.accept_and_submit(Arc::clone(&packet), 7);
@@ -107,12 +114,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     ));
     let receipt = commit_headless_test_outcome(app.world_mut()?, presented)?
         .expect("the exact submitted packet should advance presentation authority");
-    let semantics = ui_semantic_snapshot(
-        app.world(),
-        receipt.surface_id(),
-        receipt.presentation_epoch(),
-        UiSeatId::PRIMARY,
-    )?;
+    let semantics = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY)?;
     let button = semantics
         .nodes()
         .iter()
@@ -124,8 +126,8 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     assert_eq!(
         timeline
             .admit_gamepad_button(
-                mapped_descriptor.input_window(),
-                mapped_descriptor.input_seat(),
+                mapped_slot.endpoint().window(),
+                mapped_slot.endpoint().seat(),
                 0,
                 13,
                 ButtonTransitionPhase::Pressed,
@@ -133,16 +135,18 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
             .admitted(),
         1
     );
-    assert_eq!(
-        timeline
-            .admit_accessibility_action(
-                mapped_descriptor.input_window(),
-                mapped_descriptor.input_seat(),
-                1,
-            )?
-            .admitted(),
-        1
-    );
+    assert!(matches!(
+        dispatch_ui_accessibility_input(
+            app.world_mut()?,
+            UiAccessibilityInput::semantic_action(
+                receipt,
+                UiSeatId::PRIMARY,
+                button.key().clone(),
+                action.clone(),
+            ),
+        ),
+        UiRouteDisposition::Consumed(_)
+    ));
     app.update()?;
     let journal = app.world().resource::<UiActionJournal>();
     let pending = journal.pending(&cursor)?;
@@ -157,14 +161,14 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     );
     assert_eq!(event.presentation_epoch(), 7);
 
-    let resized_descriptor = update_ui_surface_logical_size(
+    let resized_slot = update_ui_surface_slot(
         app.world_mut()?,
-        mapped_descriptor.surface_id(),
-        512.0,
-        288.0,
+        mapped_slot.surface_id(),
+        mapped_slot.endpoint(),
+        content_transform(512.0, 288.0, 720.0, 405.0, 1.2)?,
     )?;
     app.update()?;
-    let resized_frame = latest_ui_frame(app.world(), resized_descriptor.surface_id())?
+    let resized_frame = latest_ui_frame(app.world(), resized_slot.surface_id())?
         .expect("the resized surface should compile a replacement candidate");
     let resized_logical_size = resized_frame.environment().logical_size();
     assert_eq!(resized_logical_size.width(), 512.0);
@@ -172,23 +176,23 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     assert_ne!(resized_frame.revision(), frame.revision());
     assert!(packet.images()[0].snapshot().resource().pixel_len() > 0);
 
-    assert!(retire_ui_surface(
-        app.world_mut()?,
-        mapped_descriptor.surface_id()
-    )?);
+    let retirement = retire_ui_surface(app.world_mut()?, mapped_slot.surface_id())?
+        .expect("the installed Surface Slot should retire exactly once");
+    assert_eq!(retirement.slot_generation(), resized_slot.slot_generation());
+    assert_eq!(
+        retirement.retirement_generation(),
+        resized_slot.slot_generation() + 1
+    );
+    assert_eq!(retirement.token().surface_id(), mapped_slot.surface_id());
     assert!(matches!(
-        install_ui_surface(app.world_mut()?, mapped_descriptor),
+        install_ui_surface(app.world_mut()?, mapped_slot),
         Err(UiAdapterError::RetiredSurface { surface: 1 })
     ));
-    let recovered = UiSurfaceDescriptor::new(
+    let recovered = UiSurfaceSlot::new(
         surface_id(2),
-        InputWindowId::new(WindowId::PRIMARY.get()),
-        InputSeatId::PRIMARY,
-        480.0,
-        270.0,
-        1.5,
-    )?
-    .with_surface_mapping(1.5, 1.25)?;
+        endpoint,
+        content_transform(480.0, 270.0, 720.0, 405.0, 1.2)?,
+    )?;
     install_ui_surface(app.world_mut()?, recovered)?;
     app.update()?;
     assert!(latest_ui_frame(app.world(), recovered.surface_id())?.is_some());
@@ -224,13 +228,14 @@ fn run_windowed() -> Result<(), Box<dyn Error>> {
     app.world_mut()?.insert_resource(AssetServer::new());
     install_ui_surface(
         app.world_mut()?,
-        UiSurfaceDescriptor::new(
+        UiSurfaceSlot::new(
             surface_id(1),
-            InputWindowId::new(WindowId::PRIMARY.get()),
-            InputSeatId::PRIMARY,
-            480.0,
-            270.0,
-            2.0,
+            UiSurfaceEndpoint::new(
+                InputWindowId::new(WindowId::PRIMARY.get()),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            ),
+            content_transform(480.0, 270.0, 960.0, 540.0, 1.0)?,
         )?,
     )?;
     let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
@@ -241,4 +246,23 @@ fn run_windowed() -> Result<(), Box<dyn Error>> {
     let mut runtime = candidate.complete_startup()?.promote();
     let run_result = WinitRunner::default().run(&mut runtime);
     finish_runtime_after_winit(run_result, runtime)
+}
+
+fn content_transform(
+    authored_width: f32,
+    authored_height: f32,
+    physical_width: f32,
+    physical_height: f32,
+    platform_scale_factor: f32,
+) -> Result<UiSurfaceContentTransform, Box<dyn Error>> {
+    let authored = UiSize::new(authored_width, authored_height)
+        .ok_or("the authored gallery UI size must be finite and non-negative")?;
+    let physical = UiSize::new(physical_width, physical_height)
+        .ok_or("the gallery physical surface size must be finite and non-negative")?;
+    Ok(UiSurfaceContentTransform::new(
+        authored,
+        physical,
+        UiSafeAreaInsets::default(),
+        platform_scale_factor,
+    )?)
 }

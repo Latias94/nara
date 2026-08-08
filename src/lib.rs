@@ -353,16 +353,18 @@ pub mod advanced_prelude {
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::advanced::{
-        UiActivationSource, UiFrame, UiKey, UiNonActivation, UiSemanticSnapshot,
+        UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiFrame, UiKey,
+        UiNonActivation, UiSemanticSnapshot,
     };
     #[cfg(feature = "runtime-ui")]
     pub use nara_ui::{
         UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue,
         UiPresentationReceipt, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog,
-        UiRouteRejectionRecord, UiRouteStamp, UiSeatId, UiSurfaceDescriptor, UiSurfaceId,
-        active_ui_surface_descriptors, commit_ui_presentation, install_ui_surface, latest_ui_frame,
-        retire_ui_surface, ui_semantic_snapshot, update_ui_surface_input_endpoint,
-        update_ui_surface_logical_size, update_ui_surface_mapping,
+        UiRouteRejectionRecord, UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize,
+        UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId,
+        UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
+        commit_ui_presentation, dispatch_ui_accessibility_input, install_ui_surface,
+        latest_ui_frame, retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
     };
 }
 

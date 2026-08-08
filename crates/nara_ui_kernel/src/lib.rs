@@ -31,19 +31,26 @@ pub use frame::{
     UiDiagnostic, UiEnvironment, UiEnvironmentError, UiFocusFact, UiFrame, UiFrameRevision,
     UiHitRegion, UiLayoutFact, UiPaintPrimitive, UiPresentationReceipt, UiResolvedBorder,
     UiResolvedBrush, UiRootDiagnostic, UiRootOutcome, UiRootStatus, UiSemanticNode,
+    UiSurfaceGenerations,
 };
-pub use geometry::{UiPhysicalRect, UiPoint, UiRect, UiSize, UiSnapPolicy};
+pub use geometry::{
+    UiPhysicalRect, UiPoint, UiRect, UiSafeAreaInsets, UiSize, UiSnapPolicy,
+    UiSurfaceContentTransform, UiSurfaceContentTransformError,
+};
 pub use identity::{
     UiActionId, UiImageId, UiKey, UiKeyError, UiLocalKey, UiOpaqueId, UiPersistentIdentity,
     UiProjectionPath, UiProjectionStep, UiRootKey,
 };
 pub use interaction::{
-    UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchError, UiDispatchOutcome,
-    UiInputEvent, UiInteractionSession, UiNavigation, UiNonActivation, UiPointerButton,
-    UiPointerId, UiRoutePhase, UiRoutedEvent, UiRoutedEventKind, UiSeatId, UiSemanticFact,
-    UiSemanticSnapshot, UiSemanticState,
+    UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiButtonPhase,
+    UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent, UiInteractionSession,
+    UiNavigation, UiNonActivation, UiPointerButton, UiPointerId, UiRoutePhase, UiRoutedEvent,
+    UiRoutedEventKind, UiSeatId, UiSemanticFact, UiSemanticSnapshot, UiSemanticState,
 };
-pub use journal::{UiFrameJournal, UiJournalError, UiRouteStamp, UiRouteTarget, UiSurfaceId};
+pub use journal::{
+    UiFrameJournal, UiJournalError, UiRouteStamp, UiRouteTarget, UiSurfaceId,
+    UiSurfaceRetirementToken,
+};
 pub use limits::{UiLimits, UiLimitsError};
 pub use style::{
     UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension, UiEdges,

@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use accesskit::{Action, ActionRequest, Node, NodeId, Rect, Role, Tree, TreeId, TreeUpdate};
 use nara_ui_kernel::{
-    UiFrameRevision, UiInputEvent, UiKey, UiSeatId, UiSemanticRole, UiSemanticSnapshot, UiSurfaceId,
+    UiAccessibilityInput, UiFrameRevision, UiKey, UiRouteStamp, UiSeatId, UiSemanticRole,
+    UiSemanticSnapshot, UiSurfaceId, UiSurfaceRetirementToken,
 };
 use thiserror::Error;
 
@@ -18,6 +19,10 @@ pub struct WinitAccessibilityBridge {
     node_ids: BTreeMap<UiKey, NodeId>,
     active_keys: BTreeMap<NodeId, UiKey>,
     active_actions: BTreeMap<NodeId, nara_ui_kernel::UiActionId>,
+    active_focusable: BTreeSet<NodeId>,
+    route: Option<UiRouteStamp>,
+    seat: Option<UiSeatId>,
+    retired: Option<UiSurfaceRetirementToken>,
 }
 
 impl WinitAccessibilityBridge {
@@ -29,23 +34,55 @@ impl WinitAccessibilityBridge {
             node_ids: BTreeMap::new(),
             active_keys: BTreeMap::new(),
             active_actions: BTreeMap::new(),
+            active_focusable: BTreeSet::new(),
+            route: None,
+            seat: None,
+            retired: None,
         }
     }
 
-    /// Maps one latest semantic snapshot without changing kernel or widget contracts.
-    pub fn update(
-        &mut self,
+    /// Prepares one AccessKit tree update without changing the active callback mapping.
+    ///
+    /// The Host publishes `prepared.accesskit_update()` to the platform first, then calls
+    /// [`Self::commit_update`]. Until that commit, callbacks resolve against the previously
+    /// published route and actions.
+    pub fn prepare_update(
+        &self,
         snapshot: &UiSemanticSnapshot,
-        scale_factor: f64,
-    ) -> Result<WinitAccessibilityUpdate, WinitAccessibilityError> {
+    ) -> Result<WinitPreparedAccessibilityUpdate, WinitAccessibilityError> {
         if snapshot.surface_id() != self.surface_id {
             return Err(WinitAccessibilityError::SurfaceMismatch {
                 expected: self.surface_id,
                 actual: snapshot.surface_id(),
             });
         }
-        if !scale_factor.is_finite() || scale_factor <= 0.0 {
-            return Err(WinitAccessibilityError::InvalidScaleFactor);
+        if self.retired.is_some() {
+            return Err(WinitAccessibilityError::SurfaceRetired {
+                surface: self.surface_id,
+            });
+        }
+        if let Some(current) = self.route {
+            let next = snapshot.route();
+            if next.slot_generation() < current.slot_generation()
+                || (next.slot_generation() == current.slot_generation()
+                    && next.presentation_epoch() < current.presentation_epoch())
+            {
+                return Err(WinitAccessibilityError::StaleSnapshot {
+                    current,
+                    candidate: next,
+                });
+            }
+            if next.slot_generation() == current.slot_generation()
+                && (next.route_revision() != current.route_revision()
+                    || next.geometry_generation() != current.geometry_generation()
+                    || (next.presentation_epoch() == current.presentation_epoch()
+                        && next != current))
+            {
+                return Err(WinitAccessibilityError::ConflictingSnapshot {
+                    current,
+                    candidate: next,
+                });
+            }
         }
         if snapshot.nodes().len() > MAX_NODE_IDENTITIES {
             return Err(WinitAccessibilityError::NodeLimitExceeded {
@@ -75,10 +112,19 @@ impl WinitAccessibilityBridge {
         let mut candidate = self.clone();
         candidate.active_keys.clear();
         candidate.active_actions.clear();
+        candidate.active_focusable.clear();
+        candidate.route = Some(snapshot.route());
+        candidate.seat = Some(snapshot.seat());
         for fact in snapshot.nodes() {
             let node_id = candidate.admit_key(fact.key())?;
             candidate.active_keys.insert(node_id, fact.key().clone());
-            if let Some(action) = fact.actions().first() {
+            if fact.state().enabled() && !fact.state().inert() && fact.state().focusable() {
+                candidate.active_focusable.insert(node_id);
+            }
+            if fact.state().enabled()
+                && !fact.state().inert()
+                && let Some(action) = fact.actions().first()
+            {
                 candidate.active_actions.insert(node_id, action.clone());
             }
         }
@@ -117,13 +163,12 @@ impl WinitAccessibilityBridge {
                     .cloned()
                     .unwrap_or_default(),
             );
-            let rect = fact.rect();
-            let max = rect.max();
+            let rect = fact.physical_rect();
             node.set_bounds(Rect::new(
-                f64::from(rect.origin().x()) * scale_factor,
-                f64::from(rect.origin().y()) * scale_factor,
-                f64::from(max.x()) * scale_factor,
-                f64::from(max.y()) * scale_factor,
+                f64::from(rect.min_x()),
+                f64::from(rect.min_y()),
+                f64::from(rect.max_x()),
+                f64::from(rect.max_y()),
             ));
             if !fact.state().enabled() || fact.state().inert() {
                 node.set_disabled();
@@ -156,24 +201,63 @@ impl WinitAccessibilityBridge {
             tree_id: TreeId::ROOT,
             focus,
         };
-        *self = candidate;
-        Ok(WinitAccessibilityUpdate {
-            surface_id: snapshot.surface_id(),
-            frame_revision: snapshot.frame_revision(),
-            presentation_epoch: snapshot.presentation_epoch(),
-            update,
+        Ok(WinitPreparedAccessibilityUpdate {
+            previous_route: self.route,
+            candidate,
+            update: WinitAccessibilityUpdate {
+                route: snapshot.route(),
+                frame_revision: snapshot.frame_revision(),
+                update,
+            },
         })
     }
 
-    /// Converts a supported AccessKit request back into a neutral kernel event.
+    /// Commits a prepared callback mapping after its exact tree update reached the platform.
+    pub fn commit_update(
+        &mut self,
+        prepared: WinitPreparedAccessibilityUpdate,
+    ) -> Result<(), WinitAccessibilityError> {
+        if self.retired.is_some() {
+            return Err(WinitAccessibilityError::SurfaceRetired {
+                surface: self.surface_id,
+            });
+        }
+        if prepared.candidate.surface_id != self.surface_id {
+            return Err(WinitAccessibilityError::SurfaceMismatch {
+                expected: self.surface_id,
+                actual: prepared.candidate.surface_id,
+            });
+        }
+        if self.route != prepared.previous_route {
+            return Err(WinitAccessibilityError::PreparedUpdateObsolete);
+        }
+        *self = prepared.candidate;
+        Ok(())
+    }
+
+    /// Converts a supported AccessKit request into the exact presented-session input.
     pub fn map_action(
         &self,
         request: &ActionRequest,
-        seat: UiSeatId,
-    ) -> Result<UiInputEvent, WinitAccessibilityError> {
+    ) -> Result<UiAccessibilityInput, WinitAccessibilityError> {
+        if self.retired.is_some() {
+            return Err(WinitAccessibilityError::SurfaceRetired {
+                surface: self.surface_id,
+            });
+        }
         if request.target_tree != TreeId::ROOT {
             return Err(WinitAccessibilityError::ForeignTree);
         }
+        let route = self
+            .route
+            .ok_or(WinitAccessibilityError::NoPresentedSnapshot {
+                surface: self.surface_id,
+            })?;
+        let seat = self
+            .seat
+            .ok_or(WinitAccessibilityError::NoPresentedSnapshot {
+                surface: self.surface_id,
+            })?;
         let target = self.active_keys.get(&request.target_node).cloned().ok_or(
             WinitAccessibilityError::UnknownNode {
                 node: request.target_node,
@@ -188,15 +272,53 @@ impl WinitAccessibilityBridge {
                     .ok_or(WinitAccessibilityError::ActionUnavailable {
                         node: request.target_node,
                     })?;
-                Ok(UiInputEvent::SemanticAction {
-                    seat,
-                    target,
-                    action,
-                })
+                Ok(UiAccessibilityInput::semantic_action_from_route(
+                    route, seat, target, action,
+                ))
             }
-            Action::Focus => Ok(UiInputEvent::FocusTarget { seat, target }),
+            Action::Focus => {
+                if !self.active_focusable.contains(&request.target_node) {
+                    return Err(WinitAccessibilityError::FocusUnavailable {
+                        node: request.target_node,
+                    });
+                }
+                Ok(UiAccessibilityInput::focus_target_from_route(
+                    route, seat, target,
+                ))
+            }
             action => Err(WinitAccessibilityError::UnsupportedAction { action }),
         }
+    }
+
+    /// Retires the bridge with the Host-issued token for this exact Surface Slot lifetime.
+    pub fn retire(
+        &mut self,
+        retirement: UiSurfaceRetirementToken,
+    ) -> Result<(), WinitAccessibilityError> {
+        if retirement.surface_id() != self.surface_id {
+            return Err(WinitAccessibilityError::RetirementSurfaceMismatch {
+                expected: self.surface_id,
+                actual: retirement.surface_id(),
+            });
+        }
+        if self.retired.is_some() {
+            return Ok(());
+        }
+        if let Some(route) = self.route
+            && route.slot_generation() > retirement.slot_generation()
+        {
+            return Err(WinitAccessibilityError::RetirementGenerationMismatch {
+                expected: route.slot_generation(),
+                actual: retirement.slot_generation(),
+            });
+        }
+        self.active_keys.clear();
+        self.active_actions.clear();
+        self.active_focusable.clear();
+        self.route = None;
+        self.seat = None;
+        self.retired = Some(retirement);
+        Ok(())
     }
 
     #[must_use]
@@ -232,19 +354,51 @@ fn map_role(role: UiSemanticRole) -> Role {
     }
 }
 
+/// One uncommitted AccessKit payload and its candidate callback mapping.
+///
+/// This token is intentionally non-`Clone`: one platform publication can advance callback
+/// authority at most once.
+#[derive(Debug)]
+pub struct WinitPreparedAccessibilityUpdate {
+    previous_route: Option<UiRouteStamp>,
+    candidate: WinitAccessibilityBridge,
+    update: WinitAccessibilityUpdate,
+}
+
+impl WinitPreparedAccessibilityUpdate {
+    #[must_use]
+    pub const fn update(&self) -> &WinitAccessibilityUpdate {
+        &self.update
+    }
+
+    #[must_use]
+    pub const fn route(&self) -> UiRouteStamp {
+        self.update.route()
+    }
+
+    #[must_use]
+    pub const fn accesskit_update(&self) -> &TreeUpdate {
+        self.update.accesskit_update()
+    }
+}
+
 /// AccessKit payload paired with the exact Nara presentation authority it represents.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WinitAccessibilityUpdate {
-    surface_id: UiSurfaceId,
+    route: UiRouteStamp,
     frame_revision: UiFrameRevision,
-    presentation_epoch: u64,
     update: TreeUpdate,
 }
 
 impl WinitAccessibilityUpdate {
     #[must_use]
     pub const fn surface_id(&self) -> UiSurfaceId {
-        self.surface_id
+        self.route.surface_id()
+    }
+
+    #[must_use]
+    pub const fn route(&self) -> UiRouteStamp {
+        self.route
     }
 
     #[must_use]
@@ -254,7 +408,7 @@ impl WinitAccessibilityUpdate {
 
     #[must_use]
     pub const fn presentation_epoch(&self) -> u64 {
-        self.presentation_epoch
+        self.route.presentation_epoch()
     }
 
     #[must_use]
@@ -277,8 +431,22 @@ pub enum WinitAccessibilityError {
         expected: UiSurfaceId,
         actual: UiSurfaceId,
     },
-    #[error("accessibility scale factor must be finite and positive")]
-    InvalidScaleFactor,
+    #[error("accessibility surface {surface:?} has been retired")]
+    SurfaceRetired { surface: UiSurfaceId },
+    #[error("accessibility surface {surface:?} has no presented semantic snapshot")]
+    NoPresentedSnapshot { surface: UiSurfaceId },
+    #[error("accessibility snapshot route {candidate:?} predates active route {current:?}")]
+    StaleSnapshot {
+        current: UiRouteStamp,
+        candidate: UiRouteStamp,
+    },
+    #[error("accessibility snapshot route {candidate:?} conflicts with active route {current:?}")]
+    ConflictingSnapshot {
+        current: UiRouteStamp,
+        candidate: UiRouteStamp,
+    },
+    #[error("prepared accessibility update no longer follows the active platform tree")]
+    PreparedUpdateObsolete,
     #[error("accessibility snapshot exceeds {maximum} semantic nodes")]
     NodeLimitExceeded { maximum: usize },
     #[error("accessibility node identity retention exceeds {maximum} keys")]
@@ -295,6 +463,20 @@ pub enum WinitAccessibilityError {
     UnknownNode { node: NodeId },
     #[error("accessibility node {node:?} has no semantic action")]
     ActionUnavailable { node: NodeId },
+    #[error("accessibility node {node:?} is not an enabled focus target")]
+    FocusUnavailable { node: NodeId },
     #[error("accessibility action {action:?} is unsupported")]
     UnsupportedAction { action: Action },
+    #[error("retirement token targets surface {actual:?}, expected {expected:?}")]
+    RetirementSurfaceMismatch {
+        expected: UiSurfaceId,
+        actual: UiSurfaceId,
+    },
+    #[error(
+        "retirement token slot generation {actual:?} does not match active route generation {expected:?}"
+    )]
+    RetirementGenerationMismatch {
+        expected: nara_ui_kernel::UiRevision,
+        actual: nara_ui_kernel::UiRevision,
+    },
 }

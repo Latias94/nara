@@ -20,16 +20,18 @@ pub use interaction::{
     MAX_UI_ACTION_CONSUMERS, MAX_UI_ACTION_JOURNAL_ENTRIES, UiActionAdmissionError,
     UiActionConsumerError, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionJournal,
     UiActionSequence, UiInputProjectionIssue, UiRouteDisposition, UiRouteRejection,
-    UiRouteRejectionLog, UiRouteRejectionRecord,
+    UiRouteRejectionLog, UiRouteRejectionRecord, dispatch_ui_accessibility_input,
 };
 pub use nara_ui_kernel::{
-    UiActionId, UiActivationSource, UiPresentationReceipt, UiRouteStamp, UiSeatId, UiSurfaceId,
+    UiAccessibilityInput, UiAccessibilityRequest, UiActionId, UiActivationSource,
+    UiPresentationReceipt, UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize,
+    UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceId,
 };
 pub use runtime::{
-    UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceDescriptor,
-    UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
-    install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface, ui_semantic_snapshot,
-    update_ui_surface_input_endpoint, update_ui_surface_logical_size, update_ui_surface_mapping,
+    UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceEndpoint,
+    UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
+    commit_ui_presentation, install_ui_surface, latest_ui_frame, latest_ui_frames,
+    retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
 };
 pub use style::*;
 
@@ -131,13 +133,14 @@ pub mod prelude {
 /// Exact presentation and presented-input boundary for first-party product integrations.
 pub mod advanced {
     pub use crate::{
-        UiActivationSource, UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError,
-        UiInputProjectionIssue, UiPresentationReceipt, UiRouteDisposition, UiRouteRejection,
-        UiRouteRejectionLog, UiRouteRejectionRecord, UiRouteStamp, UiSeatId, UiSurfaceDescriptor,
-        UiSurfaceId, UiSurfaceMappingError, active_ui_surface_descriptors, commit_ui_presentation,
-        install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface,
-        ui_semantic_snapshot, update_ui_surface_input_endpoint, update_ui_surface_logical_size,
-        update_ui_surface_mapping,
+        UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiAdapterDiagnostic,
+        UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue, UiPresentationReceipt,
+        UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRouteRejectionRecord,
+        UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize, UiSurfaceContentTransform,
+        UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceRetirement,
+        UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots, commit_ui_presentation,
+        dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, latest_ui_frames,
+        retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
     };
     pub use nara_ui_kernel::{UiFrame, UiKey, UiNonActivation, UiSemanticSnapshot};
 }

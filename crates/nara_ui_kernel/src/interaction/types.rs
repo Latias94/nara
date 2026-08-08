@@ -1,4 +1,4 @@
-use crate::{UiActionId, UiFrameRevision, UiKey, UiPoint};
+use crate::{UiActionId, UiFrameRevision, UiKey, UiPoint, UiPresentationReceipt, UiRouteStamp};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiSeatId(u32);
@@ -64,6 +64,97 @@ pub enum UiActivationSource {
     Keyboard,
     Gamepad,
     Accessibility,
+}
+
+/// Receipt-stamped platform accessibility request admitted into the normal UI transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiAccessibilityInput {
+    route: UiRouteStamp,
+    seat: UiSeatId,
+    request: UiAccessibilityRequest,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UiAccessibilityRequest {
+    FocusTarget { target: UiKey },
+    SemanticAction { target: UiKey, action: UiActionId },
+}
+
+impl UiAccessibilityInput {
+    #[must_use]
+    pub fn focus_target(receipt: UiPresentationReceipt, seat: UiSeatId, target: UiKey) -> Self {
+        Self::focus_target_from_route(UiRouteStamp::from_receipt(receipt), seat, target)
+    }
+
+    /// Creates a typed request from the exact route retained by a semantic snapshot.
+    ///
+    /// Platform adapters must obtain this route from a committed snapshot; this constructor does
+    /// not create a new presentation authority.
+    #[must_use]
+    pub fn focus_target_from_route(route: UiRouteStamp, seat: UiSeatId, target: UiKey) -> Self {
+        Self {
+            route,
+            seat,
+            request: UiAccessibilityRequest::FocusTarget { target },
+        }
+    }
+
+    #[must_use]
+    pub fn semantic_action(
+        receipt: UiPresentationReceipt,
+        seat: UiSeatId,
+        target: UiKey,
+        action: UiActionId,
+    ) -> Self {
+        Self::semantic_action_from_route(UiRouteStamp::from_receipt(receipt), seat, target, action)
+    }
+
+    /// Creates a typed semantic request from the exact route retained by a semantic snapshot.
+    #[must_use]
+    pub fn semantic_action_from_route(
+        route: UiRouteStamp,
+        seat: UiSeatId,
+        target: UiKey,
+        action: UiActionId,
+    ) -> Self {
+        Self {
+            route,
+            seat,
+            request: UiAccessibilityRequest::SemanticAction { target, action },
+        }
+    }
+
+    #[must_use]
+    pub const fn route(&self) -> UiRouteStamp {
+        self.route
+    }
+
+    #[must_use]
+    pub const fn seat(&self) -> UiSeatId {
+        self.seat
+    }
+
+    #[must_use]
+    pub const fn request(&self) -> &UiAccessibilityRequest {
+        &self.request
+    }
+
+    pub(crate) fn into_input(self) -> (UiRouteStamp, UiInputEvent) {
+        let input = match self.request {
+            UiAccessibilityRequest::FocusTarget { target } => UiInputEvent::FocusTarget {
+                seat: self.seat,
+                target,
+            },
+            UiAccessibilityRequest::SemanticAction { target, action } => {
+                UiInputEvent::SemanticAction {
+                    seat: self.seat,
+                    target,
+                    action,
+                }
+            }
+        };
+        (self.route, input)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -98,6 +98,127 @@ impl InputPresentationEpoch {
     }
 }
 
+/// Host-owned generation of one installed UI surface slot snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputSlotGeneration(u64);
+
+impl InputSlotGeneration {
+    #[must_use]
+    pub const fn new(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Host-owned generation of the exact UI route retained by one presented receipt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputRouteGeneration(u64);
+
+impl InputRouteGeneration {
+    #[must_use]
+    pub const fn new(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Host-owned generation of the exact UI geometry used to route an input event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputGeometryGeneration(u64);
+
+impl InputGeometryGeneration {
+    #[must_use]
+    pub const fn new(raw: u64) -> Option<Self> {
+        if raw == 0 { None } else { Some(Self(raw)) }
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Complete immutable route publication accepted by the normalized input authority.
+///
+/// The UI adapter constructs this value from one exact presented receipt. Keeping the endpoint and
+/// all generations together prevents a caller from publishing a partially updated route.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InputPresentedRoute {
+    pub(super) window: InputWindowId,
+    pub(super) surface: InputSurfaceId,
+    pub(super) seat: InputSeatId,
+    pub(super) presentation_epoch: InputPresentationEpoch,
+    pub(super) slot_generation: InputSlotGeneration,
+    pub(super) route_generation: InputRouteGeneration,
+    pub(super) geometry_generation: InputGeometryGeneration,
+}
+
+impl InputPresentedRoute {
+    #[must_use]
+    pub const fn new(
+        window: InputWindowId,
+        surface: InputSurfaceId,
+        seat: InputSeatId,
+        presentation_epoch: InputPresentationEpoch,
+        slot_generation: InputSlotGeneration,
+        route_generation: InputRouteGeneration,
+        geometry_generation: InputGeometryGeneration,
+    ) -> Self {
+        Self {
+            window,
+            surface,
+            seat,
+            presentation_epoch,
+            slot_generation,
+            route_generation,
+            geometry_generation,
+        }
+    }
+
+    #[must_use]
+    pub const fn window(self) -> InputWindowId {
+        self.window
+    }
+
+    #[must_use]
+    pub const fn surface(self) -> InputSurfaceId {
+        self.surface
+    }
+
+    #[must_use]
+    pub const fn seat(self) -> InputSeatId {
+        self.seat
+    }
+
+    #[must_use]
+    pub const fn presentation_epoch(self) -> InputPresentationEpoch {
+        self.presentation_epoch
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> InputSlotGeneration {
+        self.slot_generation
+    }
+
+    #[must_use]
+    pub const fn route_generation(self) -> InputRouteGeneration {
+        self.route_generation
+    }
+
+    #[must_use]
+    pub const fn geometry_generation(self) -> InputGeometryGeneration {
+        self.geometry_generation
+    }
+}
+
 /// Event-time routing facts captured without depending on UI or render types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InputRouteStamp {
@@ -106,7 +227,10 @@ pub struct InputRouteStamp {
     pub(super) seat: InputSeatId,
     pub(super) pointer: Option<InputPointerId>,
     pub(super) presentation_epoch: Option<InputPresentationEpoch>,
-    pub(super) route_generation: u64,
+    pub(super) slot_generation: Option<InputSlotGeneration>,
+    pub(super) route_generation: Option<InputRouteGeneration>,
+    pub(super) geometry_generation: Option<InputGeometryGeneration>,
+    pub(super) binding_generation: u64,
 }
 
 impl InputRouteStamp {
@@ -122,7 +246,10 @@ impl InputRouteStamp {
             seat,
             pointer,
             presentation_epoch: None,
-            route_generation: 0,
+            slot_generation: None,
+            route_generation: None,
+            geometry_generation: None,
+            binding_generation: 0,
         }
     }
 
@@ -152,13 +279,33 @@ impl InputRouteStamp {
     }
 
     #[must_use]
-    pub const fn route_generation(self) -> u64 {
+    pub const fn slot_generation(self) -> Option<InputSlotGeneration> {
+        self.slot_generation
+    }
+
+    #[must_use]
+    pub const fn route_generation(self) -> Option<InputRouteGeneration> {
         self.route_generation
     }
 
     #[must_use]
+    pub const fn geometry_generation(self) -> Option<InputGeometryGeneration> {
+        self.geometry_generation
+    }
+
+    #[must_use]
+    pub const fn binding_generation(self) -> u64 {
+        self.binding_generation
+    }
+
+    #[must_use]
     pub const fn is_ui_routable(self) -> bool {
-        self.surface.is_some() && self.presentation_epoch.is_some() && self.route_generation != 0
+        self.surface.is_some()
+            && self.presentation_epoch.is_some()
+            && self.slot_generation.is_some()
+            && self.route_generation.is_some()
+            && self.geometry_generation.is_some()
+            && self.binding_generation != 0
     }
 }
 
@@ -200,9 +347,6 @@ pub enum InputEventKind {
     },
     ScaleFactorChanged {
         scale_factor: f64,
-    },
-    AccessibilityAction {
-        action: u32,
     },
     CloseRequested,
     SurfaceRetired,
@@ -311,7 +455,15 @@ pub enum InputIngressError {
         current_surface: InputSurfaceId,
         requested_surface: InputSurfaceId,
     },
-    RouteGenerationExhausted,
+    PresentedRouteMismatch {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
+    PresentedRouteRegression {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
+    RouteBindingGenerationExhausted,
     NonFinitePosition,
     InvalidLogicalSize,
     InvalidScaleFactor,
@@ -349,7 +501,7 @@ impl InputIngressError {
             } | Self::SequenceExhausted {
                 route_invalidated: true,
                 ..
-            } | Self::RouteGenerationExhausted
+            } | Self::RouteBindingGenerationExhausted
         )
     }
 }
@@ -399,8 +551,20 @@ impl Display for InputIngressError {
                 current_surface.get(),
                 requested_surface.get(),
             ),
-            Self::RouteGenerationExhausted => {
-                formatter.write_str("input route generation was exhausted")
+            Self::PresentedRouteMismatch { window, seat } => write!(
+                formatter,
+                "input endpoint ({}, {}) no longer owns the exact presented route being released",
+                window.get(),
+                seat.get(),
+            ),
+            Self::PresentedRouteRegression { window, seat } => write!(
+                formatter,
+                "input endpoint ({}, {}) rejected a presented route that regresses its active generations",
+                window.get(),
+                seat.get(),
+            ),
+            Self::RouteBindingGenerationExhausted => {
+                formatter.write_str("input route binding generation was exhausted")
             }
             Self::NonFinitePosition => formatter.write_str("input position must be finite"),
             Self::InvalidLogicalSize => {
@@ -532,11 +696,6 @@ pub enum __InputDriverEvent {
         gamepad: u16,
         button: u16,
         phase: ButtonTransitionPhase,
-    },
-    Accessibility {
-        window: InputWindowId,
-        seat: InputSeatId,
-        action: u32,
     },
     Window {
         window: InputWindowId,

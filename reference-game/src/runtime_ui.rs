@@ -7,12 +7,13 @@ use nara::{
     },
     ecs::{Entity, Mut, Query, Res, ResMut, Resource},
     gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
-    input::{ActionOutcomes, ActionPhase, InputSeatId, InputWindowId},
+    input::{ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId},
     scene::SceneEntitySource,
     ui::{
         UiActionConsumerId, UiActionCursor, UiActionJournal, UiBrush, UiButton, UiColorRole,
-        UiNode, UiStyle, UiSurfaceDescriptor, UiSurfaceId, UiText, UiTextAlignment, UiTextOverflow,
-        UiVisual, install_ui_surface,
+        UiNode, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceEndpoint,
+        UiSurfaceId, UiSurfaceSlot, UiText, UiTextAlignment, UiTextOverflow, UiVisual,
+        install_ui_surface,
     },
 };
 
@@ -58,16 +59,26 @@ impl Plugin for ReferenceRuntimeUiPlugin {
     fn build(&self, app: &mut nara::prelude::App) -> Result<(), PluginError> {
         let surface_id = UiSurfaceId::new(REFERENCE_UI_SURFACE_ID)
             .expect("the reference UI surface ID is non-zero");
-        let descriptor = UiSurfaceDescriptor::new(
-            surface_id,
-            InputWindowId::new(1),
-            InputSeatId::PRIMARY,
-            LOGICAL_WIDTH,
-            LOGICAL_HEIGHT,
+        let logical_size = UiSize::new(LOGICAL_WIDTH, LOGICAL_HEIGHT)
+            .expect("the reference UI authored extent is valid");
+        let transform = UiSurfaceContentTransform::new(
+            logical_size,
+            logical_size,
+            UiSafeAreaInsets::default(),
             1.0,
         )
         .map_err(|error| setup_error(error.to_string()))?;
-        install_ui_surface(app.world_mut()?, descriptor)
+        let slot = UiSurfaceSlot::new(
+            surface_id,
+            UiSurfaceEndpoint::new(
+                InputWindowId::new(1),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            ),
+            transform,
+        )
+        .map_err(|error| setup_error(error.to_string()))?;
+        install_ui_surface(app.world_mut()?, slot)
             .map_err(|error| setup_error(error.to_string()))?;
         app.insert_resource(ReferenceHudProjection::default())?;
         add_local_gameplay_command_systems(app, collect_retry_intents)?;

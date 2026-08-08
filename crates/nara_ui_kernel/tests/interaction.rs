@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
-    UiActionId, UiActivationSource, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiButtonPhase,
-    UiCompiler, UiDispatchError, UiEnvironment, UiFrame, UiFrameJournal, UiInputEvent,
-    UiInteraction, UiInteractionSession, UiLayer, UiLimits, UiLocalKey, UiNavigation, UiNode,
-    UiNonActivation, UiPoint, UiPointerButton, UiPointerId, UiRoot, UiRootKey, UiRoutePhase,
-    UiRouteStamp, UiRoutedEventKind, UiSeatId, UiSemanticRole, UiSemantics, UiStyle, UiSurfaceId,
-    UiTheme,
+    UiAccessibilityInput, UiActionId, UiActivationSource, UiAuthoringSnapshot,
+    UiAuthoringSnapshotBuilder, UiButtonPhase, UiCompiler, UiDispatchError, UiEnvironment, UiFrame,
+    UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiLayer, UiLimits,
+    UiLocalKey, UiNavigation, UiNode, UiNonActivation, UiPoint, UiPointerButton, UiPointerId,
+    UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp, UiRoutedEventKind, UiSeatId, UiSemanticRole,
+    UiSemantics, UiStyle, UiSurfaceId, UiTheme,
 };
 
 const SURFACE: UiSurfaceId = UiSurfaceId::new(17).unwrap();
@@ -246,8 +246,15 @@ fn compiler() -> UiCompiler {
 }
 
 fn submit(journal: &mut UiFrameJournal, frame: Arc<UiFrame>, epoch: u64) -> UiRouteStamp {
-    journal.submit(frame, epoch).unwrap();
-    UiRouteStamp::new(SURFACE, epoch)
+    let environment = frame.environment();
+    match journal.install_surface(
+        environment.surface_id(),
+        environment.slot_generation().get(),
+    ) {
+        Ok(()) | Err(nara_ui_kernel::UiJournalError::SurfaceAlreadyInstalled { .. }) => {}
+        Err(error) => panic!("test surface should install explicitly: {error}"),
+    }
+    UiRouteStamp::from_receipt(journal.submit(frame, epoch).unwrap())
 }
 
 fn move_pointer(position: UiPoint) -> UiInputEvent {
@@ -368,14 +375,14 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
         })
     );
     let hidden = session
-        .dispatch(
+        .dispatch_accessibility(
             &journal,
-            route,
-            UiInputEvent::SemanticAction {
-                seat: SEAT,
-                target: exact_key("base", "hidden"),
-                action: UiActionId::new("hidden").unwrap(),
-            },
+            UiAccessibilityInput::semantic_action(
+                journal.resolve(route).unwrap().receipt(),
+                SEAT,
+                exact_key("base", "hidden"),
+                UiActionId::new("hidden").unwrap(),
+            ),
         )
         .unwrap();
     assert_eq!(
@@ -407,6 +414,51 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
             target: exact_key("base", "first")
         })
     );
+}
+
+#[test]
+fn receipt_stamped_accessibility_focus_and_action_share_the_presented_transaction() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let receipt = journal.resolve(route).unwrap().receipt();
+    let target = exact_key("base", "first");
+    let mut session = UiInteractionSession::default();
+
+    let focused = session
+        .dispatch_accessibility(
+            &journal,
+            UiAccessibilityInput::focus_target(receipt, SEAT, target.clone()),
+        )
+        .unwrap();
+    assert!(focused.consumed().unwrap().events().iter().any(|event| {
+        event.target() == &target
+            && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
+    }));
+
+    let activated = session
+        .dispatch_accessibility(
+            &journal,
+            UiAccessibilityInput::semantic_action(
+                receipt,
+                SEAT,
+                target.clone(),
+                UiActionId::new("first").unwrap(),
+            ),
+        )
+        .unwrap();
+    assert!(activated.consumed().unwrap().events().iter().any(|event| {
+        event.target() == &target
+            && event.kind()
+                == &UiRoutedEventKind::ActivateRequested {
+                    action: UiActionId::new("first").unwrap(),
+                    source: UiActivationSource::Accessibility,
+                }
+    }));
 }
 
 #[test]
@@ -1189,7 +1241,18 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
             pointer_button(UiButtonPhase::Pressed, UiPoint::new(220.0, 130.0)),
         )
         .unwrap();
-    let semantics = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+    let descriptive = session.semantic_snapshot(&journal, route, SEAT).unwrap();
+    assert!(
+        descriptive
+            .nodes()
+            .iter()
+            .all(|node| node.actions().is_empty())
+    );
+    let semantics = session
+        .semantic_snapshot_with_action_authority(&journal, route, SEAT, |key, action| {
+            key == &exact_key("modal", "retry") && action == &UiActionId::new("retry").unwrap()
+        })
+        .unwrap();
     let base = semantics
         .nodes()
         .iter()
@@ -1211,6 +1274,8 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
     assert!(retry.state().focused());
     assert!(retry.state().pressed());
     assert_eq!(retry.rect().origin(), UiPoint::new(210.0, 120.0));
+    assert_eq!(retry.physical_rect().min_x(), 210);
+    assert_eq!(retry.physical_rect().min_y(), 120);
 
     let disabled_retry = UiAuthoringSnapshotBuilder::new(3)
         .with_root(base_root())
@@ -1269,6 +1334,25 @@ fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
             latest: 11,
         }
     );
+}
+
+#[test]
+fn semantic_snapshot_omits_nodes_outside_the_surface_content_rect() {
+    let snapshot = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill())
+                .with_child(button("outside", "Outside", "outside", 400.0, 20.0, true)),
+        )
+        .build()
+        .unwrap();
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let route = submit(&mut journal, compile(&mut compiler, &snapshot, 1), 10);
+
+    let semantics = UiInteractionSession::default()
+        .semantic_snapshot_with_action_authority(&journal, route, SEAT, |_, _| true)
+        .unwrap();
+    assert!(semantics.nodes().is_empty());
 }
 
 #[test]
@@ -1465,9 +1549,11 @@ fn geometry_invalidation_requires_a_fresh_pointer_position() {
     session
         .dispatch(&journal, route, move_pointer(UiPoint::new(20.0, 20.0)))
         .unwrap();
+    assert!(session.has_pointer_facts(SURFACE));
     session
         .dispatch(&journal, route, UiInputEvent::GeometryInvalidated)
         .unwrap();
+    assert!(!session.has_pointer_facts(SURFACE));
 
     let newer = submit(
         &mut journal,

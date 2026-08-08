@@ -8,7 +8,8 @@ use nara_ecs::{Res, ResMut, Resource, schedule::IntoScheduleConfigs};
 use nara_input::__private::InputSet;
 use nara_input::{
     ActionId, ActionMap, ActionOutcomes, ButtonDriverInput, InputEventKind, InputFrameObservations,
-    InputPresentationEpoch, InputSeatId, InputSurfaceId, InputTimeline, InputWindowEvent,
+    InputGeometryGeneration, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
+    InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowEvent,
     InputWindowId, KeyCode, apply_keyboard_driver_input_at, apply_window_input_driver_event,
 };
 
@@ -105,12 +106,15 @@ fn paused_ui_consumption_is_observed_once_and_skipped_by_gameplay_on_resume() {
     app.world_mut()
         .unwrap()
         .resource_mut::<InputTimeline>()
-        .publish_presented_route(
+        .publish_presented_route(InputPresentedRoute::new(
             window,
             InputSurfaceId::new(9),
             InputSeatId::PRIMARY,
             InputPresentationEpoch::new(17).unwrap(),
-        )
+            InputSlotGeneration::new(3).unwrap(),
+            InputRouteGeneration::new(4).unwrap(),
+            InputGeometryGeneration::new(5).unwrap(),
+        ))
         .unwrap();
 
     let mut runtime = start_runtime(app);

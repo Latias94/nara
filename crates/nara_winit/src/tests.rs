@@ -13,7 +13,8 @@ use nara_gameplay::{
 };
 use nara_input::{
     ActionBinding, ActionId, ActionMap, ActionPhase, ButtonInput, InputEventKind,
-    InputInvalidationReason, InputPlugin, InputPresentationEpoch, InputSeatId, InputSurfaceId,
+    InputGeometryGeneration, InputInvalidationReason, InputPlugin, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
     InputTimeline, InputWindowId, PointerState,
 };
 use nara_window::{
@@ -485,12 +486,15 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
     app.world_mut()
         .unwrap()
         .resource_mut::<InputTimeline>()
-        .publish_presented_route(
+        .publish_presented_route(InputPresentedRoute::new(
             InputWindowId::new(WindowId::PRIMARY.get()),
             InputSurfaceId::new(41),
             InputSeatId::PRIMARY,
             InputPresentationEpoch::new(73).unwrap(),
-        )
+            InputSlotGeneration::new(3).unwrap(),
+            InputRouteGeneration::new(5).unwrap(),
+            InputGeometryGeneration::new(7).unwrap(),
+        ))
         .unwrap();
     let mut runtime = start_runtime(app);
     let mut state = WinitApp::new(&mut runtime).unwrap();
@@ -533,6 +537,18 @@ fn winit_ingress_captures_the_exact_route_before_focus_loss_invalidation() {
     assert_eq!(
         pressed.route().presentation_epoch(),
         InputPresentationEpoch::new(73)
+    );
+    assert_eq!(
+        pressed.route().slot_generation(),
+        InputSlotGeneration::new(3)
+    );
+    assert_eq!(
+        pressed.route().route_generation(),
+        InputRouteGeneration::new(5)
+    );
+    assert_eq!(
+        pressed.route().geometry_generation(),
+        InputGeometryGeneration::new(7)
     );
     let focus_loss = entries.last().unwrap();
     assert!(matches!(

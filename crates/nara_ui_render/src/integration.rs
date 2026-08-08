@@ -96,46 +96,6 @@ pub struct UiPaintCompileStats {
     pub rejected_packets: u32,
 }
 
-pub fn install_ui_presentation_route(
-    world: &mut World,
-    route: UiPresentationRoute,
-) -> Result<Option<UiPresentationRoute>, UiPresentationIntegrationError> {
-    let previous = {
-        let Some(mut routes) = world.get_resource_mut::<UiPresentationRoutes>() else {
-            return Err(UiPresentationIntegrationError::Unavailable);
-        };
-        routes.routes.insert(route.surface_id(), route)
-    };
-    if let Some(previous) = previous.filter(|previous| previous.target() != route.target())
-        && let Some(mut planner) = world.get_resource_mut::<UiPresentationState>()
-    {
-        planner
-            .0
-            .retire_surface_target(previous.surface_id(), previous.target());
-    }
-    Ok(previous)
-}
-
-pub fn retire_ui_presentation_route(
-    world: &mut World,
-    surface_id: UiSurfaceId,
-) -> Result<Option<UiPresentationRoute>, UiPresentationIntegrationError> {
-    let removed = {
-        let Some(mut routes) = world.get_resource_mut::<UiPresentationRoutes>() else {
-            return Err(UiPresentationIntegrationError::Unavailable);
-        };
-        routes.routes.remove(&surface_id)
-    };
-    if let (Some(route), Some(mut planner)) =
-        (removed, world.get_resource_mut::<UiPresentationState>())
-    {
-        planner
-            .0
-            .retire_surface_target(route.surface_id(), route.target());
-    }
-    Ok(removed)
-}
-
 #[doc(hidden)]
 pub fn replace_ui_presentation_routes(
     world: &mut World,
@@ -429,9 +389,12 @@ mod tests {
         let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
         compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
         let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
-        install_ui_presentation_route(
+        replace_ui_presentation_routes(
             &mut world,
-            UiPresentationRoute::new(UiSurfaceId::new(2).unwrap(), WindowId::PRIMARY).unwrap(),
+            [
+                UiPresentationRoute::new(UiSurfaceId::new(1).unwrap(), WindowId::PRIMARY).unwrap(),
+                UiPresentationRoute::new(UiSurfaceId::new(2).unwrap(), WindowId::PRIMARY).unwrap(),
+            ],
         )
         .unwrap();
         let stats = compile_ui_paint_packets(
@@ -458,13 +421,19 @@ mod tests {
         compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
         let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
         let second_surface = UiSurfaceId::new(2).unwrap();
-        install_ui_presentation_route(
+        replace_ui_presentation_routes(
             &mut world,
-            UiPresentationRoute::new(second_surface, WindowId::PRIMARY).unwrap(),
+            [
+                UiPresentationRoute::new(UiSurfaceId::new(1).unwrap(), WindowId::PRIMARY).unwrap(),
+                UiPresentationRoute::new(second_surface, WindowId::PRIMARY).unwrap(),
+            ],
         )
         .unwrap();
-
-        retire_ui_presentation_route(&mut world, second_surface).unwrap();
+        replace_ui_presentation_routes(
+            &mut world,
+            [UiPresentationRoute::new(UiSurfaceId::new(1).unwrap(), WindowId::PRIMARY).unwrap()],
+        )
+        .unwrap();
 
         let packets = world.resource::<UiPresentationState>().0.snapshot_packets();
         assert_eq!(packets.len(), 1);

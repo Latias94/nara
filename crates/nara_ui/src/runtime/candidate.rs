@@ -2,6 +2,13 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use nara_ui_kernel::{UiFrame, UiInteractionSession, UiKey};
 use nara_ui_widgets::{UiButton, UiButtonState};
+use thiserror::Error;
+
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
+pub(super) enum UiBehaviorSnapshotError {
+    #[error("actionable semantic node {key:?} has no exact controlled Button owner")]
+    ActionOwnerMissing { key: UiKey },
+}
 
 /// Immutable behavior authority compiled alongside one immutable frame candidate.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -13,7 +20,21 @@ impl UiBehaviorSnapshot {
     pub(super) fn from_compiled_frame(
         frame: &UiFrame,
         mut buttons: BTreeMap<UiKey, UiButton>,
-    ) -> Self {
+    ) -> Result<Self, UiBehaviorSnapshotError> {
+        for semantic in frame
+            .semantics()
+            .iter()
+            .filter(|semantic| !semantic.actions().is_empty())
+        {
+            let owned = buttons.get(semantic.key()).is_some_and(|button| {
+                semantic.actions().len() == 1 && &semantic.actions()[0] == button.action()
+            });
+            if !owned {
+                return Err(UiBehaviorSnapshotError::ActionOwnerMissing {
+                    key: semantic.key().clone(),
+                });
+            }
+        }
         buttons.retain(|key, button| {
             frame.semantics().iter().any(|semantic| {
                 semantic.key() == key
@@ -21,7 +42,7 @@ impl UiBehaviorSnapshot {
                     && &semantic.actions()[0] == button.action()
             })
         });
-        Self { buttons }
+        Ok(Self { buttons })
     }
 
     pub(crate) fn button(&self, key: &UiKey) -> Option<&UiButton> {

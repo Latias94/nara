@@ -6,13 +6,16 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ActionId as InputActionId, ActionMap, ActionOutcomes, ActionPhase, InputSeatId, InputWindowId,
-    KeyCode,
+    ActionId as InputActionId, ActionMap, ActionOutcomes, ActionPhase, InputPointerId, InputSeatId,
+    InputWindowId, KeyCode,
 };
 use nara_reflect::{ComponentRegistry, ComponentRegistryPlugin};
 use nara_scene::{SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource, spawn_scene};
 use nara_ui::{
-    advanced::{UiSurfaceDescriptor, UiSurfaceId, install_ui_surface},
+    advanced::{
+        UiSize, UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
+        install_ui_surface,
+    },
     prelude::{
         UiActionId, UiButton, UiColor, UiLayer, UiNode, UiPlugin, UiRoot, UiRuntimeKey,
         UiSemanticRole, UiSemantics, UiStyle, UiText, UiVisual,
@@ -62,25 +65,11 @@ pub(super) fn build_lab() -> Result<(App, LabEntities), Box<dyn Error>> {
 
     install_ui_surface(
         app.world_mut()?,
-        UiSurfaceDescriptor::new(
-            surface_id(1),
-            InputWindowId::new(11),
-            InputSeatId::PRIMARY,
-            320.0,
-            180.0,
-            1.0,
-        )?,
+        surface_slot(surface_id(1), InputWindowId::new(11), 1.0)?,
     )?;
     install_ui_surface(
         app.world_mut()?,
-        UiSurfaceDescriptor::new(
-            surface_id(2),
-            InputWindowId::new(12),
-            InputSeatId::PRIMARY,
-            320.0,
-            180.0,
-            1.25,
-        )?,
+        surface_slot(surface_id(2), InputWindowId::new(12), 1.25)?,
     )?;
 
     let scene_overlay = spawn_scene_overlay(app.world_mut()?)?;
@@ -135,6 +124,19 @@ pub(super) fn build_lab() -> Result<(App, LabEntities), Box<dyn Error>> {
             scene_overlay,
         },
     ))
+}
+
+fn surface_slot(
+    surface: UiSurfaceId,
+    window: InputWindowId,
+    scale_factor: f32,
+) -> Result<UiSurfaceSlot, Box<dyn Error>> {
+    let authored_size = UiSize::new(320.0, 180.0).expect("lab authored size is valid");
+    Ok(UiSurfaceSlot::new(
+        surface,
+        UiSurfaceEndpoint::new(window, InputSeatId::PRIMARY, InputPointerId::PRIMARY),
+        UiSurfaceContentTransform::direct(authored_size, scale_factor)?,
+    )?)
 }
 
 fn capture_gameplay_outcome(outcomes: Res<ActionOutcomes>, mut probe: ResMut<GameplayProbe>) {

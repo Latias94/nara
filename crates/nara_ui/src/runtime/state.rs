@@ -4,22 +4,25 @@ use std::{
 };
 
 use nara_ecs::Resource;
+use nara_input::InputRouteStamp as PresentedInputRouteStamp;
 use nara_text::FontFace;
 use nara_ui_kernel::{
-    UiCompileError, UiCompiler, UiDispatchBatch, UiDispatchError, UiEnvironment, UiFrame,
-    UiInteractionSession, UiKey, UiLimits, UiPresentationReceipt, UiRouteStamp, UiSeatId,
-    UiSemanticSnapshot, UiTheme,
+    UiCompileError, UiCompiler, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiEnvironment,
+    UiFrame, UiInputEvent, UiInteractionSession, UiKey, UiLimits, UiPresentationReceipt,
+    UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceRetirementToken, UiTheme,
 };
 use nara_ui_widgets::{UiButtonState, UiIntentBatch};
 use thiserror::Error;
 
 use super::{
     UiAdapterError,
-    candidate::{UiBehaviorSnapshot, UiCandidateStaging, UiCompiledCandidate},
+    candidate::{
+        UiBehaviorSnapshot, UiBehaviorSnapshotError, UiCandidateStaging, UiCompiledCandidate,
+    },
     identity::UiSurfaceIdentityLedger,
     presentation::{UiPresentedHistory, UiPresentedSession},
     projection::UiProjectedAuthoring,
-    surface::UiSurfaceDescriptor,
+    surface::{UiSurfaceRetirement, UiSurfaceSlot},
 };
 
 pub(super) const MAX_RUNTIME_SURFACES: usize = 16;
@@ -28,6 +31,8 @@ pub(super) const MAX_RUNTIME_SURFACES: usize = 16;
 pub(super) enum UiCandidatePreparationError {
     #[error(transparent)]
     Compile(#[from] UiCompileError),
+    #[error(transparent)]
+    Behavior(#[from] UiBehaviorSnapshotError),
     #[error(transparent)]
     Dispatch(#[from] UiDispatchError),
     #[error("candidate widget reconciliation failed: {0}")]
@@ -48,6 +53,15 @@ pub(crate) enum UiReducerPreparationError {
 pub(super) struct UiPreparedPresentation {
     presented: UiPresentedHistory,
     receipt: UiPresentationReceipt,
+    input_route: Option<PresentedInputRouteStamp>,
+    interaction: UiInteractionSession,
+    reducers: BTreeMap<UiKey, UiButtonState>,
+}
+
+pub(super) struct UiPreparedSlotUpdate {
+    slot: UiSurfaceSlot,
+    released_input_route: Option<PresentedInputRouteStamp>,
+    presented: UiPresentedHistory,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
 }
@@ -56,45 +70,117 @@ impl UiPreparedPresentation {
     pub(super) const fn receipt(&self) -> UiPresentationReceipt {
         self.receipt
     }
+
+    pub(super) fn bind_input_route(&mut self, route: PresentedInputRouteStamp) {
+        debug_assert!(route.is_ui_routable());
+        self.input_route = Some(route);
+    }
+}
+
+impl UiPreparedSlotUpdate {
+    pub(super) const fn released_input_route(&self) -> Option<PresentedInputRouteStamp> {
+        self.released_input_route
+    }
 }
 
 /// All candidate, presentation, interaction, and reducer state for one surface lineage.
 pub(crate) struct UiSurfaceRuntime {
-    descriptor: UiSurfaceDescriptor,
+    slot: UiSurfaceSlot,
     compiler: UiCompiler,
     candidate: Option<UiCompiledCandidate>,
     presented: UiPresentedHistory,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
+    input_route: Option<PresentedInputRouteStamp>,
 }
 
 impl UiSurfaceRuntime {
     pub(super) fn new(
-        descriptor: UiSurfaceDescriptor,
+        slot: UiSurfaceSlot,
         font: FontFace,
         limits: UiLimits,
     ) -> Result<Self, String> {
         Ok(Self {
-            descriptor,
+            slot,
             compiler: UiCompiler::new(font, limits).map_err(|error| error.to_string())?,
             candidate: None,
-            presented: UiPresentedHistory::with_limits(limits)
+            presented: UiPresentedHistory::with_limits(limits, slot)
                 .map_err(|error| error.to_string())?,
             interaction: UiInteractionSession::with_limits(limits)
                 .map_err(|error| error.to_string())?,
             reducers: BTreeMap::new(),
+            input_route: None,
         })
     }
 
-    pub(crate) const fn descriptor(&self) -> UiSurfaceDescriptor {
-        self.descriptor
+    pub(crate) const fn slot(&self) -> UiSurfaceSlot {
+        self.slot
     }
 
-    pub(super) fn replace_descriptor(&mut self, descriptor: UiSurfaceDescriptor) {
-        if self.descriptor != descriptor {
-            self.discard_candidate();
-            self.descriptor = descriptor;
+    pub(super) fn prepare_slot_update(
+        &self,
+        slot: UiSurfaceSlot,
+    ) -> Result<UiPreparedSlotUpdate, UiAdapterError> {
+        debug_assert_eq!(self.slot.surface_id(), slot.surface_id());
+        let mut presented = self.presented.clone();
+        let mut interaction = self.interaction.clone();
+        let mut reducers = self.reducers.clone();
+
+        let endpoint_changed = self.slot.endpoint() != slot.endpoint();
+        if endpoint_changed {
+            interaction.clear_surface_state(self.slot.surface_id());
+            reducers.clear();
+        } else if let Some(session) = self.presented.latest_session()? {
+            let route = UiRouteStamp::from_receipt(session.latest().receipt());
+            let dispatch = match interaction.dispatch_resolved(
+                session.latest(),
+                session.latest(),
+                route,
+                UiInputEvent::GeometryInvalidated,
+            )? {
+                UiDispatchOutcome::Consumed(dispatch) => dispatch,
+                UiDispatchOutcome::Rejected(reason) => {
+                    return Err(UiAdapterError::Widget(format!(
+                        "surface slot invalidation was rejected: {reason:?}"
+                    )));
+                }
+            };
+            let (prepared_reducers, intents) = Self::prepare_reducers(
+                &session, &dispatch, reducers,
+            )
+            .map_err(|error| match error {
+                UiReducerPreparationError::PresentedBehaviorMissing(target) => {
+                    UiAdapterError::Widget(format!(
+                        "surface slot invalidation is missing behavior for {target:?}"
+                    ))
+                }
+                UiReducerPreparationError::Widget(error) => UiAdapterError::Widget(error),
+            })?;
+            if !intents.intents().is_empty() {
+                return Err(UiAdapterError::Widget(
+                    "surface slot invalidation emitted an action intent".to_owned(),
+                ));
+            }
+            reducers = prepared_reducers;
         }
+
+        presented.advance_slot(self.slot, slot)?;
+        Ok(UiPreparedSlotUpdate {
+            slot,
+            released_input_route: self.input_route,
+            presented,
+            interaction,
+            reducers,
+        })
+    }
+
+    pub(super) fn commit_slot_update(&mut self, prepared: UiPreparedSlotUpdate) {
+        self.slot = prepared.slot;
+        self.presented = prepared.presented;
+        self.interaction = prepared.interaction;
+        self.reducers = prepared.reducers;
+        self.input_route = None;
+        self.discard_candidate();
     }
 
     /// Retires work that has not acquired presentation authority.
@@ -114,7 +200,7 @@ impl UiSurfaceRuntime {
     ) -> Result<Option<UiCandidateStaging>, UiCandidatePreparationError> {
         let (snapshot, buttons) = projected.into_parts();
         let frame = self.compiler.compile(&snapshot, environment, theme)?;
-        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons));
+        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons)?);
         let Some(staging) = self.stage_candidate_state(&frame, &behavior)? else {
             self.candidate = Some(UiCompiledCandidate::new(
                 frame,
@@ -136,7 +222,7 @@ impl UiSurfaceRuntime {
     ) -> Result<(), UiCandidatePreparationError> {
         let (snapshot, buttons) = projected.into_parts();
         let frame = self.compiler.compile(&snapshot, environment, theme)?;
-        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons));
+        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons)?);
         if staging.behavior().as_ref() != behavior.as_ref() {
             return Err(UiCandidatePreparationError::ReprojectionBehaviorMismatch);
         }
@@ -164,7 +250,7 @@ impl UiSurfaceRuntime {
     ) -> Result<Option<UiCandidateStaging>, UiCandidatePreparationError> {
         let invalidated_keys = self.presented.behavior_invalidations(behavior);
         let reconciliation = self.interaction.stage_candidate_presentation(
-            self.descriptor.surface_id(),
+            self.slot.surface_id(),
             self.presented
                 .latest_target()
                 .map(|target| target.frame().as_ref()),
@@ -203,14 +289,14 @@ impl UiSurfaceRuntime {
             .candidate
             .as_ref()
             .ok_or(UiAdapterError::FrameNotLatest {
-                surface: self.descriptor.surface_id().get(),
+                surface: self.slot.surface_id().get(),
             })?;
         let mut presented = self.presented.clone();
-        let receipt = presented.submit(candidate, self.descriptor, presentation_epoch)?;
+        let receipt = presented.submit(candidate, self.slot, presentation_epoch)?;
         let mut interaction = candidate.interaction().clone();
         let reconciliation = interaction.reconcile_latest_presentation(
             presented.journal(),
-            self.descriptor.surface_id(),
+            self.slot.surface_id(),
             &[],
         )?;
         if reconciliation
@@ -224,15 +310,33 @@ impl UiSurfaceRuntime {
         Ok(UiPreparedPresentation {
             presented,
             receipt,
+            input_route: None,
             interaction,
             reducers: candidate.reducers().clone(),
         })
     }
 
     pub(super) fn commit_presentation(&mut self, prepared: UiPreparedPresentation) {
+        debug_assert!(prepared.input_route.is_some());
         self.presented = prepared.presented;
         self.interaction = prepared.interaction;
         self.reducers = prepared.reducers;
+        self.input_route = prepared.input_route;
+    }
+
+    pub(super) fn prepare_retirement(
+        &self,
+        retirement_generation: u64,
+    ) -> Result<UiSurfaceRetirementToken, UiAdapterError> {
+        let mut presented = self.presented.clone();
+        presented
+            .retire(self.slot.surface_id(), retirement_generation)
+            .map_err(UiAdapterError::from)
+            .and_then(|token| {
+                token.ok_or(UiAdapterError::PresentationAuthorityMissing {
+                    surface: self.slot.surface_id().get(),
+                })
+            })
     }
 
     pub(crate) fn resolve_presented(
@@ -249,6 +353,18 @@ impl UiSurfaceRuntime {
 
     pub(crate) const fn interaction(&self) -> &UiInteractionSession {
         &self.interaction
+    }
+
+    pub(super) const fn input_route(&self) -> Option<PresentedInputRouteStamp> {
+        self.input_route
+    }
+
+    #[cfg(test)]
+    pub(crate) fn presented_receipt(
+        &self,
+        presentation_epoch: u64,
+    ) -> Option<UiPresentationReceipt> {
+        self.presented.receipt(presentation_epoch)
     }
 
     pub(crate) fn prepare_dispatch_reducers(
@@ -274,8 +390,19 @@ impl UiSurfaceRuntime {
         route: UiRouteStamp,
         seat: UiSeatId,
     ) -> Result<UiSemanticSnapshot, UiAdapterError> {
+        let presented = self.resolve_presented(route)?;
         self.interaction
-            .semantic_snapshot(self.presented.journal(), route, seat)
+            .semantic_snapshot_with_action_authority(
+                self.presented.journal(),
+                route,
+                seat,
+                |key, action| {
+                    presented
+                        .behavior()
+                        .button(key)
+                        .is_some_and(|button| button.action() == action)
+                },
+            )
             .map_err(UiAdapterError::from)
     }
 
@@ -368,13 +495,11 @@ impl UiRuntimeState {
         })
     }
 
-    pub(crate) fn surface_descriptor(
+    pub(crate) fn surface_slot(
         &self,
         surface_id: nara_ui_kernel::UiSurfaceId,
-    ) -> Option<UiSurfaceDescriptor> {
-        self.surfaces
-            .get(&surface_id)
-            .map(UiSurfaceRuntime::descriptor)
+    ) -> Option<UiSurfaceSlot> {
+        self.surfaces.get(&surface_id).map(UiSurfaceRuntime::slot)
     }
 
     pub(crate) fn surface(
@@ -417,9 +542,9 @@ impl UiRuntimeState {
 
     pub(super) fn prepare_surface_install(
         &self,
-        descriptor: UiSurfaceDescriptor,
+        slot: UiSurfaceSlot,
     ) -> Result<UiSurfaceRuntime, UiAdapterError> {
-        let surface_id = descriptor.surface_id();
+        let surface_id = slot.surface_id();
         if self.surfaces.contains_key(&surface_id) {
             return Err(UiAdapterError::SurfaceAlreadyInstalled {
                 surface: surface_id.get(),
@@ -429,36 +554,47 @@ impl UiRuntimeState {
         if self.surfaces.len() == MAX_RUNTIME_SURFACES {
             return Err(UiAdapterError::SurfaceLimitExceeded);
         }
-        UiSurfaceRuntime::new(descriptor, self.font.clone(), self.limits)
+        UiSurfaceRuntime::new(slot, self.font.clone(), self.limits)
             .map_err(UiAdapterError::RuntimeSetup)
     }
 
-    pub(super) fn conflicting_input_endpoint(
+    pub(super) fn conflicting_presentation_target(
         &self,
-        descriptor: UiSurfaceDescriptor,
+        slot: UiSurfaceSlot,
     ) -> Option<nara_ui_kernel::UiSurfaceId> {
         self.surfaces.iter().find_map(|(surface_id, surface)| {
-            (*surface_id != descriptor.surface_id()
-                && surface.descriptor().input_window() == descriptor.input_window()
-                && surface.descriptor().input_seat() == descriptor.input_seat())
+            (*surface_id != slot.surface_id()
+                && surface.slot().endpoint().window() == slot.endpoint().window())
             .then_some(*surface_id)
         })
     }
 
     pub(super) fn commit_surface_install(
         &mut self,
-        descriptor: UiSurfaceDescriptor,
+        slot: UiSurfaceSlot,
         prepared: UiSurfaceRuntime,
     ) {
-        let replaced = self.surfaces.insert(descriptor.surface_id(), prepared);
+        let replaced = self.surfaces.insert(slot.surface_id(), prepared);
         debug_assert!(replaced.is_none(), "validated UI surface must be new");
     }
 
-    pub(super) fn replace_surface_descriptor(&mut self, descriptor: UiSurfaceDescriptor) {
+    pub(super) fn prepare_surface_slot_update(
+        &self,
+        slot: UiSurfaceSlot,
+    ) -> Result<UiPreparedSlotUpdate, UiAdapterError> {
         self.surfaces
-            .get_mut(&descriptor.surface_id())
+            .get(&slot.surface_id())
+            .ok_or(UiAdapterError::UnknownSurface {
+                surface: slot.surface_id().get(),
+            })?
+            .prepare_slot_update(slot)
+    }
+
+    pub(super) fn commit_surface_slot_update(&mut self, prepared: UiPreparedSlotUpdate) {
+        self.surfaces
+            .get_mut(&prepared.slot.surface_id())
             .expect("validated UI surface remains installed")
-            .replace_descriptor(descriptor);
+            .commit_slot_update(prepared);
     }
 
     pub(super) fn discard_all_candidates(&mut self) {
@@ -467,12 +603,27 @@ impl UiRuntimeState {
         }
     }
 
-    pub(super) fn retire_surface(&mut self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {
-        let removed = self.surfaces.remove(&surface_id).is_some();
-        if removed {
-            self.identities.retire(surface_id);
-        }
-        removed
+    pub(super) fn prepare_surface_retirement(
+        &self,
+        surface_id: nara_ui_kernel::UiSurfaceId,
+    ) -> Result<Option<UiSurfaceRetirement>, UiAdapterError> {
+        let Some(runtime) = self.surface(surface_id) else {
+            return Ok(None);
+        };
+        let slot = runtime.slot();
+        let token = runtime.prepare_retirement(slot.next_retirement_generation()?)?;
+        Ok(Some(UiSurfaceRetirement::new(
+            slot.endpoint(),
+            token,
+            runtime.input_route(),
+        )))
+    }
+
+    pub(super) fn commit_surface_retirement(&mut self, retirement: UiSurfaceRetirement) {
+        let surface_id = retirement.surface_id();
+        let removed = self.surfaces.remove(&surface_id);
+        debug_assert!(removed.is_some(), "validated UI surface remains installed");
+        self.identities.retire(retirement.token());
     }
 
     pub(crate) fn is_retired(&self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {

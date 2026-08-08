@@ -10,7 +10,9 @@ pub struct UiPaintPacketIdentity {
     surface_id: UiSurfaceId,
     frame_revision: UiFrameRevision,
     source_revision: UiRevision,
+    slot_generation: UiRevision,
     route_revision: UiRevision,
+    geometry_generation: UiRevision,
     presentation_revision: UiRevision,
     theme_revision: UiRevision,
     font_revision: UiRevision,
@@ -23,7 +25,9 @@ impl UiPaintPacketIdentity {
             surface_id: environment.surface_id(),
             frame_revision: frame.revision(),
             source_revision: frame.source_revision(),
+            slot_generation: environment.slot_generation(),
             route_revision: environment.route_revision(),
+            geometry_generation: environment.geometry_generation(),
             presentation_revision: environment.presentation_revision(),
             theme_revision: environment.theme_revision(),
             font_revision: environment.font_revision(),
@@ -46,8 +50,18 @@ impl UiPaintPacketIdentity {
     }
 
     #[must_use]
+    pub const fn slot_generation(self) -> UiRevision {
+        self.slot_generation
+    }
+
+    #[must_use]
     pub const fn route_revision(self) -> UiRevision {
         self.route_revision
+    }
+
+    #[must_use]
+    pub const fn geometry_generation(self) -> UiRevision {
+        self.geometry_generation
     }
 
     #[must_use]

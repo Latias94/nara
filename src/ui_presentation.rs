@@ -57,53 +57,54 @@ fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
             .map(|window| (window.id, window.resolution))
             .collect::<std::collections::BTreeMap<_, _>>()
     };
-    let descriptors = match nara_ui::active_ui_surface_descriptors(world) {
-        Ok(descriptors) => descriptors,
+    let slots = match nara_ui::active_ui_surface_slots(world) {
+        Ok(slots) => slots,
         Err(error) => {
             record_bridge_error(world, error.to_string());
             return;
         }
     };
 
-    for descriptor in descriptors {
-        let window_id = nara_window::WindowId::new(descriptor.input_window().get());
+    for slot in slots {
+        let window_id = nara_window::WindowId::new(slot.endpoint().window().get());
         let Some(resolution) = windows.get(&window_id).copied() else {
             continue;
         };
-        let Some((scale_factor, input_scale_factor)) = surface_mapping(descriptor, resolution)
-        else {
+        let Some(transform) = surface_transform(slot, resolution) else {
             continue;
         };
-        if let Err(error) = nara_ui::update_ui_surface_mapping(
-            world,
-            descriptor.surface_id(),
-            scale_factor,
-            input_scale_factor,
-        ) {
+        if let Err(error) =
+            nara_ui::update_ui_surface_slot(world, slot.surface_id(), slot.endpoint(), transform)
+        {
             record_bridge_error(world, error.to_string());
         }
     }
 }
 
-fn surface_mapping(
-    descriptor: nara_ui::UiSurfaceDescriptor,
+fn surface_transform(
+    slot: nara_ui::UiSurfaceSlot,
     resolution: nara_window::WindowResolution,
-) -> Option<(f32, f32)> {
+) -> Option<nara_ui::UiSurfaceContentTransform> {
     if resolution.is_zero_sized()
         || !resolution.scale_factor.is_finite()
         || resolution.scale_factor <= 0.0
     {
         return None;
     }
-    let (logical_width, logical_height) = descriptor.logical_size();
-    let scale_factor = (resolution.physical_width as f32 / logical_width)
-        .min(resolution.physical_height as f32 / logical_height);
-    let input_scale_factor = scale_factor / resolution.scale_factor as f32;
-    (scale_factor.is_finite()
-        && scale_factor > 0.0
-        && input_scale_factor.is_finite()
-        && input_scale_factor > 0.0)
-        .then_some((scale_factor, input_scale_factor))
+    let physical_size = nara_ui::UiSize::new(
+        resolution.physical_width as f32,
+        resolution.physical_height as f32,
+    )?;
+    let insets = resolution.safe_area_insets;
+    let safe_area =
+        nara_ui::UiSafeAreaInsets::new(insets.left, insets.top, insets.right, insets.bottom)?;
+    nara_ui::UiSurfaceContentTransform::new(
+        slot.transform().authored_logical_size(),
+        physical_size,
+        safe_area,
+        resolution.scale_factor as f32,
+    )
+    .ok()
 }
 
 fn compile_runtime_ui_packets(world: &mut World) {
@@ -130,14 +131,13 @@ fn compile_runtime_ui_packets(world: &mut World) {
 }
 
 fn synchronize_runtime_ui_routes(world: &mut World) -> Result<(), String> {
-    let descriptors =
-        nara_ui::active_ui_surface_descriptors(world).map_err(|error| error.to_string())?;
-    let routes = descriptors
+    let slots = nara_ui::active_ui_surface_slots(world).map_err(|error| error.to_string())?;
+    let routes = slots
         .into_iter()
-        .map(|descriptor| {
-            nara_ui_render::UiPresentationRoute::new(
-                descriptor.surface_id(),
-                nara_window::WindowId::new(descriptor.input_window().get()),
+        .map(|slot| {
+            nara_ui_render::__private::UiPresentationRoute::new(
+                slot.surface_id(),
+                nara_window::WindowId::new(slot.endpoint().window().get()),
             )
             .map_err(|error| error.to_string())
         })
@@ -201,23 +201,33 @@ mod tests {
     use nara_hierarchy::{
         HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
     };
-    use nara_input::{InputSeatId, InputWindowId};
-    use nara_ui::{UiNode, UiRoot, UiRuntimeKey, UiSurfaceDescriptor, UiSurfaceId};
+    use nara_input::{InputPointerId, InputSeatId, InputWindowId};
+    use nara_ui::{
+        UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
+        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
+    };
 
     use super::*;
     use crate::{PresentationUiPlugins, RuntimeUiPlugins};
 
     #[test]
     fn physical_targets_preserve_one_design_space_and_normalize_platform_logical_input() {
-        let descriptor = UiSurfaceDescriptor::new(
+        let slot = UiSurfaceSlot::new(
             UiSurfaceId::new(7).expect("test surface should be non-zero"),
-            InputWindowId::new(11),
-            InputSeatId::PRIMARY,
-            960.0,
-            540.0,
-            1.0,
+            UiSurfaceEndpoint::new(
+                InputWindowId::new(1),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+            ),
+            UiSurfaceContentTransform::new(
+                UiSize::new(960.0, 540.0).expect("test authored size should be valid"),
+                UiSize::new(1280.0, 720.0).expect("test physical size should be valid"),
+                UiSafeAreaInsets::default(),
+                1.0,
+            )
+            .expect("test transform should be valid"),
         )
-        .expect("test surface descriptor should be valid");
+        .expect("test surface slot should be valid");
 
         for (resolution, expected_render_scale, expected_input_scale) in [
             (
@@ -236,16 +246,17 @@ mod tests {
                 4.0 / 3.0,
             ),
         ] {
-            let (render_scale, input_scale) =
-                surface_mapping(descriptor, resolution).expect("target mapping should be valid");
-            assert!((render_scale - expected_render_scale).abs() < 1.0e-6);
+            let transform =
+                surface_transform(slot, resolution).expect("target mapping should be valid");
+            assert!((transform.content_scale_factor() - expected_render_scale).abs() < 1.0e-6);
+            let input_scale = transform.content_scale_factor() / transform.platform_scale_factor();
             assert!((input_scale - expected_input_scale).abs() < 1.0e-6);
         }
 
-        assert!(surface_mapping(descriptor, nara_window::WindowResolution::new(0, 720)).is_none());
+        assert!(surface_transform(slot, nara_window::WindowResolution::new(0, 720)).is_none());
         assert!(
-            surface_mapping(
-                descriptor,
+            surface_transform(
+                slot,
                 nara_window::WindowResolution::new(1_280, 720).with_scale_factor(0.0),
             )
             .is_none()
@@ -262,15 +273,22 @@ mod tests {
             let world = app.world_mut().expect("test app should expose its world");
             nara_ui::install_ui_surface(
                 world,
-                UiSurfaceDescriptor::new(
+                UiSurfaceSlot::new(
                     surface_id,
-                    InputWindowId::new(11),
-                    InputSeatId::PRIMARY,
-                    320.0,
-                    180.0,
-                    1.0,
+                    UiSurfaceEndpoint::new(
+                        InputWindowId::new(1),
+                        InputSeatId::PRIMARY,
+                        InputPointerId::PRIMARY,
+                    ),
+                    UiSurfaceContentTransform::new(
+                        UiSize::new(320.0, 180.0).expect("test authored size should be valid"),
+                        UiSize::new(320.0, 180.0).expect("test physical size should be valid"),
+                        UiSafeAreaInsets::default(),
+                        1.0,
+                    )
+                    .expect("test transform should be valid"),
                 )
-                .expect("test surface descriptor should be valid"),
+                .expect("test surface slot should be valid"),
             )
             .expect("test surface should install");
             let root = world

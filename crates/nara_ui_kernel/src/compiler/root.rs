@@ -328,6 +328,7 @@ pub(super) fn compile_root(
                     expanded: semantics.expanded,
                     actions: semantics.actions.clone(),
                     rect,
+                    clip_rect: inherited_clip.rect(),
                 },
             ));
         } else if let (Some(text), Some(key)) = (&node.node.text, &node.key) {
@@ -347,6 +348,7 @@ pub(super) fn compile_root(
                     expanded: None,
                     actions: Vec::new(),
                     rect,
+                    clip_rect: inherited_clip.rect(),
                 },
             ));
         }

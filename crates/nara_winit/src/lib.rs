@@ -6,6 +6,7 @@ mod accessibility;
 #[cfg(feature = "accessibility")]
 pub use accessibility::{
     WinitAccessibilityBridge, WinitAccessibilityError, WinitAccessibilityUpdate,
+    WinitPreparedAccessibilityUpdate,
 };
 
 use std::{
@@ -385,7 +386,8 @@ impl<'runtime> WinitApp<'runtime> {
                     .platform_windows
                     .get(&window_id)
                     .map_or(1.0, |window| window.scale_factor());
-                let resolution = WindowResolution::new(size.width, size.height);
+                let resolution =
+                    WindowResolution::new(size.width, size.height).with_scale_factor(scale_factor);
                 let logical_size = nara_core::Vec2::new(
                     size.width as f32 / scale_factor as f32,
                     size.height as f32 / scale_factor as f32,

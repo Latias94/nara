@@ -1,6 +1,6 @@
 use crate::{
-    UiActionId, UiFrameRevision, UiKey, UiRect, UiSeatId, UiSemanticNode, UiSemanticRole,
-    UiSurfaceId,
+    UiActionId, UiFrameRevision, UiKey, UiPhysicalRect, UiRect, UiRouteStamp, UiSeatId,
+    UiSemanticNode, UiSemanticRole, UiSurfaceId,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,19 +80,27 @@ pub struct UiSemanticFact {
     value: Option<String>,
     actions: Vec<UiActionId>,
     rect: UiRect,
+    physical_rect: UiPhysicalRect,
     state: UiSemanticState,
 }
 
 impl UiSemanticFact {
-    pub(crate) fn from_frame_node(node: &UiSemanticNode, state: UiSemanticState) -> Self {
+    pub(crate) fn from_frame_node(
+        node: &UiSemanticNode,
+        rect: UiRect,
+        physical_rect: UiPhysicalRect,
+        actions: Vec<UiActionId>,
+        state: UiSemanticState,
+    ) -> Self {
         Self {
             key: node.key().clone(),
             parent: node.parent().cloned(),
             role: node.role(),
             name: node.name().to_owned(),
             value: node.value().map(str::to_owned),
-            actions: node.actions().to_vec(),
-            rect: node.rect(),
+            actions,
+            rect,
+            physical_rect,
             state,
         }
     }
@@ -132,6 +140,12 @@ impl UiSemanticFact {
         self.rect
     }
 
+    /// Returns visible semantic bounds after ancestor and Surface Slot clipping.
+    #[must_use]
+    pub const fn physical_rect(&self) -> UiPhysicalRect {
+        self.physical_rect
+    }
+
     #[must_use]
     pub const fn state(&self) -> UiSemanticState {
         self.state
@@ -141,25 +155,22 @@ impl UiSemanticFact {
 /// Semantic projection generated from the same exact presented frame and interaction state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSemanticSnapshot {
-    surface_id: UiSurfaceId,
+    route: UiRouteStamp,
     frame_revision: UiFrameRevision,
-    presentation_epoch: u64,
     seat: UiSeatId,
     nodes: Vec<UiSemanticFact>,
 }
 
 impl UiSemanticSnapshot {
     pub(crate) const fn new(
-        surface_id: UiSurfaceId,
+        route: UiRouteStamp,
         frame_revision: UiFrameRevision,
-        presentation_epoch: u64,
         seat: UiSeatId,
         nodes: Vec<UiSemanticFact>,
     ) -> Self {
         Self {
-            surface_id,
+            route,
             frame_revision,
-            presentation_epoch,
             seat,
             nodes,
         }
@@ -167,7 +178,12 @@ impl UiSemanticSnapshot {
 
     #[must_use]
     pub const fn surface_id(&self) -> UiSurfaceId {
-        self.surface_id
+        self.route.surface_id()
+    }
+
+    #[must_use]
+    pub const fn route(&self) -> UiRouteStamp {
+        self.route
     }
 
     #[must_use]
@@ -177,7 +193,7 @@ impl UiSemanticSnapshot {
 
     #[must_use]
     pub const fn presentation_epoch(&self) -> u64 {
-        self.presentation_epoch
+        self.route.presentation_epoch()
     }
 
     #[must_use]

@@ -1,51 +1,77 @@
-use nara_input::{InputSeatId, InputWindowId};
-use nara_ui_kernel::{UiEnvironment, UiEnvironmentError, UiSurfaceId};
+use nara_input::{InputPointerId, InputRouteStamp, InputSeatId, InputWindowId};
+use nara_ui_kernel::{
+    UiEnvironment, UiEnvironmentError, UiSurfaceContentTransform, UiSurfaceGenerations,
+    UiSurfaceId, UiSurfaceRetirementToken,
+};
 use thiserror::Error;
 
-const INITIAL_SURFACE_REVISION: u64 = 1;
+const INITIAL_SURFACE_GENERATION: u64 = 1;
 
-/// Host-owned metrics and input-route binding for one stable UI surface lifetime.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct UiSurfaceDescriptor {
-    surface_id: UiSurfaceId,
-    input_window: InputWindowId,
-    input_seat: InputSeatId,
-    logical_width: f32,
-    logical_height: f32,
-    scale_factor: f32,
-    input_scale_factor: f32,
-    route_revision: u64,
-    presentation_revision: u64,
-    font_revision: u64,
+/// Host-owned platform endpoint for one UI surface lifetime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UiSurfaceEndpoint {
+    window: InputWindowId,
+    seat: InputSeatId,
+    pointer: InputPointerId,
 }
 
-impl UiSurfaceDescriptor {
-    /// Creates the first descriptor in one surface lifetime.
-    ///
-    /// Route, presentation, and font revisions start at one. Once installed, revisions can only
-    /// advance through the runtime-owned surface update functions.
+impl UiSurfaceEndpoint {
+    #[must_use]
+    pub const fn new(window: InputWindowId, seat: InputSeatId, pointer: InputPointerId) -> Self {
+        Self {
+            window,
+            seat,
+            pointer,
+        }
+    }
+
+    #[must_use]
+    pub const fn window(self) -> InputWindowId {
+        self.window
+    }
+
+    #[must_use]
+    pub const fn seat(self) -> InputSeatId {
+        self.seat
+    }
+
+    #[must_use]
+    pub const fn pointer(self) -> InputPointerId {
+        self.pointer
+    }
+}
+
+/// One immutable Host-installed UI surface generation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiSurfaceSlot {
+    surface_id: UiSurfaceId,
+    endpoint: UiSurfaceEndpoint,
+    transform: UiSurfaceContentTransform,
+    slot_generation: u64,
+    route_generation: u64,
+    geometry_generation: u64,
+    presentation_generation: u64,
+    font_generation: u64,
+}
+
+impl UiSurfaceSlot {
     pub fn new(
         surface_id: UiSurfaceId,
-        input_window: InputWindowId,
-        input_seat: InputSeatId,
-        logical_width: f32,
-        logical_height: f32,
-        scale_factor: f32,
-    ) -> Result<Self, UiEnvironmentError> {
-        let descriptor = Self {
+        endpoint: UiSurfaceEndpoint,
+        transform: UiSurfaceContentTransform,
+    ) -> Result<Self, UiSurfaceSlotError> {
+        let slot = Self {
             surface_id,
-            input_window,
-            input_seat,
-            logical_width,
-            logical_height,
-            scale_factor,
-            input_scale_factor: 1.0,
-            route_revision: INITIAL_SURFACE_REVISION,
-            presentation_revision: INITIAL_SURFACE_REVISION,
-            font_revision: INITIAL_SURFACE_REVISION,
+            endpoint,
+            transform,
+            slot_generation: INITIAL_SURFACE_GENERATION,
+            route_generation: INITIAL_SURFACE_GENERATION,
+            geometry_generation: INITIAL_SURFACE_GENERATION,
+            presentation_generation: INITIAL_SURFACE_GENERATION,
+            font_generation: INITIAL_SURFACE_GENERATION,
         };
-        descriptor.environment(1)?;
-        Ok(descriptor)
+        slot.environment(INITIAL_SURFACE_GENERATION)?;
+        Ok(slot)
     }
 
     #[must_use]
@@ -54,169 +80,160 @@ impl UiSurfaceDescriptor {
     }
 
     #[must_use]
-    pub const fn input_window(self) -> InputWindowId {
-        self.input_window
+    pub const fn endpoint(self) -> UiSurfaceEndpoint {
+        self.endpoint
     }
 
     #[must_use]
-    pub const fn input_seat(self) -> InputSeatId {
-        self.input_seat
+    pub const fn transform(self) -> UiSurfaceContentTransform {
+        self.transform
     }
 
     #[must_use]
-    pub const fn logical_size(self) -> (f32, f32) {
-        (self.logical_width, self.logical_height)
+    pub const fn slot_generation(self) -> u64 {
+        self.slot_generation
     }
 
     #[must_use]
-    pub const fn scale_factor(self) -> f32 {
-        self.scale_factor
-    }
-
-    /// Returns the conversion from platform-logical coordinates into the authored design space.
-    #[must_use]
-    pub const fn input_scale_factor(self) -> f32 {
-        self.input_scale_factor
+    pub const fn route_generation(self) -> u64 {
+        self.route_generation
     }
 
     #[must_use]
-    pub const fn route_revision(self) -> u64 {
-        self.route_revision
+    pub const fn geometry_generation(self) -> u64 {
+        self.geometry_generation
     }
 
     #[must_use]
-    pub const fn presentation_revision(self) -> u64 {
-        self.presentation_revision
+    pub const fn presentation_generation(self) -> u64 {
+        self.presentation_generation
     }
 
     #[must_use]
-    pub const fn font_revision(self) -> u64 {
-        self.font_revision
+    pub const fn font_generation(self) -> u64 {
+        self.font_generation
+    }
+
+    pub(super) fn generations(self) -> Result<UiSurfaceGenerations, UiEnvironmentError> {
+        UiSurfaceGenerations::new(
+            self.slot_generation,
+            self.route_generation,
+            self.geometry_generation,
+            self.presentation_generation,
+        )
     }
 
     pub(super) fn environment(
         self,
-        theme_revision: u64,
+        theme_generation: u64,
     ) -> Result<UiEnvironment, UiEnvironmentError> {
-        UiEnvironment::new(
+        UiEnvironment::for_surface(
             self.surface_id,
-            self.logical_width,
-            self.logical_height,
-            self.scale_factor,
-            self.route_revision,
-            self.presentation_revision,
-            theme_revision,
-            self.font_revision,
+            self.transform,
+            self.generations()?,
+            theme_generation,
+            self.font_generation,
         )
     }
 
-    /// Configures the render and input mapping before this descriptor is first installed.
-    ///
-    /// This builder does not advance revisions. An installed surface must use
-    /// `update_ui_surface_mapping`, which derives from the runtime-owned current descriptor.
-    pub fn with_surface_mapping(
-        mut self,
-        scale_factor: f32,
-        input_scale_factor: f32,
-    ) -> Result<Self, UiSurfaceMappingError> {
-        validate_input_scale_factor(input_scale_factor)?;
-        self.scale_factor = scale_factor;
-        self.input_scale_factor = input_scale_factor;
-        self.environment(1)?;
-        Ok(self)
-    }
-
-    pub(super) fn update_logical_size(
-        mut self,
-        logical_width: f32,
-        logical_height: f32,
-    ) -> Result<Self, UiSurfaceMappingError> {
-        if self.logical_width.to_bits() == logical_width.to_bits()
-            && self.logical_height.to_bits() == logical_height.to_bits()
-        {
+    pub(super) fn successor(
+        self,
+        endpoint: UiSurfaceEndpoint,
+        transform: UiSurfaceContentTransform,
+    ) -> Result<Self, UiSurfaceSlotError> {
+        let endpoint_changed = self.endpoint != endpoint;
+        let transform_changed = self.transform != transform;
+        if !endpoint_changed && !transform_changed {
             return Ok(self);
         }
 
-        self.advance_route_revision()?;
-        self.advance_presentation_revision()?;
-        self.logical_width = logical_width;
-        self.logical_height = logical_height;
-        self.environment(1)?;
-        Ok(self)
+        let slot_generation = advance_generation(self.slot_generation, "slot_generation")?;
+        let route_generation = advance_generation(self.route_generation, "route_generation")?;
+        let presentation_generation =
+            advance_generation(self.presentation_generation, "presentation_generation")?;
+        let geometry_generation = if transform_changed {
+            advance_generation(self.geometry_generation, "geometry_generation")?
+        } else {
+            self.geometry_generation
+        };
+        Ok(Self {
+            surface_id: self.surface_id,
+            endpoint,
+            transform,
+            slot_generation,
+            route_generation,
+            geometry_generation,
+            presentation_generation,
+            font_generation: self.font_generation,
+        })
     }
 
-    pub(super) fn update_input_endpoint(
-        mut self,
-        input_window: InputWindowId,
-        input_seat: InputSeatId,
-    ) -> Result<Self, UiSurfaceMappingError> {
-        if self.input_window == input_window && self.input_seat == input_seat {
-            return Ok(self);
-        }
-
-        self.advance_route_revision()?;
-        self.input_window = input_window;
-        self.input_seat = input_seat;
-        Ok(self)
-    }
-
-    pub(super) fn update_surface_mapping(
-        mut self,
-        scale_factor: f32,
-        input_scale_factor: f32,
-    ) -> Result<Self, UiSurfaceMappingError> {
-        validate_input_scale_factor(input_scale_factor)?;
-        let render_changed = self.scale_factor.to_bits() != scale_factor.to_bits();
-        let input_changed = self.input_scale_factor.to_bits() != input_scale_factor.to_bits();
-        if !render_changed && !input_changed {
-            return Ok(self);
-        }
-
-        self.advance_route_revision()?;
-        if render_changed {
-            self.advance_presentation_revision()?;
-        }
-        self.scale_factor = scale_factor;
-        self.input_scale_factor = input_scale_factor;
-        self.environment(1)?;
-        Ok(self)
-    }
-
-    fn advance_route_revision(&mut self) -> Result<(), UiSurfaceMappingError> {
-        self.route_revision =
-            self.route_revision
-                .checked_add(1)
-                .ok_or(UiSurfaceMappingError::RevisionExhausted {
-                    field: "route_revision",
-                })?;
-        Ok(())
-    }
-
-    fn advance_presentation_revision(&mut self) -> Result<(), UiSurfaceMappingError> {
-        self.presentation_revision = self.presentation_revision.checked_add(1).ok_or(
-            UiSurfaceMappingError::RevisionExhausted {
-                field: "presentation_revision",
-            },
-        )?;
-        Ok(())
+    pub(super) fn next_retirement_generation(self) -> Result<u64, UiSurfaceSlotError> {
+        advance_generation(self.slot_generation, "retirement_generation")
     }
 }
 
-fn validate_input_scale_factor(input_scale_factor: f32) -> Result<(), UiSurfaceMappingError> {
-    if !input_scale_factor.is_finite() || input_scale_factor <= 0.0 || input_scale_factor > 8.0 {
-        return Err(UiSurfaceMappingError::InvalidInputScaleFactor {
-            value: input_scale_factor,
-        });
+/// Exact bounded tombstone returned when one Surface Slot lifetime is retired.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UiSurfaceRetirement {
+    endpoint: UiSurfaceEndpoint,
+    token: UiSurfaceRetirementToken,
+    input_route: Option<InputRouteStamp>,
+}
+
+impl UiSurfaceRetirement {
+    pub(super) const fn new(
+        endpoint: UiSurfaceEndpoint,
+        token: UiSurfaceRetirementToken,
+        input_route: Option<InputRouteStamp>,
+    ) -> Self {
+        Self {
+            endpoint,
+            token,
+            input_route,
+        }
     }
-    Ok(())
+
+    #[must_use]
+    pub const fn surface_id(self) -> UiSurfaceId {
+        self.token.surface_id()
+    }
+
+    #[must_use]
+    pub const fn endpoint(self) -> UiSurfaceEndpoint {
+        self.endpoint
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> u64 {
+        self.token.slot_generation().get()
+    }
+
+    #[must_use]
+    pub const fn retirement_generation(self) -> u64 {
+        self.token.retirement_generation().get()
+    }
+
+    #[must_use]
+    pub const fn token(self) -> UiSurfaceRetirementToken {
+        self.token
+    }
+
+    pub(super) const fn input_route(self) -> Option<InputRouteStamp> {
+        self.input_route
+    }
+}
+
+fn advance_generation(current: u64, field: &'static str) -> Result<u64, UiSurfaceSlotError> {
+    current
+        .checked_add(1)
+        .ok_or(UiSurfaceSlotError::GenerationExhausted { field })
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
-pub enum UiSurfaceMappingError {
-    #[error("UI input scale factor {value} is invalid")]
-    InvalidInputScaleFactor { value: f32 },
-    #[error("UI surface mapping revision `{field}` was exhausted")]
-    RevisionExhausted { field: &'static str },
+pub enum UiSurfaceSlotError {
+    #[error("UI surface generation `{field}` was exhausted")]
+    GenerationExhausted { field: &'static str },
     #[error(transparent)]
     Environment(#[from] UiEnvironmentError),
 }

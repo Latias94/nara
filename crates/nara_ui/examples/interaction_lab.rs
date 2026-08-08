@@ -36,17 +36,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert_eq!(primary_frame.environment().scale_factor(), 1.0);
     assert_eq!(secondary_frame.environment().scale_factor(), 1.25);
 
-    commit_ui_presentation(app.world_mut()?, Arc::clone(&primary_frame), 1)?;
-    commit_ui_presentation(app.world_mut()?, Arc::clone(&secondary_frame), 1)?;
+    let primary_receipt = commit_ui_presentation(app.world_mut()?, Arc::clone(&primary_frame), 1)?;
+    let secondary_receipt =
+        commit_ui_presentation(app.world_mut()?, Arc::clone(&secondary_frame), 1)?;
 
     let (fast_cursor, paused_cursor) = register_consumers(app.world_mut()?)?;
-    let primary_key = semantic_key(&app, primary_surface, 1, "Primary action")?;
+    let primary_key = semantic_key(&app, primary_receipt, "Primary action")?;
     let primary_action = UiActionId::new(PRIMARY_ACTION)?;
 
     prove_pointer_capture_and_surface_isolation(
         &mut app,
-        primary_surface,
-        secondary_surface,
+        primary_receipt,
+        secondary_receipt,
         &primary_key,
         &paused_cursor,
     )?;
@@ -60,7 +61,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             UiActionId::new(UPDATED_ACTION)?,
             16.0,
         )?);
-    activate_accessibility(&mut app)?;
+    activate_accessibility(&mut app, primary_receipt, &primary_key, &primary_action)?;
     assert_latest_action(
         app.world(),
         &fast_cursor,
@@ -69,10 +70,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     acknowledge_latest(app.world_mut()?, &fast_cursor)?;
 
+    app.update()?;
     let updated_frame = required_frame(&app, primary_surface)?;
-    commit_ui_presentation(app.world_mut()?, Arc::clone(&updated_frame), 2)?;
+    let updated_receipt = commit_ui_presentation(app.world_mut()?, Arc::clone(&updated_frame), 2)?;
     let updated_action = UiActionId::new(UPDATED_ACTION)?;
-    activate_accessibility(&mut app)?;
+    activate_accessibility(&mut app, updated_receipt, &primary_key, &updated_action)?;
     assert_latest_action(
         app.world(),
         &fast_cursor,
@@ -126,7 +128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert_eq!(app.world().resource::<UiActionJournal>().retained_len(), 0);
 
     queue_secondary_pointer(&mut app)?;
-    assert!(retire_ui_surface(app.world_mut()?, secondary_surface)?);
+    assert!(retire_ui_surface(app.world_mut()?, secondary_surface)?.is_some());
     app.update()?;
     assert!(matches!(
         latest_rejection(&app),

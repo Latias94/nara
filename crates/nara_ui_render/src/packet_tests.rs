@@ -13,8 +13,9 @@ use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
-    UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId,
-    UiText, UiTheme, UiVisual,
+    UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiSafeAreaInsets,
+    UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiText, UiTheme,
+    UiThemePalette, UiVisual,
 };
 use nara_window::WindowId;
 
@@ -24,17 +25,6 @@ use crate::{
 };
 
 fn frame(surface: u64, revision: u64, nodes: Vec<UiNode>) -> Arc<nara_ui_kernel::UiFrame> {
-    let snapshot = UiAuthoringSnapshotBuilder::new(revision)
-        .with_root(
-            UiRoot::new(
-                UiRootKey::runtime("packet-test", "root").unwrap(),
-                UiLayer::Base,
-                UiStyle::fill(),
-            )
-            .with_children(nodes),
-        )
-        .build()
-        .unwrap();
     let environment = UiEnvironment::new(
         UiSurfaceId::new(surface).unwrap(),
         320.0,
@@ -46,9 +36,33 @@ fn frame(surface: u64, revision: u64, nodes: Vec<UiNode>) -> Arc<nara_ui_kernel:
         1,
     )
     .unwrap();
+    frame_with_environment(revision, nodes, environment)
+}
+
+fn frame_with_environment(
+    revision: u64,
+    nodes: Vec<UiNode>,
+    environment: UiEnvironment,
+) -> Arc<nara_ui_kernel::UiFrame> {
+    let snapshot = UiAuthoringSnapshotBuilder::new(revision)
+        .with_root(
+            UiRoot::new(
+                UiRootKey::runtime("packet-test", "root").unwrap(),
+                UiLayer::Base,
+                UiStyle::fill(),
+            )
+            .with_children(nodes),
+        )
+        .build()
+        .unwrap();
+    let theme = UiTheme::new(
+        environment.theme_revision().get(),
+        UiThemePalette::default(),
+    )
+    .unwrap();
     UiCompiler::new(bundled_font_face().unwrap(), Default::default())
         .unwrap()
-        .compile(&snapshot, environment, UiTheme::default())
+        .compile(&snapshot, environment, theme)
         .unwrap()
 }
 
@@ -150,6 +164,56 @@ fn packet_preserves_rect_then_nonblank_glyph_order() {
             .skip(1)
             .any(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
     );
+}
+
+#[test]
+fn packet_lowering_uses_the_exact_letterboxed_surface_transform() {
+    let surface = UiSurfaceId::new(9).unwrap();
+    let transform = UiSurfaceContentTransform::new(
+        UiSize::new(100.0, 100.0).unwrap(),
+        UiSize::new(300.0, 200.0).unwrap(),
+        UiSafeAreaInsets::new(10.0, 0.0, 10.0, 0.0).unwrap(),
+        1.25,
+    )
+    .unwrap();
+    let generations = UiSurfaceGenerations::new(7, 8, 9, 10).unwrap();
+    let environment = UiEnvironment::for_surface(surface, transform, generations, 11, 12).unwrap();
+    let clipped_visual = UiNode::new(UiStyle::absolute(80.0, 10.0, 60.0, 30.0))
+        .with_key(UiLocalKey::runtime("packet-test", "letterboxed").unwrap())
+        .with_visual(UiVisual::solid(UiColor::rgba(0.2, 0.3, 0.4, 1.0)));
+    let text = UiNode::new(UiStyle::absolute(10.0, 50.0, 60.0, 20.0))
+        .with_key(UiLocalKey::runtime("packet-test", "letterboxed-text").unwrap())
+        .with_text(UiText::new("Nara", 12.0).unwrap());
+
+    let candidate = frame_with_environment(1, vec![clipped_visual, text], environment);
+    let packet = UiPresentationPlanner::default()
+        .plan(
+            candidate,
+            RenderTarget::Window(WindowId::PRIMARY),
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+
+    assert_eq!(packet.identity().slot_generation().get(), 7);
+    assert_eq!(packet.identity().geometry_generation().get(), 9);
+    let UiPacketPrimitive::Rect { rect, clip, .. } = packet.primitives().first().unwrap() else {
+        panic!("the authored visual must lower to a rect")
+    };
+    // 100 x 100 authored content fits a 300 x 200 surface at scale 2 with x = 50 letterboxing;
+    // the authored visual extends past the right edge and is clipped before physical snapping.
+    assert_eq!(
+        (rect.min_x(), rect.min_y(), rect.max_x(), rect.max_y()),
+        (210, 20, 250, 80)
+    );
+    assert_eq!(*clip, Some(*rect));
+    assert!(packet.primitives().iter().any(|primitive| match primitive {
+        UiPacketPrimitive::Glyph { rect, clip, .. } => {
+            rect.min_x() >= 50
+                && rect.max_x() <= 250
+                && clip.is_some_and(|clip| clip.min_x() >= 50 && clip.max_x() <= 250)
+        }
+        UiPacketPrimitive::Rect { .. } => false,
+    }));
 }
 
 #[test]

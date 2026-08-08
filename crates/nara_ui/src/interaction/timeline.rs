@@ -2,7 +2,8 @@ use nara_core::Vec2;
 use nara_input::{ButtonTransitionPhase, InputEventKind, InputTimelineEntry, KeyCode, MouseButton};
 use nara_ui_kernel::{
     UiActivationSource, UiButtonPhase, UiInputEvent, UiNavigation, UiPoint, UiPointerButton,
-    UiPointerId, UiRouteStamp, UiSeatId, UiSurfaceId,
+    UiPointerId, UiRouteStamp, UiSeatId, UiSurfaceContentTransform, UiSurfaceGenerations,
+    UiSurfaceId,
 };
 
 use crate::runtime::UiRuntimeState;
@@ -26,14 +27,25 @@ pub(crate) fn project_timeline_entry(
     if !input_route.is_ui_routable() {
         return UiTimelineProjection::PassThrough;
     }
-    let (Some(surface), Some(epoch)) = (input_route.surface(), input_route.presentation_epoch())
+    let (
+        Some(surface),
+        Some(epoch),
+        Some(slot_generation),
+        Some(route_generation),
+        Some(geometry_generation),
+    ) = (
+        input_route.surface(),
+        input_route.presentation_epoch(),
+        input_route.slot_generation(),
+        input_route.route_generation(),
+        input_route.geometry_generation(),
+    )
     else {
         return UiTimelineProjection::Rejected(UiRouteRejection::InvalidRouteStamp);
     };
     let Some(surface) = UiSurfaceId::new(surface.get()) else {
         return UiTimelineProjection::Rejected(UiRouteRejection::InvalidRouteStamp);
     };
-    let route = UiRouteStamp::new(surface, epoch.get());
     if state.is_retired(surface) {
         return UiTimelineProjection::Rejected(UiRouteRejection::RetiredSurface {
             surface: surface.get(),
@@ -44,14 +56,38 @@ pub(crate) fn project_timeline_entry(
             surface: surface.get(),
         });
     };
+    let slot = runtime.slot();
+    if slot.slot_generation() != slot_generation.get()
+        || slot.route_generation() != route_generation.get()
+        || slot.geometry_generation() != geometry_generation.get()
+    {
+        return UiTimelineProjection::Rejected(UiRouteRejection::SurfaceGenerationMismatch);
+    }
+    let generations = match UiSurfaceGenerations::new(
+        slot_generation.get(),
+        route_generation.get(),
+        geometry_generation.get(),
+        slot.presentation_generation(),
+    ) {
+        Ok(generations) => generations,
+        Err(_) => return UiTimelineProjection::Rejected(UiRouteRejection::InvalidRouteStamp),
+    };
+    let route = UiRouteStamp::new(
+        surface,
+        generations.slot_generation(),
+        generations.route_revision(),
+        generations.geometry_generation(),
+        epoch.get(),
+    );
     let presented = match runtime.resolve_presented(route) {
         Ok(presented) => presented,
         Err(error) => return UiTimelineProjection::Rejected(map_adapter_error(error)),
     };
-    let descriptor = presented.descriptor();
+    let presented_slot = presented.slot();
     let blocks_unhandled_input = presented.blocks_unhandled_input();
-    if descriptor.input_window() != input_route.window()
-        || descriptor.input_seat() != input_route.seat()
+    if presented_slot != slot
+        || slot.endpoint().window() != input_route.window()
+        || slot.endpoint().seat() != input_route.seat()
     {
         return UiTimelineProjection::Rejected(UiRouteRejection::RouteEndpointMismatch);
     }
@@ -60,6 +96,12 @@ pub(crate) fn project_timeline_entry(
     let pointer = input_route
         .pointer()
         .map(|pointer| UiPointerId::new(pointer.get()));
+    if input_route
+        .pointer()
+        .is_some_and(|pointer| pointer != slot.endpoint().pointer())
+    {
+        return UiTimelineProjection::Rejected(UiRouteRejection::PointerOwnerMismatch);
+    }
     if entry.invalidation().is_some()
         && matches!(
             entry.kind(),
@@ -74,12 +116,30 @@ pub(crate) fn project_timeline_entry(
             input: UiInputEvent::PointerCancelled { seat, pointer },
         };
     }
-    let position = match project_point(entry.logical_position(), descriptor.input_scale_factor()) {
-        Ok(position) => position,
-        Err(error) => {
-            return UiTimelineProjection::Rejected(UiRouteRejection::InvalidProjection(error));
+    let (position, outside_content) =
+        match project_point(entry.logical_position(), presented_slot.transform()) {
+            Ok(position) => position,
+            Err(error) => {
+                return UiTimelineProjection::Rejected(UiRouteRejection::InvalidProjection(error));
+            }
+        };
+    if outside_content
+        && matches!(
+            entry.kind(),
+            InputEventKind::PointerMoved | InputEventKind::PointerButton { .. }
+        )
+    {
+        let Some(pointer) = pointer else {
+            return rejected_projection(UiInputProjectionIssue::MissingPointer);
+        };
+        if runtime.interaction().has_pointer_facts(surface) {
+            return UiTimelineProjection::Routed {
+                route,
+                input: UiInputEvent::PointerCancelled { seat, pointer },
+            };
         }
-    };
+        return unhandled_projection(blocks_unhandled_input);
+    }
 
     let input = match entry.kind() {
         InputEventKind::PointerMoved => {
@@ -136,10 +196,6 @@ pub(crate) fn project_timeline_entry(
         InputEventKind::Resized { .. } | InputEventKind::ScaleFactorChanged { .. } => {
             UiInputEvent::GeometryInvalidated
         }
-        InputEventKind::AccessibilityAction { action: _ } => UiInputEvent::ActivateFocused {
-            seat,
-            source: UiActivationSource::Accessibility,
-        },
         InputEventKind::CloseRequested | InputEventKind::SurfaceRetired => {
             UiInputEvent::SurfaceCancelled
         }
@@ -161,17 +217,16 @@ fn unhandled_projection(blocked: bool) -> UiTimelineProjection {
 
 fn project_point(
     position: Option<Vec2>,
-    input_scale_factor: f32,
-) -> Result<Option<UiPoint>, UiInputProjectionIssue> {
+    transform: UiSurfaceContentTransform,
+) -> Result<(Option<UiPoint>, bool), UiInputProjectionIssue> {
     let Some(position) = position else {
-        return Ok(None);
+        return Ok((None, false));
     };
-    let x = position.x / input_scale_factor;
-    let y = position.y / input_scale_factor;
-    if !x.is_finite() || !y.is_finite() {
+    if !position.is_finite() {
         return Err(UiInputProjectionIssue::NonFinitePosition);
     }
-    Ok(Some(UiPoint::new(x, y)))
+    let projected = transform.platform_logical_to_authored(UiPoint::new(position.x, position.y));
+    Ok((projected, projected.is_none()))
 }
 
 fn project_key(seat: UiSeatId, key: KeyCode, phase: ButtonTransitionPhase) -> Option<UiInputEvent> {

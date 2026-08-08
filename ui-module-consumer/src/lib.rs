@@ -80,6 +80,7 @@ pub fn activate_retry_button() -> Result<UiIntent, StatusLabelError> {
     let mut compiler = UiCompiler::new(bundled_font_face()?, Default::default())?;
     let frame = compiler.compile(&snapshot, environment, UiTheme::default())?;
     let mut journal = UiFrameJournal::default();
+    journal.install_surface(surface, 1)?;
     journal.submit(frame, 1)?;
     let route = UiRouteStamp::new(surface, 1);
     let mut session = UiInteractionSession::default();

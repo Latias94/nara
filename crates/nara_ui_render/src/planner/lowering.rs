@@ -3,7 +3,8 @@ use std::{collections::HashSet, mem::size_of, sync::Arc};
 use nara_render::{RenderResourceSnapshot, RenderTarget};
 use nara_text::GlyphRasterKey;
 use nara_ui_kernel::{
-    UiFrame, UiImageId, UiPaintPrimitive, UiPhysicalRect, UiRect, UiResolvedBrush,
+    UiEnvironment, UiFrame, UiImageId, UiPaintPrimitive, UiPhysicalRect, UiPoint, UiRect,
+    UiResolvedBrush,
 };
 
 use crate::{
@@ -142,7 +143,7 @@ pub(super) fn lower_packet(
                 let Some(rect) = packet_rect(*physical_rect) else {
                     continue;
                 };
-                let Some(clip) = packet_clip(*clip_rect, environment.scale_factor(), rect) else {
+                let Some(clip) = packet_clip(*clip_rect, environment, rect) else {
                     continue;
                 };
                 if brush.is_none() && border.is_none() {
@@ -231,11 +232,10 @@ pub(super) fn lower_packet(
                 layout,
                 ..
             } => {
-                let Some(text_rect) = physical_rect(*rect, environment.scale_factor()) else {
+                let Some(text_rect) = environment.physical_rect(*rect).and_then(packet_rect) else {
                     continue;
                 };
-                let Some(clip) = packet_clip(*clip_rect, environment.scale_factor(), text_rect)
-                else {
+                let Some(clip) = packet_clip(*clip_rect, environment, text_rect) else {
                     continue;
                 };
                 append_glyphs(
@@ -247,7 +247,7 @@ pub(super) fn lower_packet(
                         text_rect: *rect,
                         clip,
                         color: *color,
-                        scale_factor: environment.scale_factor(),
+                        environment,
                         atlas,
                         limits,
                     },
@@ -284,7 +284,7 @@ struct GlyphAppendContext<'a> {
     text_rect: UiRect,
     clip: Option<UiPacketRect>,
     color: nara_ui_kernel::UiColor,
-    scale_factor: f32,
+    environment: UiEnvironment,
     atlas: &'a GlyphAtlas,
     limits: UiPresentationLimits,
 }
@@ -313,8 +313,15 @@ fn append_glyphs(
         else {
             continue;
         };
-        let baseline_x = snap_coordinate(origin.x() + glyph.x(), context.scale_factor);
-        let baseline_y = snap_coordinate(origin.y() + glyph.y(), context.scale_factor);
+        let Some(baseline) = context
+            .environment
+            .content_transform()
+            .authored_to_physical(UiPoint::new(origin.x() + glyph.x(), origin.y() + glyph.y()))
+        else {
+            continue;
+        };
+        let baseline_x = snap_physical_coordinate(baseline.x());
+        let baseline_y = snap_physical_coordinate(baseline.y());
         let width_i32 =
             i32::try_from(width).map_err(|_| UiPresentationContentError::ArithmeticOverflow)?;
         let height_i32 =
@@ -460,26 +467,21 @@ fn packet_rect(rect: UiPhysicalRect) -> Option<UiPacketRect> {
     UiPacketRect::new(rect.min_x(), rect.min_y(), rect.max_x(), rect.max_y())
 }
 
-fn physical_rect(rect: UiRect, scale_factor: f32) -> Option<UiPacketRect> {
-    let origin = rect.origin();
-    let max = rect.max();
-    UiPacketRect::new(
-        snap_coordinate(origin.x(), scale_factor),
-        snap_coordinate(origin.y(), scale_factor),
-        snap_coordinate(max.x(), scale_factor),
-        snap_coordinate(max.y(), scale_factor),
-    )
-}
-
 fn packet_clip(
     clip: Option<UiRect>,
-    scale_factor: f32,
+    environment: UiEnvironment,
     primitive_rect: UiPacketRect,
 ) -> Option<Option<UiPacketRect>> {
-    let Some(clip) = clip else {
-        return Some(None);
+    let authored_content = UiRect::new(UiPoint::default(), environment.logical_size())?;
+    let physical_content = environment
+        .physical_rect(authored_content)
+        .and_then(packet_rect)?;
+    let physical_clip = match clip {
+        Some(clip) => environment.physical_rect(clip).and_then(packet_rect)?,
+        None => physical_content,
     };
-    physical_rect(clip, scale_factor)
+    physical_content
+        .intersect(physical_clip)
         .and_then(|clip| clip.intersect(primitive_rect))
         .map(Some)
 }
@@ -494,10 +496,8 @@ fn primitive_clip(
     }
 }
 
-fn snap_coordinate(value: f32, scale_factor: f32) -> i32 {
-    (value * scale_factor)
-        .round()
-        .clamp(i32::MIN as f32, i32::MAX as f32) as i32
+fn snap_physical_coordinate(value: f32) -> i32 {
+    value.round().clamp(i32::MIN as f32, i32::MAX as f32) as i32
 }
 
 #[cfg(test)]

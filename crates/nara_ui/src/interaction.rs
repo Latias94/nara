@@ -1,7 +1,8 @@
 use nara_ecs::World;
 use nara_input::InputTimeline;
 #[cfg(test)]
-use nara_ui_kernel::{UiInputEvent, UiRouteStamp};
+use nara_ui_kernel::UiRouteStamp;
+use nara_ui_kernel::{UiAccessibilityInput, UiAccessibilityRequest, UiInputEvent};
 
 use crate::runtime::UiRuntimeState;
 
@@ -18,6 +19,48 @@ pub use transaction::{
     UiInputProjectionIssue, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog,
     UiRouteRejectionRecord,
 };
+
+/// Dispatches one receipt-stamped accessibility request through the same atomic UI transaction as
+/// normalized pointer, keyboard, and gamepad input. Platform adapters do not receive an input
+/// timeline sequence; the request is intentionally owned by the presented receipt instead.
+pub fn dispatch_ui_accessibility_input(
+    world: &mut World,
+    input: UiAccessibilityInput,
+) -> UiRouteDisposition {
+    let route = input.route();
+    let seat = input.seat();
+    let event = match input.request() {
+        UiAccessibilityRequest::FocusTarget { target } => UiInputEvent::FocusTarget {
+            seat,
+            target: target.clone(),
+        },
+        UiAccessibilityRequest::SemanticAction { target, action } => UiInputEvent::SemanticAction {
+            seat,
+            target: target.clone(),
+            action: action.clone(),
+        },
+    };
+    if !world.contains_resource::<UiRuntimeState>() || !world.contains_resource::<UiActionJournal>()
+    {
+        let rejection = UiRouteRejection::RuntimeUnavailable;
+        record_rejection(world, None, rejection.clone());
+        return UiRouteDisposition::RejectedClosed(rejection);
+    }
+    if world
+        .resource::<UiRuntimeState>()
+        .surface(route.surface_id())
+        .is_some_and(|surface| surface.slot().endpoint().seat().get() != seat.get())
+    {
+        let rejection = UiRouteRejection::SeatOwnerMismatch;
+        record_rejection(world, None, rejection.clone());
+        return UiRouteDisposition::RejectedClosed(rejection);
+    }
+    let disposition = transaction::execute(world, route, event, None);
+    if let UiRouteDisposition::RejectedClosed(rejection) = &disposition {
+        record_rejection(world, None, rejection.clone());
+    }
+    disposition
+}
 
 use timeline::UiTimelineProjection;
 

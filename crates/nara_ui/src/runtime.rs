@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use nara_ecs::{Mut, Resource, World};
 use nara_hierarchy::HierarchyOrder;
-use nara_input::{InputIngressError, InputPresentationEpoch, InputSurfaceId, InputTimeline};
+use nara_input::{
+    InputGeometryGeneration, InputIngressError, InputPresentationEpoch, InputPresentedRoute,
+    InputRouteGeneration, InputSlotGeneration, InputSurfaceId, InputTimeline,
+};
 use nara_ui_kernel::{
     UiDispatchError, UiEnvironmentError, UiFrame, UiJournalError, UiPresentationReceipt,
     UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceId,
@@ -19,7 +22,7 @@ pub(crate) mod state;
 mod surface;
 
 pub(crate) use state::UiRuntimeState;
-pub use surface::{UiSurfaceDescriptor, UiSurfaceMappingError};
+pub use surface::{UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError};
 
 const MAX_ADAPTER_DIAGNOSTICS: usize = 64;
 const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
@@ -79,16 +82,16 @@ pub enum UiAdapterError {
     UnknownSurface { surface: u64 },
     #[error("UI surface {surface} is already installed")]
     SurfaceAlreadyInstalled { surface: u64 },
+    #[error("UI surface {surface} has no installed presentation authority")]
+    PresentationAuthorityMissing { surface: u64 },
     #[error("UI surface limit was exceeded")]
     SurfaceLimitExceeded,
     #[error("UI surface identity lifetime space was exhausted")]
     SurfaceIdentitySpaceExhausted,
-    #[error("UI input endpoint window {window} seat {seat} is already owned by surface {surface}")]
-    InputEndpointConflict {
-        window: u64,
-        seat: u32,
-        surface: u64,
-    },
+    #[error("UI presentation target window {window} is already owned by surface {surface}")]
+    PresentationTargetConflict { window: u64, surface: u64 },
+    #[error("UI surface seat {actual} does not match endpoint seat {expected}")]
+    SeatOwnerMismatch { expected: u32, actual: u32 },
     #[error("the submitted frame is not the adapter's latest frame for surface {surface}")]
     FrameNotLatest { surface: u64 },
     #[error(
@@ -101,7 +104,7 @@ pub enum UiAdapterError {
     #[error(transparent)]
     Environment(#[from] UiEnvironmentError),
     #[error(transparent)]
-    SurfaceMapping(#[from] UiSurfaceMappingError),
+    SurfaceSlot(#[from] UiSurfaceSlotError),
     #[error(transparent)]
     Journal(#[from] UiJournalError),
     #[error(transparent)]
@@ -114,21 +117,6 @@ pub enum UiAdapterError {
 
 #[derive(Resource)]
 pub(crate) struct UiDefaultTheme(pub(crate) UiTheme);
-
-enum UiSurfaceUpdate {
-    LogicalSize {
-        width: f32,
-        height: f32,
-    },
-    InputEndpoint {
-        window: nara_input::InputWindowId,
-        seat: nara_input::InputSeatId,
-    },
-    Mapping {
-        scale_factor: f32,
-        input_scale_factor: f32,
-    },
-}
 
 pub(crate) fn compile_ui_frames(world: &mut World) {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
@@ -184,7 +172,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                 surface.discard_candidate();
                 continue;
             };
-            let environment = match surface.descriptor().environment(theme.revision().get()) {
+            let environment = match surface.slot().environment(theme.revision().get()) {
                 Ok(environment) => environment,
                 Err(error) => {
                     push_diagnostic(
@@ -238,127 +226,59 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
 
 /// Installs one new Host-owned surface lifetime without reusing retired identities.
 ///
-/// Active surface facts can only change through the typed `update_ui_surface_*` functions. This
-/// keeps revision allocation inside the runtime owner and prevents copied descriptor snapshots
-/// from impersonating a successor.
-pub fn install_ui_surface(
-    world: &mut World,
-    descriptor: UiSurfaceDescriptor,
-) -> Result<(), UiAdapterError> {
+/// The Host supplies the initial immutable slot while the runtime remains the only successor-
+/// generation allocator.
+pub fn install_ui_surface(world: &mut World, slot: UiSurfaceSlot) -> Result<(), UiAdapterError> {
     let theme_revision = active_theme_revision(world);
-    descriptor.environment(theme_revision)?;
+    slot.environment(theme_revision)?;
     world.resource_scope(|_world, mut state: Mut<UiRuntimeState>| {
-        if let Some(surface) = state.conflicting_input_endpoint(descriptor) {
-            return Err(UiAdapterError::InputEndpointConflict {
-                window: descriptor.input_window().get(),
-                seat: descriptor.input_seat().get(),
+        if let Some(surface) = state.conflicting_presentation_target(slot) {
+            return Err(UiAdapterError::PresentationTargetConflict {
+                window: slot.endpoint().window().get(),
                 surface: surface.get(),
             });
         }
-        let prepared = state.prepare_surface_install(descriptor)?;
-        state.commit_surface_install(descriptor, prepared);
+        let prepared = state.prepare_surface_install(slot)?;
+        state.commit_surface_install(slot, prepared);
         Ok(())
     })
 }
 
-/// Updates one installed surface's authored logical extent.
+/// Atomically replaces one slot's endpoint and exact coordinate transform.
 ///
-/// Geometry routing and presentation revisions advance together when the extent changes.
-pub fn update_ui_surface_logical_size(
+/// Endpoint and transform facts cannot be updated independently. Any change advances the slot,
+/// route, and presentation generations. A transform change also advances geometry generation.
+pub fn update_ui_surface_slot(
     world: &mut World,
     surface_id: UiSurfaceId,
-    width: f32,
-    height: f32,
-) -> Result<UiSurfaceDescriptor, UiAdapterError> {
-    apply_ui_surface_update(
-        world,
-        surface_id,
-        UiSurfaceUpdate::LogicalSize { width, height },
-    )
-}
-
-/// Rebinds one installed surface's input endpoint and advances only its route revision.
-pub fn update_ui_surface_input_endpoint(
-    world: &mut World,
-    surface_id: UiSurfaceId,
-    window: nara_input::InputWindowId,
-    seat: nara_input::InputSeatId,
-) -> Result<UiSurfaceDescriptor, UiAdapterError> {
-    apply_ui_surface_update(
-        world,
-        surface_id,
-        UiSurfaceUpdate::InputEndpoint { window, seat },
-    )
-}
-
-/// Updates one installed surface's render and platform-input mapping.
-///
-/// A render-scale change advances route and presentation revisions. An input-only scale change
-/// advances only the route revision.
-pub fn update_ui_surface_mapping(
-    world: &mut World,
-    surface_id: UiSurfaceId,
-    scale_factor: f32,
-    input_scale_factor: f32,
-) -> Result<UiSurfaceDescriptor, UiAdapterError> {
-    apply_ui_surface_update(
-        world,
-        surface_id,
-        UiSurfaceUpdate::Mapping {
-            scale_factor,
-            input_scale_factor,
-        },
-    )
-}
-
-fn apply_ui_surface_update(
-    world: &mut World,
-    surface_id: UiSurfaceId,
-    update: UiSurfaceUpdate,
-) -> Result<UiSurfaceDescriptor, UiAdapterError> {
+    endpoint: UiSurfaceEndpoint,
+    transform: nara_ui_kernel::UiSurfaceContentTransform,
+) -> Result<UiSurfaceSlot, UiAdapterError> {
     let theme_revision = active_theme_revision(world);
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let previous =
-            state
-                .surface_descriptor(surface_id)
-                .ok_or(UiAdapterError::UnknownSurface {
-                    surface: surface_id.get(),
-                })?;
-        let updated = match update {
-            UiSurfaceUpdate::LogicalSize { width, height } => {
-                previous.update_logical_size(width, height)?
-            }
-            UiSurfaceUpdate::InputEndpoint { window, seat } => {
-                previous.update_input_endpoint(window, seat)?
-            }
-            UiSurfaceUpdate::Mapping {
-                scale_factor,
-                input_scale_factor,
-            } => previous.update_surface_mapping(scale_factor, input_scale_factor)?,
-        };
+        let previous = state
+            .surface_slot(surface_id)
+            .ok_or(UiAdapterError::UnknownSurface {
+                surface: surface_id.get(),
+            })?;
+        let updated = previous.successor(endpoint, transform)?;
         updated.environment(theme_revision)?;
         if updated == previous {
             return Ok(updated);
         }
-        if let Some(surface) = state.conflicting_input_endpoint(updated) {
-            return Err(UiAdapterError::InputEndpointConflict {
-                window: updated.input_window().get(),
-                seat: updated.input_seat().get(),
+        if let Some(surface) = state.conflicting_presentation_target(updated) {
+            return Err(UiAdapterError::PresentationTargetConflict {
+                window: updated.endpoint().window().get(),
                 surface: surface.get(),
             });
         }
-        if previous.input_window() != updated.input_window()
-            || previous.input_seat() != updated.input_seat()
-        {
+        let prepared = state.prepare_surface_slot_update(updated)?;
+        if let Some(route) = prepared.released_input_route() {
             world
                 .resource_mut::<InputTimeline>()
-                .release_presented_route(
-                    previous.input_window(),
-                    previous.input_seat(),
-                    InputSurfaceId::new(surface_id.get()),
-                )?;
+                .release_presented_route(route)?;
         }
-        state.replace_surface_descriptor(updated);
+        state.commit_surface_slot_update(prepared);
         Ok(updated)
     })
 }
@@ -371,23 +291,22 @@ fn active_theme_revision(world: &World) -> u64 {
         .get()
 }
 
-/// Retires one surface after releasing only the input endpoint it owns.
+/// Retires one surface after releasing exactly the endpoint it owns.
 pub fn retire_ui_surface(
     world: &mut World,
     surface_id: UiSurfaceId,
-) -> Result<bool, UiAdapterError> {
+) -> Result<Option<UiSurfaceRetirement>, UiAdapterError> {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let Some(descriptor) = state.surface_descriptor(surface_id) else {
-            return Ok(false);
+        let Some(retirement) = state.prepare_surface_retirement(surface_id)? else {
+            return Ok(None);
         };
-        world
-            .resource_mut::<InputTimeline>()
-            .release_presented_route(
-                descriptor.input_window(),
-                descriptor.input_seat(),
-                InputSurfaceId::new(surface_id.get()),
-            )?;
-        Ok(state.retire_surface(surface_id))
+        if let Some(route) = retirement.input_route() {
+            world
+                .resource_mut::<InputTimeline>()
+                .release_presented_route(route)?;
+        }
+        state.commit_surface_retirement(retirement);
+        Ok(Some(retirement))
     })
 }
 
@@ -416,19 +335,17 @@ pub fn latest_ui_frames(world: &World) -> Result<Vec<Arc<UiFrame>>, UiAdapterErr
         .collect())
 }
 
-/// Returns the active Host-owned surface descriptors in stable surface order.
+/// Returns the active Host-owned Surface Slot snapshots in stable surface order.
 ///
 /// Presentation adapters use this bounded snapshot to mirror explicit window routes without
 /// making the renderer-neutral UI authoring crate depend on a presentation backend.
-pub fn active_ui_surface_descriptors(
-    world: &World,
-) -> Result<Vec<UiSurfaceDescriptor>, UiAdapterError> {
+pub fn active_ui_surface_slots(world: &World) -> Result<Vec<UiSurfaceSlot>, UiAdapterError> {
     let Some(state) = world.get_resource::<UiRuntimeState>() else {
         return Err(UiAdapterError::RuntimeUnavailable);
     };
     Ok(state
         .surfaces()
-        .map(|(_, surface)| surface.descriptor())
+        .map(|(_, surface)| surface.slot())
         .collect())
 }
 
@@ -440,7 +357,7 @@ pub fn commit_ui_presentation(
 ) -> Result<UiPresentationReceipt, UiAdapterError> {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
         let surface_id = frame.environment().surface_id();
-        let (descriptor, prepared) = {
+        let (slot, prepared) = {
             let surface = state
                 .surface(surface_id)
                 .ok_or(UiAdapterError::UnknownSurface {
@@ -457,19 +374,27 @@ pub fn commit_ui_presentation(
                 });
             }
             let prepared = surface.prepare_presentation(presentation_epoch)?;
-            (surface.descriptor(), prepared)
+            (surface.slot(), prepared)
         };
         let receipt = prepared.receipt();
         let epoch = InputPresentationEpoch::new(presentation_epoch)
             .ok_or(UiJournalError::ZeroPresentationEpoch)?;
-        world
+        let input_route = world
             .resource_mut::<InputTimeline>()
-            .publish_presented_route(
-                descriptor.input_window(),
+            .publish_presented_route(InputPresentedRoute::new(
+                slot.endpoint().window(),
                 InputSurfaceId::new(surface_id.get()),
-                descriptor.input_seat(),
+                slot.endpoint().seat(),
                 epoch,
-            )?;
+                InputSlotGeneration::new(receipt.slot_generation().get())
+                    .expect("validated receipt slot generation is non-zero"),
+                InputRouteGeneration::new(receipt.route_revision().get())
+                    .expect("validated receipt route generation is non-zero"),
+                InputGeometryGeneration::new(receipt.geometry_generation().get())
+                    .expect("validated receipt geometry generation is non-zero"),
+            ))?;
+        let mut prepared = prepared;
+        prepared.bind_input_route(input_route);
         state
             .surface_mut(surface_id)
             .expect("validated UI surface remains installed")
@@ -481,19 +406,37 @@ pub fn commit_ui_presentation(
 /// Projects accessibility semantics from the latest submitted frame and interaction state.
 pub fn ui_semantic_snapshot(
     world: &World,
-    surface_id: UiSurfaceId,
-    presentation_epoch: u64,
+    receipt: UiPresentationReceipt,
     seat: UiSeatId,
 ) -> Result<UiSemanticSnapshot, UiAdapterError> {
     let Some(state) = world.get_resource::<UiRuntimeState>() else {
         return Err(UiAdapterError::RuntimeUnavailable);
     };
     let surface = state
-        .surface(surface_id)
+        .surface(receipt.surface_id())
         .ok_or(UiAdapterError::UnknownSurface {
-            surface: surface_id.get(),
+            surface: receipt.surface_id().get(),
         })?;
-    surface.semantic_snapshot(UiRouteStamp::new(surface_id, presentation_epoch), seat)
+    let expected_seat = surface.slot().endpoint().seat();
+    if expected_seat.get() != seat.get() {
+        return Err(UiAdapterError::SeatOwnerMismatch {
+            expected: expected_seat.get(),
+            actual: seat.get(),
+        });
+    }
+    surface.semantic_snapshot(UiRouteStamp::from_receipt(receipt), seat)
+}
+
+#[cfg(test)]
+pub(crate) fn presented_receipt(
+    world: &World,
+    surface_id: UiSurfaceId,
+    presentation_epoch: u64,
+) -> Option<UiPresentationReceipt> {
+    world
+        .get_resource::<UiRuntimeState>()?
+        .surface(surface_id)?
+        .presented_receipt(presentation_epoch)
 }
 
 pub(super) fn push_diagnostic(

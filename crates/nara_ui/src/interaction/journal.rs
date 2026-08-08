@@ -446,7 +446,8 @@ pub enum UiActionAdmissionError {
 #[cfg(test)]
 mod tests {
     use nara_ui_kernel::{
-        UiActionId, UiActivationSource, UiLocalKey, UiRootKey, UiRouteStamp, UiSurfaceId,
+        UiActionId, UiActivationSource, UiLocalKey, UiRootKey, UiRouteStamp, UiSurfaceGenerations,
+        UiSurfaceId,
     };
 
     use super::{
@@ -460,9 +461,16 @@ mod tests {
         let key =
             nara_ui_kernel::UiKey::scoped(root, UiLocalKey::runtime("journal-test", name).unwrap())
                 .unwrap();
+        let generations = UiSurfaceGenerations::new(1, 1, 1, 1).unwrap();
         UiActionDraft::new(
             Some(7),
-            UiRouteStamp::new(surface, 3),
+            UiRouteStamp::new(
+                surface,
+                generations.slot_generation(),
+                generations.route_revision(),
+                generations.geometry_generation(),
+                3,
+            ),
             5,
             key,
             UiActionId::new(name).unwrap(),

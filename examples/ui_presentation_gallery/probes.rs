@@ -8,11 +8,11 @@ pub(super) fn assert_owned_packet(
     packet: &Arc<UiPaintPacket>,
     frame: &Arc<UiFrame>,
     image_snapshot: &PreparedImageSnapshot,
-    descriptor: UiSurfaceDescriptor,
+    slot: UiSurfaceSlot,
 ) {
     assert!(Arc::ptr_eq(&packet.frame(), frame));
     let identity = packet.identity();
-    assert_eq!(identity.surface_id(), descriptor.surface_id());
+    assert_eq!(identity.surface_id(), slot.surface_id());
     assert_eq!(identity.frame_revision(), frame.revision());
     assert_eq!(identity.source_revision(), frame.source_revision());
     assert_eq!(
@@ -23,7 +23,10 @@ pub(super) fn assert_owned_packet(
         identity.presentation_revision(),
         frame.environment().presentation_revision()
     );
-    assert_eq!(packet.scale_factor(), descriptor.scale_factor());
+    assert_eq!(
+        packet.scale_factor(),
+        slot.transform().content_scale_factor()
+    );
     assert_eq!(packet.target(), RenderTarget::Window(WindowId::PRIMARY));
 
     let solid = packet

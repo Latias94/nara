@@ -38,10 +38,13 @@ fn public_surface_compiles_without_renderer_or_ecs_types() {
     assert!(frame.hit_test(crate::UiPoint::new(20.0, 20.0)).is_none());
 
     let mut journal = UiFrameJournal::default();
+    journal
+        .install_surface(surface, environment.slot_generation().get())
+        .unwrap();
     let receipt = journal.submit(Arc::clone(&frame), 10).unwrap();
     assert_eq!(
         journal
-            .resolve(UiRouteStamp::new(surface, receipt.presentation_epoch()))
+            .resolve(UiRouteStamp::from_receipt(receipt))
             .unwrap()
             .revision(),
         frame.revision()

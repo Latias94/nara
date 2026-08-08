@@ -8,6 +8,7 @@ const HARD_MAX_PAINT_PRIMITIVES: usize = 8_192;
 const HARD_MAX_DIAGNOSTICS: usize = 64;
 const HARD_MAX_CACHE_ROOTS: usize = 64;
 const HARD_MAX_SURFACES: usize = 16;
+const HARD_MAX_SURFACE_LIFETIMES: usize = 4_096;
 
 /// Owner-local resource limits. Callers may reduce but never widen the hard ceilings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub struct UiLimits {
     pub(crate) max_diagnostics: usize,
     pub(crate) max_cache_roots: usize,
     pub(crate) max_surfaces: usize,
+    pub(crate) max_surface_lifetimes: usize,
 }
 
 impl Default for UiLimits {
@@ -33,6 +35,7 @@ impl Default for UiLimits {
             max_diagnostics: HARD_MAX_DIAGNOSTICS,
             max_cache_roots: HARD_MAX_CACHE_ROOTS,
             max_surfaces: HARD_MAX_SURFACES,
+            max_surface_lifetimes: HARD_MAX_SURFACE_LIFETIMES,
         }
     }
 }
@@ -86,6 +89,12 @@ impl UiLimits {
         Ok(self)
     }
 
+    pub fn with_max_surface_lifetimes(mut self, value: usize) -> Result<Self, UiLimitsError> {
+        validate("max_surface_lifetimes", value, HARD_MAX_SURFACE_LIFETIMES)?;
+        self.max_surface_lifetimes = value;
+        Ok(self)
+    }
+
     pub(crate) fn validate(self) -> Result<(), UiLimitsError> {
         validate("max_roots", self.max_roots, HARD_MAX_ROOTS)?;
         validate("max_nodes", self.max_nodes, HARD_MAX_NODES)?;
@@ -106,7 +115,12 @@ impl UiLimits {
             self.max_cache_roots,
             HARD_MAX_CACHE_ROOTS,
         )?;
-        validate("max_surfaces", self.max_surfaces, HARD_MAX_SURFACES)
+        validate("max_surfaces", self.max_surfaces, HARD_MAX_SURFACES)?;
+        validate(
+            "max_surface_lifetimes",
+            self.max_surface_lifetimes,
+            HARD_MAX_SURFACE_LIFETIMES,
+        )
     }
 }
 

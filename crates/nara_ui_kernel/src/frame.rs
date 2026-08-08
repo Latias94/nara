@@ -5,7 +5,8 @@ use thiserror::Error;
 
 use crate::{
     UiActionId, UiColor, UiCornerRadii, UiImageId, UiKey, UiLayer, UiPhysicalRect, UiPoint, UiRect,
-    UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy, UiSurfaceId,
+    UiRevision, UiRootKey, UiSemanticRole, UiSize, UiSnapPolicy, UiSurfaceContentTransform,
+    UiSurfaceId,
 };
 
 const MAX_LOGICAL_EXTENT: f32 = 16_384.0;
@@ -15,13 +16,56 @@ const MAX_SCALE_FACTOR: f32 = 8.0;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UiEnvironment {
     surface_id: UiSurfaceId,
-    logical_size: UiSize,
-    scale_factor: f32,
-    route_revision: UiRevision,
-    presentation_revision: UiRevision,
+    content_transform: UiSurfaceContentTransform,
+    generations: UiSurfaceGenerations,
     theme_revision: UiRevision,
     font_revision: UiRevision,
     snap_policy: UiSnapPolicy,
+}
+
+/// Exact Surface Slot generations carried by every candidate, receipt and input route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UiSurfaceGenerations {
+    slot: UiRevision,
+    route: UiRevision,
+    geometry: UiRevision,
+    presentation: UiRevision,
+}
+
+impl UiSurfaceGenerations {
+    pub fn new(
+        slot: u64,
+        route: u64,
+        geometry: u64,
+        presentation: u64,
+    ) -> Result<Self, UiEnvironmentError> {
+        Ok(Self {
+            slot: revision("slot_generation", slot)?,
+            route: revision("route_revision", route)?,
+            geometry: revision("geometry_generation", geometry)?,
+            presentation: revision("presentation_revision", presentation)?,
+        })
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> UiRevision {
+        self.slot
+    }
+
+    #[must_use]
+    pub const fn route_revision(self) -> UiRevision {
+        self.route
+    }
+
+    #[must_use]
+    pub const fn geometry_generation(self) -> UiRevision {
+        self.geometry
+    }
+
+    #[must_use]
+    pub const fn presentation_revision(self) -> UiRevision {
+        self.presentation
+    }
 }
 
 impl UiEnvironment {
@@ -53,13 +97,40 @@ impl UiEnvironment {
                 value: scale_factor,
             });
         }
+        let logical_size =
+            UiSize::new(logical_width, logical_height).expect("validated positive logical size");
+        let content_transform = UiSurfaceContentTransform::direct(logical_size, scale_factor)
+            .map_err(|_| UiEnvironmentError::InvalidScaleFactor {
+                value: scale_factor,
+            })?;
+        // The direct convenience path represents one fixed synthetic slot. Callers that own a
+        // real Host lifecycle must use `for_surface` with explicit generations.
+        Self::for_surface(
+            surface_id,
+            content_transform,
+            UiSurfaceGenerations::new(
+                1,
+                route_revision,
+                presentation_revision,
+                presentation_revision,
+            )?,
+            theme_revision,
+            font_revision,
+        )
+    }
+
+    /// Builds an environment from one exact Host-owned Surface Slot generation.
+    pub fn for_surface(
+        surface_id: UiSurfaceId,
+        content_transform: UiSurfaceContentTransform,
+        generations: UiSurfaceGenerations,
+        theme_revision: u64,
+        font_revision: u64,
+    ) -> Result<Self, UiEnvironmentError> {
         Ok(Self {
             surface_id,
-            logical_size: UiSize::new(logical_width, logical_height)
-                .expect("validated positive logical size"),
-            scale_factor,
-            route_revision: revision("route_revision", route_revision)?,
-            presentation_revision: revision("presentation_revision", presentation_revision)?,
+            content_transform,
+            generations,
             theme_revision: revision("theme_revision", theme_revision)?,
             font_revision: revision("font_revision", font_revision)?,
             snap_policy: UiSnapPolicy::NearestEdge,
@@ -79,22 +150,42 @@ impl UiEnvironment {
 
     #[must_use]
     pub const fn logical_size(self) -> UiSize {
-        self.logical_size
+        self.content_transform.authored_logical_size()
     }
 
     #[must_use]
     pub const fn scale_factor(self) -> f32 {
-        self.scale_factor
+        self.content_transform.content_scale_factor()
+    }
+
+    #[must_use]
+    pub const fn content_transform(self) -> UiSurfaceContentTransform {
+        self.content_transform
+    }
+
+    #[must_use]
+    pub const fn generations(self) -> UiSurfaceGenerations {
+        self.generations
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> UiRevision {
+        self.generations.slot_generation()
     }
 
     #[must_use]
     pub const fn route_revision(self) -> UiRevision {
-        self.route_revision
+        self.generations.route_revision()
+    }
+
+    #[must_use]
+    pub const fn geometry_generation(self) -> UiRevision {
+        self.generations.geometry_generation()
     }
 
     #[must_use]
     pub const fn presentation_revision(self) -> UiRevision {
-        self.presentation_revision
+        self.generations.presentation_revision()
     }
 
     #[must_use]
@@ -113,7 +204,13 @@ impl UiEnvironment {
     }
 
     pub(crate) fn snap(self, rect: UiRect) -> UiPhysicalRect {
-        UiPhysicalRect::snap(rect, self.scale_factor, self.snap_policy)
+        self.physical_rect(rect).unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn physical_rect(self, rect: UiRect) -> Option<UiPhysicalRect> {
+        self.content_transform
+            .authored_rect_to_physical(rect, self.snap_policy)
     }
 }
 
@@ -356,6 +453,7 @@ pub struct UiSemanticNode {
     pub(crate) expanded: Option<bool>,
     pub(crate) actions: Vec<UiActionId>,
     pub(crate) rect: UiRect,
+    pub(crate) clip_rect: Option<UiRect>,
 }
 
 impl UiSemanticNode {
@@ -407,6 +505,16 @@ impl UiSemanticNode {
     #[must_use]
     pub const fn rect(&self) -> UiRect {
         self.rect
+    }
+
+    #[must_use]
+    pub const fn clip_rect(&self) -> Option<UiRect> {
+        self.clip_rect
+    }
+
+    pub(crate) fn visible_rect(&self) -> Option<UiRect> {
+        self.clip_rect
+            .map_or(Some(self.rect), |clip| self.rect.intersect(clip))
     }
 }
 
@@ -567,8 +675,7 @@ pub fn frame_blocks_unhandled_input(frame: &UiFrame) -> bool {
 pub struct UiPresentationReceipt {
     pub(crate) surface_id: UiSurfaceId,
     pub(crate) frame_revision: UiFrameRevision,
-    pub(crate) route_revision: UiRevision,
-    pub(crate) presentation_revision: UiRevision,
+    pub(crate) generations: UiSurfaceGenerations,
     pub(crate) presentation_epoch: u64,
 }
 
@@ -584,13 +691,28 @@ impl UiPresentationReceipt {
     }
 
     #[must_use]
+    pub const fn generations(self) -> UiSurfaceGenerations {
+        self.generations
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> UiRevision {
+        self.generations.slot_generation()
+    }
+
+    #[must_use]
     pub const fn route_revision(self) -> UiRevision {
-        self.route_revision
+        self.generations.route_revision()
+    }
+
+    #[must_use]
+    pub const fn geometry_generation(self) -> UiRevision {
+        self.generations.geometry_generation()
     }
 
     #[must_use]
     pub const fn presentation_revision(self) -> UiRevision {
-        self.presentation_revision
+        self.generations.presentation_revision()
     }
 
     #[must_use]

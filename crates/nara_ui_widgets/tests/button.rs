@@ -43,11 +43,12 @@ fn fixture() -> (UiButton, UiFrameJournal, UiRouteStamp, UiInteractionSession) {
     assert_eq!(semantic.name(), "Retry");
     assert_eq!(semantic.actions(), &[UiActionId::new("retry").unwrap()]);
     let mut journal = UiFrameJournal::default();
-    journal.submit(Arc::clone(&frame), 9).unwrap();
+    journal.install_surface(surface, 1).unwrap();
+    let receipt = journal.submit(Arc::clone(&frame), 9).unwrap();
     (
         button,
         journal,
-        UiRouteStamp::new(surface, 9),
+        UiRouteStamp::from_receipt(receipt),
         UiInteractionSession::default(),
     )
 }

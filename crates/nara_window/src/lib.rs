@@ -43,10 +43,46 @@ impl WindowId {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct WindowSafeAreaInsets {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+impl Default for WindowSafeAreaInsets {
+    fn default() -> Self {
+        Self {
+            left: 0.0,
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+        }
+    }
+}
+
+impl WindowSafeAreaInsets {
+    #[must_use]
+    pub fn new(left: f32, top: f32, right: f32, bottom: f32) -> Option<Self> {
+        [left, top, right, bottom]
+            .into_iter()
+            .all(|value| value.is_finite() && value >= 0.0)
+            .then_some(Self {
+                left,
+                top,
+                right,
+                bottom,
+            })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct WindowResolution {
     pub physical_width: u32,
     pub physical_height: u32,
     pub scale_factor: f64,
+    pub safe_area_insets: WindowSafeAreaInsets,
 }
 
 impl Default for WindowResolution {
@@ -55,6 +91,7 @@ impl Default for WindowResolution {
             physical_width: 1280,
             physical_height: 720,
             scale_factor: 1.0,
+            safe_area_insets: WindowSafeAreaInsets::default(),
         }
     }
 }
@@ -72,6 +109,12 @@ impl WindowResolution {
     #[must_use]
     pub fn with_scale_factor(mut self, scale_factor: f64) -> Self {
         self.scale_factor = scale_factor;
+        self
+    }
+
+    #[must_use]
+    pub fn with_safe_area_insets(mut self, safe_area_insets: WindowSafeAreaInsets) -> Self {
+        self.safe_area_insets = safe_area_insets;
         self
     }
 

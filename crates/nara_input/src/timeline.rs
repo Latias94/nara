@@ -15,8 +15,9 @@ mod types;
 pub use types::{__InputDriverEvent, __InputDriverOutput};
 pub use types::{
     InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
-    InputIngressError, InputInvalidationReason, InputPointerId, InputPresentationEpoch,
-    InputRouteStamp, InputSeatId, InputSurfaceId, InputTimelineEntry, InputUiCursorError,
+    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPointerId,
+    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputRouteStamp,
+    InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimelineEntry, InputUiCursorError,
     InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
     MAX_INPUT_TIMELINE_ENTRIES,
 };
@@ -42,7 +43,10 @@ struct RetainedInput {
 struct RouteState {
     surface: InputSurfaceId,
     presentation_epoch: InputPresentationEpoch,
-    generation: u64,
+    slot_generation: InputSlotGeneration,
+    route_generation: InputRouteGeneration,
+    geometry_generation: InputGeometryGeneration,
+    binding_generation: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,7 +67,7 @@ pub struct InputTimeline {
     action_scanned_cursor: u64,
     routes: BTreeMap<(InputWindowId, InputSeatId), RouteState>,
     focused_windows: BTreeMap<InputSeatId, InputWindowId>,
-    next_route_generation: u64,
+    next_binding_generation: u64,
     routes_poisoned: bool,
     pressed_keys: BTreeMap<(InputWindowId, InputSeatId), BTreeSet<KeyCode>>,
     pressed_mouse_buttons:
@@ -81,7 +85,7 @@ impl Default for InputTimeline {
             action_scanned_cursor: 0,
             routes: BTreeMap::new(),
             focused_windows: BTreeMap::new(),
-            next_route_generation: 0,
+            next_binding_generation: 0,
             routes_poisoned: false,
             pressed_keys: BTreeMap::new(),
             pressed_mouse_buttons: BTreeMap::new(),
@@ -121,16 +125,17 @@ impl InputTimeline {
         }
     }
 
+    /// Publishes one exact presented route and the slot/geometry generations it represents.
     pub fn publish_presented_route(
         &mut self,
-        window: InputWindowId,
-        surface: InputSurfaceId,
-        seat: InputSeatId,
-        presentation_epoch: InputPresentationEpoch,
+        route: InputPresentedRoute,
     ) -> Result<InputRouteStamp, InputIngressError> {
         if self.routes_poisoned {
-            return Err(InputIngressError::RouteGenerationExhausted);
+            return Err(InputIngressError::RouteBindingGenerationExhausted);
         }
+        let window = route.window();
+        let surface = route.surface();
+        let seat = route.seat();
         let key = (window, seat);
         if !self.routes.contains_key(&key) && self.routes.len() >= MAX_INPUT_ROUTES {
             return Err(InputIngressError::RouteCapacityExceeded {
@@ -146,21 +151,36 @@ impl InputTimeline {
                     requested_surface: surface,
                 });
             }
-            if current.presentation_epoch == presentation_epoch {
+            let same_slot = route.slot_generation() == current.slot_generation;
+            let regresses = route.slot_generation() < current.slot_generation
+                || route.route_generation() < current.route_generation
+                || route.geometry_generation() < current.geometry_generation
+                || (same_slot && route.presentation_epoch() < current.presentation_epoch);
+            if regresses {
+                return Err(InputIngressError::PresentedRouteRegression { window, seat });
+            }
+            if current.presentation_epoch == route.presentation_epoch()
+                && current.slot_generation == route.slot_generation()
+                && current.route_generation == route.route_generation()
+                && current.geometry_generation == route.geometry_generation()
+            {
                 return Ok(self.pointer_route(window, seat, None));
             }
         }
-        let generation = self.next_route_generation.checked_add(1).ok_or_else(|| {
+        let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
             self.poison_routes();
-            InputIngressError::RouteGenerationExhausted
+            InputIngressError::RouteBindingGenerationExhausted
         })?;
-        self.next_route_generation = generation;
+        self.next_binding_generation = binding_generation;
         self.routes.insert(
             key,
             RouteState {
                 surface,
-                presentation_epoch,
-                generation,
+                presentation_epoch: route.presentation_epoch(),
+                slot_generation: route.slot_generation(),
+                route_generation: route.route_generation(),
+                geometry_generation: route.geometry_generation(),
+                binding_generation,
             },
         );
         Ok(self.pointer_route(window, seat, None))
@@ -190,28 +210,41 @@ impl InputTimeline {
         Ok(())
     }
 
-    /// Releases one endpoint only when it is still owned by the matching surface.
+    /// Releases one endpoint when it still owns the exact published route stamp.
+    ///
+    /// Releasing an endpoint that was already invalidated by platform lifecycle input is
+    /// idempotent; a replacement route at the same endpoint is rejected.
     pub fn release_presented_route(
         &mut self,
-        window: InputWindowId,
-        seat: InputSeatId,
-        surface: InputSurfaceId,
-    ) -> Result<bool, InputIngressError> {
+        route: InputRouteStamp,
+    ) -> Result<(), InputIngressError> {
+        let window = route.window();
+        let seat = route.seat();
         let key = (window, seat);
-        if !self
-            .routes
-            .get(&key)
-            .is_some_and(|route| route.surface == surface)
-        {
-            return Ok(false);
+        let Some(_) = self.routes.get(&key) else {
+            return Ok(());
+        };
+        if self.pointer_route(window, seat, route.pointer()) != route {
+            return Err(InputIngressError::PresentedRouteMismatch { window, seat });
         }
-        let generation = self.next_route_generation.checked_add(1).ok_or_else(|| {
+        let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
             self.poison_routes();
-            InputIngressError::RouteGenerationExhausted
+            InputIngressError::RouteBindingGenerationExhausted
         })?;
-        self.next_route_generation = generation;
+        self.next_binding_generation = binding_generation;
         self.routes.remove(&key);
-        Ok(true)
+        if self.focused_windows.get(&seat) == Some(&window) {
+            self.focused_windows.remove(&seat);
+        }
+        self.pressed_mouse_buttons
+            .retain(|&(event_window, event_seat, _), _| {
+                event_window != window || event_seat != seat
+            });
+        self.pointer_positions
+            .retain(|&(event_window, event_seat, _), _| {
+                event_window != window || event_seat != seat
+            });
+        Ok(())
     }
 
     /// Admits one normalized keyboard transition into the global timeline.
@@ -311,21 +344,6 @@ impl InputTimeline {
         self.admit_drafts(&[draft])
     }
 
-    pub fn admit_accessibility_action(
-        &mut self,
-        window: InputWindowId,
-        seat: InputSeatId,
-        action: u32,
-    ) -> Result<InputAdmission, InputIngressError> {
-        let draft = InputDraft {
-            route: self.focused_route(window, seat),
-            logical_position: None,
-            kind: InputEventKind::AccessibilityAction { action },
-            invalidation: None,
-        };
-        self.admit_drafts(&[draft])
-    }
-
     fn apply_driver_event(
         &mut self,
         event: __InputDriverEvent,
@@ -356,13 +374,6 @@ impl InputTimeline {
                 phase,
             } => self
                 .admit_gamepad_button(window, seat, gamepad, button, phase)
-                .map(__InputDriverOutput::new),
-            __InputDriverEvent::Accessibility {
-                window,
-                seat,
-                action,
-            } => self
-                .admit_accessibility_action(window, seat, action)
                 .map(__InputDriverOutput::new),
             __InputDriverEvent::Window {
                 window,
@@ -809,7 +820,10 @@ impl InputTimeline {
             seat,
             pointer,
             presentation_epoch: Some(route.presentation_epoch),
-            route_generation: route.generation,
+            slot_generation: Some(route.slot_generation),
+            route_generation: Some(route.route_generation),
+            geometry_generation: Some(route.geometry_generation),
+            binding_generation: route.binding_generation,
         }
     }
 
@@ -822,11 +836,11 @@ impl InputTimeline {
             *focused_seat != seat || *focused_window != window
         });
         self.routes.remove(&(window, seat));
-        let Some(generation) = self.next_route_generation.checked_add(1) else {
+        let Some(binding_generation) = self.next_binding_generation.checked_add(1) else {
             self.poison_routes();
-            return Err(InputIngressError::RouteGenerationExhausted);
+            return Err(InputIngressError::RouteBindingGenerationExhausted);
         };
-        self.next_route_generation = generation;
+        self.next_binding_generation = binding_generation;
         Ok(())
     }
 
@@ -1018,15 +1032,30 @@ mod tests {
     use super::*;
     use crate::{ActionId, ActionMap};
 
+    fn slot_generation(value: u64) -> InputSlotGeneration {
+        InputSlotGeneration::new(value).unwrap()
+    }
+
+    fn route_generation(value: u64) -> InputRouteGeneration {
+        InputRouteGeneration::new(value).unwrap()
+    }
+
+    fn geometry_generation(value: u64) -> InputGeometryGeneration {
+        InputGeometryGeneration::new(value).unwrap()
+    }
+
     fn published_timeline() -> InputTimeline {
         let mut timeline = InputTimeline::default();
         timeline
-            .publish_presented_route(
+            .publish_presented_route(InputPresentedRoute::new(
                 InputWindowId::new(1),
                 InputSurfaceId::new(7),
                 InputSeatId::PRIMARY,
                 InputPresentationEpoch::new(11).unwrap(),
-            )
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
             .unwrap();
         timeline
             .apply_window(
@@ -1167,27 +1196,63 @@ mod tests {
         let first = InputSurfaceId::new(10);
         let second = InputSurfaceId::new(20);
         let epoch = InputPresentationEpoch::new(7).unwrap();
+        let slot = slot_generation(3);
+        let geometry = geometry_generation(5);
 
         let initial = timeline
-            .publish_presented_route(window, first, seat, epoch)
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                first,
+                seat,
+                epoch,
+                slot,
+                route_generation(4),
+                geometry,
+            ))
             .unwrap();
         let repeated = timeline
-            .publish_presented_route(window, first, seat, epoch)
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                first,
+                seat,
+                epoch,
+                slot,
+                route_generation(4),
+                geometry,
+            ))
             .unwrap();
         assert_eq!(repeated, initial);
+        assert_eq!(initial.slot_generation(), Some(slot));
+        assert_eq!(initial.geometry_generation(), Some(geometry));
 
+        let next_geometry = geometry_generation(6);
         let advanced = timeline
-            .publish_presented_route(window, first, seat, InputPresentationEpoch::new(8).unwrap())
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                first,
+                seat,
+                InputPresentationEpoch::new(8).unwrap(),
+                slot,
+                route_generation(5),
+                next_geometry,
+            ))
             .unwrap();
-        assert!(advanced.route_generation() > initial.route_generation());
+        assert!(advanced.binding_generation() > initial.binding_generation());
+        assert_eq!(initial.route_generation(), Some(route_generation(4)));
+        assert_eq!(advanced.route_generation(), Some(route_generation(5)));
+        assert_eq!(advanced.slot_generation(), Some(slot));
+        assert_eq!(advanced.geometry_generation(), Some(next_geometry));
 
         assert_eq!(
-            timeline.publish_presented_route(
+            timeline.publish_presented_route(InputPresentedRoute::new(
                 window,
                 second,
                 seat,
                 InputPresentationEpoch::new(9).unwrap(),
-            ),
+                slot_generation(4),
+                route_generation(4),
+                geometry_generation(1),
+            )),
             Err(InputIngressError::RouteConflict {
                 window,
                 seat,
@@ -1196,26 +1261,151 @@ mod tests {
             })
         );
         assert_eq!(timeline.pointer_route(window, seat, None), advanced);
-        assert!(
-            !timeline
-                .release_presented_route(window, seat, second)
-                .unwrap()
+        assert_eq!(
+            timeline.publish_presented_route(InputPresentedRoute::new(
+                window,
+                first,
+                seat,
+                InputPresentationEpoch::new(7).unwrap(),
+                slot_generation(2),
+                route_generation(6),
+                geometry_generation(6),
+            )),
+            Err(InputIngressError::PresentedRouteRegression { window, seat })
         );
-        assert!(
-            timeline
-                .release_presented_route(window, seat, first)
-                .unwrap()
+        assert_eq!(
+            timeline.release_presented_route(initial),
+            Err(InputIngressError::PresentedRouteMismatch { window, seat })
         );
+        timeline.release_presented_route(advanced).unwrap();
+        assert_eq!(timeline.release_presented_route(advanced), Ok(()));
 
         let reclaimed = timeline
-            .publish_presented_route(
+            .publish_presented_route(InputPresentedRoute::new(
                 window,
                 second,
                 seat,
                 InputPresentationEpoch::new(9).unwrap(),
-            )
+                slot_generation(4),
+                route_generation(4),
+                geometry_generation(1),
+            ))
             .unwrap();
         assert_eq!(reclaimed.surface(), Some(second));
+    }
+
+    #[test]
+    fn releasing_the_focused_route_falls_back_to_the_next_explicit_keyboard_window() {
+        let mut timeline = InputTimeline::default();
+        let seat = InputSeatId::PRIMARY;
+        let first_window = InputWindowId::new(3);
+        let second_window = InputWindowId::new(4);
+        let first = timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                first_window,
+                InputSurfaceId::new(10),
+                seat,
+                InputPresentationEpoch::new(1).unwrap(),
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
+            .unwrap();
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                second_window,
+                InputSurfaceId::new(20),
+                seat,
+                InputPresentationEpoch::new(2).unwrap(),
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
+            .unwrap();
+        timeline
+            .apply_window(first_window, seat, InputWindowEvent::Focused(true))
+            .unwrap();
+        timeline.release_presented_route(first).unwrap();
+        timeline
+            .apply_keyboard(
+                second_window,
+                seat,
+                ButtonDriverInput::Press(KeyCode::Enter),
+            )
+            .unwrap();
+
+        let route = timeline
+            .pending_ui_entries()
+            .last()
+            .expect("keyboard input should be retained")
+            .route();
+        assert_eq!(route.window(), second_window);
+        assert_eq!(route.surface(), Some(InputSurfaceId::new(20)));
+        assert!(route.is_ui_routable());
+    }
+
+    #[test]
+    fn retained_entries_keep_their_exact_slot_and_geometry_generations() {
+        let mut timeline = InputTimeline::default();
+        let window = InputWindowId::new(3);
+        let surface = InputSurfaceId::new(10);
+        let seat = InputSeatId::PRIMARY;
+        let first_slot = slot_generation(7);
+        let first_geometry = geometry_generation(11);
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                surface,
+                seat,
+                InputPresentationEpoch::new(13).unwrap(),
+                first_slot,
+                route_generation(9),
+                first_geometry,
+            ))
+            .unwrap();
+        timeline
+            .admit_pointer(
+                window,
+                seat,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(1.0, 2.0)),
+            )
+            .unwrap();
+
+        let second_slot = slot_generation(8);
+        let second_geometry = geometry_generation(12);
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                surface,
+                seat,
+                InputPresentationEpoch::new(14).unwrap(),
+                second_slot,
+                route_generation(10),
+                second_geometry,
+            ))
+            .unwrap();
+        timeline
+            .admit_pointer(
+                window,
+                seat,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(3.0, 4.0)),
+            )
+            .unwrap();
+
+        let routes = timeline
+            .pending_ui_entries()
+            .map(|entry| entry.route())
+            .collect::<Vec<_>>();
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0].slot_generation(), Some(first_slot));
+        assert_eq!(routes[0].route_generation(), Some(route_generation(9)));
+        assert_eq!(routes[0].geometry_generation(), Some(first_geometry));
+        assert_eq!(routes[1].slot_generation(), Some(second_slot));
+        assert_eq!(routes[1].route_generation(), Some(route_generation(10)));
+        assert_eq!(routes[1].geometry_generation(), Some(second_geometry));
+        assert!(routes[1].binding_generation() > routes[0].binding_generation());
     }
 
     #[test]
@@ -1226,20 +1416,26 @@ mod tests {
         let first_seat = InputSeatId::PRIMARY;
         let second_seat = InputSeatId::new(5);
         timeline
-            .publish_presented_route(
+            .publish_presented_route(InputPresentedRoute::new(
                 first_window,
                 InputSurfaceId::new(10),
                 first_seat,
                 InputPresentationEpoch::new(100).unwrap(),
-            )
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(2),
+            ))
             .unwrap();
         timeline
-            .publish_presented_route(
+            .publish_presented_route(InputPresentedRoute::new(
                 second_window,
                 InputSurfaceId::new(20),
                 second_seat,
                 InputPresentationEpoch::new(200).unwrap(),
-            )
+                slot_generation(3),
+                route_generation(3),
+                geometry_generation(4),
+            ))
             .unwrap();
         timeline
             .apply_window(first_window, first_seat, InputWindowEvent::Focused(true))
@@ -1369,12 +1565,15 @@ mod tests {
         let seat = InputSeatId::PRIMARY;
         for (window, surface, epoch) in [(first_window, 10, 100), (second_window, 20, 200)] {
             timeline
-                .publish_presented_route(
+                .publish_presented_route(InputPresentedRoute::new(
                     window,
                     InputSurfaceId::new(surface),
                     seat,
                     InputPresentationEpoch::new(epoch).unwrap(),
-                )
+                    slot_generation(surface),
+                    route_generation(surface),
+                    geometry_generation(epoch),
+                ))
                 .unwrap();
         }
         timeline

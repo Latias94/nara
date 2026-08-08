@@ -83,6 +83,12 @@ pub enum UiRouteRejection {
     InvalidProjection(UiInputProjectionIssue),
     #[error("UI route endpoint does not match the retained presented session")]
     RouteEndpointMismatch,
+    #[error("UI route generations do not match the current Surface Slot")]
+    SurfaceGenerationMismatch,
+    #[error("UI pointer does not match the Surface Slot pointer owner")]
+    PointerOwnerMismatch,
+    #[error("UI seat does not match the Surface Slot endpoint owner")]
+    SeatOwnerMismatch,
     #[error("the active modal UI session blocks an input kind it does not handle")]
     UnhandledInputBlocked,
     #[error("UI surface {surface} is unknown")]
@@ -210,6 +216,13 @@ impl UiInteractionTransaction {
             .ok_or(UiRouteRejection::UnknownSurface {
                 surface: surface_id.get(),
             })?;
+        let slot = surface.slot();
+        if slot.slot_generation() != route.slot_generation().get()
+            || slot.route_generation() != route.route_revision().get()
+            || slot.geometry_generation() != route.geometry_generation().get()
+        {
+            return Err(UiRouteRejection::SurfaceGenerationMismatch);
+        }
         let presented = surface
             .resolve_presented(route)
             .map_err(map_adapter_error)?;
@@ -311,15 +324,17 @@ pub(crate) fn map_adapter_error(error: UiAdapterError) -> UiRouteRejection {
         UiAdapterError::Dispatch(error) => UiRouteRejection::Dispatch(error),
         UiAdapterError::Widget(error) => UiRouteRejection::Widget(error),
         UiAdapterError::RuntimeUnavailable => UiRouteRejection::RuntimeUnavailable,
+        UiAdapterError::SeatOwnerMismatch { .. } => UiRouteRejection::SeatOwnerMismatch,
         UiAdapterError::RuntimeSetup(_)
         | UiAdapterError::SourceRevisionExhausted
         | UiAdapterError::SurfaceLimitExceeded
         | UiAdapterError::SurfaceIdentitySpaceExhausted
-        | UiAdapterError::InputEndpointConflict { .. }
+        | UiAdapterError::PresentationTargetConflict { .. }
         | UiAdapterError::SurfaceAlreadyInstalled { .. }
+        | UiAdapterError::PresentationAuthorityMissing { .. }
         | UiAdapterError::FrameNotLatest { .. }
         | UiAdapterError::Environment(_)
-        | UiAdapterError::SurfaceMapping(_)
+        | UiAdapterError::SurfaceSlot(_)
         | UiAdapterError::Input(_) => UiRouteRejection::InvalidRouteStamp,
     }
 }
