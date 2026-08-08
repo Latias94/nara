@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b93eef518ce897559266d560cf4007f984bf3099682844262c51a3cb201615db"
+source_fingerprint: "902e2a22780501415916909560a41d92406d905ceb6d4cc114d5d17204dad13e"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "b93eef518ce897559266d560cf4007f984bf3099682844262c51a3cb201
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b93eef518ce897559266d560cf4007f984bf3099682844262c51a3cb201615db`
-- Immutable records: 378
+- Source fingerprint: `902e2a22780501415916909560a41d92406d905ceb6d4cc114d5d17204dad13e`
+- Immutable records: 380
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [UI Foundation correction: UIF-U0 authority rebaseline active](registry/2026-08/2026-08-08T091856Z-engine-foundation-contract-completion-codex-root-e4e17d11b72d488897f4026dec686253.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [UI Foundation correction: UIF-U1 atomic presented-session interaction active](registry/2026-08/2026-08-08T105208Z-engine-foundation-contract-completion-codex-root-31aad28a16ce4c0391a1a0c75cd0fb87.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [UIF-U0 UI Foundation authority and contract rebaseline](verification/2026-08/2026-08-08T105134Z-uif-u0-ui-foundation-authority-and-contract-rebaseline-7425f7e748a543dc9bab48bbf84d0e11.md) - Records the superseded NUI authority, focused ADR set, split product successors, and closed pre-implementation contract baseline.
 - **Verification Evidence**: [NUI-U15A neutral UI conformance and public boundary freeze](verification/2026-08/2026-08-08T051354Z-nui-u15a-neutral-ui-conformance-and-public-boundary-freeze-32535c96ab3b49d3affa4ecdcbb22e39.md) - Freezes the kernel, runtime adapter, and root presentation UI boundaries through three executable public-only examples.
 - **Verification Evidence**: [NUI-U17 deep runtime UI ownership and interface closure](verification/2026-08/2026-08-06T181000Z-nui-u17-deep-runtime-ui-ownership-3eb9a95fdf4a43caa78aea9fad953e13.md) - Verifies exact presented-session authority, fail-closed routing, pause-safe journal delivery, route ownership, and private schedule/module boundaries without product-matrix expansion.
 - **Verification Evidence**: [NUI-U14 owned UI and image packet through WGPU](verification/2026-08/2026-08-06T052759Z-nui-u14-owned-ui-and-image-packet-through-wgpu-059e76de3be74d5894fe41135b3c7670.md) - Verifies immutable resource-complete UI/image packets, stable render ordering, closed content/backend outcomes, captured image and glyph ownership, and desktop GPU readback.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Decision**: [NUI post-U8 identity receipt and reference UI checkpoint](decisions/2026-08/2026-08-05T101528Z-nui-post-u8-identity-receipt-and-reference-ui-checkpoint-cafb82e406d24834a129c782e07b65bb.md) - Fixes the minimum source/projection identity rule, exact backend-submission receipt semantics and retention, AccessKit trial boundary, and the reference HUD/terminal/Retry product matrix before UI core implementation.
 - **Verification Evidence**: [NUI-U8 immutable ordered runtime hierarchy and structural UI order](verification/2026-08/2026-08-05T095653Z-nui-u8-immutable-ordered-runtime-hierarchy-and-structural-ui-order-6b8cb6a9690f464bb389c89167f2e0f0.md) - Verifies exclusive immutable hierarchy authority, immediate fail-closed completion, atomic ordered Scene projection and retirement, and entity-allocation-independent UI layout, hit testing, and rendering order.
 - **Verification Evidence**: [NUI-U6/U7 canonical ordered documents and exact placement patches](verification/2026-08/2026-08-05T062453Z-nui-u6-u7-canonical-ordered-documents-and-exact-placement-patches-e0f908e2277c4a56b55090275d8591dd.md) - Verifies canonical ordered Scene and Prefab placement, bounded rejection of the removed parent shape, exact candidate-relative Patch inverses, tooling history, and persistence parity.
-- **Verification Evidence**: [NUI-U5A explicit 2D content and presentation composition](verification/2026-08/2026-08-05T020814Z-nui-u5a-explicit-2d-content-and-presentation-composition-cab380e2dfc34bb88b849f62b84b8c3b.md) - Verifies the content-only runtime-2d boundary, explicit presentation-2d composition, stable project capability bits, exact headless and desktop plans, and independently locked consumers.
 
 # Integration Notes
 
