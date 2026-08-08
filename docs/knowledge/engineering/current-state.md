@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "b2aa67eced4e30d2b604180d6cc7b3c7c908685f21574e0a9323b6ff09cafc53"
+source_fingerprint: "3fc9fd68b5dccd4a869a443228edaac32bf25a0f798374f43b221e5512b2d5a6"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "b2aa67eced4e30d2b604180d6cc7b3c7c908685f21574e0a9323b6ff09c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `b2aa67eced4e30d2b604180d6cc7b3c7c908685f21574e0a9323b6ff09cafc53`
-- Immutable records: 387
+- Source fingerprint: `3fc9fd68b5dccd4a869a443228edaac32bf25a0f798374f43b221e5512b2d5a6`
+- Immutable records: 389
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [UI Foundation correction: UIF-U3 presentation closure active](registry/2026-08/2026-08-08T160402Z-engine-foundation-contract-completion-codex-root-7489ada27b5c437f99ded88ad2fb9f96.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [UI Foundation correction: UIF-U4 Surface Slot and accessibility active](registry/2026-08/2026-08-08T183959Z-engine-foundation-contract-completion-codex-root-e25d8b72ab3d4254a6e72723727816eb.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [UIF-U3 atomic presentation planning and backend closure](verification/2026-08/2026-08-08T183905Z-uif-u3-atomic-presentation-planning-and-backend-closure-a342f27273bb47dda137107656a35074.md) - Verifies target-private failure-atomic planning, resource-complete packets, owner-local budgets, bounded rounded rectangles, exact backend retry generations, and one-shot presentation authority.
 - **Verification Evidence**: [UIF-U2 root envelopes and order-safe fallback](verification/2026-08/2026-08-08T160401Z-uif-u2-root-envelope-and-order-safe-fallback-5dfa71eb2270485699155b13fb595f07.md) - Closes root-local failure isolation, relative visual fallback, modal barrier safety, and rejected-candidate retirement.
 - **Verification Evidence**: [UIF-U1 presentation reconciliation correction](verification/2026-08/2026-08-08T142032Z-uif-u1-presentation-reconciliation-correction-055102d378e94c819ef419be51d29159.md) - Closes candidate/session generation splits, remove/reinsert resurrection, release backpressure, and staged reconciliation ownership.
 - **Verification Evidence**: [UIF-U1 atomic presented-session interaction](verification/2026-08/2026-08-08T113450Z-uif-u1-atomic-presented-session-interaction-d13d3f5c4c68440fa5ddacb88ee64eab.md) - Verifies closed dispatch outcomes, atomic reconciliation, invalidation-safe pointer routing, committed focus semantics, and disabled-focus identity.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [NUI-U12 presented-frame widgets focus and semantics](verification/2026-08/2026-08-05T162240Z-nui-u12-presented-frame-widgets-focus-and-semantics-a83546b63b6a4c87b986b762d8ba7e77.md) - Verifies exact retained-frame interaction routing, controlled Button intents, modal focus and capture, complete semantic state, and the bounded optional AccessKit mapping.
 - **Verification Evidence**: [NUI-U11 normalized input timeline and pause-safe routing](verification/2026-08/2026-08-05T132051Z-nui-u11-normalized-input-timeline-and-pause-safe-routing-aba5a9f9a3664dfdaf3093313a43989f.md) - Verifies the bounded globally ordered normalized input timeline, event-time route stamps, atomic lifecycle cancellation, independent consumer cursors, and pause-safe UI-before-gameplay handling.
 - **Verification Evidence**: [NUI-U10 renderer-neutral immutable UI frame kernel](verification/2026-08/2026-08-05T122212Z-nui-u10-renderer-neutral-immutable-ui-frame-kernel-524095a3d0614d7390aa2b2f8e8d3442.md) - Verifies the bounded renderer-neutral compiler, exact structured identity, stable layout and presentation order, root-local failure atomicity, and exact submitted-frame receipts.
-- **Verification Evidence**: [NUI-U9 bounded deterministic text module](verification/2026-08/2026-08-05T111150Z-nui-u9-bounded-deterministic-text-module-9b67d709856c4004b32df7db37c0d2ae.md) - Verifies exact bundled-font admission, deterministic bounded shaping and raster output, no system discovery, and direct independently locked consumption.
 
 # Integration Notes
 
