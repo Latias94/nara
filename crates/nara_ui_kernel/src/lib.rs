@@ -14,6 +14,12 @@ mod journal;
 mod limits;
 mod style;
 
+/// First-party cross-crate implementation seams that are not product API.
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::interaction::UiCandidateReconciliation;
+}
+
 pub use authoring::{
     UiAuthoringError, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiInteraction, UiLayer,
     UiNode, UiRoot, UiSemanticRole, UiSemantics,

@@ -1,16 +1,21 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use nara_ecs::Resource;
 use nara_text::FontFace;
 use nara_ui_kernel::{
-    UiCompiler, UiEnvironment, UiFrame, UiInteractionSession, UiKey, UiLimits, UiRouteStamp,
-    UiSeatId, UiSemanticSnapshot, UiTheme,
+    UiCompileError, UiCompiler, UiDispatchBatch, UiDispatchError, UiEnvironment, UiFrame,
+    UiInteractionSession, UiKey, UiLimits, UiPresentationReceipt, UiRouteStamp, UiSeatId,
+    UiSemanticSnapshot, UiTheme,
 };
-use nara_ui_widgets::UiButtonState;
+use nara_ui_widgets::{UiButtonState, UiIntentBatch};
+use thiserror::Error;
 
 use super::{
     UiAdapterError,
-    candidate::UiCompiledCandidate,
+    candidate::{UiBehaviorSnapshot, UiCandidateStaging, UiCompiledCandidate},
     identity::UiSurfaceIdentityLedger,
     presentation::{UiPresentedHistory, UiPresentedSession},
     projection::UiProjectedAuthoring,
@@ -18,6 +23,40 @@ use super::{
 };
 
 pub(super) const MAX_RUNTIME_SURFACES: usize = 16;
+
+#[derive(Debug, Error)]
+pub(super) enum UiCandidatePreparationError {
+    #[error(transparent)]
+    Compile(#[from] UiCompileError),
+    #[error(transparent)]
+    Dispatch(#[from] UiDispatchError),
+    #[error("candidate widget reconciliation failed: {0}")]
+    Widget(String),
+    #[error("candidate reconciliation emitted an action intent")]
+    ReconciliationIntent,
+    #[error("reducer-only reprojection changed candidate interaction facts")]
+    ReprojectionInteractionMismatch,
+    #[error("reducer-only reprojection changed candidate behavior")]
+    ReprojectionBehaviorMismatch,
+}
+
+pub(crate) enum UiReducerPreparationError {
+    PresentedBehaviorMissing(UiKey),
+    Widget(String),
+}
+
+pub(super) struct UiPreparedPresentation {
+    presented: UiPresentedHistory,
+    receipt: UiPresentationReceipt,
+    interaction: UiInteractionSession,
+    reducers: BTreeMap<UiKey, UiButtonState>,
+}
+
+impl UiPreparedPresentation {
+    pub(super) const fn receipt(&self) -> UiPresentationReceipt {
+        self.receipt
+    }
+}
 
 /// All candidate, presentation, interaction, and reducer state for one surface lineage.
 pub(crate) struct UiSurfaceRuntime {
@@ -62,15 +101,50 @@ impl UiSurfaceRuntime {
         &self.reducers
     }
 
-    pub(super) fn publish_candidate(
+    pub(super) fn prepare_candidate(
         &mut self,
         projected: UiProjectedAuthoring,
         environment: UiEnvironment,
         theme: UiTheme,
-    ) -> Result<(), nara_ui_kernel::UiCompileError> {
+    ) -> Result<Option<UiCandidateStaging>, UiCandidatePreparationError> {
         let (snapshot, buttons) = projected.into_parts();
         let frame = self.compiler.compile(&snapshot, environment, theme)?;
-        self.candidate = Some(UiCompiledCandidate::new(frame, buttons));
+        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons));
+        let Some(staging) = self.stage_candidate_state(&frame, &behavior)? else {
+            self.candidate = Some(UiCompiledCandidate::new(
+                frame,
+                behavior,
+                self.interaction.clone(),
+                self.reducers.clone(),
+            ));
+            return Ok(None);
+        };
+        Ok(Some(staging))
+    }
+
+    pub(super) fn finish_candidate(
+        &mut self,
+        staging: UiCandidateStaging,
+        projected: UiProjectedAuthoring,
+        environment: UiEnvironment,
+        theme: UiTheme,
+    ) -> Result<(), UiCandidatePreparationError> {
+        let (snapshot, buttons) = projected.into_parts();
+        let frame = self.compiler.compile(&snapshot, environment, theme)?;
+        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons));
+        if staging.behavior().as_ref() != behavior.as_ref() {
+            return Err(UiCandidatePreparationError::ReprojectionBehaviorMismatch);
+        }
+        if !interaction_facts_match(staging.probe(), &frame) {
+            return Err(UiCandidatePreparationError::ReprojectionInteractionMismatch);
+        }
+        let (interaction, reducers) = staging.into_parts();
+        self.candidate = Some(UiCompiledCandidate::new(
+            frame,
+            behavior,
+            interaction,
+            reducers,
+        ));
         Ok(())
     }
 
@@ -78,10 +152,48 @@ impl UiSurfaceRuntime {
         self.candidate.as_ref()
     }
 
+    fn stage_candidate_state(
+        &self,
+        frame: &Arc<UiFrame>,
+        behavior: &Arc<UiBehaviorSnapshot>,
+    ) -> Result<Option<UiCandidateStaging>, UiCandidatePreparationError> {
+        let invalidated_keys = self.presented.behavior_invalidations(behavior);
+        let reconciliation = self.interaction.stage_candidate_presentation(
+            self.descriptor.surface_id(),
+            self.presented
+                .latest_target()
+                .map(|target| target.frame().as_ref()),
+            frame,
+            &invalidated_keys,
+        )?;
+        let Some(reconciliation) = reconciliation else {
+            return Ok(None);
+        };
+        let (interaction, reconciliation) = reconciliation.into_parts();
+        let mut reducer_seed = self.reducers.clone();
+        for key in &invalidated_keys {
+            if let Some(state) = reducer_seed.get_mut(key) {
+                state.cancel_pointer_interaction();
+            }
+        }
+        let (mut reducers, intents) =
+            Self::prepare_reconciliation_reducers(behavior, &reconciliation, reducer_seed)?;
+        if !intents.intents().is_empty() {
+            return Err(UiCandidatePreparationError::ReconciliationIntent);
+        }
+        reducers.retain(|key, _| behavior.button(key).is_some());
+        Ok(Some(UiCandidateStaging::new(
+            Arc::clone(frame),
+            Arc::clone(behavior),
+            interaction,
+            reducers,
+        )))
+    }
+
     pub(super) fn prepare_presentation(
         &self,
         presentation_epoch: u64,
-    ) -> Result<(UiPresentedHistory, nara_ui_kernel::UiPresentationReceipt), UiAdapterError> {
+    ) -> Result<UiPreparedPresentation, UiAdapterError> {
         let candidate = self
             .candidate
             .as_ref()
@@ -90,13 +202,32 @@ impl UiSurfaceRuntime {
             })?;
         let mut presented = self.presented.clone();
         let receipt = presented.submit(candidate, self.descriptor, presentation_epoch)?;
-        Ok((presented, receipt))
+        let mut interaction = candidate.interaction().clone();
+        let reconciliation = interaction.reconcile_latest_presentation(
+            presented.journal(),
+            self.descriptor.surface_id(),
+            &[],
+        )?;
+        if reconciliation
+            .as_ref()
+            .is_some_and(|dispatch| !dispatch.events().is_empty())
+        {
+            return Err(UiAdapterError::Widget(
+                "candidate interaction facts changed after final visual compilation".to_owned(),
+            ));
+        }
+        Ok(UiPreparedPresentation {
+            presented,
+            receipt,
+            interaction,
+            reducers: candidate.reducers().clone(),
+        })
     }
 
-    pub(super) fn commit_presentation(&mut self, presented: UiPresentedHistory) {
-        self.presented = presented;
-        let retained = self.presented.retained_button_keys();
-        self.reducers.retain(|key, _| retained.contains(key));
+    pub(super) fn commit_presentation(&mut self, prepared: UiPreparedPresentation) {
+        self.presented = prepared.presented;
+        self.interaction = prepared.interaction;
+        self.reducers = prepared.reducers;
     }
 
     pub(crate) fn resolve_presented(
@@ -115,6 +246,14 @@ impl UiSurfaceRuntime {
         &self.interaction
     }
 
+    pub(crate) fn prepare_dispatch_reducers(
+        &self,
+        presented: &UiPresentedSession,
+        dispatch: &UiDispatchBatch,
+    ) -> Result<(BTreeMap<UiKey, UiButtonState>, UiIntentBatch), UiReducerPreparationError> {
+        Self::prepare_reducers(presented, dispatch, self.reducers.clone())
+    }
+
     pub(crate) fn commit_interaction(
         &mut self,
         interaction: UiInteractionSession,
@@ -122,6 +261,7 @@ impl UiSurfaceRuntime {
     ) {
         self.interaction = interaction;
         self.reducers = reducers;
+        self.candidate = None;
     }
 
     pub(super) fn semantic_snapshot(
@@ -133,6 +273,73 @@ impl UiSurfaceRuntime {
             .semantic_snapshot(self.presented.journal(), route, seat)
             .map_err(UiAdapterError::from)
     }
+
+    fn prepare_reducers(
+        presented: &UiPresentedSession,
+        dispatch: &UiDispatchBatch,
+        mut reducers: BTreeMap<UiKey, UiButtonState>,
+    ) -> Result<(BTreeMap<UiKey, UiButtonState>, UiIntentBatch), UiReducerPreparationError> {
+        let mut intents = UiIntentBatch::default();
+        let targets = dispatch
+            .events()
+            .iter()
+            .map(|event| event.target().clone())
+            .collect::<BTreeSet<_>>();
+        for target in targets {
+            let button = if dispatch.is_reconciliation() {
+                let Some(button) = presented.latest_behavior().button(&target) else {
+                    reducers.remove(&target);
+                    continue;
+                };
+                Some(button)
+            } else {
+                presented.behavior().button(&target)
+            };
+            let button = button.ok_or_else(|| {
+                UiReducerPreparationError::PresentedBehaviorMissing(target.clone())
+            })?;
+            reducers
+                .entry(target)
+                .or_default()
+                .reduce_batch(button, dispatch, &mut intents)
+                .map_err(|error| UiReducerPreparationError::Widget(error.to_string()))?;
+        }
+        Ok((reducers, intents))
+    }
+
+    fn prepare_reconciliation_reducers(
+        behavior: &UiBehaviorSnapshot,
+        dispatch: &UiDispatchBatch,
+        mut reducers: BTreeMap<UiKey, UiButtonState>,
+    ) -> Result<(BTreeMap<UiKey, UiButtonState>, UiIntentBatch), UiCandidatePreparationError> {
+        let mut intents = UiIntentBatch::default();
+        let targets = dispatch
+            .events()
+            .iter()
+            .map(|event| event.target().clone())
+            .collect::<BTreeSet<_>>();
+        for target in targets {
+            let Some(button) = behavior.button(&target) else {
+                reducers.remove(&target);
+                continue;
+            };
+            reducers
+                .entry(target)
+                .or_default()
+                .reduce_batch(button, dispatch, &mut intents)
+                .map_err(|error| UiCandidatePreparationError::Widget(error.to_string()))?;
+        }
+        Ok((reducers, intents))
+    }
+}
+
+fn interaction_facts_match(probe: &UiFrame, final_frame: &UiFrame) -> bool {
+    probe.environment() == final_frame.environment()
+        && probe.layouts() == final_frame.layouts()
+        && probe.hit_regions() == final_frame.hit_regions()
+        && probe.focus_order() == final_frame.focus_order()
+        && probe.semantics() == final_frame.semantics()
+        && probe.root_outcomes() == final_frame.root_outcomes()
 }
 
 /// Runtime UI adapter state; all mutable surface-local values live inside `UiSurfaceRuntime`.

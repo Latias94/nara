@@ -1,12 +1,11 @@
-use std::{collections::BTreeSet, collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc};
 
+use super::candidate::{UiBehaviorSnapshot, UiCompiledCandidate};
+use super::surface::UiSurfaceDescriptor;
 use nara_ui_kernel::{
     UiFrameJournal, UiJournalError, UiKey, UiLayer, UiLimits, UiPresentationReceipt, UiRootStatus,
     UiRouteStamp, UiRouteTarget,
 };
-
-use super::candidate::{UiBehaviorSnapshot, UiCompiledCandidate};
-use super::surface::UiSurfaceDescriptor;
 
 #[derive(Clone, Debug)]
 struct PresentedEntry {
@@ -21,6 +20,7 @@ pub(crate) struct UiPresentedSession {
     target: UiRouteTarget,
     latest: UiRouteTarget,
     behavior: Arc<UiBehaviorSnapshot>,
+    latest_behavior: Arc<UiBehaviorSnapshot>,
     descriptor: UiSurfaceDescriptor,
 }
 
@@ -37,20 +37,17 @@ impl UiPresentedSession {
         &self.behavior
     }
 
+    pub(crate) fn latest_behavior(&self) -> &Arc<UiBehaviorSnapshot> {
+        &self.latest_behavior
+    }
+
     pub(crate) const fn descriptor(&self) -> UiSurfaceDescriptor {
         self.descriptor
     }
 
     pub(crate) fn blocks_unhandled_input(&self) -> bool {
-        let frame = self.target.frame();
-        frame.layouts().iter().rev().any(|layout| {
-            layout.layer() == UiLayer::Modal
-                && layout.visible()
-                && frame.root_outcomes().iter().any(|outcome| {
-                    outcome.key() == layout.root_key()
-                        && outcome.status() == UiRootStatus::Published
-                })
-        })
+        frame_blocks_unhandled_input(self.target.frame())
+            || frame_blocks_unhandled_input(self.latest.frame())
     }
 }
 
@@ -97,17 +94,21 @@ impl UiPresentedHistory {
     ) -> Result<Option<UiPresentedSession>, UiJournalError> {
         let target = self.journal.resolve(route)?;
         let latest = self.journal.latest(route.surface_id())?;
-        let presented = self
-            .entries
-            .iter()
-            .find(|entry| {
-                entry.target.receipt() == target.receipt()
-                    && Arc::ptr_eq(entry.target.frame(), target.frame())
-            })
-            .map(|entry| UiPresentedSession {
+        let presented = self.entries.iter().find(|entry| {
+            entry.target.receipt() == target.receipt()
+                && Arc::ptr_eq(entry.target.frame(), target.frame())
+        });
+        let latest_presented = self.entries.iter().find(|entry| {
+            entry.target.receipt() == latest.receipt()
+                && Arc::ptr_eq(entry.target.frame(), latest.frame())
+        });
+        let presented = presented
+            .zip(latest_presented)
+            .map(|(entry, latest_entry)| UiPresentedSession {
                 target,
                 latest,
                 behavior: Arc::clone(&entry.behavior),
+                latest_behavior: Arc::clone(&latest_entry.behavior),
                 descriptor: entry.descriptor,
             });
         Ok(presented)
@@ -117,10 +118,23 @@ impl UiPresentedHistory {
         &self.journal
     }
 
-    pub(super) fn retained_button_keys(&self) -> BTreeSet<UiKey> {
-        self.entries
-            .iter()
-            .flat_map(|entry| entry.behavior.keys().cloned())
-            .collect()
+    pub(super) fn behavior_invalidations(&self, next: &UiBehaviorSnapshot) -> Vec<UiKey> {
+        self.entries.front().map_or_else(Vec::new, |latest| {
+            latest.behavior.pointer_invalidations(next)
+        })
     }
+
+    pub(super) fn latest_target(&self) -> Option<&UiRouteTarget> {
+        self.entries.front().map(|entry| &entry.target)
+    }
+}
+
+fn frame_blocks_unhandled_input(frame: &nara_ui_kernel::UiFrame) -> bool {
+    frame.layouts().iter().rev().any(|layout| {
+        layout.layer() == UiLayer::Modal
+            && layout.visible()
+            && frame.root_outcomes().iter().any(|outcome| {
+                outcome.key() == layout.root_key() && outcome.status() == UiRootStatus::Published
+            })
+    })
 }

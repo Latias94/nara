@@ -116,6 +116,12 @@ impl UiButtonState {
         self.focused
     }
 
+    /// Retires pointer-owned state while preserving the committed focus identity.
+    pub fn cancel_pointer_interaction(&mut self) {
+        self.hovered = false;
+        self.pressed = false;
+    }
+
     #[must_use]
     pub const fn visual_state(self, button: &UiButton) -> UiButtonVisualState {
         if !button.enabled {

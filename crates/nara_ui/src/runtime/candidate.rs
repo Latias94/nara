@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use nara_ui_kernel::{UiFrame, UiKey};
-use nara_ui_widgets::UiButton;
+use nara_ui_kernel::{UiFrame, UiInteractionSession, UiKey};
+use nara_ui_widgets::{UiButton, UiButtonState};
 
 /// Immutable behavior authority compiled alongside one immutable frame candidate.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct UiBehaviorSnapshot {
     buttons: BTreeMap<UiKey, UiButton>,
 }
@@ -28,8 +28,16 @@ impl UiBehaviorSnapshot {
         self.buttons.get(key)
     }
 
-    pub(crate) fn keys(&self) -> impl Iterator<Item = &UiKey> {
-        self.buttons.keys()
+    pub(crate) fn pointer_invalidations(&self, next: &Self) -> Vec<UiKey> {
+        self.buttons
+            .iter()
+            .filter(|(key, previous)| {
+                next.buttons.get(*key).is_none_or(|next| {
+                    previous.action() != next.action() || previous.enabled() != next.enabled()
+                })
+            })
+            .map(|(key, _)| key.clone())
+            .collect()
     }
 }
 
@@ -38,12 +46,23 @@ impl UiBehaviorSnapshot {
 pub(super) struct UiCompiledCandidate {
     frame: Arc<UiFrame>,
     behavior: Arc<UiBehaviorSnapshot>,
+    interaction: UiInteractionSession,
+    reducers: BTreeMap<UiKey, UiButtonState>,
 }
 
 impl UiCompiledCandidate {
-    pub(super) fn new(frame: Arc<UiFrame>, buttons: BTreeMap<UiKey, UiButton>) -> Self {
-        let behavior = Arc::new(UiBehaviorSnapshot::from_compiled_frame(&frame, buttons));
-        Self { frame, behavior }
+    pub(super) const fn new(
+        frame: Arc<UiFrame>,
+        behavior: Arc<UiBehaviorSnapshot>,
+        interaction: UiInteractionSession,
+        reducers: BTreeMap<UiKey, UiButtonState>,
+    ) -> Self {
+        Self {
+            frame,
+            behavior,
+            interaction,
+            reducers,
+        }
     }
 
     pub(super) fn frame(&self) -> &Arc<UiFrame> {
@@ -52,5 +71,53 @@ impl UiCompiledCandidate {
 
     pub(super) fn behavior(&self) -> &Arc<UiBehaviorSnapshot> {
         &self.behavior
+    }
+
+    pub(super) const fn interaction(&self) -> &UiInteractionSession {
+        &self.interaction
+    }
+
+    pub(super) const fn reducers(&self) -> &BTreeMap<UiKey, UiButtonState> {
+        &self.reducers
+    }
+}
+
+/// Interaction and reducer facts staged while a candidate is reprojected for exact visual parity.
+pub(super) struct UiCandidateStaging {
+    probe: Arc<UiFrame>,
+    behavior: Arc<UiBehaviorSnapshot>,
+    interaction: UiInteractionSession,
+    reducers: BTreeMap<UiKey, UiButtonState>,
+}
+
+impl UiCandidateStaging {
+    pub(super) const fn new(
+        probe: Arc<UiFrame>,
+        behavior: Arc<UiBehaviorSnapshot>,
+        interaction: UiInteractionSession,
+        reducers: BTreeMap<UiKey, UiButtonState>,
+    ) -> Self {
+        Self {
+            probe,
+            behavior,
+            interaction,
+            reducers,
+        }
+    }
+
+    pub(super) const fn probe(&self) -> &Arc<UiFrame> {
+        &self.probe
+    }
+
+    pub(super) const fn behavior(&self) -> &Arc<UiBehaviorSnapshot> {
+        &self.behavior
+    }
+
+    pub(super) const fn reducers(&self) -> &BTreeMap<UiKey, UiButtonState> {
+        &self.reducers
+    }
+
+    pub(super) fn into_parts(self) -> (UiInteractionSession, BTreeMap<UiKey, UiButtonState>) {
+        (self.interaction, self.reducers)
     }
 }

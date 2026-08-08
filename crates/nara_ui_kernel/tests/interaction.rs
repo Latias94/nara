@@ -4,7 +4,7 @@ use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiActionId, UiActivationSource, UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiButtonPhase,
     UiCompiler, UiDispatchError, UiEnvironment, UiFrame, UiFrameJournal, UiInputEvent,
-    UiInteraction, UiInteractionSession, UiLayer, UiLocalKey, UiNavigation, UiNode,
+    UiInteraction, UiInteractionSession, UiLayer, UiLimits, UiLocalKey, UiNavigation, UiNode,
     UiNonActivation, UiPoint, UiPointerButton, UiPointerId, UiRoot, UiRootKey, UiRoutePhase,
     UiRouteStamp, UiRoutedEventKind, UiSeatId, UiSemanticRole, UiSemantics, UiStyle, UiSurfaceId,
     UiTheme,
@@ -393,8 +393,16 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
             pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
         )
         .unwrap();
+    assert!(inert.consumed().unwrap().is_reconciliation());
+    let rejected_inert = session
+        .dispatch(
+            &journal,
+            modal_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
     assert_eq!(
-        inert.rejection(),
+        rejected_inert.rejection(),
         Some(&UiNonActivation::TargetOutsideModal {
             target: exact_key("base", "first")
         })
@@ -453,6 +461,17 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
     }));
 
     let modal_route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 2), 11);
+    let modal_reconciliation = session
+        .dispatch(
+            &journal,
+            modal_route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    assert!(modal_reconciliation.consumed().unwrap().is_reconciliation());
     let retry = session
         .dispatch(
             &journal,
@@ -480,6 +499,22 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
         compile(&mut compiler, &snapshot(false), 3),
         12,
     );
+    let restore_reconciliation = session
+        .dispatch(
+            &journal,
+            restored_route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    assert!(
+        restore_reconciliation
+            .consumed()
+            .unwrap()
+            .is_reconciliation()
+    );
     let restored = session
         .dispatch(
             &journal,
@@ -495,6 +530,588 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
             && event.phase() == UiRoutePhase::Target
             && matches!(event.kind(), UiRoutedEventKind::ActivateRequested { .. })
     }));
+}
+
+#[test]
+fn removed_modal_restore_target_cannot_revive_after_same_key_reinsertion() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            UiInputEvent::FocusTarget {
+                seat: SEAT,
+                target: exact_key("base", "second"),
+            },
+        )
+        .unwrap();
+
+    submit(&mut journal, compile(&mut compiler, &snapshot(true), 2), 11);
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+
+    let without_second = UiAuthoringSnapshotBuilder::new(8)
+        .with_root(
+            UiRoot::new(root_key("base"), UiLayer::Base, UiStyle::fill()).with_children([
+                button("first", "First", "first", 10.0, 10.0, true),
+                button("disabled", "Disabled", "disabled", 10.0, 70.0, false),
+                hidden_button(),
+            ]),
+        )
+        .with_root(modal_root())
+        .build()
+        .unwrap();
+    submit(&mut journal, compile(&mut compiler, &without_second, 3), 12);
+    let retired_restore = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert!(retired_restore.is_reconciliation());
+    assert!(retired_restore.events().is_empty());
+
+    let reinserted = UiAuthoringSnapshotBuilder::new(9)
+        .with_root(base_root())
+        .with_root(modal_root())
+        .build()
+        .unwrap();
+    submit(&mut journal, compile(&mut compiler, &reinserted, 4), 13);
+    let rebound_generation = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert!(rebound_generation.is_reconciliation());
+    assert!(rebound_generation.events().is_empty());
+
+    let restored = UiAuthoringSnapshotBuilder::new(10)
+        .with_root(base_root())
+        .build()
+        .unwrap();
+    let restored_route = submit(&mut journal, compile(&mut compiler, &restored, 5), 14);
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    let semantics = session
+        .semantic_snapshot(&journal, restored_route, SEAT)
+        .unwrap();
+    assert!(
+        semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &exact_key("base", "first"))
+            .unwrap()
+            .state()
+            .focused()
+    );
+    assert!(
+        !semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &exact_key("base", "second"))
+            .unwrap()
+            .state()
+            .focused()
+    );
+}
+
+#[test]
+fn candidate_reconciliation_is_staged_without_mutating_the_presented_session() {
+    let mut compiler = compiler();
+    let initial_frame = compile(&mut compiler, &snapshot(false), 1);
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(&mut journal, Arc::clone(&initial_frame), 10);
+    let mut session = UiInteractionSession::default();
+    session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+
+    let target = exact_key("base", "first");
+    let candidate_frame = compile(&mut compiler, &snapshot(false), 2);
+    let staged = session
+        .stage_candidate_presentation(
+            SURFACE,
+            Some(&initial_frame),
+            &candidate_frame,
+            std::slice::from_ref(&target),
+        )
+        .unwrap()
+        .unwrap();
+    assert!(staged.dispatch().events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+
+    let released = session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Released, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    assert!(released.consumed().unwrap().events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Released { inside: true }
+    }));
+
+    let (mut staged_session, _) = staged.into_parts();
+    let staged_release = staged_session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Released, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    assert_eq!(
+        staged_release.rejection(),
+        Some(&UiNonActivation::NoPointerCapture)
+    );
+}
+
+#[test]
+fn explicit_behavior_identity_retirement_cancels_inflight_pointer_state() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    let target = exact_key("base", "first");
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    let changed_snapshot = UiAuthoringSnapshotBuilder::new(11)
+        .with_root(base_root())
+        .build()
+        .unwrap();
+    let changed_route = submit(
+        &mut journal,
+        compile(&mut compiler, &changed_snapshot, 2),
+        11,
+    );
+
+    let retired = session
+        .reconcile_latest_presentation(&journal, SURFACE, std::slice::from_ref(&target))
+        .unwrap()
+        .unwrap();
+    assert!(retired.is_reconciliation());
+    assert!(retired.events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+    let semantics = session
+        .semantic_snapshot(&journal, changed_route, SEAT)
+        .unwrap();
+    assert!(
+        semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &target)
+            .unwrap()
+            .state()
+            .focused()
+    );
+
+    let release = session
+        .dispatch(
+            &journal,
+            changed_route,
+            pointer_button(UiButtonPhase::Released, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    assert_eq!(
+        release.rejection(),
+        Some(&UiNonActivation::NoPointerCapture)
+    );
+}
+
+#[test]
+fn invalidating_capture_retires_the_same_pointers_independent_hover_state() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            move_pointer(UiPoint::new(120.0, 20.0)),
+        )
+        .unwrap();
+    let captured = exact_key("base", "first");
+    let hovered = exact_key("base", "second");
+    submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 2),
+        11,
+    );
+
+    let reconciled = session
+        .reconcile_latest_presentation(&journal, SURFACE, std::slice::from_ref(&captured))
+        .unwrap()
+        .unwrap();
+    assert!(reconciled.events().iter().any(|event| {
+        event.target() == &captured
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+    assert!(reconciled.events().iter().any(|event| {
+        event.target() == &hovered
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::HoverChanged { hovered: false }
+    }));
+}
+
+#[test]
+fn low_node_limit_still_admits_the_complete_pointer_cleanup_batch() {
+    let limits = UiLimits::default().with_max_nodes(2).unwrap();
+    let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), limits).unwrap();
+    let authored = UiAuthoringSnapshotBuilder::new(1)
+        .with_root(
+            UiRoot::new(root_key("small"), UiLayer::Base, UiStyle::fill())
+                .with_child(button("only", "Only", "only", 10.0, 10.0, true)),
+        )
+        .build()
+        .unwrap();
+    let mut journal = UiFrameJournal::with_limits(limits).unwrap();
+    let initial_route = submit(&mut journal, compile(&mut compiler, &authored, 1), 10);
+    let mut session = UiInteractionSession::with_limits(limits).unwrap();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    submit(&mut journal, compile(&mut compiler, &authored, 2), 11);
+
+    let cleanup = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[exact_key("small", "only")])
+        .unwrap()
+        .unwrap();
+    assert!(cleanup.events().iter().any(|event| {
+        event.target() == &exact_key("small", "only")
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+    assert!(cleanup.events().iter().any(|event| {
+        event.target() == &exact_key("small", "only")
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::HoverChanged { hovered: false }
+    }));
+}
+
+#[test]
+fn equivalent_presentation_rebinds_pointer_capture_to_the_latest_epoch() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    let initial = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert!(initial.is_reconciliation());
+    let target = exact_key("base", "first");
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+
+    let latest_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        11,
+    );
+    let rebound = session
+        .reconcile_latest_presentation(&journal, SURFACE, &[])
+        .unwrap()
+        .unwrap();
+    assert!(rebound.is_reconciliation());
+    assert!(rebound.events().is_empty());
+    let semantics = session
+        .semantic_snapshot(&journal, latest_route, SEAT)
+        .unwrap();
+    assert!(
+        semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &target)
+            .unwrap()
+            .state()
+            .pressed()
+    );
+
+    let released = session
+        .dispatch(
+            &journal,
+            latest_route,
+            pointer_button(UiButtonPhase::Released, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    let released = released.consumed().unwrap();
+    assert!(!released.is_reconciliation());
+    assert!(released.events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Released { inside: true }
+    }));
+    assert!(
+        released
+            .events()
+            .iter()
+            .all(|event| event.kind() != &UiRoutedEventKind::Cancelled)
+    );
+}
+
+#[test]
+fn pointer_capture_cannot_cross_presentation_generations() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let historical_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let latest_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 2),
+        11,
+    );
+    let mut session = UiInteractionSession::default();
+    let target = exact_key("base", "first");
+
+    let pressed = session
+        .dispatch(
+            &journal,
+            historical_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    assert!(pressed.consumed().is_some());
+    let semantics = session
+        .semantic_snapshot(&journal, latest_route, SEAT)
+        .unwrap();
+    assert!(
+        !semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &target)
+            .unwrap()
+            .state()
+            .pressed()
+    );
+
+    let cleanup = session
+        .dispatch(
+            &journal,
+            latest_route,
+            pointer_button(UiButtonPhase::Released, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    let cleanup = cleanup.consumed().unwrap();
+    assert!(cleanup.is_reconciliation());
+    assert_eq!(cleanup.presentation_epoch(), 11);
+    assert!(cleanup.events().iter().any(|event| {
+        event.target() == &target
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+    assert!(cleanup.events().iter().all(|event| {
+        !matches!(
+            event.kind(),
+            UiRoutedEventKind::Released { .. } | UiRoutedEventKind::ActivateRequested { .. }
+        )
+    }));
+
+    let rejected = session
+        .dispatch(
+            &journal,
+            latest_route,
+            pointer_button(UiButtonPhase::Released, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        Some(&UiNonActivation::NoPointerCapture)
+    );
+}
+
+#[test]
+fn historical_input_reconciles_against_the_latest_presentation_before_routing() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let historical_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(
+            &journal,
+            historical_route,
+            UiInputEvent::Navigate {
+                seat: SEAT,
+                direction: UiNavigation::Next,
+            },
+        )
+        .unwrap();
+    let latest_route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 2), 11);
+
+    let reconciled = session
+        .dispatch(
+            &journal,
+            historical_route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    let reconciliation = reconciled.consumed().unwrap();
+    assert!(reconciliation.is_reconciliation());
+    assert_eq!(reconciliation.presentation_epoch(), 11);
+    assert!(
+        reconciliation
+            .events()
+            .iter()
+            .all(|event| { !matches!(event.kind(), UiRoutedEventKind::ActivateRequested { .. }) })
+    );
+    assert!(reconciliation.events().iter().any(|event| {
+        event.target() == &exact_key("modal", "retry")
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
+    }));
+
+    let rejected = session
+        .dispatch(
+            &journal,
+            historical_route,
+            UiInputEvent::ActivateFocused {
+                seat: SEAT,
+                source: UiActivationSource::Keyboard,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        Some(&UiNonActivation::TargetRetired {
+            target: exact_key("modal", "retry")
+        })
+    );
+    let semantics = session
+        .semantic_snapshot(&journal, latest_route, SEAT)
+        .unwrap();
+    assert!(
+        semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &exact_key("modal", "retry"))
+            .unwrap()
+            .state()
+            .focused()
+    );
+}
+
+#[test]
+fn empty_reconciliation_is_separate_when_the_presentation_generation_changed() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let historical_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let _latest_route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 2), 11);
+    let mut session = UiInteractionSession::default();
+    let historical_move = move_pointer(UiPoint::new(20.0, 20.0));
+
+    let reconciled = session
+        .dispatch(&journal, historical_route, historical_move.clone())
+        .unwrap();
+    let reconciliation = reconciled.consumed().unwrap();
+    assert!(reconciliation.is_reconciliation());
+    assert_eq!(reconciliation.presentation_epoch(), 11);
+    assert!(reconciliation.events().is_empty());
+
+    let rejected = session
+        .dispatch(&journal, historical_route, historical_move)
+        .unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        Some(&UiNonActivation::TargetOutsideModal {
+            target: exact_key("base", "first")
+        })
+    );
+}
+
+#[test]
+fn presentation_reconciliation_precedes_input_validation_errors() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 1), 10);
+    let mut session = UiInteractionSession::default();
+    let invalid_move = UiInputEvent::PointerMoved {
+        seat: SEAT,
+        pointer: POINTER,
+        position: UiPoint::new(f32::NAN, 20.0),
+    };
+
+    let reconciled = session
+        .dispatch(&journal, route, invalid_move.clone())
+        .unwrap();
+    let reconciliation = reconciled.consumed().unwrap();
+    assert!(reconciliation.is_reconciliation());
+    assert!(reconciliation.events().is_empty());
+
+    assert_eq!(
+        session.dispatch(&journal, route, invalid_move).unwrap_err(),
+        UiDispatchError::NonFinitePointerPosition
+    );
 }
 
 #[test]
@@ -696,6 +1313,99 @@ fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
         )
         .unwrap();
     assert!(accepted.rejection().is_none());
+}
+
+#[test]
+fn one_surface_has_one_seat_and_one_pointer_owner() {
+    let mut compiler = compiler();
+    let frame = compile(&mut compiler, &snapshot(false), 1);
+    let mut journal = UiFrameJournal::default();
+    let route = submit(&mut journal, frame, 10);
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(&journal, route, move_pointer(UiPoint::new(20.0, 20.0)))
+        .unwrap();
+
+    assert_eq!(
+        session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::PointerMoved {
+                    seat: SEAT,
+                    pointer: UiPointerId::new(1),
+                    position: UiPoint::new(20.0, 20.0),
+                },
+            )
+            .unwrap_err(),
+        UiDispatchError::PointerLimitExceeded { maximum: 1 }
+    );
+    assert_eq!(
+        session
+            .dispatch(
+                &journal,
+                route,
+                UiInputEvent::Navigate {
+                    seat: UiSeatId::new(1),
+                    direction: UiNavigation::Next,
+                },
+            )
+            .unwrap_err(),
+        UiDispatchError::SeatLimitExceeded { maximum: 1 }
+    );
+}
+
+#[test]
+fn pending_reconciliation_is_consumed_before_unsupported_pointer_rejection() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let initial_route = submit(
+        &mut journal,
+        compile(&mut compiler, &snapshot(false), 1),
+        10,
+    );
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(
+            &journal,
+            initial_route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(20.0, 20.0)),
+        )
+        .unwrap();
+
+    let disabled_snapshot = UiAuthoringSnapshotBuilder::new(4)
+        .with_root(base_root_with_first_enabled(false))
+        .build()
+        .unwrap();
+    let disabled_route = submit(
+        &mut journal,
+        compile(&mut compiler, &disabled_snapshot, 2),
+        11,
+    );
+    let unsupported = UiInputEvent::PointerButton {
+        seat: SEAT,
+        pointer: POINTER,
+        button: UiPointerButton::Secondary,
+        phase: UiButtonPhase::Pressed,
+        position: Some(UiPoint::new(20.0, 20.0)),
+    };
+
+    let reconciled = session
+        .dispatch(&journal, disabled_route, unsupported.clone())
+        .unwrap();
+    assert!(reconciled.consumed().unwrap().events().iter().any(|event| {
+        event.target() == &exact_key("base", "first")
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::Cancelled
+    }));
+
+    let rejected = session
+        .dispatch(&journal, disabled_route, unsupported)
+        .unwrap();
+    assert_eq!(
+        rejected.rejection(),
+        Some(&UiNonActivation::UnsupportedPointerButton)
+    );
 }
 
 #[test]

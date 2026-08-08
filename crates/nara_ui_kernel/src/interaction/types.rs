@@ -201,6 +201,7 @@ pub enum UiNonActivation {
 pub struct UiDispatchBatch {
     frame_revision: UiFrameRevision,
     presentation_epoch: u64,
+    reconciliation: bool,
     events: Vec<UiRoutedEvent>,
 }
 
@@ -209,6 +210,19 @@ impl UiDispatchBatch {
         Self {
             frame_revision,
             presentation_epoch,
+            reconciliation: false,
+            events: Vec::new(),
+        }
+    }
+
+    pub(crate) const fn reconciliation(
+        frame_revision: UiFrameRevision,
+        presentation_epoch: u64,
+    ) -> Self {
+        Self {
+            frame_revision,
+            presentation_epoch,
+            reconciliation: true,
             events: Vec::new(),
         }
     }
@@ -223,6 +237,12 @@ impl UiDispatchBatch {
         self.presentation_epoch
     }
 
+    /// Returns whether this batch owns presentation reconciliation rather than event-time input.
+    #[must_use]
+    pub const fn is_reconciliation(&self) -> bool {
+        self.reconciliation
+    }
+
     #[must_use]
     pub fn events(&self) -> &[UiRoutedEvent] {
         &self.events
@@ -230,12 +250,6 @@ impl UiDispatchBatch {
 
     pub(crate) fn push(&mut self, event: UiRoutedEvent) {
         self.events.push(event);
-    }
-
-    pub(crate) fn extend(&mut self, other: Self) {
-        debug_assert_eq!(self.frame_revision, other.frame_revision);
-        debug_assert_eq!(self.presentation_epoch, other.presentation_epoch);
-        self.events.extend(other.events);
     }
 }
 

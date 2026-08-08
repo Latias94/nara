@@ -1,15 +1,15 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use nara_ecs::{Mut, Resource, World};
 use nara_input::{InputTimeline, InputUiCursorError, InputUiDisposition};
 use nara_ui_kernel::{
-    UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent, UiInteractionSession,
-    UiJournalError, UiKey, UiNonActivation, UiRouteStamp, UiSurfaceId,
+    UiButtonPhase, UiDispatchBatch, UiDispatchError, UiDispatchOutcome, UiInputEvent,
+    UiInteractionSession, UiJournalError, UiKey, UiNonActivation, UiRouteStamp, UiSurfaceId,
 };
-use nara_ui_widgets::{UiButtonState, UiIntent, UiIntentBatch};
+use nara_ui_widgets::{UiButtonState, UiIntent};
 use thiserror::Error;
 
-use crate::runtime::{UiAdapterError, UiRuntimeState};
+use crate::runtime::{UiAdapterError, UiRuntimeState, state::UiReducerPreparationError};
 
 use super::journal::{UiActionAdmissionError, UiActionDraft, UiActionJournal};
 
@@ -47,7 +47,13 @@ pub(crate) fn execute(
                     error,
                 ));
             }
-            transaction.commit(&mut state, &mut journal)
+            let (disposition, diagnostic) = transaction.commit(&mut state, &mut journal);
+            if let Some(rejection) = diagnostic
+                && let Some(mut log) = world.get_resource_mut::<UiRouteRejectionLog>()
+            {
+                log.record(input_sequence, rejection);
+            }
+            disposition
         })
     })
 }
@@ -175,6 +181,7 @@ pub(crate) struct UiInteractionTransaction {
     reducers: BTreeMap<UiKey, UiButtonState>,
     journal: UiActionJournal,
     dispatch: UiDispatchBatch,
+    diagnostic: Option<UiRouteRejection>,
 }
 
 impl UiInteractionTransaction {
@@ -186,6 +193,13 @@ impl UiInteractionTransaction {
         input_sequence: Option<u64>,
     ) -> Result<Self, UiRouteRejection> {
         let surface_id = route.surface_id();
+        let release_must_commit = matches!(
+            &input,
+            UiInputEvent::PointerButton {
+                phase: UiButtonPhase::Released,
+                ..
+            }
+        );
         if state.is_retired(surface_id) {
             return Err(UiRouteRejection::RetiredSurface {
                 surface: surface_id.get(),
@@ -211,25 +225,18 @@ impl UiInteractionTransaction {
                 return Err(UiRouteRejection::NonActivation(reason));
             }
         };
-
-        let mut reducers = surface.reducer_states().clone();
-        let mut intents = UiIntentBatch::default();
-        let mut targets = BTreeSet::new();
-        targets.extend(dispatch.events().iter().map(|event| event.target().clone()));
-        for target in targets {
-            let button = presented.behavior().button(&target).ok_or_else(|| {
-                UiRouteRejection::PresentedBehaviorMissing {
-                    surface: surface_id.get(),
-                    presentation_epoch: route.presentation_epoch(),
-                    target: Some(target.clone()),
+        let (reducers, intents) = surface
+            .prepare_dispatch_reducers(&presented, &dispatch)
+            .map_err(|error| match error {
+                UiReducerPreparationError::PresentedBehaviorMissing(target) => {
+                    UiRouteRejection::PresentedBehaviorMissing {
+                        surface: surface_id.get(),
+                        presentation_epoch: route.presentation_epoch(),
+                        target: Some(target),
+                    }
                 }
+                UiReducerPreparationError::Widget(error) => UiRouteRejection::Widget(error),
             })?;
-            reducers
-                .entry(target)
-                .or_default()
-                .reduce_batch(button, &dispatch, &mut intents)
-                .map_err(|error| UiRouteRejection::Widget(error.to_string()))?;
-        }
 
         let drafts = intents
             .intents()
@@ -250,7 +257,11 @@ impl UiInteractionTransaction {
             })
             .collect::<Vec<_>>();
         let mut journal = journal.clone();
-        journal.admit(&drafts)?;
+        let diagnostic = match journal.admit(&drafts) {
+            Ok(_) => None,
+            Err(error) if release_must_commit => Some(UiRouteRejection::IntentJournal(error)),
+            Err(error) => return Err(UiRouteRejection::IntentJournal(error)),
+        };
 
         Ok(Self {
             surface_id,
@@ -258,6 +269,7 @@ impl UiInteractionTransaction {
             reducers,
             journal,
             dispatch,
+            diagnostic,
         })
     }
 
@@ -265,20 +277,21 @@ impl UiInteractionTransaction {
         self,
         state: &mut UiRuntimeState,
         journal: &mut UiActionJournal,
-    ) -> UiRouteDisposition {
+    ) -> (UiRouteDisposition, Option<UiRouteRejection>) {
         let Self {
             surface_id,
             interaction,
             reducers,
             journal: candidate_journal,
             dispatch,
+            diagnostic,
         } = self;
         state
             .surface_mut(surface_id)
             .expect("a prepared UI transaction retains its surface")
             .commit_interaction(interaction, reducers);
         *journal = candidate_journal;
-        UiRouteDisposition::Consumed(dispatch)
+        (UiRouteDisposition::Consumed(dispatch), diagnostic)
     }
 }
 

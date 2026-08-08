@@ -2,7 +2,7 @@ use super::{
     UiNonActivation, UiPointerId, UiRoutedEventKind, UiSeatId,
     focus::{is_focusable_key, set_focus},
     routing::{hit_target, route_event, target_rejection},
-    state::SurfaceState,
+    state::{PointerCapture, SurfaceState},
 };
 use crate::{UiDispatchBatch, UiFrame, UiKey};
 
@@ -12,6 +12,7 @@ pub(super) fn pointer_press(
     pointer: UiPointerId,
     frame: &UiFrame,
     latest: &UiFrame,
+    presentation_epoch: u64,
     batch: &mut UiDispatchBatch,
 ) -> Result<(), UiNonActivation> {
     let pointer_key = (seat, pointer);
@@ -21,10 +22,10 @@ pub(super) fn pointer_press(
         .expect("pointer preflight creates state");
     if let Some(target) = &pointer_state.captured {
         return Err(UiNonActivation::PointerAlreadyCaptured {
-            target: target.clone(),
+            target: target.target.clone(),
         });
     }
-    let Some(position) = pointer_state.position else {
+    let Some(position) = pointer_state.position.map(|position| position.point) else {
         return Err(UiNonActivation::MissingPointerPosition);
     };
     let target = match hit_target(frame, latest, state.modal_root.as_ref(), position) {
@@ -43,7 +44,10 @@ pub(super) fn pointer_press(
         .pointers
         .get_mut(&pointer_key)
         .expect("pointer preflight creates state")
-        .captured = Some(target.clone());
+        .captured = Some(PointerCapture {
+        target: target.clone(),
+        presentation_epoch,
+    });
     if is_focusable_key(frame, latest, state.modal_root.as_ref(), &target) {
         set_focus(state, seat, Some(target.clone()), frame, batch);
     }
@@ -57,6 +61,7 @@ pub(super) fn pointer_release(
     pointer: UiPointerId,
     frame: &UiFrame,
     latest: &UiFrame,
+    presentation_epoch: u64,
     batch: &mut UiDispatchBatch,
 ) -> Result<(), UiNonActivation> {
     let pointer_key = (seat, pointer);
@@ -65,11 +70,19 @@ pub(super) fn pointer_release(
             .pointers
             .get_mut(&pointer_key)
             .expect("pointer preflight creates state");
-        (pointer.captured.take(), pointer.position)
+        (
+            pointer.captured.take(),
+            pointer.position.map(|position| position.point),
+        )
     };
-    let Some(target) = captured else {
+    let Some(capture) = captured else {
         return Err(UiNonActivation::NoPointerCapture);
     };
+    let target = capture.target;
+    if capture.presentation_epoch != presentation_epoch {
+        route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
+        return Ok(());
+    }
     let Some(position) = position else {
         route_event(frame, &target, UiRoutedEventKind::Cancelled, batch);
         return Ok(());

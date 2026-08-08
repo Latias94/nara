@@ -230,6 +230,33 @@ fn disabled_control_retains_focus_but_rejects_activation_from_an_older_frame() {
 }
 
 #[test]
+fn behavior_change_cancels_pointer_state_without_discarding_focus() {
+    let (button, journal, route, mut session) = fixture();
+    let pressed = session
+        .dispatch(
+            &journal,
+            route,
+            pointer_button(UiButtonPhase::Pressed, UiPoint::new(30.0, 30.0)),
+        )
+        .unwrap();
+    let mut state = UiButtonState::default();
+    let mut intents = UiIntentBatch::default();
+    state
+        .reduce_batch(&button, pressed.consumed().unwrap(), &mut intents)
+        .unwrap();
+    assert!(state.hovered());
+    assert!(state.pressed());
+    assert!(state.focused());
+
+    state.cancel_pointer_interaction();
+
+    assert!(!state.hovered());
+    assert!(!state.pressed());
+    assert!(state.focused());
+    assert!(intents.intents().is_empty());
+}
+
+#[test]
 fn intent_capacity_failure_does_not_partially_mutate_the_batch() {
     let (button, journal, route, mut session) = fixture();
     session

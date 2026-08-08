@@ -4,8 +4,8 @@ use nara_ecs::{Mut, Resource, World};
 use nara_hierarchy::HierarchyOrder;
 use nara_input::{InputIngressError, InputPresentationEpoch, InputSurfaceId, InputTimeline};
 use nara_ui_kernel::{
-    UiCompileError, UiDispatchError, UiEnvironmentError, UiFrame, UiJournalError,
-    UiPresentationReceipt, UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceId,
+    UiDispatchError, UiEnvironmentError, UiFrame, UiJournalError, UiPresentationReceipt,
+    UiRouteStamp, UiSeatId, UiSemanticSnapshot, UiSurfaceId,
 };
 use thiserror::Error;
 
@@ -191,8 +191,33 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
                     continue;
                 }
             };
-            if let Err(error) = surface.publish_candidate(projected, environment, theme.kernel()) {
-                push_compile_diagnostic(&mut diagnostics, &error);
+            match surface.prepare_candidate(projected, environment, theme.kernel()) {
+                Ok(None) => {}
+                Ok(Some(staging)) => {
+                    let Some(projected) = projection::project_authoring(
+                        world,
+                        &ordered_entities,
+                        source_revision,
+                        staging.reducers(),
+                        &mut diagnostics,
+                    ) else {
+                        continue;
+                    };
+                    if let Err(error) =
+                        surface.finish_candidate(staging, projected, environment, theme.kernel())
+                    {
+                        push_diagnostic(
+                            &mut diagnostics,
+                            "candidate-reprojection-rejected",
+                            &error.to_string(),
+                        );
+                    }
+                }
+                Err(error) => push_diagnostic(
+                    &mut diagnostics,
+                    "candidate-preparation-rejected",
+                    &error.to_string(),
+                ),
             }
         }
         world
@@ -405,7 +430,7 @@ pub fn commit_ui_presentation(
 ) -> Result<UiPresentationReceipt, UiAdapterError> {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
         let surface_id = frame.environment().surface_id();
-        let (descriptor, presented, receipt) = {
+        let (descriptor, prepared) = {
             let surface = state
                 .surface(surface_id)
                 .ok_or(UiAdapterError::UnknownSurface {
@@ -421,9 +446,10 @@ pub fn commit_ui_presentation(
                     surface: surface_id.get(),
                 });
             }
-            let (presented, receipt) = surface.prepare_presentation(presentation_epoch)?;
-            (surface.descriptor(), presented, receipt)
+            let prepared = surface.prepare_presentation(presentation_epoch)?;
+            (surface.descriptor(), prepared)
         };
+        let receipt = prepared.receipt();
         let epoch = InputPresentationEpoch::new(presentation_epoch)
             .ok_or(UiJournalError::ZeroPresentationEpoch)?;
         world
@@ -437,7 +463,7 @@ pub fn commit_ui_presentation(
         state
             .surface_mut(surface_id)
             .expect("validated UI surface remains installed")
-            .commit_presentation(presented);
+            .commit_presentation(prepared);
         Ok(receipt)
     })
 }
@@ -458,10 +484,6 @@ pub fn ui_semantic_snapshot(
             surface: surface_id.get(),
         })?;
     surface.semantic_snapshot(UiRouteStamp::new(surface_id, presentation_epoch), seat)
-}
-
-fn push_compile_diagnostic(diagnostics: &mut Vec<UiAdapterDiagnostic>, error: &UiCompileError) {
-    push_diagnostic(diagnostics, "compile-rejected", &error.to_string());
 }
 
 pub(super) fn push_diagnostic(

@@ -378,7 +378,7 @@ fn button_visual(
     if let Some(background) = background {
         visual = visual.with_background(UiBrush::Role(background));
     }
-    if interaction.focused() && button.enabled() {
+    if interaction.focused() {
         visual = visual.with_border(UiBorder::new(
             visuals.focus_border_width(),
             UiBrush::Role(visuals.focused_border()),
