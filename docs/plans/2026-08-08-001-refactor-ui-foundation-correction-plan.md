@@ -267,7 +267,8 @@ no hit/focus/semantics/action; a last-good root rebinds current layer/sequence a
 change; global identity/limit errors remain fail-closed. Current modal membership and barrier policy
 belong to the envelope rather than cached body facts: an inert retained modal still blocks underlay UI
 and gameplay, while a modal with no valid barrier/fallback rejects the candidate and preserves the
-previous presented session.
+previous presented session. Every whole-candidate rejection retires any older unpresented candidate
+for that surface; only an already committed presented session may remain authoritative.
 
 **Verification:** kernel compile/order nextest, a neutral multi-root example, and an explicit
 reorder-while-invalid regression.
@@ -287,7 +288,8 @@ image and glyph snapshots survive backend submission; bounded uniform radii for 
 closed by the planner and rendered by WGPU; staged planner state and the last-presented packet are
 unchanged on `ContentRejected`; backend upload/residency work may return `Deferred` only with an exact
 retry identity and without advancing receipt authority; `BackendFault` retires its GPU generation.
-Only a backend-issued one-shot presentation commit can publish a receipt.
+Text measurement cannot multiply expensive shaping across callbacks before applying the shared
+candidate allowance. Only a backend-issued one-shot presentation commit can publish a receipt.
 
 **Verification:** `nara_ui_render`/WGPU focused nextest, one neutral presentation gallery, and one
 representative readback. No repeated product hash matrix.

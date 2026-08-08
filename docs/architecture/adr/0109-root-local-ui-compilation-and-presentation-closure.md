@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
+**Amended**: 2026-08-09 by the UIF-U2 unpresented-candidate retirement clarification
 **Owner**: UI authoring builder, UI compiler, text budget, presentation planner, WGPU UI adapter
 **Refines**: [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
 [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md), and
@@ -50,7 +51,9 @@ flowchart LR
 
 - Missing or duplicate stable root identity, impossible root order, compiler/profile mismatch and
   global capacity overflow remain whole-snapshot failures. These checks complete before frame
-  revision, cache clock, retention or LRU state changes.
+  revision, cache clock, retention or LRU state changes. A rejected current source attempt retires
+  any older unpresented candidate for that surface while preserving already committed presented
+  history and interaction authority.
 - Style, text, layout and root-local key failures become bounded root outcomes; valid roots continue.
 - A cached root stores relative layout and paint facts only. Fallback rebinds the current envelope
   layer and ordinal through the same binding path as a fresh root. It is non-interactive and

@@ -3606,6 +3606,71 @@ release loss.
 `crates/nara_ui_kernel/tests/interaction.rs`, `crates/nara_ui/src/adapter_tests.rs`,
 `crates/nara_ui_widgets/tests/button.rs`, and `crates/nara_ui/examples/interaction_lab.rs`.
 
+## UIF-U2: Root Envelopes, Relative Fallback, And Candidate Retirement
+
+**Removed contract**: `UiAuthoringSnapshotBuilder::build` no longer rejects the complete snapshot
+for one root-local style, depth, text or node-key failure. `UiAuthoringError::DepthLimitExceeded`
+is removed; depth failure is now a root outcome. Cached compiled roots no longer retain their old
+global layer or root sequence. A failed current source attempt may no longer leave an older
+unpresented candidate available through `latest_ui_frame` or `commit_ui_presentation`.
+
+**Canonical replacement**: snapshot-global root identity, order and capacity failures remain
+`UiAuthoringError`/`UiCompileError` and publish no candidate. Every known root otherwise owns an
+ordered envelope whose body is either validated or carries a typed `UiRootDiagnostic` such as
+`DepthLimitExceeded`, `KeyRejected` or `InvalidStyle`. `UiAuthoringSnapshot::roots()` returns only
+validated root bodies; the compiled frame's ordered `root_outcomes()` reports every envelope. A
+compatible last-good cache stores relative layout/paint facts only, rebinds the current layer and
+ordinal, and contributes no hit, focus, semantics or action. A retained modal remains an inert
+barrier; a modal without a compatible fallback rejects the candidate. Any whole-candidate failure
+discards unpresented work while preserving an already committed presented session.
+
+**Before**:
+
+```rust
+let snapshot = UiAuthoringSnapshotBuilder::new(revision)
+    .with_root(invalid_root)
+    .with_root(valid_root)
+    .build()?; // One invalid root aborted both roots.
+```
+
+**After**:
+
+```rust
+let snapshot = UiAuthoringSnapshotBuilder::new(revision)
+    .with_root(invalid_root)
+    .with_root(valid_root)
+    .build()?;
+let frame = compiler.compile(&snapshot, environment, theme)?;
+for outcome in frame.root_outcomes() {
+    // Published, RetainedVisual, or Absent in current envelope order.
+}
+```
+
+**User action**: direct kernel consumers must inspect root outcomes instead of expecting
+root-local validation to fail `build`. Do not infer total envelope count from `roots().len()`, do
+not cache frame-global order outside the compiler, and do not retain a candidate `Arc<UiFrame>`
+after a later source attempt is rejected. Presenters must treat `FrameNotLatest` as terminal for
+that candidate.
+
+**Source action**: `manual-rewrite`; no compatibility error variant, stale-order cache adapter or
+candidate alias is retained.
+
+**Cache action**: `delete` root caches produced before the relative-order contract and discard every
+unpresented frame after a whole-candidate failure. Preserve only the presented history through its
+own journal/session lifecycle.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert commit `2fde103` and its evidence/registration successor together. Do not
+restore whole-snapshot root-local rejection, cached global order, modal pass-through or stale
+candidate commit authority.
+
+**Verification anchors**: `crates/nara_ui_kernel/src/authoring.rs`,
+`crates/nara_ui_kernel/src/compiler/{cache,order,root}.rs`,
+`crates/nara_ui/src/runtime/{projection,state}.rs`,
+`crates/nara_ui_kernel/tests/{validation,compile_order,failure_atomic}.rs`,
+`crates/nara_ui/src/adapter_tests.rs`, and `crates/nara_ui_kernel/examples/layout_gallery.rs`.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do
