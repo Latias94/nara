@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-08
+* **Work Registration**: [Ordered UI kernel correction: NUI-U15B product integration active](registry/2026-08/2026-08-08T052339Z-engine-foundation-contract-completion-codex-root-d0c82695aaa647019700840f26617c89.md) - Activates bounded Reference Game UI product integration against the frozen NUI-U15A public inventory and semantic baseline.
+* **Verification Evidence**: [NUI-U15A neutral UI conformance and public boundary freeze](verification/2026-08/2026-08-08T051354Z-nui-u15a-neutral-ui-conformance-and-public-boundary-freeze-32535c96ab3b49d3affa4ecdcbb22e39.md) - Freezes the kernel, runtime adapter, and root presentation UI boundaries through three executable public-only examples.
+
 ## 2026-08-07
 * **Work Registration**: [Ordered UI kernel correction: NUI-U15A UI foundation conformance active](registry/2026-08/2026-08-07T010500Z-engine-foundation-contract-completion-codex-root-b47fe204c2fb4706a00429c0d8ee86c8.md) - Activates neutral layered UI conformance examples and the shared-interface freeze before Reference Game product integration.
 
@@ -147,5 +151,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game runtime authority and delivery: U10 X11 repair awaiting push authorization](registry/2026-07/2026-07-26T083957Z-engine-foundation-contract-completion-codex-root-2bcd10025bb842ca8b8f1318935242ea.md) - Records the second protected U10 failure, verified Linux X11 consumer repair, invalidated U8 hosted verdict, and next separately authorized push gate.
 * **Verification Evidence**: [RGD-U10 Linux X11 consumer diagnosis and local repair](verification/2026-07/2026-07-26T083759Z-rgd-u10-linux-x11-consumer-diagnosis-and-local-repair-4e1b673441774fd99f3637586cb2df4f.md) - Records the second protected candidate failure, exact Ubuntu 24.04 X11 runtime diagnosis, and locally verified workflow repair without claiming hosted completion.
 * **Work Registration**: [Reference-game runtime authority and delivery: U10 rerun awaiting authorization](registry/2026-07/2026-07-26T030358Z-engine-foundation-contract-completion-codex-root-6b6df8de23764d76b5756d5e8f75723a.md) - Records final hosted CI success after the candidate and release-verifier repairs while preserving the separately authorized U10 rerun gate.
-* **Verification Evidence**: [RGD-U8 final hosted CI after candidate capacity repair](verification/2026-07/2026-07-26T030317Z-rgd-u8-final-hosted-ci-after-candidate-capacity-repair-73cf3d9e548743eb9462aec8acbcfec1.md) - Re-establishes the six-cell hosted CI baseline after the candidate capacity and release-verifier pin repairs.
-* **Work Registration**: [Reference-game runtime authority and delivery: U10 release alignment repaired](registry/2026-07/2026-07-26T025113Z-engine-foundation-contract-completion-codex-root-427f191683c748e486e1e5b51618957d.md) - Records the completed local release-verifier alignment repair and the remaining hosted CI and separately authorized U10 rerun gates.
