@@ -1322,6 +1322,44 @@ fn geometry_invalidation_is_scoped_to_the_surface_slot_lineage() {
 }
 
 #[test]
+fn retained_predecessor_target_cannot_overwrite_successor_geometry_invalidation() {
+    let mut compiler = compiler();
+    let mut journal = UiFrameJournal::default();
+    let predecessor = submit(
+        &mut journal,
+        compile_for_slot(&mut compiler, &snapshot(false), 1, 1, 1, 1),
+        100,
+    );
+    let retained_predecessor = journal.resolve(predecessor).unwrap();
+    journal.advance_surface_slot(SURFACE, 1, 2).unwrap();
+    let successor = submit(
+        &mut journal,
+        compile_for_slot(&mut compiler, &snapshot(false), 2, 2, 2, 1),
+        1,
+    );
+    let latest = journal.resolve(successor).unwrap();
+    let mut session = UiInteractionSession::default();
+    session
+        .dispatch(&journal, successor, UiInputEvent::GeometryInvalidated)
+        .unwrap();
+
+    assert!(matches!(
+        session.dispatch_resolved(
+            &retained_predecessor,
+            &latest,
+            predecessor,
+            UiInputEvent::GeometryInvalidated,
+        ),
+        Err(UiDispatchError::ResolvedRouteMismatch)
+    ));
+
+    let stale = session
+        .dispatch(&journal, successor, move_pointer(UiPoint::new(20.0, 20.0)))
+        .unwrap();
+    assert_eq!(stale.rejection(), Some(&UiNonActivation::StaleGeometry));
+}
+
+#[test]
 fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
     let mut compiler = compiler();
     let mut journal = UiFrameJournal::default();

@@ -5,8 +5,8 @@ mod accessibility;
 
 #[cfg(feature = "accessibility")]
 pub use accessibility::{
-    WinitAccessibilityBridge, WinitAccessibilityError, WinitAccessibilityReceipt,
-    WinitAccessibilityUpdate,
+    WinitAccessibilityEndpointRetirement, WinitAccessibilityError, WinitAccessibilityPublisher,
+    WinitAccessibilityReceipt, WinitAccessibilityRetirementReceipt, WinitAccessibilityUpdate,
 };
 
 use std::{

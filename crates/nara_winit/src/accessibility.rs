@@ -12,9 +12,13 @@ const FIRST_CONTENT_NODE_ID: u64 = 2;
 const FIRST_PUBLICATION_GENERATION: u64 = 1;
 const MAX_NODE_IDENTITIES: usize = 4_096;
 
-/// Bounded optional adapter from Nara semantic facts to AccessKit schema values.
+/// Host-owned synchronous publisher from Nara semantic facts to a bounded AccessKit tree record.
+///
+/// A publication receipt proves that this publisher recorded the exact tree and atomically replaced
+/// its callback mapping. It does not claim that an operating-system accessibility client observed
+/// the record.
 #[derive(Debug)]
-pub struct WinitAccessibilityBridge {
+pub struct WinitAccessibilityPublisher {
     surface_id: UiSurfaceId,
     next_node_id: u64,
     node_ids: BTreeMap<UiKey, NodeId>,
@@ -24,10 +28,11 @@ pub struct WinitAccessibilityBridge {
     route: Option<UiRouteStamp>,
     seat: Option<UiSeatId>,
     next_publication_generation: u64,
-    retired: Option<UiSurfaceRetirementToken>,
+    committed_update: Option<WinitAccessibilityUpdate>,
+    retirement: Option<WinitAccessibilityRetirementReceipt>,
 }
 
-impl WinitAccessibilityBridge {
+impl WinitAccessibilityPublisher {
     #[must_use]
     pub const fn new(surface_id: UiSurfaceId) -> Self {
         Self {
@@ -40,21 +45,19 @@ impl WinitAccessibilityBridge {
             route: None,
             seat: None,
             next_publication_generation: FIRST_PUBLICATION_GENERATION,
-            retired: None,
+            committed_update: None,
+            retirement: None,
         }
     }
 
-    /// Publishes one semantic snapshot and commits its callback mapping atomically.
+    /// Records one semantic snapshot and commits its callback mapping atomically.
     ///
-    /// The snapshot is fully validated and a unique publication generation is reserved before
-    /// `publish` is invoked. The callback must synchronously submit the exact update to the
-    /// platform. A failed callback leaves the previous callback mapping authoritative; a successful
-    /// callback is followed by an infallible internal state swap. No publishable token escapes this
-    /// method, so prepared updates cannot be reordered with retirement or with one another.
+    /// The complete candidate is validated before a unique publication generation is reserved. The
+    /// exact AccessKit payload is then stored in this publisher before the callback mapping becomes
+    /// observable. No external callback or publishable token can delay, omit or reorder that record.
     pub fn publish_update(
         &mut self,
         snapshot: &UiSemanticSnapshot,
-        publish: impl FnOnce(&WinitAccessibilityUpdate) -> Result<(), WinitAccessibilityError>,
     ) -> Result<WinitAccessibilityReceipt, WinitAccessibilityError> {
         let publication_generation = self.next_publication_generation;
         let publication = self.build_publication(snapshot, publication_generation)?;
@@ -62,9 +65,8 @@ impl WinitAccessibilityBridge {
             .next_publication_generation
             .checked_add(1)
             .ok_or(WinitAccessibilityError::PublicationGenerationExhausted)?;
-        publish(&publication.update)?;
         let receipt = publication.update.receipt();
-        self.commit_candidate(publication.candidate);
+        self.commit_candidate(publication.candidate, publication.update);
         Ok(receipt)
     }
 
@@ -79,7 +81,7 @@ impl WinitAccessibilityBridge {
                 actual: snapshot.surface_id(),
             });
         }
-        if self.retired.is_some() {
+        if self.retirement.is_some() {
             return Err(WinitAccessibilityError::SurfaceRetired {
                 surface: self.surface_id,
             });
@@ -235,10 +237,15 @@ impl WinitAccessibilityBridge {
         })
     }
 
-    fn commit_candidate(&mut self, candidate: WinitAccessibilityBridge) {
+    fn commit_candidate(
+        &mut self,
+        candidate: WinitAccessibilityPublisher,
+        update: WinitAccessibilityUpdate,
+    ) {
         let next_publication_generation = self.next_publication_generation;
         *self = candidate;
         self.next_publication_generation = next_publication_generation;
+        self.committed_update = Some(update);
     }
 
     fn candidate_clone(&self) -> Self {
@@ -252,7 +259,8 @@ impl WinitAccessibilityBridge {
             route: self.route,
             seat: self.seat,
             next_publication_generation: self.next_publication_generation,
-            retired: self.retired,
+            committed_update: None,
+            retirement: self.retirement,
         }
     }
 
@@ -261,7 +269,7 @@ impl WinitAccessibilityBridge {
         &self,
         request: &ActionRequest,
     ) -> Result<UiAccessibilityInput, WinitAccessibilityError> {
-        if self.retired.is_some() {
+        if self.retirement.is_some() {
             return Err(WinitAccessibilityError::SurfaceRetired {
                 surface: self.surface_id,
             });
@@ -311,19 +319,29 @@ impl WinitAccessibilityBridge {
         }
     }
 
-    /// Retires the bridge with the Host-issued token for this exact Surface Slot lifetime.
+    /// Records one explicit endpoint retirement and clears the exact tree record and mapping.
+    ///
+    /// `endpoint` is a Host-observed postcondition, not a request for a later asynchronous action.
+    /// The same exact retirement is idempotent; a different retirement after the publisher closed
+    /// fails closed.
     pub fn retire(
         &mut self,
         retirement: UiSurfaceRetirementToken,
-    ) -> Result<(), WinitAccessibilityError> {
+        endpoint: WinitAccessibilityEndpointRetirement,
+    ) -> Result<WinitAccessibilityRetirementReceipt, WinitAccessibilityError> {
         if retirement.surface_id() != self.surface_id {
             return Err(WinitAccessibilityError::RetirementSurfaceMismatch {
                 expected: self.surface_id,
                 actual: retirement.surface_id(),
             });
         }
-        if self.retired.is_some() {
-            return Ok(());
+        if let Some(committed) = self.retirement {
+            if committed.token() == retirement && committed.endpoint() == endpoint {
+                return Ok(committed);
+            }
+            return Err(WinitAccessibilityError::SurfaceRetired {
+                surface: self.surface_id,
+            });
         }
         if let Some(route) = self.route
             && route.slot_generation() > retirement.slot_generation()
@@ -333,13 +351,36 @@ impl WinitAccessibilityBridge {
                 actual: retirement.slot_generation(),
             });
         }
+        let publication_generation = self.next_publication_generation;
+        self.next_publication_generation = self
+            .next_publication_generation
+            .checked_add(1)
+            .ok_or(WinitAccessibilityError::PublicationGenerationExhausted)?;
+        let receipt = WinitAccessibilityRetirementReceipt {
+            token: retirement,
+            endpoint,
+            publication_generation,
+        };
         self.active_keys.clear();
         self.active_actions.clear();
         self.active_focusable.clear();
         self.route = None;
         self.seat = None;
-        self.retired = Some(retirement);
-        Ok(())
+        self.committed_update = None;
+        self.retirement = Some(receipt);
+        Ok(receipt)
+    }
+
+    /// Returns the exact tree record committed by the latest successful publication.
+    #[must_use]
+    pub fn committed_update(&self) -> Option<&WinitAccessibilityUpdate> {
+        self.committed_update.as_ref()
+    }
+
+    /// Returns the exact tombstone after this publisher has synchronously retired.
+    #[must_use]
+    pub const fn retirement(&self) -> Option<WinitAccessibilityRetirementReceipt> {
+        self.retirement
     }
 
     #[must_use]
@@ -378,11 +419,12 @@ fn map_role(role: UiSemanticRole) -> Role {
 /// One internal publication candidate. It never crosses the public API boundary.
 #[derive(Debug)]
 struct WinitAccessibilityPublication {
-    candidate: WinitAccessibilityBridge,
+    candidate: WinitAccessibilityPublisher,
     update: WinitAccessibilityUpdate,
 }
 
-/// AccessKit payload paired with the exact Nara presentation authority it represents.
+/// AccessKit payload stored by the publisher with the exact Nara presentation authority it
+/// represents.
 #[derive(Debug, PartialEq)]
 pub struct WinitAccessibilityUpdate {
     route: UiRouteStamp,
@@ -431,7 +473,9 @@ impl WinitAccessibilityUpdate {
     }
 }
 
-/// Exact evidence that one accessibility tree update was synchronously published and committed.
+/// Exact evidence that one accessibility tree record and callback mapping were committed together.
+///
+/// This receipt does not prove that an operating-system client or player observed the tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WinitAccessibilityReceipt {
     route: UiRouteStamp,
@@ -461,10 +505,49 @@ impl WinitAccessibilityReceipt {
     }
 }
 
+/// Host-observed endpoint postcondition that authorizes accessibility retirement.
+///
+/// These variants describe work already completed by the Host. They are not deferred requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WinitAccessibilityEndpointRetirement {
+    PlatformTreeRemoved,
+    NativeWindowDestroyed,
+}
+
+/// Exact tombstone recorded after the publisher cleared its tree record and callback mapping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinitAccessibilityRetirementReceipt {
+    token: UiSurfaceRetirementToken,
+    endpoint: WinitAccessibilityEndpointRetirement,
+    publication_generation: u64,
+}
+
+impl WinitAccessibilityRetirementReceipt {
+    #[must_use]
+    pub const fn token(self) -> UiSurfaceRetirementToken {
+        self.token
+    }
+
+    #[must_use]
+    pub const fn surface_id(self) -> UiSurfaceId {
+        self.token.surface_id()
+    }
+
+    #[must_use]
+    pub const fn endpoint(self) -> WinitAccessibilityEndpointRetirement {
+        self.endpoint
+    }
+
+    #[must_use]
+    pub const fn publication_generation(self) -> u64 {
+        self.publication_generation
+    }
+}
+
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum WinitAccessibilityError {
     #[error(
-        "accessibility snapshot surface {actual:?} does not match adapter surface {expected:?}"
+        "accessibility snapshot surface {actual:?} does not match publisher surface {expected:?}"
     )]
     SurfaceMismatch {
         expected: UiSurfaceId,
@@ -486,8 +569,6 @@ pub enum WinitAccessibilityError {
     },
     #[error("accessibility publication generation was exhausted")]
     PublicationGenerationExhausted,
-    #[error("platform accessibility publication failed: {message}")]
-    PlatformPublish { message: String },
     #[error("accessibility snapshot exceeds {maximum} semantic nodes")]
     NodeLimitExceeded { maximum: usize },
     #[error("accessibility node identity retention exceeds {maximum} keys")]

@@ -88,8 +88,13 @@ impl UiInteractionSession {
         route: UiRouteStamp,
         input: UiInputEvent,
     ) -> Result<UiDispatchOutcome, UiDispatchError> {
+        let latest_route = UiRouteStamp::from_receipt(latest.receipt());
         if UiRouteStamp::from_receipt(target.receipt()) != route
-            || latest.receipt().surface_id() != route.surface_id()
+            || latest_route.surface_id() != route.surface_id()
+            || latest_route.slot_generation() != route.slot_generation()
+            || latest_route.presentation_epoch() < route.presentation_epoch()
+            || latest_route.route_revision() < route.route_revision()
+            || latest_route.geometry_generation() < route.geometry_generation()
         {
             return Err(UiDispatchError::ResolvedRouteMismatch);
         }

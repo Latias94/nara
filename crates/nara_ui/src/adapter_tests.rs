@@ -6,14 +6,15 @@ use nara_app::{
 };
 use nara_asset::AssetRef;
 use nara_core::Vec2;
-use nara_ecs::{Entity, ResMut, Resource, World};
+use nara_ecs::{Entity, Res, ResMut, Resource, World};
 use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ButtonDriverInput, ButtonTransitionPhase, InputEventKind, InputGeometryGeneration,
-    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
-    InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowEvent, InputWindowId,
+    ActionId, ActionMap, ActionOutcomes, ActionPhase, ButtonDriverInput, ButtonTransitionPhase,
+    InputEventKind, InputGeometryGeneration, InputPointerId, InputPresentationEpoch,
+    InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
+    InputTimeline, InputWindowEvent, InputWindowId, KeyCode, MAX_INPUT_TIMELINE_ENTRIES,
     MouseButton, PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
 };
 use nara_reflect::{
@@ -43,6 +44,30 @@ use crate::{
 };
 
 const TEST_DOMAIN: &str = "nara.test.ui";
+
+#[derive(Debug, Default, Resource)]
+struct CapturedGameplayPhases(Vec<ActionPhase>);
+
+fn capture_gameplay_phases(
+    outcomes: Res<ActionOutcomes>,
+    mut captured: ResMut<CapturedGameplayPhases>,
+) {
+    captured
+        .0
+        .extend(outcomes.as_slice().iter().map(|outcome| outcome.phase));
+}
+
+fn install_gameplay_capture(app: &mut App) {
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .insert_resource(CapturedGameplayPhases::default());
+    app.world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<ActionMap>()
+        .bind_mouse(ActionId::new("fire").unwrap(), MouseButton::Left);
+    app.add_systems(CoreStage::Update, capture_gameplay_phases)
+        .expect("gameplay action capture should install");
+}
 
 fn ui_app() -> App {
     let mut app = App::new();
@@ -3115,6 +3140,219 @@ fn retirement_route_mismatch_preserves_surface_session_and_identity() {
     assert!(!state.is_retired(surface_id()));
     assert_eq!(active_ui_surface_slots(app.world()).unwrap().len(), 1);
     assert!(ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).is_ok());
+}
+
+#[test]
+fn surface_retirement_releases_only_gameplay_owned_held_edges() {
+    let mut gameplay_owned = build_unstarted_button_app().0;
+    install_gameplay_capture(&mut gameplay_owned);
+    update_ui_surface_slot(
+        gameplay_owned.world_mut().unwrap(),
+        surface_id(),
+        test_endpoint(11),
+        test_transform(200.0, 100.0, 300.0, 100.0, 1.0),
+    )
+    .unwrap();
+    gameplay_owned.update().unwrap();
+    let frame = latest_ui_frame(gameplay_owned.world(), surface_id())
+        .unwrap()
+        .unwrap();
+    commit_ui_presentation(gameplay_owned.world_mut().unwrap(), frame, 1).unwrap();
+    {
+        let mut timeline = gameplay_owned
+            .world_mut()
+            .unwrap()
+            .resource_mut::<InputTimeline>();
+        timeline
+            .admit_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(25.0, 10.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+    }
+    gameplay_owned.update().unwrap();
+    assert_eq!(
+        gameplay_owned
+            .world()
+            .resource::<CapturedGameplayPhases>()
+            .0,
+        [ActionPhase::Started]
+    );
+    gameplay_owned
+        .world_mut()
+        .unwrap()
+        .resource_mut::<CapturedGameplayPhases>()
+        .0
+        .clear();
+
+    retire_ui_surface(gameplay_owned.world_mut().unwrap(), surface_id())
+        .unwrap()
+        .unwrap();
+    gameplay_owned.update().unwrap();
+    assert_eq!(
+        gameplay_owned
+            .world()
+            .resource::<CapturedGameplayPhases>()
+            .0,
+        [ActionPhase::Released]
+    );
+
+    let mut ui_owned = build_unstarted_button_app().0;
+    install_gameplay_capture(&mut ui_owned);
+    ui_owned.update().unwrap();
+    let frame = latest_ui_frame(ui_owned.world(), surface_id())
+        .unwrap()
+        .unwrap();
+    commit_ui_presentation(ui_owned.world_mut().unwrap(), frame, 1).unwrap();
+    {
+        let mut timeline = ui_owned
+            .world_mut()
+            .unwrap()
+            .resource_mut::<InputTimeline>();
+        timeline
+            .admit_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(10.0, 10.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+    }
+    ui_owned.update().unwrap();
+    assert!(
+        ui_owned
+            .world()
+            .resource::<CapturedGameplayPhases>()
+            .0
+            .is_empty()
+    );
+
+    retire_ui_surface(ui_owned.world_mut().unwrap(), surface_id())
+        .unwrap()
+        .unwrap();
+    ui_owned.update().unwrap();
+    assert!(
+        ui_owned
+            .world()
+            .resource::<CapturedGameplayPhases>()
+            .0
+            .is_empty()
+    );
+}
+
+#[test]
+fn full_input_timeline_aborts_coordinated_surface_retirement_without_partial_state() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let receipt = commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        frame,
+        1,
+    )
+    .unwrap();
+    app.update().unwrap();
+    let window = InputWindowId::new(11);
+    let seat = InputSeatId::PRIMARY;
+    let pointer = InputPointerId::PRIMARY;
+    let expected_route = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .publish_presented_route(InputPresentedRoute::new(
+            window,
+            InputSurfaceId::new(surface_id().get()),
+            seat,
+            InputPresentationEpoch::new(receipt.presentation_epoch()).unwrap(),
+            InputSlotGeneration::new(receipt.slot_generation().get()).unwrap(),
+            InputRouteGeneration::new(receipt.route_revision().get()).unwrap(),
+            InputGeometryGeneration::new(receipt.geometry_generation().get()).unwrap(),
+        ))
+        .unwrap();
+    {
+        let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
+        timeline
+            .admit_pointer(
+                window,
+                seat,
+                pointer,
+                PointerDriverInput::Moved(Vec2::new(20.0, 20.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+        while timeline.retained_len() < MAX_INPUT_TIMELINE_ENTRIES {
+            let button = u16::try_from(timeline.retained_len()).unwrap();
+            timeline
+                .admit_gamepad_button(window, seat, 0, button, ButtonTransitionPhase::Pressed)
+                .unwrap();
+        }
+    }
+
+    assert!(matches!(
+        retire_ui_surface(app.world_mut().unwrap(), surface_id()),
+        Err(UiAdapterError::Input(
+            nara_input::InputIngressError::CapacityExceeded {
+                route_invalidated: false,
+                ..
+            }
+        ))
+    ));
+    assert!(
+        app.world()
+            .resource::<crate::runtime::UiRuntimeState>()
+            .surface(surface_id())
+            .is_some()
+    );
+    assert!(ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).is_ok());
+
+    let rebound = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .publish_presented_route(InputPresentedRoute::new(
+            window,
+            expected_route.surface().unwrap(),
+            seat,
+            InputPresentationEpoch::new(expected_route.presentation_epoch().unwrap().get())
+                .unwrap(),
+            InputSlotGeneration::new(expected_route.slot_generation().unwrap().get()).unwrap(),
+            InputRouteGeneration::new(expected_route.route_generation().unwrap().get()).unwrap(),
+            InputGeometryGeneration::new(expected_route.geometry_generation().unwrap().get())
+                .unwrap(),
+        ))
+        .unwrap();
+    assert_eq!(
+        rebound.binding_generation(),
+        expected_route.binding_generation()
+    );
 }
 
 #[test]

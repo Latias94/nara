@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use nara_app::{__RuntimeDriverPort, RuntimeState};
 use nara_core::Vec2;
@@ -29,6 +29,55 @@ enum ActionRetention {
     Done,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActionDelivery {
+    OwnUiDisposition,
+    Gameplay,
+    Ui,
+    FollowPress(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeldInputDisposition {
+    Pending,
+    Gameplay,
+    Ui,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HeldInput {
+    press_sequence: u64,
+    route: InputRouteStamp,
+    disposition: HeldInputDisposition,
+}
+
+impl HeldInput {
+    fn new(press_sequence: u64, route: InputRouteStamp) -> Self {
+        Self {
+            press_sequence,
+            route,
+            disposition: if route.is_ui_routable() {
+                HeldInputDisposition::Pending
+            } else {
+                HeldInputDisposition::Gameplay
+            },
+        }
+    }
+
+    const fn action_delivery(self) -> ActionDelivery {
+        match self.disposition {
+            HeldInputDisposition::Pending => ActionDelivery::FollowPress(self.press_sequence),
+            HeldInputDisposition::Gameplay => ActionDelivery::Gameplay,
+            HeldInputDisposition::Ui => ActionDelivery::Ui,
+        }
+    }
+
+    fn can_route_release_through(self, route: InputRouteStamp) -> bool {
+        self.disposition != HeldInputDisposition::Gameplay
+            && same_presented_lineage(self.route, route)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct RetainedInput {
     entry: InputTimelineEntry,
@@ -37,6 +86,7 @@ struct RetainedInput {
     ui_pending: bool,
     ui_consumed: bool,
     action: ActionRetention,
+    action_delivery: ActionDelivery,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,6 +105,13 @@ struct InputDraft {
     logical_position: Option<Vec2>,
     kind: InputEventKind,
     invalidation: Option<InputInvalidationReason>,
+    action_delivery: ActionDelivery,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhysicalInvalidationMode {
+    PlatformObserved,
+    Coordinated,
 }
 
 /// Global normalized input authority and independent consumer progress.
@@ -69,12 +126,9 @@ pub struct InputTimeline {
     focused_windows: BTreeMap<InputSeatId, InputWindowId>,
     next_binding_generation: u64,
     routes_poisoned: bool,
-    pressed_keys: BTreeMap<(InputWindowId, InputSeatId), BTreeSet<KeyCode>>,
+    pressed_keys: BTreeMap<(InputWindowId, InputSeatId), BTreeMap<KeyCode, HeldInput>>,
     pressed_mouse_buttons:
-        BTreeMap<(InputWindowId, InputSeatId, InputPointerId), BTreeSet<MouseButton>>,
-    unrouted_pressed_keys: BTreeMap<(InputWindowId, InputSeatId), BTreeSet<KeyCode>>,
-    unrouted_pressed_mouse_buttons:
-        BTreeMap<(InputWindowId, InputSeatId, InputPointerId), BTreeSet<MouseButton>>,
+        BTreeMap<(InputWindowId, InputSeatId, InputPointerId), BTreeMap<MouseButton, HeldInput>>,
     pointer_positions: BTreeMap<(InputWindowId, InputSeatId, InputPointerId), Vec2>,
 }
 
@@ -92,8 +146,6 @@ impl Default for InputTimeline {
             routes_poisoned: false,
             pressed_keys: BTreeMap::new(),
             pressed_mouse_buttons: BTreeMap::new(),
-            unrouted_pressed_keys: BTreeMap::new(),
-            unrouted_pressed_mouse_buttons: BTreeMap::new(),
             pointer_positions: BTreeMap::new(),
         }
     }
@@ -197,21 +249,25 @@ impl InputTimeline {
         sequence: u64,
         disposition: InputUiDisposition,
     ) -> Result<(), InputUiCursorError> {
-        let Some(retained) = self
-            .retained
-            .iter_mut()
-            .find(|retained| retained.entry.sequence == sequence)
-        else {
-            return Err(InputUiCursorError::UnknownSequence { sequence });
+        let (entry, ui_consumed) = {
+            let Some(retained) = self
+                .retained
+                .iter_mut()
+                .find(|retained| retained.entry.sequence == sequence)
+            else {
+                return Err(InputUiCursorError::UnknownSequence { sequence });
+            };
+            if !retained.ui_pending {
+                return Err(InputUiCursorError::AlreadyFinalized { sequence });
+            }
+            retained.ui_pending = false;
+            retained.ui_consumed = matches!(
+                disposition,
+                InputUiDisposition::Consumed | InputUiDisposition::RejectedClosed
+            );
+            (retained.entry, retained.ui_consumed)
         };
-        if !retained.ui_pending {
-            return Err(InputUiCursorError::AlreadyFinalized { sequence });
-        }
-        retained.ui_pending = false;
-        retained.ui_consumed = matches!(
-            disposition,
-            InputUiDisposition::Consumed | InputUiDisposition::RejectedClosed
-        );
+        self.resolve_held_press(entry, ui_consumed);
         Ok(())
     }
 
@@ -252,7 +308,14 @@ impl InputTimeline {
         expected_route: Option<InputRouteStamp>,
     ) -> Result<InputEndpointRetirement, InputIngressError> {
         self.validate_presented_endpoint(window, seat, expected_route)?;
-        let output = self.retire_endpoint(window, seat)?;
+        let output = self.invalidate_physical_endpoint(
+            window,
+            seat,
+            InputEventKind::SurfaceRetired,
+            InputInvalidationReason::SurfaceRetired,
+            true,
+            PhysicalInvalidationMode::Coordinated,
+        )?;
         Ok(InputEndpointRetirement::new(
             output.admission,
             output.released_keys,
@@ -332,6 +395,7 @@ impl InputTimeline {
             logical_position: position,
             kind: InputEventKind::Wheel { delta },
             invalidation: None,
+            action_delivery: ActionDelivery::OwnUiDisposition,
         };
         self.admit_drafts(&[draft])
     }
@@ -353,6 +417,7 @@ impl InputTimeline {
                 phase,
             },
             invalidation: None,
+            action_delivery: ActionDelivery::OwnUiDisposition,
         };
         self.admit_drafts(&[draft])
     }
@@ -405,40 +470,34 @@ impl InputTimeline {
         match input {
             ButtonDriverInput::Press(key) => {
                 let draft = self.key_draft(window, seat, key, ButtonTransitionPhase::Pressed);
-                let state_key = (draft.route.window(), seat);
-                if self
-                    .pressed_keys
-                    .get(&state_key)
-                    .is_some_and(|pressed| pressed.contains(&key))
-                {
+                if self.pressed_key_window(seat, key).is_some() {
                     return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
                 }
+                let state_key = (draft.route.window(), seat);
                 let admission = self.admit_drafts(&[draft])?;
-                self.pressed_keys.entry(state_key).or_default().insert(key);
-                if !draft.route.is_ui_routable() {
-                    self.unrouted_pressed_keys
-                        .entry(state_key)
-                        .or_default()
-                        .insert(key);
-                }
+                let press_sequence = admission
+                    .first_sequence()
+                    .expect("one admitted key press has one sequence");
+                self.pressed_keys
+                    .entry(state_key)
+                    .or_default()
+                    .insert(key, HeldInput::new(press_sequence, draft.route));
                 Ok(__InputDriverOutput::new(admission))
             }
             ButtonDriverInput::Release(key) => {
-                let draft = self.key_draft(window, seat, key, ButtonTransitionPhase::Released);
-                let state_key = (draft.route.window(), seat);
-                if !self
-                    .pressed_keys
-                    .get(&state_key)
-                    .is_some_and(|pressed| pressed.contains(&key))
-                {
+                let Some(origin_window) = self.pressed_key_window(seat, key) else {
                     return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
-                }
+                };
+                let draft = self.key_draft_for_window(
+                    origin_window,
+                    seat,
+                    key,
+                    ButtonTransitionPhase::Released,
+                );
+                let state_key = (draft.route.window(), seat);
                 let admission = self.admit_drafts(&[draft])?;
                 if let Some(pressed) = self.pressed_keys.get_mut(&state_key) {
                     pressed.remove(&key);
-                }
-                if let Some(unrouted) = self.unrouted_pressed_keys.get_mut(&state_key) {
-                    unrouted.remove(&key);
                 }
                 Ok(__InputDriverOutput::new(admission))
             }
@@ -448,20 +507,23 @@ impl InputTimeline {
                     .iter()
                     .filter(|((_, event_seat), _)| *event_seat == seat)
                     .flat_map(|((event_window, _), pressed)| {
-                        pressed.iter().copied().map(|key| (*event_window, key))
+                        pressed.keys().copied().map(|key| (*event_window, key))
                     })
                     .collect::<Vec<_>>();
                 let drafts = released
                     .iter()
                     .copied()
                     .map(|(event_window, key)| {
-                        self.key_draft(event_window, seat, key, ButtonTransitionPhase::Released)
+                        self.key_draft_for_window(
+                            event_window,
+                            seat,
+                            key,
+                            ButtonTransitionPhase::Released,
+                        )
                     })
                     .collect::<Vec<_>>();
                 let admission = self.admit_drafts(&drafts)?;
                 self.pressed_keys
-                    .retain(|(_, event_seat), _| *event_seat != seat);
-                self.unrouted_pressed_keys
                     .retain(|(_, event_seat), _| *event_seat != seat);
                 let mut output = __InputDriverOutput::new(admission);
                 output.released_keys = released
@@ -486,7 +548,7 @@ impl InputTimeline {
                 if self
                     .pressed_mouse_buttons
                     .get(&state_key)
-                    .is_some_and(|pressed| pressed.contains(&button))
+                    .is_some_and(|pressed| pressed.contains_key(&button))
                 {
                     return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
                 }
@@ -498,23 +560,20 @@ impl InputTimeline {
                     ButtonTransitionPhase::Pressed,
                 );
                 let admission = self.admit_drafts(&[draft])?;
+                let press_sequence = admission
+                    .first_sequence()
+                    .expect("one admitted pointer press has one sequence");
                 self.pressed_mouse_buttons
                     .entry(state_key)
                     .or_default()
-                    .insert(button);
-                if !draft.route.is_ui_routable() {
-                    self.unrouted_pressed_mouse_buttons
-                        .entry(state_key)
-                        .or_default()
-                        .insert(button);
-                }
+                    .insert(button, HeldInput::new(press_sequence, draft.route));
                 Ok(__InputDriverOutput::new(admission))
             }
             ButtonDriverInput::Release(button) => {
                 if !self
                     .pressed_mouse_buttons
                     .get(&state_key)
-                    .is_some_and(|pressed| pressed.contains(&button))
+                    .is_some_and(|pressed| pressed.contains_key(&button))
                 {
                     return Ok(__InputDriverOutput::new(InputAdmission::IGNORED));
                 }
@@ -529,16 +588,13 @@ impl InputTimeline {
                 if let Some(pressed) = self.pressed_mouse_buttons.get_mut(&state_key) {
                     pressed.remove(&button);
                 }
-                if let Some(unrouted) = self.unrouted_pressed_mouse_buttons.get_mut(&state_key) {
-                    unrouted.remove(&button);
-                }
                 Ok(__InputDriverOutput::new(admission))
             }
             ButtonDriverInput::ReleaseAll => {
                 let released = self
                     .pressed_mouse_buttons
                     .get(&state_key)
-                    .map(|pressed| pressed.iter().copied().collect::<Vec<_>>())
+                    .map(|pressed| pressed.keys().copied().collect::<Vec<_>>())
                     .unwrap_or_default();
                 let drafts = released
                     .iter()
@@ -555,7 +611,6 @@ impl InputTimeline {
                     .collect::<Vec<_>>();
                 let admission = self.admit_drafts(&drafts)?;
                 self.pressed_mouse_buttons.remove(&state_key);
-                self.unrouted_pressed_mouse_buttons.remove(&state_key);
                 let mut output = __InputDriverOutput::new(admission);
                 output.released_mouse_buttons = released;
                 Ok(output)
@@ -580,6 +635,7 @@ impl InputTimeline {
                     logical_position: Some(position),
                     kind: InputEventKind::PointerMoved,
                     invalidation: None,
+                    action_delivery: ActionDelivery::OwnUiDisposition,
                 };
                 let admission = self.admit_drafts(&[draft])?;
                 self.pointer_positions
@@ -592,7 +648,7 @@ impl InputTimeline {
                 let released = self
                     .pressed_mouse_buttons
                     .get(&state_key)
-                    .map(|pressed| pressed.iter().copied().collect::<Vec<_>>())
+                    .map(|pressed| pressed.keys().copied().collect::<Vec<_>>())
                     .unwrap_or_default();
                 let mut drafts = released
                     .iter()
@@ -614,18 +670,17 @@ impl InputTimeline {
                     logical_position: position,
                     kind: InputEventKind::PointerLeft,
                     invalidation: Some(InputInvalidationReason::PointerLeft),
+                    action_delivery: ActionDelivery::OwnUiDisposition,
                 });
                 let admission = match self.admit_drafts(&drafts) {
                     Ok(admission) => admission,
                     Err(error) => {
                         self.pressed_mouse_buttons.remove(&state_key);
-                        self.unrouted_pressed_mouse_buttons.remove(&state_key);
                         self.pointer_positions.remove(&state_key);
                         return Err(error);
                     }
                 };
                 self.pressed_mouse_buttons.remove(&state_key);
-                self.unrouted_pressed_mouse_buttons.remove(&state_key);
                 self.pointer_positions.remove(&state_key);
                 let mut output = __InputDriverOutput::new(admission);
                 output.released_mouse_buttons = released;
@@ -646,6 +701,7 @@ impl InputTimeline {
                 logical_position: None,
                 kind: InputEventKind::FocusChanged { focused: true },
                 invalidation: None,
+                action_delivery: ActionDelivery::OwnUiDisposition,
             };
             let admission = self.admit_drafts(&[draft])?;
             self.focused_windows.insert(seat, window);
@@ -663,6 +719,7 @@ impl InputTimeline {
                 InputEventKind::FocusChanged { focused: false },
                 InputInvalidationReason::FocusLost,
                 owns_keyboard_focus,
+                PhysicalInvalidationMode::PlatformObserved,
             ),
             InputWindowEvent::Resized { logical_size } => {
                 if !vec2_is_finite(logical_size) || logical_size.x < 0.0 || logical_size.y < 0.0 {
@@ -692,6 +749,7 @@ impl InputTimeline {
                 InputEventKind::CloseRequested,
                 InputInvalidationReason::CloseRequested,
                 owns_keyboard_focus,
+                PhysicalInvalidationMode::PlatformObserved,
             ),
             InputWindowEvent::SurfaceRetired => self.retire_endpoint(window, seat),
             InputWindowEvent::Focused(true) => unreachable!("focus gain returned above"),
@@ -712,6 +770,7 @@ impl InputTimeline {
             logical_position: None,
             kind,
             invalidation: Some(reason),
+            action_delivery: ActionDelivery::OwnUiDisposition,
         };
         let unbind_result = self.unbind_route(window, seat);
         self.clear_pointer_positions(window, seat);
@@ -734,6 +793,7 @@ impl InputTimeline {
             InputEventKind::SurfaceRetired,
             InputInvalidationReason::SurfaceRetired,
             true,
+            PhysicalInvalidationMode::PlatformObserved,
         )
     }
 
@@ -744,13 +804,19 @@ impl InputTimeline {
         kind: InputEventKind,
         reason: InputInvalidationReason,
         clear_keyboard: bool,
+        mode: PhysicalInvalidationMode,
     ) -> Result<__InputDriverOutput, InputIngressError> {
         let old_route = self.pointer_route(window, seat, None);
 
         let released_keys = if clear_keyboard {
             self.pressed_keys
                 .get(&(window, seat))
-                .map(|pressed| pressed.iter().copied().collect::<Vec<_>>())
+                .map(|pressed| {
+                    pressed
+                        .iter()
+                        .map(|(&key, &held)| (key, held))
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default()
         } else {
             Vec::new()
@@ -762,7 +828,9 @@ impl InputTimeline {
                 *event_window == window && *event_seat == seat
             })
             .flat_map(|((_, _, pointer), pressed)| {
-                pressed.iter().copied().map(|button| (*pointer, button))
+                pressed
+                    .iter()
+                    .map(|(&button, &held)| (*pointer, button, held))
             })
             .collect::<Vec<_>>();
         let pointer_positions = self
@@ -776,33 +844,53 @@ impl InputTimeline {
         let mut drafts = Vec::with_capacity(
             released_keys.len() + released_mouse_buttons.len() + pointer_positions.len() + 1,
         );
-        drafts.extend(released_keys.iter().copied().map(|key| InputDraft {
-            route: old_route,
+        drafts.extend(released_keys.iter().copied().map(|(key, held)| InputDraft {
+            route: if held.can_route_release_through(old_route) {
+                old_route
+            } else {
+                InputRouteStamp::unrouted(window, seat, None)
+            },
             logical_position: None,
             kind: InputEventKind::Key {
                 key,
                 phase: ButtonTransitionPhase::Released,
             },
             invalidation: Some(reason),
+            action_delivery: held.action_delivery(),
         }));
         drafts.extend(
             released_mouse_buttons
                 .iter()
                 .copied()
-                .map(|(pointer, button)| InputDraft {
-                    route: InputRouteStamp {
-                        pointer: Some(pointer),
-                        ..old_route
+                .map(|(pointer, button, held)| InputDraft {
+                    route: {
+                        let routed = InputRouteStamp {
+                            pointer: Some(pointer),
+                            ..old_route
+                        };
+                        if held.can_route_release_through(routed) {
+                            routed
+                        } else {
+                            InputRouteStamp::unrouted(window, seat, Some(pointer))
+                        }
                     },
-                    logical_position: self
-                        .pointer_positions
-                        .get(&(window, seat, pointer))
-                        .copied(),
+                    logical_position: held
+                        .can_route_release_through(InputRouteStamp {
+                            pointer: Some(pointer),
+                            ..old_route
+                        })
+                        .then(|| {
+                            self.pointer_positions
+                                .get(&(window, seat, pointer))
+                                .copied()
+                        })
+                        .flatten(),
                     kind: InputEventKind::PointerButton {
                         button,
                         phase: ButtonTransitionPhase::Released,
                     },
                     invalidation: Some(reason),
+                    action_delivery: held.action_delivery(),
                 }),
         );
         drafts.extend(
@@ -817,6 +905,7 @@ impl InputTimeline {
                     logical_position: Some(position),
                     kind: InputEventKind::PointerLeft,
                     invalidation: Some(reason),
+                    action_delivery: ActionDelivery::OwnUiDisposition,
                 }),
         );
         drafts.push(InputDraft {
@@ -824,27 +913,96 @@ impl InputTimeline {
             logical_position: None,
             kind,
             invalidation: Some(reason),
+            action_delivery: ActionDelivery::OwnUiDisposition,
         });
 
-        if let Err(error) = self.fail_closed_window(window, seat) {
-            self.clear_physical_route_state(window, seat, clear_keyboard);
-            return Err(error);
-        }
-        let admission = match self.admit_drafts(&drafts) {
-            Ok(admission) => admission,
-            Err(error) => {
-                self.clear_physical_route_state(window, seat, clear_keyboard);
-                return Err(error.after_route_invalidation());
+        let admission = match mode {
+            PhysicalInvalidationMode::Coordinated => {
+                let binding_generation = self.next_binding_generation_for_change()?;
+                let admission = self.admit_drafts(&drafts)?;
+                self.commit_failed_closed_window(window, seat, binding_generation);
+                admission
+            }
+            PhysicalInvalidationMode::PlatformObserved => {
+                if let Err(error) = self.fail_closed_window(window, seat) {
+                    self.clear_physical_route_state(window, seat, clear_keyboard);
+                    return Err(error);
+                }
+                match self.admit_drafts(&drafts) {
+                    Ok(admission) => admission,
+                    Err(error) => {
+                        self.clear_physical_route_state(window, seat, clear_keyboard);
+                        return Err(error.after_route_invalidation());
+                    }
+                }
             }
         };
         self.clear_physical_route_state(window, seat, clear_keyboard);
         let mut output = __InputDriverOutput::new(admission);
-        output.released_keys = released_keys;
+        output.released_keys = released_keys.into_iter().map(|(key, _)| key).collect();
         output.released_mouse_buttons = released_mouse_buttons
             .into_iter()
-            .map(|(_, button)| button)
+            .map(|(_, button, _)| button)
             .collect();
         Ok(output)
+    }
+
+    fn resolve_held_press(&mut self, entry: InputTimelineEntry, ui_consumed: bool) {
+        let disposition = if ui_consumed {
+            HeldInputDisposition::Ui
+        } else {
+            HeldInputDisposition::Gameplay
+        };
+        let sequence = entry.sequence();
+        match entry.kind() {
+            InputEventKind::Key {
+                key,
+                phase: ButtonTransitionPhase::Pressed,
+            } => {
+                if let Some(held) = self
+                    .pressed_keys
+                    .get_mut(&(entry.route().window(), entry.route().seat()))
+                    .and_then(|pressed| pressed.get_mut(&key))
+                    && held.press_sequence == sequence
+                {
+                    held.disposition = disposition;
+                }
+            }
+            InputEventKind::PointerButton {
+                button,
+                phase: ButtonTransitionPhase::Pressed,
+            } => {
+                if let Some(pointer) = entry.route().pointer()
+                    && let Some(held) = self
+                        .pressed_mouse_buttons
+                        .get_mut(&(entry.route().window(), entry.route().seat(), pointer))
+                        .and_then(|pressed| pressed.get_mut(&button))
+                    && held.press_sequence == sequence
+                {
+                    held.disposition = disposition;
+                }
+            }
+            _ => return,
+        }
+
+        let delivery = if ui_consumed {
+            ActionDelivery::Ui
+        } else {
+            ActionDelivery::Gameplay
+        };
+        for retained in &mut self.retained {
+            if retained.action_delivery == ActionDelivery::FollowPress(sequence) {
+                retained.action_delivery = delivery;
+            }
+        }
+    }
+
+    fn pressed_key_window(&self, seat: InputSeatId, key: KeyCode) -> Option<InputWindowId> {
+        self.pressed_keys
+            .iter()
+            .find_map(|(&(window, event_seat), pressed)| {
+                (event_seat == seat && pressed.contains_key(&key)).then_some(window)
+            })
     }
 
     fn key_draft(
@@ -855,21 +1013,33 @@ impl InputTimeline {
         phase: ButtonTransitionPhase,
     ) -> InputDraft {
         let focused_window = self.focused_windows.get(&seat).copied().unwrap_or(window);
-        let route = if phase == ButtonTransitionPhase::Released
-            && self
-                .unrouted_pressed_keys
-                .get(&(focused_window, seat))
-                .is_some_and(|keys| keys.contains(&key))
-        {
-            InputRouteStamp::unrouted(focused_window, seat, None)
+        self.key_draft_for_window(focused_window, seat, key, phase)
+    }
+
+    fn key_draft_for_window(
+        &self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        key: KeyCode,
+        phase: ButtonTransitionPhase,
+    ) -> InputDraft {
+        let held = (phase == ButtonTransitionPhase::Released)
+            .then(|| self.pressed_keys.get(&(window, seat))?.get(&key).copied())
+            .flatten();
+        let action_delivery =
+            held.map_or(ActionDelivery::OwnUiDisposition, HeldInput::action_delivery);
+        let current_route = self.pointer_route(window, seat, None);
+        let route = if held.is_none_or(|held| held.can_route_release_through(current_route)) {
+            current_route
         } else {
-            self.pointer_route(focused_window, seat, None)
+            InputRouteStamp::unrouted(window, seat, None)
         };
         InputDraft {
             route,
             logical_position: None,
             kind: InputEventKind::Key { key, phase },
             invalidation: None,
+            action_delivery,
         }
     }
 
@@ -882,22 +1052,30 @@ impl InputTimeline {
         phase: ButtonTransitionPhase,
     ) -> InputDraft {
         let state_key = (window, seat, pointer);
-        let was_unrouted = phase == ButtonTransitionPhase::Released
-            && self
-                .unrouted_pressed_mouse_buttons
-                .get(&state_key)
-                .is_some_and(|buttons| buttons.contains(&button));
+        let held = (phase == ButtonTransitionPhase::Released)
+            .then(|| {
+                self.pressed_mouse_buttons
+                    .get(&state_key)?
+                    .get(&button)
+                    .copied()
+            })
+            .flatten();
+        let current_route = self.pointer_route(window, seat, Some(pointer));
+        let route_through_ui =
+            held.is_none_or(|held| held.can_route_release_through(current_route));
         InputDraft {
-            route: if was_unrouted {
-                InputRouteStamp::unrouted(window, seat, Some(pointer))
+            route: if route_through_ui {
+                current_route
             } else {
-                self.pointer_route(window, seat, Some(pointer))
+                InputRouteStamp::unrouted(window, seat, Some(pointer))
             },
-            logical_position: (!was_unrouted)
+            logical_position: route_through_ui
                 .then(|| self.pointer_positions.get(&state_key).copied())
                 .flatten(),
             kind: InputEventKind::PointerButton { button, phase },
             invalidation: None,
+            action_delivery: held
+                .map_or(ActionDelivery::OwnUiDisposition, HeldInput::action_delivery),
         }
     }
 
@@ -960,7 +1138,6 @@ impl InputTimeline {
         if !self.routes.contains_key(&(window, seat)) {
             return Ok(());
         }
-        self.mark_pressed_transitions_unrouted(window, seat);
         let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
             self.poison_routes();
             InputIngressError::RouteBindingGenerationExhausted
@@ -970,21 +1147,23 @@ impl InputTimeline {
         Ok(())
     }
 
-    fn mark_pressed_transitions_unrouted(&mut self, window: InputWindowId, seat: InputSeatId) {
-        if let Some(pressed) = self.pressed_keys.get(&(window, seat)) {
-            self.unrouted_pressed_keys
-                .entry((window, seat))
-                .or_default()
-                .extend(pressed.iter().copied());
-        }
-        for (&(event_window, event_seat, pointer), pressed) in &self.pressed_mouse_buttons {
-            if event_window == window && event_seat == seat {
-                self.unrouted_pressed_mouse_buttons
-                    .entry((window, seat, pointer))
-                    .or_default()
-                    .extend(pressed.iter().copied());
-            }
-        }
+    fn next_binding_generation_for_change(&self) -> Result<u64, InputIngressError> {
+        self.next_binding_generation
+            .checked_add(1)
+            .ok_or(InputIngressError::RouteBindingGenerationExhausted)
+    }
+
+    fn commit_failed_closed_window(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        binding_generation: u64,
+    ) {
+        self.focused_windows.retain(|focused_seat, focused_window| {
+            *focused_seat != seat || *focused_window != window
+        });
+        self.routes.remove(&(window, seat));
+        self.next_binding_generation = binding_generation;
     }
 
     fn fail_closed_window(
@@ -992,15 +1171,11 @@ impl InputTimeline {
         window: InputWindowId,
         seat: InputSeatId,
     ) -> Result<(), InputIngressError> {
-        self.focused_windows.retain(|focused_seat, focused_window| {
-            *focused_seat != seat || *focused_window != window
-        });
-        self.routes.remove(&(window, seat));
         let Some(binding_generation) = self.next_binding_generation.checked_add(1) else {
             self.poison_routes();
             return Err(InputIngressError::RouteBindingGenerationExhausted);
         };
-        self.next_binding_generation = binding_generation;
+        self.commit_failed_closed_window(window, seat, binding_generation);
         Ok(())
     }
 
@@ -1018,13 +1193,8 @@ impl InputTimeline {
     ) {
         if clear_keyboard {
             self.pressed_keys.remove(&(window, seat));
-            self.unrouted_pressed_keys.remove(&(window, seat));
         }
         self.pressed_mouse_buttons
-            .retain(|&(event_window, event_seat, _), _| {
-                event_window != window || event_seat != seat
-            });
-        self.unrouted_pressed_mouse_buttons
             .retain(|&(event_window, event_seat, _), _| {
                 event_window != window || event_seat != seat
             });
@@ -1078,6 +1248,7 @@ impl InputTimeline {
                 ui_pending: draft.route.is_ui_routable(),
                 ui_consumed: false,
                 action: ActionRetention::Unscanned,
+                action_delivery: draft.action_delivery,
             });
         }
         self.next_sequence = last_sequence;
@@ -1114,11 +1285,27 @@ impl InputTimeline {
     }
 
     pub(crate) fn finalize_ui_routing(&mut self) {
+        let mut unresolved_presses = Vec::new();
         for retained in &mut self.retained {
             if retained.ui_pending {
                 retained.ui_pending = false;
+                if matches!(
+                    retained.entry.kind(),
+                    InputEventKind::Key {
+                        phase: ButtonTransitionPhase::Pressed,
+                        ..
+                    } | InputEventKind::PointerButton {
+                        phase: ButtonTransitionPhase::Pressed,
+                        ..
+                    }
+                ) {
+                    unresolved_presses.push(retained.entry);
+                }
             }
             self.ui_cursor = self.ui_cursor.max(retained.entry.sequence);
+        }
+        for entry in unresolved_presses {
+            self.resolve_held_press(entry, false);
         }
     }
 
@@ -1144,13 +1331,27 @@ impl InputTimeline {
     }
 
     pub(crate) fn take_deferred_actions(&mut self) -> Vec<InputTimelineEntry> {
+        let press_delivery = self
+            .retained
+            .iter()
+            .filter(|retained| !retained.ui_pending)
+            .map(|retained| (retained.entry.sequence, !retained.ui_consumed))
+            .collect::<BTreeMap<_, _>>();
         let mut entries = Vec::new();
         for retained in &mut self.retained {
             if retained.action != ActionRetention::Deferred {
                 continue;
             }
             retained.action = ActionRetention::Done;
-            if !retained.ui_consumed {
+            let deliver = match retained.action_delivery {
+                ActionDelivery::OwnUiDisposition => !retained.ui_consumed,
+                ActionDelivery::Gameplay => true,
+                ActionDelivery::Ui => false,
+                ActionDelivery::FollowPress(sequence) => {
+                    press_delivery.get(&sequence).copied().unwrap_or(false)
+                }
+            };
+            if deliver {
                 entries.push(retained.entry);
             }
         }
@@ -1190,6 +1391,18 @@ impl __RuntimeDriverPort for InputTimeline {
     fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output {
         self.apply_driver_event(input)
     }
+}
+
+fn same_presented_lineage(left: InputRouteStamp, right: InputRouteStamp) -> bool {
+    left.is_ui_routable()
+        && right.is_ui_routable()
+        && left.window() == right.window()
+        && left.seat() == right.seat()
+        && left.pointer() == right.pointer()
+        && left.surface() == right.surface()
+        && left.slot_generation() == right.slot_generation()
+        && left.route_generation() == right.route_generation()
+        && left.geometry_generation() == right.geometry_generation()
 }
 
 fn vec2_is_finite(value: Vec2) -> bool {
@@ -1521,6 +1734,69 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_releases_follow_the_physical_origin_after_focus_migration() {
+        let mut timeline = InputTimeline::default();
+        let seat = InputSeatId::PRIMARY;
+        let first_window = InputWindowId::new(3);
+        let second_window = InputWindowId::new(4);
+        let first = timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                first_window,
+                InputSurfaceId::new(10),
+                seat,
+                InputPresentationEpoch::new(1).unwrap(),
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
+            .unwrap();
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                second_window,
+                InputSurfaceId::new(20),
+                seat,
+                InputPresentationEpoch::new(2).unwrap(),
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
+            .unwrap();
+        timeline
+            .apply_window(first_window, seat, InputWindowEvent::Focused(true))
+            .unwrap();
+        timeline
+            .apply_keyboard(first_window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap();
+        timeline
+            .apply_keyboard(first_window, seat, ButtonDriverInput::Press(KeyCode::Space))
+            .unwrap();
+        timeline
+            .unbind_presented_endpoint(first_window, seat, Some(first))
+            .unwrap();
+        timeline
+            .apply_window(second_window, seat, InputWindowEvent::Focused(true))
+            .unwrap();
+
+        let individual_release = timeline
+            .apply_keyboard(
+                second_window,
+                seat,
+                ButtonDriverInput::Release(KeyCode::Enter),
+            )
+            .unwrap();
+        assert_eq!(individual_release.admission.admitted(), 1);
+        assert!(!timeline.entries().last().unwrap().route().is_ui_routable());
+
+        let release_all = timeline
+            .apply_keyboard(second_window, seat, ButtonDriverInput::ReleaseAll)
+            .unwrap();
+        assert_eq!(release_all.released_keys, [KeyCode::Space]);
+        assert!(!timeline.entries().last().unwrap().route().is_ui_routable());
+        assert!(timeline.pressed_key_window(seat, KeyCode::Enter).is_none());
+        assert!(timeline.pressed_key_window(seat, KeyCode::Space).is_none());
+    }
+
+    #[test]
     fn unbinding_a_presented_route_preserves_balanced_physical_edges() {
         let mut timeline = published_timeline();
         let window = InputWindowId::new(1);
@@ -1578,10 +1854,11 @@ mod tests {
             )
             .unwrap();
         let key_release = timeline
-            .apply_keyboard(window, seat, ButtonDriverInput::Release(KeyCode::Enter))
+            .apply_keyboard(window, seat, ButtonDriverInput::ReleaseAll)
             .unwrap();
         assert_eq!(mouse_release.admission.admitted(), 1);
         assert_eq!(key_release.admission.admitted(), 1);
+        assert_eq!(key_release.released_keys, [KeyCode::Enter]);
         let entries = timeline.entries().copied().collect::<Vec<_>>();
         let releases = &entries[entries.len() - 2..];
         assert!(releases.iter().all(|entry| !entry.route().is_ui_routable()));
@@ -1736,6 +2013,102 @@ mod tests {
                 .admitted(),
             1
         );
+    }
+
+    #[test]
+    fn retirement_releases_follow_the_consumer_that_received_each_press() {
+        let window = InputWindowId::new(1);
+        let seat = InputSeatId::PRIMARY;
+        let pointer = InputPointerId::PRIMARY;
+        let mut actions = ActionMap::default();
+        actions.bind_key(ActionId::new("confirm").unwrap(), KeyCode::Enter);
+        actions.bind_mouse(ActionId::new("fire").unwrap(), MouseButton::Left);
+
+        let mut gameplay_owned = published_timeline();
+        let gameplay_route = gameplay_owned.pointer_route(window, seat, None);
+        gameplay_owned
+            .apply_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap();
+        gameplay_owned
+            .apply_mouse(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+        gameplay_owned.finalize_ui_routing();
+        gameplay_owned.stage_actions(&actions);
+        assert_eq!(gameplay_owned.take_deferred_actions().len(), 2);
+
+        gameplay_owned
+            .retire_presented_endpoint(window, seat, Some(gameplay_route))
+            .unwrap();
+        gameplay_owned.finalize_ui_routing();
+        gameplay_owned.stage_actions(&actions);
+        let gameplay_releases = gameplay_owned.take_deferred_actions();
+        assert_eq!(gameplay_releases.len(), 2);
+        assert!(gameplay_releases.iter().any(|entry| {
+            matches!(
+                entry.kind(),
+                InputEventKind::Key {
+                    key: KeyCode::Enter,
+                    phase: ButtonTransitionPhase::Released,
+                }
+            )
+        }));
+        assert!(gameplay_releases.iter().any(|entry| {
+            matches!(
+                entry.kind(),
+                InputEventKind::PointerButton {
+                    button: MouseButton::Left,
+                    phase: ButtonTransitionPhase::Released,
+                }
+            )
+        }));
+        assert!(
+            gameplay_releases
+                .iter()
+                .all(|entry| !entry.route().is_ui_routable())
+        );
+
+        let mut ui_owned = published_timeline();
+        let ui_route = ui_owned.pointer_route(window, seat, None);
+        let key_press = ui_owned
+            .apply_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap()
+            .admission;
+        let mouse_press = ui_owned
+            .apply_mouse(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap()
+            .admission;
+        ui_owned
+            .__finalize_ui_entry(
+                key_press.first_sequence().unwrap(),
+                InputUiDisposition::Consumed,
+            )
+            .unwrap();
+        ui_owned
+            .__finalize_ui_entry(
+                mouse_press.first_sequence().unwrap(),
+                InputUiDisposition::Consumed,
+            )
+            .unwrap();
+        ui_owned.finalize_ui_routing();
+        ui_owned.stage_actions(&actions);
+        assert!(ui_owned.take_deferred_actions().is_empty());
+
+        ui_owned
+            .retire_presented_endpoint(window, seat, Some(ui_route))
+            .unwrap();
+        ui_owned.finalize_ui_routing();
+        ui_owned.stage_actions(&actions);
+        assert!(ui_owned.take_deferred_actions().is_empty());
     }
 
     #[test]
@@ -1918,7 +2291,7 @@ mod tests {
             timeline
                 .pressed_mouse_buttons
                 .get(&(window, seat, second_pointer))
-                .is_some_and(|pressed| pressed.contains(&MouseButton::Left))
+                .is_some_and(|pressed| pressed.contains_key(&MouseButton::Left))
         );
         let entries = timeline.entries().copied().collect::<Vec<_>>();
         let cancellation = &entries[entries.len() - 2..];
@@ -1993,7 +2366,7 @@ mod tests {
             timeline
                 .pressed_keys
                 .get(&(second_window, seat))
-                .is_some_and(|pressed| pressed.contains(&KeyCode::Enter))
+                .is_some_and(|pressed| pressed.contains_key(&KeyCode::Enter))
         );
         assert_eq!(
             timeline
@@ -2085,6 +2458,63 @@ mod tests {
     }
 
     #[test]
+    fn coordinated_endpoint_retirement_aborts_atomically_when_timeline_is_full() {
+        let mut timeline = published_timeline();
+        let window = InputWindowId::new(1);
+        let seat = InputSeatId::PRIMARY;
+        let pointer = InputPointerId::PRIMARY;
+        timeline
+            .apply_pointer(
+                window,
+                seat,
+                pointer,
+                PointerDriverInput::Moved(Vec2::new(20.0, 30.0)),
+            )
+            .unwrap();
+        timeline
+            .apply_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap();
+        timeline
+            .apply_mouse(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+        let route = timeline.pointer_route(window, seat, None);
+        while timeline.retained_len() < MAX_INPUT_TIMELINE_ENTRIES {
+            let button = u16::try_from(timeline.retained_len()).unwrap();
+            timeline
+                .admit_gamepad_button(window, seat, 0, button, ButtonTransitionPhase::Pressed)
+                .unwrap();
+        }
+
+        assert_eq!(
+            timeline.retire_presented_endpoint(window, seat, Some(route)),
+            Err(InputIngressError::CapacityExceeded {
+                limit: MAX_INPUT_TIMELINE_ENTRIES,
+                retained: MAX_INPUT_TIMELINE_ENTRIES,
+                requested: 4,
+                route_invalidated: false,
+            })
+        );
+        assert_eq!(timeline.pointer_route(window, seat, None), route);
+        assert!(timeline.pressed_keys.contains_key(&(window, seat)));
+        assert!(
+            timeline
+                .pressed_mouse_buttons
+                .contains_key(&(window, seat, pointer))
+        );
+        assert!(
+            timeline
+                .pointer_positions
+                .contains_key(&(window, seat, pointer))
+        );
+        assert_eq!(timeline.retained_len(), MAX_INPUT_TIMELINE_ENTRIES);
+    }
+
+    #[test]
     fn sequence_exhaustion_does_not_partially_publish_or_change_pressed_state() {
         let mut timeline = published_timeline();
         timeline.next_sequence = u64::MAX;
@@ -2109,7 +2539,7 @@ mod tests {
             !timeline
                 .pressed_keys
                 .get(&(InputWindowId::new(1), InputSeatId::PRIMARY))
-                .is_some_and(|pressed| pressed.contains(&KeyCode::Space))
+                .is_some_and(|pressed| pressed.contains_key(&KeyCode::Space))
         );
     }
 }
