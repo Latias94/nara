@@ -2,7 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
-**Amended**: 2026-08-08 by the UIF-U1 presentation-reconciliation correction
+**Amended**: 2026-08-09 by the UIF-U1 presentation-reconciliation and UIF-U4 surface-lifecycle
+corrections
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
@@ -119,7 +120,43 @@ stable key restores its focused visual without a synthetic focus transaction.
 
 Semantic snapshots are read-only projections of committed session state. They cannot invent a
 default focus. AccessKit actions, when enabled, are converted by the platform adapter into the same
-receipt-stamped backend-neutral action before dispatch.
+receipt-stamped backend-neutral action before dispatch. The ingress identity includes the exact
+publisher, Surface Slot and publication generation that produced the node mapping. A delayed action
+from an older publication or a foreign publisher cannot be restamped onto the current receipt or
+resolved through a coincidentally equal node identity.
+
+Platform accessibility publication is one exclusive synchronous adapter transaction owned by
+`WinitAccessibilityPublisher`. `publish_update` validates the exact semantic snapshot, constructs
+the complete AccessKit tree and callback mapping, reserves a unique publication generation, records
+that exact update, then performs an infallible mapping swap. There is no caller-supplied callback and
+no publishable prepared token, so an empty or delayed callback cannot mint evidence. The receipt
+proves exact Host-owned tree-record and mapping commit; it does not claim that an operating-system
+client or player observed the tree. Retirement clears the record and mapping and writes a typed
+postcondition tombstone for either platform-tree removal or native-window destruction.
+
+The normalized input authority rejects a presented route that regresses an active slot, route or
+geometry generation, or regresses the presentation epoch within one slot. Geometry invalidation
+watermarks include the Surface Slot lineage, so presentation epochs may restart when a Host installs
+a strictly newer slot generation.
+
+Logical route invalidation and physical endpoint retirement are distinct operations. A transform or
+slot update unbinds the exact UI route, clears geometry-scoped pointer positions, and preserves
+platform focus plus held keys/buttons. Each held edge retains the consumer that received its press:
+gameplay-owned releases return to gameplay, UI-owned releases remain UI-suppressed, and unresolved
+releases follow the exact press disposition once finalized. A successor route cannot claim an edge
+from a predecessor lineage. True endpoint retirement first validates the exact route when one exists,
+synthesizes bounded key/button releases and pointer leave, then clears focus and all physical endpoint
+state. A replacement route at the same window/seat endpoint is a typed mismatch and fails closed
+before retirement mutates either owner. If a Surface Slot migrates from endpoint A to endpoint B,
+held edges remain attached to the exact consumer and predecessor endpoint lineage that received each
+press until a balanced release or explicit retirement cleanup completes; the successor endpoint
+cannot silently absorb or discard that ownership.
+
+Surface availability is explicit. An active slot that loses a usable target through zero extent,
+missing endpoint or invalid scale becomes suspended with a successor generation. Suspension removes
+packet, route, pointer/capture and accessibility authority but may retain physical held-edge ownership
+until real releases arrive. Restore creates a fresh active generation and requires a fresh presented
+receipt. Retirement is permanent and cannot be restored.
 
 Authored semantics are descriptive, not an independent behavior authority. An actionable semantic
 fact is published only when the exact presented behavior snapshot owns and can resolve that action.
@@ -157,11 +194,24 @@ Accepted. It concentrates failure and ordering complexity behind one dispatch In
 - Disabled focus, navigation origin, semantics and visual reducer state agree through re-enable.
 - Two surfaces on distinct targets with different content transforms cannot overwrite each other's
   routes or session state.
+- A mismatched replacement route aborts slot update or retirement without removing the Surface
+  Slot, advancing its tombstone, or changing its presented session.
 - Non-zero letterbox origin and fractional platform scale map paint, hit and semantic bounds through
   the same transform; transform replacement cancels old capture and pointer position.
 - Black-bar input is never clamped and follows the modal/non-modal disposition rule.
+- A newer Surface Slot may restart presentation epochs without inheriting stale-geometry rejection
+  from the retired lineage; the old receipt remains retired.
+- Transform/slot invalidation preserves held physical edges and routes each eventual release to the
+  same consumer that received its press even after a successor route is published; true endpoint
+  retirement emits balanced releases exactly once and permits clean endpoint reuse.
+- Zero extent, missing endpoint and invalid scale suspend the slot and retire stale receipt, route,
+  geometry and accessibility authority; restore requires fresh generations and presentation.
 - A platform accessibility action resolves through the same receipt and intent as pointer/keyboard
   activation when the OS adapter feature is enabled.
+- Stale, foreign-surface and post-retirement accessibility updates fail before replacing the exact
+  committed tree record or mapping. Every receipt names a stored update; retirement clears it and
+  records one typed endpoint postcondition. An attempted generation is never exposed as a receipt,
+  and an older retirement generation fails likewise.
 
 ## Risks and Mitigations
 

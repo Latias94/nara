@@ -3,6 +3,7 @@ title: UI Foundation Correction - Plan
 type: refactor
 date: 2026-08-08
 deepened: 2026-08-08
+amended: 2026-08-09
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution_state: active
@@ -28,7 +29,9 @@ operator_execution_authority: external-control-plane
   Foundation Conformance Baseline. The Reference Game remains a late acceptance carrier and may
   provide neutral reproductions, but it cannot design a shared Interface.
 - **Authority:** This is the sole active UI execution plan. The predecessor remains immutable
-  historical evidence. Successor plans are inactive until UIF-U5 publishes completion evidence.
+  historical evidence. The 2026-08-09 contract audit reopened focused corrective units without
+  rewriting the immutable UIF-U2/UIF-U3 evidence. Successor plans are inactive until UIF-U5
+  publishes completion evidence.
 - **Execution profile:** Nara is pre-1.0. Prefer owning-module fearless refactors and deletion of
   obsolete paths over compatibility wrappers. Keep Cargo commands serial with one build job.
 
@@ -39,15 +42,18 @@ operator_execution_authority: external-control-plane
 ```text
 compile(authoring_snapshot, environment, limits)
     -> Compiled(UiFrameCandidate) | CompileRejected(diagnostics)
-present(PresentationRequest {
-    candidate, target, surface_slot_generation,
+plan(candidate, target, capability_generation)
+    -> Planned(ResourceCompletePacket) | ContentRejected
+prepare_submission(packet, surface_slot_generation, presentation_epoch)
+    -> PreparedPresentationAuthority | AuthorityRejected
+submit(PresentationRequest {
+    packet, prepared_authority,
     environment_revision, capability_generation, gpu_generation,
 })
-    -> Presented(OneShotPresentationCommit)
-     | ContentRejected
+    -> Presented(BackendPresentationCommit)
      | Deferred(retry_identity)
      | BackendFault
-OneShotPresentationCommit::commit() -> UiPresentationReceipt
+commit(BackendPresentationCommit) -> UiPresentationReceipt // infallible
 dispatch(presented_receipt, input_event)
     -> Consumed | PassThrough | RejectedClosed + typed intents
 ```
@@ -55,17 +61,27 @@ dispatch(presented_receipt, input_event)
 The exact Rust names may evolve during implementation, but the following facts are durable:
 
 1. A candidate is immutable and revisioned. Root-local failures are candidate outcomes; global
-   identity, profile or capacity failures return `CompileRejected` without a candidate.
-2. A receipt is returned only by consuming the backend-issued one-shot commit for the exact packet,
-   target, Surface Slot, environment, capability and GPU generations. Consumers and journals cannot
-   construct or advance receipt authority directly.
-3. Only that receipt may route pointer, keyboard, gamepad or platform accessibility actions.
-4. `RejectedClosed` changes no session, widget reducer or intent-journal state. Geometry/capture
+   identity, snapshot-profile or shared-capacity failures return `CompileRejected` without a
+   candidate. An unsafe modal fallback is the explicit safety exception: it rejects the candidate
+   rather than publishing a visible-but-penetrable modal.
+2. The snapshot records the exact authoring profile used to validate roots. The compiler rejects a
+   different profile before frame revision, cache clock, retention or least-recently-used state can
+   change. Compile-only and session-only budgets are not part of that profile.
+3. Candidate text input work is reserved before a unique shaping attempt. Failed deterministic
+   layouts consume that work once and are cached within the candidate; shaped-glyph output is
+   accounted separately from source bytes or Unicode scalar count.
+4. All fallible UI authority staging and input-route reservation complete before backend submit. A
+   receipt is returned only by consuming the backend-issued, non-cloneable commit for the exact
+   packet, target, Surface Slot, environment, capability and GPU generations. Its final authority
+   swap is infallible; consumers and journals cannot construct or advance receipt authority directly.
+5. Only that receipt may route pointer, keyboard, gamepad or platform accessibility actions.
+6. `RejectedClosed` changes no session, widget reducer or intent-journal state. Geometry/capture
    reconciliation is represented as a successful consumed transition when it must mutate state.
-5. `PassThrough` leaves UI state unchanged and explicitly permits gameplay routing.
-6. `ContentRejected` and `Deferred` do not replace last-presented state. A deferred retry is valid
-   only for its exact generations; `BackendFault` retires the GPU generation and every retry bound
-   to it.
+7. `PassThrough` leaves UI state unchanged and explicitly permits gameplay routing.
+8. `ContentRejected` and `Deferred` do not replace last-presented state. A deferred retry is valid
+   only for its exact generations and becomes `Superseded` when a newer attempt for that slot is
+   admitted. Target/surface faults retire only their target or slot; device loss retires the GPU
+   generation and every retry bound to it.
 
 ### Foundation invariants
 
@@ -94,6 +110,11 @@ The exact Rust names may evolve during implementation, but the following facts a
 - During this Foundation baseline one presentation target admits at most one active Surface Slot.
   Multiple slots are supported only when they have distinct presentation targets; target aggregation,
   compositing and viewport fan-in are deferred to a named successor.
+- A Surface Slot follows `Active(transform) -> Suspended(reason, generation) -> Active(successor)`
+  or `Retired(tombstone)`. Zero extent, missing endpoint and invalid scale suspend packet, route,
+  pointer/capture and accessibility authority instead of silently retaining an old receipt. A
+  suspended native endpoint may retain physical held-edge ownership so real releases remain balanced;
+  retirement consumes that ownership and cannot be resumed.
 - Platform accessibility actions, if enabled for a product, enter the same exact presented-session
   transaction as normalized input. A platform-neutral semantic action remains a valid Foundation
   proof without claiming OS adapter acceptance.
@@ -109,13 +130,24 @@ and failure scope are deterministic in current structural order, then paint/reso
 
 | Owner | Dimensions | Admission point | Failure disposition |
 |---|---|---|---|
-| `nara_ui_kernel` | root count, node count, shaped glyphs, logical paint, depth/diagnostic bounds | snapshot preflight and tentative candidate compilation | whole-candidate `CompileRejected` before revision/cache/LRU mutation |
+| `nara_ui_kernel` authoring profile | root count, source-node count, depth and key bytes | snapshot construction and compiler profile preflight | whole-candidate `CompileRejected` before revision/cache/LRU mutation |
+| `nara_ui_kernel` compile budget | attempted unique text bytes/requests, candidate nodes, shaped-glyph output, logical paint, diagnostics/cache | reserve attempted work before shaping; account output after successful layout; tentative candidate compilation | whole-candidate `CompileRejected` before revision/cache/LRU mutation |
 | `nara_ui_render` planner | expanded primitives, referenced images/glyphs, atlas pages/bytes, retained packet bytes | target-plan preflight and staged resource planning | `ContentRejected`; last-presented packet and planner state remain unchanged |
 | concrete backend | device upload bytes, instance-buffer bytes, residency/queue work | backend frame submission | `Deferred` when retryable, `BackendFault` for device failure; no receipt advances |
 
 Root-local authoring errors remain isolated until a shared candidate budget is exhausted. There is
 no partial target presentation and no order-dependent silent truncation. A retryable backend budget
 may make residency progress, but it never publishes a receipt until the complete packet is accepted.
+
+### Root failure matrix
+
+| Root state | Compatible retained visual | Barrier required | Result |
+|---|---|---|---|
+| non-modal local failure | yes | no | inert `RetainedVisual` root outcome |
+| non-modal local failure | no | no | `Absent` root outcome |
+| modal local failure | yes | yes | inert retained visual plus current envelope barrier |
+| modal local failure | no | yes | whole-candidate `CompileRejected::ModalFallbackUnavailable` |
+| identity/profile/shared-capacity failure | irrelevant | irrelevant | whole-candidate `CompileRejected` |
 
 ### Foundation baseline lineage
 
@@ -141,27 +173,24 @@ global-service and public render-topology models.
 
 ```mermaid
 flowchart LR
-    U0[UIF-U0 Authority]
-    U1[UIF-U1 Interaction]
-    U2[UIF-U2 Root envelopes]
-    U3[UIF-U3 Presentation]
-    U4[UIF-U4 Surface/accessibility]
+    Evidence[Immutable UIF-U0 through UIF-U3 evidence]
+    Audit[2026-08-09 contract audit]
+    U2C[UIF-U2C Profile and text-work correction]
+    U3C[UIF-U3C Submission authority correction]
+    U4C[UIF-U4C Surface suspension and platform closure]
     U5[UIF-U5 Refreeze]
     Runtime[Inactive Runtime UI product successor]
     Editor[Inactive Editor successor]
 
-    U0 --> U1
-    U0 --> U2 --> U3
-    U1 --> U4
-    U3 --> U4 --> U5
+    Evidence --> Audit --> U2C --> U3C --> U4C --> U5
     U5 -. product priority .-> Runtime
     U5 -. product priority .-> Editor
 ```
 
-Execution remains operationally serial as UIF-U1, U2, U3, U4 and U5 so that one active registration
-and one Cargo owner exist at a time. The graph records technical dependencies rather than inventing a
-dependency between unrelated owners. UIF-U5 admits exactly one product successor as the next active
-plan; the other remains independently eligible against the same pinned conformance baseline.
+Execution remains operationally serial. The original UIF-U2/UIF-U3 evidence stays immutable, while
+the corrective sequence supersedes only their completion claims. UIF-U2C is complete and UIF-U3C is
+the sole active unit; UIF-U4C and UIF-U5 remain inactive. UIF-U5 admits exactly one product successor as the next
+active plan; the other remains independently eligible against the same pinned conformance baseline.
 
 ### Alternatives considered
 
@@ -189,12 +218,12 @@ plan; the other remains independently eligible against the same pinned conforman
 | Gate | Command or evidence | Applies to |
 |---|---|---|
 | V1 Interaction owners | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui_widgets -p nara_ui --test-threads=1` | UIF-U1 |
-| V2 Root compiler | `cargo nextest run --locked -p nara_ui_kernel --test compile_order --test failure_atomic --test validation --test-threads=1` | UIF-U2 |
-| V3 Presentation owners | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | UIF-U3 |
-| V4 Surface/platform adapter | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui_widgets -p nara_input -p nara_ui -p nara_winit --all-features --test-threads=1` | UIF-U4 |
+| V2 Root compiler | `cargo nextest run --locked -p nara_ui_kernel --test compile_order --test failure_atomic --test validation --test profile --test text_budget --test-threads=1` | UIF-U2/UIF-U2C |
+| V3 Presentation owners | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | UIF-U3/UIF-U3C |
+| V4 Surface/platform adapter | Serial focused nextest: `cargo nextest run --locked -p nara_input --lib --test-threads=1`; `cargo nextest run --locked -p nara_ui_kernel --test interaction --test-threads=1`; `cargo nextest run --locked -p nara_ui_widgets --test button --test-threads=1`; `cargo nextest run --locked -p nara_ui --lib --test-threads=1`; `cargo nextest run --locked -p nara_winit --features accessibility --test accessibility --test-threads=1`; root Host bridge tests for suspend/restore and submit/commit races | UIF-U4/UIF-U4C |
 | V5 Neutral examples | `cargo run --locked -p nara_ui_kernel --example layout_gallery -j 1`; `cargo run --locked -p nara_ui --example interaction_lab -j 1`; `cargo run --locked --example ui_presentation_gallery --features presentation-ui,desktop-winit,render-wgpu -j 1` | UIF-U5 |
 | V6 Independent consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | UIF-U5 |
-| V7 Compile/lint/format | serial locked check, changed-target clippy with `-D warnings`, and `cargo fmt --all -- --check` | Every code unit; full shared gate at UIF-U5 |
+| V7 Compile/lint/format | serial locked check, changed-target `cargo clippy --no-deps` with `-D warnings`, and `cargo fmt --all -- --check` | Every code unit; full shared gate at UIF-U5 |
 
 Documentation-only UIF-U0 uses link/frontmatter inspection plus engineering-memory validation. No
 Reference Game product matrix is required by UIF-U0 through UIF-U4.
@@ -208,7 +237,10 @@ Reference Game product matrix is required by UIF-U0 through UIF-U4.
 | UIF-U2 | Snapshot/compiler boundary | UIF-U0 | Root-local failure cannot coexist with global identity safety | UIF-U3 |
 | UIF-U3 | Presentation planner/backend | UIF-U2 | Legal authoring requires submit-time live World/asset reads | UIF-U4 |
 | UIF-U4 | Host Surface Slot/platform adapter | UIF-U1 and UIF-U3 | Platform identity must enter the kernel or two surfaces share mutable state | UIF-U5 |
-| UIF-U5 | Public neutral consumers | UIF-U1 through UIF-U4 | A conformance Interface still has an unresolved P0/P1 owner defect | one product successor |
+| UIF-U2C | Snapshot profile and attempted text work | 2026-08-09 audit | Builder/compiler profile can disagree or failed shaping work escapes the shared budget | UIF-U3C |
+| UIF-U3C | Prepared submission authority | UIF-U2C | GPU submission can succeed before receipt/route authority is guaranteed commit-ready | UIF-U4C |
+| UIF-U4C | Surface suspension and platform closure | UIF-U1, UIF-U3C and started UIF-U4 work | Zero/missing endpoints silently retain old receipt or platform authority | UIF-U5 |
+| UIF-U5 | Public neutral consumers | UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C | A conformance Interface still has an unresolved P0/P1 owner defect | one product successor |
 
 ## Implementation Units
 
@@ -306,11 +338,21 @@ Winit or AccessKit.
 
 **Required cases:** a precise `SurfaceContentTransform` defines platform-logical, physical-surface,
 physical-content and authored-logical coordinates, safe-area ordering, forward/inverse mapping and
-outside-content behavior; one active slot per presentation target; retirement releases all endpoint
-state; transform changes cancel stale pointer/capture state; multiple distinct targets do not
-overwrite focus or routes. Platform accessibility actions become receipt-stamped typed events before
-dispatch; semantic actions are advertised only when a controlled behavior owner resolves them.
-Generic root selectors, per-surface theme selection and target aggregation remain deferred.
+outside-content behavior; one active slot per presentation target; transform changes cancel stale
+pointer/capture state without tearing held physical edges, and a release that began before logical
+route invalidation cannot be claimed by a successor route. True endpoint retirement synthesizes
+balanced releases and clears all endpoint state. A coordinated retirement admits its complete
+lifecycle batch before changing either input or UI ownership; capacity/sequence failure leaves the
+Surface Slot, route and physical state unchanged, while a platform-observed endpoint loss remains
+fail-closed. Geometry invalidation is scoped to the exact
+Surface Slot lineage, so a newer slot may restart its presentation epoch without inheriting an old
+stale-geometry watermark. Multiple distinct targets do not overwrite focus or routes. Platform
+accessibility actions become receipt-stamped typed events before dispatch; semantic actions are
+advertised only when a controlled behavior owner resolves them. Platform tree publication and its
+callback mapping commit form one exclusive synchronous transaction with an infallible platform
+commit arm: a stale, foreign or retired candidate cannot reach the platform or replace the last
+committed mapping. Generic root selectors, per-surface theme selection and target aggregation remain
+deferred.
 
 **Verification:** kernel surface lab, Winit adapter test where the feature is enabled, and a two-
 surface route isolation regression.
@@ -318,9 +360,94 @@ surface route isolation regression.
 **Exit:** Host owns endpoints and platform lifecycles; kernel sees only backend-neutral Surface Slot
 facts and exact receipts.
 
+### UIF-U2C — Snapshot profile and attempted text-work correction
+
+**Status:** Complete at commits `e6070bc` and `3dab804`, with immutable verification in
+`docs/knowledge/engineering/verification/2026-08/2026-08-09T035823Z-uif-u2c-snapshot-profile-and-text-work-correction-dda1efec999b40e98d6f38fac067503b.md`.
+This unit supersedes the affected completion claim in UIF-U2 evidence without editing that evidence.
+
+**Depends on:** the 2026-08-09 contract audit and immutable UIF-U2 evidence.
+
+**Goal:** Make authoring admission and compiler interpretation share one exact, owner-specific
+profile while bounding every unique shaping attempt, including deterministic failures.
+
+**Required cases:** `UiAuthoringSnapshot` records the exact root/source-node/depth/key profile used
+by its builder; the compiler compares that profile before revision/cache/LRU mutation; stricter-to-
+wider and wider-to-stricter mismatches both reject; diagnostics, paint, cache and session budgets do
+not create false profile mismatches. Candidate text work reserves unique source bytes before calling
+the text engine, caches deterministic failed requests for the candidate, and accounts successful
+shaped-glyph output separately. Multiple distinct `LineLimitExceeded` roots eventually exhaust the
+text-work budget, while repeated identical failure does not repeatedly shape or charge. Rejection
+preserves frame revision, compatible last-good roots and cache order. The modal failure matrix above
+is the only whole-candidate exception to ordinary root-local content isolation.
+
+**Verification:** V2 plus focused failure-atomic regressions for both profile mismatch directions,
+distinct failed text requests, repeated identical failure, and last-good retention after rejection.
+
+**Exit:** A snapshot cannot be interpreted under a different authoring profile, and no expensive
+text attempt can bypass the candidate-wide work budget through a root-local error.
+
+### UIF-U3C — Prepared submission authority and infallible commit
+
+**Status:** Active. This unit supersedes the affected completion claim in UIF-U3 evidence without
+editing that evidence.
+
+**Depends on:** UIF-U2C and immutable UIF-U3 planner/backend evidence.
+
+**Goal:** Ensure that successful backend submission can only be followed by an infallible authority
+commit for the exact packet and generations the backend accepted.
+
+**Required cases:** before GPU submit, the UI runtime stages the exact candidate/session/reducer/
+journal replacement and reserves every fallible input-route capacity, conflict and generation fact.
+The backend receives a prepared attempt bound to packet, target, slot, environment, capability and
+GPU generations. A non-cloneable backend commit consumes that exact attempt; the final presented-
+session and route swap cannot fail. Public consumers cannot call a frame-plus-epoch receipt minting
+function, and the kernel journal cannot independently mint receipt authority. Each slot follows
+`Prepared -> Submitted -> Accepted -> Committed`, with `Aborted` and `Superseded` terminal paths;
+a deferred older attempt cannot revive after a newer attempt succeeds. Target/surface failure and
+device loss retire only their owning fault domain.
+
+**Verification:** V3 plus a Host bridge race regression proving that backend acceptance has no
+fallible post-submit arm, superseded deferred work cannot commit, and target failure does not retire
+an unrelated GPU generation or Surface Slot.
+
+**Exit:** A submitted pixel generation and the input/semantic receipt generation cannot diverge.
+
+### UIF-U4C — Surface suspension and platform authority closure
+
+**Status:** Inactive until UIF-U3C closes. The already committed UIF-U4 endpoint-retirement and
+recording-accessibility work remains valid input to this unit.
+
+**Depends on:** UIF-U1, UIF-U3C and commit `e0948b5`.
+
+**Goal:** Complete the Host-owned Surface Slot lifecycle for temporarily unavailable endpoints and
+finish platform publication semantics without retaining stale authority.
+
+**Required cases:** the Host owns a unique target-to-slot index. Zero extent, endpoint missing or
+invalid scale moves an active slot to `Suspended`, removes its presentation route and accessibility
+tree, invalidates stale receipt/geometry/capture facts, and does not submit an old packet. Restore
+allocates successor generations and requires fresh presentation before input or semantics resume.
+Suspension preserves only the physical held-edge ownership needed for balanced real releases; true
+retirement synthesizes the appropriate releases exactly once and writes a permanent tombstone.
+When a slot migrates from endpoint A to endpoint B, every held edge remains owned by the consumer
+that received its press on A until a balanced release or explicit retirement cleanup completes; B
+cannot silently absorb or clear predecessor ownership. Distinct targets remain isolated.
+`WinitAccessibilityPublisher` proves only exact Host-owned tree and mapping record commit. An incoming
+platform action must carry the exact publisher, Surface Slot, publication generation and presented
+receipt that produced its node mapping; stale-generation and foreign-publisher node identities fail
+closed instead of being restamped onto current behavior. Any future real `accesskit_winit` adapter
+stays internal and may strengthen, but never weaken or bypass, that receipt meaning.
+
+**Verification:** V4, minimize/restore and missing-window Host bridge tests, stale receipt rejection,
+endpoint A-to-B held-edge balancing, distinct-target isolation, exact accessibility record retirement,
+stale/foreign accessibility action rejection and non-16:9 letterbox mapping.
+
+**Exit:** Every active, suspended and retired endpoint has one explicit authority state; no skipped
+Host branch leaves a stale route, receipt, pointer transform or accessibility tree authoritative.
+
 ### UIF-U5 — Neutral refreeze and handoff
 
-**Depends on:** UIF-U1 through UIF-U4.
+**Depends on:** UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C.
 
 **Goal:** Publish a Foundation Conformance Baseline that is safe for product integration without
 claiming product validation.
@@ -345,9 +472,11 @@ technical descendant of Runtime UI.
 
 ## Definition of Done
 
-- UIF-U0 through UIF-U5 have immutable evidence and one active successor registration.
+- UIF-U0/UIF-U1 plus UIF-U2C through UIF-U5 have immutable evidence and one active successor
+  registration; original UIF-U2/UIF-U3 evidence remains immutable historical input.
 - Three deep Interfaces remain free of ECS, Host, WGPU and toolkit identity leakage.
-- Every UIF-U1 through UIF-U4 failure scenario is fail-closed and tested through the owning seam.
+- Every UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C failure scenario is fail-closed and tested through the
+  owning seam.
 - No stale active plan, orphan test, compatibility alias, duplicate order authority, live submit-
   time asset read, or redundant Cartesian/hash smoke remains in the affected path.
 - The Runtime UI and Editor plans can pin the conformance baseline. A shared defect follows the

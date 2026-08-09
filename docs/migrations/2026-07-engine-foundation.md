@@ -3671,6 +3671,119 @@ candidate commit authority.
 `crates/nara_ui_kernel/tests/{validation,compile_order,failure_atomic}.rs`,
 `crates/nara_ui/src/adapter_tests.rs`, and `crates/nara_ui_kernel/examples/layout_gallery.rs`.
 
+## UIF-U2C: Snapshot Profiles And Candidate Text Work
+
+**Removed contract**: a `UiAuthoringSnapshot` is no longer interpreted solely by the caller's
+current `UiLimits`. The builder records an exact authoring profile (root count, source-node count,
+depth and encoded-key limits), and a compiler with a different profile rejects before advancing
+frame revision or cache/LRU state. Compile-only paint/diagnostic/cache settings and session limits
+remain independent.
+
+**Canonical replacement**: reserve input text work for each unique layout request before shaping;
+cache deterministic failed requests within the candidate; and count successful shaped-glyph output
+separately from source bytes. Unicode scalar count is not used as a proxy for glyph output. Repeated
+failed layout requests therefore do
+not repeatedly shape or charge, while distinct failures eventually exhaust the candidate-wide work
+budget. No compatibility alias is retained.
+
+## UIF-U3C: Prepared Submission And Infallible Receipt Commit
+
+**Removed contract**: a backend may no longer submit pixels and then call a public, fallible
+frame-plus-epoch helper that independently publishes the UI receipt and input route.
+
+**Canonical replacement**: stage the exact presented history, interaction/reducer state and input
+route reservations before backend submit. The backend receives a non-cloneable prepared attempt and
+returns a commit bound to packet, target, Surface Slot, environment, capability and GPU generations.
+Consuming that commit performs an infallible authority swap. Deferred attempts are superseded by a
+newer admitted attempt and cannot revive; target faults and device faults retire only their owning
+domain.
+
+## UIF-U4: Host-Owned Surface Slots And Receipt-Stamped Accessibility
+
+**Removed contract**: Runtime UI no longer installs a copyable `UiSurfaceDescriptor`, updates
+logical size/input endpoint/render scale through independent helpers, or publishes an opaque numeric
+accessibility action through `nara_input`. The old `update_ui_surface_mapping`,
+`update_ui_surface_logical_size`, `update_ui_surface_input_endpoint`, and independent
+`install_ui_presentation_route`/`retire_ui_presentation_route` paths are deleted. A platform route
+cannot be replaced by a late snapshot with older slot, route, geometry, or same-slot presentation
+generations.
+
+**Canonical replacement**: Host code installs one immutable `UiSurfaceSlot` composed from a stable
+surface identity, endpoint, and `UiSurfaceContentTransform`. Endpoint and transform changes use one
+atomic `update_ui_surface_slot` operation; retirement uses one atomic `retire_ui_surface`
+transaction and propagates its exact `UiSurfaceRetirement` record to downstream platform and
+presentation owners. The input timeline stores the exact `InputRouteStamp` returned when a
+presented receipt is published. Logical slot/transform invalidation uses
+`unbind_presented_endpoint`, which preserves held physical edges while making their later release
+follow the consumer that received the original press even if a successor presentation is installed.
+True platform teardown uses
+`retire_presented_endpoint`, which emits bounded balanced releases and clears all endpoint state.
+The coordinated retirement path admits its complete lifecycle batch before removing the route; a
+capacity or sequence failure therefore leaves the UI owner and the physical endpoint unchanged.
+Platform-observed window loss remains fail-closed because the native endpoint is already gone. Both
+operations reject a replacement owner.
+
+**Before**:
+
+```rust
+let descriptor = UiSurfaceDescriptor::new(surface, window, seat, 960.0, 540.0, 1.0)?;
+install_ui_surface(world, descriptor)?;
+update_ui_surface_mapping(world, surface, render_scale, input_scale)?;
+```
+
+**After**:
+
+```rust
+let transform = UiSurfaceContentTransform::new(
+    UiSize::new(960.0, 540.0)?,
+    physical_size,
+    safe_area,
+    platform_scale,
+)?;
+let endpoint = UiSurfaceEndpoint::new(window, seat, pointer);
+let slot = UiSurfaceSlot::new(surface, endpoint, transform)?;
+install_ui_surface(world, slot)?;
+update_ui_surface_slot(world, surface, endpoint, next_transform)?;
+```
+
+Accessibility adapters now call `WinitAccessibilityPublisher::publish_update`. The publisher
+performs all fallible validation and candidate construction, records the exact AccessKit tree and
+mapping in Host-owned state, and atomically swaps the committed mapping. There is no caller-supplied
+callback or publishable prepared token. `WinitAccessibilityReceipt` proves exact publisher-record
+commit only; it does not claim OS/client observation. `map_action` returns a typed
+`UiAccessibilityInput` containing the committed route and seat. Focus and semantic actions use the
+same UI transaction as pointer and keyboard input.
+
+**User action**: migrate callers to the slot/transform constructor and the single successor update.
+Keep surface IDs non-reusable. Do not construct `UiRouteStamp` from an epoch alone; derive it from
+the exact `UiPresentationReceipt` or the platform route returned by the timeline. Treat
+`PresentedRouteRegression`, `PresentedRouteMismatch`, stale snapshots, and retired identities as
+fail-closed outcomes.
+
+**Source action**: `manual-rewrite`; this is an intentional pre-1.0 ownership and coordinate
+contract break. No compatibility alias is retained.
+
+**Cache action**: delete cached transforms, input routes, semantic trees, callback mappings, and
+render-target route mirrors after an endpoint/transform replacement or retirement. Retained packet
+and glyph caches may survive only when their owning planner/backend contract explicitly permits it.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert implementation commits `f7228ad` and `d088630`, assertion commit `c1c5554`,
+and this migration/ledger/evidence successor together. Do not restore independent surface update
+helpers, an opaque accessibility ingress, or a mutable callback mapping that advances before its
+TreeUpdate is published.
+
+**Verification anchors**: `crates/nara_ui/src/runtime/{surface,state}.rs`,
+`crates/nara_ui/src/runtime.rs`, `crates/nara_input/src/timeline.rs`,
+`crates/nara_ui_kernel/src/{geometry,journal}.rs`,
+`crates/nara_ui_kernel/tests/surface_transform.rs`,
+`crates/nara_ui/src/adapter_tests.rs`, `crates/nara_winit/src/accessibility.rs`,
+`crates/nara_winit/tests/accessibility.rs`, `src/ui_presentation.rs`, and the UIF-U4 focused
+nextest gate prove transform round-trips, black-bar handling, endpoint isolation, route regression,
+cross-slot epoch restart, logical-unbind versus physical-retirement behavior, exclusive
+accessibility publication, and exact receipt/action mapping.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do
