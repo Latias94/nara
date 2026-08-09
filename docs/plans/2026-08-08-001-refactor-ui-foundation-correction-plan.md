@@ -188,9 +188,10 @@ flowchart LR
 ```
 
 Execution remains operationally serial. The original UIF-U2/UIF-U3 evidence stays immutable, while
-the corrective sequence supersedes only their completion claims. UIF-U2C is complete and UIF-U3C is
-the sole active unit; UIF-U4C and UIF-U5 remain inactive. UIF-U5 admits exactly one product successor as the next
-active plan; the other remains independently eligible against the same pinned conformance baseline.
+the corrective sequence supersedes only their completion claims. UIF-U2C and UIF-U3C are complete;
+UIF-U4C is the sole active unit and UIF-U5 remains inactive. UIF-U5 admits exactly one product
+successor as the next active plan; the other remains independently eligible against the same pinned
+conformance baseline.
 
 ### Alternatives considered
 
@@ -389,8 +390,9 @@ text attempt can bypass the candidate-wide work budget through a root-local erro
 
 ### UIF-U3C — Prepared submission authority and infallible commit
 
-**Status:** Active. This unit supersedes the affected completion claim in UIF-U3 evidence without
-editing that evidence.
+**Status:** Complete at commit `0f5154f`, with immutable verification in
+`docs/knowledge/engineering/verification/2026-08/2026-08-09T160757Z-uif-u3c-prepared-submission-authority-and-infallible-commit-2592110e3d0d4ae8a051a157f49db1ba.md`.
+This unit supersedes the affected completion claim in UIF-U3 evidence without editing that evidence.
 
 **Depends on:** UIF-U2C and immutable UIF-U3 planner/backend evidence.
 
@@ -415,8 +417,8 @@ an unrelated GPU generation or Surface Slot.
 
 ### UIF-U4C — Surface suspension and platform authority closure
 
-**Status:** Inactive until UIF-U3C closes. The already committed UIF-U4 endpoint-retirement and
-recording-accessibility work remains valid input to this unit.
+**Status:** Active. The already committed UIF-U4 endpoint-retirement and recording-accessibility
+work remains valid input to this unit.
 
 **Depends on:** UIF-U1, UIF-U3C and commit `e0948b5`.
 

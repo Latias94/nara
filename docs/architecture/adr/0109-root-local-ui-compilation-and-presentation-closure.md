@@ -3,12 +3,12 @@
 **Status**: Accepted
 **Date**: 2026-08-08
 **Amended**: 2026-08-09 by the UIF-U2 unpresented-candidate retirement clarification and UIF-U2C/
-UIF-U3C contract audit
+UIF-U3C corrections
 **Owner**: UI authoring builder, UI compiler, text budget, presentation planner, WGPU UI adapter
 **Refines**: [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
 [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md), and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
-**Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), UIF-U2 and UIF-U3
+**Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), UIF-U2, UIF-U2C, UIF-U3 and UIF-U3C
 
 ## Context
 
@@ -96,7 +96,8 @@ flowchart LR
   commit performs an infallible authority swap. Content rejection cannot replace last-presented
   state; deferred retry remains bound to exact candidate/target/slot/environment/capability/GPU
   generations and is superseded by a newer admitted attempt. Target faults retire their target or
-  slot; device loss retires its GPU generation.
+  slot; device loss retires its GPU generation. The backend-outcome queue has one Host consumer;
+  every issued permit is consumed exactly once or closed fail-closed before its owner retires.
 
 ### Root Failure Algebra
 

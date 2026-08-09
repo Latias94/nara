@@ -8,17 +8,18 @@ This ledger tracks implementation evidence independently from ADR decision accep
 ## Current UIF correction override (2026-08-09)
 
 The rows below retain their historical ADR evidence anchors and are not rewritten in place. The
-current authority is the active UIF-U3C registration and the amended correction plan: UIF-U2C is
+current authority is the active UIF-U4C registration and the amended correction plan: UIF-U2C is
 complete for snapshot-profile identity, attempted text-work accounting and modal failure algebra;
-UIF-U3C is active for prepared submission authority and infallible receipt commit; UIF-U4C is
-pending for suspended Surface Slot lifecycle and Host platform closure. `WinitAccessibilityPublisher`
-and commit `e0948b5` supersede the historical `WinitAccessibilityBridge` symbol in older anchors.
+UIF-U3C is complete for prepared submission authority, exact backend permits and infallible receipt
+commit; UIF-U4C is active for suspended Surface Slot lifecycle and Host platform closure.
+`WinitAccessibilityPublisher` and commit `e0948b5` supersede the historical
+`WinitAccessibilityBridge` symbol in older anchors.
 
 | Current corrective owner | Status | Durable scope |
 |---|---|---|
 | UIF-U2C | implemented | snapshot profile identity, attempted text work, failed-layout caching, modal escalation; commits `e6070bc`, `3dab804` and UIF-U2C verification |
-| UIF-U3C | active | prepared backend submission, supersession, infallible receipt commit |
-| UIF-U4C | pending | suspended Surface Slot lifecycle, target uniqueness and platform closure |
+| UIF-U3C | implemented | prepared backend submission, supersession, fault-domain isolation and infallible receipt commit; commit `0f5154f` and `docs/knowledge/engineering/verification/2026-08/2026-08-09T160757Z-uif-u3c-prepared-submission-authority-and-infallible-commit-2592110e3d0d4ae8a051a157f49db1ba.md` |
+| UIF-U4C | active | suspended Surface Slot lifecycle, target uniqueness and platform closure |
 
 ## Schema
 

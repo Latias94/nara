@@ -3698,6 +3698,33 @@ Consuming that commit performs an infallible authority swap. Deferred attempts a
 newer admitted attempt and cannot revive; target faults and device faults retire only their owning
 domain.
 
+**User action**: first-party presenters must call the runtime preparation Interface before
+submitting a packet, pass the resulting exact backend permit through the backend, and return the
+consumed completion to the Host. Do not construct a `UiPresentationReceipt`, submit directly through
+`UiFrameJournal`, or publish a raw backend outcome. Treat a missing, duplicate, stale or superseded
+permit as fail-closed and abort its prepared attempt.
+
+**Source action**: `manual-rewrite`; migrate direct frame-plus-epoch commit callers to
+`prepare_ui_presentation` plus exact backend completion. The old test-only receipt compatibility
+helper and raw `issue_presented`/`defer_submission`/`discard_submitted` re-exports are removed.
+
+**Cache action**: `delete` outstanding presenter/backend retry state created before this contract.
+Retained immutable packets remain readable, but they are not submission authority and cannot revive
+an aborted or superseded attempt.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert commit `0f5154f` and its evidence/registration successor together. Do not
+restore a fallible post-submit route publication path or allow consumers to mint receipts.
+
+**Verification anchors**: `crates/nara_ui/src/runtime.rs`,
+`crates/nara_ui/src/runtime/{candidate,presentation,state}.rs`,
+`crates/nara_ui_kernel/src/journal.rs`, `crates/nara_input/src/timeline.rs`,
+`crates/nara_ui_render/src/{integration,packet/outcome,planner/mod}.rs`,
+`crates/nara_render_wgpu/src/{backend,error,lib}.rs`, `src/ui_presentation.rs`,
+`src/ui_presentation/attempts.rs`, `src/ui_presentation/tests.rs`, and
+`examples/ui_presentation_gallery.rs`.
+
 ## UIF-U4: Host-Owned Surface Slots And Receipt-Stamped Accessibility
 
 **Removed contract**: Runtime UI no longer installs a copyable `UiSurfaceDescriptor`, updates
