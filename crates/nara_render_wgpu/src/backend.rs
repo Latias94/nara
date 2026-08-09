@@ -355,6 +355,7 @@ impl WgpuRenderBackend {
         &mut self,
         handles: Option<&BackendWindowHandles>,
         captured: WgpuCapturedFrame,
+        #[cfg(feature = "ui-submitter")] ui_submissions: &mut crate::WgpuUiSubmissionState,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
         status: &mut RenderBackendStatus,
@@ -430,6 +431,18 @@ impl WgpuRenderBackend {
         }
         self.ensure_device(window.id)?;
         self.fail_if_device_lost()?;
+        #[cfg(feature = "ui-submitter")]
+        {
+            let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(
+                self.instance_id(),
+                self.device_epoch(),
+            )
+            .ok_or_else(|| WgpuRenderError::DeviceUnavailable {
+                message: "the initialized WGPU device has no non-zero presentation generation"
+                    .to_owned(),
+            })?;
+            ui_submissions.bind_backend(backend_generation)?;
+        }
         status.mark_ready(WGPU_RENDER_BACKEND);
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         self.quad_textures.begin_frame(frame.index);
@@ -982,7 +995,7 @@ const fn backend_label(backend: wgpu::Backend) -> &'static str {
     }
 }
 
-fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
+pub(super) fn render_backend_state(state: WgpuBackendState) -> RenderBackendState {
     match state {
         WgpuBackendState::Uninitialized => RenderBackendState::Uninitialized,
         WgpuBackendState::Initializing => RenderBackendState::Initializing,
@@ -1265,9 +1278,13 @@ mod tests {
             index: packet.topology.frame_index(),
             state: nara_render::RenderFrameState::Rendering,
         };
+        #[cfg(feature = "ui-submitter")]
+        let mut ui_submissions = crate::WgpuUiSubmissionState::Prepared(Vec::new());
         backend.render_packet(
             None,
             packet,
+            #[cfg(feature = "ui-submitter")]
+            &mut ui_submissions,
             &mut frame,
             &mut FrameStats::default(),
             &mut RenderBackendStatus::default(),

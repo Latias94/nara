@@ -496,6 +496,10 @@ pub enum InputIngressError {
         current_surface: InputSurfaceId,
         requested_surface: InputSurfaceId,
     },
+    RouteReservationConflict {
+        window: InputWindowId,
+        seat: InputSeatId,
+    },
     PresentedRouteMismatch {
         window: InputWindowId,
         seat: InputSeatId,
@@ -504,7 +508,9 @@ pub enum InputIngressError {
         window: InputWindowId,
         seat: InputSeatId,
     },
-    RouteBindingGenerationExhausted,
+    RouteBindingGenerationExhausted {
+        route_invalidated: bool,
+    },
     NonFinitePosition,
     InvalidLogicalSize,
     InvalidScaleFactor,
@@ -542,7 +548,9 @@ impl InputIngressError {
             } | Self::SequenceExhausted {
                 route_invalidated: true,
                 ..
-            } | Self::RouteBindingGenerationExhausted
+            } | Self::RouteBindingGenerationExhausted {
+                route_invalidated: true,
+            }
         )
     }
 }
@@ -592,6 +600,12 @@ impl Display for InputIngressError {
                 current_surface.get(),
                 requested_surface.get(),
             ),
+            Self::RouteReservationConflict { window, seat } => write!(
+                formatter,
+                "input endpoint ({}, {}) already has a prepared presented-route publication",
+                window.get(),
+                seat.get(),
+            ),
             Self::PresentedRouteMismatch { window, seat } => write!(
                 formatter,
                 "input endpoint ({}, {}) no longer owns the exact presented route being unbound",
@@ -604,9 +618,15 @@ impl Display for InputIngressError {
                 window.get(),
                 seat.get(),
             ),
-            Self::RouteBindingGenerationExhausted => {
-                formatter.write_str("input route binding generation was exhausted")
-            }
+            Self::RouteBindingGenerationExhausted { route_invalidated } => write!(
+                formatter,
+                "input route binding generation was exhausted{}",
+                if *route_invalidated {
+                    "; the affected route was invalidated"
+                } else {
+                    ""
+                }
+            ),
             Self::NonFinitePosition => formatter.write_str("input position must be finite"),
             Self::InvalidLogicalSize => {
                 formatter.write_str("input logical size must be finite and non-negative")

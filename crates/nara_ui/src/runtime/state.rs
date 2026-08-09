@@ -18,6 +18,7 @@ use super::{
     UiAdapterError,
     candidate::{
         UiBehaviorSnapshot, UiBehaviorSnapshotError, UiCandidateStaging, UiCompiledCandidate,
+        UiPresentationFacts,
     },
     identity::UiSurfaceIdentityLedger,
     presentation::{UiPresentedHistory, UiPresentedSession},
@@ -89,6 +90,7 @@ pub(crate) struct UiSurfaceRuntime {
     compiler: UiCompiler,
     candidate: Option<UiCompiledCandidate>,
     presented: UiPresentedHistory,
+    presentation_authority: nara_ui_kernel::__private::UiFrameJournalAuthority,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
     input_route: Option<PresentedInputRouteStamp>,
@@ -100,12 +102,14 @@ impl UiSurfaceRuntime {
         font: FontFace,
         limits: UiLimits,
     ) -> Result<Self, String> {
+        let (presented, presentation_authority) =
+            UiPresentedHistory::with_limits(limits, slot).map_err(|error| error.to_string())?;
         Ok(Self {
             slot,
             compiler: UiCompiler::new(font, limits).map_err(|error| error.to_string())?,
             candidate: None,
-            presented: UiPresentedHistory::with_limits(limits, slot)
-                .map_err(|error| error.to_string())?,
+            presented,
+            presentation_authority,
             interaction: UiInteractionSession::with_limits(limits)
                 .map_err(|error| error.to_string())?,
             reducers: BTreeMap::new(),
@@ -291,8 +295,38 @@ impl UiSurfaceRuntime {
             .ok_or(UiAdapterError::FrameNotLatest {
                 surface: self.slot.surface_id().get(),
             })?;
+        self.prepare_candidate_presentation(candidate, presentation_epoch)
+    }
+
+    pub(super) fn prepare_retained_presentation(
+        &self,
+        retained: &UiPresentationFacts,
+        presentation_epoch: u64,
+    ) -> Result<Option<UiPreparedPresentation>, UiAdapterError> {
+        let Some(latest) = self
+            .candidate
+            .as_ref()
+            .filter(|latest| retained.matches_candidate(latest))
+        else {
+            return Ok(None);
+        };
+        let rebound = latest.rebind_presentation_identity(retained);
+        self.prepare_candidate_presentation(&rebound, presentation_epoch)
+            .map(Some)
+    }
+
+    fn prepare_candidate_presentation(
+        &self,
+        candidate: &UiCompiledCandidate,
+        presentation_epoch: u64,
+    ) -> Result<UiPreparedPresentation, UiAdapterError> {
         let mut presented = self.presented.clone();
-        let receipt = presented.submit(candidate, self.slot, presentation_epoch)?;
+        let receipt = presented.submit(
+            &self.presentation_authority,
+            candidate,
+            self.slot,
+            presentation_epoch,
+        )?;
         let mut interaction = candidate.interaction().clone();
         let reconciliation = interaction.reconcile_latest_presentation(
             presented.journal(),

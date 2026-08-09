@@ -2,6 +2,7 @@ use std::{collections::VecDeque, sync::Arc};
 
 use super::candidate::{UiBehaviorSnapshot, UiCompiledCandidate};
 use super::surface::UiSurfaceSlot;
+use nara_ui_kernel::__private::UiFrameJournalAuthority;
 use nara_ui_kernel::{
     UiFrameJournal, UiJournalError, UiKey, UiLimits, UiPresentationReceipt, UiRouteStamp,
     UiRouteTarget, UiSurfaceRetirementToken,
@@ -62,24 +63,30 @@ impl UiPresentedHistory {
     pub(super) fn with_limits(
         limits: UiLimits,
         slot: UiSurfaceSlot,
-    ) -> Result<Self, UiJournalError> {
-        let mut journal = UiFrameJournal::with_limits(limits)?;
+    ) -> Result<(Self, UiFrameJournalAuthority), UiJournalError> {
+        let (mut journal, authority) = nara_ui_kernel::__private::new_hosted_frame_journal(limits)?;
         journal.install_surface(slot.surface_id(), slot.slot_generation())?;
-        Ok(Self {
-            journal,
-            entries: VecDeque::new(),
-        })
+        Ok((
+            Self {
+                journal,
+                entries: VecDeque::new(),
+            },
+            authority,
+        ))
     }
 
     pub(super) fn submit(
         &mut self,
+        authority: &UiFrameJournalAuthority,
         candidate: &UiCompiledCandidate,
         slot: UiSurfaceSlot,
         presentation_epoch: u64,
     ) -> Result<UiPresentationReceipt, UiJournalError> {
-        let receipt = self
-            .journal
-            .submit(Arc::clone(candidate.frame()), presentation_epoch)?;
+        let receipt = authority.submit(
+            &mut self.journal,
+            Arc::clone(candidate.frame()),
+            presentation_epoch,
+        )?;
         let target = self.journal.resolve(UiRouteStamp::from_receipt(receipt))?;
         self.entries.push_front(PresentedEntry {
             target,

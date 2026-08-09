@@ -5,17 +5,23 @@ use std::{
 
 use nara_app::{App, Plugin, PluginError};
 use nara_asset::AssetServer;
-use nara_ecs::{Res, Resource, World, system::SystemParam};
+use nara_ecs::{Mut, ResMut, Resource, World, system::SystemParam};
 use nara_image::{IMAGE_PREPARE_PLUGIN_ID, PreparedImageResource};
 use nara_render::{PreparedRenderResources, RenderTarget};
 use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use nara_window::WindowId;
 use thiserror::Error;
 
+use crate::packet::{
+    UiAcceptedBackendPresentation, UiPreparedBackendSubmission, UiSubmittedBackendPresentation,
+};
+use crate::planner::UiPlannedPacketAbortOutcome;
 use crate::planner::collect_referenced_image_ids;
 use crate::{
-    UiPaintPacket, UiPaintPacketIdentity, UiPreparedImages, UiPresentationAttemptIdentity,
-    UiPresentationContentError, UiPresentationOutcome, UiPresentationPlanner,
+    OneShotPresentationCommit, UiBackendSubmissionIdentity, UiPaintPacket, UiPaintPacketIdentity,
+    UiPreparedImages, UiPresentationAttemptId, UiPresentationAttemptIdentity,
+    UiPresentationBackendGeneration, UiPresentationContentError, UiPresentationOutcome,
+    UiPresentationPlanner,
 };
 
 /// Host-owned explicit mapping from one stable UI surface to one render window.
@@ -73,19 +79,336 @@ struct UiPresentationState(UiPresentationPlanner);
 #[derive(Debug, Default, Resource)]
 pub struct UiPresentationOutcomes {
     outcomes: Vec<UiPresentationOutcome>,
+    reserved_backend: HashSet<UiBackendSubmissionIdentity>,
+}
+
+/// Move-only permission to publish exactly one backend outcome for one admitted submission.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct UiBackendOutcomePermit {
+    identity: UiBackendSubmissionIdentity,
+}
+
+impl UiBackendOutcomePermit {
+    #[must_use]
+    pub const fn identity(&self) -> UiBackendSubmissionIdentity {
+        self.identity
+    }
+}
+
+/// One exact backend outcome whose storage was reserved before submission.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct UiCompletedBackendOutcome {
+    permit: UiBackendOutcomePermit,
+    outcome: UiPresentationOutcome,
+}
+
+/// One prepared backend submission paired with its pre-submit outcome permission.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct UiBackendSubmission {
+    submission: UiPreparedBackendSubmission,
+    permit: UiBackendOutcomePermit,
+}
+
+/// One backend-generation-bound submission retaining its exact outcome permission.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct UiSubmittedBackendSubmission {
+    submission: UiSubmittedBackendPresentation,
+    permit: UiBackendOutcomePermit,
+}
+
+impl UiSubmittedBackendSubmission {
+    #[must_use]
+    pub fn submission(&self) -> &UiSubmittedBackendPresentation {
+        &self.submission
+    }
+
+    #[must_use]
+    pub fn presented(self) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::Presented(OneShotPresentationCommit::issue(submission)),
+        }
+    }
+
+    #[must_use]
+    pub fn deferred(self, message: String) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::Deferred {
+                retry: submission.defer(),
+                message,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn backend_fault(
+        self,
+        domain: crate::UiPresentationBackendFaultDomain,
+        message: String,
+    ) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        let backend_generation = submission.backend_generation();
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::BackendFault {
+                attempt: Some(submission.into_attempt()),
+                backend_generation: Some(backend_generation),
+                domain,
+                message,
+            },
+        }
+    }
+}
+
+/// Failure-atomic batch bind result retaining every prepared submission for rejection outcomes.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct UiBackendSubmissionBatchBindError {
+    admission_id: UiPresentationAttemptId,
+    required: UiPresentationBackendGeneration,
+    actual: UiPresentationBackendGeneration,
+    submissions: Vec<UiBackendSubmission>,
+}
+
+impl UiBackendSubmissionBatchBindError {
+    #[must_use]
+    pub const fn admission_id(&self) -> UiPresentationAttemptId {
+        self.admission_id
+    }
+
+    #[must_use]
+    pub const fn required(&self) -> UiPresentationBackendGeneration {
+        self.required
+    }
+
+    #[must_use]
+    pub const fn actual(&self) -> UiPresentationBackendGeneration {
+        self.actual
+    }
+
+    #[must_use]
+    pub fn into_submissions(self) -> Vec<UiBackendSubmission> {
+        self.submissions
+    }
+}
+
+#[doc(hidden)]
+pub fn bind_backend_submission_batch(
+    submissions: Vec<UiBackendSubmission>,
+    backend_generation: UiPresentationBackendGeneration,
+) -> Result<Vec<UiSubmittedBackendSubmission>, UiBackendSubmissionBatchBindError> {
+    if let Some((admission_id, required)) = submissions.iter().find_map(|submission| {
+        submission
+            .submission()
+            .required_backend_generation()
+            .filter(|required| *required != backend_generation)
+            .map(|required| (submission.submission().identity().admission_id(), required))
+    }) {
+        return Err(UiBackendSubmissionBatchBindError {
+            admission_id,
+            required,
+            actual: backend_generation,
+            submissions,
+        });
+    }
+    Ok(submissions
+        .into_iter()
+        .map(|submission| {
+            let UiBackendSubmission { submission, permit } = submission;
+            UiSubmittedBackendSubmission {
+                submission: submission.bind_backend_unchecked(backend_generation),
+                permit,
+            }
+        })
+        .collect())
+}
+
+impl UiBackendSubmission {
+    pub fn pair(
+        submission: UiPreparedBackendSubmission,
+        permit: UiBackendOutcomePermit,
+    ) -> Result<Self, UiPresentationIntegrationError> {
+        let actual = submission.identity();
+        let expected = permit.identity;
+        if actual != expected {
+            return Err(
+                UiPresentationIntegrationError::BackendPermitIdentityMismatch {
+                    expected: Box::new(expected),
+                    actual: Box::new(actual),
+                },
+            );
+        }
+        Ok(Self { submission, permit })
+    }
+
+    fn pair_exact(submission: UiPreparedBackendSubmission, permit: UiBackendOutcomePermit) -> Self {
+        debug_assert_eq!(submission.identity(), permit.identity);
+        Self { submission, permit }
+    }
+
+    #[must_use]
+    pub fn submission(&self) -> &UiPreparedBackendSubmission {
+        &self.submission
+    }
+
+    #[must_use]
+    pub fn content_rejected(self, message: String) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::ContentRejected {
+                attempt: submission.into_attempt(),
+                message,
+            },
+        }
+    }
+
+    #[must_use]
+    pub fn backend_fault(
+        self,
+        backend_generation: Option<UiPresentationBackendGeneration>,
+        domain: crate::UiPresentationBackendFaultDomain,
+        message: String,
+    ) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::BackendFault {
+                attempt: Some(submission.into_attempt()),
+                backend_generation,
+                domain,
+                message,
+            },
+        }
+    }
+}
+
+/// Move-only frame exchange populated by the Host and drained once by the concrete backend.
+#[doc(hidden)]
+#[derive(Debug, Default, Resource)]
+pub(crate) struct UiBackendSubmissionQueue {
+    packets: Vec<Arc<UiPaintPacket>>,
+    submissions: Vec<UiPreparedBackendSubmission>,
+}
+
+impl UiBackendSubmissionQueue {
+    /// Replaces the next backend frame and returns prepared attempts that never reached submit.
+    fn replace(
+        &mut self,
+        packets: Vec<Arc<UiPaintPacket>>,
+        submissions: Vec<UiPreparedBackendSubmission>,
+    ) -> Vec<UiPreparedBackendSubmission> {
+        self.packets = packets;
+        std::mem::replace(&mut self.submissions, submissions)
+    }
+
+    fn take(&mut self) -> (Vec<Arc<UiPaintPacket>>, Vec<UiPreparedBackendSubmission>) {
+        (
+            std::mem::take(&mut self.packets),
+            std::mem::take(&mut self.submissions),
+        )
+    }
+}
+
+/// Exact draw packets and admission attempts for one concrete backend frame.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct UiBackendPresentationFrame {
+    packets: Vec<Arc<UiPaintPacket>>,
+    submissions: Vec<UiBackendSubmission>,
+}
+
+impl UiBackendPresentationFrame {
+    #[must_use]
+    pub fn into_parts(self) -> (Vec<Arc<UiPaintPacket>>, Vec<UiBackendSubmission>) {
+        (self.packets, self.submissions)
+    }
 }
 
 impl UiPresentationOutcomes {
-    pub fn push(&mut self, outcome: UiPresentationOutcome) {
+    pub fn commit_backend(&mut self, completed: UiCompletedBackendOutcome) {
+        let UiCompletedBackendOutcome { permit, outcome } = completed;
+        self.reserved_backend.remove(&permit.identity);
         self.outcomes.push(outcome);
     }
 
-    fn replace(&mut self, outcomes: Vec<UiPresentationOutcome>) {
+    fn replace_content(
+        &mut self,
+        outcomes: Vec<UiPresentationOutcome>,
+    ) -> Result<(), UiPresentationIntegrationError> {
+        if !self.reserved_backend.is_empty() {
+            return Err(
+                UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                    count: self.reserved_backend.len(),
+                },
+            );
+        }
+        if !self.outcomes.is_empty() {
+            return Err(
+                UiPresentationIntegrationError::PendingPresentationOutcomes {
+                    count: self.outcomes.len(),
+                },
+            );
+        }
         self.outcomes = outcomes;
+        Ok(())
     }
 
-    fn drain(&mut self) -> Vec<UiPresentationOutcome> {
-        self.outcomes.drain(..).collect()
+    pub fn reserve_backend(
+        &mut self,
+        submissions: &[UiPreparedBackendSubmission],
+    ) -> Result<Vec<UiBackendOutcomePermit>, UiPresentationIntegrationError> {
+        if !self.reserved_backend.is_empty() {
+            return Err(
+                UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                    count: self.reserved_backend.len(),
+                },
+            );
+        }
+        self.outcomes.try_reserve(submissions.len()).map_err(|_| {
+            UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                additional: submissions.len(),
+            }
+        })?;
+        let mut identities = HashSet::new();
+        identities.try_reserve(submissions.len()).map_err(|_| {
+            UiPresentationIntegrationError::OutcomeCapacityUnavailable {
+                additional: submissions.len(),
+            }
+        })?;
+        for submission in submissions {
+            let identity = submission.identity();
+            if !identities.insert(identity) {
+                return Err(UiPresentationIntegrationError::DuplicateBackendAttempt {
+                    admission_id: identity.admission_id().get(),
+                });
+            }
+        }
+        self.reserved_backend = identities;
+        Ok(submissions
+            .iter()
+            .map(|submission| UiBackendOutcomePermit {
+                identity: submission.identity(),
+            })
+            .collect())
+    }
+
+    fn drain(&mut self) -> Result<Vec<UiPresentationOutcome>, UiPresentationIntegrationError> {
+        if !self.reserved_backend.is_empty() {
+            return Err(
+                UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                    count: self.reserved_backend.len(),
+                },
+            );
+        }
+        Ok(std::mem::take(&mut self.outcomes))
     }
 }
 
@@ -139,7 +462,27 @@ pub fn compile_ui_paint_packets(
     {
         return Err(UiPresentationIntegrationError::Unavailable);
     }
-
+    let (pending_outcomes, outstanding_backend) = {
+        let outcome_state = world.resource::<UiPresentationOutcomes>();
+        (
+            outcome_state.outcomes.len(),
+            outcome_state.reserved_backend.len(),
+        )
+    };
+    if pending_outcomes != 0 {
+        return Err(
+            UiPresentationIntegrationError::PendingPresentationOutcomes {
+                count: pending_outcomes,
+            },
+        );
+    }
+    if outstanding_backend != 0 {
+        return Err(
+            UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                count: outstanding_backend,
+            },
+        );
+    }
     let routes = world.resource::<UiPresentationRoutes>().routes.clone();
     let target_conflicts = target_conflicts(&routes);
     let duplicate_surfaces = duplicate_frame_surfaces(frames);
@@ -160,7 +503,9 @@ pub fn compile_ui_paint_packets(
                 };
                 stats.rejected_packets = stats.rejected_packets.saturating_add(1);
                 outcomes.push(match routes.get(&identity.surface_id()).copied() {
-                    Some(route) => build_rejection(identity, route.target(), error),
+                    Some(route) => {
+                        build_rejection(identity, route.target(), error)
+                    }
                     None => UiPresentationOutcome::ContentRejected {
                         attempt: UiPresentationAttemptIdentity::unrouted(identity),
                         message: error.to_string(),
@@ -195,13 +540,16 @@ pub fn compile_ui_paint_packets(
                 Err(error) => {
                     stats.rejected_packets = stats.rejected_packets.saturating_add(1);
                     outcomes.push(build_rejection(identity, target, error));
+                    let _ = planner
+                        .0
+                        .abort_surface_target(identity.surface_id(), target);
                 }
             }
         }
     });
     world
         .resource_mut::<UiPresentationOutcomes>()
-        .replace(outcomes);
+        .replace_content(outcomes)?;
     Ok(stats)
 }
 
@@ -211,13 +559,141 @@ pub fn drain_ui_presentation_outcomes(
     let Some(mut outcomes) = world.get_resource_mut::<UiPresentationOutcomes>() else {
         return Err(UiPresentationIntegrationError::Unavailable);
     };
-    Ok(outcomes.drain())
+    outcomes.drain()
+}
+
+/// Publishes the exact replay packets and move-only attempts for the next backend frame.
+#[doc(hidden)]
+pub fn replace_ui_backend_frame(
+    world: &mut World,
+    packets: Vec<Arc<UiPaintPacket>>,
+    submissions: Vec<UiPreparedBackendSubmission>,
+) -> Result<Vec<UiPreparedBackendSubmission>, UiPresentationIntegrationError> {
+    if !world.contains_resource::<UiBackendSubmissionQueue>()
+        || !world.contains_resource::<UiPresentationState>()
+    {
+        return Err(UiPresentationIntegrationError::Unavailable);
+    }
+    let mut admission_ids = HashSet::with_capacity(submissions.len());
+    let mut target_admissions = HashMap::with_capacity(submissions.len());
+    for submission in &submissions {
+        let identity = submission.identity();
+        if !admission_ids.insert(identity.admission_id()) {
+            return Err(UiPresentationIntegrationError::DuplicateBackendAttempt {
+                admission_id: identity.admission_id().get(),
+            });
+        }
+        if let Some(first) = target_admissions.insert(identity.target(), identity.admission_id()) {
+            return Err(UiPresentationIntegrationError::DuplicateBackendTarget {
+                target: identity.target(),
+                first_admission_id: first.get(),
+                second_admission_id: identity.admission_id().get(),
+            });
+        }
+        if !packets.iter().any(|packet| {
+            Arc::ptr_eq(packet, submission.packet())
+                && packet.identity() == identity.packet()
+                && packet.target() == identity.target()
+        }) {
+            return Err(UiPresentationIntegrationError::SubmissionPacketMissing {
+                admission_id: identity.admission_id().get(),
+            });
+        }
+    }
+    world.resource_scope(|world, mut queue: Mut<UiBackendSubmissionQueue>| {
+        world
+            .resource_mut::<UiPresentationState>()
+            .0
+            .replace_backend_submissions(&submissions, &queue.submissions)
+            .map_err(
+                |admission_id| UiPresentationIntegrationError::SubmissionPlannerMismatch {
+                    admission_id: admission_id.get(),
+                },
+            )?;
+        Ok(queue.replace(packets, submissions))
+    })
+}
+
+/// Consumes backend acceptance and advances only the planner's committed packet snapshot.
+///
+/// Plugin installation and exact-token staging are pre-submit invariants. Therefore this function
+/// deliberately has no fallible arm after the backend has accepted pixels.
+#[doc(hidden)]
+#[must_use]
+pub fn commit_ui_backend_presentation(
+    world: &mut World,
+    commit: OneShotPresentationCommit,
+) -> UiAcceptedBackendPresentation {
+    let accepted = commit.accept();
+    world
+        .resource_mut::<UiPresentationState>()
+        .0
+        .commit_presented(accepted.identity(), Arc::clone(accepted.packet()));
+    accepted
+}
+
+/// Consumes a stale backend acceptance without advancing the planner's presented packet.
+#[doc(hidden)]
+#[must_use]
+pub fn discard_ui_backend_acceptance(
+    commit: OneShotPresentationCommit,
+) -> UiAcceptedBackendPresentation {
+    commit.accept()
+}
+
+/// Terminates the exact active plan after rejection, abort, or supersession.
+///
+/// The previous presented packet becomes the replay plan. If this target has never presented, the
+/// target-local planner state is removed instead of leaving rejected content active.
+#[doc(hidden)]
+#[must_use]
+pub fn abort_ui_planned_packet(
+    world: &mut World,
+    attempt: UiPresentationAttemptIdentity,
+) -> UiPlannedPacketAbortOutcome {
+    world
+        .resource_mut::<UiPresentationState>()
+        .0
+        .abort_planned(attempt)
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum UiPresentationIntegrationError {
     #[error("UI presentation integration is unavailable because UiRenderPlugin is not installed")]
     Unavailable,
+    #[error("UI backend attempt {admission_id} appears more than once in one submitted frame")]
+    DuplicateBackendAttempt { admission_id: u64 },
+    #[error(
+        "UI presentation target {target:?} is owned by backend attempts {first_admission_id} and {second_admission_id} in one submitted frame"
+    )]
+    DuplicateBackendTarget {
+        target: RenderTarget,
+        first_admission_id: u64,
+        second_admission_id: u64,
+    },
+    #[error(
+        "UI backend attempt {admission_id} does not own an exact packet in its submitted frame"
+    )]
+    SubmissionPacketMissing { admission_id: u64 },
+    #[error(
+        "UI backend attempt {admission_id} no longer matches the planner's exact active packet"
+    )]
+    SubmissionPlannerMismatch { admission_id: u64 },
+    #[error(
+        "UI backend outcome permit identity mismatch: expected {expected:?}, received {actual:?}"
+    )]
+    BackendPermitIdentityMismatch {
+        expected: Box<UiBackendSubmissionIdentity>,
+        actual: Box<UiBackendSubmissionIdentity>,
+    },
+    #[error("{count} UI presentation outcomes remain undrained from the previous frame")]
+    PendingPresentationOutcomes { count: usize },
+    #[error("{count} UI backend outcome reservations remain incomplete from the submitted frame")]
+    OutstandingBackendOutcomeReservations { count: usize },
+    #[error(
+        "UI backend outcome capacity for {additional} submissions could not be reserved before submit"
+    )]
+    OutcomeCapacityUnavailable { additional: usize },
 }
 
 fn target_conflicts(
@@ -264,18 +740,54 @@ fn build_rejection(
     }
 }
 
+/// Stable planner snapshots used by the Host to choose new submissions versus replay packets.
 #[doc(hidden)]
-#[derive(SystemParam)]
-pub struct UiPaintPacketReader<'w> {
-    state: Option<Res<'w, UiPresentationState>>,
+#[derive(Debug)]
+pub struct UiPaintPacketSnapshots {
+    planned: Vec<Arc<UiPaintPacket>>,
+    presented: Vec<Arc<UiPaintPacket>>,
 }
 
-impl UiPaintPacketReader<'_> {
+impl UiPaintPacketSnapshots {
     #[must_use]
-    pub fn snapshot(&self) -> Vec<Arc<UiPaintPacket>> {
-        self.state
-            .as_deref()
-            .map_or_else(Vec::new, |state| state.0.snapshot_packets())
+    pub fn into_parts(self) -> (Vec<Arc<UiPaintPacket>>, Vec<Arc<UiPaintPacket>>) {
+        (self.planned, self.presented)
+    }
+}
+
+#[doc(hidden)]
+pub fn snapshot_ui_paint_packets(
+    world: &World,
+) -> Result<UiPaintPacketSnapshots, UiPresentationIntegrationError> {
+    let Some(state) = world.get_resource::<UiPresentationState>() else {
+        return Err(UiPresentationIntegrationError::Unavailable);
+    };
+    Ok(UiPaintPacketSnapshots {
+        planned: state.0.snapshot_planned_packets(),
+        presented: state.0.snapshot_presented_packets(),
+    })
+}
+
+#[doc(hidden)]
+#[derive(SystemParam)]
+pub struct UiBackendSubmissionReader<'w> {
+    queue: ResMut<'w, UiBackendSubmissionQueue>,
+    outcomes: ResMut<'w, UiPresentationOutcomes>,
+}
+
+impl UiBackendSubmissionReader<'_> {
+    pub fn take(&mut self) -> Result<UiBackendPresentationFrame, UiPresentationIntegrationError> {
+        let permits = self.outcomes.reserve_backend(&self.queue.submissions)?;
+        let (packets, submissions) = self.queue.take();
+        let submissions = submissions
+            .into_iter()
+            .zip(permits)
+            .map(|(submission, permit)| UiBackendSubmission::pair_exact(submission, permit))
+            .collect::<Vec<_>>();
+        Ok(UiBackendPresentationFrame {
+            packets,
+            submissions,
+        })
     }
 }
 
@@ -307,182 +819,11 @@ impl Plugin for UiRenderPlugin {
         app.insert_resource(UiPresentationState(planner))?;
         app.init_resource::<UiPresentationRoutes>()?;
         app.init_resource::<UiPresentationOutcomes>()?;
+        app.init_resource::<UiBackendSubmissionQueue>()?;
         Ok(())
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use nara_text::bundled_font_face;
-    use nara_ui_kernel::{
-        UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiImageId, UiLayer,
-        UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle, UiTheme, UiVisual,
-    };
-
-    fn frame(surface: u64, source_revision: u64, visual: UiVisual) -> Arc<UiFrame> {
-        let node = UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
-            .with_key(UiLocalKey::runtime("packet-retention", "node").unwrap())
-            .with_visual(visual);
-        let snapshot = UiAuthoringSnapshotBuilder::new(source_revision)
-            .with_root(
-                UiRoot::new(
-                    UiRootKey::runtime("packet-retention", "root").unwrap(),
-                    UiLayer::Base,
-                    UiStyle::fill(),
-                )
-                .with_child(node),
-            )
-            .build()
-            .unwrap();
-        let environment = UiEnvironment::new(
-            UiSurfaceId::new(surface).unwrap(),
-            64.0,
-            64.0,
-            1.0,
-            source_revision,
-            1,
-            1,
-            1,
-        )
-        .unwrap();
-        UiCompiler::new(bundled_font_face().unwrap(), Default::default())
-            .unwrap()
-            .compile(&snapshot, environment, UiTheme::default())
-            .unwrap()
-    }
-
-    fn packet_world() -> World {
-        let surface_id = UiSurfaceId::new(1).unwrap();
-        let route = UiPresentationRoute::new(surface_id, WindowId::PRIMARY).unwrap();
-        let mut routes = UiPresentationRoutes::default();
-        routes.routes.insert(surface_id, route);
-        let mut world = World::new();
-        world.insert_resource(UiPresentationState(UiPresentationPlanner::default()));
-        world.insert_resource(routes);
-        world.insert_resource(UiPresentationOutcomes::default());
-        world
-    }
-
-    #[test]
-    fn rejected_candidate_keeps_the_exact_last_good_packet_arc() {
-        let mut world = packet_world();
-        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
-        let admitted = frame(1, 1, UiVisual::solid(white));
-        compile_ui_paint_packets(&mut world, &[admitted]).unwrap();
-        let first = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
-
-        let missing_image = UiImageId::new("project://ui/missing.png").unwrap();
-        let rejected = frame(1, 2, UiVisual::image(missing_image, white));
-        let stats = compile_ui_paint_packets(&mut world, &[rejected]).unwrap();
-
-        assert_eq!(stats.rejected_packets, 1);
-        assert!(Arc::ptr_eq(
-            &world.resource::<UiPresentationState>().0.snapshot_packets()[0],
-            &first
-        ));
-    }
-
-    #[test]
-    fn two_surfaces_cannot_compete_for_one_target() {
-        let mut world = packet_world();
-        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
-        compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
-        let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
-        replace_ui_presentation_routes(
-            &mut world,
-            [
-                UiPresentationRoute::new(UiSurfaceId::new(1).unwrap(), WindowId::PRIMARY).unwrap(),
-                UiPresentationRoute::new(UiSurfaceId::new(2).unwrap(), WindowId::PRIMARY).unwrap(),
-            ],
-        )
-        .unwrap();
-        let stats = compile_ui_paint_packets(
-            &mut world,
-            &[
-                frame(1, 2, UiVisual::solid(white)),
-                frame(2, 2, UiVisual::solid(white)),
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(stats.admitted_packets, 0);
-        assert_eq!(stats.rejected_packets, 2);
-        assert!(Arc::ptr_eq(
-            &world.resource::<UiPresentationState>().0.snapshot_packets()[0],
-            &original
-        ));
-    }
-
-    #[test]
-    fn retiring_a_conflicting_route_does_not_release_the_target_owner() {
-        let mut world = packet_world();
-        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
-        compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
-        let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
-        let second_surface = UiSurfaceId::new(2).unwrap();
-        replace_ui_presentation_routes(
-            &mut world,
-            [
-                UiPresentationRoute::new(UiSurfaceId::new(1).unwrap(), WindowId::PRIMARY).unwrap(),
-                UiPresentationRoute::new(second_surface, WindowId::PRIMARY).unwrap(),
-            ],
-        )
-        .unwrap();
-        replace_ui_presentation_routes(
-            &mut world,
-            [UiPresentationRoute::new(UiSurfaceId::new(1).unwrap(), WindowId::PRIMARY).unwrap()],
-        )
-        .unwrap();
-
-        let packets = world.resource::<UiPresentationState>().0.snapshot_packets();
-        assert_eq!(packets.len(), 1);
-        assert!(Arc::ptr_eq(&packets[0], &original));
-    }
-
-    #[test]
-    fn duplicate_surface_frames_reject_the_whole_surface_attempt() {
-        let mut world = packet_world();
-        let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);
-        compile_ui_paint_packets(&mut world, &[frame(1, 1, UiVisual::solid(white))]).unwrap();
-        let original = world.resource::<UiPresentationState>().0.snapshot_packets()[0].clone();
-
-        let stats = compile_ui_paint_packets(
-            &mut world,
-            &[
-                frame(1, 2, UiVisual::solid(white)),
-                frame(1, 3, UiVisual::solid(white)),
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(stats.admitted_packets, 0);
-        assert_eq!(stats.rejected_packets, 2);
-        assert!(Arc::ptr_eq(
-            &world.resource::<UiPresentationState>().0.snapshot_packets()[0],
-            &original
-        ));
-        let outcomes = drain_ui_presentation_outcomes(&mut world).unwrap();
-        assert_eq!(outcomes.len(), 2);
-        assert!(outcomes.iter().all(|outcome| {
-            outcome
-                .message()
-                .is_some_and(|message| message.contains("more than once"))
-        }));
-    }
-
-    #[test]
-    fn outcome_journal_does_not_silently_truncate_backend_results() {
-        let frame = frame(1, 1, UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)));
-        let identity = UiPaintPacketIdentity::from_frame(&frame);
-        let mut outcomes = UiPresentationOutcomes::default();
-        for index in 0..65 {
-            outcomes.push(UiPresentationOutcome::ContentRejected {
-                attempt: UiPresentationAttemptIdentity::unrouted(identity),
-                message: index.to_string(),
-            });
-        }
-
-        assert_eq!(outcomes.drain().len(), 65);
-    }
-}
+#[path = "integration_tests.rs"]
+mod tests;

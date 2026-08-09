@@ -35,7 +35,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
-    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))?;
+    app.add_plugins((
+        RuntimeUiPlugins,
+        RenderPlugin,
+        ImagePlugin::default(),
+        ImagePreparePlugin,
+    ))?;
     app.add_systems(StartupStage::Scene, setup_gallery)?;
     app.world_mut()?.insert_resource(AssetServer::new());
 
@@ -95,17 +100,18 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     assert_owned_packet(&packet, &frame, &image_snapshot, mapped_slot);
     let mut rejecting_presenter =
         HeadlessTestPresenter::new(RenderTarget::Window(WindowId::new(2)));
-    let rejected = rejecting_presenter.accept_and_submit(Arc::clone(&packet), 6);
+    let rejected =
+        rejecting_presenter.accept_and_submit(app.world_mut()?, Arc::clone(&packet), 6)?;
     assert!(rejecting_presenter.submitted().is_none());
     assert_eq!(
         rejected.attempt(),
-        Some(nara_ui_render::__private::presentation_attempt(&packet))
+        nara_ui_render::__private::presentation_attempt(&packet)
     );
     assert!(commit_headless_test_outcome(app.world_mut()?, rejected)?.is_none());
     assert!(latest_ui_frame(app.world(), mapped_slot.surface_id())?.is_some());
 
     let mut presenter = HeadlessTestPresenter::new(RenderTarget::Window(WindowId::PRIMARY));
-    let presented = presenter.accept_and_submit(Arc::clone(&packet), 7);
+    let presented = presenter.accept_and_submit(app.world_mut()?, Arc::clone(&packet), 7)?;
     assert!(Arc::ptr_eq(
         presenter
             .submitted()

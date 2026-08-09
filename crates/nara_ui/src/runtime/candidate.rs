@@ -71,6 +71,24 @@ pub(super) struct UiCompiledCandidate {
     reducers: BTreeMap<UiKey, UiButtonState>,
 }
 
+/// Lightweight immutable facts retained across one backend deferral.
+#[derive(Clone, Debug)]
+pub(super) struct UiPresentationFacts {
+    frame: Arc<UiFrame>,
+    behavior: Arc<UiBehaviorSnapshot>,
+}
+
+impl UiPresentationFacts {
+    pub(super) fn frame(&self) -> &Arc<UiFrame> {
+        &self.frame
+    }
+
+    pub(super) fn matches_candidate(&self, candidate: &UiCompiledCandidate) -> bool {
+        self.behavior.as_ref() == candidate.behavior.as_ref()
+            && frame_presentation_facts_match(self.frame.as_ref(), candidate.frame.as_ref())
+    }
+}
+
 impl UiCompiledCandidate {
     pub(super) const fn new(
         frame: Arc<UiFrame>,
@@ -101,6 +119,34 @@ impl UiCompiledCandidate {
     pub(super) const fn reducers(&self) -> &BTreeMap<UiKey, UiButtonState> {
         &self.reducers
     }
+
+    pub(super) fn presentation_facts(&self) -> UiPresentationFacts {
+        UiPresentationFacts {
+            frame: Arc::clone(&self.frame),
+            behavior: Arc::clone(&self.behavior),
+        }
+    }
+
+    pub(super) fn rebind_presentation_identity(&self, retained: &UiPresentationFacts) -> Self {
+        debug_assert!(retained.matches_candidate(self));
+        Self::new(
+            Arc::clone(&retained.frame),
+            Arc::clone(&retained.behavior),
+            self.interaction.clone(),
+            self.reducers.clone(),
+        )
+    }
+}
+
+fn frame_presentation_facts_match(previous: &UiFrame, latest: &UiFrame) -> bool {
+    previous.environment() == latest.environment()
+        && previous.root_outcomes() == latest.root_outcomes()
+        && previous.layouts() == latest.layouts()
+        && previous.paint() == latest.paint()
+        && previous.hit_regions() == latest.hit_regions()
+        && previous.focus_order() == latest.focus_order()
+        && previous.semantics() == latest.semantics()
+        && previous.diagnostics() == latest.diagnostics()
 }
 
 /// Interaction and reducer facts staged while a candidate is reprojected for exact visual parity.

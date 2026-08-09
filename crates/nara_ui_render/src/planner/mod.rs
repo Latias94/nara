@@ -5,8 +5,10 @@ use nara_text::{TextEngine, TextEngineCreateError, TextLimits, bundled_font_face
 use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use thiserror::Error;
 
+use crate::packet::UiPreparedBackendSubmission;
 use crate::{
-    UiPaintPacket, UiPaintPacketIdentity, UiPresentationLimits, UiPresentationLimitsError,
+    UiBackendSubmissionIdentity, UiPaintPacket, UiPaintPacketIdentity, UiPresentationAttemptId,
+    UiPresentationAttemptIdentity, UiPresentationLimits, UiPresentationLimitsError,
     atlas::{GlyphAtlas, UiAtlasPlanError},
 };
 
@@ -21,7 +23,9 @@ use lowering::{lower_packet, preflight_content};
 struct TargetPresentationState {
     surface_id: UiSurfaceId,
     atlas: GlyphAtlas,
-    last_good: Arc<UiPaintPacket>,
+    planned: Arc<UiPaintPacket>,
+    last_presented: Option<Arc<UiPaintPacket>>,
+    active_submission: Option<UiBackendSubmissionIdentity>,
 }
 
 /// Target-private, failure-atomic planner for resource-complete UI packets.
@@ -64,6 +68,16 @@ impl UiPresentationPlanner {
                 requested_surface: surface_id,
             });
         }
+        if let Some(active_submission) = self
+            .targets
+            .get(&target)
+            .and_then(|state| state.active_submission)
+        {
+            return Err(UiPresentationContentError::SubmissionStillActive {
+                target,
+                admission_id: active_submission.admission_id(),
+            });
+        }
         let preflight = preflight_content(&frame, images, self.limits)?;
         let current_atlas = self
             .targets
@@ -91,26 +105,46 @@ impl UiPresentationPlanner {
                 .map_err(|_| UiPresentationContentError::AllocationFailed)?;
         }
 
+        let last_presented = self
+            .targets
+            .get(&target)
+            .and_then(|state| state.last_presented.as_ref().map(Arc::clone));
         self.targets.insert(
             target,
             TargetPresentationState {
                 surface_id,
                 atlas: staged_atlas,
-                last_good: Arc::clone(&packet),
+                planned: Arc::clone(&packet),
+                last_presented,
+                active_submission: None,
             },
         );
         Ok(packet)
     }
 
     #[must_use]
-    pub fn last_good(&self, target: RenderTarget) -> Option<Arc<UiPaintPacket>> {
+    pub fn planned(&self, target: RenderTarget) -> Option<Arc<UiPaintPacket>> {
         self.targets
             .get(&target)
-            .map(|state| Arc::clone(&state.last_good))
+            .map(|state| Arc::clone(&state.planned))
+    }
+
+    #[must_use]
+    pub fn last_presented(&self, target: RenderTarget) -> Option<Arc<UiPaintPacket>> {
+        self.targets
+            .get(&target)
+            .and_then(|state| state.last_presented.as_ref().map(Arc::clone))
     }
 
     pub fn retire_target(&mut self, target: RenderTarget) -> Option<Arc<UiPaintPacket>> {
-        self.targets.remove(&target).map(|state| state.last_good)
+        if self
+            .targets
+            .get(&target)
+            .is_some_and(|state| state.active_submission.is_some())
+        {
+            return None;
+        }
+        self.targets.remove(&target).map(|state| state.planned)
     }
 
     pub(crate) fn retire_surface_target(
@@ -127,20 +161,168 @@ impl UiPresentationPlanner {
             .flatten()
     }
 
-    pub(crate) fn snapshot_packets(&self) -> Vec<Arc<UiPaintPacket>> {
+    pub(crate) fn replace_backend_submissions(
+        &mut self,
+        submissions: &[UiPreparedBackendSubmission],
+        displaced: &[UiPreparedBackendSubmission],
+    ) -> Result<(), UiPresentationAttemptId> {
+        for submission in submissions {
+            let identity = submission.identity();
+            let Some(state) = self.targets.get(&identity.target()) else {
+                return Err(identity.admission_id());
+            };
+            let active_is_replaceable = state.active_submission.is_none_or(|active| {
+                active == identity || displaced.iter().any(|queued| queued.identity() == active)
+            });
+            if state.surface_id != identity.packet().surface_id()
+                || state.planned.identity() != identity.packet()
+                || !Arc::ptr_eq(&state.planned, submission.packet())
+                || !active_is_replaceable
+            {
+                return Err(identity.admission_id());
+            }
+        }
+        for submission in submissions {
+            let identity = submission.identity();
+            self.targets
+                .get_mut(&identity.target())
+                .expect("all planner submissions were validated before staging")
+                .active_submission = Some(identity);
+        }
+        Ok(())
+    }
+
+    /// Commits one backend-accepted packet after `replace_backend_submissions` has reserved the
+    /// exact planner state. The active-submission lock makes a missing or mismatched target an
+    /// internal invariant violation rather than a recoverable post-submit outcome.
+    pub(crate) fn commit_presented(
+        &mut self,
+        identity: UiBackendSubmissionIdentity,
+        packet: Arc<UiPaintPacket>,
+    ) {
+        let state = self
+            .targets
+            .get_mut(&identity.target())
+            .expect("a backend acceptance must retain its staged planner target");
+        assert_eq!(
+            state.active_submission,
+            Some(identity),
+            "a backend acceptance must retain its active planner submission"
+        );
+        assert_eq!(
+            state.surface_id,
+            identity.packet().surface_id(),
+            "a backend acceptance must retain its staged surface"
+        );
+        assert_eq!(
+            state.planned.identity(),
+            identity.packet(),
+            "a backend acceptance must retain its staged packet identity"
+        );
+        assert!(
+            Arc::ptr_eq(&state.planned, &packet),
+            "a backend acceptance must retain its staged packet allocation"
+        );
+        state.last_presented = Some(packet);
+        state.active_submission = None;
+    }
+
+    pub(crate) fn abort_planned(
+        &mut self,
+        attempt: UiPresentationAttemptIdentity,
+    ) -> UiPlannedPacketAbortOutcome {
+        let Some(target) = attempt.target() else {
+            return UiPlannedPacketAbortOutcome::IgnoredUnrouted;
+        };
+        let last_presented = match self.targets.get(&target) {
+            Some(state)
+                if attempt.backend_submission().is_some_and(|identity| {
+                    state.active_submission == Some(identity)
+                        && state.planned.identity() == identity.packet()
+                }) || (attempt.backend_submission().is_none()
+                    && state.active_submission.is_none()
+                    && state.planned.identity() == attempt.packet()) =>
+            {
+                state.last_presented.as_ref().map(Arc::clone)
+            }
+            _ => return UiPlannedPacketAbortOutcome::IgnoredStale,
+        };
+        if let Some(last_presented) = last_presented {
+            let state = self
+                .targets
+                .get_mut(&target)
+                .expect("the exact planner target was just validated");
+            state.planned = last_presented;
+            state.active_submission = None;
+            UiPlannedPacketAbortOutcome::RestoredLastPresented
+        } else {
+            self.targets.remove(&target);
+            UiPlannedPacketAbortOutcome::RemovedUnpresentedTarget
+        }
+    }
+
+    pub(crate) fn abort_surface_target(
+        &mut self,
+        surface_id: UiSurfaceId,
+        target: RenderTarget,
+    ) -> UiPlannedPacketAbortOutcome {
+        let last_presented = match self.targets.get(&target) {
+            Some(state) if state.surface_id == surface_id && state.active_submission.is_none() => {
+                state.last_presented.as_ref().map(Arc::clone)
+            }
+            _ => return UiPlannedPacketAbortOutcome::IgnoredStale,
+        };
+        if let Some(last_presented) = last_presented {
+            let state = self
+                .targets
+                .get_mut(&target)
+                .expect("the exact planner target was just validated");
+            state.planned = last_presented;
+            UiPlannedPacketAbortOutcome::RestoredLastPresented
+        } else {
+            self.targets.remove(&target);
+            UiPlannedPacketAbortOutcome::RemovedUnpresentedTarget
+        }
+    }
+
+    pub(crate) fn snapshot_planned_packets(&self) -> Vec<Arc<UiPaintPacket>> {
         let mut packets = self
             .targets
             .values()
-            .map(|state| Arc::clone(&state.last_good))
+            .map(|state| Arc::clone(&state.planned))
             .collect::<Vec<_>>();
-        packets.sort_by_key(|packet| {
-            (
-                packet.identity().surface_id(),
-                render_target_order_key(packet.target()),
-            )
-        });
+        sort_packets(&mut packets);
         packets
     }
+
+    pub(crate) fn snapshot_presented_packets(&self) -> Vec<Arc<UiPaintPacket>> {
+        let mut packets = self
+            .targets
+            .values()
+            .filter_map(|state| state.last_presented.as_ref().map(Arc::clone))
+            .collect::<Vec<_>>();
+        sort_packets(&mut packets);
+        packets
+    }
+}
+
+/// Planner result after a prepared or submitted packet is terminated without presentation.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiPlannedPacketAbortOutcome {
+    RestoredLastPresented,
+    RemovedUnpresentedTarget,
+    IgnoredStale,
+    IgnoredUnrouted,
+}
+
+fn sort_packets(packets: &mut [Arc<UiPaintPacket>]) {
+    packets.sort_by_key(|packet| {
+        (
+            packet.identity().surface_id(),
+            render_target_order_key(packet.target()),
+        )
+    });
 }
 
 fn render_target_order_key(target: RenderTarget) -> (u8, u64) {
@@ -177,6 +359,13 @@ pub enum UiPresentationContentError {
         target: RenderTarget,
         existing_surface: UiSurfaceId,
         requested_surface: UiSurfaceId,
+    },
+    #[error(
+        "UI presentation target {target:?} still owns active backend admission {admission_id:?}"
+    )]
+    SubmissionStillActive {
+        target: RenderTarget,
+        admission_id: UiPresentationAttemptId,
     },
     #[error(
         "UI presentation target {target:?} is assigned to both surface {first_surface:?} and surface {second_surface:?}"

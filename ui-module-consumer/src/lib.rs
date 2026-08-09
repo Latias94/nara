@@ -2,12 +2,10 @@ use nara_text::{
     GlyphRaster, TextEngine, TextLayout, TextLayoutRequest, TextLimits, bundled_font_face,
 };
 use nara_ui_kernel::{
-    UiActionId, UiActivationSource, UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment,
-    UiFrameJournal, UiInputEvent, UiInteractionSession, UiKey, UiLayer, UiLocalKey, UiNavigation,
-    UiNode, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiStyle, UiSurfaceId, UiText, UiTheme,
-    UiVisual,
+    UiActionId, UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiKey, UiLayer, UiLocalKey,
+    UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
 };
-use nara_ui_widgets::{UiButton, UiButtonState, UiIntent, UiIntentBatch};
+use nara_ui_widgets::UiButton;
 use std::sync::Arc;
 
 pub type StatusLabelError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -56,8 +54,9 @@ pub fn compile_status_panel(text: &str) -> Result<Arc<nara_ui_kernel::UiFrame>, 
     Ok(compiler.compile(&snapshot, environment, UiTheme::default())?)
 }
 
-/// Proves direct widget consumption from authored data through a presented-frame intent.
-pub fn activate_retry_button() -> Result<UiIntent, StatusLabelError> {
+/// Compiles one controlled Button through the ordinary public authoring interface.
+pub fn compile_retry_button() -> Result<(UiButton, Arc<nara_ui_kernel::UiFrame>), StatusLabelError>
+{
     let root_key = UiRootKey::runtime("consumer", "terminal")?;
     let local_key = UiLocalKey::runtime("consumer", "retry")?;
     let key = UiKey::scoped(root_key.clone(), local_key)?;
@@ -79,34 +78,5 @@ pub fn activate_retry_button() -> Result<UiIntent, StatusLabelError> {
     let environment = UiEnvironment::new(surface, 320.0, 180.0, 1.0, 1, 1, 1, 1)?;
     let mut compiler = UiCompiler::new(bundled_font_face()?, Default::default())?;
     let frame = compiler.compile(&snapshot, environment, UiTheme::default())?;
-    let mut journal = UiFrameJournal::default();
-    journal.install_surface(surface, 1)?;
-    journal.submit(frame, 1)?;
-    let route = UiRouteStamp::new(surface, 1);
-    let mut session = UiInteractionSession::default();
-    let focus = session.dispatch(
-        &journal,
-        route,
-        UiInputEvent::Navigate {
-            seat: UiSeatId::PRIMARY,
-            direction: UiNavigation::Next,
-        },
-    )?;
-    let activation = session.dispatch(
-        &journal,
-        route,
-        UiInputEvent::ActivateFocused {
-            seat: UiSeatId::PRIMARY,
-            source: UiActivationSource::Keyboard,
-        },
-    )?;
-    let mut state = UiButtonState::default();
-    let mut intents = UiIntentBatch::default();
-    state.reduce_batch(&button, &focus, &mut intents)?;
-    state.reduce_batch(&button, &activation, &mut intents)?;
-    intents
-        .intents()
-        .first()
-        .cloned()
-        .ok_or_else(|| "presented Retry activation emitted no intent".into())
+    Ok((button, frame))
 }

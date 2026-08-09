@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
@@ -10,6 +13,34 @@ use nara_ui_kernel::{
     UiSemanticRole, UiSemantics, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations,
     UiSurfaceId, UiTheme,
 };
+
+struct HostedJournal {
+    journal: UiFrameJournal,
+    authority: nara_ui_kernel::__private::UiFrameJournalAuthority,
+}
+
+impl Deref for HostedJournal {
+    type Target = UiFrameJournal;
+
+    fn deref(&self) -> &Self::Target {
+        &self.journal
+    }
+}
+
+impl DerefMut for HostedJournal {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.journal
+    }
+}
+
+fn hosted_journal() -> HostedJournal {
+    hosted_journal_with_limits(Default::default())
+}
+
+fn hosted_journal_with_limits(limits: UiLimits) -> HostedJournal {
+    let (journal, authority) = nara_ui_kernel::__private::new_hosted_frame_journal(limits).unwrap();
+    HostedJournal { journal, authority }
+}
 
 const SURFACE: UiSurfaceId = UiSurfaceId::new(17).unwrap();
 const SEAT: UiSeatId = UiSeatId::PRIMARY;
@@ -55,7 +86,7 @@ fn base_root_with_first_enabled(first_enabled: bool) -> UiRoot {
 #[test]
 fn disabled_focus_identity_survives_reconciliation_and_reenable() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -124,7 +155,7 @@ fn disabled_middle_focus_remains_the_origin_for_sequential_and_directional_navig
         (UiNavigation::Right, "last"),
     ] {
         let mut compiler = compiler();
-        let mut journal = UiFrameJournal::default();
+        let mut journal = hosted_journal();
         let initial = navigation_snapshot(6, true);
         let initial_route = submit(&mut journal, compile(&mut compiler, &initial, 1), 10);
         let mut session = UiInteractionSession::default();
@@ -275,7 +306,7 @@ fn compiler() -> UiCompiler {
     UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap()
 }
 
-fn submit(journal: &mut UiFrameJournal, frame: Arc<UiFrame>, epoch: u64) -> UiRouteStamp {
+fn submit(journal: &mut HostedJournal, frame: Arc<UiFrame>, epoch: u64) -> UiRouteStamp {
     let environment = frame.environment();
     match journal.install_surface(
         environment.surface_id(),
@@ -284,7 +315,12 @@ fn submit(journal: &mut UiFrameJournal, frame: Arc<UiFrame>, epoch: u64) -> UiRo
         Ok(()) | Err(nara_ui_kernel::UiJournalError::SurfaceAlreadyInstalled { .. }) => {}
         Err(error) => panic!("test surface should install explicitly: {error}"),
     }
-    UiRouteStamp::from_receipt(journal.submit(frame, epoch).unwrap())
+    UiRouteStamp::from_receipt(
+        journal
+            .authority
+            .submit(&mut journal.journal, frame, epoch)
+            .unwrap(),
+    )
 }
 
 fn move_pointer(position: UiPoint) -> UiInputEvent {
@@ -309,7 +345,7 @@ fn pointer_button(phase: UiButtonPhase, position: UiPoint) -> UiInputEvent {
 fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
     let mut compiler = compiler();
     let frame = compile(&mut compiler, &snapshot(false), 1);
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, frame, 10);
     let mut session = UiInteractionSession::default();
     let first = exact_key("base", "first");
@@ -387,7 +423,7 @@ fn pointer_capture_routes_capture_target_bubble_and_release_outside() {
 fn disabled_hidden_and_modal_underlay_fail_closed() {
     let mut compiler = compiler();
     let frame = compile(&mut compiler, &snapshot(false), 1);
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, frame, 10);
     let mut session = UiInteractionSession::default();
 
@@ -449,7 +485,7 @@ fn disabled_hidden_and_modal_underlay_fail_closed() {
 #[test]
 fn receipt_stamped_accessibility_focus_and_action_share_the_presented_transaction() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -494,7 +530,7 @@ fn receipt_stamped_accessibility_focus_and_action_share_the_presented_transactio
 #[test]
 fn navigation_activation_and_modal_focus_restoration_share_one_session() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let base_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -617,7 +653,7 @@ fn navigation_activation_and_modal_focus_restoration_share_one_session() {
 #[test]
 fn removed_modal_restore_target_cannot_revive_after_same_key_reinsertion() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -709,7 +745,7 @@ fn removed_modal_restore_target_cannot_revive_after_same_key_reinsertion() {
 fn candidate_reconciliation_is_staged_without_mutating_the_presented_session() {
     let mut compiler = compiler();
     let initial_frame = compile(&mut compiler, &snapshot(false), 1);
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(&mut journal, Arc::clone(&initial_frame), 10);
     let mut session = UiInteractionSession::default();
     session
@@ -771,7 +807,7 @@ fn candidate_reconciliation_is_staged_without_mutating_the_presented_session() {
 #[test]
 fn explicit_behavior_identity_retirement_cancels_inflight_pointer_state() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -835,7 +871,7 @@ fn explicit_behavior_identity_retirement_cancels_inflight_pointer_state() {
 #[test]
 fn invalidating_capture_retires_the_same_pointers_independent_hover_state() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -892,7 +928,7 @@ fn low_node_limit_still_admits_the_complete_pointer_cleanup_batch() {
         )
         .build()
         .unwrap();
-    let mut journal = UiFrameJournal::with_limits(limits).unwrap();
+    let mut journal = hosted_journal_with_limits(limits);
     let initial_route = submit(&mut journal, compile(&mut compiler, &authored, 1), 10);
     let mut session = UiInteractionSession::with_limits(limits).unwrap();
     session
@@ -923,7 +959,7 @@ fn low_node_limit_still_admits_the_complete_pointer_cleanup_batch() {
 #[test]
 fn equivalent_presentation_rebinds_pointer_capture_to_the_latest_epoch() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -993,7 +1029,7 @@ fn equivalent_presentation_rebinds_pointer_capture_to_the_latest_epoch() {
 #[test]
 fn pointer_capture_cannot_cross_presentation_generations() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let historical_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -1066,7 +1102,7 @@ fn pointer_capture_cannot_cross_presentation_generations() {
 #[test]
 fn historical_input_reconciles_against_the_latest_presentation_before_routing() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let historical_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -1143,7 +1179,7 @@ fn historical_input_reconciles_against_the_latest_presentation_before_routing() 
 #[test]
 fn empty_reconciliation_is_separate_when_the_presentation_generation_changed() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let historical_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -1175,7 +1211,7 @@ fn empty_reconciliation_is_separate_when_the_presentation_generation_changed() {
 #[test]
 fn presentation_reconciliation_precedes_input_validation_errors() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 1), 10);
     let mut session = UiInteractionSession::default();
     let invalid_move = UiInputEvent::PointerMoved {
@@ -1200,7 +1236,7 @@ fn presentation_reconciliation_precedes_input_validation_errors() {
 #[test]
 fn retired_targets_and_invalidated_geometry_cannot_activate() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let old_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -1226,7 +1262,7 @@ fn retired_targets_and_invalidated_geometry_cannot_activate() {
         })
     );
 
-    let mut fresh_journal = UiFrameJournal::default();
+    let mut fresh_journal = hosted_journal();
     let route = submit(
         &mut fresh_journal,
         compile(&mut compiler, &snapshot(false), 3),
@@ -1287,7 +1323,7 @@ fn geometry_invalidation_is_scoped_to_the_surface_slot_lineage() {
         ),
     ] {
         let mut compiler = compiler();
-        let mut journal = UiFrameJournal::default();
+        let mut journal = hosted_journal();
         let predecessor = submit(
             &mut journal,
             compile_for_slot(&mut compiler, &snapshot(false), 1, 1, 1, 1),
@@ -1325,7 +1361,7 @@ fn geometry_invalidation_is_scoped_to_the_surface_slot_lineage() {
 #[test]
 fn retained_predecessor_target_cannot_overwrite_successor_geometry_invalidation() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let predecessor = submit(
         &mut journal,
         compile_for_slot(&mut compiler, &snapshot(false), 1, 1, 1, 1),
@@ -1363,7 +1399,7 @@ fn retained_predecessor_target_cannot_overwrite_successor_geometry_invalidation(
 #[test]
 fn semantic_snapshot_uses_the_exact_frame_and_interaction_state() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, compile(&mut compiler, &snapshot(true), 1), 10);
     let mut session = UiInteractionSession::default();
     session
@@ -1478,7 +1514,7 @@ fn semantic_snapshot_omits_nodes_outside_the_surface_content_rect() {
         .build()
         .unwrap();
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, compile(&mut compiler, &snapshot, 1), 10);
 
     let semantics = UiInteractionSession::default()
@@ -1491,7 +1527,7 @@ fn semantic_snapshot_omits_nodes_outside_the_surface_content_rect() {
 fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
     let mut compiler = compiler();
     let frame = compile(&mut compiler, &snapshot(false), 1);
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, frame, 10);
     let mut session = UiInteractionSession::default();
 
@@ -1535,7 +1571,7 @@ fn unsupported_pointer_buttons_do_not_consume_pointer_capacity() {
 fn one_surface_has_one_seat_and_one_pointer_owner() {
     let mut compiler = compiler();
     let frame = compile(&mut compiler, &snapshot(false), 1);
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, frame, 10);
     let mut session = UiInteractionSession::default();
     session
@@ -1574,7 +1610,7 @@ fn one_surface_has_one_seat_and_one_pointer_owner() {
 #[test]
 fn pending_reconciliation_is_consumed_before_unsupported_pointer_rejection() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let initial_route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -1628,7 +1664,7 @@ fn pending_reconciliation_is_consumed_before_unsupported_pointer_rejection() {
 fn rejected_missing_positions_do_not_consume_pointer_capacity() {
     let mut compiler = compiler();
     let frame = compile(&mut compiler, &snapshot(false), 1);
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(&mut journal, frame, 10);
     let mut session = UiInteractionSession::default();
 
@@ -1671,7 +1707,7 @@ fn rejected_missing_positions_do_not_consume_pointer_capacity() {
 #[test]
 fn geometry_invalidation_requires_a_fresh_pointer_position() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),
@@ -1715,7 +1751,7 @@ fn geometry_invalidation_requires_a_fresh_pointer_position() {
 #[test]
 fn semantic_snapshot_reports_only_committed_focus() {
     let mut compiler = compiler();
-    let mut journal = UiFrameJournal::default();
+    let mut journal = hosted_journal();
     let route = submit(
         &mut journal,
         compile(&mut compiler, &snapshot(false), 1),

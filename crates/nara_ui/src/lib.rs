@@ -30,8 +30,8 @@ pub use nara_ui_kernel::{
 pub use runtime::{
     UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceEndpoint,
     UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
-    commit_ui_presentation, install_ui_surface, latest_ui_frame, latest_ui_frames,
-    retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
+    install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface, ui_semantic_snapshot,
+    update_ui_surface_slot,
 };
 pub use style::*;
 
@@ -118,6 +118,18 @@ impl Plugin for UiPlugin {
     }
 }
 
+/// First-party Host presentation seams that are not ordinary runtime UI API.
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::runtime::{
+        UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
+        UiPreparedPresentationAuthority, abort_prepared_ui_presentation,
+        commit_prepared_ui_presentation, defer_prepared_ui_presentation, prepare_ui_presentation,
+        retry_deferred_ui_presentation, supersede_deferred_ui_presentation,
+        supersede_prepared_ui_presentation,
+    };
+}
+
 /// Ordinary runtime authoring surface. Compiler, journal, and session types stay out of this prelude.
 pub mod prelude {
     pub use crate::{
@@ -138,7 +150,7 @@ pub mod advanced {
         UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRouteRejectionRecord,
         UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize, UiSurfaceContentTransform,
         UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceRetirement,
-        UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots, commit_ui_presentation,
+        UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
         dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, latest_ui_frames,
         retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
     };

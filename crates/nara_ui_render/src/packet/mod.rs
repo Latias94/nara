@@ -427,6 +427,13 @@ impl UiPaintPacket {
 mod outcome;
 
 pub use outcome::{
-    OneShotPresentationCommit, UiPresentationAttemptIdentity, UiPresentationBackendGeneration,
-    UiPresentationOutcome, UiPresentationRetryIdentity,
+    OneShotPresentationCommit, UiBackendSubmissionIdentity, UiPresentationAttemptId,
+    UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+    UiPresentationBackendGeneration, UiPresentationCapabilityGeneration, UiPresentationEpoch,
+    UiPresentationOutcome, UiPresentationRetryIdentity, UiPresentationRuntimeGeneration,
+};
+
+pub use outcome::{
+    UiAcceptedBackendPresentation, UiDeferredBackendPresentation, UiPreparedBackendSubmission,
+    UiSubmittedBackendPresentation,
 };

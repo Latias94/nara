@@ -65,11 +65,14 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
             UiTheme::default(),
         )
         .unwrap();
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
     journal
         .install_surface(surface, frame.environment().slot_generation().get())
         .unwrap();
-    let receipt = journal.submit(Arc::clone(&frame), 7).unwrap();
+    let receipt = authority
+        .submit(&mut journal, Arc::clone(&frame), 7)
+        .unwrap();
     let route = UiRouteStamp::from_receipt(receipt);
     let retry_key = exact_key(&modal_root, &retry_local);
     let mut session = UiInteractionSession::default();
@@ -225,7 +228,7 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
             UiTheme::default(),
         )
         .unwrap();
-    let successor_receipt = journal.submit(successor_frame, 8).unwrap();
+    let successor_receipt = authority.submit(&mut journal, successor_frame, 8).unwrap();
     let successor_route = UiRouteStamp::from_receipt(successor_receipt);
     let successor_semantics = session
         .semantic_snapshot_with_action_authority(
@@ -297,9 +300,12 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
             UiTheme::default(),
         )
         .unwrap();
-    let mut foreign_journal = UiFrameJournal::default();
+    let (mut foreign_journal, foreign_authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
     foreign_journal.install_surface(foreign_surface, 1).unwrap();
-    let foreign_receipt = foreign_journal.submit(foreign_frame, 8).unwrap();
+    let foreign_receipt = foreign_authority
+        .submit(&mut foreign_journal, foreign_frame, 8)
+        .unwrap();
     let foreign_semantics = UiInteractionSession::default()
         .semantic_snapshot_with_action_authority(
             &foreign_journal,
@@ -346,9 +352,12 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
             UiTheme::default(),
         )
         .unwrap();
-    let mut conflicting_journal = UiFrameJournal::default();
+    let (mut conflicting_journal, conflicting_authority) =
+        nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap();
     conflicting_journal.install_surface(surface, 1).unwrap();
-    let conflicting_receipt = conflicting_journal.submit(conflicting_frame, 8).unwrap();
+    let conflicting_receipt = conflicting_authority
+        .submit(&mut conflicting_journal, conflicting_frame, 8)
+        .unwrap();
     let conflicting_semantics = session
         .semantic_snapshot_with_action_authority(
             &conflicting_journal,
@@ -392,7 +401,7 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
             UiTheme::default(),
         )
         .unwrap();
-    let disabled_receipt = journal.submit(disabled_frame, 9).unwrap();
+    let disabled_receipt = authority.submit(&mut journal, disabled_frame, 9).unwrap();
     let disabled_route = UiRouteStamp::from_receipt(disabled_receipt);
     let disabled_semantics = session
         .semantic_snapshot_with_action_authority(
@@ -463,7 +472,7 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
             UiTheme::default(),
         )
         .unwrap();
-    let slot_two_receipt = journal.submit(slot_two_frame, 10).unwrap();
+    let slot_two_receipt = authority.submit(&mut journal, slot_two_frame, 10).unwrap();
     let slot_two_semantics = session
         .semantic_snapshot_with_action_authority(
             &journal,

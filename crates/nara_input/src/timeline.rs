@@ -99,6 +99,26 @@ struct RouteState {
     binding_generation: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreparedRouteReservation {
+    route: InputPresentedRoute,
+    binding_generation: u64,
+    changes_route: bool,
+    reserves_capacity: bool,
+}
+
+/// Move-only reservation for one exact presented-route publication.
+///
+/// This token is intentionally exposed only through [`crate::__private`]. Dropping it without
+/// calling the matching abort or commit entry leaves the endpoint reserved and therefore fails
+/// closed rather than allowing another publication to invalidate an in-flight backend attempt.
+#[must_use = "a prepared input route must be committed, aborted, or superseded"]
+#[derive(Debug)]
+pub struct PreparedInputRoutePublication {
+    endpoint: (InputWindowId, InputSeatId),
+    reservation: PreparedRouteReservation,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct InputDraft {
     route: InputRouteStamp,
@@ -123,6 +143,7 @@ pub struct InputTimeline {
     ui_cursor: u64,
     action_scanned_cursor: u64,
     routes: BTreeMap<(InputWindowId, InputSeatId), RouteState>,
+    prepared_routes: BTreeMap<(InputWindowId, InputSeatId), PreparedRouteReservation>,
     focused_windows: BTreeMap<InputSeatId, InputWindowId>,
     next_binding_generation: u64,
     routes_poisoned: bool,
@@ -141,6 +162,7 @@ impl Default for InputTimeline {
             ui_cursor: 0,
             action_scanned_cursor: 0,
             routes: BTreeMap::new(),
+            prepared_routes: BTreeMap::new(),
             focused_windows: BTreeMap::new(),
             next_binding_generation: 0,
             routes_poisoned: false,
@@ -187,18 +209,38 @@ impl InputTimeline {
         &mut self,
         route: InputPresentedRoute,
     ) -> Result<InputRouteStamp, InputIngressError> {
+        let prepared = self.prepare_presented_route(route)?;
+        Ok(self.commit_presented_route(prepared))
+    }
+
+    fn prepare_presented_route(
+        &mut self,
+        route: InputPresentedRoute,
+    ) -> Result<PreparedInputRoutePublication, InputIngressError> {
         if self.routes_poisoned {
-            return Err(InputIngressError::RouteBindingGenerationExhausted);
+            return Err(InputIngressError::RouteBindingGenerationExhausted {
+                route_invalidated: true,
+            });
         }
         let window = route.window();
         let surface = route.surface();
         let seat = route.seat();
         let key = (window, seat);
-        if !self.routes.contains_key(&key) && self.routes.len() >= MAX_INPUT_ROUTES {
-            return Err(InputIngressError::RouteCapacityExceeded {
-                limit: MAX_INPUT_ROUTES,
-            });
+        self.ensure_endpoint_unreserved(window, seat)?;
+        let reserves_capacity = !self.routes.contains_key(&key);
+        if reserves_capacity {
+            let reserved_capacity = self
+                .prepared_routes
+                .values()
+                .filter(|reservation| reservation.reserves_capacity)
+                .count();
+            if self.routes.len() + reserved_capacity >= MAX_INPUT_ROUTES {
+                return Err(InputIngressError::RouteCapacityExceeded {
+                    limit: MAX_INPUT_ROUTES,
+                });
+            }
         }
+        let mut exact_binding_generation = None;
         if let Some(current) = self.routes.get(&key) {
             if current.surface != surface {
                 return Err(InputIngressError::RouteConflict {
@@ -221,26 +263,80 @@ impl InputTimeline {
                 && current.route_generation == route.route_generation()
                 && current.geometry_generation == route.geometry_generation()
             {
-                return Ok(self.pointer_route(window, seat, None));
+                exact_binding_generation = Some(current.binding_generation);
             }
         }
-        let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
-            self.poison_routes();
-            InputIngressError::RouteBindingGenerationExhausted
-        })?;
-        self.next_binding_generation = binding_generation;
-        self.routes.insert(
-            key,
-            RouteState {
-                surface,
-                presentation_epoch: route.presentation_epoch(),
-                slot_generation: route.slot_generation(),
-                route_generation: route.route_generation(),
-                geometry_generation: route.geometry_generation(),
-                binding_generation,
-            },
+        let binding_generation = if let Some(binding_generation) = exact_binding_generation {
+            binding_generation
+        } else {
+            let binding_generation = self.next_binding_generation.checked_add(1).ok_or(
+                InputIngressError::RouteBindingGenerationExhausted {
+                    route_invalidated: false,
+                },
+            )?;
+            self.next_binding_generation = binding_generation;
+            binding_generation
+        };
+        let reservation = PreparedRouteReservation {
+            route,
+            binding_generation,
+            changes_route: exact_binding_generation.is_none(),
+            reserves_capacity,
+        };
+        self.prepared_routes.insert(key, reservation);
+        Ok(PreparedInputRoutePublication {
+            endpoint: key,
+            reservation,
+        })
+    }
+
+    fn commit_presented_route(
+        &mut self,
+        prepared: PreparedInputRoutePublication,
+    ) -> InputRouteStamp {
+        let (endpoint, reservation) = self.consume_presented_route_reservation(
+            prepared,
+            "a prepared route can commit only its exact reservation",
         );
-        Ok(self.pointer_route(window, seat, None))
+        if reservation.changes_route {
+            let route = reservation.route;
+            self.routes.insert(
+                endpoint,
+                RouteState {
+                    surface: route.surface(),
+                    presentation_epoch: route.presentation_epoch(),
+                    slot_generation: route.slot_generation(),
+                    route_generation: route.route_generation(),
+                    geometry_generation: route.geometry_generation(),
+                    binding_generation: reservation.binding_generation,
+                },
+            );
+        }
+        self.pointer_route(endpoint.0, endpoint.1, None)
+    }
+
+    fn release_presented_route_reservation(&mut self, prepared: PreparedInputRoutePublication) {
+        let _ = self.consume_presented_route_reservation(
+            prepared,
+            "a prepared route can release only its exact reservation",
+        );
+    }
+
+    fn consume_presented_route_reservation(
+        &mut self,
+        prepared: PreparedInputRoutePublication,
+        mismatch_message: &'static str,
+    ) -> ((InputWindowId, InputSeatId), PreparedRouteReservation) {
+        let PreparedInputRoutePublication {
+            endpoint,
+            reservation,
+        } = prepared;
+        let active = self
+            .prepared_routes
+            .remove(&endpoint)
+            .expect("a move-only prepared route keeps its endpoint reservation");
+        assert_eq!(active, reservation, "{mismatch_message}");
+        (endpoint, reservation)
     }
 
     #[doc(hidden)]
@@ -289,6 +385,7 @@ impl InputTimeline {
         seat: InputSeatId,
         expected_route: Option<InputRouteStamp>,
     ) -> Result<(), InputIngressError> {
+        self.ensure_endpoint_unreserved(window, seat)?;
         self.validate_presented_endpoint(window, seat, expected_route)?;
         let result = self.unbind_route(window, seat);
         self.clear_pointer_positions(window, seat);
@@ -307,6 +404,7 @@ impl InputTimeline {
         seat: InputSeatId,
         expected_route: Option<InputRouteStamp>,
     ) -> Result<InputEndpointRetirement, InputIngressError> {
+        self.ensure_endpoint_unreserved(window, seat)?;
         self.validate_presented_endpoint(window, seat, expected_route)?;
         let output = self.invalidate_physical_endpoint(
             window,
@@ -763,6 +861,7 @@ impl InputTimeline {
         kind: InputEventKind,
         reason: InputInvalidationReason,
     ) -> Result<__InputDriverOutput, InputIngressError> {
+        self.ensure_endpoint_unreserved(window, seat)?;
         let old_route = self.pointer_route(window, seat, None);
         let route_was_bound = old_route.is_ui_routable();
         let draft = InputDraft {
@@ -806,6 +905,7 @@ impl InputTimeline {
         clear_keyboard: bool,
         mode: PhysicalInvalidationMode,
     ) -> Result<__InputDriverOutput, InputIngressError> {
+        self.ensure_endpoint_unreserved(window, seat)?;
         let old_route = self.pointer_route(window, seat, None);
 
         let released_keys = if clear_keyboard {
@@ -1130,17 +1230,33 @@ impl InputTimeline {
         Ok(())
     }
 
+    fn ensure_endpoint_unreserved(
+        &self,
+        window: InputWindowId,
+        seat: InputSeatId,
+    ) -> Result<(), InputIngressError> {
+        if self.prepared_routes.contains_key(&(window, seat)) {
+            return Err(InputIngressError::RouteReservationConflict { window, seat });
+        }
+        Ok(())
+    }
+
     fn unbind_route(
         &mut self,
         window: InputWindowId,
         seat: InputSeatId,
     ) -> Result<(), InputIngressError> {
+        self.ensure_endpoint_unreserved(window, seat)?;
         if !self.routes.contains_key(&(window, seat)) {
             return Ok(());
         }
         let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
-            self.poison_routes();
-            InputIngressError::RouteBindingGenerationExhausted
+            if self.prepared_routes.is_empty() {
+                self.poison_routes();
+            }
+            InputIngressError::RouteBindingGenerationExhausted {
+                route_invalidated: self.routes_poisoned,
+            }
         })?;
         self.next_binding_generation = binding_generation;
         self.routes.remove(&(window, seat));
@@ -1148,9 +1264,11 @@ impl InputTimeline {
     }
 
     fn next_binding_generation_for_change(&self) -> Result<u64, InputIngressError> {
-        self.next_binding_generation
-            .checked_add(1)
-            .ok_or(InputIngressError::RouteBindingGenerationExhausted)
+        self.next_binding_generation.checked_add(1).ok_or(
+            InputIngressError::RouteBindingGenerationExhausted {
+                route_invalidated: false,
+            },
+        )
     }
 
     fn commit_failed_closed_window(
@@ -1171,15 +1289,21 @@ impl InputTimeline {
         window: InputWindowId,
         seat: InputSeatId,
     ) -> Result<(), InputIngressError> {
+        self.ensure_endpoint_unreserved(window, seat)?;
         let Some(binding_generation) = self.next_binding_generation.checked_add(1) else {
-            self.poison_routes();
-            return Err(InputIngressError::RouteBindingGenerationExhausted);
+            if self.prepared_routes.is_empty() {
+                self.poison_routes();
+            }
+            return Err(InputIngressError::RouteBindingGenerationExhausted {
+                route_invalidated: self.routes_poisoned,
+            });
         };
         self.commit_failed_closed_window(window, seat, binding_generation);
         Ok(())
     }
 
     fn poison_routes(&mut self) {
+        debug_assert!(self.prepared_routes.is_empty());
         self.routes_poisoned = true;
         self.routes.clear();
         self.focused_windows.clear();
@@ -1368,6 +1492,42 @@ impl InputTimeline {
             self.retained.pop_front();
         }
     }
+}
+
+/// Reserves all fallible input-route publication facts before backend submission.
+#[doc(hidden)]
+pub fn prepare_presented_route(
+    timeline: &mut InputTimeline,
+    route: InputPresentedRoute,
+) -> Result<PreparedInputRoutePublication, InputIngressError> {
+    timeline.prepare_presented_route(route)
+}
+
+/// Commits one exact prepared route without a fallible post-submit arm.
+#[doc(hidden)]
+pub fn commit_presented_route(
+    timeline: &mut InputTimeline,
+    prepared: PreparedInputRoutePublication,
+) -> InputRouteStamp {
+    timeline.commit_presented_route(prepared)
+}
+
+/// Aborts one prepared route and releases its endpoint/capacity reservation.
+#[doc(hidden)]
+pub fn abort_presented_route(
+    timeline: &mut InputTimeline,
+    prepared: PreparedInputRoutePublication,
+) {
+    timeline.release_presented_route_reservation(prepared);
+}
+
+/// Supersedes one prepared route and releases its endpoint/capacity reservation.
+#[doc(hidden)]
+pub fn supersede_presented_route(
+    timeline: &mut InputTimeline,
+    prepared: PreparedInputRoutePublication,
+) {
+    timeline.release_presented_route_reservation(prepared);
 }
 
 impl __RuntimeDriverPort for InputTimeline {
@@ -1679,6 +1839,239 @@ mod tests {
             ))
             .unwrap();
         assert_eq!(reclaimed.surface(), Some(second));
+    }
+
+    #[test]
+    fn prepared_route_reserves_the_endpoint_without_changing_active_authority() {
+        let mut timeline = InputTimeline::default();
+        let window = InputWindowId::new(31);
+        let seat = InputSeatId::PRIMARY;
+        let surface = InputSurfaceId::new(41);
+        let initial = timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                surface,
+                seat,
+                InputPresentationEpoch::new(1).unwrap(),
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
+            .unwrap();
+        let next_route = InputPresentedRoute::new(
+            window,
+            surface,
+            seat,
+            InputPresentationEpoch::new(2).unwrap(),
+            slot_generation(1),
+            route_generation(2),
+            geometry_generation(2),
+        );
+
+        let prepared = prepare_presented_route(&mut timeline, next_route).unwrap();
+
+        assert_eq!(timeline.pointer_route(window, seat, None), initial);
+        assert_eq!(
+            timeline.publish_presented_route(next_route),
+            Err(InputIngressError::RouteReservationConflict { window, seat })
+        );
+        assert_eq!(
+            timeline.unbind_presented_endpoint(window, seat, Some(initial)),
+            Err(InputIngressError::RouteReservationConflict { window, seat })
+        );
+        assert_eq!(
+            timeline.retire_presented_endpoint(window, seat, Some(initial)),
+            Err(InputIngressError::RouteReservationConflict { window, seat })
+        );
+        assert_eq!(
+            timeline.admit_window_event(
+                window,
+                seat,
+                InputWindowEvent::Resized {
+                    logical_size: Vec2::new(640.0, 480.0),
+                },
+            ),
+            Err(InputIngressError::RouteReservationConflict { window, seat })
+        );
+        let committed = commit_presented_route(&mut timeline, prepared);
+        assert_eq!(
+            committed.presentation_epoch(),
+            Some(next_route.presentation_epoch())
+        );
+        assert_eq!(
+            committed.route_generation(),
+            Some(next_route.route_generation())
+        );
+        assert_eq!(
+            committed.geometry_generation(),
+            Some(next_route.geometry_generation())
+        );
+        assert!(committed.binding_generation() > initial.binding_generation());
+        assert_eq!(timeline.pointer_route(window, seat, None), committed);
+    }
+
+    #[test]
+    fn aborted_and_superseded_route_reservations_release_the_endpoint() {
+        let mut timeline = InputTimeline::default();
+        let window = InputWindowId::new(32);
+        let seat = InputSeatId::PRIMARY;
+        let route = InputPresentedRoute::new(
+            window,
+            InputSurfaceId::new(42),
+            seat,
+            InputPresentationEpoch::new(1).unwrap(),
+            slot_generation(1),
+            route_generation(1),
+            geometry_generation(1),
+        );
+
+        let aborted = prepare_presented_route(&mut timeline, route).unwrap();
+        assert!(!timeline.pointer_route(window, seat, None).is_ui_routable());
+        abort_presented_route(&mut timeline, aborted);
+
+        let superseded = prepare_presented_route(&mut timeline, route).unwrap();
+        supersede_presented_route(&mut timeline, superseded);
+
+        let published = timeline.publish_presented_route(route).unwrap();
+        assert_eq!(published.surface(), Some(route.surface()));
+    }
+
+    #[test]
+    fn prepared_routes_reserve_capacity_until_released() {
+        let mut timeline = InputTimeline::default();
+        for raw in 1..MAX_INPUT_ROUTES {
+            let raw = u64::try_from(raw).unwrap();
+            timeline
+                .publish_presented_route(InputPresentedRoute::new(
+                    InputWindowId::new(raw),
+                    InputSurfaceId::new(raw),
+                    InputSeatId::PRIMARY,
+                    InputPresentationEpoch::new(1).unwrap(),
+                    slot_generation(1),
+                    route_generation(1),
+                    geometry_generation(1),
+                ))
+                .unwrap();
+        }
+        let reserved_route = InputPresentedRoute::new(
+            InputWindowId::new(100),
+            InputSurfaceId::new(100),
+            InputSeatId::PRIMARY,
+            InputPresentationEpoch::new(1).unwrap(),
+            slot_generation(1),
+            route_generation(1),
+            geometry_generation(1),
+        );
+        let prepared = prepare_presented_route(&mut timeline, reserved_route).unwrap();
+        let overflow_route = InputPresentedRoute::new(
+            InputWindowId::new(101),
+            InputSurfaceId::new(101),
+            InputSeatId::PRIMARY,
+            InputPresentationEpoch::new(1).unwrap(),
+            slot_generation(1),
+            route_generation(1),
+            geometry_generation(1),
+        );
+
+        assert!(matches!(
+            prepare_presented_route(&mut timeline, overflow_route),
+            Err(InputIngressError::RouteCapacityExceeded {
+                limit: MAX_INPUT_ROUTES,
+            })
+        ));
+        abort_presented_route(&mut timeline, prepared);
+        let reusable = prepare_presented_route(&mut timeline, overflow_route).unwrap();
+        abort_presented_route(&mut timeline, reusable);
+    }
+
+    #[test]
+    fn prepared_route_rejects_regression_and_exhaustion_before_reserving() {
+        let mut timeline = InputTimeline::default();
+        let window = InputWindowId::new(33);
+        let seat = InputSeatId::PRIMARY;
+        let surface = InputSurfaceId::new(43);
+        let active = timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                surface,
+                seat,
+                InputPresentationEpoch::new(5).unwrap(),
+                slot_generation(2),
+                route_generation(3),
+                geometry_generation(4),
+            ))
+            .unwrap();
+        let regression = InputPresentedRoute::new(
+            window,
+            surface,
+            seat,
+            InputPresentationEpoch::new(4).unwrap(),
+            slot_generation(2),
+            route_generation(3),
+            geometry_generation(4),
+        );
+
+        assert!(matches!(
+            prepare_presented_route(&mut timeline, regression),
+            Err(InputIngressError::PresentedRouteRegression {
+                window: error_window,
+                seat: error_seat,
+            }) if error_window == window && error_seat == seat
+        ));
+        timeline.next_binding_generation = u64::MAX;
+        let advancing = InputPresentedRoute::new(
+            window,
+            surface,
+            seat,
+            InputPresentationEpoch::new(6).unwrap(),
+            slot_generation(2),
+            route_generation(4),
+            geometry_generation(5),
+        );
+        let error = prepare_presented_route(&mut timeline, advancing).unwrap_err();
+        assert!(matches!(
+            error,
+            InputIngressError::RouteBindingGenerationExhausted {
+                route_invalidated: false,
+            }
+        ));
+        assert!(!error.route_was_invalidated());
+        assert_eq!(timeline.pointer_route(window, seat, None), active);
+        assert!(timeline.prepared_routes.is_empty());
+    }
+
+    #[test]
+    fn unbind_generation_exhaustion_reports_fail_closed_invalidation() {
+        let mut timeline = InputTimeline::default();
+        let window = InputWindowId::new(33);
+        let seat = InputSeatId::PRIMARY;
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                InputSurfaceId::new(43),
+                seat,
+                InputPresentationEpoch::new(5).unwrap(),
+                slot_generation(2),
+                route_generation(3),
+                geometry_generation(4),
+            ))
+            .unwrap();
+        timeline.next_binding_generation = u64::MAX;
+
+        let error = timeline.unbind_route(window, seat).unwrap_err();
+
+        assert!(matches!(
+            error,
+            InputIngressError::RouteBindingGenerationExhausted {
+                route_invalidated: true,
+            }
+        ));
+        assert!(error.route_was_invalidated());
+        assert!(timeline.routes_poisoned);
+        assert_eq!(
+            timeline.pointer_route(window, seat, None),
+            InputRouteStamp::unrouted(window, seat, None)
+        );
     }
 
     #[test]

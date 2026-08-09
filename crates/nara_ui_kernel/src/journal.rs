@@ -7,6 +7,19 @@ use thiserror::Error;
 
 use crate::{UiFrame, UiFrameRevision, UiLimits, UiLimitsError, UiPresentationReceipt, UiRevision};
 
+#[derive(Debug, Default)]
+struct UiFrameJournalSubmissionIdentity;
+
+/// Exclusive capability for staging presented frames in one hosted journal lineage.
+///
+/// Ordinary journals created through [`UiFrameJournal::with_limits`] cannot submit frames. A
+/// first-party presentation Host obtains this capability together with the journal, retains it
+/// outside product-facing state, and may stage only clones of that exact journal lineage.
+#[derive(Debug)]
+pub struct UiFrameJournalAuthority {
+    identity: Arc<UiFrameJournalSubmissionIdentity>,
+}
+
 /// Host-allocated, non-reused identifier for one UI surface lifetime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiSurfaceId(u64);
@@ -161,6 +174,7 @@ impl SurfaceHistory {
 /// Bounded authority journal retaining the current and two prior submitted frames per surface.
 #[derive(Clone, Debug)]
 pub struct UiFrameJournal {
+    submission_identity: Arc<UiFrameJournalSubmissionIdentity>,
     limits: UiLimits,
     active: BTreeMap<UiSurfaceId, SurfaceHistory>,
     retired_surfaces: BTreeSet<UiSurfaceId>,
@@ -171,11 +185,22 @@ impl UiFrameJournal {
     pub fn with_limits(limits: UiLimits) -> Result<Self, UiJournalError> {
         limits.validate()?;
         Ok(Self {
+            submission_identity: Arc::new(UiFrameJournalSubmissionIdentity),
             limits,
             active: BTreeMap::new(),
             retired_surfaces: BTreeSet::new(),
             retired: VecDeque::new(),
         })
+    }
+
+    pub(crate) fn new_hosted(
+        limits: UiLimits,
+    ) -> Result<(Self, UiFrameJournalAuthority), UiJournalError> {
+        let journal = Self::with_limits(limits)?;
+        let authority = UiFrameJournalAuthority {
+            identity: Arc::clone(&journal.submission_identity),
+        };
+        Ok((journal, authority))
     }
 
     /// Registers one installed Surface Slot even when it has not presented a frame yet.
@@ -251,12 +276,17 @@ impl UiFrameJournal {
         Ok(())
     }
 
-    /// Records a receipt after the caller has accepted and submitted the exact frame packet.
-    pub fn submit(
+    /// Records a receipt after the first-party presentation owner has accepted and submitted the
+    /// exact frame packet.
+    fn submit(
         &mut self,
+        authority: &UiFrameJournalAuthority,
         frame: Arc<UiFrame>,
         presentation_epoch: u64,
     ) -> Result<UiPresentationReceipt, UiJournalError> {
+        if !Arc::ptr_eq(&self.submission_identity, &authority.identity) {
+            return Err(UiJournalError::SubmissionAuthorityMismatch);
+        }
         if presentation_epoch == 0 {
             return Err(UiJournalError::ZeroPresentationEpoch);
         }
@@ -397,6 +427,22 @@ impl UiFrameJournal {
     }
 }
 
+impl UiFrameJournalAuthority {
+    /// Stages an exact frame in a clone of the hosted journal before backend submission.
+    ///
+    /// The capability is instance-bound and intentionally not cloneable. A receipt staged in a
+    /// journal clone has no live routing authority until the owning runtime atomically installs the
+    /// complete prepared session after backend acceptance.
+    pub fn submit(
+        &self,
+        journal: &mut UiFrameJournal,
+        frame: Arc<UiFrame>,
+        presentation_epoch: u64,
+    ) -> Result<UiPresentationReceipt, UiJournalError> {
+        journal.submit(self, frame, presentation_epoch)
+    }
+}
+
 impl Default for UiFrameJournal {
     fn default() -> Self {
         Self::with_limits(UiLimits::default()).expect("default UI limits are valid")
@@ -424,6 +470,8 @@ pub enum UiJournalError {
     Limits(#[from] UiLimitsError),
     #[error("UI presentation epoch must be non-zero")]
     ZeroPresentationEpoch,
+    #[error("UI presentation journal submission authority does not own this journal lineage")]
+    SubmissionAuthorityMismatch,
     #[error("UI surface slot generation must be non-zero")]
     ZeroSlotGeneration,
     #[error("UI surface retirement generation must be non-zero")]

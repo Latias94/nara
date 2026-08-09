@@ -33,6 +33,13 @@ fn surface_environment(surface: UiSurfaceId, slot: u64, route: u64) -> UiEnviron
     .unwrap()
 }
 
+fn hosted_journal() -> (
+    UiFrameJournal,
+    nara_ui_kernel::__private::UiFrameJournalAuthority,
+) {
+    nara_ui_kernel::__private::new_hosted_frame_journal(Default::default()).unwrap()
+}
+
 #[test]
 fn compile_without_submission_never_grants_route_authority() {
     let surface = UiSurfaceId::new(1).unwrap();
@@ -57,10 +64,36 @@ fn compile_without_submission_never_grants_route_authority() {
 }
 
 #[test]
+fn hosted_submission_authority_is_bound_to_one_journal_lineage() {
+    let surface = UiSurfaceId::new(11).unwrap();
+    let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
+    let frame = compiler
+        .compile(&snapshot(1), environment(surface, 1), UiTheme::default())
+        .unwrap();
+    let (mut journal, authority) = hosted_journal();
+    let (_foreign_journal, foreign_authority) = hosted_journal();
+    journal.install_surface(surface, 1).unwrap();
+
+    assert_eq!(
+        foreign_authority
+            .submit(&mut journal, Arc::clone(&frame), 10)
+            .unwrap_err(),
+        UiJournalError::SubmissionAuthorityMismatch
+    );
+    assert_eq!(
+        journal.latest(surface).unwrap_err(),
+        UiJournalError::CompiledButNotPresented { surface }
+    );
+
+    let receipt = authority.submit(&mut journal, frame, 10).unwrap();
+    assert_eq!(receipt.surface_id(), surface);
+}
+
+#[test]
 fn journal_keeps_current_and_two_prior_exact_pairs() {
     let surface = UiSurfaceId::new(1).unwrap();
     let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) = hosted_journal();
     journal.install_surface(surface, 1).unwrap();
     let mut frames = Vec::new();
     let mut routes = Vec::new();
@@ -72,7 +105,9 @@ fn journal_keeps_current_and_two_prior_exact_pairs() {
                 UiTheme::default(),
             )
             .unwrap();
-        let receipt = journal.submit(Arc::clone(&frame), 100 + revision).unwrap();
+        let receipt = authority
+            .submit(&mut journal, Arc::clone(&frame), 100 + revision)
+            .unwrap();
         routes.push(UiRouteStamp::from_receipt(receipt));
         frames.push(frame);
     }
@@ -99,9 +134,9 @@ fn retired_surface_rejects_an_exact_previously_presented_route() {
     let frame = compiler
         .compile(&snapshot(1), environment(surface, 1), UiTheme::default())
         .unwrap();
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) = hosted_journal();
     journal.install_surface(surface, 1).unwrap();
-    let receipt = journal.submit(frame, 9).unwrap();
+    let receipt = authority.submit(&mut journal, frame, 9).unwrap();
     let retirement = journal.retire_surface(surface, 2).unwrap().unwrap();
     assert_eq!(retirement.surface_id(), surface);
     assert_eq!(retirement.slot_generation(), receipt.slot_generation());
@@ -121,7 +156,7 @@ fn retired_surface_rejects_an_exact_previously_presented_route() {
         .compile(&snapshot(2), environment(surface, 2), UiTheme::default())
         .unwrap();
     assert_eq!(
-        journal.submit(late, 10).unwrap_err(),
+        authority.submit(&mut journal, late, 10).unwrap_err(),
         UiJournalError::SurfaceNotInstalled { surface }
     );
     assert_eq!(
@@ -151,7 +186,7 @@ fn installed_surface_can_retire_before_its_first_presentation() {
 fn newer_slot_generation_atomically_retires_old_routes() {
     let surface = UiSurfaceId::new(13).unwrap();
     let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), Default::default()).unwrap();
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) = hosted_journal();
     journal.install_surface(surface, 1).unwrap();
 
     let first = compiler
@@ -161,7 +196,7 @@ fn newer_slot_generation_atomically_retires_old_routes() {
             UiTheme::default(),
         )
         .unwrap();
-    let first_receipt = journal.submit(first, 10).unwrap();
+    let first_receipt = authority.submit(&mut journal, first, 10).unwrap();
     let successor = compiler
         .compile(
             &snapshot(2),
@@ -170,11 +205,11 @@ fn newer_slot_generation_atomically_retires_old_routes() {
         )
         .unwrap();
     assert!(matches!(
-        journal.submit(Arc::clone(&successor), 11),
+        authority.submit(&mut journal, Arc::clone(&successor), 11),
         Err(UiJournalError::SlotGenerationMismatch { .. })
     ));
     journal.advance_surface_slot(surface, 1, 2).unwrap();
-    let successor_receipt = journal.submit(successor, 11).unwrap();
+    let successor_receipt = authority.submit(&mut journal, successor, 11).unwrap();
 
     assert!(
         journal
@@ -199,7 +234,7 @@ fn newer_slot_generation_atomically_retires_old_routes() {
         )
         .unwrap();
     assert!(matches!(
-        journal.submit(rewound, 12),
+        authority.submit(&mut journal, rewound, 12),
         Err(UiJournalError::SlotGenerationMismatch { .. })
     ));
 
@@ -221,11 +256,13 @@ fn submitted_receipt_matches_the_exact_frame_and_environment() {
     let frame = compiler
         .compile(&snapshot(1), environment, UiTheme::default())
         .unwrap();
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) = hosted_journal();
     journal
         .install_surface(surface, environment.slot_generation().get())
         .unwrap();
-    let receipt = journal.submit(Arc::clone(&frame), 44).unwrap();
+    let receipt = authority
+        .submit(&mut journal, Arc::clone(&frame), 44)
+        .unwrap();
     assert_eq!(receipt.surface_id(), surface);
     assert_eq!(receipt.frame_revision(), frame.revision());
     assert_eq!(receipt.slot_generation(), environment.slot_generation());
@@ -247,9 +284,9 @@ fn exact_route_generations_cannot_be_replayed_at_the_same_epoch() {
     let frame = compiler
         .compile(&snapshot(1), environment(surface, 1), UiTheme::default())
         .unwrap();
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) = hosted_journal();
     journal.install_surface(surface, 1).unwrap();
-    let receipt = journal.submit(frame, 9).unwrap();
+    let receipt = authority.submit(&mut journal, frame, 9).unwrap();
     let wrong_geometry = UiSurfaceGenerations::new(
         receipt.slot_generation().get(),
         receipt.route_revision().get(),

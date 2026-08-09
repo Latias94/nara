@@ -1,6 +1,5 @@
-use nara_ui_kernel::UiActivationSource;
-use nara_ui_module_consumer::{activate_retry_button, compile_status_panel, prepare_status_label};
-use nara_ui_widgets::UiIntent;
+use nara_ui_kernel::UiActionId;
+use nara_ui_module_consumer::{compile_retry_button, compile_status_panel, prepare_status_label};
 
 #[test]
 fn direct_consumer_shapes_without_ecs_scene_or_render_dependencies() {
@@ -20,13 +19,19 @@ fn direct_consumer_compiles_an_immutable_ui_frame() {
 }
 
 #[test]
-fn direct_consumer_reduces_a_presented_button_to_a_typed_intent() {
-    let intent = activate_retry_button().unwrap();
-    assert!(matches!(
-        intent,
-        UiIntent::Activate {
-            source: UiActivationSource::Keyboard,
-            ..
-        }
-    ));
+fn direct_consumer_compiles_a_controlled_button_without_private_presentation_authority() {
+    let (button, frame) = compile_retry_button().unwrap();
+    assert_eq!(button.action(), &UiActionId::new("retry").unwrap());
+    assert!(
+        frame
+            .focus_order()
+            .iter()
+            .any(|fact| fact.key() == button.key())
+    );
+    let semantics = frame
+        .semantics()
+        .iter()
+        .find(|node| node.key() == button.key())
+        .unwrap();
+    assert_eq!(semantics.actions(), &[UiActionId::new("retry").unwrap()]);
 }

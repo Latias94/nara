@@ -3,9 +3,9 @@ use std::sync::Arc;
 use nara_text::bundled_font_face;
 
 use crate::{
-    UiAuthoringSnapshotBuilder, UiCompiler, UiDimension, UiEnvironment, UiFrameJournal, UiLayer,
-    UiLocalKey, UiNode, UiRoot, UiRootKey, UiRootStatus, UiRouteStamp, UiStyle, UiSurfaceId,
-    UiText, UiTextAlignment, UiTheme, UiVisual,
+    UiAuthoringSnapshotBuilder, UiCompiler, UiDimension, UiEnvironment, UiLayer, UiLocalKey,
+    UiNode, UiRoot, UiRootKey, UiRootStatus, UiRouteStamp, UiStyle, UiSurfaceId, UiText,
+    UiTextAlignment, UiTheme, UiVisual,
 };
 
 #[test]
@@ -37,11 +37,14 @@ fn public_surface_compiles_without_renderer_or_ecs_types() {
     assert_eq!(frame.paint().len(), 2);
     assert!(frame.hit_test(crate::UiPoint::new(20.0, 20.0)).is_none());
 
-    let mut journal = UiFrameJournal::default();
+    let (mut journal, authority) =
+        crate::__private::new_hosted_frame_journal(Default::default()).unwrap();
     journal
         .install_surface(surface, environment.slot_generation().get())
         .unwrap();
-    let receipt = journal.submit(Arc::clone(&frame), 10).unwrap();
+    let receipt = authority
+        .submit(&mut journal, Arc::clone(&frame), 10)
+        .unwrap();
     assert_eq!(
         journal
             .resolve(UiRouteStamp::from_receipt(receipt))

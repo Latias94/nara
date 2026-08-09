@@ -16,10 +16,12 @@ pub use integration::{
 };
 pub use limits::{UiPresentationLimits, UiPresentationLimitsError};
 pub use packet::{
-    OneShotPresentationCommit, UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder,
-    UiPacketFill, UiPacketImage, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket,
-    UiPaintPacketIdentity, UiPresentationAttemptIdentity, UiPresentationBackendGeneration,
-    UiPresentationOutcome, UiPresentationRetryIdentity,
+    OneShotPresentationCommit, UiBackendSubmissionIdentity, UiGlyphAtlasPageKey,
+    UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage, UiPacketPrimitive,
+    UiPacketRect, UiPacketUv, UiPaintPacket, UiPaintPacketIdentity, UiPresentationAttemptId,
+    UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+    UiPresentationBackendGeneration, UiPresentationCapabilityGeneration, UiPresentationEpoch,
+    UiPresentationOutcome, UiPresentationRetryIdentity, UiPresentationRuntimeGeneration,
 };
 pub use planner::{
     UiPreparedImages, UiPresentationContentError, UiPresentationPlanner,
@@ -31,13 +33,25 @@ pub mod __private {
     use std::sync::Arc;
 
     pub use crate::integration::{
-        UiPaintPacketReader, UiPresentationOutcomes, UiPresentationRoute, UiPresentationRouteError,
-        replace_ui_presentation_routes,
+        UiBackendOutcomePermit, UiBackendPresentationFrame, UiBackendSubmission,
+        UiBackendSubmissionBatchBindError, UiBackendSubmissionReader, UiCompletedBackendOutcome,
+        UiPaintPacketSnapshots, UiPresentationOutcomes, UiPresentationRoute,
+        UiPresentationRouteError, UiSubmittedBackendSubmission, abort_ui_planned_packet,
+        bind_backend_submission_batch, commit_ui_backend_presentation,
+        discard_ui_backend_acceptance, replace_ui_backend_frame, replace_ui_presentation_routes,
+        snapshot_ui_paint_packets,
+    };
+    pub use crate::planner::UiPlannedPacketAbortOutcome;
+
+    pub use crate::packet::{
+        UiAcceptedBackendPresentation, UiDeferredBackendPresentation, UiPreparedBackendSubmission,
+        UiSubmittedBackendPresentation,
     };
 
     use crate::{
-        OneShotPresentationCommit, UiPaintPacket, UiPresentationAttemptIdentity,
-        UiPresentationBackendGeneration, UiPresentationOutcome, UiPresentationRetryIdentity,
+        UiBackendSubmissionIdentity, UiPaintPacket, UiPresentationAttemptId,
+        UiPresentationAttemptIdentity, UiPresentationCapabilityGeneration, UiPresentationEpoch,
+        UiPresentationOutcome, UiPresentationRuntimeGeneration,
     };
 
     #[must_use]
@@ -46,24 +60,70 @@ pub mod __private {
     }
 
     #[must_use]
-    pub fn presentation_retry(
-        attempt: UiPresentationAttemptIdentity,
-        backend_generation: UiPresentationBackendGeneration,
-    ) -> UiPresentationRetryIdentity {
-        UiPresentationRetryIdentity::new(attempt, backend_generation)
+    pub fn prepare_backend_submission(
+        admission_id: UiPresentationAttemptId,
+        packet: Arc<UiPaintPacket>,
+        presentation_epoch: UiPresentationEpoch,
+        runtime_generation: UiPresentationRuntimeGeneration,
+        capability_generation: UiPresentationCapabilityGeneration,
+    ) -> UiPreparedBackendSubmission {
+        UiPreparedBackendSubmission::new(
+            admission_id,
+            packet,
+            presentation_epoch,
+            runtime_generation,
+            capability_generation,
+        )
     }
 
     #[must_use]
-    pub fn issue_presented(
-        packet: Arc<UiPaintPacket>,
-        presentation_epoch: u64,
-        backend_generation: UiPresentationBackendGeneration,
+    pub const fn prepared_attempt(
+        submission: &UiPreparedBackendSubmission,
+    ) -> UiPresentationAttemptIdentity {
+        UiPresentationAttemptIdentity::backend(submission.identity())
+    }
+
+    #[must_use]
+    pub const fn submitted_attempt(
+        identity: UiBackendSubmissionIdentity,
+    ) -> UiPresentationAttemptIdentity {
+        UiPresentationAttemptIdentity::backend(identity)
+    }
+
+    #[must_use]
+    pub fn retry_deferred(deferred: UiDeferredBackendPresentation) -> UiPreparedBackendSubmission {
+        deferred.into_retry()
+    }
+
+    #[must_use]
+    pub fn discard_prepared(
+        submission: UiPreparedBackendSubmission,
+    ) -> UiPresentationAttemptIdentity {
+        submission.into_attempt()
+    }
+
+    #[must_use]
+    pub fn abort_prepared(
+        submission: UiPreparedBackendSubmission,
+        message: String,
     ) -> UiPresentationOutcome {
-        UiPresentationOutcome::Presented(OneShotPresentationCommit::issue(
-            packet,
-            presentation_epoch,
-            backend_generation,
-        ))
+        UiPresentationOutcome::Aborted {
+            attempt: submission.into_attempt(),
+            message,
+        }
+    }
+
+    #[must_use]
+    pub fn supersede_prepared(
+        submission: UiPreparedBackendSubmission,
+        successor: &UiPreparedBackendSubmission,
+        message: String,
+    ) -> UiPresentationOutcome {
+        UiPresentationOutcome::Superseded {
+            attempt: submission.into_attempt(),
+            successor: prepared_attempt(successor),
+            message,
+        }
     }
 }
 
@@ -74,13 +134,15 @@ pub mod prelude {
 /// Explicit Host/backend integration surface kept out of ordinary gameplay imports.
 pub mod advanced {
     pub use crate::{
-        UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder, UiPacketFill, UiPacketImage,
-        UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintCompileStats, UiPaintPacket,
-        UiPaintPacketIdentity, UiPreparedImages, UiPresentationAttemptIdentity,
-        UiPresentationBackendGeneration, UiPresentationContentError,
-        UiPresentationIntegrationError, UiPresentationLimits, UiPresentationLimitsError,
-        UiPresentationOutcome, UiPresentationPlanner, UiPresentationPlannerCreateError,
-        UiPresentationRetryIdentity, compile_ui_paint_packets, drain_ui_presentation_outcomes,
+        OneShotPresentationCommit, UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPacketBorder,
+        UiPacketFill, UiPacketImage, UiPacketPrimitive, UiPacketRect, UiPacketUv,
+        UiPaintCompileStats, UiPaintPacket, UiPaintPacketIdentity, UiPreparedImages,
+        UiPresentationAttemptId, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+        UiPresentationBackendGeneration, UiPresentationCapabilityGeneration,
+        UiPresentationContentError, UiPresentationEpoch, UiPresentationIntegrationError,
+        UiPresentationLimits, UiPresentationLimitsError, UiPresentationOutcome,
+        UiPresentationPlanner, UiPresentationPlannerCreateError, UiPresentationRetryIdentity,
+        UiPresentationRuntimeGeneration, compile_ui_paint_packets, drain_ui_presentation_outcomes,
     };
 }
 

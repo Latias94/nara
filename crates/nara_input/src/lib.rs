@@ -62,6 +62,10 @@ pub const MAX_RETAINED_BUTTON_TRANSITIONS: usize = MAX_INPUT_TIMELINE_ENTRIES;
 #[doc(hidden)]
 pub mod __private {
     pub use crate::schedule::InputSet;
+    pub use crate::timeline::{
+        PreparedInputRoutePublication, abort_presented_route, commit_presented_route,
+        prepare_presented_route, supersede_presented_route,
+    };
 }
 
 /// Physical edge recorded for a retained button state.

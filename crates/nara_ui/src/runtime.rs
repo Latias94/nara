@@ -24,6 +24,66 @@ mod surface;
 pub(crate) use state::UiRuntimeState;
 pub use surface::{UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError};
 
+/// Move-only UI authority staged before one exact backend submission.
+///
+/// The ordinary runtime API does not expose this token. The first-party Host presentation bridge
+/// retains it until the backend accepts, defers, aborts, or supersedes the matching packet.
+#[must_use = "a prepared UI presentation must be committed, aborted, or superseded"]
+pub struct UiPreparedPresentationAuthority {
+    surface_id: UiSurfaceId,
+    facts: candidate::UiPresentationFacts,
+    prepared: state::UiPreparedPresentation,
+    input_route: nara_input::__private::PreparedInputRoutePublication,
+}
+
+impl UiPreparedPresentationAuthority {
+    #[must_use]
+    pub const fn surface_id(&self) -> UiSurfaceId {
+        self.surface_id
+    }
+
+    #[must_use]
+    pub fn frame(&self) -> &Arc<UiFrame> {
+        self.facts.frame()
+    }
+
+    #[must_use]
+    pub const fn receipt(&self) -> UiPresentationReceipt {
+        self.prepared.receipt()
+    }
+}
+
+/// Move-only exact candidate retained while a backend makes retryable residency progress.
+#[must_use = "a deferred UI presentation must be retried, aborted, or superseded"]
+pub struct UiDeferredPresentationAuthority {
+    surface_id: UiSurfaceId,
+    facts: candidate::UiPresentationFacts,
+    presentation_epoch: u64,
+}
+
+impl UiDeferredPresentationAuthority {
+    #[must_use]
+    pub const fn surface_id(&self) -> UiSurfaceId {
+        self.surface_id
+    }
+
+    #[must_use]
+    pub fn frame(&self) -> &Arc<UiFrame> {
+        self.facts.frame()
+    }
+
+    #[must_use]
+    pub const fn presentation_epoch(&self) -> u64 {
+        self.presentation_epoch
+    }
+}
+
+/// Result of atomically validating and restaging one deferred presentation.
+pub enum UiDeferredPresentationRetry {
+    Prepared(Box<UiPreparedPresentationAuthority>),
+    Superseded,
+}
+
 const MAX_ADAPTER_DIAGNOSTICS: usize = 64;
 const MAX_DIAGNOSTIC_BYTES: usize = 1_024;
 
@@ -355,15 +415,15 @@ pub fn active_ui_surface_slots(world: &World) -> Result<Vec<UiSurfaceSlot>, UiAd
         .collect())
 }
 
-/// Commits backend acceptance of the exact current frame and publishes its input route.
-pub fn commit_ui_presentation(
+/// Stages every fallible UI and input-route fact before the exact frame reaches a backend.
+pub fn prepare_ui_presentation(
     world: &mut World,
     frame: Arc<UiFrame>,
     presentation_epoch: u64,
-) -> Result<UiPresentationReceipt, UiAdapterError> {
-    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
+) -> Result<UiPreparedPresentationAuthority, UiAdapterError> {
+    world.resource_scope(|world, state: Mut<UiRuntimeState>| {
         let surface_id = frame.environment().surface_id();
-        let (slot, prepared) = {
+        let (slot, facts, prepared) = {
             let surface = state
                 .surface(surface_id)
                 .ok_or(UiAdapterError::UnknownSurface {
@@ -380,33 +440,145 @@ pub fn commit_ui_presentation(
                 });
             }
             let prepared = surface.prepare_presentation(presentation_epoch)?;
-            (surface.slot(), prepared)
+            (surface.slot(), candidate.presentation_facts(), prepared)
         };
-        let receipt = prepared.receipt();
-        let epoch = InputPresentationEpoch::new(presentation_epoch)
-            .ok_or(UiJournalError::ZeroPresentationEpoch)?;
-        let input_route = world
-            .resource_mut::<InputTimeline>()
-            .publish_presented_route(InputPresentedRoute::new(
-                slot.endpoint().window(),
-                InputSurfaceId::new(surface_id.get()),
-                slot.endpoint().seat(),
-                epoch,
-                InputSlotGeneration::new(receipt.slot_generation().get())
-                    .expect("validated receipt slot generation is non-zero"),
-                InputRouteGeneration::new(receipt.route_revision().get())
-                    .expect("validated receipt route generation is non-zero"),
-                InputGeometryGeneration::new(receipt.geometry_generation().get())
-                    .expect("validated receipt geometry generation is non-zero"),
-            ))?;
-        let mut prepared = prepared;
+        let input_route = prepare_input_route(world, slot, prepared.receipt())?;
+        Ok(UiPreparedPresentationAuthority {
+            surface_id,
+            facts,
+            prepared,
+            input_route,
+        })
+    })
+}
+
+/// Releases live route capacity while retaining one exact retryable candidate.
+pub fn defer_prepared_ui_presentation(
+    world: &mut World,
+    authority: UiPreparedPresentationAuthority,
+) -> UiDeferredPresentationAuthority {
+    let UiPreparedPresentationAuthority {
+        surface_id,
+        facts,
+        prepared,
+        input_route,
+    } = authority;
+    nara_input::__private::abort_presented_route(
+        &mut world.resource_mut::<InputTimeline>(),
+        input_route,
+    );
+    UiDeferredPresentationAuthority {
+        surface_id,
+        facts,
+        presentation_epoch: prepared.receipt().presentation_epoch(),
+    }
+}
+
+/// Restages current session/reducer facts for one exact equivalent deferred packet.
+pub fn retry_deferred_ui_presentation(
+    world: &mut World,
+    authority: UiDeferredPresentationAuthority,
+) -> Result<UiDeferredPresentationRetry, UiAdapterError> {
+    world.resource_scope(|world, state: Mut<UiRuntimeState>| {
+        let surface =
+            state
+                .surface(authority.surface_id)
+                .ok_or(UiAdapterError::UnknownSurface {
+                    surface: authority.surface_id.get(),
+                })?;
+        let slot = surface.slot();
+        let Some(prepared) = surface
+            .prepare_retained_presentation(&authority.facts, authority.presentation_epoch)?
+        else {
+            return Ok(UiDeferredPresentationRetry::Superseded);
+        };
+        let input_route = prepare_input_route(world, slot, prepared.receipt())?;
+        Ok(UiDeferredPresentationRetry::Prepared(Box::new(
+            UiPreparedPresentationAuthority {
+                surface_id: authority.surface_id,
+                facts: authority.facts,
+                prepared,
+                input_route,
+            },
+        )))
+    })
+}
+
+/// Terminates deferred authority after a newer candidate is admitted.
+pub fn supersede_deferred_ui_presentation(_authority: UiDeferredPresentationAuthority) {}
+
+/// Commits one backend-accepted prepared presentation with no fallible post-submit work.
+#[must_use]
+pub fn commit_prepared_ui_presentation(
+    world: &mut World,
+    authority: UiPreparedPresentationAuthority,
+) -> UiPresentationReceipt {
+    let UiPreparedPresentationAuthority {
+        surface_id,
+        facts: _,
+        mut prepared,
+        input_route,
+    } = authority;
+    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
+        let input_route = nara_input::__private::commit_presented_route(
+            &mut world.resource_mut::<InputTimeline>(),
+            input_route,
+        );
         prepared.bind_input_route(input_route);
+        let receipt = prepared.receipt();
         state
             .surface_mut(surface_id)
-            .expect("validated UI surface remains installed")
+            .expect("a prepared UI presentation keeps its Surface Slot installed")
             .commit_presentation(prepared);
-        Ok(receipt)
+        receipt
     })
+}
+
+fn prepare_input_route(
+    world: &mut World,
+    slot: UiSurfaceSlot,
+    receipt: UiPresentationReceipt,
+) -> Result<nara_input::__private::PreparedInputRoutePublication, UiAdapterError> {
+    let epoch = InputPresentationEpoch::new(receipt.presentation_epoch())
+        .ok_or(UiJournalError::ZeroPresentationEpoch)?;
+    nara_input::__private::prepare_presented_route(
+        &mut world.resource_mut::<InputTimeline>(),
+        InputPresentedRoute::new(
+            slot.endpoint().window(),
+            InputSurfaceId::new(receipt.surface_id().get()),
+            slot.endpoint().seat(),
+            epoch,
+            InputSlotGeneration::new(receipt.slot_generation().get())
+                .expect("validated receipt slot generation is non-zero"),
+            InputRouteGeneration::new(receipt.route_revision().get())
+                .expect("validated receipt route generation is non-zero"),
+            InputGeometryGeneration::new(receipt.geometry_generation().get())
+                .expect("validated receipt geometry generation is non-zero"),
+        ),
+    )
+    .map_err(UiAdapterError::from)
+}
+
+/// Aborts one prepared presentation before backend acceptance.
+pub fn abort_prepared_ui_presentation(
+    world: &mut World,
+    authority: UiPreparedPresentationAuthority,
+) {
+    nara_input::__private::abort_presented_route(
+        &mut world.resource_mut::<InputTimeline>(),
+        authority.input_route,
+    );
+}
+
+/// Supersedes one prepared presentation before a newer attempt is admitted.
+pub fn supersede_prepared_ui_presentation(
+    world: &mut World,
+    authority: UiPreparedPresentationAuthority,
+) {
+    nara_input::__private::supersede_presented_route(
+        &mut world.resource_mut::<InputTimeline>(),
+        authority.input_route,
+    );
 }
 
 /// Projects accessibility semantics from the latest submitted frame and interaction state.

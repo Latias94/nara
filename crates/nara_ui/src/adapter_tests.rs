@@ -36,9 +36,9 @@ use nara_ui_kernel::{
 use crate::interaction::dispatch_presented_ui_input;
 use crate::{
     UiActionAdmissionError, UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal,
-    UiAdapterError, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin, UiRoot,
+    UiAdapterError, UiButton, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin, UiRoot,
     UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRuntimeKey, UiSemantics, UiStyle,
-    UiSurfaceEndpoint, UiSurfaceSlot, UiVisual, active_ui_surface_slots, commit_ui_presentation,
+    UiSurfaceEndpoint, UiSurfaceSlot, UiVisual, active_ui_surface_slots,
     dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, register_ui_components,
     retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
 };
@@ -79,6 +79,17 @@ fn ui_app() -> App {
     ))
     .expect("UI test plugins should install");
     app
+}
+
+fn commit_ui_presentation(
+    world: &mut World,
+    frame: Arc<nara_ui_kernel::UiFrame>,
+    presentation_epoch: u64,
+) -> Result<UiPresentationReceipt, UiAdapterError> {
+    let prepared = crate::__private::prepare_ui_presentation(world, frame, presentation_epoch)?;
+    Ok(crate::__private::commit_prepared_ui_presentation(
+        world, prepared,
+    ))
 }
 
 fn start_runtime(app: App) -> RuntimeInstance {
@@ -668,6 +679,115 @@ fn mismatched_exact_input_route_aborts_a_prepared_slot_update() {
     ));
     assert_eq!(active_ui_surface_slots(app.world()).unwrap(), [original]);
     assert_eq!(test_receipt(app.world(), 1), receipt);
+}
+
+#[test]
+fn prepared_presentation_reserves_the_route_and_commits_without_a_fallible_arm() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let prepared =
+        crate::__private::prepare_ui_presentation(app.world_mut().unwrap(), Arc::clone(&frame), 1)
+            .unwrap();
+
+    assert!(crate::runtime::presented_receipt(app.world(), surface_id(), 1).is_none());
+    let slot = active_ui_surface_slots(app.world()).unwrap()[0];
+    assert!(matches!(
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<InputTimeline>()
+            .publish_presented_route(InputPresentedRoute::new(
+                slot.endpoint().window(),
+                InputSurfaceId::new(surface_id().get()),
+                slot.endpoint().seat(),
+                InputPresentationEpoch::new(1).unwrap(),
+                InputSlotGeneration::new(slot.slot_generation()).unwrap(),
+                InputRouteGeneration::new(slot.route_generation()).unwrap(),
+                InputGeometryGeneration::new(slot.geometry_generation()).unwrap(),
+            )),
+        Err(nara_input::InputIngressError::RouteReservationConflict { .. })
+    ));
+
+    let receipt =
+        crate::__private::commit_prepared_ui_presentation(app.world_mut().unwrap(), prepared);
+    assert_eq!(receipt, test_receipt(app.world(), 1));
+}
+
+#[test]
+fn aborting_prepared_presentation_releases_the_exact_route_reservation() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let prepared =
+        crate::__private::prepare_ui_presentation(app.world_mut().unwrap(), Arc::clone(&frame), 1)
+            .unwrap();
+    crate::__private::abort_prepared_ui_presentation(app.world_mut().unwrap(), prepared);
+
+    assert!(crate::runtime::presented_receipt(app.world(), surface_id(), 1).is_none());
+    let retry = crate::__private::prepare_ui_presentation(app.world_mut().unwrap(), frame, 1)
+        .expect("aborting must release route capacity and endpoint ownership");
+    let receipt =
+        crate::__private::commit_prepared_ui_presentation(app.world_mut().unwrap(), retry);
+    assert_eq!(receipt, test_receipt(app.world(), 1));
+}
+
+#[test]
+fn deferred_presentation_reprepares_an_equivalent_candidate_without_changing_packet_identity() {
+    let (mut app, _button) = build_button_app();
+    let original = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let prepared = crate::__private::prepare_ui_presentation(
+        app.world_mut().unwrap(),
+        Arc::clone(&original),
+        7,
+    )
+    .unwrap();
+    let deferred =
+        crate::__private::defer_prepared_ui_presentation(app.world_mut().unwrap(), prepared);
+
+    app.update()
+        .expect("an equivalent authoring frame should compile while backend work is deferred");
+    let latest = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&latest, &original));
+
+    let crate::__private::UiDeferredPresentationRetry::Prepared(retried) =
+        crate::__private::retry_deferred_ui_presentation(app.world_mut().unwrap(), deferred)
+            .unwrap()
+    else {
+        panic!("equivalent deferred facts must remain retryable");
+    };
+    assert!(Arc::ptr_eq(retried.frame(), &original));
+    let receipt =
+        crate::__private::commit_prepared_ui_presentation(app.world_mut().unwrap(), *retried);
+    assert_eq!(receipt.frame_revision(), original.revision());
+    assert_eq!(receipt.presentation_epoch(), 7);
+}
+
+#[test]
+fn deferred_presentation_cannot_retry_after_behavior_changes() {
+    let (mut app, button) = build_button_app();
+    let original = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let prepared =
+        crate::__private::prepare_ui_presentation(app.world_mut().unwrap(), original, 9).unwrap();
+    let deferred =
+        crate::__private::defer_prepared_ui_presentation(app.world_mut().unwrap(), prepared);
+
+    let disabled = app
+        .world()
+        .get::<UiButton>(button)
+        .expect("the test Button should remain installed")
+        .clone()
+        .with_enabled(false);
+    app.world_mut().unwrap().entity_mut(button).insert(disabled);
+    app.update()
+        .expect("the changed Button behavior should compile a successor candidate");
+
+    assert!(matches!(
+        crate::__private::retry_deferred_ui_presentation(app.world_mut().unwrap(), deferred)
+            .unwrap(),
+        crate::__private::UiDeferredPresentationRetry::Superseded
+    ));
+    let latest = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let successor = crate::__private::prepare_ui_presentation(app.world_mut().unwrap(), latest, 10)
+        .expect("superseding deferred work must leave route capacity reusable");
+    crate::__private::abort_prepared_ui_presentation(app.world_mut().unwrap(), successor);
 }
 
 #[test]

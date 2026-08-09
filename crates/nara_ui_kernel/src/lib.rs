@@ -20,6 +20,17 @@ pub mod __private {
     pub use crate::authoring::with_rejected_root;
     pub use crate::frame::frame_blocks_unhandled_input;
     pub use crate::interaction::UiCandidateReconciliation;
+    pub use crate::journal::UiFrameJournalAuthority;
+
+    use crate::{UiFrameJournal, UiJournalError, UiLimits};
+
+    /// Creates one journal together with the exclusive first-party submission capability for its
+    /// lineage. Ordinary consumers should use [`UiFrameJournal::with_limits`] instead.
+    pub fn new_hosted_frame_journal(
+        limits: UiLimits,
+    ) -> Result<(UiFrameJournal, UiFrameJournalAuthority), UiJournalError> {
+        UiFrameJournal::new_hosted(limits)
+    }
 }
 
 pub use authoring::{

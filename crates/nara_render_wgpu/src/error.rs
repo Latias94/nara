@@ -28,6 +28,9 @@ pub enum WgpuRenderError {
     #[cfg(feature = "ui-submitter")]
     #[error("resource-complete UI packet violated the WGPU adapter contract: {message}")]
     UiPacketInvariant { message: String },
+    #[cfg(feature = "ui-submitter")]
+    #[error("prepared UI backend submission was rejected before submit: {message}")]
+    UiSubmissionRejected { message: String },
     #[error("render packet submission was deferred: {message}")]
     UploadDeferred { message: String },
     #[error("wgpu surface creation failed for window {window_id:?}: {message}")]
@@ -57,6 +60,50 @@ impl WgpuRenderError {
             self,
             Self::StaleFrameGeneration { .. } | Self::FrameAlreadyConsumed { .. }
         )
+    }
+
+    #[must_use]
+    pub(crate) const fn is_attempt_fault(&self) -> bool {
+        if self.is_packet_admission_rejection() {
+            return true;
+        }
+        #[cfg(feature = "ui-submitter")]
+        if matches!(
+            self,
+            Self::UiPacketInvariant { .. } | Self::UiSubmissionRejected { .. }
+        ) {
+            return true;
+        }
+        false
+    }
+
+    #[must_use]
+    pub(crate) const fn target_window(&self) -> Option<WindowId> {
+        match self {
+            Self::SurfaceCreation { window_id, .. }
+            | Self::SurfaceMissing { window_id }
+            | Self::SurfaceUnsupported { window_id }
+            | Self::SurfaceUnconfigured { window_id }
+            | Self::SurfaceValidation { window_id } => Some(*window_id),
+            Self::WindowTargetLifecycle(error) => Some(match error {
+                WindowTargetError::UnknownWindow { window_id }
+                | WindowTargetError::DuplicateWindow { window_id }
+                | WindowTargetError::SurfaceActivationAfterRetirement { window_id }
+                | WindowTargetError::SurfaceAlreadyActive { window_id }
+                | WindowTargetError::SurfaceOwnerStillActive { window_id }
+                | WindowTargetError::StaleSurfaceBinding { window_id }
+                | WindowTargetError::SurfaceGenerationExhausted { window_id }
+                | WindowTargetError::ProviderReleaseBeforeSurfaceRetirement { window_id } => {
+                    *window_id
+                }
+            }),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn is_target_fault(&self) -> bool {
+        self.target_window().is_some()
     }
 
     #[must_use]

@@ -397,7 +397,7 @@ fn non_image_resource_identity_is_rejected_before_packet_commit() {
         error,
         UiPresentationContentError::InvalidImageResourceKind { .. }
     ));
-    assert!(Arc::ptr_eq(&planner.last_good(target).unwrap(), &first));
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &first));
 }
 
 #[test]
@@ -431,7 +431,7 @@ fn missing_image_preflight_does_not_stage_glyphs_or_replace_last_good() {
         error,
         UiPresentationContentError::MissingImage { .. }
     ));
-    assert!(Arc::ptr_eq(&planner.last_good(target).unwrap(), &first));
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &first));
 
     let replay = planner
         .plan(
@@ -464,21 +464,18 @@ fn target_private_state_is_isolated_and_released_only_by_explicit_retirement() {
         )
         .unwrap();
 
+    assert!(Arc::ptr_eq(&planner.planned(first_target).unwrap(), &first));
     assert!(Arc::ptr_eq(
-        &planner.last_good(first_target).unwrap(),
-        &first
-    ));
-    assert!(Arc::ptr_eq(
-        &planner.last_good(second_target).unwrap(),
+        &planner.planned(second_target).unwrap(),
         &second
     ));
     assert!(Arc::ptr_eq(
         &planner.retire_target(first_target).unwrap(),
         &first
     ));
-    assert!(planner.last_good(first_target).is_none());
+    assert!(planner.planned(first_target).is_none());
     assert!(Arc::ptr_eq(
-        &planner.last_good(second_target).unwrap(),
+        &planner.planned(second_target).unwrap(),
         &second
     ));
 }
@@ -502,7 +499,7 @@ fn packet_snapshots_have_a_deterministic_surface_order() {
         .unwrap();
 
     let surfaces = planner
-        .snapshot_packets()
+        .snapshot_planned_packets()
         .into_iter()
         .map(|packet| packet.identity().surface_id())
         .collect::<Vec<_>>();
