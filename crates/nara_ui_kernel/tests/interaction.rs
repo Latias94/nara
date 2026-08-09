@@ -4,10 +4,11 @@ use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActionId, UiActivationSource, UiAuthoringSnapshot,
     UiAuthoringSnapshotBuilder, UiButtonPhase, UiCompiler, UiDispatchError, UiEnvironment, UiFrame,
-    UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiLayer, UiLimits,
-    UiLocalKey, UiNavigation, UiNode, UiNonActivation, UiPoint, UiPointerButton, UiPointerId,
-    UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp, UiRoutedEventKind, UiSeatId, UiSemanticRole,
-    UiSemantics, UiStyle, UiSurfaceId, UiTheme,
+    UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiJournalError, UiLayer,
+    UiLimits, UiLocalKey, UiNavigation, UiNode, UiNonActivation, UiPoint, UiPointerButton,
+    UiPointerId, UiRoot, UiRootKey, UiRoutePhase, UiRouteStamp, UiRoutedEventKind, UiSeatId,
+    UiSemanticRole, UiSemantics, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations,
+    UiSurfaceId, UiTheme,
 };
 
 const SURFACE: UiSurfaceId = UiSurfaceId::new(17).unwrap();
@@ -238,6 +239,35 @@ fn compile(
             .unwrap(),
             UiTheme::default(),
         )
+        .unwrap()
+}
+
+fn compile_for_slot(
+    compiler: &mut UiCompiler,
+    snapshot: &UiAuthoringSnapshot,
+    slot_generation: u64,
+    route_revision: u64,
+    geometry_generation: u64,
+    presentation_revision: u64,
+) -> Arc<UiFrame> {
+    let transform =
+        UiSurfaceContentTransform::direct(UiSize::new(320.0, 180.0).unwrap(), 1.0).unwrap();
+    let environment = UiEnvironment::for_surface(
+        SURFACE,
+        transform,
+        UiSurfaceGenerations::new(
+            slot_generation,
+            route_revision,
+            geometry_generation,
+            presentation_revision,
+        )
+        .unwrap(),
+        1,
+        1,
+    )
+    .unwrap();
+    compiler
+        .compile(snapshot, environment, UiTheme::default())
         .unwrap()
 }
 
@@ -1226,6 +1256,69 @@ fn retired_targets_and_invalidated_geometry_cannot_activate() {
         )
         .unwrap();
     assert!(active.rejection().is_none());
+}
+
+#[test]
+fn geometry_invalidation_is_scoped_to_the_surface_slot_lineage() {
+    for (name, input) in [
+        ("pointer", move_pointer(UiPoint::new(20.0, 20.0))),
+        (
+            "navigate",
+            UiInputEvent::Navigate {
+                seat: SEAT,
+                direction: UiNavigation::Next,
+            },
+        ),
+        (
+            "focus",
+            UiInputEvent::FocusTarget {
+                seat: SEAT,
+                target: exact_key("base", "first"),
+            },
+        ),
+        (
+            "semantic",
+            UiInputEvent::SemanticAction {
+                seat: SEAT,
+                target: exact_key("base", "first"),
+                action: UiActionId::new("first").unwrap(),
+            },
+        ),
+    ] {
+        let mut compiler = compiler();
+        let mut journal = UiFrameJournal::default();
+        let predecessor = submit(
+            &mut journal,
+            compile_for_slot(&mut compiler, &snapshot(false), 1, 1, 1, 1),
+            100,
+        );
+        let mut session = UiInteractionSession::default();
+        session
+            .dispatch(&journal, predecessor, UiInputEvent::GeometryInvalidated)
+            .unwrap();
+        journal.advance_surface_slot(SURFACE, 1, 2).unwrap();
+        let successor = submit(
+            &mut journal,
+            compile_for_slot(&mut compiler, &snapshot(false), 2, 2, 2, 1),
+            1,
+        );
+
+        assert_eq!(
+            session
+                .dispatch(&journal, predecessor, input.clone())
+                .unwrap_err(),
+            UiDispatchError::Journal(UiJournalError::SurfaceRetired {
+                surface: SURFACE,
+                presentation_epoch: 100,
+            })
+        );
+
+        let outcome = session.dispatch(&journal, successor, input).unwrap();
+        assert!(
+            outcome.rejection().is_none(),
+            "{name} input must not inherit stale geometry from the predecessor slot: {outcome:?}"
+        );
+    }
 }
 
 #[test]

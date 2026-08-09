@@ -22,12 +22,12 @@ use schedule::InputSet;
 #[doc(hidden)]
 pub use timeline::{__InputDriverEvent, __InputDriverOutput};
 pub use timeline::{
-    InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
-    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPointerId,
-    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputRouteStamp,
-    InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline, InputTimelineEntry,
-    InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
-    MAX_INPUT_TIMELINE_ENTRIES,
+    InputAdmission, InputConsumerCursors, InputEndpointRetirement, InputEventKind,
+    InputFrameObservations, InputGeometryGeneration, InputIngressError, InputInvalidationReason,
+    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
+    InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimeline,
+    InputTimelineEntry, InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId,
+    MAX_INPUT_ROUTES, MAX_INPUT_TIMELINE_ENTRIES,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

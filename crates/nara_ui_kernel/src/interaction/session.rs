@@ -614,7 +614,7 @@ fn apply_input(
         }
         UiInputEvent::GeometryInvalidated => {
             cancel_all_pointers(state, frame, batch);
-            state.invalidated_epoch = Some(route.presentation_epoch());
+            state.invalidate_geometry(route);
         }
         UiInputEvent::SurfaceCancelled => {
             cancel_surface(state, frame, batch);
@@ -643,10 +643,7 @@ fn is_stale_geometry(state: &SurfaceState, route: UiRouteStamp, input: &UiInputE
             | UiInputEvent::FocusTarget { .. }
             | UiInputEvent::SemanticAction { .. }
     );
-    targets_geometry
-        && state
-            .invalidated_epoch
-            .is_some_and(|epoch| route.presentation_epoch() <= epoch)
+    targets_geometry && state.geometry_is_invalidated_for(route)
 }
 
 fn validate_position(position: UiPoint) -> Result<(), UiDispatchError> {

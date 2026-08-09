@@ -98,49 +98,58 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
     assert_eq!(retry_semantics.state().expanded(), Some(false));
 
     let mut bridge = WinitAccessibilityBridge::new(surface);
-    let prepared = bridge.prepare_update(&semantics).unwrap();
-    let update = prepared.update();
-    assert_eq!(update.surface_id(), surface);
-    assert_eq!(update.presentation_epoch(), 7);
-    let tree = update.accesskit_update();
-    let retry_id = tree
-        .nodes
-        .iter()
-        .find(|(_, node)| node.label() == Some("Retry"))
-        .map(|(node_id, _)| *node_id)
+    let mut published_retry_id = None;
+    let mut published_base_id = None;
+    let accessibility_receipt = bridge
+        .publish_update(&semantics, |update| {
+            assert_eq!(update.surface_id(), surface);
+            assert_eq!(update.presentation_epoch(), 7);
+            assert_eq!(update.publication_generation(), 1);
+            let tree = update.accesskit_update();
+            published_retry_id = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Retry"))
+                .map(|(node_id, _)| *node_id);
+            published_base_id = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Underlay"))
+                .map(|(node_id, _)| *node_id);
+            let retry_id = published_retry_id.expect("Retry should have an AccessKit identity");
+            let base_id = published_base_id.expect("Underlay should have an AccessKit identity");
+            assert_eq!(tree.focus, retry_id);
+            let retry_node = tree
+                .nodes
+                .iter()
+                .find(|(node_id, _)| *node_id == retry_id)
+                .map(|(_, node)| node)
+                .unwrap();
+            assert_eq!(retry_node.role(), Role::Button);
+            assert_eq!(retry_node.label(), Some("Retry"));
+            assert_eq!(retry_node.is_selected(), Some(true));
+            assert_eq!(retry_node.is_expanded(), Some(false));
+            assert!(retry_node.supports_action(Action::Click));
+            assert!(retry_node.supports_action(Action::Focus));
+            assert_eq!(
+                retry_node.bounds().unwrap(),
+                accesskit::Rect::new(200.0, 120.0, 440.0, 208.0)
+            );
+            let base_node = tree
+                .nodes
+                .iter()
+                .find(|(node_id, _)| *node_id == base_id)
+                .map(|(_, node)| node)
+                .unwrap();
+            assert!(base_node.is_disabled());
+            assert!(!base_node.supports_action(Action::Click));
+            Ok(())
+        })
         .unwrap();
-    let base_id = tree
-        .nodes
-        .iter()
-        .find(|(_, node)| node.label() == Some("Underlay"))
-        .map(|(node_id, _)| *node_id)
-        .unwrap();
-    assert_eq!(tree.focus, retry_id);
-    let retry_node = tree
-        .nodes
-        .iter()
-        .find(|(node_id, _)| *node_id == retry_id)
-        .map(|(_, node)| node)
-        .unwrap();
-    assert_eq!(retry_node.role(), Role::Button);
-    assert_eq!(retry_node.label(), Some("Retry"));
-    assert_eq!(retry_node.is_selected(), Some(true));
-    assert_eq!(retry_node.is_expanded(), Some(false));
-    assert!(retry_node.supports_action(Action::Click));
-    assert!(retry_node.supports_action(Action::Focus));
-    assert_eq!(
-        retry_node.bounds().unwrap(),
-        accesskit::Rect::new(200.0, 120.0, 440.0, 208.0)
-    );
-    let base_node = tree
-        .nodes
-        .iter()
-        .find(|(node_id, _)| *node_id == base_id)
-        .map(|(_, node)| node)
-        .unwrap();
-    assert!(base_node.is_disabled());
-    assert!(!base_node.supports_action(Action::Click));
-    bridge.commit_update(prepared).unwrap();
+    let retry_id = published_retry_id.expect("Retry should have an AccessKit identity");
+    assert!(published_base_id.is_some());
+    assert_eq!(accessibility_receipt.route(), route);
+    assert_eq!(accessibility_receipt.publication_generation(), 1);
 
     let click = bridge
         .map_action(&ActionRequest {
@@ -184,8 +193,8 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
         }
     );
 
-    let repeated = bridge.prepare_update(&semantics).unwrap();
-    bridge.commit_update(repeated).unwrap();
+    let repeated = bridge.publish_update(&semantics, |_| Ok(())).unwrap();
+    assert_eq!(repeated.publication_generation(), 2);
     assert_eq!(bridge.node_id(&retry_key), Some(retry_id));
 
     let continue_action = UiActionId::new("continue").unwrap();
@@ -222,9 +231,6 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             |key, action| key == &retry_key && action == &continue_action,
         )
         .unwrap();
-    let successor_prepared = bridge.prepare_update(&successor_semantics).unwrap();
-    let obsolete_successor = bridge.prepare_update(&successor_semantics).unwrap();
-    assert_eq!(successor_prepared.route(), successor_route);
     assert_eq!(
         bridge
             .map_action(&ActionRequest {
@@ -241,11 +247,47 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             retry_action.clone(),
         )
     );
-    bridge.commit_update(successor_prepared).unwrap();
+    let mut callback_called = false;
     assert_eq!(
-        bridge.commit_update(obsolete_successor).unwrap_err(),
-        WinitAccessibilityError::PreparedUpdateObsolete
+        bridge
+            .publish_update(&successor_semantics, |update| {
+                callback_called = true;
+                assert_eq!(update.publication_generation(), 3);
+                Err(WinitAccessibilityError::PlatformPublish {
+                    message: "synthetic platform failure".to_owned(),
+                })
+            })
+            .unwrap_err(),
+        WinitAccessibilityError::PlatformPublish {
+            message: "synthetic platform failure".to_owned(),
+        }
     );
+    assert!(callback_called);
+    assert_eq!(bridge.node_id(&retry_key), Some(retry_id));
+    assert_eq!(
+        bridge
+            .map_action(&ActionRequest {
+                action: Action::Click,
+                target_tree: TreeId::ROOT,
+                target_node: retry_id,
+                data: None,
+            })
+            .unwrap(),
+        UiAccessibilityInput::semantic_action(
+            receipt,
+            UiSeatId::PRIMARY,
+            retry_key.clone(),
+            retry_action.clone(),
+        )
+    );
+    let successor_accessibility_receipt = bridge
+        .publish_update(&successor_semantics, |update| {
+            assert_eq!(update.route(), successor_route);
+            assert_eq!(update.publication_generation(), 4);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(successor_accessibility_receipt.route(), successor_route);
     assert_eq!(
         bridge
             .map_action(&ActionRequest {
@@ -262,10 +304,15 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             continue_action.clone(),
         )
     );
+    let mut stale_callback_called = false;
     assert!(matches!(
-        bridge.prepare_update(&semantics),
+        bridge.publish_update(&semantics, |_| {
+            stale_callback_called = true;
+            Ok(())
+        }),
         Err(WinitAccessibilityError::StaleSnapshot { .. })
     ));
+    assert!(!stale_callback_called);
 
     let foreign_surface = UiSurfaceId::new(42).unwrap();
     let foreign_frame = compiler
@@ -286,16 +333,20 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             |key, action| key == &retry_key && action == &continue_action,
         )
         .unwrap();
-    let foreign_prepared = WinitAccessibilityBridge::new(foreign_surface)
-        .prepare_update(&foreign_semantics)
-        .unwrap();
+    let mut foreign_callback_called = false;
     assert_eq!(
-        bridge.commit_update(foreign_prepared).unwrap_err(),
+        bridge
+            .publish_update(&foreign_semantics, |_| {
+                foreign_callback_called = true;
+                Ok(())
+            })
+            .unwrap_err(),
         WinitAccessibilityError::SurfaceMismatch {
             expected: surface,
             actual: foreign_surface,
         }
     );
+    assert!(!foreign_callback_called);
     assert_eq!(
         bridge
             .map_action(&ActionRequest {
@@ -331,10 +382,15 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             |key, action| key == &retry_key && action == &continue_action,
         )
         .unwrap();
+    let mut conflicting_callback_called = false;
     assert!(matches!(
-        bridge.prepare_update(&conflicting_semantics),
+        bridge.publish_update(&conflicting_semantics, |_| {
+            conflicting_callback_called = true;
+            Ok(())
+        }),
         Err(WinitAccessibilityError::ConflictingSnapshot { .. })
     ));
+    assert!(!conflicting_callback_called);
 
     let disabled_snapshot = UiAuthoringSnapshotBuilder::new(3)
         .with_root(
@@ -369,19 +425,23 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             |key, action| key == &retry_key && action == &retry_action,
         )
         .unwrap();
-    let disabled_prepared = bridge.prepare_update(&disabled_semantics).unwrap();
-    let disabled_tree = disabled_prepared.accesskit_update();
-    assert_eq!(disabled_tree.focus, retry_id);
-    let disabled_retry = disabled_tree
-        .nodes
-        .iter()
-        .find(|(node_id, _)| *node_id == retry_id)
-        .map(|(_, node)| node)
+    bridge
+        .publish_update(&disabled_semantics, |update| {
+            assert_eq!(update.publication_generation(), 5);
+            let disabled_tree = update.accesskit_update();
+            assert_eq!(disabled_tree.focus, retry_id);
+            let disabled_retry = disabled_tree
+                .nodes
+                .iter()
+                .find(|(node_id, _)| *node_id == retry_id)
+                .map(|(_, node)| node)
+                .unwrap();
+            assert!(disabled_retry.is_disabled());
+            assert!(!disabled_retry.supports_action(Action::Click));
+            assert!(!disabled_retry.supports_action(Action::Focus));
+            Ok(())
+        })
         .unwrap();
-    assert!(disabled_retry.is_disabled());
-    assert!(!disabled_retry.supports_action(Action::Click));
-    assert!(!disabled_retry.supports_action(Action::Focus));
-    bridge.commit_update(disabled_prepared).unwrap();
     assert_eq!(
         bridge
             .map_action(&ActionRequest {
@@ -436,8 +496,17 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
             |key, action| key == &retry_key && action == &retry_action,
         )
         .unwrap();
-    let slot_two_prepared = bridge.prepare_update(&slot_two_semantics).unwrap();
-    bridge.commit_update(slot_two_prepared).unwrap();
+    let slot_two_accessibility_receipt = bridge
+        .publish_update(&slot_two_semantics, |update| {
+            assert_eq!(update.route(), UiRouteStamp::from_receipt(slot_two_receipt));
+            assert_eq!(update.publication_generation(), 6);
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        slot_two_accessibility_receipt.route(),
+        UiRouteStamp::from_receipt(slot_two_receipt)
+    );
     assert_eq!(
         bridge.retire(old_retirement).unwrap_err(),
         WinitAccessibilityError::RetirementGenerationMismatch {
@@ -446,24 +515,37 @@ fn bounded_accesskit_trial_preserves_semantics_focus_geometry_and_actions() {
         }
     );
     assert_eq!(
-        bridge.prepare_update(&slot_two_semantics).unwrap().route(),
+        bridge
+            .publish_update(&slot_two_semantics, |_| Ok(()))
+            .unwrap()
+            .route(),
         UiRouteStamp::from_receipt(slot_two_receipt)
     );
 
-    let prepared_before_retirement = bridge.prepare_update(&slot_two_semantics).unwrap();
     let retirement = journal.retire_surface(surface, 3).unwrap().unwrap();
     assert_eq!(retirement.slot_generation().get(), 2);
     bridge.retire(retirement).unwrap();
+    let mut retired_callback_called = false;
     assert_eq!(
         bridge
-            .commit_update(prepared_before_retirement)
+            .publish_update(&slot_two_semantics, |_| {
+                retired_callback_called = true;
+                Ok(())
+            })
             .unwrap_err(),
         WinitAccessibilityError::SurfaceRetired { surface }
     );
+    assert!(!retired_callback_called);
     assert_eq!(
-        bridge.prepare_update(&disabled_semantics).unwrap_err(),
+        bridge
+            .publish_update(&disabled_semantics, |_| {
+                retired_callback_called = true;
+                Ok(())
+            })
+            .unwrap_err(),
         WinitAccessibilityError::SurfaceRetired { surface }
     );
+    assert!(!retired_callback_called);
     assert_eq!(
         bridge
             .map_action(&ActionRequest {

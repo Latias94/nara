@@ -434,6 +434,47 @@ impl InputAdmission {
     }
 }
 
+/// Result of retiring one physical input endpoint.
+///
+/// Retirement is distinct from logical UI route invalidation: it emits balanced release edges,
+/// clears the endpoint's physical state, and returns the exact admitted range for callers that
+/// coordinate platform teardown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputEndpointRetirement {
+    admission: InputAdmission,
+    released_keys: Vec<KeyCode>,
+    released_mouse_buttons: Vec<MouseButton>,
+}
+
+impl InputEndpointRetirement {
+    pub(super) fn new(
+        admission: InputAdmission,
+        released_keys: Vec<KeyCode>,
+        released_mouse_buttons: Vec<MouseButton>,
+    ) -> Self {
+        Self {
+            admission,
+            released_keys,
+            released_mouse_buttons,
+        }
+    }
+
+    #[must_use]
+    pub const fn admission(&self) -> InputAdmission {
+        self.admission
+    }
+
+    #[must_use]
+    pub fn released_keys(&self) -> &[KeyCode] {
+        &self.released_keys
+    }
+
+    #[must_use]
+    pub fn released_mouse_buttons(&self) -> &[MouseButton] {
+        &self.released_mouse_buttons
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputIngressError {
     CapacityExceeded {
@@ -553,7 +594,7 @@ impl Display for InputIngressError {
             ),
             Self::PresentedRouteMismatch { window, seat } => write!(
                 formatter,
-                "input endpoint ({}, {}) no longer owns the exact presented route being released",
+                "input endpoint ({}, {}) no longer owns the exact presented route being unbound",
                 window.get(),
                 seat.get(),
             ),

@@ -6,10 +6,50 @@ use super::{
     routing::{active_modal_root, is_interactive_key, route_event},
     session::UiDispatchError,
 };
-use crate::{UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRootKey, UiRouteStamp};
+use crate::{
+    UiDispatchBatch, UiFrame, UiKey, UiPoint, UiRevision, UiRootKey, UiRouteStamp, UiSurfaceId,
+};
 
 const MAX_SEATS_PER_SURFACE: usize = 1;
 const MAX_POINTERS_PER_SURFACE: usize = 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UiRouteLineage {
+    surface_id: UiSurfaceId,
+    slot_generation: UiRevision,
+}
+
+impl UiRouteLineage {
+    const fn from_route(route: UiRouteStamp) -> Self {
+        Self {
+            surface_id: route.surface_id(),
+            slot_generation: route.slot_generation(),
+        }
+    }
+
+    fn matches(self, route: UiRouteStamp) -> bool {
+        self.surface_id == route.surface_id() && self.slot_generation == route.slot_generation()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct UiGeometryInvalidation {
+    lineage: UiRouteLineage,
+    presentation_epoch: u64,
+}
+
+impl UiGeometryInvalidation {
+    const fn from_route(route: UiRouteStamp) -> Self {
+        Self {
+            lineage: UiRouteLineage::from_route(route),
+            presentation_epoch: route.presentation_epoch(),
+        }
+    }
+
+    fn blocks(self, route: UiRouteStamp) -> bool {
+        self.lineage.matches(route) && route.presentation_epoch() <= self.presentation_epoch
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct PointerState {
@@ -40,13 +80,35 @@ pub(super) struct SeatState {
 pub(super) struct SurfaceState {
     pub(super) presentation_epoch: Option<u64>,
     pub(super) presented_route: Option<UiRouteStamp>,
-    pub(super) invalidated_epoch: Option<u64>,
+    /// The latest geometry invalidation, scoped to its Surface Slot lineage.
+    ///
+    /// Presentation epochs are only ordered within one slot lifetime. Keeping the lineage with
+    /// the invalidation prevents an epoch restart on a successor slot from inheriting the
+    /// predecessor's stale-geometry barrier.
+    invalidated_geometry: Option<UiGeometryInvalidation>,
     pub(super) modal_root: Option<UiRootKey>,
     pub(super) seats: BTreeMap<UiSeatId, SeatState>,
     pub(super) pointers: BTreeMap<(UiSeatId, UiPointerId), PointerState>,
 }
 
 impl SurfaceState {
+    pub(super) fn invalidate_geometry(&mut self, route: UiRouteStamp) {
+        let invalidation = UiGeometryInvalidation::from_route(route);
+        let replace = match self.invalidated_geometry {
+            None => true,
+            Some(previous) if previous.lineage != invalidation.lineage => true,
+            Some(previous) => invalidation.presentation_epoch > previous.presentation_epoch,
+        };
+        if replace {
+            self.invalidated_geometry = Some(invalidation);
+        }
+    }
+
+    pub(super) fn geometry_is_invalidated_for(&self, route: UiRouteStamp) -> bool {
+        self.invalidated_geometry
+            .is_some_and(|invalidated| invalidated.blocks(route))
+    }
+
     pub(super) fn has_pointer_facts(&self) -> bool {
         self.pointers.values().any(|pointer| {
             pointer.position.is_some() || pointer.hovered.is_some() || pointer.captured.is_some()

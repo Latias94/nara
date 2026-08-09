@@ -273,11 +273,14 @@ pub fn update_ui_surface_slot(
             });
         }
         let prepared = state.prepare_surface_slot_update(updated)?;
-        if let Some(route) = prepared.released_input_route() {
-            world
-                .resource_mut::<InputTimeline>()
-                .release_presented_route(route)?;
-        }
+        let previous_endpoint = previous.endpoint();
+        world
+            .resource_mut::<InputTimeline>()
+            .unbind_presented_endpoint(
+                previous_endpoint.window(),
+                previous_endpoint.seat(),
+                prepared.released_input_route(),
+            )?;
         state.commit_surface_slot_update(prepared);
         Ok(updated)
     })
@@ -291,7 +294,7 @@ fn active_theme_revision(world: &World) -> u64 {
         .get()
 }
 
-/// Retires one surface after releasing exactly the endpoint it owns.
+/// Retires one surface after balancing and clearing exactly the physical endpoint it owns.
 pub fn retire_ui_surface(
     world: &mut World,
     surface_id: UiSurfaceId,
@@ -300,11 +303,14 @@ pub fn retire_ui_surface(
         let Some(retirement) = state.prepare_surface_retirement(surface_id)? else {
             return Ok(None);
         };
-        if let Some(route) = retirement.input_route() {
-            world
-                .resource_mut::<InputTimeline>()
-                .release_presented_route(route)?;
-        }
+        let endpoint = retirement.endpoint();
+        world
+            .resource_mut::<InputTimeline>()
+            .retire_presented_endpoint(
+                endpoint.window(),
+                endpoint.seat(),
+                retirement.input_route(),
+            )?;
         state.commit_surface_retirement(retirement);
         Ok(Some(retirement))
     })

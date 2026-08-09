@@ -9,10 +9,11 @@ use thiserror::Error;
 
 const ROOT_NODE_ID: NodeId = NodeId(1);
 const FIRST_CONTENT_NODE_ID: u64 = 2;
+const FIRST_PUBLICATION_GENERATION: u64 = 1;
 const MAX_NODE_IDENTITIES: usize = 4_096;
 
 /// Bounded optional adapter from Nara semantic facts to AccessKit schema values.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct WinitAccessibilityBridge {
     surface_id: UiSurfaceId,
     next_node_id: u64,
@@ -22,6 +23,7 @@ pub struct WinitAccessibilityBridge {
     active_focusable: BTreeSet<NodeId>,
     route: Option<UiRouteStamp>,
     seat: Option<UiSeatId>,
+    next_publication_generation: u64,
     retired: Option<UiSurfaceRetirementToken>,
 }
 
@@ -37,19 +39,40 @@ impl WinitAccessibilityBridge {
             active_focusable: BTreeSet::new(),
             route: None,
             seat: None,
+            next_publication_generation: FIRST_PUBLICATION_GENERATION,
             retired: None,
         }
     }
 
-    /// Prepares one AccessKit tree update without changing the active callback mapping.
+    /// Publishes one semantic snapshot and commits its callback mapping atomically.
     ///
-    /// The Host publishes `prepared.accesskit_update()` to the platform first, then calls
-    /// [`Self::commit_update`]. Until that commit, callbacks resolve against the previously
-    /// published route and actions.
-    pub fn prepare_update(
+    /// The snapshot is fully validated and a unique publication generation is reserved before
+    /// `publish` is invoked. The callback must synchronously submit the exact update to the
+    /// platform. A failed callback leaves the previous callback mapping authoritative; a successful
+    /// callback is followed by an infallible internal state swap. No publishable token escapes this
+    /// method, so prepared updates cannot be reordered with retirement or with one another.
+    pub fn publish_update(
+        &mut self,
+        snapshot: &UiSemanticSnapshot,
+        publish: impl FnOnce(&WinitAccessibilityUpdate) -> Result<(), WinitAccessibilityError>,
+    ) -> Result<WinitAccessibilityReceipt, WinitAccessibilityError> {
+        let publication_generation = self.next_publication_generation;
+        let publication = self.build_publication(snapshot, publication_generation)?;
+        self.next_publication_generation = self
+            .next_publication_generation
+            .checked_add(1)
+            .ok_or(WinitAccessibilityError::PublicationGenerationExhausted)?;
+        publish(&publication.update)?;
+        let receipt = publication.update.receipt();
+        self.commit_candidate(publication.candidate);
+        Ok(receipt)
+    }
+
+    fn build_publication(
         &self,
         snapshot: &UiSemanticSnapshot,
-    ) -> Result<WinitPreparedAccessibilityUpdate, WinitAccessibilityError> {
+        publication_generation: u64,
+    ) -> Result<WinitAccessibilityPublication, WinitAccessibilityError> {
         if snapshot.surface_id() != self.surface_id {
             return Err(WinitAccessibilityError::SurfaceMismatch {
                 expected: self.surface_id,
@@ -109,7 +132,7 @@ impl WinitAccessibilityBridge {
             }
         }
 
-        let mut candidate = self.clone();
+        let mut candidate = self.candidate_clone();
         candidate.active_keys.clear();
         candidate.active_actions.clear();
         candidate.active_focusable.clear();
@@ -201,38 +224,36 @@ impl WinitAccessibilityBridge {
             tree_id: TreeId::ROOT,
             focus,
         };
-        Ok(WinitPreparedAccessibilityUpdate {
-            previous_route: self.route,
+        Ok(WinitAccessibilityPublication {
             candidate,
             update: WinitAccessibilityUpdate {
                 route: snapshot.route(),
                 frame_revision: snapshot.frame_revision(),
+                publication_generation,
                 update,
             },
         })
     }
 
-    /// Commits a prepared callback mapping after its exact tree update reached the platform.
-    pub fn commit_update(
-        &mut self,
-        prepared: WinitPreparedAccessibilityUpdate,
-    ) -> Result<(), WinitAccessibilityError> {
-        if self.retired.is_some() {
-            return Err(WinitAccessibilityError::SurfaceRetired {
-                surface: self.surface_id,
-            });
+    fn commit_candidate(&mut self, candidate: WinitAccessibilityBridge) {
+        let next_publication_generation = self.next_publication_generation;
+        *self = candidate;
+        self.next_publication_generation = next_publication_generation;
+    }
+
+    fn candidate_clone(&self) -> Self {
+        Self {
+            surface_id: self.surface_id,
+            next_node_id: self.next_node_id,
+            node_ids: self.node_ids.clone(),
+            active_keys: self.active_keys.clone(),
+            active_actions: self.active_actions.clone(),
+            active_focusable: self.active_focusable.clone(),
+            route: self.route,
+            seat: self.seat,
+            next_publication_generation: self.next_publication_generation,
+            retired: self.retired,
         }
-        if prepared.candidate.surface_id != self.surface_id {
-            return Err(WinitAccessibilityError::SurfaceMismatch {
-                expected: self.surface_id,
-                actual: prepared.candidate.surface_id,
-            });
-        }
-        if self.route != prepared.previous_route {
-            return Err(WinitAccessibilityError::PreparedUpdateObsolete);
-        }
-        *self = prepared.candidate;
-        Ok(())
     }
 
     /// Converts a supported AccessKit request into the exact presented-session input.
@@ -354,39 +375,19 @@ fn map_role(role: UiSemanticRole) -> Role {
     }
 }
 
-/// One uncommitted AccessKit payload and its candidate callback mapping.
-///
-/// This token is intentionally non-`Clone`: one platform publication can advance callback
-/// authority at most once.
+/// One internal publication candidate. It never crosses the public API boundary.
 #[derive(Debug)]
-pub struct WinitPreparedAccessibilityUpdate {
-    previous_route: Option<UiRouteStamp>,
+struct WinitAccessibilityPublication {
     candidate: WinitAccessibilityBridge,
     update: WinitAccessibilityUpdate,
 }
 
-impl WinitPreparedAccessibilityUpdate {
-    #[must_use]
-    pub const fn update(&self) -> &WinitAccessibilityUpdate {
-        &self.update
-    }
-
-    #[must_use]
-    pub const fn route(&self) -> UiRouteStamp {
-        self.update.route()
-    }
-
-    #[must_use]
-    pub const fn accesskit_update(&self) -> &TreeUpdate {
-        self.update.accesskit_update()
-    }
-}
-
 /// AccessKit payload paired with the exact Nara presentation authority it represents.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct WinitAccessibilityUpdate {
     route: UiRouteStamp,
     frame_revision: UiFrameRevision,
+    publication_generation: u64,
     update: TreeUpdate,
 }
 
@@ -407,6 +408,11 @@ impl WinitAccessibilityUpdate {
     }
 
     #[must_use]
+    pub const fn publication_generation(&self) -> u64 {
+        self.publication_generation
+    }
+
+    #[must_use]
     pub const fn presentation_epoch(&self) -> u64 {
         self.route.presentation_epoch()
     }
@@ -416,9 +422,42 @@ impl WinitAccessibilityUpdate {
         &self.update
     }
 
+    fn receipt(&self) -> WinitAccessibilityReceipt {
+        WinitAccessibilityReceipt {
+            route: self.route,
+            frame_revision: self.frame_revision,
+            publication_generation: self.publication_generation,
+        }
+    }
+}
+
+/// Exact evidence that one accessibility tree update was synchronously published and committed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinitAccessibilityReceipt {
+    route: UiRouteStamp,
+    frame_revision: UiFrameRevision,
+    publication_generation: u64,
+}
+
+impl WinitAccessibilityReceipt {
     #[must_use]
-    pub fn into_accesskit_update(self) -> TreeUpdate {
-        self.update
+    pub const fn route(self) -> UiRouteStamp {
+        self.route
+    }
+
+    #[must_use]
+    pub const fn surface_id(self) -> UiSurfaceId {
+        self.route.surface_id()
+    }
+
+    #[must_use]
+    pub const fn frame_revision(self) -> UiFrameRevision {
+        self.frame_revision
+    }
+
+    #[must_use]
+    pub const fn publication_generation(self) -> u64 {
+        self.publication_generation
     }
 }
 
@@ -445,8 +484,10 @@ pub enum WinitAccessibilityError {
         current: UiRouteStamp,
         candidate: UiRouteStamp,
     },
-    #[error("prepared accessibility update no longer follows the active platform tree")]
-    PreparedUpdateObsolete,
+    #[error("accessibility publication generation was exhausted")]
+    PublicationGenerationExhausted,
+    #[error("platform accessibility publication failed: {message}")]
+    PlatformPublish { message: String },
     #[error("accessibility snapshot exceeds {maximum} semantic nodes")]
     NodeLimitExceeded { maximum: usize },
     #[error("accessibility node identity retention exceeds {maximum} keys")]

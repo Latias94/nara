@@ -14,11 +14,11 @@ mod types;
 #[doc(hidden)]
 pub use types::{__InputDriverEvent, __InputDriverOutput};
 pub use types::{
-    InputAdmission, InputConsumerCursors, InputEventKind, InputFrameObservations,
-    InputGeometryGeneration, InputIngressError, InputInvalidationReason, InputPointerId,
-    InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputRouteStamp,
-    InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimelineEntry, InputUiCursorError,
-    InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
+    InputAdmission, InputConsumerCursors, InputEndpointRetirement, InputEventKind,
+    InputFrameObservations, InputGeometryGeneration, InputIngressError, InputInvalidationReason,
+    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration,
+    InputRouteStamp, InputSeatId, InputSlotGeneration, InputSurfaceId, InputTimelineEntry,
+    InputUiCursorError, InputUiDisposition, InputWindowEvent, InputWindowId, MAX_INPUT_ROUTES,
     MAX_INPUT_TIMELINE_ENTRIES,
 };
 
@@ -72,6 +72,9 @@ pub struct InputTimeline {
     pressed_keys: BTreeMap<(InputWindowId, InputSeatId), BTreeSet<KeyCode>>,
     pressed_mouse_buttons:
         BTreeMap<(InputWindowId, InputSeatId, InputPointerId), BTreeSet<MouseButton>>,
+    unrouted_pressed_keys: BTreeMap<(InputWindowId, InputSeatId), BTreeSet<KeyCode>>,
+    unrouted_pressed_mouse_buttons:
+        BTreeMap<(InputWindowId, InputSeatId, InputPointerId), BTreeSet<MouseButton>>,
     pointer_positions: BTreeMap<(InputWindowId, InputSeatId, InputPointerId), Vec2>,
 }
 
@@ -89,6 +92,8 @@ impl Default for InputTimeline {
             routes_poisoned: false,
             pressed_keys: BTreeMap::new(),
             pressed_mouse_buttons: BTreeMap::new(),
+            unrouted_pressed_keys: BTreeMap::new(),
+            unrouted_pressed_mouse_buttons: BTreeMap::new(),
             pointer_positions: BTreeMap::new(),
         }
     }
@@ -210,41 +215,49 @@ impl InputTimeline {
         Ok(())
     }
 
-    /// Releases one endpoint when it still owns the exact published route stamp.
+    /// Unbinds one presented UI endpoint while preserving physical button state.
     ///
-    /// Releasing an endpoint that was already invalidated by platform lifecycle input is
-    /// idempotent; a replacement route at the same endpoint is rejected.
-    pub fn release_presented_route(
+    /// Surface Slot and geometry updates invalidate UI routing, focus and capture in their owning
+    /// UI session, but the native window may still hold keys or pointer buttons. Those physical
+    /// transitions remain tracked so their real release edges can reach the timeline, while the
+    /// geometry-scoped pointer position is discarded. A true platform endpoint retirement must
+    /// enter through [`Self::retire_presented_endpoint`] or [`InputWindowEvent::SurfaceRetired`],
+    /// which synthesize balanced releases before clearing all physical state.
+    ///
+    /// The expected route is optional because a Surface Slot can change before its first
+    /// presentation or after platform lifecycle input already removed the route. A replacement
+    /// route at the same endpoint is still a typed mismatch.
+    pub fn unbind_presented_endpoint(
         &mut self,
-        route: InputRouteStamp,
+        window: InputWindowId,
+        seat: InputSeatId,
+        expected_route: Option<InputRouteStamp>,
     ) -> Result<(), InputIngressError> {
-        let window = route.window();
-        let seat = route.seat();
-        let key = (window, seat);
-        let Some(_) = self.routes.get(&key) else {
-            return Ok(());
-        };
-        if self.pointer_route(window, seat, route.pointer()) != route {
-            return Err(InputIngressError::PresentedRouteMismatch { window, seat });
-        }
-        let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
-            self.poison_routes();
-            InputIngressError::RouteBindingGenerationExhausted
-        })?;
-        self.next_binding_generation = binding_generation;
-        self.routes.remove(&key);
-        if self.focused_windows.get(&seat) == Some(&window) {
-            self.focused_windows.remove(&seat);
-        }
-        self.pressed_mouse_buttons
-            .retain(|&(event_window, event_seat, _), _| {
-                event_window != window || event_seat != seat
-            });
-        self.pointer_positions
-            .retain(|&(event_window, event_seat, _), _| {
-                event_window != window || event_seat != seat
-            });
-        Ok(())
+        self.validate_presented_endpoint(window, seat, expected_route)?;
+        let result = self.unbind_route(window, seat);
+        self.clear_pointer_positions(window, seat);
+        result
+    }
+
+    /// Retires one physical endpoint after validating its last presented route, when one exists.
+    ///
+    /// Unlike [`Self::unbind_presented_endpoint`], retirement synthesizes balanced key,
+    /// pointer-button, and pointer-leave transitions and then clears all physical state owned by the
+    /// endpoint. A caller that prepared retirement while a route was bound must pass that exact
+    /// route stamp; `None` is accepted only while no replacement route owns the endpoint.
+    pub fn retire_presented_endpoint(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        expected_route: Option<InputRouteStamp>,
+    ) -> Result<InputEndpointRetirement, InputIngressError> {
+        self.validate_presented_endpoint(window, seat, expected_route)?;
+        let output = self.retire_endpoint(window, seat)?;
+        Ok(InputEndpointRetirement::new(
+            output.admission,
+            output.released_keys,
+            output.released_mouse_buttons,
+        ))
     }
 
     /// Admits one normalized keyboard transition into the global timeline.
@@ -402,6 +415,12 @@ impl InputTimeline {
                 }
                 let admission = self.admit_drafts(&[draft])?;
                 self.pressed_keys.entry(state_key).or_default().insert(key);
+                if !draft.route.is_ui_routable() {
+                    self.unrouted_pressed_keys
+                        .entry(state_key)
+                        .or_default()
+                        .insert(key);
+                }
                 Ok(__InputDriverOutput::new(admission))
             }
             ButtonDriverInput::Release(key) => {
@@ -418,6 +437,9 @@ impl InputTimeline {
                 if let Some(pressed) = self.pressed_keys.get_mut(&state_key) {
                     pressed.remove(&key);
                 }
+                if let Some(unrouted) = self.unrouted_pressed_keys.get_mut(&state_key) {
+                    unrouted.remove(&key);
+                }
                 Ok(__InputDriverOutput::new(admission))
             }
             ButtonDriverInput::ReleaseAll => {
@@ -432,18 +454,14 @@ impl InputTimeline {
                 let drafts = released
                     .iter()
                     .copied()
-                    .map(|(event_window, key)| InputDraft {
-                        route: self.pointer_route(event_window, seat, None),
-                        logical_position: None,
-                        kind: InputEventKind::Key {
-                            key,
-                            phase: ButtonTransitionPhase::Released,
-                        },
-                        invalidation: None,
+                    .map(|(event_window, key)| {
+                        self.key_draft(event_window, seat, key, ButtonTransitionPhase::Released)
                     })
                     .collect::<Vec<_>>();
                 let admission = self.admit_drafts(&drafts)?;
                 self.pressed_keys
+                    .retain(|(_, event_seat), _| *event_seat != seat);
+                self.unrouted_pressed_keys
                     .retain(|(_, event_seat), _| *event_seat != seat);
                 let mut output = __InputDriverOutput::new(admission);
                 output.released_keys = released
@@ -484,6 +502,12 @@ impl InputTimeline {
                     .entry(state_key)
                     .or_default()
                     .insert(button);
+                if !draft.route.is_ui_routable() {
+                    self.unrouted_pressed_mouse_buttons
+                        .entry(state_key)
+                        .or_default()
+                        .insert(button);
+                }
                 Ok(__InputDriverOutput::new(admission))
             }
             ButtonDriverInput::Release(button) => {
@@ -504,6 +528,9 @@ impl InputTimeline {
                 let admission = self.admit_drafts(&[draft])?;
                 if let Some(pressed) = self.pressed_mouse_buttons.get_mut(&state_key) {
                     pressed.remove(&button);
+                }
+                if let Some(unrouted) = self.unrouted_pressed_mouse_buttons.get_mut(&state_key) {
+                    unrouted.remove(&button);
                 }
                 Ok(__InputDriverOutput::new(admission))
             }
@@ -528,6 +555,7 @@ impl InputTimeline {
                     .collect::<Vec<_>>();
                 let admission = self.admit_drafts(&drafts)?;
                 self.pressed_mouse_buttons.remove(&state_key);
+                self.unrouted_pressed_mouse_buttons.remove(&state_key);
                 let mut output = __InputDriverOutput::new(admission);
                 output.released_mouse_buttons = released;
                 Ok(output)
@@ -559,7 +587,6 @@ impl InputTimeline {
                 Ok(__InputDriverOutput::new(admission))
             }
             PointerDriverInput::Left => {
-                let route = self.pointer_route(window, seat, Some(pointer));
                 let state_key = (window, seat, pointer);
                 let position = self.pointer_positions.get(&state_key).copied();
                 let released = self
@@ -570,18 +597,20 @@ impl InputTimeline {
                 let mut drafts = released
                     .iter()
                     .copied()
-                    .map(|button| InputDraft {
-                        route,
-                        logical_position: position,
-                        kind: InputEventKind::PointerButton {
+                    .map(|button| {
+                        let mut draft = self.mouse_draft(
+                            window,
+                            seat,
+                            pointer,
                             button,
-                            phase: ButtonTransitionPhase::Released,
-                        },
-                        invalidation: Some(InputInvalidationReason::PointerLeft),
+                            ButtonTransitionPhase::Released,
+                        );
+                        draft.invalidation = Some(InputInvalidationReason::PointerLeft);
+                        draft
                     })
                     .collect::<Vec<_>>();
                 drafts.push(InputDraft {
-                    route,
+                    route: self.pointer_route(window, seat, Some(pointer)),
                     logical_position: position,
                     kind: InputEventKind::PointerLeft,
                     invalidation: Some(InputInvalidationReason::PointerLeft),
@@ -590,11 +619,13 @@ impl InputTimeline {
                     Ok(admission) => admission,
                     Err(error) => {
                         self.pressed_mouse_buttons.remove(&state_key);
+                        self.unrouted_pressed_mouse_buttons.remove(&state_key);
                         self.pointer_positions.remove(&state_key);
                         return Err(error);
                     }
                 };
                 self.pressed_mouse_buttons.remove(&state_key);
+                self.unrouted_pressed_mouse_buttons.remove(&state_key);
                 self.pointer_positions.remove(&state_key);
                 let mut output = __InputDriverOutput::new(admission);
                 output.released_mouse_buttons = released;
@@ -621,13 +652,14 @@ impl InputTimeline {
             return Ok(__InputDriverOutput::new(admission));
         }
 
-        let old_route = self.pointer_route(window, seat, None);
         let owns_keyboard_focus = self
             .focused_windows
             .get(&seat)
             .is_none_or(|focused_window| *focused_window == window);
-        let (kind, reason, clear_keyboard) = match event {
-            InputWindowEvent::Focused(false) => (
+        match event {
+            InputWindowEvent::Focused(false) => self.invalidate_physical_endpoint(
+                window,
+                seat,
                 InputEventKind::FocusChanged { focused: false },
                 InputInvalidationReason::FocusLost,
                 owns_keyboard_focus,
@@ -636,34 +668,84 @@ impl InputTimeline {
                 if !vec2_is_finite(logical_size) || logical_size.x < 0.0 || logical_size.y < 0.0 {
                     return Err(InputIngressError::InvalidLogicalSize);
                 }
-                (
+                self.invalidate_logical_route(
+                    window,
+                    seat,
                     InputEventKind::Resized { logical_size },
                     InputInvalidationReason::Resized,
-                    false,
                 )
             }
             InputWindowEvent::ScaleFactorChanged { scale_factor } => {
                 if !scale_factor.is_finite() || scale_factor <= 0.0 {
                     return Err(InputIngressError::InvalidScaleFactor);
                 }
-                (
+                self.invalidate_logical_route(
+                    window,
+                    seat,
                     InputEventKind::ScaleFactorChanged { scale_factor },
                     InputInvalidationReason::ScaleFactorChanged,
-                    false,
                 )
             }
-            InputWindowEvent::CloseRequested => (
+            InputWindowEvent::CloseRequested => self.invalidate_physical_endpoint(
+                window,
+                seat,
                 InputEventKind::CloseRequested,
                 InputInvalidationReason::CloseRequested,
                 owns_keyboard_focus,
             ),
-            InputWindowEvent::SurfaceRetired => (
-                InputEventKind::SurfaceRetired,
-                InputInvalidationReason::SurfaceRetired,
-                owns_keyboard_focus,
-            ),
+            InputWindowEvent::SurfaceRetired => self.retire_endpoint(window, seat),
             InputWindowEvent::Focused(true) => unreachable!("focus gain returned above"),
+        }
+    }
+
+    fn invalidate_logical_route(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        kind: InputEventKind,
+        reason: InputInvalidationReason,
+    ) -> Result<__InputDriverOutput, InputIngressError> {
+        let old_route = self.pointer_route(window, seat, None);
+        let route_was_bound = old_route.is_ui_routable();
+        let draft = InputDraft {
+            route: old_route,
+            logical_position: None,
+            kind,
+            invalidation: Some(reason),
         };
+        let unbind_result = self.unbind_route(window, seat);
+        self.clear_pointer_positions(window, seat);
+        unbind_result?;
+        match self.admit_drafts(&[draft]) {
+            Ok(admission) => Ok(__InputDriverOutput::new(admission)),
+            Err(error) if route_was_bound => Err(error.after_route_invalidation()),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn retire_endpoint(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+    ) -> Result<__InputDriverOutput, InputIngressError> {
+        self.invalidate_physical_endpoint(
+            window,
+            seat,
+            InputEventKind::SurfaceRetired,
+            InputInvalidationReason::SurfaceRetired,
+            true,
+        )
+    }
+
+    fn invalidate_physical_endpoint(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        kind: InputEventKind,
+        reason: InputInvalidationReason,
+        clear_keyboard: bool,
+    ) -> Result<__InputDriverOutput, InputIngressError> {
+        let old_route = self.pointer_route(window, seat, None);
 
         let released_keys = if clear_keyboard {
             self.pressed_keys
@@ -744,7 +826,10 @@ impl InputTimeline {
             invalidation: Some(reason),
         });
 
-        self.fail_closed_window(window, seat)?;
+        if let Err(error) = self.fail_closed_window(window, seat) {
+            self.clear_physical_route_state(window, seat, clear_keyboard);
+            return Err(error);
+        }
         let admission = match self.admit_drafts(&drafts) {
             Ok(admission) => admission,
             Err(error) => {
@@ -769,8 +854,19 @@ impl InputTimeline {
         key: KeyCode,
         phase: ButtonTransitionPhase,
     ) -> InputDraft {
+        let focused_window = self.focused_windows.get(&seat).copied().unwrap_or(window);
+        let route = if phase == ButtonTransitionPhase::Released
+            && self
+                .unrouted_pressed_keys
+                .get(&(focused_window, seat))
+                .is_some_and(|keys| keys.contains(&key))
+        {
+            InputRouteStamp::unrouted(focused_window, seat, None)
+        } else {
+            self.pointer_route(focused_window, seat, None)
+        };
         InputDraft {
-            route: self.focused_route(window, seat),
+            route,
             logical_position: None,
             kind: InputEventKind::Key { key, phase },
             invalidation: None,
@@ -785,12 +881,21 @@ impl InputTimeline {
         button: MouseButton,
         phase: ButtonTransitionPhase,
     ) -> InputDraft {
+        let state_key = (window, seat, pointer);
+        let was_unrouted = phase == ButtonTransitionPhase::Released
+            && self
+                .unrouted_pressed_mouse_buttons
+                .get(&state_key)
+                .is_some_and(|buttons| buttons.contains(&button));
         InputDraft {
-            route: self.pointer_route(window, seat, Some(pointer)),
-            logical_position: self
-                .pointer_positions
-                .get(&(window, seat, pointer))
-                .copied(),
+            route: if was_unrouted {
+                InputRouteStamp::unrouted(window, seat, Some(pointer))
+            } else {
+                self.pointer_route(window, seat, Some(pointer))
+            },
+            logical_position: (!was_unrouted)
+                .then(|| self.pointer_positions.get(&state_key).copied())
+                .flatten(),
             kind: InputEventKind::PointerButton { button, phase },
             invalidation: None,
         }
@@ -827,6 +932,61 @@ impl InputTimeline {
         }
     }
 
+    fn validate_presented_endpoint(
+        &self,
+        window: InputWindowId,
+        seat: InputSeatId,
+        expected_route: Option<InputRouteStamp>,
+    ) -> Result<(), InputIngressError> {
+        if expected_route.is_some_and(|route| route.window() != window || route.seat() != seat) {
+            return Err(InputIngressError::PresentedRouteMismatch { window, seat });
+        }
+        if self.routes.contains_key(&(window, seat)) {
+            let Some(expected_route) = expected_route else {
+                return Err(InputIngressError::PresentedRouteMismatch { window, seat });
+            };
+            if self.pointer_route(window, seat, expected_route.pointer()) != expected_route {
+                return Err(InputIngressError::PresentedRouteMismatch { window, seat });
+            }
+        }
+        Ok(())
+    }
+
+    fn unbind_route(
+        &mut self,
+        window: InputWindowId,
+        seat: InputSeatId,
+    ) -> Result<(), InputIngressError> {
+        if !self.routes.contains_key(&(window, seat)) {
+            return Ok(());
+        }
+        self.mark_pressed_transitions_unrouted(window, seat);
+        let binding_generation = self.next_binding_generation.checked_add(1).ok_or_else(|| {
+            self.poison_routes();
+            InputIngressError::RouteBindingGenerationExhausted
+        })?;
+        self.next_binding_generation = binding_generation;
+        self.routes.remove(&(window, seat));
+        Ok(())
+    }
+
+    fn mark_pressed_transitions_unrouted(&mut self, window: InputWindowId, seat: InputSeatId) {
+        if let Some(pressed) = self.pressed_keys.get(&(window, seat)) {
+            self.unrouted_pressed_keys
+                .entry((window, seat))
+                .or_default()
+                .extend(pressed.iter().copied());
+        }
+        for (&(event_window, event_seat, pointer), pressed) in &self.pressed_mouse_buttons {
+            if event_window == window && event_seat == seat {
+                self.unrouted_pressed_mouse_buttons
+                    .entry((window, seat, pointer))
+                    .or_default()
+                    .extend(pressed.iter().copied());
+            }
+        }
+    }
+
     fn fail_closed_window(
         &mut self,
         window: InputWindowId,
@@ -858,11 +1018,20 @@ impl InputTimeline {
     ) {
         if clear_keyboard {
             self.pressed_keys.remove(&(window, seat));
+            self.unrouted_pressed_keys.remove(&(window, seat));
         }
         self.pressed_mouse_buttons
             .retain(|&(event_window, event_seat, _), _| {
                 event_window != window || event_seat != seat
             });
+        self.unrouted_pressed_mouse_buttons
+            .retain(|&(event_window, event_seat, _), _| {
+                event_window != window || event_seat != seat
+            });
+        self.clear_pointer_positions(window, seat);
+    }
+
+    fn clear_pointer_positions(&mut self, window: InputWindowId, seat: InputSeatId) {
         self.pointer_positions
             .retain(|&(event_window, event_seat, _), _| {
                 event_window != window || event_seat != seat
@@ -1274,11 +1443,16 @@ mod tests {
             Err(InputIngressError::PresentedRouteRegression { window, seat })
         );
         assert_eq!(
-            timeline.release_presented_route(initial),
+            timeline.unbind_presented_endpoint(window, seat, Some(initial)),
             Err(InputIngressError::PresentedRouteMismatch { window, seat })
         );
-        timeline.release_presented_route(advanced).unwrap();
-        assert_eq!(timeline.release_presented_route(advanced), Ok(()));
+        timeline
+            .unbind_presented_endpoint(window, seat, Some(advanced))
+            .unwrap();
+        assert_eq!(
+            timeline.unbind_presented_endpoint(window, seat, Some(advanced)),
+            Ok(())
+        );
 
         let reclaimed = timeline
             .publish_presented_route(InputPresentedRoute::new(
@@ -1295,7 +1469,7 @@ mod tests {
     }
 
     #[test]
-    fn releasing_the_focused_route_falls_back_to_the_next_explicit_keyboard_window() {
+    fn unbinding_a_route_preserves_the_platform_keyboard_focus() {
         let mut timeline = InputTimeline::default();
         let seat = InputSeatId::PRIMARY;
         let first_window = InputWindowId::new(3);
@@ -1325,7 +1499,9 @@ mod tests {
         timeline
             .apply_window(first_window, seat, InputWindowEvent::Focused(true))
             .unwrap();
-        timeline.release_presented_route(first).unwrap();
+        timeline
+            .unbind_presented_endpoint(first_window, seat, Some(first))
+            .unwrap();
         timeline
             .apply_keyboard(
                 second_window,
@@ -1335,13 +1511,231 @@ mod tests {
             .unwrap();
 
         let route = timeline
-            .pending_ui_entries()
+            .entries()
             .last()
             .expect("keyboard input should be retained")
             .route();
-        assert_eq!(route.window(), second_window);
-        assert_eq!(route.surface(), Some(InputSurfaceId::new(20)));
-        assert!(route.is_ui_routable());
+        assert_eq!(route.window(), first_window);
+        assert_eq!(route.surface(), None);
+        assert!(!route.is_ui_routable());
+    }
+
+    #[test]
+    fn unbinding_a_presented_route_preserves_balanced_physical_edges() {
+        let mut timeline = published_timeline();
+        let window = InputWindowId::new(1);
+        let seat = InputSeatId::PRIMARY;
+        let pointer = InputPointerId::PRIMARY;
+        timeline
+            .apply_pointer(
+                window,
+                seat,
+                pointer,
+                PointerDriverInput::Moved(Vec2::new(20.0, 30.0)),
+            )
+            .unwrap();
+        timeline
+            .apply_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap();
+        timeline
+            .apply_mouse(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+        let presented = timeline.pointer_route(window, seat, None);
+
+        timeline
+            .unbind_presented_endpoint(window, seat, Some(presented))
+            .unwrap();
+
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                InputSurfaceId::new(7),
+                seat,
+                InputPresentationEpoch::new(1).unwrap(),
+                slot_generation(2),
+                route_generation(2),
+                geometry_generation(2),
+            ))
+            .unwrap();
+
+        assert!(
+            !timeline
+                .pointer_positions
+                .contains_key(&(window, seat, pointer))
+        );
+
+        let mouse_release = timeline
+            .apply_mouse(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Release(MouseButton::Left),
+            )
+            .unwrap();
+        let key_release = timeline
+            .apply_keyboard(window, seat, ButtonDriverInput::Release(KeyCode::Enter))
+            .unwrap();
+        assert_eq!(mouse_release.admission.admitted(), 1);
+        assert_eq!(key_release.admission.admitted(), 1);
+        let entries = timeline.entries().copied().collect::<Vec<_>>();
+        let releases = &entries[entries.len() - 2..];
+        assert!(releases.iter().all(|entry| !entry.route().is_ui_routable()));
+        assert!(releases.iter().all(|entry| entry.invalidation().is_none()));
+        assert_eq!(
+            releases
+                .iter()
+                .find(|entry| {
+                    matches!(
+                        entry.kind(),
+                        InputEventKind::PointerButton {
+                            button: MouseButton::Left,
+                            phase: ButtonTransitionPhase::Released,
+                        }
+                    )
+                })
+                .and_then(|entry| entry.logical_position()),
+            None
+        );
+        assert!(releases.iter().any(|entry| {
+            matches!(
+                entry.kind(),
+                InputEventKind::PointerButton {
+                    button: MouseButton::Left,
+                    phase: ButtonTransitionPhase::Released,
+                }
+            )
+        }));
+        assert!(releases.iter().any(|entry| {
+            matches!(
+                entry.kind(),
+                InputEventKind::Key {
+                    key: KeyCode::Enter,
+                    phase: ButtonTransitionPhase::Released,
+                }
+            )
+        }));
+    }
+
+    #[test]
+    fn presented_endpoint_retirement_balances_edges_and_allows_endpoint_reuse() {
+        let mut timeline = published_timeline();
+        let window = InputWindowId::new(1);
+        let seat = InputSeatId::PRIMARY;
+        let pointer = InputPointerId::PRIMARY;
+        let presented = timeline.pointer_route(window, seat, None);
+        timeline
+            .apply_pointer(
+                window,
+                seat,
+                pointer,
+                PointerDriverInput::Moved(Vec2::new(20.0, 30.0)),
+            )
+            .unwrap();
+        timeline
+            .apply_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter))
+            .unwrap();
+        timeline
+            .apply_mouse(
+                window,
+                seat,
+                pointer,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+        let before_retirement = timeline.entries().count();
+
+        let retirement = timeline
+            .retire_presented_endpoint(window, seat, Some(presented))
+            .unwrap();
+
+        assert_eq!(retirement.released_keys(), [KeyCode::Enter]);
+        assert_eq!(retirement.released_mouse_buttons(), [MouseButton::Left]);
+        assert_eq!(retirement.admission().admitted(), 4);
+        assert!(!timeline.routes.contains_key(&(window, seat)));
+        assert!(!timeline.focused_windows.contains_key(&seat));
+        assert!(!timeline.pressed_keys.contains_key(&(window, seat)));
+        assert!(
+            !timeline
+                .pressed_mouse_buttons
+                .contains_key(&(window, seat, pointer))
+        );
+        assert!(
+            !timeline
+                .pointer_positions
+                .contains_key(&(window, seat, pointer))
+        );
+        let lifecycle_entries = timeline
+            .entries()
+            .skip(before_retirement)
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(lifecycle_entries.len(), 4);
+        assert!(lifecycle_entries.iter().all(|entry| {
+            entry.invalidation() == Some(InputInvalidationReason::SurfaceRetired)
+        }));
+        assert!(matches!(
+            lifecycle_entries[0].kind(),
+            InputEventKind::Key {
+                key: KeyCode::Enter,
+                phase: ButtonTransitionPhase::Released,
+            }
+        ));
+        assert!(matches!(
+            lifecycle_entries[1].kind(),
+            InputEventKind::PointerButton {
+                button: MouseButton::Left,
+                phase: ButtonTransitionPhase::Released,
+            }
+        ));
+        assert!(matches!(
+            lifecycle_entries[2].kind(),
+            InputEventKind::PointerLeft
+        ));
+        assert!(matches!(
+            lifecycle_entries[3].kind(),
+            InputEventKind::SurfaceRetired
+        ));
+
+        timeline
+            .publish_presented_route(InputPresentedRoute::new(
+                window,
+                InputSurfaceId::new(8),
+                seat,
+                InputPresentationEpoch::new(1).unwrap(),
+                slot_generation(1),
+                route_generation(1),
+                geometry_generation(1),
+            ))
+            .unwrap();
+        timeline
+            .apply_window(window, seat, InputWindowEvent::Focused(true))
+            .unwrap();
+        assert_eq!(
+            timeline
+                .apply_keyboard(window, seat, ButtonDriverInput::Press(KeyCode::Enter),)
+                .unwrap()
+                .admission
+                .admitted(),
+            1
+        );
+        assert_eq!(
+            timeline
+                .apply_mouse(
+                    window,
+                    seat,
+                    pointer,
+                    ButtonDriverInput::Press(MouseButton::Left),
+                )
+                .unwrap()
+                .admission
+                .admitted(),
+            1
+        );
     }
 
     #[test]

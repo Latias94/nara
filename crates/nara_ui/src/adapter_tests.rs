@@ -11,10 +11,10 @@ use nara_hierarchy::{
     HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
 };
 use nara_input::{
-    ButtonDriverInput, InputGeometryGeneration, InputPointerId, InputPresentationEpoch,
-    InputPresentedRoute, InputRouteGeneration, InputSeatId, InputSlotGeneration, InputSurfaceId,
-    InputTimeline, InputWindowEvent, InputWindowId, MouseButton, PointerDriverInput,
-    apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+    ButtonDriverInput, ButtonTransitionPhase, InputEventKind, InputGeometryGeneration,
+    InputPointerId, InputPresentationEpoch, InputPresentedRoute, InputRouteGeneration, InputSeatId,
+    InputSlotGeneration, InputSurfaceId, InputTimeline, InputWindowEvent, InputWindowId,
+    MouseButton, PointerDriverInput, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
 };
 use nara_reflect::{
     ComponentRegistry, ComponentRegistryPlugin, ComponentSchemaVersion, ComponentTypeId,
@@ -432,7 +432,7 @@ fn endpoint_and_transform_updates_have_distinct_exact_invalidation() {
 }
 
 #[test]
-fn transform_update_releases_timeline_and_interaction_pointer_state_together() {
+fn transform_update_unbinds_ui_route_but_preserves_the_physical_release() {
     let (mut app, _button) = build_button_app();
     let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
     let receipt = commit_ui_presentation(app.world_mut().unwrap(), frame, 1).unwrap();
@@ -488,19 +488,29 @@ fn transform_update_releases_timeline_and_interaction_pointer_state_together() {
             .values()
             .all(|state| !state.pressed())
     );
+    let release = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .admit_mouse_button(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            ButtonDriverInput::Release(MouseButton::Left),
+        )
+        .unwrap();
+    assert_eq!(release.admitted(), 1);
     assert!(
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<InputTimeline>()
-            .admit_mouse_button(
-                InputWindowId::new(11),
-                InputSeatId::PRIMARY,
-                InputPointerId::PRIMARY,
-                ButtonDriverInput::Release(MouseButton::Left),
-            )
-            .unwrap()
-            .is_ignored()
+        !app.world()
+            .resource::<InputTimeline>()
+            .entries()
+            .last()
+            .expect("the physical release should remain in the timeline")
+            .route()
+            .is_ui_routable()
     );
+    app.update()
+        .expect("an unbound physical release should pass through without UI activation");
     assert!(
         app.world()
             .resource::<UiActionJournal>()
@@ -520,6 +530,84 @@ fn transform_update_releases_timeline_and_interaction_pointer_state_together() {
         ),
         UiRouteDisposition::RejectedClosed(UiRouteRejection::SurfaceGenerationMismatch)
     ));
+}
+
+#[test]
+fn pass_through_press_remains_balanced_across_a_transform_update() {
+    let (mut app, _button) = build_unstarted_button_app();
+    update_ui_surface_slot(
+        app.world_mut().unwrap(),
+        surface_id(),
+        test_endpoint(11),
+        test_transform(200.0, 100.0, 300.0, 100.0, 1.0),
+    )
+    .unwrap();
+    app.update().unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    commit_ui_presentation(app.world_mut().unwrap(), frame, 1).unwrap();
+    {
+        let mut timeline = app.world_mut().unwrap().resource_mut::<InputTimeline>();
+        timeline
+            .admit_pointer(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                PointerDriverInput::Moved(Vec2::new(25.0, 10.0)),
+            )
+            .unwrap();
+        timeline
+            .admit_mouse_button(
+                InputWindowId::new(11),
+                InputSeatId::PRIMARY,
+                InputPointerId::PRIMARY,
+                ButtonDriverInput::Press(MouseButton::Left),
+            )
+            .unwrap();
+    }
+    app.update()
+        .expect("a non-modal letterbox press should pass through UI routing");
+
+    update_ui_surface_slot(
+        app.world_mut().unwrap(),
+        surface_id(),
+        test_endpoint(11),
+        test_transform(200.0, 100.0, 400.0, 200.0, 1.0),
+    )
+    .unwrap();
+    app.update()
+        .expect("the successor surface slot should compile before rebinding");
+    let successor = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("the successor surface slot should expose a candidate");
+    commit_ui_presentation(app.world_mut().unwrap(), successor, 2).unwrap();
+    let release = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .admit_mouse_button(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            ButtonDriverInput::Release(MouseButton::Left),
+        )
+        .unwrap();
+
+    assert_eq!(release.admitted(), 1);
+    let release_entry = app
+        .world()
+        .resource::<InputTimeline>()
+        .entries()
+        .last()
+        .copied()
+        .expect("the release should remain observable");
+    assert!(matches!(
+        release_entry.kind(),
+        InputEventKind::PointerButton {
+            button: MouseButton::Left,
+            phase: ButtonTransitionPhase::Released,
+        }
+    ));
+    assert!(!release_entry.route().is_ui_routable());
 }
 
 #[test]
@@ -1812,7 +1900,7 @@ fn resize_while_pressed_cancels_without_activating_the_button() {
             },
         )
         .unwrap();
-    assert_eq!(admission.admitted(), 3);
+    assert_eq!(admission.admitted(), 1);
     app.update().unwrap();
 
     assert!(
@@ -1832,6 +1920,36 @@ fn resize_while_pressed_cancels_without_activating_the_button() {
             .unwrap()
             .state()
             .pressed()
+    );
+
+    let release = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<InputTimeline>()
+        .admit_mouse_button(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            InputPointerId::PRIMARY,
+            ButtonDriverInput::Release(MouseButton::Left),
+        )
+        .unwrap();
+    assert_eq!(release.admitted(), 1);
+    assert!(
+        !app.world()
+            .resource::<InputTimeline>()
+            .entries()
+            .last()
+            .expect("the physical release should remain observable")
+            .route()
+            .is_ui_routable()
+    );
+    app.update().unwrap();
+    assert!(
+        app.world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .unwrap()
+            .is_empty()
     );
 }
 
