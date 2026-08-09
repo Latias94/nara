@@ -70,6 +70,10 @@ impl UiCompiler {
             });
         }
 
+        if snapshot.profile() != self.limits.snapshot_profile() {
+            return Err(UiCompileError::SnapshotProfileMismatch);
+        }
+
         let authored_keys = self.preflight_snapshot(snapshot)?;
         let frame_revision = UiFrameRevision::new(self.next_frame_revision);
         let next_frame_revision = self
@@ -475,4 +479,6 @@ pub enum UiCompileError {
     FrameRevisionExhausted,
     #[error("UI cache revision is exhausted")]
     CacheRevisionExhausted,
+    #[error("UI authoring snapshot profile does not match the compiler profile")]
+    SnapshotProfileMismatch,
 }

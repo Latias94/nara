@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     UiActionId, UiKey, UiLimits, UiLimitsError, UiLocalKey, UiRevision, UiRootDiagnostic,
-    UiRootKey, UiStyle, UiStyleError, UiText, UiVisual,
+    UiRootKey, UiStyle, UiStyleError, UiText, UiVisual, limits::UiSnapshotProfile,
 };
 
 /// Closed root layers shared by paint, hit, focus, and semantic order.
@@ -299,6 +299,7 @@ impl UiRoot {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiAuthoringSnapshot {
     pub(crate) source_revision: UiRevision,
+    profile: UiSnapshotProfile,
     pub(crate) roots: Vec<UiRoot>,
     pub(crate) envelopes: Vec<UiRootEnvelope>,
 }
@@ -307,6 +308,10 @@ impl UiAuthoringSnapshot {
     #[must_use]
     pub const fn source_revision(&self) -> UiRevision {
         self.source_revision
+    }
+
+    pub(crate) const fn profile(&self) -> UiSnapshotProfile {
+        self.profile
     }
 
     #[must_use]
@@ -484,6 +489,7 @@ impl UiAuthoringSnapshotBuilder {
         debug_assert!(pending_roots.next().is_none());
         Ok(UiAuthoringSnapshot {
             source_revision,
+            profile: limits.snapshot_profile(),
             roots,
             envelopes,
         })

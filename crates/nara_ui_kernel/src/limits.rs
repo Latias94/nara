@@ -24,6 +24,18 @@ pub struct UiLimits {
     pub(crate) max_surface_lifetimes: usize,
 }
 
+/// Exact authoring constraints that must travel with one immutable source snapshot.
+///
+/// Compile-only diagnostics, paint, cache and session limits deliberately remain outside this
+/// profile so changing them does not reinterpret the authored document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct UiSnapshotProfile {
+    max_roots: usize,
+    max_nodes: usize,
+    max_depth: usize,
+    max_key_bytes: usize,
+}
+
 impl Default for UiLimits {
     fn default() -> Self {
         Self {
@@ -41,6 +53,15 @@ impl Default for UiLimits {
 }
 
 impl UiLimits {
+    pub(crate) const fn snapshot_profile(self) -> UiSnapshotProfile {
+        UiSnapshotProfile {
+            max_roots: self.max_roots,
+            max_nodes: self.max_nodes,
+            max_depth: self.max_depth,
+            max_key_bytes: self.max_key_bytes,
+        }
+    }
+
     pub fn with_max_roots(mut self, value: usize) -> Result<Self, UiLimitsError> {
         validate("max_roots", value, HARD_MAX_ROOTS)?;
         self.max_roots = value;

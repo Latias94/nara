@@ -885,6 +885,7 @@ fn low_node_limit_still_admits_the_complete_pointer_cleanup_batch() {
     let limits = UiLimits::default().with_max_nodes(2).unwrap();
     let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), limits).unwrap();
     let authored = UiAuthoringSnapshotBuilder::new(1)
+        .with_limits(limits)
         .with_root(
             UiRoot::new(root_key("small"), UiLayer::Base, UiStyle::fill())
                 .with_child(button("only", "Only", "only", 10.0, 10.0, true)),

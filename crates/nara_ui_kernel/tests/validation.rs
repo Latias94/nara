@@ -147,55 +147,6 @@ fn root_diagnostics_are_bounded_and_report_truncation() {
 }
 
 #[test]
-fn compiler_node_budget_is_candidate_wide_and_does_not_advance_revision() {
-    let root = |name: &str| {
-        UiRoot::new(
-            UiRootKey::runtime("test", name).unwrap(),
-            UiLayer::Base,
-            UiStyle::fill(),
-        )
-        .with_child(UiNode::new(UiStyle::fill()))
-    };
-    let oversized = UiAuthoringSnapshotBuilder::new(1)
-        .with_root(root("one"))
-        .with_root(root("two"))
-        .build()
-        .unwrap();
-    let limits = UiLimits::default().with_max_nodes(3).unwrap();
-    let mut compiler = UiCompiler::new(bundled_font_face().unwrap(), limits).unwrap();
-    assert!(matches!(
-        compiler.compile(
-            &oversized,
-            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 100.0, 100.0, 1.0, 1, 1, 1, 1)
-                .unwrap(),
-            UiTheme::default(),
-        ),
-        Err(UiCompileError::SnapshotNodeLimitExceeded {
-            actual: 4,
-            maximum: 3
-        })
-    ));
-
-    let valid = UiAuthoringSnapshotBuilder::new(2)
-        .with_root(UiRoot::new(
-            UiRootKey::runtime("test", "valid").unwrap(),
-            UiLayer::Base,
-            UiStyle::fill(),
-        ))
-        .build()
-        .unwrap();
-    let frame = compiler
-        .compile(
-            &valid,
-            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 100.0, 100.0, 1.0, 1, 1, 1, 1)
-                .unwrap(),
-            UiTheme::default(),
-        )
-        .unwrap();
-    assert_eq!(frame.revision().get(), 1);
-}
-
-#[test]
 fn shaped_glyph_and_logical_paint_budgets_are_candidate_wide() {
     let text_root = |name: &str, text: &str| {
         UiRoot::new(
