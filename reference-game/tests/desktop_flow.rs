@@ -18,8 +18,8 @@ use nara::{
     project_host::ProjectContentLoader,
 };
 use nara_reference_game::{
-    MovementDirection, PlayerRole, WaveOutcome, WaveRetryPhase, WaveRetryRejection,
-    WaveRetryStatus, WaveRunGeneration, WaveSnapshot, movement_command,
+    MovementDirection, PlayerRole, WaveOutcome, WaveRetryPhase, WaveRetryStatus, WaveRunGeneration,
+    WaveSnapshot, movement_command,
 };
 use project_content_fixture::{desktop_candidate_plan_and_root, stop_runtime};
 
@@ -184,7 +184,7 @@ fn wasd_edges_lower_to_semantic_commands_and_focus_release_stops() {
 }
 
 #[test]
-fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
+fn enter_without_presented_ui_cannot_admit_retry() {
     let mut running = desktop_runtime();
     keyboard(&mut running, ButtonDriverInput::Press(KeyCode::Enter));
     running.drive(Duration::ZERO).unwrap();
@@ -209,11 +209,6 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
     let run_generation = terminal.world().resource::<WaveRunGeneration>().get();
     keyboard(&mut terminal, ButtonDriverInput::Press(KeyCode::Enter));
     terminal.drive(Duration::ZERO).unwrap();
-    assert_eq!(
-        terminal.world().resource::<WaveRetryStatus>().phase(),
-        WaveRetryPhase::Idle
-    );
-
     keyboard(&mut terminal, ButtonDriverInput::Release(KeyCode::Enter));
     terminal.drive(Duration::ZERO).unwrap();
     keyboard(&mut terminal, ButtonDriverInput::Press(KeyCode::Enter));
@@ -221,21 +216,14 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
     drive_fixed(&mut terminal);
     assert_eq!(
         terminal.world().resource::<WaveRetryStatus>().phase(),
-        WaveRetryPhase::Pending
-    );
-    assert_eq!(
-        terminal
-            .world()
-            .resource::<WaveRetryStatus>()
-            .pending_generation(),
-        Some(run_generation)
+        WaveRetryPhase::Idle
     );
     assert_eq!(
         terminal
             .world()
             .resource::<WaveRetryStatus>()
             .last_rejection(),
-        Some(WaveRetryRejection::AlreadyPending)
+        None
     );
     assert_eq!(terminal.generation(), runtime_generation);
     assert_eq!(
@@ -243,55 +231,7 @@ fn enter_is_terminal_only_and_admits_at_most_one_pending_retry() {
         run_generation
     );
     assert!(terminal.world().resource::<WaveSnapshot>().is_terminal());
-
-    drive_fixed(&mut terminal);
-    let snapshot = terminal.world().resource::<WaveSnapshot>();
-    assert_eq!(terminal.generation(), runtime_generation);
-    assert_eq!(snapshot.run_generation, run_generation + 1);
-    assert_eq!(snapshot.tick, 1);
-    assert_eq!(snapshot.outcome, WaveOutcome::Running);
-    assert_eq!(snapshot.player.hit_points, 20);
-    assert_eq!(snapshot.enemies.len(), 3);
-    assert_eq!(
-        terminal.world().resource::<WaveRetryStatus>().phase(),
-        WaveRetryPhase::Applied
-    );
-    assert_eq!(
-        terminal
-            .world()
-            .resource::<WaveRetryStatus>()
-            .last_rejection(),
-        Some(WaveRetryRejection::AlreadyPending)
-    );
     stop_runtime(terminal);
-}
-
-#[test]
-fn repeated_retry_keeps_one_runtime_generation() {
-    let mut runtime = desktop_runtime();
-    let runtime_generation = runtime.generation();
-
-    for expected_generation in 2..=3 {
-        start_desktop_wave(&mut runtime);
-        drive_to_terminal(&mut runtime);
-        keyboard(&mut runtime, ButtonDriverInput::Press(KeyCode::Enter));
-        runtime.drive(Duration::ZERO).unwrap();
-        drive_fixed(&mut runtime);
-        assert_eq!(
-            runtime.world().resource::<WaveRetryStatus>().phase(),
-            WaveRetryPhase::Pending
-        );
-        drive_fixed(&mut runtime);
-        assert_eq!(runtime.generation(), runtime_generation);
-        assert_eq!(
-            runtime.world().resource::<WaveRunGeneration>().get(),
-            expected_generation
-        );
-        keyboard(&mut runtime, ButtonDriverInput::Release(KeyCode::Enter));
-        runtime.drive(Duration::ZERO).unwrap();
-    }
-
-    stop_runtime(runtime);
 }
 
 #[test]

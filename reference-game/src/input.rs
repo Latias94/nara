@@ -6,7 +6,6 @@ use nara::{
 
 use crate::{
     MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, movement_draft, movement_release_draft,
-    runtime_ui::REFERENCE_RETRY_ACTION,
 };
 
 const MOVE_LEFT_ACTION: &str = "reference-game.move-left";
@@ -44,10 +43,6 @@ pub(crate) fn install_desktop_input(app: &mut App) -> Result<(), PluginError> {
         for (id, key, _) in bindings {
             action_map.bind(ActionBinding::key(action_id(id), key));
         }
-        action_map.bind(ActionBinding::key(
-            action_id(REFERENCE_RETRY_ACTION),
-            KeyCode::Enter,
-        ));
     }
 
     {

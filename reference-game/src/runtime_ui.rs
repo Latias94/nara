@@ -7,7 +7,7 @@ use nara::{
     },
     ecs::{Entity, Mut, Query, Res, ResMut, Resource},
     gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
-    input::{ActionOutcomes, ActionPhase, InputPointerId, InputSeatId, InputWindowId},
+    input::{InputPointerId, InputSeatId, InputWindowId},
     scene::SceneEntitySource,
     ui::{
         UiActionConsumerId, UiActionCursor, UiActionJournal, UiBrush, UiButton, UiColorRole,
@@ -357,7 +357,6 @@ fn retry_hint(retry: WaveRetryStatus) -> &'static str {
 }
 
 fn collect_retry_intents(
-    outcomes: Option<Res<ActionOutcomes>>,
     mut ui_actions: ResMut<UiActionJournal>,
     ui_cursor: Res<ReferenceUiActionCursor>,
     snapshot: Res<WaveSnapshot>,
@@ -365,12 +364,6 @@ fn collect_retry_intents(
     mut commands: ResMut<LocalGameplayCommands>,
     faults: Res<RuntimeFaultReporter>,
 ) {
-    let keyboard = outcomes.is_some_and(|outcomes| {
-        outcomes.as_slice().iter().any(|outcome| {
-            outcome.action.as_str() == REFERENCE_RETRY_ACTION
-                && outcome.phase == ActionPhase::Started
-        })
-    });
     let (semantic, last_sequence) = match ui_actions.pending(&ui_cursor.0) {
         Ok(pending) => (
             pending
@@ -387,7 +380,7 @@ fn collect_retry_intents(
         }
     };
     let retry_is_eligible = snapshot.is_terminal() && retry.phase() != WaveRetryPhase::Pending;
-    if retry_is_eligible && (keyboard || semantic) && commands.push(retry_draft()).is_err() {
+    if retry_is_eligible && semantic && commands.push(retry_draft()).is_err() {
         faults.report(RuntimeFault::engine(
             RuntimeFaultKind::LocalIntentLoss,
             "reference-game.retry-intent",
