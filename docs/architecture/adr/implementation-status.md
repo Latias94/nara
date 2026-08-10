@@ -3,7 +3,7 @@
 **Status**: Active
 **Last Verified**: 2026-08-10
 
-This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole active execution contract is the [UI Foundation Correction plan](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), which preserves completed NUI evidence while reopening only the shared Foundation contracts under `UIF-U<N>`. Superseded plans remain audit evidence and trigger backlog, not active implementation authority. Legacy rows that still name NUI-U15B/U16 describe the last completed NUI baseline; ADR 0107-0109 and UIF own the current remaining gaps and supersede those row-tail execution claims.
+This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole active execution contract is the [Runtime UI Product Slice plan](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md), which consumes the immutable UIF-U5 Foundation Conformance Baseline. Superseded plans remain audit evidence and trigger backlog, not active implementation authority. Legacy rows that still name NUI-U15B/U16 describe the last completed NUI baseline; ADR 0107-0109 and the UIF baseline own shared contracts while RUP owns current product validation.
 
 ## Current UIF correction override (2026-08-10)
 
@@ -13,7 +13,8 @@ Slice plan: UIF-U2C is
 complete for snapshot-profile identity, attempted text-work accounting and modal failure algebra;
 UIF-U3C is complete for prepared submission authority, exact backend permits and infallible receipt
 commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target ownership and Host
-platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is active for product integration.
+platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; RUP-U1 is
+active for the exact gameplay-to-Retry trajectory.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
 `WinitAccessibilityBridge` symbol in older anchors.
 
@@ -23,7 +24,8 @@ platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is active for product 
 | UIF-U3C | implemented | prepared backend submission, supersession, fault-domain isolation and infallible receipt commit; commit `0f5154f` and `docs/knowledge/engineering/verification/2026-08/2026-08-09T160757Z-uif-u3c-prepared-submission-authority-and-infallible-commit-2592110e3d0d4ae8a051a157f49db1ba.md` |
 | UIF-U4C | implemented | suspended Surface Slot lifecycle, target uniqueness and platform closure; commit `d28efcf` and UIF-U4C verification |
 | UIF-U5 | implemented | public inventory, neutral examples, independent consumer and Foundation Conformance Baseline; commit `e307cb3` and record `70b35505e8da4cb388c36d3ede602259` |
-| RUP-U0 | active | Reference Game product authority and focused fixture reconciliation against the pinned UIF-U5 baseline |
+| RUP-U0 | implemented | focused Reference Game fixture reconciliation; commit `80a7270` and verification `c067431accb242a7b69b839b5dd481d4` |
+| RUP-U1 | active | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress |
 
 ## Schema
 
