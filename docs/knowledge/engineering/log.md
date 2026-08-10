@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-10
+* **Work Registration**: [UI Foundation correction: UIF-U5 conformance baseline active](registry/2026-08/2026-08-10T095931Z-engine-foundation-contract-completion-codex-root-e2588ef669d841afbb388f28ec65148a.md) - Activates the public neutral-consumer and Foundation Conformance Baseline unit after UIF-U4C closed Surface Slot and platform authority.
+* **Verification Evidence**: [UIF-U4C surface suspension and platform authority closure](verification/2026-08/2026-08-10T055148Z-uif-u4c-surface-suspension-and-platform-authority-closure-9c48d2de48184e7e973c9871b7e32b6c.md) - Verifies unique target ownership, explicit Surface Slot availability, balanced endpoint migration, stale attempt retirement, and exact accessibility publisher generations.
+
 ## 2026-08-09
 * **Work Registration**: [UI Foundation correction: UIF-U4C surface suspension and platform authority active](registry/2026-08/2026-08-09T160834Z-engine-foundation-contract-completion-codex-root-e8e71c183fe54ec8b82c9dfff7c70147.md) - Activates Host-owned Surface Slot suspension, target uniqueness, endpoint handoff, and exact platform accessibility authority after UIF-U3C closed submission atomicity.
 * **Verification Evidence**: [UIF-U3C prepared submission authority and infallible commit](verification/2026-08/2026-08-09T160757Z-uif-u3c-prepared-submission-authority-and-infallible-commit-2592110e3d0d4ae8a051a157f49db1ba.md) - Verifies pre-submit authority staging, exact backend permits, infallible Host commit, attempt supersession, and target/device fault-domain isolation.
@@ -147,7 +151,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game delivery hardening: asset reload terminality closed](registry/2026-07/2026-07-28T130402Z-engine-foundation-contract-completion-codex-root-80386a62cae54b33a36c50f0f24ec517.md) - Closes the bounded asset-reload source gate while paused-input retention remains open.
 * **Verification Evidence**: [RGD-U11 bounded asset reload terminality](verification/2026-07/2026-07-28T130156Z-rgd-u11-bounded-asset-reload-terminality-a915d41a753d47369d2a22e202cb5d59.md) - Verifies bounded source-change, reload-request, watcher, event-observation, and image publication terminality.
 * **Work Registration**: [Reference-game delivery hardening: persistence authority closed](registry/2026-07/2026-07-28T030251Z-engine-foundation-contract-completion-codex-root-c9fab8d53c6545e8afff9c7b117db378.md) - Closes the verified persistence-receipt source gate while asset reload terminality and paused-input retention remain open.
-* **Verification Evidence**: [RGD-U11 verified editor persistence authority](verification/2026-07/2026-07-28T025934Z-rgd-u11-verified-editor-persistence-authority-ecc563c521db4408a236fe8caa4a17fe.md) - Closes the receipt-forgery source gate with workspace-bound linear authority and post-publication content verification.
-
-## 2026-07-27
-* **Work Registration**: [Reference-game delivery hardening: owner-lineage correction closed](registry/2026-07/2026-07-27T165137Z-engine-foundation-contract-completion-codex-root-a0b7b9bae94e42cfa2ea4ccc3f752a77.md) - Closes the ADR 0098 implementation tracer while keeping persistence receipts, asset-reload terminality, and paused-input retention open.

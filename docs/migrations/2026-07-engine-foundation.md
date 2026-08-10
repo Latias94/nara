@@ -3811,6 +3811,82 @@ nextest gate prove transform round-trips, black-bar handling, endpoint isolation
 cross-slot epoch restart, logical-unbind versus physical-retirement behavior, exclusive
 accessibility publication, and exact receipt/action mapping.
 
+## UIF-U4C: Explicit Surface Availability And Opaque Accessibility Publishers
+
+**Removed contract**: an installed Surface Slot no longer remains presentation-authoritative while
+its native target has zero extent, is missing, or has an invalid scale. A caller can no longer
+construct or choose `WinitAccessibilityPublisherId`, pass that ID into
+`WinitAccessibilityPublisher::new`, map an unbound AccessKit `ActionRequest`, republish semantics at
+the suspended slot generation, or assume every different suspension generation is a conflict.
+
+**Canonical replacement**: the Runtime UI Host owns a unique window-target-to-Surface-Slot index
+and exposes each installed lifetime as `UiSurfaceAvailability::Active` or
+`UiSurfaceAvailability::Suspended(reason)`. Use `suspend_ui_surface` for a temporarily unavailable
+target, `restore_ui_surface` for a fresh successor endpoint/transform generation, and
+`retire_ui_surface` for permanent teardown. Suspension keeps the target reservation and only the
+physical held-edge facts required for balanced releases; direct retirement releases the
+reservation even when no restored frame was presented.
+
+`WinitAccessibilityPublisher::new(surface_id)` now allocates its own opaque process-unique
+publisher identity and returns `Result`. Save the exact `WinitAccessibilityReceipt` returned by
+`publish_update`, bind an incoming AccessKit request with `receipt.bind_action(request)`, then pass
+that receipt-bound request to `map_action`. A surface suspension must be forwarded to the publisher
+with its successor slot generation. The suspended generation itself is not publishable; only a
+strict successor semantic route can restore action mapping. A later successor suspension replaces
+the earlier one, while stale suspensions and stale retirement tokens fail closed.
+
+**Before**:
+
+```rust
+let publisher_id = WinitAccessibilityPublisherId::new(7).unwrap();
+let mut publisher = WinitAccessibilityPublisher::new(publisher_id, surface);
+let receipt = publisher.publish_update(&semantics)?;
+let input = publisher.map_action(&WinitAccessibilityActionRequest::new(receipt, request))?;
+```
+
+**After**:
+
+```rust
+let mut publisher = WinitAccessibilityPublisher::new(surface)?;
+let receipt = publisher.publish_update(&semantics)?;
+let input = publisher.map_action(&receipt.bind_action(request))?;
+
+let suspension = suspend_ui_surface(world, surface, UiSurfaceSuspensionReason::ZeroExtent)?;
+if let Some(suspension) = suspension {
+    publisher.suspend(WinitAccessibilitySuspension::new(
+        suspension.surface_id(),
+        UiRevision::new(suspension.suspended_slot_generation()).unwrap(),
+    ))?;
+}
+```
+
+**User action**: rewrite publisher construction and every platform action callback. Keep the exact
+publication receipt alongside the platform tree lifetime; do not reconstruct it from a surface,
+node ID, generation, or integer publisher ID. Replace “skip the frame while minimized” branches
+with an explicit suspend/restore transition, and forward permanent teardown through the exact
+retirement token.
+
+**Source action**: `manual-rewrite`. The caller-supplied identity, raw action ingress, implicit
+unavailable-target behavior, and equal-generation restore semantics are intentionally removed.
+
+**Cache action**: delete cached platform trees, node mappings, input transforms, prepared backend
+attempts and presentation routes when a surface suspends. Restore may retain source authoring and
+resource caches, but it must compile and present a fresh slot generation before semantics or input
+resume.
+
+**Compatibility window**: none (pre-1.0 fearless replacement).
+
+**Rollback**: revert implementation commit `d28efcf` and this migration/ledger/evidence successor
+together. Do not restore caller-selected publisher IDs, raw AccessKit action mapping, skipped
+unavailable-target branches, or stale backend acceptance after suspension.
+
+**Verification anchors**: `crates/nara_ui/src/runtime/{state,surface,targets}.rs`,
+`crates/nara_ui/src/adapter_tests.rs`, `crates/nara_winit/src/accessibility.rs`,
+`crates/nara_winit/tests/accessibility.rs`, `src/ui_presentation/{attempts,surfaces,tests}.rs`, and
+the UIF-U4C verification record prove target-conflict atomicity, direct suspended retirement,
+outstanding-attempt cancellation, strict accessibility generations, stale/foreign action rejection,
+missing-window recovery and non-16:9 letterbox mapping.
+
 ## Persistent Format Matrix
 
 Rows describe only formats intentionally supported after the refactor; deleted draft formats do
