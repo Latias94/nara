@@ -18,13 +18,15 @@ use nara::{
         PluginId, RuntimeDriverScope, RuntimeGeneration, RuntimeWorldAccessError,
     },
     ecs::{Entity, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs},
-    gameplay::GameplayCommandSet,
-    prelude::{App, Commands, Plugin, PluginError, Query, Res, ResMut, World},
+    gameplay::{GameplayCommandBatch, GameplayCommandSet},
+    prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
     ui::latest_ui_frame,
     window::WindowId,
 };
-use nara_reference_game::{PlayerRole, REFERENCE_RUNTIME_UI_PLUGIN_ID, WaveSnapshot};
+use nara_reference_game::{
+    PlayerRole, REFERENCE_RUNTIME_UI_PLUGIN_ID, WaveRetryRejection, WaveRetryStatus, WaveSnapshot,
+};
 use nara_render::RenderTarget;
 use nara_ui::{
     UiAccessibilityInput, UiPresentationReceipt, UiRouteDisposition, UiSurfaceContentTransform,
@@ -53,6 +55,8 @@ const RETRY_REPLACEMENT_REJECTION_FIXTURE_DECLARATION: PluginDeclaration = Plugi
 .requires_plugins(COMPONENT_PRESENTER_REQUIREMENTS);
 static NEXT_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PRESENTATION_ATTEMPT_ID: AtomicU64 = AtomicU64::new(1);
+const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
+const MAX_RECORDED_RETRY_BATCHES: usize = 8;
 
 #[derive(Debug, Default)]
 struct ComponentPresenterPlugin;
@@ -79,7 +83,12 @@ impl Plugin for RetryReplacementRejectionFixturePlugin {
         install_component_presenter(app)?;
         app.init_resource::<RetryCandidateObserver>()?.add_systems(
             CoreStage::FixedUpdate,
-            install_retry_candidate_observer_after_terminal.after(GameplayCommandSet::Capture),
+            (
+                install_retry_candidate_observer_after_terminal,
+                repair_retry_candidate_observer_after_rejection,
+            )
+                .chain()
+                .after(GameplayCommandSet::Capture),
         )?;
         Ok(())
     }
@@ -167,12 +176,42 @@ impl __RuntimeDriverPort for ComponentSurfaceUpdates {
 struct RetryCandidateObserver {
     installed: bool,
     triggered: bool,
+    observer_entity: Option<Entity>,
+    repair_at_tick: Option<u64>,
+}
+
+#[derive(Debug, Default, Resource)]
+pub(super) struct ComponentRetryCommandTrace {
+    batches: Vec<usize>,
+    overflowed: bool,
+}
+
+impl ComponentRetryCommandTrace {
+    pub(super) fn batches(&self) -> &[usize] {
+        &self.batches
+    }
+
+    pub(super) const fn overflowed(&self) -> bool {
+        self.overflowed
+    }
+
+    fn record(&mut self, retry_count: usize) {
+        if retry_count == 0 {
+            return;
+        }
+        if self.batches.len() == MAX_RECORDED_RETRY_BATCHES {
+            self.overflowed = true;
+            return;
+        }
+        self.batches.push(retry_count);
+    }
 }
 
 fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
     app.init_resource::<ComponentPresentationState>()?
         .init_resource::<ComponentAccessibilityInputs>()?
         .init_resource::<ComponentSurfaceUpdates>()?
+        .init_resource::<ComponentRetryCommandTrace>()?
         .add_systems(
             CoreStage::First,
             (
@@ -181,8 +220,23 @@ fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
             )
                 .chain(),
         )?
+        .add_systems(
+            CoreStage::FixedUpdate,
+            record_component_retry_commands.in_set(GameplayCommandSet::Capture),
+        )?
         .add_systems(CoreStage::Cleanup, present_latest_reference_ui_component)?;
     Ok(())
+}
+
+fn record_component_retry_commands(
+    batch: Res<GameplayCommandBatch>,
+    mut trace: ResMut<ComponentRetryCommandTrace>,
+) {
+    let retry_count = batch
+        .iter()
+        .filter(|command| command.command_type().as_str() == RETRY_COMMAND_TYPE)
+        .count();
+    trace.record(retry_count);
 }
 
 pub(super) fn queue_component_accessibility_input(
@@ -317,25 +371,54 @@ fn install_retry_candidate_observer_after_terminal(world: &mut World) {
     {
         return;
     }
-    world.add_observer(
-        |event: On<Add, SceneEntitySource>,
-         snapshot: Res<WaveSnapshot>,
-         mut observer: ResMut<RetryCandidateObserver>,
-         players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
-         mut commands: Commands| {
-            if !snapshot.is_terminal() || observer.triggered {
-                return;
-            }
-            if let Some((old_player, _)) = players.iter().find(|(entity, source)| {
-                *entity != event.entity && source.entity_id.as_str() == "player"
-            }) {
-                observer.triggered = true;
-                commands.entity(old_player).despawn();
-            }
-        },
-    );
+    let observer_entity = world
+        .add_observer(
+            |event: On<Add, SceneEntitySource>,
+             snapshot: Res<WaveSnapshot>,
+             mut observer: ResMut<RetryCandidateObserver>,
+             players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
+             mut commands: Commands| {
+                if !snapshot.is_terminal() || observer.triggered {
+                    return;
+                }
+                if let Some((old_player, _)) = players.iter().find(|(entity, source)| {
+                    *entity != event.entity && source.entity_id.as_str() == "player"
+                }) {
+                    observer.triggered = true;
+                    commands.entity(old_player).despawn();
+                }
+            },
+        )
+        .id();
     world.flush();
-    world.resource_mut::<RetryCandidateObserver>().installed = true;
+    let mut observer = world.resource_mut::<RetryCandidateObserver>();
+    observer.installed = true;
+    observer.observer_entity = Some(observer_entity);
+}
+
+fn repair_retry_candidate_observer_after_rejection(world: &mut World) {
+    let fixed_tick = world.resource::<FixedTime>().tick();
+    let rejected = world.resource::<WaveRetryStatus>().last_rejection()
+        == Some(WaveRetryRejection::ReplacementRejected);
+    let repair_at_tick = world.resource::<RetryCandidateObserver>().repair_at_tick;
+    if rejected && repair_at_tick.is_none() {
+        world
+            .resource_mut::<RetryCandidateObserver>()
+            .repair_at_tick = fixed_tick.checked_add(1);
+        return;
+    }
+    if repair_at_tick.is_none_or(|repair_at_tick| fixed_tick < repair_at_tick) {
+        return;
+    }
+    let observer_entity = world
+        .resource_mut::<RetryCandidateObserver>()
+        .observer_entity
+        .take()
+        .expect("the installed Retry rejection observer should remain repairable");
+    assert!(world.despawn(observer_entity));
+    world
+        .resource_mut::<RetryCandidateObserver>()
+        .repair_at_tick = None;
 }
 
 pub(super) fn component_presenter_plugin() -> PluginDefinition {

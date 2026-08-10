@@ -137,6 +137,20 @@ pub(super) fn inject_keyboard(runtime: &mut RuntimeInstance, key: KeyCode) {
         .unwrap();
 }
 
+pub(super) fn release_keyboard(runtime: &mut RuntimeInstance, key: KeyCode) {
+    runtime
+        .with_driver_scope(|scope| {
+            apply_keyboard_driver_input_at(
+                scope,
+                InputWindowId::new(1),
+                InputSeatId::PRIMARY,
+                ButtonDriverInput::Release(key),
+            )
+        })
+        .unwrap()
+        .unwrap();
+}
+
 pub(super) fn inject_pointer_click(runtime: &mut RuntimeInstance) {
     let point = retry_platform_center(runtime);
     pointer_move(runtime, point);

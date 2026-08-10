@@ -6,12 +6,102 @@ mod ui_product_fixture;
 use nara_reference_game::WaveRetryPhase;
 use ui_product_fixture::{
     CANONICAL_UI_TARGET, FRACTIONAL_INPUT_TARGET, LETTERBOX_RESIZE_TARGET, ProductUiCapture,
-    ProductUiState, REFERENCE_RETRY_ACTION, RetryActivation, SemanticCapture, UI_PHYSICAL_TARGETS,
-    capture_product_states, capture_readability_case, capture_retry_interaction_variants,
-    exercise_fractional_pointer_retry_activation, exercise_paused_retry_activation,
-    exercise_pending_retry_reactivation, exercise_resize_cancels_retry_capture,
-    exercise_retry_activation,
+    ProductUiState, REFERENCE_RETRY_ACTION, RetryActivation, SemanticCapture,
+    SingleRuntimeRetryTrajectory, UI_PHYSICAL_TARGETS, capture_product_states,
+    capture_readability_case, capture_retry_interaction_variants,
+    capture_single_runtime_retry_trajectory, exercise_fractional_pointer_retry_activation,
+    exercise_paused_retry_activation, exercise_pending_retry_reactivation,
+    exercise_resize_cancels_retry_capture, exercise_retry_activation,
 };
+
+#[test]
+fn one_runtime_retry_trace_binds_exact_commands_to_presented_state() {
+    let trace: SingleRuntimeRetryTrajectory =
+        capture_single_runtime_retry_trajectory(CANONICAL_UI_TARGET);
+    let captures = [
+        &trace.running,
+        &trace.completed,
+        &trace.first_pending,
+        &trace.pending_after_reactivation,
+        &trace.rejected,
+        &trace.second_pending,
+        &trace.applied,
+    ];
+
+    assert!(captures.windows(2).all(|pair| {
+        pair[0].runtime_generation == pair[1].runtime_generation
+            && pair[0].presentation_epoch < pair[1].presentation_epoch
+    }));
+    assert_eq!(
+        captures
+            .iter()
+            .map(|capture| capture.run_generation)
+            .collect::<Vec<_>>(),
+        vec![1, 1, 1, 1, 1, 1, 2]
+    );
+
+    assert_eq!(
+        trace.first_activation_receipt.presentation_epoch(),
+        trace.completed.presentation_epoch
+    );
+    assert_eq!(
+        trace.first_activation_receipt.frame_revision().get(),
+        trace.completed.frame_revision
+    );
+    assert_eq!(
+        trace.first_activation_receipt.route_revision().get(),
+        trace.completed.route_revision
+    );
+    assert_eq!(
+        trace.second_activation_receipt.presentation_epoch(),
+        trace.rejected.presentation_epoch
+    );
+    assert_eq!(
+        trace.second_activation_receipt.frame_revision().get(),
+        trace.rejected.frame_revision
+    );
+    assert_eq!(
+        trace.second_activation_receipt.route_revision().get(),
+        trace.rejected.route_revision
+    );
+
+    assert_eq!(trace.retry_batches_after_first_activation, vec![1]);
+    assert_eq!(trace.retry_batches_after_pending_reactivation, vec![1]);
+    assert_eq!(trace.retry_command_batches, vec![1, 1]);
+    assert!(!trace.retry_trace_overflowed);
+
+    let retry_key = &trace.completed.retry().expect("completed Retry").key;
+    for capture in [
+        &trace.completed,
+        &trace.first_pending,
+        &trace.pending_after_reactivation,
+        &trace.rejected,
+        &trace.second_pending,
+    ] {
+        let retry = capture.retry().expect("the terminal trace retains Retry");
+        assert_eq!(&retry.key, retry_key, "{capture:#?}");
+        assert!(retry.focused, "{capture:#?}");
+    }
+    assert_eq!(trace.first_pending.state, ProductUiState::RetryPending);
+    assert_eq!(
+        trace.pending_after_reactivation.state,
+        ProductUiState::RetryPending
+    );
+    assert_eq!(trace.rejected.state, ProductUiState::RetryRejected);
+    assert_eq!(trace.second_pending.state, ProductUiState::RetryPending);
+    assert_eq!(trace.applied.state, ProductUiState::RetryApplied);
+    assert!(trace.applied.retry().is_none(), "{:#?}", trace.applied);
+    assert!(!trace.applied.paint_keys.contains(retry_key));
+    assert!(!contains_key(&trace.applied.hit_facts, retry_key));
+    assert!(!contains_key(&trace.applied.focus_facts, retry_key));
+    assert!(
+        trace
+            .applied
+            .semantic_facts
+            .iter()
+            .all(|fact| &fact.key != retry_key)
+    );
+}
 
 #[test]
 fn canonical_target_covers_the_six_product_states() {

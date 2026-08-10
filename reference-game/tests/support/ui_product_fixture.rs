@@ -35,6 +35,10 @@ use super::project_content_fixture::headless_wave_candidate_plan_and_root_with;
 mod interaction;
 #[path = "ui_product_fixture/presenter.rs"]
 mod presenter;
+#[path = "ui_product_fixture/trajectory.rs"]
+mod trajectory;
+
+pub use trajectory::{SingleRuntimeRetryTrajectory, capture_single_runtime_retry_trajectory};
 
 use interaction::{
     activate_component_accessibility, activate_gamepad, clear_focus, drive_fixed,
