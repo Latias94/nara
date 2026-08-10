@@ -8,9 +8,9 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The active [UI Foundation Correction
-   plan](../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md) owns current execution
-   order. The [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
+3. The active [Runtime UI Product Slice
+   plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) owns current execution order.
+   The [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and
    must not authorize implementation by themselves.

@@ -1,15 +1,16 @@
 # Nara UI Program Roadmap
 
 This page is a navigation index, not an execution authority or an implementation ledger. The
-active plan is the only plan allowed to order work; successor plans remain inactive until the
-Foundation publishes a pinned conformance record and exactly one is selected by product priority.
+active plan is the only plan allowed to order work. UIF-U5 has published the pinned conformance
+record, and the Runtime UI Product Slice is the selected product priority.
 
 ```text
-UI Foundation Correction (active)
+UI Foundation Correction (complete)
         +-----------------------------+
         |                             |
         v                             v
 Runtime UI Product Slice      Editor Foundation Workflow
+          (active)                    (inactive)
         |                             |
         +-------------+---------------+
                       v

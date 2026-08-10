@@ -1,9 +1,9 @@
 # Reference-Game UI Product Slice
 
-**Status**: Runtime UI product contract; implementation paused pending UIF conformance baseline
+**Status**: Runtime UI product contract; RUP-U0 active against the pinned UIF-U5 baseline
 **Date**: 2026-08-05
 **Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint; 2026-08-07 for the example-first NUI-U15A/NUI-U15B split; 2026-08-08 for the UIF/RUP rebaseline
-**Authority**: ADR 0102 and ADR 0107-0109; execution belongs to the inactive [Runtime UI Product Slice plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) after UIF publishes a pinned conformance baseline
+**Authority**: ADR 0102 and ADR 0107-0109; execution belongs to the active [Runtime UI Product Slice plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md), pinned to UIF-U5 record `70b35505e8da4cb388c36d3ede602259`
 **Scope**: The first complete data-driven runtime UI proof for the reference game
 
 This document is a product input for the renderer-neutral UI work. It is intentionally narrower

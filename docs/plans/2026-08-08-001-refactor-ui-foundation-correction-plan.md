@@ -6,10 +6,11 @@ deepened: 2026-08-08
 amended: 2026-08-10
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
-execution_state: active
+execution_state: superseded
 product_contract_source: docs/architecture/ui-foundation-design.md
 origin: docs/plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md
 supersedes: docs/plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md
+superseded_by: docs/plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md
 plan_id: ui-foundation-correction-2026-08
 unit_namespace: UIF
 operator_execution_authority: external-control-plane
@@ -28,10 +29,9 @@ operator_execution_authority: external-control-plane
 - **Product order:** Runtime UI product acceptance is paused until this plan publishes a new
   Foundation Conformance Baseline. The Reference Game remains a late acceptance carrier and may
   provide neutral reproductions, but it cannot design a shared Interface.
-- **Authority:** This is the sole active UI execution plan. The predecessor remains immutable
-  historical evidence. The 2026-08-09 contract audit reopened focused corrective units without
-  rewriting the immutable UIF-U2/UIF-U3 evidence. Successor plans are inactive until UIF-U5
-  publishes completion evidence.
+- **Authority:** This plan is complete at UIF-U5 baseline record
+  `70b35505e8da4cb388c36d3ede602259`. The predecessor and all corrective-unit evidence remain
+  immutable. The Runtime UI Product Slice is the active product successor.
 - **Execution profile:** Nara is pre-1.0. Prefer owning-module fearless refactors and deletion of
   obsolete paths over compatibility wrappers. Keep Cargo commands serial with one build job.
 
@@ -448,7 +448,8 @@ Host branch leaves a stale route, receipt, pointer transform or accessibility tr
 
 ### UIF-U5 — Neutral refreeze and handoff
 
-**Status:** Active. This is the sole active unit.
+**Status:** Complete at commit `e307cb3` and baseline record
+`70b35505e8da4cb388c36d3ede602259`.
 
 **Depends on:** UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C.
 
@@ -462,9 +463,8 @@ used by first-party conformance to named local presenter glue; it does not publi
 receipt issuer. The baseline record includes the exact commit, public inventory, invariants,
 assertions, reference pressure matrix revision, and predecessor record it supersedes.
 
-**Exit:** Close UIF and activate exactly one product successor against the pinned conformance record.
-Runtime UI is the default next delivery priority; Editor remains independently eligible and is not a
-technical descendant of Runtime UI.
+**Exit:** UIF is closed and the Runtime UI Product Slice is active against the pinned conformance
+record. Editor remains independently eligible and is not a technical descendant of Runtime UI.
 
 ## Non-goals and admission triggers
 
