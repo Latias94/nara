@@ -1,7 +1,7 @@
 use std::{error::Error, sync::Arc};
 
 use nara_ui::{
-    advanced::{UiActivationSource, UiRouteRejection, commit_ui_presentation, retire_ui_surface},
+    advanced::{UiActivationSource, UiRouteRejection, retire_ui_surface},
     prelude::{UiActionId, UiActionJournal, UiButton, UiLayer, UiRoot},
 };
 
@@ -36,9 +36,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     assert_eq!(primary_frame.environment().scale_factor(), 1.0);
     assert_eq!(secondary_frame.environment().scale_factor(), 1.25);
 
-    let primary_receipt = commit_ui_presentation(app.world_mut()?, Arc::clone(&primary_frame), 1)?;
+    let primary_receipt =
+        present_for_interaction_lab(app.world_mut()?, Arc::clone(&primary_frame), 1)?;
     let secondary_receipt =
-        commit_ui_presentation(app.world_mut()?, Arc::clone(&secondary_frame), 1)?;
+        present_for_interaction_lab(app.world_mut()?, Arc::clone(&secondary_frame), 1)?;
 
     let (fast_cursor, paused_cursor) = register_consumers(app.world_mut()?)?;
     let primary_key = semantic_key(&app, primary_receipt, "Primary action")?;
@@ -72,7 +73,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     app.update()?;
     let updated_frame = required_frame(&app, primary_surface)?;
-    let updated_receipt = commit_ui_presentation(app.world_mut()?, Arc::clone(&updated_frame), 2)?;
+    let updated_receipt =
+        present_for_interaction_lab(app.world_mut()?, Arc::clone(&updated_frame), 2)?;
     let updated_action = UiActionId::new(UPDATED_ACTION)?;
     activate_accessibility(&mut app, updated_receipt, &primary_key, &updated_action)?;
     assert_latest_action(
@@ -90,7 +92,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .insert(UiButton::new("Primary action", updated_action, 16.0)?.with_enabled(false));
     app.update()?;
     let disabled_frame = required_frame(&app, primary_surface)?;
-    let disabled_receipt = commit_ui_presentation(app.world_mut()?, disabled_frame, 3)?;
+    let disabled_receipt = present_for_interaction_lab(app.world_mut()?, disabled_frame, 3)?;
     prove_disabled_rejection(&mut app, disabled_receipt, &primary_key)?;
 
     app.world_mut()?
@@ -102,7 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         )?);
     app.update()?;
     let reenabled_frame = required_frame(&app, primary_surface)?;
-    let reenabled_receipt = commit_ui_presentation(app.world_mut()?, reenabled_frame, 4)?;
+    let reenabled_receipt = present_for_interaction_lab(app.world_mut()?, reenabled_frame, 4)?;
     prove_reenabled_focus(&app, reenabled_receipt, &primary_key)?;
 
     app.world_mut()?
@@ -110,7 +112,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .insert(UiRoot::new(UiLayer::Modal));
     app.update()?;
     let modal_frame = required_frame(&app, primary_surface)?;
-    commit_ui_presentation(app.world_mut()?, modal_frame, 5)?;
+    present_for_interaction_lab(app.world_mut()?, modal_frame, 5)?;
     prove_modal_rejection(&mut app)?;
 
     let retained = app
@@ -139,4 +141,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         "interaction lab: scene+ecs authoring, two surfaces, timeline arbitration, capture/focus/modal, exact behavior, accessibility, fail-closed routing, retained cursors"
     );
     Ok(())
+}
+
+fn present_for_interaction_lab(
+    world: &mut nara_ecs::World,
+    frame: Arc<nara_ui_kernel::UiFrame>,
+    presentation_epoch: u64,
+) -> Result<nara_ui::UiPresentationReceipt, nara_ui::UiAdapterError> {
+    let prepared = nara_ui::__private::prepare_ui_presentation(world, frame, presentation_epoch)?;
+    Ok(nara_ui::__private::commit_prepared_ui_presentation(
+        world, prepared,
+    ))
 }

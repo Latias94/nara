@@ -1980,9 +1980,7 @@ fn retained_modal_projection_is_inert_but_keeps_the_current_barrier() {
         retained.root_outcomes()[0].status(),
         UiRootStatus::RetainedVisual
     );
-    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
-        &retained
-    ));
+    assert!(retained.blocks_unhandled_input());
     assert!(retained.hit_regions().is_empty());
     assert!(retained.focus_order().is_empty());
     assert!(retained.semantics().is_empty());

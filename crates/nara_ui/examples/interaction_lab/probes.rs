@@ -241,7 +241,7 @@ pub(super) fn invalidate_geometry(app: &mut App) -> Result<(), Box<dyn Error>> {
                 logical_size: Vec2::new(640.0, 360.0),
             },
         )?;
-    assert_eq!(admission.admitted(), 2);
+    assert_eq!(admission.admitted(), 1);
     app.update()?;
     Ok(())
 }

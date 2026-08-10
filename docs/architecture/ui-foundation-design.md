@@ -82,6 +82,15 @@ accepted by the backend and the Host consumes the matching one-shot commit.
 Only that non-constructible receipt can route input or platform accessibility
 actions.
 
+### Conformance visibility
+
+The frozen public inventory and the first-party conformance implementation are not identical.
+`layout_gallery` and `ui-module-consumer` use only ordinary public Interfaces. Headless runtime and
+presentation conformance must also prove the Host-only acceptance path, so their local presenter
+glue may use doc-hidden first-party seams that can stage and consume non-forgeable authority. Those
+seams are not product Interface: they are never re-exported, never imported by Reference Game code,
+and never promoted into a test-only public receipt issuer merely to make an example look external.
+
 ### Internal modules
 
 `nara_ui_kernel` remains one deep public module with private implementation
@@ -226,7 +235,7 @@ favor of the transform's validated forward and inverse mappings.
 
 | Measure | Foundation signal |
 |---|---|
-| Interface locality | Three neutral consumers compile without ECS, Host or WGPU leakage |
+| Interface locality | Public kernel/consumer code has no ECS, Host or WGPU leakage; named first-party presenter glue contains all doc-hidden Host authority |
 | Failure atomicity | Every UIF-U1 through UIF-U4 rejection test leaves no uncommitted owner state |
 | Revision coherence | A stale receipt cannot activate or hit geometry from another revision |
 | Resource closure | A presented packet owns all image/glyph bytes and each owner enforces its candidate/target/device budget once |

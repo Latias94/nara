@@ -47,8 +47,7 @@ impl UiPresentedSession {
     }
 
     pub(crate) fn blocks_unhandled_input(&self) -> bool {
-        frame_blocks_unhandled_input(self.target.frame())
-            || frame_blocks_unhandled_input(self.latest.frame())
+        self.target.frame().blocks_unhandled_input() || self.latest.frame().blocks_unhandled_input()
     }
 }
 
@@ -175,8 +174,4 @@ impl UiPresentedHistory {
         self.journal
             .retire_surface(surface_id, retirement_generation)
     }
-}
-
-fn frame_blocks_unhandled_input(frame: &nara_ui_kernel::UiFrame) -> bool {
-    nara_ui_kernel::__private::frame_blocks_unhandled_input(frame)
 }

@@ -144,9 +144,7 @@ fn retained_visual_rebinds_to_the_current_layer_and_modal_barrier() {
         .compile(&current, environment(1.0), UiTheme::default())
         .unwrap();
 
-    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
-        &frame
-    ));
+    assert!(frame.blocks_unhandled_input());
     assert!(
         frame
             .layouts()

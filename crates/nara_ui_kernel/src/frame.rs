@@ -649,7 +649,12 @@ impl UiFrame {
         self.hits.iter().find(|region| region.contains(point))
     }
 
-    pub(crate) fn blocks_unhandled_input(&self) -> bool {
+    /// Returns whether an active modal root requires unhandled input to stop at this frame.
+    ///
+    /// This is a read-only fact of the immutable frame. It does not grant route, presentation, or
+    /// interaction authority to the caller.
+    #[must_use]
+    pub fn blocks_unhandled_input(&self) -> bool {
         self.active_modal_root().is_some()
     }
 
@@ -662,12 +667,6 @@ impl UiFrame {
             })
             .map(|outcome| &outcome.key)
     }
-}
-
-/// Returns whether a first-party adapter must stop unhandled input at this frame's modal barrier.
-#[doc(hidden)]
-pub fn frame_blocks_unhandled_input(frame: &UiFrame) -> bool {
-    frame.blocks_unhandled_input()
 }
 
 /// Evidence that the exact immutable frame packet was accepted and submitted by a presenter.

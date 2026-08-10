@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -153,14 +153,16 @@ flowchart LR
   current-tick consume and post-consume capture anchors required by independent products. Input
   projection, UI route finalization, local-action mapping, command admission, acknowledgement, and
   other technical phases remain private or doc-hidden engine-integration details.
-- Shared UI interfaces are proven before product integration by three thin neutral consumers: a
-  kernel layout/frame gallery, an ECS/Scene runtime interaction lab, and a root-facade presentation
-  gallery. The runtime lab proves the formal semantic tree and typed accessibility-action interface
-  without taking a dependency on the bounded AccessKit adapter trial. The presentation gallery owns
-  one neutral public-only projection, exact candidate, owned packet, matching receipt, presented
-  commit, and typed-activation round trip without adding a product or device matrix. They use only
-  intended public modules and introduce no shared example framework, registry, alternate authoring
-  model, product vocabulary, or duplicate pixel/hash matrix.
+- Shared UI interfaces are proven before product integration by three thin neutral conformance
+  executables plus one independent public consumer: a kernel layout/frame gallery, an ECS/Scene
+  runtime interaction lab, a root-facade presentation gallery, and `ui-module-consumer`. The kernel
+  gallery and independent consumer use only ordinary public modules. The runtime and presentation
+  galleries isolate non-forgeable prepare/submit/commit authority in local first-party presenter
+  glue that may use doc-hidden implementation seams; those seams are excluded from the frozen
+  public inventory, cannot be re-exported, and cannot appear in product code. Requiring a public
+  fake presenter would weaken receipt meaning and is rejected. The examples introduce no shared
+  framework, registry, alternate authoring model, product vocabulary, or duplicate pixel/hash
+  matrix.
 - The conformance checkpoint freezes a recorded baseline: public-interface inventory, named shared
   semantic invariants, exact example assertions, and the commit that proved them. Product integration
   must reopen and refreeze this checkpoint before changing shared UI behavior or an assertion, even if
@@ -209,8 +211,10 @@ and a narrow public API.
   gameplay.
 - Editable text, rich spans, localization, project fonts, virtual collections, docking, and native
   multi-window Editor policy remain deferred.
-- Headless tests require an explicit test presenter when they exercise interaction; a compiled
-  frame by itself is not submission evidence, and a receipt never attests human visibility.
+- Headless interaction and presentation conformance requires an explicit first-party test presenter.
+  Its doc-hidden authority stays local to the conformance executable and is not ordinary consumer
+  Interface. A compiled frame by itself is not submission evidence, and a receipt never attests
+  human visibility.
 
 ## Success Metrics
 
@@ -225,7 +229,8 @@ and a narrow public API.
 | Kernel dependencies on ECS/Host/Editor/WGPU | 0 | Cargo graph and independent-consumer checks |
 | World-mutating widget callbacks | 0 | Public API inspection and compile tests |
 | Product code binding to technical input/command phases | 0 systems | Schedule-extension consumer tests |
-| Conformance examples importing Reference Game or private integration modules | 0 imports | Example manifests, public API review, and focused example execution |
+| Independent/public consumers importing Reference Game or private integration modules | 0 imports | Consumer manifest, public inventory, and focused execution |
+| First-party conformance imports of private presentation authority | Named local presenter glue only; 0 re-exports and 0 product imports | Exact source scan and example execution |
 | Reference product parity | HUD, terminal, Retry, accessibility, package, and headless gates pass | Reference-game verification contract |
 
 ## Risks and Mitigations

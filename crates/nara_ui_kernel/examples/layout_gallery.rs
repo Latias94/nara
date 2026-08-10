@@ -260,9 +260,7 @@ fn assert_root_envelope_contract(frame: &Arc<nara_ui_kernel::UiFrame>) {
             .filter(|outcome| outcome.key() == &base || outcome.key() == &overlay)
             .all(|outcome| outcome.status() == UiRootStatus::Published)
     );
-    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
-        frame
-    ));
+    assert!(frame.blocks_unhandled_input());
     assert!(frame.hit_regions().is_empty());
     assert!(frame.focus_order().is_empty());
     assert!(

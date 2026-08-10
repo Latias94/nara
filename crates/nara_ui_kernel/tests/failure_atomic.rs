@@ -86,9 +86,7 @@ fn failed_root_retains_only_environment_compatible_visuals() {
     assert!(retained.hit_regions().is_empty());
     assert!(retained.focus_order().is_empty());
     assert!(retained.semantics().is_empty());
-    assert!(nara_ui_kernel::__private::frame_blocks_unhandled_input(
-        &retained
-    ));
+    assert!(retained.blocks_unhandled_input());
 
     assert!(matches!(
         compiler.compile(&invalid, environment(1.25), UiTheme::default()),

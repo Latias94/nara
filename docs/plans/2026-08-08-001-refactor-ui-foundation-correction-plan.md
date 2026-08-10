@@ -3,7 +3,7 @@ title: UI Foundation Correction - Plan
 type: refactor
 date: 2026-08-08
 deepened: 2026-08-08
-amended: 2026-08-09
+amended: 2026-08-10
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution_state: active
@@ -188,10 +188,9 @@ flowchart LR
 ```
 
 Execution remains operationally serial. The original UIF-U2/UIF-U3 evidence stays immutable, while
-the corrective sequence supersedes only their completion claims. UIF-U2C and UIF-U3C are complete;
-UIF-U4C is the sole active unit and UIF-U5 remains inactive. UIF-U5 admits exactly one product
-successor as the next active plan; the other remains independently eligible against the same pinned
-conformance baseline.
+the corrective sequence supersedes only their completion claims. UIF-U2C, UIF-U3C and UIF-U4C are
+complete; UIF-U5 is the sole active unit. UIF-U5 admits exactly one product successor as the next
+active plan; the other remains independently eligible against the same pinned conformance baseline.
 
 ### Alternatives considered
 
@@ -222,7 +221,7 @@ conformance baseline.
 | V2 Root compiler | `cargo nextest run --locked -p nara_ui_kernel --test compile_order --test failure_atomic --test validation --test profile --test text_budget --test-threads=1` | UIF-U2/UIF-U2C |
 | V3 Presentation owners | `cargo nextest run --locked -p nara_ui_kernel -p nara_ui -p nara_ui_render -p nara_render_wgpu --all-features --test-threads=1` | UIF-U3/UIF-U3C |
 | V4 Surface/platform adapter | Serial focused nextest: `cargo nextest run --locked -p nara_input --lib --test-threads=1`; `cargo nextest run --locked -p nara_ui_kernel --test interaction --test-threads=1`; `cargo nextest run --locked -p nara_ui_widgets --test button --test-threads=1`; `cargo nextest run --locked -p nara_ui --lib --test-threads=1`; `cargo nextest run --locked -p nara_winit --features accessibility --test accessibility --test-threads=1`; root Host bridge tests for suspend/restore and submit/commit races | UIF-U4/UIF-U4C |
-| V5 Neutral examples | `cargo run --locked -p nara_ui_kernel --example layout_gallery -j 1`; `cargo run --locked -p nara_ui --example interaction_lab -j 1`; `cargo run --locked --example ui_presentation_gallery --features presentation-ui,desktop-winit,render-wgpu -j 1` | UIF-U5 |
+| V5 Neutral conformance | `cargo run --locked -p nara_ui_kernel --example layout_gallery -j 1`; `cargo run --locked -p nara_ui --example interaction_lab -j 1`; `cargo run --locked --example ui_presentation_gallery --features presentation-ui,desktop-winit,render-wgpu -j 1`; exact source audit proves ordinary consumers have no private imports and first-party Host authority is confined to named local presenter glue | UIF-U5 |
 | V6 Independent consumer | `cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1` | UIF-U5 |
 | V7 Compile/lint/format | serial locked check, changed-target `cargo clippy --no-deps` with `-D warnings`, and `cargo fmt --all -- --check` | Every code unit; full shared gate at UIF-U5 |
 
@@ -241,7 +240,7 @@ Reference Game product matrix is required by UIF-U0 through UIF-U4.
 | UIF-U2C | Snapshot profile and attempted text work | 2026-08-09 audit | Builder/compiler profile can disagree or failed shaping work escapes the shared budget | UIF-U3C |
 | UIF-U3C | Prepared submission authority | UIF-U2C | GPU submission can succeed before receipt/route authority is guaranteed commit-ready | UIF-U4C |
 | UIF-U4C | Surface suspension and platform closure | UIF-U1, UIF-U3C and started UIF-U4 work | Zero/missing endpoints silently retain old receipt or platform authority | UIF-U5 |
-| UIF-U5 | Public neutral consumers | UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C | A conformance Interface still has an unresolved P0/P1 owner defect | one product successor |
+| UIF-U5 | Neutral conformance and public inventory | UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C | A conformance Interface still has an unresolved P0/P1 owner defect | one product successor |
 
 ## Implementation Units
 
@@ -417,8 +416,8 @@ an unrelated GPU generation or Surface Slot.
 
 ### UIF-U4C — Surface suspension and platform authority closure
 
-**Status:** Active. The already committed UIF-U4 endpoint-retirement and recording-accessibility
-work remains valid input to this unit.
+**Status:** Complete at commit `d28efcf`, with immutable verification in
+`2026-08-10T055148Z-uif-u4c-surface-suspension-and-platform-authority-closure-9c48d2de48184e7e973c9871b7e32b6c`.
 
 **Depends on:** UIF-U1, UIF-U3C and commit `e0948b5`.
 
@@ -449,15 +448,19 @@ Host branch leaves a stale route, receipt, pointer transform or accessibility tr
 
 ### UIF-U5 — Neutral refreeze and handoff
 
+**Status:** Active. This is the sole active unit.
+
 **Depends on:** UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C.
 
 **Goal:** Publish a Foundation Conformance Baseline that is safe for product integration without
 claiming product validation.
 
 **Verification:** `layout_gallery`, `interaction_lab`, `ui_presentation_gallery`, UI module consumer,
-focused shared nextest, serial formatting/lint, and direct public-inventory audit. The baseline
-record includes the exact commit, public inventory, invariants, assertions, reference pressure
-matrix revision, and predecessor record it supersedes.
+focused shared nextest, serial formatting/lint, and direct public-inventory audit. The audit keeps
+ordinary public consumers free of private imports while bounding the non-forgeable Host authority
+used by first-party conformance to named local presenter glue; it does not publish a test-only
+receipt issuer. The baseline record includes the exact commit, public inventory, invariants,
+assertions, reference pressure matrix revision, and predecessor record it supersedes.
 
 **Exit:** Close UIF and activate exactly one product successor against the pinned conformance record.
 Runtime UI is the default next delivery priority; Editor remains independently eligible and is not a
@@ -477,6 +480,8 @@ technical descendant of Runtime UI.
 - UIF-U0/UIF-U1 plus UIF-U2C through UIF-U5 have immutable evidence and one active successor
   registration; original UIF-U2/UIF-U3 evidence remains immutable historical input.
 - Three deep Interfaces remain free of ECS, Host, WGPU and toolkit identity leakage.
+- Ordinary product and independent-consumer code imports no doc-hidden presentation authority;
+  first-party conformance lists and confines every such import instead of treating it as public API.
 - Every UIF-U1, UIF-U2C, UIF-U3C and UIF-U4C failure scenario is fail-closed and tested through the
   owning seam.
 - No stale active plan, orphan test, compatibility alias, duplicate order authority, live submit-
