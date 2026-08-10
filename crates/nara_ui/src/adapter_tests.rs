@@ -38,9 +38,10 @@ use crate::{
     UiActionAdmissionError, UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal,
     UiAdapterError, UiButton, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin, UiRoot,
     UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRuntimeKey, UiSemantics, UiStyle,
-    UiSurfaceEndpoint, UiSurfaceSlot, UiVisual, active_ui_surface_slots,
-    dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, register_ui_components,
-    retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
+    UiSurfaceAvailability, UiSurfaceEndpoint, UiSurfaceSlot, UiSurfaceSuspensionReason, UiVisual,
+    active_ui_surface_slots, dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame,
+    register_ui_components, restore_ui_surface, retire_ui_surface, suspend_ui_surface,
+    ui_semantic_snapshot, ui_surface_slot_snapshots, update_ui_surface_slot,
 };
 
 const TEST_DOMAIN: &str = "nara.test.ui";
@@ -851,6 +852,332 @@ fn duplicate_window_target_is_rejected_even_for_a_distinct_seat() {
             surface: 7,
         })
     ));
+}
+
+#[test]
+fn occupied_target_conflicts_leave_update_and_restore_state_unchanged() {
+    let mut app = ui_app();
+    let primary = test_slot(surface_id(), 11, 200.0, 100.0);
+    let other_surface = UiSurfaceId::new(8).unwrap();
+    let other = test_slot(other_surface, 12, 200.0, 100.0);
+    install_ui_surface(app.world_mut().unwrap(), primary).unwrap();
+    install_ui_surface(app.world_mut().unwrap(), other).unwrap();
+
+    let active_before = ui_surface_slot_snapshots(app.world()).unwrap();
+    assert!(matches!(
+        update_ui_surface_slot(
+            app.world_mut().unwrap(),
+            surface_id(),
+            test_endpoint(12),
+            primary.transform(),
+        ),
+        Err(UiAdapterError::PresentationTargetConflict {
+            window: 12,
+            surface: 8,
+        })
+    ));
+    assert_eq!(
+        ui_surface_slot_snapshots(app.world()).unwrap(),
+        active_before
+    );
+
+    suspend_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        UiSurfaceSuspensionReason::EndpointUnavailable,
+    )
+    .unwrap()
+    .expect("the primary surface should suspend");
+    let suspended_before = ui_surface_slot_snapshots(app.world()).unwrap();
+    assert!(matches!(
+        restore_ui_surface(
+            app.world_mut().unwrap(),
+            surface_id(),
+            test_endpoint(12),
+            primary.transform(),
+        ),
+        Err(UiAdapterError::PresentationTargetConflict {
+            window: 12,
+            surface: 8,
+        })
+    ));
+    assert_eq!(
+        ui_surface_slot_snapshots(app.world()).unwrap(),
+        suspended_before
+    );
+    assert!(matches!(
+        install_ui_surface(
+            app.world_mut().unwrap(),
+            test_slot(UiSurfaceId::new(9).unwrap(), 11, 200.0, 100.0),
+        ),
+        Err(UiAdapterError::PresentationTargetConflict {
+            window: 11,
+            surface: 7,
+        })
+    ));
+    assert!(matches!(
+        install_ui_surface(
+            app.world_mut().unwrap(),
+            test_slot(UiSurfaceId::new(10).unwrap(), 12, 200.0, 100.0),
+        ),
+        Err(UiAdapterError::PresentationTargetConflict {
+            window: 12,
+            surface: 8,
+        })
+    ));
+}
+
+#[test]
+fn suspension_retires_presented_authority_and_restore_requires_a_fresh_receipt() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let receipt = commit_ui_presentation(app.world_mut().unwrap(), frame, 1).unwrap();
+
+    let suspension = suspend_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        UiSurfaceSuspensionReason::ZeroExtent,
+    )
+    .unwrap()
+    .expect("an active surface should suspend exactly once");
+    assert_eq!(suspension.previous_slot_generation(), 1);
+    assert_eq!(suspension.suspended_slot_generation(), 2);
+    assert_eq!(suspension.reason(), UiSurfaceSuspensionReason::ZeroExtent);
+    assert!(active_ui_surface_slots(app.world()).unwrap().is_empty());
+    let snapshots = ui_surface_slot_snapshots(app.world()).unwrap();
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(
+        snapshots[0].availability(),
+        UiSurfaceAvailability::Suspended(UiSurfaceSuspensionReason::ZeroExtent)
+    );
+    assert!(
+        latest_ui_frame(app.world(), surface_id())
+            .unwrap()
+            .is_none()
+    );
+    assert!(ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).is_err());
+    assert!(
+        suspend_ui_surface(
+            app.world_mut().unwrap(),
+            surface_id(),
+            UiSurfaceSuspensionReason::EndpointUnavailable,
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(matches!(
+        update_ui_surface_slot(
+            app.world_mut().unwrap(),
+            surface_id(),
+            test_endpoint(11),
+            suspension.snapshot().slot().transform(),
+        ),
+        Err(UiAdapterError::SurfaceSuspended { surface: 7 })
+    ));
+
+    let conflicting = test_slot(UiSurfaceId::new(8).unwrap(), 11, 200.0, 100.0);
+    assert!(matches!(
+        install_ui_surface(app.world_mut().unwrap(), conflicting),
+        Err(UiAdapterError::PresentationTargetConflict {
+            window: 11,
+            surface: 7,
+        })
+    ));
+
+    let restored = restore_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        test_endpoint(11),
+        suspension.snapshot().slot().transform(),
+    )
+    .expect("a suspended surface should restore with successor generations");
+    assert_eq!(restored.slot_generation(), 3);
+    assert_eq!(restored.route_generation(), 3);
+    assert_eq!(restored.geometry_generation(), 3);
+    assert_eq!(restored.presentation_generation(), 3);
+    assert!(
+        latest_ui_frame(app.world(), surface_id())
+            .unwrap()
+            .is_none()
+    );
+    assert!(matches!(
+        restore_ui_surface(
+            app.world_mut().unwrap(),
+            surface_id(),
+            test_endpoint(11),
+            restored.transform(),
+        ),
+        Err(UiAdapterError::SurfaceAlreadyActive { surface: 7 })
+    ));
+
+    app.update()
+        .expect("restore should compile a fresh candidate without reviving the old receipt");
+    let successor = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let successor_receipt = commit_ui_presentation(app.world_mut().unwrap(), successor, 2).unwrap();
+    assert!(ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).is_err());
+    assert!(ui_semantic_snapshot(app.world(), successor_receipt, UiSeatId::PRIMARY).is_ok());
+}
+
+#[test]
+fn suspended_surface_can_retire_without_an_intermediate_restoration() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let receipt = commit_ui_presentation(app.world_mut().unwrap(), frame, 1).unwrap();
+
+    let suspension = suspend_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        UiSurfaceSuspensionReason::EndpointUnavailable,
+    )
+    .unwrap()
+    .expect("the active surface should suspend");
+    let retirement = retire_ui_surface(app.world_mut().unwrap(), surface_id())
+        .unwrap()
+        .expect("a suspended surface should retire directly");
+
+    assert_eq!(
+        retirement.slot_generation(),
+        suspension.suspended_slot_generation()
+    );
+    assert_eq!(
+        retirement.retirement_generation(),
+        suspension.suspended_slot_generation() + 1
+    );
+    assert!(ui_surface_slot_snapshots(app.world()).unwrap().is_empty());
+    assert!(ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).is_err());
+    install_ui_surface(
+        app.world_mut().unwrap(),
+        test_slot(UiSurfaceId::new(8).unwrap(), 11, 200.0, 100.0),
+    )
+    .expect("retirement should release the suspended target reservation");
+    assert!(matches!(
+        install_ui_surface(
+            app.world_mut().unwrap(),
+            test_slot(surface_id(), 13, 200.0, 100.0),
+        ),
+        Err(UiAdapterError::RetiredSurface { surface: 7 })
+    ));
+}
+
+#[test]
+fn restoring_on_a_new_endpoint_moves_the_unique_target_binding_atomically() {
+    let mut app = ui_app();
+    let original = test_slot(surface_id(), 11, 200.0, 100.0);
+    install_ui_surface(app.world_mut().unwrap(), original).unwrap();
+    suspend_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        UiSurfaceSuspensionReason::EndpointUnavailable,
+    )
+    .unwrap()
+    .expect("the original target should suspend");
+
+    let restored = restore_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        test_endpoint(12),
+        original.transform(),
+    )
+    .expect("restore should transfer the target binding");
+    assert_eq!(restored.endpoint().window(), InputWindowId::new(12));
+    install_ui_surface(
+        app.world_mut().unwrap(),
+        test_slot(UiSurfaceId::new(8).unwrap(), 11, 200.0, 100.0),
+    )
+    .expect("the predecessor target should be reusable after exact handoff");
+    assert!(matches!(
+        install_ui_surface(
+            app.world_mut().unwrap(),
+            test_slot(UiSurfaceId::new(9).unwrap(), 12, 200.0, 100.0),
+        ),
+        Err(UiAdapterError::PresentationTargetConflict {
+            window: 12,
+            surface: 7,
+        })
+    ));
+}
+
+#[test]
+fn endpoint_handoff_keeps_a_held_edge_owned_by_its_predecessor_lineage() {
+    let (mut app, _button) = build_button_app();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    commit_ui_presentation(app.world_mut().unwrap(), frame, 1).unwrap();
+    let cursor = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("endpoint-handoff-test").unwrap())
+        .unwrap();
+
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .admit_keyboard(
+            InputWindowId::new(11),
+            InputSeatId::PRIMARY,
+            ButtonDriverInput::Press(KeyCode::Enter),
+        )
+        .unwrap();
+    app.update()
+        .expect("an unfocused Enter press should settle as predecessor-owned gameplay input");
+    assert!(
+        app.world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .unwrap()
+            .is_empty()
+    );
+
+    let original = active_ui_surface_slots(app.world()).unwrap()[0];
+    suspend_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        UiSurfaceSuspensionReason::EndpointUnavailable,
+    )
+    .unwrap()
+    .expect("the predecessor endpoint should suspend exactly once");
+    restore_ui_surface(
+        app.world_mut().unwrap(),
+        surface_id(),
+        test_endpoint(12),
+        original.transform(),
+    )
+    .expect("the successor endpoint should acquire the Surface Slot");
+    app.update()
+        .expect("the successor endpoint should compile a fresh candidate");
+    let successor = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    commit_ui_presentation(app.world_mut().unwrap(), successor, 2).unwrap();
+
+    let release = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<InputTimeline>()
+        .admit_keyboard(
+            InputWindowId::new(12),
+            InputSeatId::PRIMARY,
+            ButtonDriverInput::Release(KeyCode::Enter),
+        )
+        .unwrap();
+    assert_eq!(release.admitted(), 1);
+    let release_entry = app
+        .world()
+        .resource::<InputTimeline>()
+        .entries()
+        .last()
+        .copied()
+        .expect("the balanced release should remain in the timeline");
+    assert_eq!(release_entry.route().window(), InputWindowId::new(11));
+    assert!(!release_entry.route().is_ui_routable());
+
+    app.update()
+        .expect("the predecessor-owned release must not activate successor UI");
+    assert!(
+        app.world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn compiled_order(reverse_allocation: bool) -> (Vec<UiKey>, Vec<UiKey>, UiKey) {

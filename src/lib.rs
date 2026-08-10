@@ -361,10 +361,12 @@ pub mod advanced_prelude {
         UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue,
         UiPresentationReceipt, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog,
         UiRouteRejectionRecord, UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize,
-        UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId,
-        UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
-        dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, retire_ui_surface,
-        ui_semantic_snapshot, update_ui_surface_slot,
+        UiSurfaceAvailability, UiSurfaceContentTransform, UiSurfaceContentTransformError,
+        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError,
+        UiSurfaceSlotSnapshot, UiSurfaceSuspension, UiSurfaceSuspensionReason,
+        active_ui_surface_slots, dispatch_ui_accessibility_input, install_ui_surface,
+        latest_ui_frame, restore_ui_surface, retire_ui_surface, suspend_ui_surface,
+        ui_semantic_snapshot, ui_surface_slot_snapshots, update_ui_surface_slot,
     };
 }
 

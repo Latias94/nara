@@ -9,6 +9,7 @@ use nara_ui_render::{
 };
 
 mod attempts;
+mod surfaces;
 
 use attempts::{UiPresentationAttempt, UiPresentationAttemptLedger};
 
@@ -54,7 +55,7 @@ impl Plugin for UiPresentationBridgePlugin {
         app.init_resource::<UiPresentationAttemptLedger>()?;
         app.add_systems(
             CoreStage::First,
-            synchronize_runtime_ui_surface_metrics
+            surfaces::synchronize_runtime_ui_surface_metrics
                 .after(nara_window::WindowSet::ApplyEvents)
                 .before(nara_input::__private::InputSet::RouteUi),
         )?;
@@ -64,67 +65,9 @@ impl Plugin for UiPresentationBridgePlugin {
     }
 }
 
-fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
-    let windows = {
-        let mut query = world.query::<&nara_window::Window>();
-        query
-            .iter(world)
-            .map(|window| (window.id, window.resolution))
-            .collect::<std::collections::BTreeMap<_, _>>()
-    };
-    let slots = match nara_ui::active_ui_surface_slots(world) {
-        Ok(slots) => slots,
-        Err(error) => {
-            record_bridge_error(world, error.to_string());
-            return;
-        }
-    };
-
-    for slot in slots {
-        let window_id = nara_window::WindowId::new(slot.endpoint().window().get());
-        let Some(resolution) = windows.get(&window_id).copied() else {
-            continue;
-        };
-        let Some(transform) = surface_transform(slot, resolution) else {
-            continue;
-        };
-        if let Err(error) =
-            nara_ui::update_ui_surface_slot(world, slot.surface_id(), slot.endpoint(), transform)
-        {
-            record_bridge_error(world, error.to_string());
-        }
-    }
-}
-
-fn surface_transform(
-    slot: nara_ui::UiSurfaceSlot,
-    resolution: nara_window::WindowResolution,
-) -> Option<nara_ui::UiSurfaceContentTransform> {
-    if resolution.is_zero_sized()
-        || !resolution.scale_factor.is_finite()
-        || resolution.scale_factor <= 0.0
-    {
-        return None;
-    }
-    let physical_size = nara_ui::UiSize::new(
-        resolution.physical_width as f32,
-        resolution.physical_height as f32,
-    )?;
-    let insets = resolution.safe_area_insets;
-    let safe_area =
-        nara_ui::UiSafeAreaInsets::new(insets.left, insets.top, insets.right, insets.bottom)?;
-    nara_ui::UiSurfaceContentTransform::new(
-        slot.transform().authored_logical_size(),
-        physical_size,
-        safe_area,
-        resolution.scale_factor as f32,
-    )
-    .ok()
-}
-
 fn compile_runtime_ui_packets(world: &mut World) {
     world.resource_mut::<UiPresentationBridgeStats>().last_error = None;
-    if let Err(error) = synchronize_runtime_ui_routes(world) {
+    if let Err(error) = surfaces::synchronize_runtime_ui_routes(world) {
         record_bridge_error(world, error);
         return;
     }
@@ -413,6 +356,15 @@ fn abort_prepared_attempts(
     }
 }
 
+fn abort_surface_attempts(world: &mut World, surface_id: UiSurfaceId) {
+    let attempt_id = world
+        .resource::<UiPresentationAttemptLedger>()
+        .attempt_id_for_surface(surface_id);
+    if let Some(attempt_id) = attempt_id {
+        terminate_attempt(world, attempt_id, AttemptTermination::Aborted);
+    }
+}
+
 fn upsert_draw_packet(packets: &mut Vec<Arc<UiPaintPacket>>, packet: Arc<UiPaintPacket>) {
     if let Some(existing) = packets
         .iter_mut()
@@ -422,22 +374,6 @@ fn upsert_draw_packet(packets: &mut Vec<Arc<UiPaintPacket>>, packet: Arc<UiPaint
     } else {
         packets.push(packet);
     }
-}
-
-fn synchronize_runtime_ui_routes(world: &mut World) -> Result<(), String> {
-    let slots = nara_ui::active_ui_surface_slots(world).map_err(|error| error.to_string())?;
-    let routes = slots
-        .into_iter()
-        .map(|slot| {
-            nara_ui_render::__private::UiPresentationRoute::new(
-                slot.surface_id(),
-                nara_window::WindowId::new(slot.endpoint().window().get()),
-            )
-            .map_err(|error| error.to_string())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    nara_ui_render::__private::replace_ui_presentation_routes(world, routes)
-        .map_err(|error| error.to_string())
 }
 
 fn commit_runtime_ui_presentations(world: &mut World) {

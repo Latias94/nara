@@ -20,9 +20,13 @@ pub(crate) mod presentation;
 mod projection;
 pub(crate) mod state;
 mod surface;
+mod targets;
 
 pub(crate) use state::UiRuntimeState;
-pub use surface::{UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError};
+pub use surface::{
+    UiSurfaceAvailability, UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot,
+    UiSurfaceSlotError, UiSurfaceSlotSnapshot, UiSurfaceSuspension, UiSurfaceSuspensionReason,
+};
 
 /// Move-only UI authority staged before one exact backend submission.
 ///
@@ -150,6 +154,18 @@ pub enum UiAdapterError {
     SurfaceIdentitySpaceExhausted,
     #[error("UI presentation target window {window} is already owned by surface {surface}")]
     PresentationTargetConflict { window: u64, surface: u64 },
+    #[error(
+        "UI presentation target window {window} expected surface {expected_surface}, but owner is {actual_surface:?}"
+    )]
+    PresentationTargetOwnerMismatch {
+        window: u64,
+        expected_surface: u64,
+        actual_surface: Option<u64>,
+    },
+    #[error("UI surface {surface} is suspended")]
+    SurfaceSuspended { surface: u64 },
+    #[error("UI surface {surface} is already active")]
+    SurfaceAlreadyActive { surface: u64 },
     #[error("UI surface seat {actual} does not match endpoint seat {expected}")]
     SeatOwnerMismatch { expected: u32, actual: u32 },
     #[error("the submitted frame is not the adapter's latest frame for surface {surface}")]
@@ -221,7 +237,7 @@ pub(crate) fn compile_ui_frames(world: &mut World) {
             return;
         }
 
-        for (_, surface) in state.surfaces_mut() {
+        for (_, surface) in state.active_surfaces_mut() {
             let Some(projected) = projection::project_authoring(
                 world,
                 &ordered_entities,
@@ -292,14 +308,8 @@ pub fn install_ui_surface(world: &mut World, slot: UiSurfaceSlot) -> Result<(), 
     let theme_revision = active_theme_revision(world);
     slot.environment(theme_revision)?;
     world.resource_scope(|_world, mut state: Mut<UiRuntimeState>| {
-        if let Some(surface) = state.conflicting_presentation_target(slot) {
-            return Err(UiAdapterError::PresentationTargetConflict {
-                window: slot.endpoint().window().get(),
-                surface: surface.get(),
-            });
-        }
         let prepared = state.prepare_surface_install(slot)?;
-        state.commit_surface_install(slot, prepared);
+        state.commit_surface_install(prepared);
         Ok(())
     })
 }
@@ -316,23 +326,24 @@ pub fn update_ui_surface_slot(
 ) -> Result<UiSurfaceSlot, UiAdapterError> {
     let theme_revision = active_theme_revision(world);
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let previous = state
-            .surface_slot(surface_id)
-            .ok_or(UiAdapterError::UnknownSurface {
+        let previous =
+            state
+                .surface_snapshot(surface_id)
+                .ok_or(UiAdapterError::UnknownSurface {
+                    surface: surface_id.get(),
+                })?;
+        if !previous.availability().is_active() {
+            return Err(UiAdapterError::SurfaceSuspended {
                 surface: surface_id.get(),
-            })?;
+            });
+        }
+        let previous = previous.slot();
         let updated = previous.successor(endpoint, transform)?;
         updated.environment(theme_revision)?;
         if updated == previous {
             return Ok(updated);
         }
-        if let Some(surface) = state.conflicting_presentation_target(updated) {
-            return Err(UiAdapterError::PresentationTargetConflict {
-                window: updated.endpoint().window().get(),
-                surface: surface.get(),
-            });
-        }
-        let prepared = state.prepare_surface_slot_update(updated)?;
+        let prepared = state.prepare_surface_slot_update(updated, UiSurfaceAvailability::Active)?;
         let previous_endpoint = previous.endpoint();
         world
             .resource_mut::<InputTimeline>()
@@ -343,6 +354,69 @@ pub fn update_ui_surface_slot(
             )?;
         state.commit_surface_slot_update(prepared);
         Ok(updated)
+    })
+}
+
+/// Suspends one active Surface Slot while preserving balanced physical held-edge ownership.
+///
+/// Suspension advances the slot, route, geometry, and presentation generations, retires every
+/// presented receipt, clears pointer/capture authority, removes the input route, and discards the
+/// unpresented candidate. The stable Surface ID and target reservation remain installed so only an
+/// explicit restore or retirement can continue the lifetime.
+pub fn suspend_ui_surface(
+    world: &mut World,
+    surface_id: UiSurfaceId,
+    reason: UiSurfaceSuspensionReason,
+) -> Result<Option<UiSurfaceSuspension>, UiAdapterError> {
+    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
+        let Some((prepared, suspension)) = state.prepare_surface_suspension(surface_id, reason)?
+        else {
+            return Ok(None);
+        };
+        let endpoint = suspension.endpoint();
+        world
+            .resource_mut::<InputTimeline>()
+            .unbind_presented_endpoint(
+                endpoint.window(),
+                endpoint.seat(),
+                prepared.released_input_route(),
+            )?;
+        state.commit_surface_slot_update(prepared);
+        Ok(Some(suspension))
+    })
+}
+
+/// Restores one suspended Surface Slot with a fresh endpoint/transform generation.
+///
+/// Restore never revives the previous packet or receipt. A fresh candidate must compile and pass
+/// backend acceptance before input or semantics become authoritative again.
+pub fn restore_ui_surface(
+    world: &mut World,
+    surface_id: UiSurfaceId,
+    endpoint: UiSurfaceEndpoint,
+    transform: nara_ui_kernel::UiSurfaceContentTransform,
+) -> Result<UiSurfaceSlot, UiAdapterError> {
+    let theme_revision = active_theme_revision(world);
+    world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
+        let previous =
+            state
+                .surface_snapshot(surface_id)
+                .ok_or(UiAdapterError::UnknownSurface {
+                    surface: surface_id.get(),
+                })?;
+        let prepared = state.prepare_surface_restoration(surface_id, endpoint, transform)?;
+        let restored = prepared.slot();
+        restored.environment(theme_revision)?;
+        let previous_endpoint = previous.slot().endpoint();
+        world
+            .resource_mut::<InputTimeline>()
+            .unbind_presented_endpoint(
+                previous_endpoint.window(),
+                previous_endpoint.seat(),
+                prepared.released_input_route(),
+            )?;
+        state.commit_surface_slot_update(prepared);
+        Ok(restored)
     })
 }
 
@@ -360,9 +434,10 @@ pub fn retire_ui_surface(
     surface_id: UiSurfaceId,
 ) -> Result<Option<UiSurfaceRetirement>, UiAdapterError> {
     world.resource_scope(|world, mut state: Mut<UiRuntimeState>| {
-        let Some(retirement) = state.prepare_surface_retirement(surface_id)? else {
+        let Some(prepared) = state.prepare_surface_retirement(surface_id)? else {
             return Ok(None);
         };
+        let retirement = prepared.retirement();
         let endpoint = retirement.endpoint();
         world
             .resource_mut::<InputTimeline>()
@@ -371,8 +446,7 @@ pub fn retire_ui_surface(
                 endpoint.seat(),
                 retirement.input_route(),
             )?;
-        state.commit_surface_retirement(retirement);
-        Ok(Some(retirement))
+        Ok(Some(state.commit_surface_retirement(prepared)))
     })
 }
 
@@ -411,7 +485,21 @@ pub fn active_ui_surface_slots(world: &World) -> Result<Vec<UiSurfaceSlot>, UiAd
     };
     Ok(state
         .surfaces()
+        .filter(|(_, surface)| surface.is_active())
         .map(|(_, surface)| surface.slot())
+        .collect())
+}
+
+/// Returns every installed, non-retired Surface Slot and its explicit availability state.
+pub fn ui_surface_slot_snapshots(
+    world: &World,
+) -> Result<Vec<UiSurfaceSlotSnapshot>, UiAdapterError> {
+    let Some(state) = world.get_resource::<UiRuntimeState>() else {
+        return Err(UiAdapterError::RuntimeUnavailable);
+    };
+    Ok(state
+        .surfaces()
+        .map(|(_, surface)| surface.snapshot())
         .collect())
 }
 
@@ -429,6 +517,11 @@ pub fn prepare_ui_presentation(
                 .ok_or(UiAdapterError::UnknownSurface {
                     surface: surface_id.get(),
                 })?;
+            if !surface.is_active() {
+                return Err(UiAdapterError::SurfaceSuspended {
+                    surface: surface_id.get(),
+                });
+            }
             let Some(candidate) = surface.candidate() else {
                 return Err(UiAdapterError::FrameNotLatest {
                     surface: surface_id.get(),

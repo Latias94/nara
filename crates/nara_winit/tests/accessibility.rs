@@ -2,20 +2,34 @@
 
 use std::sync::Arc;
 
-use accesskit::{Action, ActionRequest, Role, TreeId};
+use accesskit::{Action, ActionRequest, NodeId, Role, TreeId};
 use nara_text::bundled_font_face;
 use nara_ui_kernel::{
     UiAccessibilityInput, UiActionId, UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment,
     UiFrameJournal, UiInputEvent, UiInteraction, UiInteractionSession, UiKey, UiLayer, UiLocalKey,
-    UiNode, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiSemanticRole, UiSemantics, UiSize,
-    UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
+    UiNode, UiRevision, UiRoot, UiRootKey, UiRouteStamp, UiSeatId, UiSemanticRole, UiSemantics,
+    UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceGenerations, UiSurfaceId, UiTheme,
 };
 use nara_winit::{
-    WinitAccessibilityEndpointRetirement, WinitAccessibilityError, WinitAccessibilityPublisher,
+    WinitAccessibilityActionRequest, WinitAccessibilityEndpointRetirement, WinitAccessibilityError,
+    WinitAccessibilityPublisher, WinitAccessibilityReceipt, WinitAccessibilitySuspension,
 };
 
 fn exact_key(root: &UiRootKey, local: &UiLocalKey) -> UiKey {
     UiKey::scoped(root.clone(), local.clone()).unwrap()
+}
+
+fn platform_action(
+    receipt: WinitAccessibilityReceipt,
+    action: Action,
+    target_node: NodeId,
+) -> WinitAccessibilityActionRequest {
+    receipt.bind_action(ActionRequest {
+        action,
+        target_tree: TreeId::ROOT,
+        target_node,
+        data: None,
+    })
 }
 
 #[test]
@@ -102,7 +116,8 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     assert_eq!(retry_semantics.state().selected(), Some(true));
     assert_eq!(retry_semantics.state().expanded(), Some(false));
 
-    let mut publisher = WinitAccessibilityPublisher::new(surface);
+    let mut publisher = WinitAccessibilityPublisher::new(surface).unwrap();
+    let publisher_id = publisher.publisher_id();
     let accessibility_receipt = publisher.publish_update(&semantics).unwrap();
     let update = publisher
         .committed_update()
@@ -150,14 +165,14 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     assert!(!base_node.supports_action(Action::Click));
     assert_eq!(accessibility_receipt.route(), route);
     assert_eq!(accessibility_receipt.publication_generation(), 1);
+    assert_eq!(accessibility_receipt.publisher_id(), publisher_id);
 
     let click = publisher
-        .map_action(&ActionRequest {
-            action: Action::Click,
-            target_tree: TreeId::ROOT,
-            target_node: retry_id,
-            data: None,
-        })
+        .map_action(&platform_action(
+            accessibility_receipt,
+            Action::Click,
+            retry_id,
+        ))
         .unwrap();
     assert_eq!(
         click,
@@ -170,23 +185,21 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     );
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Focus,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                accessibility_receipt,
+                Action::Focus,
+                retry_id,
+            ))
             .unwrap(),
         UiAccessibilityInput::focus_target(receipt, UiSeatId::PRIMARY, retry_key.clone())
     );
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Increment,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                accessibility_receipt,
+                Action::Increment,
+                retry_id,
+            ))
             .unwrap_err(),
         WinitAccessibilityError::UnsupportedAction {
             action: Action::Increment,
@@ -203,6 +216,37 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
         repeated.publication_generation()
     );
     assert_eq!(publisher.node_id(&retry_key), Some(retry_id));
+    assert_eq!(
+        publisher
+            .map_action(&platform_action(
+                accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
+            .unwrap_err(),
+        WinitAccessibilityError::ActionPublicationMismatch {
+            current_generation: repeated.publication_generation(),
+            candidate_generation: accessibility_receipt.publication_generation(),
+        }
+    );
+
+    let mut foreign_publisher = WinitAccessibilityPublisher::new(surface).unwrap();
+    let foreign_publisher_id = foreign_publisher.publisher_id();
+    assert_ne!(foreign_publisher_id, publisher_id);
+    let foreign_publication = foreign_publisher.publish_update(&semantics).unwrap();
+    assert_eq!(
+        publisher
+            .map_action(&platform_action(
+                foreign_publication,
+                Action::Click,
+                retry_id,
+            ))
+            .unwrap_err(),
+        WinitAccessibilityError::ForeignPublisher {
+            expected: publisher_id,
+            actual: foreign_publisher_id,
+        }
+    );
 
     let continue_action = UiActionId::new("continue").unwrap();
     let successor_snapshot = UiAuthoringSnapshotBuilder::new(2)
@@ -240,12 +284,7 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
         .unwrap();
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Click,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(repeated, Action::Click, retry_id))
             .unwrap(),
         UiAccessibilityInput::semantic_action(
             receipt,
@@ -266,12 +305,11 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     assert_eq!(publisher.node_id(&retry_key), Some(retry_id));
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Click,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                successor_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
             .unwrap(),
         UiAccessibilityInput::semantic_action(
             successor_receipt,
@@ -330,12 +368,11 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     );
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Click,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                successor_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
             .unwrap(),
         UiAccessibilityInput::semantic_action(
             successor_receipt,
@@ -429,23 +466,21 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     assert!(!disabled_retry.supports_action(Action::Focus));
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Click,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                disabled_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
             .unwrap_err(),
         WinitAccessibilityError::ActionUnavailable { node: retry_id }
     );
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Focus,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                disabled_accessibility_receipt,
+                Action::Focus,
+                retry_id,
+            ))
             .unwrap_err(),
         WinitAccessibilityError::FocusUnavailable { node: retry_id }
     );
@@ -508,14 +543,203 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     );
     assert_eq!(
         publisher
-            .publish_update(&slot_two_semantics)
+            .suspend(WinitAccessibilitySuspension::new(
+                surface,
+                UiRevision::new(3).unwrap(),
+            ))
             .unwrap()
-            .route(),
-        UiRouteStamp::from_receipt(slot_two_receipt)
+            .publication_generation(),
+        6
+    );
+    let suspension_receipt = publisher.suspension().unwrap();
+    assert_eq!(suspension_receipt.publisher_id(), publisher_id);
+    assert_eq!(suspension_receipt.surface_id(), surface);
+    assert_eq!(suspension_receipt.slot_generation().get(), 3);
+    assert!(publisher.committed_update().is_none());
+    assert_eq!(
+        publisher
+            .suspend(WinitAccessibilitySuspension::new(
+                surface,
+                UiRevision::new(3).unwrap(),
+            ))
+            .unwrap(),
+        suspension_receipt
+    );
+    assert_eq!(
+        publisher
+            .map_action(&platform_action(
+                slot_two_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
+            .unwrap_err(),
+        WinitAccessibilityError::SurfaceSuspended {
+            surface,
+            slot_generation: UiRevision::new(3).unwrap(),
+        }
+    );
+    assert_eq!(
+        publisher.publish_update(&slot_two_semantics).unwrap_err(),
+        WinitAccessibilityError::SnapshotDoesNotSucceedSuspension {
+            suspended: UiRevision::new(3).unwrap(),
+            candidate: UiRouteStamp::from_receipt(slot_two_receipt),
+        }
     );
 
-    let retirement = journal.retire_surface(surface, 3).unwrap().unwrap();
-    assert_eq!(retirement.slot_generation().get(), 2);
+    journal.advance_surface_slot(surface, 2, 3).unwrap();
+    let suspended_generation_frame = compiler
+        .compile(
+            &disabled_snapshot,
+            UiEnvironment::for_surface(
+                surface,
+                UiSurfaceContentTransform::direct(UiSize::new(320.0, 180.0).unwrap(), 2.0).unwrap(),
+                UiSurfaceGenerations::new(3, 3, 1, 3).unwrap(),
+                1,
+                1,
+            )
+            .unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+    let suspended_generation_receipt = authority
+        .submit(&mut journal, suspended_generation_frame, 11)
+        .unwrap();
+    let suspended_generation_semantics = session
+        .semantic_snapshot_with_action_authority(
+            &journal,
+            UiRouteStamp::from_receipt(suspended_generation_receipt),
+            UiSeatId::PRIMARY,
+            |key, action| key == &retry_key && action == &retry_action,
+        )
+        .unwrap();
+    assert_eq!(
+        publisher
+            .publish_update(&suspended_generation_semantics)
+            .unwrap_err(),
+        WinitAccessibilityError::SnapshotDoesNotSucceedSuspension {
+            suspended: UiRevision::new(3).unwrap(),
+            candidate: UiRouteStamp::from_receipt(suspended_generation_receipt),
+        }
+    );
+
+    journal.advance_surface_slot(surface, 3, 4).unwrap();
+    let restored_frame = compiler
+        .compile(
+            &disabled_snapshot,
+            UiEnvironment::for_surface(
+                surface,
+                UiSurfaceContentTransform::direct(UiSize::new(320.0, 180.0).unwrap(), 2.0).unwrap(),
+                UiSurfaceGenerations::new(4, 4, 1, 4).unwrap(),
+                1,
+                1,
+            )
+            .unwrap(),
+            UiTheme::default(),
+        )
+        .unwrap();
+    let restored_receipt = authority.submit(&mut journal, restored_frame, 12).unwrap();
+    let restored_semantics = session
+        .semantic_snapshot_with_action_authority(
+            &journal,
+            UiRouteStamp::from_receipt(restored_receipt),
+            UiSeatId::PRIMARY,
+            |key, action| key == &retry_key && action == &retry_action,
+        )
+        .unwrap();
+    let restored_accessibility_receipt = publisher.publish_update(&restored_semantics).unwrap();
+    assert_eq!(restored_accessibility_receipt.publication_generation(), 7);
+    assert!(publisher.suspension().is_none());
+    assert_eq!(
+        publisher
+            .map_action(&platform_action(
+                slot_two_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
+            .unwrap_err(),
+        WinitAccessibilityError::ActionPublicationMismatch {
+            current_generation: restored_accessibility_receipt.publication_generation(),
+            candidate_generation: slot_two_accessibility_receipt.publication_generation(),
+        }
+    );
+    assert_eq!(
+        publisher
+            .map_action(&platform_action(
+                restored_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
+            .unwrap_err(),
+        WinitAccessibilityError::ActionUnavailable { node: retry_id }
+    );
+
+    let mut successor_suspension_publisher = WinitAccessibilityPublisher::new(surface).unwrap();
+    successor_suspension_publisher
+        .publish_update(&slot_two_semantics)
+        .unwrap();
+    successor_suspension_publisher
+        .suspend(WinitAccessibilitySuspension::new(
+            surface,
+            UiRevision::new(3).unwrap(),
+        ))
+        .unwrap();
+    let successor_suspension = successor_suspension_publisher
+        .suspend(WinitAccessibilitySuspension::new(
+            surface,
+            UiRevision::new(5).unwrap(),
+        ))
+        .unwrap();
+    assert_eq!(successor_suspension.slot_generation().get(), 5);
+    assert_eq!(successor_suspension.publication_generation(), 3);
+    assert_eq!(
+        successor_suspension_publisher
+            .suspend(WinitAccessibilitySuspension::new(
+                surface,
+                UiRevision::new(4).unwrap(),
+            ))
+            .unwrap_err(),
+        WinitAccessibilityError::StaleSuspension {
+            current: UiRevision::new(5).unwrap(),
+            candidate: UiRevision::new(4).unwrap(),
+        }
+    );
+    assert_eq!(
+        successor_suspension_publisher.suspension(),
+        Some(successor_suspension)
+    );
+
+    let mut unpresented_restore_publisher = WinitAccessibilityPublisher::new(surface).unwrap();
+    unpresented_restore_publisher
+        .publish_update(&slot_two_semantics)
+        .unwrap();
+    unpresented_restore_publisher
+        .suspend(WinitAccessibilitySuspension::new(
+            surface,
+            UiRevision::new(3).unwrap(),
+        ))
+        .unwrap();
+
+    let retirement = journal.retire_surface(surface, 5).unwrap().unwrap();
+    assert_eq!(retirement.slot_generation().get(), 4);
+    assert_eq!(
+        unpresented_restore_publisher
+            .retire(
+                old_retirement,
+                WinitAccessibilityEndpointRetirement::NativeWindowDestroyed,
+            )
+            .unwrap_err(),
+        WinitAccessibilityError::RetirementPredatesSuspension {
+            suspended: UiRevision::new(3).unwrap(),
+            candidate: UiRevision::new(1).unwrap(),
+        }
+    );
+    let unpresented_retirement = unpresented_restore_publisher
+        .retire(
+            retirement,
+            WinitAccessibilityEndpointRetirement::NativeWindowDestroyed,
+        )
+        .unwrap();
+    assert_eq!(unpresented_retirement.token(), retirement);
     let retirement_receipt = publisher
         .retire(
             retirement,
@@ -527,7 +751,8 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
         retirement_receipt.endpoint(),
         WinitAccessibilityEndpointRetirement::NativeWindowDestroyed
     );
-    assert_eq!(retirement_receipt.publication_generation(), 7);
+    assert_eq!(retirement_receipt.publisher_id(), publisher_id);
+    assert_eq!(retirement_receipt.publication_generation(), 8);
     assert!(publisher.committed_update().is_none());
     assert_eq!(publisher.retirement(), Some(retirement_receipt));
     assert_eq!(
@@ -549,7 +774,7 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
         WinitAccessibilityError::SurfaceRetired { surface }
     );
     assert_eq!(
-        publisher.publish_update(&slot_two_semantics).unwrap_err(),
+        publisher.publish_update(&restored_semantics).unwrap_err(),
         WinitAccessibilityError::SurfaceRetired { surface }
     );
     assert_eq!(
@@ -558,12 +783,11 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
     );
     assert_eq!(
         publisher
-            .map_action(&ActionRequest {
-                action: Action::Click,
-                target_tree: TreeId::ROOT,
-                target_node: retry_id,
-                data: None,
-            })
+            .map_action(&platform_action(
+                restored_accessibility_receipt,
+                Action::Click,
+                retry_id,
+            ))
             .unwrap_err(),
         WinitAccessibilityError::SurfaceRetired { surface }
     );

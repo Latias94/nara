@@ -1,9 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use accesskit::{Action, ActionRequest, Node, NodeId, Rect, Role, Tree, TreeId, TreeUpdate};
 use nara_ui_kernel::{
-    UiAccessibilityInput, UiFrameRevision, UiKey, UiRouteStamp, UiSeatId, UiSemanticRole,
-    UiSemanticSnapshot, UiSurfaceId, UiSurfaceRetirementToken,
+    UiAccessibilityInput, UiFrameRevision, UiKey, UiRevision, UiRouteStamp, UiSeatId,
+    UiSemanticRole, UiSemanticSnapshot, UiSurfaceId, UiSurfaceRetirementToken,
 };
 use thiserror::Error;
 
@@ -11,6 +14,32 @@ const ROOT_NODE_ID: NodeId = NodeId(1);
 const FIRST_CONTENT_NODE_ID: u64 = 2;
 const FIRST_PUBLICATION_GENERATION: u64 = 1;
 const MAX_NODE_IDENTITIES: usize = 4_096;
+static NEXT_PUBLISHER_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Opaque process-unique identity for one Host-owned accessibility publisher lifetime.
+///
+/// The adapter allocates this identity when the Host creates a publisher and never accepts a
+/// caller-provided value. It is carried by every publication receipt so coincidentally equal
+/// AccessKit node identifiers from another publisher cannot be resolved against this publisher's
+/// current tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WinitAccessibilityPublisherId(u64);
+
+impl WinitAccessibilityPublisherId {
+    fn allocate() -> Result<Self, WinitAccessibilityError> {
+        NEXT_PUBLISHER_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map(Self)
+            .map_err(|_| WinitAccessibilityError::PublisherIdExhausted)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
 
 /// Host-owned synchronous publisher from Nara semantic facts to a bounded AccessKit tree record.
 ///
@@ -19,6 +48,7 @@ const MAX_NODE_IDENTITIES: usize = 4_096;
 /// the record.
 #[derive(Debug)]
 pub struct WinitAccessibilityPublisher {
+    publisher_id: WinitAccessibilityPublisherId,
     surface_id: UiSurfaceId,
     next_node_id: u64,
     node_ids: BTreeMap<UiKey, NodeId>,
@@ -29,13 +59,14 @@ pub struct WinitAccessibilityPublisher {
     seat: Option<UiSeatId>,
     next_publication_generation: u64,
     committed_update: Option<WinitAccessibilityUpdate>,
+    suspension: Option<WinitAccessibilitySuspensionReceipt>,
     retirement: Option<WinitAccessibilityRetirementReceipt>,
 }
 
 impl WinitAccessibilityPublisher {
-    #[must_use]
-    pub const fn new(surface_id: UiSurfaceId) -> Self {
-        Self {
+    pub fn new(surface_id: UiSurfaceId) -> Result<Self, WinitAccessibilityError> {
+        Ok(Self {
+            publisher_id: WinitAccessibilityPublisherId::allocate()?,
             surface_id,
             next_node_id: FIRST_CONTENT_NODE_ID,
             node_ids: BTreeMap::new(),
@@ -46,8 +77,19 @@ impl WinitAccessibilityPublisher {
             seat: None,
             next_publication_generation: FIRST_PUBLICATION_GENERATION,
             committed_update: None,
+            suspension: None,
             retirement: None,
-        }
+        })
+    }
+
+    #[must_use]
+    pub const fn publisher_id(&self) -> WinitAccessibilityPublisherId {
+        self.publisher_id
+    }
+
+    #[must_use]
+    pub const fn surface_id(&self) -> UiSurfaceId {
+        self.surface_id
     }
 
     /// Records one semantic snapshot and commits its callback mapping atomically.
@@ -84,6 +126,14 @@ impl WinitAccessibilityPublisher {
         if self.retirement.is_some() {
             return Err(WinitAccessibilityError::SurfaceRetired {
                 surface: self.surface_id,
+            });
+        }
+        if let Some(suspension) = self.suspension
+            && snapshot.route().slot_generation() <= suspension.slot_generation()
+        {
+            return Err(WinitAccessibilityError::SnapshotDoesNotSucceedSuspension {
+                suspended: suspension.slot_generation(),
+                candidate: snapshot.route(),
             });
         }
         if let Some(current) = self.route {
@@ -140,6 +190,7 @@ impl WinitAccessibilityPublisher {
         candidate.active_focusable.clear();
         candidate.route = Some(snapshot.route());
         candidate.seat = Some(snapshot.seat());
+        candidate.suspension = None;
         for fact in snapshot.nodes() {
             let node_id = candidate.admit_key(fact.key())?;
             candidate.active_keys.insert(node_id, fact.key().clone());
@@ -229,6 +280,7 @@ impl WinitAccessibilityPublisher {
         Ok(WinitAccessibilityPublication {
             candidate,
             update: WinitAccessibilityUpdate {
+                publisher_id: self.publisher_id,
                 route: snapshot.route(),
                 frame_revision: snapshot.frame_revision(),
                 publication_generation,
@@ -250,6 +302,7 @@ impl WinitAccessibilityPublisher {
 
     fn candidate_clone(&self) -> Self {
         Self {
+            publisher_id: self.publisher_id,
             surface_id: self.surface_id,
             next_node_id: self.next_node_id,
             node_ids: self.node_ids.clone(),
@@ -260,6 +313,7 @@ impl WinitAccessibilityPublisher {
             seat: self.seat,
             next_publication_generation: self.next_publication_generation,
             committed_update: None,
+            suspension: self.suspension,
             retirement: self.retirement,
         }
     }
@@ -267,13 +321,46 @@ impl WinitAccessibilityPublisher {
     /// Converts a supported AccessKit request into the exact presented-session input.
     pub fn map_action(
         &self,
-        request: &ActionRequest,
+        request: &WinitAccessibilityActionRequest,
     ) -> Result<UiAccessibilityInput, WinitAccessibilityError> {
+        let receipt = request.receipt();
+        if receipt.publisher_id() != self.publisher_id {
+            return Err(WinitAccessibilityError::ForeignPublisher {
+                expected: self.publisher_id,
+                actual: receipt.publisher_id(),
+            });
+        }
+        if receipt.surface_id() != self.surface_id {
+            return Err(WinitAccessibilityError::ActionSurfaceMismatch {
+                expected: self.surface_id,
+                actual: receipt.surface_id(),
+            });
+        }
         if self.retirement.is_some() {
             return Err(WinitAccessibilityError::SurfaceRetired {
                 surface: self.surface_id,
             });
         }
+        if let Some(suspension) = self.suspension {
+            return Err(WinitAccessibilityError::SurfaceSuspended {
+                surface: self.surface_id,
+                slot_generation: suspension.slot_generation(),
+            });
+        }
+        let current = self
+            .committed_update
+            .as_ref()
+            .map(WinitAccessibilityUpdate::receipt)
+            .ok_or(WinitAccessibilityError::NoPresentedSnapshot {
+                surface: self.surface_id,
+            })?;
+        if receipt != current {
+            return Err(WinitAccessibilityError::ActionPublicationMismatch {
+                current_generation: current.publication_generation(),
+                candidate_generation: receipt.publication_generation(),
+            });
+        }
+        let request = request.accesskit_request();
         if request.target_tree != TreeId::ROOT {
             return Err(WinitAccessibilityError::ForeignTree);
         }
@@ -319,6 +406,66 @@ impl WinitAccessibilityPublisher {
         }
     }
 
+    /// Clears the committed platform tree and action mapping for a temporarily unavailable slot.
+    ///
+    /// The supplied fact is a Host-observed successor generation, not a request to suspend later.
+    /// Repeating the same fact is idempotent. A later publication must belong to that generation or
+    /// a successor before this publisher becomes active again.
+    pub fn suspend(
+        &mut self,
+        suspension: WinitAccessibilitySuspension,
+    ) -> Result<WinitAccessibilitySuspensionReceipt, WinitAccessibilityError> {
+        if suspension.surface_id() != self.surface_id {
+            return Err(WinitAccessibilityError::SuspensionSurfaceMismatch {
+                expected: self.surface_id,
+                actual: suspension.surface_id(),
+            });
+        }
+        if self.retirement.is_some() {
+            return Err(WinitAccessibilityError::SurfaceRetired {
+                surface: self.surface_id,
+            });
+        }
+        if let Some(committed) = self.suspension {
+            if committed.suspension() == suspension {
+                return Ok(committed);
+            }
+            if suspension.slot_generation() < committed.slot_generation() {
+                return Err(WinitAccessibilityError::StaleSuspension {
+                    current: committed.slot_generation(),
+                    candidate: suspension.slot_generation(),
+                });
+            }
+        }
+        if let Some(route) = self.route
+            && suspension.slot_generation() <= route.slot_generation()
+        {
+            return Err(WinitAccessibilityError::SuspensionGenerationMismatch {
+                current: route.slot_generation(),
+                candidate: suspension.slot_generation(),
+            });
+        }
+        let publication_generation = self.next_publication_generation;
+        let next_publication_generation = self
+            .next_publication_generation
+            .checked_add(1)
+            .ok_or(WinitAccessibilityError::PublicationGenerationExhausted)?;
+        let receipt = WinitAccessibilitySuspensionReceipt {
+            publisher_id: self.publisher_id,
+            suspension,
+            publication_generation,
+        };
+        self.next_publication_generation = next_publication_generation;
+        self.active_keys.clear();
+        self.active_actions.clear();
+        self.active_focusable.clear();
+        self.route = None;
+        self.seat = None;
+        self.committed_update = None;
+        self.suspension = Some(receipt);
+        Ok(receipt)
+    }
+
     /// Records one explicit endpoint retirement and clears the exact tree record and mapping.
     ///
     /// `endpoint` is a Host-observed postcondition, not a request for a later asynchronous action.
@@ -343,12 +490,19 @@ impl WinitAccessibilityPublisher {
                 surface: self.surface_id,
             });
         }
-        if let Some(route) = self.route
-            && route.slot_generation() > retirement.slot_generation()
+        if let Some(expected) = self.route.map(UiRouteStamp::slot_generation) {
+            if expected != retirement.slot_generation() {
+                return Err(WinitAccessibilityError::RetirementGenerationMismatch {
+                    expected,
+                    actual: retirement.slot_generation(),
+                });
+            }
+        } else if let Some(suspension) = self.suspension
+            && retirement.slot_generation() < suspension.slot_generation()
         {
-            return Err(WinitAccessibilityError::RetirementGenerationMismatch {
-                expected: route.slot_generation(),
-                actual: retirement.slot_generation(),
+            return Err(WinitAccessibilityError::RetirementPredatesSuspension {
+                suspended: suspension.slot_generation(),
+                candidate: retirement.slot_generation(),
             });
         }
         let publication_generation = self.next_publication_generation;
@@ -357,6 +511,7 @@ impl WinitAccessibilityPublisher {
             .checked_add(1)
             .ok_or(WinitAccessibilityError::PublicationGenerationExhausted)?;
         let receipt = WinitAccessibilityRetirementReceipt {
+            publisher_id: self.publisher_id,
             token: retirement,
             endpoint,
             publication_generation,
@@ -367,6 +522,7 @@ impl WinitAccessibilityPublisher {
         self.route = None;
         self.seat = None;
         self.committed_update = None;
+        self.suspension = None;
         self.retirement = Some(receipt);
         Ok(receipt)
     }
@@ -381,6 +537,12 @@ impl WinitAccessibilityPublisher {
     #[must_use]
     pub const fn retirement(&self) -> Option<WinitAccessibilityRetirementReceipt> {
         self.retirement
+    }
+
+    /// Returns the exact temporary tree-removal record while this publisher is suspended.
+    #[must_use]
+    pub const fn suspension(&self) -> Option<WinitAccessibilitySuspensionReceipt> {
+        self.suspension
     }
 
     #[must_use]
@@ -427,6 +589,7 @@ struct WinitAccessibilityPublication {
 /// represents.
 #[derive(Debug, PartialEq)]
 pub struct WinitAccessibilityUpdate {
+    publisher_id: WinitAccessibilityPublisherId,
     route: UiRouteStamp,
     frame_revision: UiFrameRevision,
     publication_generation: u64,
@@ -434,6 +597,11 @@ pub struct WinitAccessibilityUpdate {
 }
 
 impl WinitAccessibilityUpdate {
+    #[must_use]
+    pub const fn publisher_id(&self) -> WinitAccessibilityPublisherId {
+        self.publisher_id
+    }
+
     #[must_use]
     pub const fn surface_id(&self) -> UiSurfaceId {
         self.route.surface_id()
@@ -466,6 +634,7 @@ impl WinitAccessibilityUpdate {
 
     fn receipt(&self) -> WinitAccessibilityReceipt {
         WinitAccessibilityReceipt {
+            publisher_id: self.publisher_id,
             route: self.route,
             frame_revision: self.frame_revision,
             publication_generation: self.publication_generation,
@@ -478,12 +647,18 @@ impl WinitAccessibilityUpdate {
 /// This receipt does not prove that an operating-system client or player observed the tree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WinitAccessibilityReceipt {
+    publisher_id: WinitAccessibilityPublisherId,
     route: UiRouteStamp,
     frame_revision: UiFrameRevision,
     publication_generation: u64,
 }
 
 impl WinitAccessibilityReceipt {
+    #[must_use]
+    pub const fn publisher_id(self) -> WinitAccessibilityPublisherId {
+        self.publisher_id
+    }
+
     #[must_use]
     pub const fn route(self) -> UiRouteStamp {
         self.route
@@ -497,6 +672,98 @@ impl WinitAccessibilityReceipt {
     #[must_use]
     pub const fn frame_revision(self) -> UiFrameRevision {
         self.frame_revision
+    }
+
+    #[must_use]
+    pub const fn publication_generation(self) -> u64 {
+        self.publication_generation
+    }
+
+    /// Binds an incoming AccessKit callback to this exact committed publication.
+    #[must_use]
+    pub fn bind_action(self, request: ActionRequest) -> WinitAccessibilityActionRequest {
+        WinitAccessibilityActionRequest::new(self, request)
+    }
+}
+
+/// Incoming AccessKit action bound to the exact publication that created its node mapping.
+#[derive(Debug)]
+pub struct WinitAccessibilityActionRequest {
+    receipt: WinitAccessibilityReceipt,
+    request: ActionRequest,
+}
+
+impl WinitAccessibilityActionRequest {
+    #[must_use]
+    pub const fn new(receipt: WinitAccessibilityReceipt, request: ActionRequest) -> Self {
+        Self { receipt, request }
+    }
+
+    #[must_use]
+    pub const fn receipt(&self) -> WinitAccessibilityReceipt {
+        self.receipt
+    }
+
+    #[must_use]
+    pub const fn accesskit_request(&self) -> &ActionRequest {
+        &self.request
+    }
+}
+
+/// Host-observed successor generation whose platform accessibility tree is unavailable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinitAccessibilitySuspension {
+    surface_id: UiSurfaceId,
+    slot_generation: UiRevision,
+}
+
+impl WinitAccessibilitySuspension {
+    #[must_use]
+    pub const fn new(surface_id: UiSurfaceId, slot_generation: UiRevision) -> Self {
+        Self {
+            surface_id,
+            slot_generation,
+        }
+    }
+
+    #[must_use]
+    pub const fn surface_id(self) -> UiSurfaceId {
+        self.surface_id
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> UiRevision {
+        self.slot_generation
+    }
+}
+
+/// Exact evidence that one publisher synchronously removed its tree and action mapping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinitAccessibilitySuspensionReceipt {
+    publisher_id: WinitAccessibilityPublisherId,
+    suspension: WinitAccessibilitySuspension,
+    publication_generation: u64,
+}
+
+impl WinitAccessibilitySuspensionReceipt {
+    #[must_use]
+    pub const fn publisher_id(self) -> WinitAccessibilityPublisherId {
+        self.publisher_id
+    }
+
+    #[must_use]
+    pub const fn suspension(self) -> WinitAccessibilitySuspension {
+        self.suspension
+    }
+
+    #[must_use]
+    pub const fn surface_id(self) -> UiSurfaceId {
+        self.suspension.surface_id()
+    }
+
+    #[must_use]
+    pub const fn slot_generation(self) -> UiRevision {
+        self.suspension.slot_generation()
     }
 
     #[must_use]
@@ -517,12 +784,18 @@ pub enum WinitAccessibilityEndpointRetirement {
 /// Exact tombstone recorded after the publisher cleared its tree record and callback mapping.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WinitAccessibilityRetirementReceipt {
+    publisher_id: WinitAccessibilityPublisherId,
     token: UiSurfaceRetirementToken,
     endpoint: WinitAccessibilityEndpointRetirement,
     publication_generation: u64,
 }
 
 impl WinitAccessibilityRetirementReceipt {
+    #[must_use]
+    pub const fn publisher_id(self) -> WinitAccessibilityPublisherId {
+        self.publisher_id
+    }
+
     #[must_use]
     pub const fn token(self) -> UiSurfaceRetirementToken {
         self.token
@@ -546,6 +819,8 @@ impl WinitAccessibilityRetirementReceipt {
 
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum WinitAccessibilityError {
+    #[error("accessibility publisher identities are exhausted")]
+    PublisherIdExhausted,
     #[error(
         "accessibility snapshot surface {actual:?} does not match publisher surface {expected:?}"
     )]
@@ -555,6 +830,13 @@ pub enum WinitAccessibilityError {
     },
     #[error("accessibility surface {surface:?} has been retired")]
     SurfaceRetired { surface: UiSurfaceId },
+    #[error(
+        "accessibility surface {surface:?} is suspended at slot generation {slot_generation:?}"
+    )]
+    SurfaceSuspended {
+        surface: UiSurfaceId,
+        slot_generation: UiRevision,
+    },
     #[error("accessibility surface {surface:?} has no presented semantic snapshot")]
     NoPresentedSnapshot { surface: UiSurfaceId },
     #[error("accessibility snapshot route {candidate:?} predates active route {current:?}")]
@@ -565,6 +847,13 @@ pub enum WinitAccessibilityError {
     #[error("accessibility snapshot route {candidate:?} conflicts with active route {current:?}")]
     ConflictingSnapshot {
         current: UiRouteStamp,
+        candidate: UiRouteStamp,
+    },
+    #[error(
+        "accessibility snapshot route {candidate:?} does not succeed suspended slot generation {suspended:?}"
+    )]
+    SnapshotDoesNotSucceedSuspension {
+        suspended: UiRevision,
         candidate: UiRouteStamp,
     },
     #[error("accessibility publication generation was exhausted")]
@@ -581,6 +870,23 @@ pub enum WinitAccessibilityError {
     MissingParent { key: UiKey, parent: UiKey },
     #[error("accessibility action targets a foreign tree")]
     ForeignTree,
+    #[error("accessibility action publisher {actual:?} does not match publisher {expected:?}")]
+    ForeignPublisher {
+        expected: WinitAccessibilityPublisherId,
+        actual: WinitAccessibilityPublisherId,
+    },
+    #[error("accessibility action surface {actual:?} does not match surface {expected:?}")]
+    ActionSurfaceMismatch {
+        expected: UiSurfaceId,
+        actual: UiSurfaceId,
+    },
+    #[error(
+        "accessibility action publication generation {candidate_generation} does not match current generation {current_generation}"
+    )]
+    ActionPublicationMismatch {
+        current_generation: u64,
+        candidate_generation: u64,
+    },
     #[error("accessibility action targets unknown node {node:?}")]
     UnknownNode { node: NodeId },
     #[error("accessibility node {node:?} has no semantic action")]
@@ -589,6 +895,26 @@ pub enum WinitAccessibilityError {
     FocusUnavailable { node: NodeId },
     #[error("accessibility action {action:?} is unsupported")]
     UnsupportedAction { action: Action },
+    #[error("suspension targets surface {actual:?}, expected {expected:?}")]
+    SuspensionSurfaceMismatch {
+        expected: UiSurfaceId,
+        actual: UiSurfaceId,
+    },
+    #[error("suspension slot generation {candidate:?} must succeed active generation {current:?}")]
+    SuspensionGenerationMismatch {
+        current: UiRevision,
+        candidate: UiRevision,
+    },
+    #[error("suspension slot generation {candidate:?} predates committed suspension {current:?}")]
+    StaleSuspension {
+        current: UiRevision,
+        candidate: UiRevision,
+    },
+    #[error("retirement slot generation {candidate:?} predates suspended generation {suspended:?}")]
+    RetirementPredatesSuspension {
+        suspended: UiRevision,
+        candidate: UiRevision,
+    },
     #[error("retirement token targets surface {actual:?}, expected {expected:?}")]
     RetirementSurfaceMismatch {
         expected: UiSurfaceId,

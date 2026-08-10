@@ -5,8 +5,9 @@ use nara_hierarchy::{
 use nara_input::{InputPointerId, InputSeatId, InputWindowId};
 use nara_render::RenderTarget;
 use nara_ui::{
-    UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
-    UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiVisual,
+    UiColor, UiNode, UiRoot, UiRuntimeKey, UiSafeAreaInsets, UiSize, UiSurfaceAvailability,
+    UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
+    UiSurfaceSuspensionReason, UiVisual,
 };
 
 use super::*;
@@ -184,6 +185,23 @@ fn install_fake_backend(app: &mut App, mode: FakeBackendMode) {
 fn install_test_surface_and_root(app: &mut App, surface: u64, window: u64) -> Entity {
     let surface_id = UiSurfaceId::new(surface).expect("test surface should be non-zero");
     let world = app.world_mut().expect("test app should expose its world");
+    let window_id = nara_window::WindowId::new(window);
+    let window_exists = {
+        let mut query = world.query::<&nara_window::Window>();
+        query.iter(world).any(|candidate| candidate.id == window_id)
+    };
+    if !window_exists {
+        let window = nara_window::Window::new(
+            format!("test-{window}"),
+            nara_window::WindowResolution::new(320, 180),
+        )
+        .with_id(window_id);
+        if window_id == nara_window::WindowId::PRIMARY {
+            world.spawn((window, nara_window::PrimaryWindow));
+        } else {
+            world.spawn(window);
+        }
+    }
     nara_ui::install_ui_surface(
         world,
         UiSurfaceSlot::new(
@@ -222,103 +240,13 @@ fn install_test_surface_and_root(app: &mut App, surface: u64, window: u64) -> En
 }
 
 #[test]
-fn physical_targets_preserve_one_design_space_and_normalize_platform_logical_input() {
-    let slot = UiSurfaceSlot::new(
-        UiSurfaceId::new(7).expect("test surface should be non-zero"),
-        UiSurfaceEndpoint::new(
-            InputWindowId::new(1),
-            InputSeatId::PRIMARY,
-            InputPointerId::PRIMARY,
-        ),
-        UiSurfaceContentTransform::new(
-            UiSize::new(960.0, 540.0).expect("test authored size should be valid"),
-            UiSize::new(1280.0, 720.0).expect("test physical size should be valid"),
-            UiSafeAreaInsets::default(),
-            1.0,
-        )
-        .expect("test transform should be valid"),
-    )
-    .expect("test surface slot should be valid");
-
-    for (resolution, expected_render_scale, expected_input_scale) in [
-        (
-            nara_window::WindowResolution::new(1_280, 720),
-            4.0 / 3.0,
-            4.0 / 3.0,
-        ),
-        (
-            nara_window::WindowResolution::new(1_920, 1_080).with_scale_factor(2.0),
-            2.0,
-            1.0,
-        ),
-        (
-            nara_window::WindowResolution::new(2_560, 1_440).with_scale_factor(2.0),
-            8.0 / 3.0,
-            4.0 / 3.0,
-        ),
-    ] {
-        let transform =
-            surface_transform(slot, resolution).expect("target mapping should be valid");
-        assert!((transform.content_scale_factor() - expected_render_scale).abs() < 1.0e-6);
-        let input_scale = transform.content_scale_factor() / transform.platform_scale_factor();
-        assert!((input_scale - expected_input_scale).abs() < 1.0e-6);
-    }
-
-    assert!(surface_transform(slot, nara_window::WindowResolution::new(0, 720)).is_none());
-    assert!(
-        surface_transform(
-            slot,
-            nara_window::WindowResolution::new(1_280, 720).with_scale_factor(0.0),
-        )
-        .is_none()
-    );
-}
-
-#[test]
 fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     let mut app = App::new();
     app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
         .expect("runtime and presentation UI products should install");
     install_fake_backend(&mut app, FakeBackendMode::Present);
     let surface_id = UiSurfaceId::new(7).expect("test surface should be non-zero");
-    let root = {
-        let world = app.world_mut().expect("test app should expose its world");
-        nara_ui::install_ui_surface(
-            world,
-            UiSurfaceSlot::new(
-                surface_id,
-                UiSurfaceEndpoint::new(
-                    InputWindowId::new(1),
-                    InputSeatId::PRIMARY,
-                    InputPointerId::PRIMARY,
-                ),
-                UiSurfaceContentTransform::new(
-                    UiSize::new(320.0, 180.0).expect("test authored size should be valid"),
-                    UiSize::new(320.0, 180.0).expect("test physical size should be valid"),
-                    UiSafeAreaInsets::default(),
-                    1.0,
-                )
-                .expect("test transform should be valid"),
-            )
-            .expect("test surface slot should be valid"),
-        )
-        .expect("test surface should install");
-        let root = world
-            .spawn((
-                UiRoot::default(),
-                UiNode::default(),
-                UiRuntimeKey::new("test.presentation-bridge", "root")
-                    .expect("test root key should be valid"),
-            ))
-            .id();
-        HierarchyWriter::new(world)
-            .apply_batch(&[HierarchyOperation::Place {
-                entity: root,
-                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-            }])
-            .expect("test root should enter structural order");
-        root
-    };
+    let root = install_test_surface_and_root(&mut app, surface_id.get(), 1);
 
     app.update()
         .expect("the bridge should compile one explicitly routed UI frame");
@@ -347,6 +275,182 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     .expect("the UI packet compiler should remain available");
     assert_eq!(compile.admitted_packets, 0);
     assert_eq!(compile.rejected_packets, 1);
+}
+
+#[test]
+fn host_minimize_suspends_routes_and_restore_requires_fresh_presentation() {
+    let mut app = App::new();
+    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+        .expect("runtime and presentation UI products should install");
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+    let surface_id = UiSurfaceId::new(30).unwrap();
+    install_test_surface_and_root(&mut app, surface_id.get(), 1);
+
+    app.update().expect("the initial surface should present");
+    let initial_receipt = app
+        .world()
+        .resource::<UiPresentationBridgeStats>()
+        .last_presented_receipt
+        .expect("the initial surface should own one receipt");
+    *app.world_mut().unwrap().resource_mut::<FakeBackendMode>() = FakeBackendMode::HoldAcceptance;
+    {
+        let world = app.world_mut().unwrap();
+        let mut query = world.query::<&mut nara_window::Window>();
+        let mut window = query
+            .iter_mut(world)
+            .find(|window| window.id == nara_window::WindowId::PRIMARY)
+            .expect("the primary window should remain installed");
+        window.resolution = nara_window::WindowResolution::new(640, 360);
+    }
+    app.update()
+        .expect("the resized surface should retain one uncommitted backend acceptance");
+    assert_eq!(
+        app.world().resource::<FakeHeldBackendAcceptances>().0.len(),
+        1
+    );
+    assert!(
+        !app.world()
+            .resource::<UiPresentationAttemptLedger>()
+            .is_empty()
+    );
+    {
+        let world = app.world_mut().unwrap();
+        let mut query = world.query::<&mut nara_window::Window>();
+        let mut window = query
+            .iter_mut(world)
+            .find(|window| window.id == nara_window::WindowId::PRIMARY)
+            .expect("the primary window should remain installed");
+        window.resolution = nara_window::WindowResolution::new(0, 720);
+    }
+
+    app.update()
+        .expect("zero extent should suspend without submitting the old packet");
+    let snapshots = nara_ui::ui_surface_slot_snapshots(app.world()).unwrap();
+    assert_eq!(
+        snapshots[0].availability(),
+        UiSurfaceAvailability::Suspended(UiSurfaceSuspensionReason::ZeroExtent)
+    );
+    assert!(
+        nara_ui::active_ui_surface_slots(app.world())
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        nara_ui::latest_ui_frame(app.world(), surface_id)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        nara_ui::ui_semantic_snapshot(app.world(), initial_receipt, nara_ui::UiSeatId::PRIMARY)
+            .is_err()
+    );
+    let (_, suspended_packets) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
+        .unwrap()
+        .into_parts();
+    assert!(suspended_packets.is_empty());
+    assert!(
+        app.world()
+            .resource::<UiPresentationAttemptLedger>()
+            .is_empty()
+    );
+    assert_eq!(
+        app.world().resource::<FakeHeldBackendAcceptances>().0.len(),
+        1
+    );
+
+    *app.world_mut().unwrap().resource_mut::<FakeBackendMode>() =
+        FakeBackendMode::PresentAndReleaseHeld;
+    {
+        let world = app.world_mut().unwrap();
+        let mut query = world.query::<&mut nara_window::Window>();
+        let mut window = query
+            .iter_mut(world)
+            .find(|window| window.id == nara_window::WindowId::PRIMARY)
+            .expect("the primary window should remain installed");
+        window.resolution = nara_window::WindowResolution::new(1_024, 768);
+    }
+    app.update()
+        .expect("a valid 4:3 target should restore and present a fresh generation");
+
+    let restored = nara_ui::ui_surface_slot_snapshots(app.world()).unwrap()[0];
+    assert_eq!(restored.availability(), UiSurfaceAvailability::Active);
+    assert_eq!(restored.slot().slot_generation(), 4);
+    assert!((restored.slot().transform().physical_content_origin().y() - 96.0).abs() < 1.0e-6);
+    let restored_receipt = app
+        .world()
+        .resource::<UiPresentationBridgeStats>()
+        .last_presented_receipt
+        .expect("restore should publish one fresh receipt");
+    assert_ne!(
+        restored_receipt.slot_generation(),
+        initial_receipt.slot_generation()
+    );
+    assert!(
+        nara_ui::ui_semantic_snapshot(app.world(), initial_receipt, nara_ui::UiSeatId::PRIMARY)
+            .is_err()
+    );
+    assert!(
+        nara_ui::ui_semantic_snapshot(app.world(), restored_receipt, nara_ui::UiSeatId::PRIMARY)
+            .is_ok()
+    );
+    let stats = app.world().resource::<UiPresentationBridgeStats>();
+    assert_eq!(stats.aborted_packets, 1);
+    assert_eq!(stats.stale_backend_acceptances, 1);
+    assert!(
+        app.world()
+            .resource::<FakeHeldBackendAcceptances>()
+            .0
+            .is_empty()
+    );
+    assert!(
+        app.world()
+            .resource::<UiPresentationAttemptLedger>()
+            .is_empty()
+    );
+}
+
+#[test]
+fn missing_window_suspends_and_a_recreated_endpoint_restores_the_same_surface_lifetime() {
+    let mut app = App::new();
+    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+        .expect("runtime and presentation UI products should install");
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+    let surface_id = UiSurfaceId::new(31).unwrap();
+    install_test_surface_and_root(&mut app, surface_id.get(), 1);
+    app.update().expect("the initial surface should present");
+
+    let removed_window = {
+        let world = app.world_mut().unwrap();
+        let mut query = world.query::<(Entity, &nara_window::Window)>();
+        let (entity, window) = query
+            .iter(world)
+            .find(|(_, window)| window.id == nara_window::WindowId::PRIMARY)
+            .expect("the primary window should remain installed");
+        let window = window.clone();
+        assert!(world.despawn(entity));
+        window
+    };
+    app.update()
+        .expect("a missing endpoint should suspend instead of retaining stale authority");
+    assert_eq!(
+        nara_ui::ui_surface_slot_snapshots(app.world()).unwrap()[0].availability(),
+        UiSurfaceAvailability::Suspended(UiSurfaceSuspensionReason::EndpointUnavailable)
+    );
+
+    app.world_mut()
+        .unwrap()
+        .spawn((removed_window, nara_window::PrimaryWindow));
+    app.update()
+        .expect("recreating the endpoint should restore with fresh generations");
+    let restored = nara_ui::ui_surface_slot_snapshots(app.world()).unwrap()[0];
+    assert_eq!(restored.availability(), UiSurfaceAvailability::Active);
+    assert_eq!(restored.slot().slot_generation(), 3);
+    assert!(
+        app.world()
+            .resource::<UiPresentationBridgeStats>()
+            .last_presented_receipt
+            .is_some()
+    );
 }
 
 #[test]

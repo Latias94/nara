@@ -330,7 +330,10 @@ pub(crate) fn map_adapter_error(error: UiAdapterError) -> UiRouteRejection {
         | UiAdapterError::SurfaceLimitExceeded
         | UiAdapterError::SurfaceIdentitySpaceExhausted
         | UiAdapterError::PresentationTargetConflict { .. }
+        | UiAdapterError::PresentationTargetOwnerMismatch { .. }
         | UiAdapterError::SurfaceAlreadyInstalled { .. }
+        | UiAdapterError::SurfaceAlreadyActive { .. }
+        | UiAdapterError::SurfaceSuspended { .. }
         | UiAdapterError::PresentationAuthorityMissing { .. }
         | UiAdapterError::FrameNotLatest { .. }
         | UiAdapterError::Environment(_)

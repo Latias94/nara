@@ -343,6 +343,22 @@ impl UiPresentationAttemptLedger {
             .collect()
     }
 
+    pub(super) fn attempt_id_for_surface(
+        &self,
+        surface_id: UiSurfaceId,
+    ) -> Option<UiPresentationAttemptId> {
+        let mut matching = self
+            .active
+            .iter()
+            .filter(|attempt| attempt.surface_id() == surface_id);
+        let first = matching.next().map(UiPresentationAttempt::attempt_id);
+        debug_assert!(
+            matching.next().is_none(),
+            "the presentation ledger admits at most one active attempt per surface"
+        );
+        first
+    }
+
     #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.active.is_empty()

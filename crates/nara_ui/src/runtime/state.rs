@@ -23,7 +23,11 @@ use super::{
     identity::UiSurfaceIdentityLedger,
     presentation::{UiPresentedHistory, UiPresentedSession},
     projection::UiProjectedAuthoring,
-    surface::{UiSurfaceRetirement, UiSurfaceSlot},
+    surface::{
+        UiSurfaceAvailability, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotSnapshot,
+        UiSurfaceSuspension, UiSurfaceSuspensionReason,
+    },
+    targets::{UiPreparedTargetBinding, UiPreparedTargetRelease, UiSurfaceTargetIndex},
 };
 
 pub(super) const MAX_RUNTIME_SURFACES: usize = 16;
@@ -61,10 +65,26 @@ pub(super) struct UiPreparedPresentation {
 
 pub(super) struct UiPreparedSlotUpdate {
     slot: UiSurfaceSlot,
+    availability: UiSurfaceAvailability,
     released_input_route: Option<PresentedInputRouteStamp>,
     presented: UiPresentedHistory,
     interaction: UiInteractionSession,
     reducers: BTreeMap<UiKey, UiButtonState>,
+}
+
+pub(super) struct UiPreparedSurfaceInstall {
+    runtime: UiSurfaceRuntime,
+    target: UiPreparedTargetBinding,
+}
+
+pub(super) struct UiPreparedSurfaceSlotUpdate {
+    update: UiPreparedSlotUpdate,
+    target: UiPreparedTargetBinding,
+}
+
+pub(super) struct UiPreparedSurfaceRetirement {
+    retirement: UiSurfaceRetirement,
+    target: UiPreparedTargetRelease,
 }
 
 impl UiPreparedPresentation {
@@ -84,9 +104,26 @@ impl UiPreparedSlotUpdate {
     }
 }
 
+impl UiPreparedSurfaceSlotUpdate {
+    pub(super) const fn slot(&self) -> UiSurfaceSlot {
+        self.update.slot
+    }
+
+    pub(super) const fn released_input_route(&self) -> Option<PresentedInputRouteStamp> {
+        self.update.released_input_route()
+    }
+}
+
+impl UiPreparedSurfaceRetirement {
+    pub(super) const fn retirement(&self) -> UiSurfaceRetirement {
+        self.retirement
+    }
+}
+
 /// All candidate, presentation, interaction, and reducer state for one surface lineage.
 pub(crate) struct UiSurfaceRuntime {
     slot: UiSurfaceSlot,
+    availability: UiSurfaceAvailability,
     compiler: UiCompiler,
     candidate: Option<UiCompiledCandidate>,
     presented: UiPresentedHistory,
@@ -106,6 +143,7 @@ impl UiSurfaceRuntime {
             UiPresentedHistory::with_limits(limits, slot).map_err(|error| error.to_string())?;
         Ok(Self {
             slot,
+            availability: UiSurfaceAvailability::Active,
             compiler: UiCompiler::new(font, limits).map_err(|error| error.to_string())?,
             candidate: None,
             presented,
@@ -121,9 +159,18 @@ impl UiSurfaceRuntime {
         self.slot
     }
 
+    pub(crate) const fn snapshot(&self) -> UiSurfaceSlotSnapshot {
+        UiSurfaceSlotSnapshot::new(self.slot, self.availability)
+    }
+
+    pub(crate) const fn is_active(&self) -> bool {
+        self.availability.is_active()
+    }
+
     pub(super) fn prepare_slot_update(
         &self,
         slot: UiSurfaceSlot,
+        availability: UiSurfaceAvailability,
     ) -> Result<UiPreparedSlotUpdate, UiAdapterError> {
         debug_assert_eq!(self.slot.surface_id(), slot.surface_id());
         let mut presented = self.presented.clone();
@@ -171,6 +218,7 @@ impl UiSurfaceRuntime {
         presented.advance_slot(self.slot, slot)?;
         Ok(UiPreparedSlotUpdate {
             slot,
+            availability,
             released_input_route: self.input_route,
             presented,
             interaction,
@@ -180,6 +228,7 @@ impl UiSurfaceRuntime {
 
     pub(super) fn commit_slot_update(&mut self, prepared: UiPreparedSlotUpdate) {
         self.slot = prepared.slot;
+        self.availability = prepared.availability;
         self.presented = prepared.presented;
         self.interaction = prepared.interaction;
         self.reducers = prepared.reducers;
@@ -514,6 +563,7 @@ pub(crate) struct UiRuntimeState {
     font: FontFace,
     limits: UiLimits,
     surfaces: BTreeMap<nara_ui_kernel::UiSurfaceId, UiSurfaceRuntime>,
+    targets: UiSurfaceTargetIndex,
     identities: UiSurfaceIdentityLedger,
     next_source_revision: u64,
 }
@@ -524,16 +574,19 @@ impl UiRuntimeState {
             font: nara_text::bundled_font_face().map_err(|error| error.to_string())?,
             limits: UiLimits::default(),
             surfaces: BTreeMap::new(),
+            targets: UiSurfaceTargetIndex::default(),
             identities: UiSurfaceIdentityLedger::default(),
             next_source_revision: 1,
         })
     }
 
-    pub(crate) fn surface_slot(
+    pub(crate) fn surface_snapshot(
         &self,
         surface_id: nara_ui_kernel::UiSurfaceId,
-    ) -> Option<UiSurfaceSlot> {
-        self.surfaces.get(&surface_id).map(UiSurfaceRuntime::slot)
+    ) -> Option<UiSurfaceSlotSnapshot> {
+        self.surfaces
+            .get(&surface_id)
+            .map(UiSurfaceRuntime::snapshot)
     }
 
     pub(crate) fn surface(
@@ -556,10 +609,12 @@ impl UiRuntimeState {
         self.surfaces.iter()
     }
 
-    pub(super) fn surfaces_mut(
+    pub(super) fn active_surfaces_mut(
         &mut self,
     ) -> impl Iterator<Item = (&nara_ui_kernel::UiSurfaceId, &mut UiSurfaceRuntime)> {
-        self.surfaces.iter_mut()
+        self.surfaces
+            .iter_mut()
+            .filter(|(_, surface)| surface.is_active())
     }
 
     pub(super) const fn source_revision(&self) -> u64 {
@@ -577,7 +632,7 @@ impl UiRuntimeState {
     pub(super) fn prepare_surface_install(
         &self,
         slot: UiSurfaceSlot,
-    ) -> Result<UiSurfaceRuntime, UiAdapterError> {
+    ) -> Result<UiPreparedSurfaceInstall, UiAdapterError> {
         let surface_id = slot.surface_id();
         if self.surfaces.contains_key(&surface_id) {
             return Err(UiAdapterError::SurfaceAlreadyInstalled {
@@ -588,47 +643,88 @@ impl UiRuntimeState {
         if self.surfaces.len() == MAX_RUNTIME_SURFACES {
             return Err(UiAdapterError::SurfaceLimitExceeded);
         }
-        UiSurfaceRuntime::new(slot, self.font.clone(), self.limits)
-            .map_err(UiAdapterError::RuntimeSetup)
+        let target = self.targets.prepare_install(slot)?;
+        let runtime = UiSurfaceRuntime::new(slot, self.font.clone(), self.limits)
+            .map_err(UiAdapterError::RuntimeSetup)?;
+        Ok(UiPreparedSurfaceInstall { runtime, target })
     }
 
-    pub(super) fn conflicting_presentation_target(
-        &self,
-        slot: UiSurfaceSlot,
-    ) -> Option<nara_ui_kernel::UiSurfaceId> {
-        self.surfaces.iter().find_map(|(surface_id, surface)| {
-            (*surface_id != slot.surface_id()
-                && surface.slot().endpoint().window() == slot.endpoint().window())
-            .then_some(*surface_id)
-        })
-    }
-
-    pub(super) fn commit_surface_install(
-        &mut self,
-        slot: UiSurfaceSlot,
-        prepared: UiSurfaceRuntime,
-    ) {
-        let replaced = self.surfaces.insert(slot.surface_id(), prepared);
+    pub(super) fn commit_surface_install(&mut self, prepared: UiPreparedSurfaceInstall) {
+        let surface_id = prepared.runtime.slot().surface_id();
+        let replaced = self.surfaces.insert(surface_id, prepared.runtime);
         debug_assert!(replaced.is_none(), "validated UI surface must be new");
+        self.targets.commit_binding(prepared.target);
     }
 
     pub(super) fn prepare_surface_slot_update(
         &self,
         slot: UiSurfaceSlot,
-    ) -> Result<UiPreparedSlotUpdate, UiAdapterError> {
-        self.surfaces
-            .get(&slot.surface_id())
-            .ok_or(UiAdapterError::UnknownSurface {
-                surface: slot.surface_id().get(),
-            })?
-            .prepare_slot_update(slot)
+        availability: UiSurfaceAvailability,
+    ) -> Result<UiPreparedSurfaceSlotUpdate, UiAdapterError> {
+        let runtime =
+            self.surfaces
+                .get(&slot.surface_id())
+                .ok_or(UiAdapterError::UnknownSurface {
+                    surface: slot.surface_id().get(),
+                })?;
+        let target = self.targets.prepare_transition(runtime.slot(), slot)?;
+        let update = runtime.prepare_slot_update(slot, availability)?;
+        Ok(UiPreparedSurfaceSlotUpdate { update, target })
     }
 
-    pub(super) fn commit_surface_slot_update(&mut self, prepared: UiPreparedSlotUpdate) {
+    pub(super) fn prepare_surface_suspension(
+        &self,
+        surface_id: nara_ui_kernel::UiSurfaceId,
+        reason: UiSurfaceSuspensionReason,
+    ) -> Result<Option<(UiPreparedSurfaceSlotUpdate, UiSurfaceSuspension)>, UiAdapterError> {
+        let runtime = self
+            .surfaces
+            .get(&surface_id)
+            .ok_or(UiAdapterError::UnknownSurface {
+                surface: surface_id.get(),
+            })?;
+        if !runtime.is_active() {
+            return Ok(None);
+        }
+        let previous = runtime.slot();
+        let suspended =
+            previous.availability_successor(previous.endpoint(), previous.transform())?;
+        let prepared =
+            self.prepare_surface_slot_update(suspended, UiSurfaceAvailability::Suspended(reason))?;
+        Ok(Some((
+            prepared,
+            UiSurfaceSuspension::new(previous.slot_generation(), suspended, reason),
+        )))
+    }
+
+    pub(super) fn prepare_surface_restoration(
+        &self,
+        surface_id: nara_ui_kernel::UiSurfaceId,
+        endpoint: super::UiSurfaceEndpoint,
+        transform: nara_ui_kernel::UiSurfaceContentTransform,
+    ) -> Result<UiPreparedSurfaceSlotUpdate, UiAdapterError> {
+        let runtime = self
+            .surfaces
+            .get(&surface_id)
+            .ok_or(UiAdapterError::UnknownSurface {
+                surface: surface_id.get(),
+            })?;
+        if runtime.is_active() {
+            return Err(UiAdapterError::SurfaceAlreadyActive {
+                surface: surface_id.get(),
+            });
+        }
+        let restored = runtime.slot().availability_successor(endpoint, transform)?;
+        self.prepare_surface_slot_update(restored, UiSurfaceAvailability::Active)
+    }
+
+    pub(super) fn commit_surface_slot_update(&mut self, prepared: UiPreparedSurfaceSlotUpdate) {
+        let surface_id = prepared.update.slot.surface_id();
         self.surfaces
-            .get_mut(&prepared.slot.surface_id())
+            .get_mut(&surface_id)
             .expect("validated UI surface remains installed")
-            .commit_slot_update(prepared);
+            .commit_slot_update(prepared.update);
+        self.targets.commit_binding(prepared.target);
     }
 
     pub(super) fn discard_all_candidates(&mut self) {
@@ -640,24 +736,27 @@ impl UiRuntimeState {
     pub(super) fn prepare_surface_retirement(
         &self,
         surface_id: nara_ui_kernel::UiSurfaceId,
-    ) -> Result<Option<UiSurfaceRetirement>, UiAdapterError> {
+    ) -> Result<Option<UiPreparedSurfaceRetirement>, UiAdapterError> {
         let Some(runtime) = self.surface(surface_id) else {
             return Ok(None);
         };
         let slot = runtime.slot();
         let token = runtime.prepare_retirement(slot.next_retirement_generation()?)?;
-        Ok(Some(UiSurfaceRetirement::new(
-            slot.endpoint(),
-            token,
-            runtime.input_route(),
-        )))
+        let retirement = UiSurfaceRetirement::new(slot.endpoint(), token, runtime.input_route());
+        let target = self.targets.prepare_release(slot)?;
+        Ok(Some(UiPreparedSurfaceRetirement { retirement, target }))
     }
 
-    pub(super) fn commit_surface_retirement(&mut self, retirement: UiSurfaceRetirement) {
-        let surface_id = retirement.surface_id();
+    pub(super) fn commit_surface_retirement(
+        &mut self,
+        prepared: UiPreparedSurfaceRetirement,
+    ) -> UiSurfaceRetirement {
+        let surface_id = prepared.retirement.surface_id();
         let removed = self.surfaces.remove(&surface_id);
         debug_assert!(removed.is_some(), "validated UI surface remains installed");
-        self.identities.retire(retirement.token());
+        self.targets.commit_release(prepared.target);
+        self.identities.retire(prepared.retirement.token());
+        prepared.retirement
     }
 
     pub(crate) fn is_retired(&self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {

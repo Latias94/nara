@@ -5,8 +5,10 @@ mod accessibility;
 
 #[cfg(feature = "accessibility")]
 pub use accessibility::{
-    WinitAccessibilityEndpointRetirement, WinitAccessibilityError, WinitAccessibilityPublisher,
-    WinitAccessibilityReceipt, WinitAccessibilityRetirementReceipt, WinitAccessibilityUpdate,
+    WinitAccessibilityActionRequest, WinitAccessibilityEndpointRetirement, WinitAccessibilityError,
+    WinitAccessibilityPublisher, WinitAccessibilityPublisherId, WinitAccessibilityReceipt,
+    WinitAccessibilityRetirementReceipt, WinitAccessibilitySuspension,
+    WinitAccessibilitySuspensionReceipt, WinitAccessibilityUpdate,
 };
 
 use std::{

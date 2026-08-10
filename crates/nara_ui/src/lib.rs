@@ -28,10 +28,11 @@ pub use nara_ui_kernel::{
     UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceId,
 };
 pub use runtime::{
-    UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceEndpoint,
-    UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
-    install_ui_surface, latest_ui_frame, latest_ui_frames, retire_ui_surface, ui_semantic_snapshot,
-    update_ui_surface_slot,
+    UiAdapterDiagnostic, UiAdapterDiagnostics, UiAdapterError, UiSurfaceAvailability,
+    UiSurfaceEndpoint, UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError,
+    UiSurfaceSlotSnapshot, UiSurfaceSuspension, UiSurfaceSuspensionReason, active_ui_surface_slots,
+    install_ui_surface, latest_ui_frame, latest_ui_frames, restore_ui_surface, retire_ui_surface,
+    suspend_ui_surface, ui_semantic_snapshot, ui_surface_slot_snapshots, update_ui_surface_slot,
 };
 pub use style::*;
 
@@ -148,11 +149,13 @@ pub mod advanced {
         UiAccessibilityInput, UiAccessibilityRequest, UiActivationSource, UiAdapterDiagnostic,
         UiAdapterDiagnostics, UiAdapterError, UiInputProjectionIssue, UiPresentationReceipt,
         UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRouteRejectionRecord,
-        UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize, UiSurfaceContentTransform,
-        UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceRetirement,
-        UiSurfaceSlot, UiSurfaceSlotError, active_ui_surface_slots,
+        UiRouteStamp, UiSafeAreaInsets, UiSeatId, UiSize, UiSurfaceAvailability,
+        UiSurfaceContentTransform, UiSurfaceContentTransformError, UiSurfaceEndpoint, UiSurfaceId,
+        UiSurfaceRetirement, UiSurfaceSlot, UiSurfaceSlotError, UiSurfaceSlotSnapshot,
+        UiSurfaceSuspension, UiSurfaceSuspensionReason, active_ui_surface_slots,
         dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, latest_ui_frames,
-        retire_ui_surface, ui_semantic_snapshot, update_ui_surface_slot,
+        restore_ui_surface, retire_ui_surface, suspend_ui_surface, ui_semantic_snapshot,
+        ui_surface_slot_snapshots, update_ui_surface_slot,
     };
     pub use nara_ui_kernel::{UiFrame, UiKey, UiNonActivation, UiSemanticSnapshot};
 }

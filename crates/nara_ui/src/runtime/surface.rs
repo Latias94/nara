@@ -168,8 +168,144 @@ impl UiSurfaceSlot {
         })
     }
 
+    pub(super) fn availability_successor(
+        self,
+        endpoint: UiSurfaceEndpoint,
+        transform: UiSurfaceContentTransform,
+    ) -> Result<Self, UiSurfaceSlotError> {
+        Ok(Self {
+            surface_id: self.surface_id,
+            endpoint,
+            transform,
+            slot_generation: advance_generation(self.slot_generation, "slot_generation")?,
+            route_generation: advance_generation(self.route_generation, "route_generation")?,
+            geometry_generation: advance_generation(
+                self.geometry_generation,
+                "geometry_generation",
+            )?,
+            presentation_generation: advance_generation(
+                self.presentation_generation,
+                "presentation_generation",
+            )?,
+            font_generation: self.font_generation,
+        })
+    }
+
     pub(super) fn next_retirement_generation(self) -> Result<u64, UiSurfaceSlotError> {
         advance_generation(self.slot_generation, "retirement_generation")
+    }
+}
+
+/// Host-observed reason that temporarily removed a Surface Slot from presentation authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiSurfaceSuspensionReason {
+    ZeroExtent,
+    EndpointUnavailable,
+    InvalidScale,
+}
+
+/// Current availability of one installed, non-retired Surface Slot lifetime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiSurfaceAvailability {
+    Active,
+    Suspended(UiSurfaceSuspensionReason),
+}
+
+impl UiSurfaceAvailability {
+    #[must_use]
+    pub const fn is_active(self) -> bool {
+        matches!(self, Self::Active)
+    }
+
+    #[must_use]
+    pub const fn suspension_reason(self) -> Option<UiSurfaceSuspensionReason> {
+        match self {
+            Self::Active => None,
+            Self::Suspended(reason) => Some(reason),
+        }
+    }
+}
+
+/// Immutable Host-facing snapshot of one installed Surface Slot and its availability.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiSurfaceSlotSnapshot {
+    slot: UiSurfaceSlot,
+    availability: UiSurfaceAvailability,
+}
+
+impl UiSurfaceSlotSnapshot {
+    pub(super) const fn new(slot: UiSurfaceSlot, availability: UiSurfaceAvailability) -> Self {
+        Self { slot, availability }
+    }
+
+    #[must_use]
+    pub const fn slot(self) -> UiSurfaceSlot {
+        self.slot
+    }
+
+    #[must_use]
+    pub const fn availability(self) -> UiSurfaceAvailability {
+        self.availability
+    }
+
+    #[must_use]
+    pub const fn active_slot(self) -> Option<UiSurfaceSlot> {
+        match self.availability {
+            UiSurfaceAvailability::Active => Some(self.slot),
+            UiSurfaceAvailability::Suspended(_) => None,
+        }
+    }
+}
+
+/// Exact transition record emitted after one Surface Slot becomes suspended.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiSurfaceSuspension {
+    previous_slot_generation: u64,
+    reason: UiSurfaceSuspensionReason,
+    snapshot: UiSurfaceSlotSnapshot,
+}
+
+impl UiSurfaceSuspension {
+    pub(super) const fn new(
+        previous_slot_generation: u64,
+        slot: UiSurfaceSlot,
+        reason: UiSurfaceSuspensionReason,
+    ) -> Self {
+        Self {
+            previous_slot_generation,
+            reason,
+            snapshot: UiSurfaceSlotSnapshot::new(slot, UiSurfaceAvailability::Suspended(reason)),
+        }
+    }
+
+    #[must_use]
+    pub const fn surface_id(self) -> UiSurfaceId {
+        self.snapshot.slot().surface_id()
+    }
+
+    #[must_use]
+    pub const fn endpoint(self) -> UiSurfaceEndpoint {
+        self.snapshot.slot().endpoint()
+    }
+
+    #[must_use]
+    pub const fn previous_slot_generation(self) -> u64 {
+        self.previous_slot_generation
+    }
+
+    #[must_use]
+    pub const fn suspended_slot_generation(self) -> u64 {
+        self.snapshot.slot().slot_generation()
+    }
+
+    #[must_use]
+    pub const fn reason(self) -> UiSurfaceSuspensionReason {
+        self.reason
+    }
+
+    #[must_use]
+    pub const fn snapshot(self) -> UiSurfaceSlotSnapshot {
+        self.snapshot
     }
 }
 
