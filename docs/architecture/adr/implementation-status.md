@@ -4,25 +4,23 @@
 **Last Verified**: 2026-08-10
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole
-active execution contract is the [UI Modal Entry Focus Correction
-plan](../../plans/2026-08-10-001-refactor-ui-modal-entry-focus-correction-plan.md), currently at
-UIFM-U2. The [Runtime UI Product Slice
-plan](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) remains paused until it pins
-the successor Foundation Conformance Baseline. Superseded plans remain audit evidence and trigger
-backlog, not active implementation authority. Legacy rows that still name NUI-U15B/U16 describe the
-last completed NUI baseline; ADR 0107-0109 and the UIF baseline own shared contracts while RUP owns
-product validation after reactivation.
+active execution contract is the [Runtime UI Product Slice
+plan](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md), which pins successor
+Foundation Conformance Baseline `19cfa496dc2346368764057367cc2163`. The completed focused UIFM plan
+remains audit evidence, not active implementation authority. Legacy rows that still name
+NUI-U15B/U16 describe the last completed NUI baseline; ADR 0107-0109 and the successor UIF baseline
+own shared contracts while RUP owns current product validation.
 
 ## Current UIF correction override (2026-08-10)
 
 The rows below retain their historical ADR evidence anchors and are not rewritten in place. The
-current authority is the UIF-U5 Foundation Conformance Baseline plus the active UIFM correction:
-UIF-U2C is
+current authority is successor Foundation Conformance Baseline
+`19cfa496dc2346368764057367cc2163` and the active Runtime UI Product Slice plan: UIF-U2C is
 complete for snapshot-profile identity, attempted text-work accounting and modal failure algebra;
 UIF-U3C is complete for prepared submission authority, exact backend permits and infallible receipt
 commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target ownership and Host
 platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; UIFM-U1 is
-complete at `40d3f87`; UIFM-U2 is active; RUP-U1 is paused pending explicit baseline rebase.
+complete at `40d3f87`; UIFM-U2 published the successor baseline; RUP-U1 is active again.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
 `WinitAccessibilityBridge` symbol in older anchors.
 
@@ -34,8 +32,8 @@ complete at `40d3f87`; UIFM-U2 is active; RUP-U1 is paused pending explicit base
 | UIF-U5 | implemented | public inventory, neutral examples, independent consumer and Foundation Conformance Baseline; commit `e307cb3` and record `70b35505e8da4cb388c36d3ede602259` |
 | RUP-U0 | implemented | focused Reference Game fixture reconciliation; commit `80a7270` and verification `c067431accb242a7b69b839b5dd481d4` |
 | UIFM-U1 | implemented | Surface-owner modal-entry focus reconciliation before final paint and semantic publication; commit `40d3f87` and verification `04e51278170c4a839dbeb0c9658741d8` |
-| UIFM-U2 | active | successor Foundation Conformance Baseline publication and explicit RUP-U1 rebase |
-| RUP-U1 | paused | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress |
+| UIFM-U2 | implemented | successor Foundation Conformance Baseline `19cfa496dc2346368764057367cc2163` and explicit RUP-U1 rebase |
+| RUP-U1 | active | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress |
 
 ## Schema
 
