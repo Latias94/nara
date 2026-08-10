@@ -235,6 +235,20 @@ fn modal_root() -> UiRoot {
         .with_child(button("retry", "Retry", "retry", 210.0, 120.0, true))
 }
 
+fn modal_root_with_disabled_first_target() -> UiRoot {
+    UiRoot::new(root_key("modal"), UiLayer::Modal, UiStyle::fill()).with_children([
+        button(
+            "disabled-retry",
+            "Disabled Retry",
+            "disabled-retry",
+            110.0,
+            120.0,
+            false,
+        ),
+        button("retry", "Retry", "retry", 210.0, 120.0, true),
+    ])
+}
+
 fn snapshot(include_modal: bool) -> UiAuthoringSnapshot {
     let builder =
         UiAuthoringSnapshotBuilder::new(if include_modal { 2 } else { 1 }).with_root(base_root());
@@ -339,6 +353,155 @@ fn pointer_button(phase: UiButtonPhase, position: UiPoint) -> UiInputEvent {
         phase,
         position: Some(position),
     }
+}
+
+#[test]
+fn initial_modal_candidate_stages_owner_focus_without_input() {
+    let mut compiler = compiler();
+    let frame = compile(&mut compiler, &snapshot(true), 1);
+    let session = UiInteractionSession::default();
+    let staged = session
+        .stage_candidate_presentation(SURFACE, SEAT, None, &frame, &[])
+        .unwrap()
+        .expect("the endpoint seat and modal focus should change candidate state");
+    let retry = exact_key("modal", "retry");
+    assert!(staged.dispatch().events().iter().any(|event| {
+        event.target() == &retry
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
+    }));
+    assert!(
+        staged
+            .dispatch()
+            .events()
+            .iter()
+            .all(|event| { !matches!(event.kind(), UiRoutedEventKind::ActivateRequested { .. }) })
+    );
+
+    let (staged_session, _) = staged.into_parts();
+    let mut journal = hosted_journal();
+    let route = submit(&mut journal, frame, 10);
+    let semantics = staged_session
+        .semantic_snapshot(&journal, route, SEAT)
+        .unwrap();
+    assert!(
+        semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &retry)
+            .unwrap()
+            .state()
+            .focused()
+    );
+}
+
+#[test]
+fn base_to_modal_candidate_transition_focuses_without_prior_input() {
+    let mut compiler = compiler();
+    let base = compile(&mut compiler, &snapshot(false), 1);
+    let initial = UiInteractionSession::default()
+        .stage_candidate_presentation(SURFACE, SEAT, None, &base, &[])
+        .unwrap()
+        .expect("the endpoint seat should be admitted before initial presentation");
+    assert!(initial.dispatch().events().is_empty());
+    let (session, _) = initial.into_parts();
+
+    let modal = compile(&mut compiler, &snapshot(true), 2);
+    let staged = session
+        .stage_candidate_presentation(SURFACE, SEAT, Some(&base), &modal, &[])
+        .unwrap()
+        .expect("entering a modal should reconcile focus before presentation");
+    let retry = exact_key("modal", "retry");
+    assert!(staged.dispatch().events().iter().any(|event| {
+        event.target() == &retry
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
+    }));
+
+    let (staged_session, _) = staged.into_parts();
+    let mut journal = hosted_journal();
+    let route = submit(&mut journal, modal, 10);
+    let semantics = staged_session
+        .semantic_snapshot(&journal, route, SEAT)
+        .unwrap();
+    assert_eq!(
+        semantics
+            .nodes()
+            .iter()
+            .filter(|node| node.state().focused())
+            .map(|node| node.key())
+            .collect::<Vec<_>>(),
+        vec![&retry]
+    );
+}
+
+#[test]
+fn initial_non_modal_candidate_does_not_invent_focus() {
+    let mut compiler = compiler();
+    let frame = compile(&mut compiler, &snapshot(false), 1);
+    let staged = UiInteractionSession::default()
+        .stage_candidate_presentation(SURFACE, SEAT, None, &frame, &[])
+        .unwrap()
+        .expect("the endpoint seat should be admitted even without a modal");
+    assert!(staged.dispatch().events().is_empty());
+
+    let (staged_session, _) = staged.into_parts();
+    let mut journal = hosted_journal();
+    let route = submit(&mut journal, frame, 10);
+    let semantics = staged_session
+        .semantic_snapshot(&journal, route, SEAT)
+        .unwrap();
+    assert!(semantics.nodes().iter().all(|node| !node.state().focused()));
+}
+
+#[test]
+fn initial_modal_focus_skips_disabled_targets_in_structural_order() {
+    let snapshot = UiAuthoringSnapshotBuilder::new(11)
+        .with_root(modal_root_with_disabled_first_target())
+        .build()
+        .unwrap();
+    let mut compiler = compiler();
+    let frame = compile(&mut compiler, &snapshot, 1);
+    let staged = UiInteractionSession::default()
+        .stage_candidate_presentation(SURFACE, SEAT, None, &frame, &[])
+        .unwrap()
+        .expect("modal entry should select the first eligible focus target");
+    let disabled = exact_key("modal", "disabled-retry");
+    let retry = exact_key("modal", "retry");
+    assert!(staged.dispatch().events().iter().all(|event| {
+        event.target() != &disabled
+            || event.kind() != &UiRoutedEventKind::FocusChanged { focused: true }
+    }));
+    assert!(staged.dispatch().events().iter().any(|event| {
+        event.target() == &retry
+            && event.phase() == UiRoutePhase::Target
+            && event.kind() == &UiRoutedEventKind::FocusChanged { focused: true }
+    }));
+
+    let (staged_session, _) = staged.into_parts();
+    let mut journal = hosted_journal();
+    let route = submit(&mut journal, frame, 10);
+    let semantics = staged_session
+        .semantic_snapshot(&journal, route, SEAT)
+        .unwrap();
+    assert!(
+        !semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &disabled)
+            .unwrap()
+            .state()
+            .focused()
+    );
+    assert!(
+        semantics
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &retry)
+            .unwrap()
+            .state()
+            .focused()
+    );
 }
 
 #[test]
@@ -765,6 +928,7 @@ fn candidate_reconciliation_is_staged_without_mutating_the_presented_session() {
     let staged = session
         .stage_candidate_presentation(
             SURFACE,
+            SEAT,
             Some(&initial_frame),
             &candidate_frame,
             std::slice::from_ref(&target),

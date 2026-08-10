@@ -263,6 +263,10 @@ impl UiSurfaceRuntime {
             ));
             return Ok(None);
         };
+        if !staging.requires_reprojection(&self.reducers) {
+            self.candidate = Some(staging.into_candidate());
+            return Ok(None);
+        }
         Ok(Some(staging))
     }
 
@@ -304,6 +308,7 @@ impl UiSurfaceRuntime {
         let invalidated_keys = self.presented.behavior_invalidations(behavior);
         let reconciliation = self.interaction.stage_candidate_presentation(
             self.slot.surface_id(),
+            UiSeatId::new(self.slot.endpoint().seat().get()),
             self.presented
                 .latest_target()
                 .map(|target| target.frame().as_ref()),

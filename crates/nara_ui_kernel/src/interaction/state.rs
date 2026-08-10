@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, btree_map::Entry};
 
 use super::{
     UiInputEvent, UiPointerId, UiRoutedEventKind, UiSeatId,
@@ -120,13 +120,17 @@ pub(super) fn preflight_seat(
     state: &mut SurfaceState,
     seat: UiSeatId,
 ) -> Result<(), UiDispatchError> {
-    if !state.seats.contains_key(&seat) && state.seats.len() == MAX_SEATS_PER_SURFACE {
-        return Err(UiDispatchError::SeatLimitExceeded {
+    let can_insert = state.seats.len() < MAX_SEATS_PER_SURFACE;
+    match state.seats.entry(seat) {
+        Entry::Occupied(_) => Ok(()),
+        Entry::Vacant(entry) if can_insert => {
+            entry.insert(SeatState::default());
+            Ok(())
+        }
+        Entry::Vacant(_) => Err(UiDispatchError::SeatLimitExceeded {
             maximum: MAX_SEATS_PER_SURFACE,
-        });
+        }),
     }
-    state.seats.entry(seat).or_default();
-    Ok(())
 }
 
 pub(super) fn preflight_pointer(
@@ -338,8 +342,7 @@ pub(super) fn reconcile_surface(
         }
     }
 
-    let seats = state.seats.keys().copied().collect::<Vec<_>>();
-    for seat in seats {
+    if let Some(seat) = state.seats.first_key_value().map(|(seat, _)| *seat) {
         let restore_is_retired = state
             .seats
             .get(&seat)
@@ -365,8 +368,7 @@ fn reconcile_modal(
     latest: &UiFrame,
     batch: &mut UiDispatchBatch,
 ) {
-    let seats = state.seats.keys().copied().collect::<Vec<_>>();
-    for seat in seats {
+    if let Some(seat) = state.seats.first_key_value().map(|(seat, _)| *seat) {
         let current = state.seats.get(&seat).and_then(|seat| seat.focused.clone());
         let next = match (&state.modal_root, &next_modal) {
             (None, Some(modal)) => {

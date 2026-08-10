@@ -1293,6 +1293,147 @@ fn build_button_app() -> (App, Entity) {
 }
 
 #[test]
+fn initial_modal_presentation_commits_focus_for_the_surface_owner_seat() {
+    let (mut app, _) = build_unstarted_button_app_with_layer(UiLayer::Modal);
+    app.update().expect("initial modal frame should compile");
+    let frame = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("initial modal frame should exist");
+    let retry_key = expected_runtime_node("root", "retry");
+    let palette = UiTheme::default().palette();
+    let border = frame
+        .paint()
+        .iter()
+        .find_map(|primitive| match primitive {
+            UiPaintPrimitive::Rect {
+                key: Some(actual),
+                border: Some(border),
+                ..
+            } if actual == &retry_key => Some(*border),
+            _ => None,
+        })
+        .expect("modal focus must be compiled into the candidate paint facts");
+    assert_eq!(border.width(), 2.0);
+    assert_eq!(border.color(), palette.focus);
+    let cursor = app
+        .world_mut()
+        .expect("test App should allow world mutation")
+        .resource_mut::<UiActionJournal>()
+        .register_consumer(UiActionConsumerId::new("modal-entry-focus-test").unwrap())
+        .unwrap();
+    let receipt = commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        frame,
+        1,
+    )
+    .unwrap();
+
+    let semantics = ui_semantic_snapshot(app.world(), receipt, UiSeatId::PRIMARY).unwrap();
+    let retry = semantics
+        .nodes()
+        .iter()
+        .find(|node| node.key() == &retry_key)
+        .expect("initial modal should expose its Retry control");
+    assert!(
+        retry.state().focused(),
+        "modal entry should commit focus for the Surface Slot owner seat before input"
+    );
+    let reducer = app
+        .world()
+        .resource::<crate::runtime::UiRuntimeState>()
+        .surface(surface_id())
+        .unwrap()
+        .reducer_states()
+        .get(&retry_key)
+        .copied()
+        .expect("the presented modal must retain its staged Button reducer");
+    assert!(reducer.focused());
+    assert!(
+        app.world()
+            .resource::<UiActionJournal>()
+            .pending(&cursor)
+            .unwrap()
+            .is_empty(),
+        "modal focus reconciliation must not emit an activation intent"
+    );
+}
+
+#[test]
+fn modal_endpoint_replacement_seeds_only_the_new_owner_seat() {
+    let (mut app, _) = build_unstarted_button_app_with_layer(UiLayer::Modal);
+    app.update().expect("initial modal frame should compile");
+    let first = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("initial modal frame should exist");
+    let first_receipt = commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        first,
+        1,
+    )
+    .unwrap();
+    let retry_key = expected_runtime_node("root", "retry");
+    assert!(
+        ui_semantic_snapshot(app.world(), first_receipt, UiSeatId::PRIMARY)
+            .unwrap()
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &retry_key)
+            .unwrap()
+            .state()
+            .focused()
+    );
+
+    let next_input_seat = InputSeatId::new(1);
+    let next_ui_seat = UiSeatId::new(next_input_seat.get());
+    let current = active_ui_surface_slots(app.world()).unwrap()[0];
+    update_ui_surface_slot(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        surface_id(),
+        UiSurfaceEndpoint::new(
+            InputWindowId::new(12),
+            next_input_seat,
+            InputPointerId::PRIMARY,
+        ),
+        current.transform(),
+    )
+    .unwrap();
+    app.update()
+        .expect("the successor endpoint modal frame should compile");
+    let successor = latest_ui_frame(app.world(), surface_id())
+        .unwrap()
+        .expect("the successor endpoint modal frame should exist");
+    let successor_receipt = commit_ui_presentation(
+        app.world_mut()
+            .expect("test App should allow world mutation"),
+        successor,
+        2,
+    )
+    .unwrap();
+
+    let next_owner = ui_semantic_snapshot(app.world(), successor_receipt, next_ui_seat).unwrap();
+    assert!(
+        next_owner
+            .nodes()
+            .iter()
+            .find(|node| node.key() == &retry_key)
+            .unwrap()
+            .state()
+            .focused(),
+        "the successor endpoint owner seat should receive modal-entry focus"
+    );
+    assert!(matches!(
+        ui_semantic_snapshot(app.world(), successor_receipt, UiSeatId::PRIMARY),
+        Err(UiAdapterError::SeatOwnerMismatch {
+            expected: 1,
+            actual: 0,
+        })
+    ));
+}
+
+#[test]
 fn actionable_semantics_without_an_exact_controlled_behavior_owner_are_rejected() {
     let mut app = ui_app();
     install_test_surface(

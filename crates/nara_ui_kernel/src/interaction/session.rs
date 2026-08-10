@@ -4,15 +4,15 @@ use thiserror::Error;
 
 use super::{
     UiAccessibilityInput, UiActivationSource, UiButtonPhase, UiDispatchBatch, UiDispatchOutcome,
-    UiInputEvent, UiNonActivation, UiPointerButton, UiSemanticFact, UiSemanticSnapshot,
+    UiInputEvent, UiNonActivation, UiPointerButton, UiSeatId, UiSemanticFact, UiSemanticSnapshot,
     UiSemanticState,
     focus::{activate_target, committed_focus, is_focusable_key, navigate_focus, set_focus},
     pointer::{pointer_press, pointer_release, set_hover},
     routing::{KeyAvailability, active_modal_root, hit_target, key_availability, target_rejection},
     state::{
         PointerPosition, SurfaceState, cancel_all_pointers, cancel_pointer, cancel_seat,
-        cancel_surface, preflight_input_identity, reconcile_pointer_input_generation,
-        reconcile_presented_pointer_state, reconcile_surface,
+        cancel_surface, preflight_input_identity, preflight_seat,
+        reconcile_pointer_input_generation, reconcile_presented_pointer_state, reconcile_surface,
     },
 };
 use crate::{
@@ -36,7 +36,7 @@ pub struct UiCandidateReconciliation {
 }
 
 impl UiCandidateReconciliation {
-    /// Returns the cleanup events that must be reduced before this state can be adopted.
+    /// Returns the candidate reconciliation events that must be reduced before adoption.
     #[must_use]
     pub const fn dispatch(&self) -> &UiDispatchBatch {
         &self.dispatch
@@ -261,17 +261,19 @@ impl UiInteractionSession {
         Ok(Some(reconciliation))
     }
 
-    /// Stages state cleanup against an unpresented candidate without granting it route authority.
+    /// Stages interaction reconciliation against an unpresented candidate without route authority.
     ///
-    /// First-party adapters use this before final visual compilation so candidate paint, semantics,
-    /// reducers, and the eventual presented session all describe the same interaction state. The
-    /// presented session is not mutated; the returned staged session can be adopted only after
-    /// dependent reducers succeed. The committed presentation epoch remains unchanged until backend
-    /// acceptance is published.
+    /// `owner_seat` must come from the Surface Slot endpoint. First-party adapters use this before
+    /// final visual compilation so candidate paint, semantics, reducers, and the eventual presented
+    /// session all describe the same interaction state. Reconciliation may admit that seat and stage
+    /// modal-entry focus, but cannot emit an activation intent. The presented session is not mutated;
+    /// the returned staged session can be adopted only after dependent reducers succeed. The
+    /// committed presentation epoch remains unchanged until backend acceptance is published.
     #[doc(hidden)]
     pub fn stage_candidate_presentation(
         &self,
         surface: UiSurfaceId,
+        owner_seat: UiSeatId,
         previous: Option<&UiFrame>,
         candidate_frame: &UiFrame,
         invalidated_keys: &[UiKey],
@@ -284,6 +286,7 @@ impl UiInteractionSession {
         self.preflight_surface(surface)?;
         let initial = self.surfaces.get(&surface).cloned().unwrap_or_default();
         let mut candidate = initial.clone();
+        preflight_seat(&mut candidate, owner_seat)?;
         let current_epoch = initial.presentation_epoch;
         let mut reconciliation =
             UiDispatchBatch::reconciliation(candidate_frame.revision(), current_epoch.unwrap_or(1));

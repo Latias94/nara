@@ -9,8 +9,7 @@ use nara_reference_game::{
 use super::{
     ProductUiCapture, UiPhysicalTarget, capture,
     interaction::{
-        drive_fixed, drive_to_terminal, focus_retry, inject_keyboard, inject_pointer_click,
-        release_keyboard,
+        drive_fixed, drive_to_terminal, inject_keyboard, inject_pointer_click, release_keyboard,
     },
     presenter::{
         ComponentPresentationState, ComponentRetryCommandTrace,
@@ -56,7 +55,6 @@ pub fn capture_single_runtime_retry_trajectory(
         runtime.world().resource::<WaveSnapshot>().outcome,
         WaveOutcome::Completed
     );
-    focus_retry(&mut runtime);
     let completed = capture(&runtime, target);
     let first_activation_receipt = runtime
         .world()

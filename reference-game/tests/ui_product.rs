@@ -167,12 +167,12 @@ fn canonical_target_covers_the_six_product_states() {
     assert_semantic_prefix(completed, "FINAL SCORE ");
     assert_semantic_contains(completed, " ENEMIES ");
     assert_semantic_name(completed, "Press Enter or activate Retry");
-    assert_enabled_retry(completed, false);
+    assert_enabled_retry(completed, true);
     assert_semantic_name(defeated, "DEFEAT");
     assert_semantic_prefix(defeated, "FINAL SCORE ");
     assert_semantic_contains(defeated, " ENEMIES ");
     assert_semantic_name(defeated, "Press Enter or activate Retry");
-    assert_enabled_retry(defeated, false);
+    assert_enabled_retry(defeated, true);
 
     let pending_retry = pending.retry().expect("pending Retry semantics");
     assert_eq!(pending_retry.name, "Retrying...");

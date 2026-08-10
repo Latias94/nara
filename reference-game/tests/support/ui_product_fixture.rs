@@ -352,7 +352,6 @@ pub fn exercise_retry_activation(activation: RetryActivation) -> WaveRetryStatus
 }
 
 fn activate_retry_to_pending(runtime: &mut RuntimeInstance) {
-    focus_retry(runtime);
     inject_keyboard(runtime, KeyCode::Enter);
     runtime
         .drive(Duration::ZERO)
@@ -375,9 +374,6 @@ fn exercise_retry_activation_at(
     );
     drive_to_terminal(&mut runtime);
 
-    if !matches!(activation, RetryActivation::Pointer) {
-        focus_retry(&mut runtime);
-    }
     match activation {
         RetryActivation::Pointer => inject_pointer_click(&mut runtime),
         RetryActivation::Keyboard => inject_keyboard(&mut runtime, KeyCode::Enter),
@@ -404,7 +400,6 @@ pub fn exercise_pending_retry_reactivation() -> PendingRetryReactivation {
         bundled_wave_commands(),
     );
     drive_to_terminal(&mut runtime);
-    focus_retry(&mut runtime);
     inject_keyboard(&mut runtime, KeyCode::Enter);
     runtime
         .drive(Duration::ZERO)
@@ -438,7 +433,6 @@ pub fn exercise_paused_retry_activation() -> (WaveRetryStatus, WaveRetryStatus) 
         bundled_wave_commands(),
     );
     drive_to_terminal(&mut runtime);
-    focus_retry(&mut runtime);
     assert!(matches!(
         runtime.request_control(RuntimeControl::Pause),
         RuntimeControlRequestResult::Accepted(_)

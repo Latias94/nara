@@ -184,6 +184,17 @@ impl UiCandidateStaging {
         &self.reducers
     }
 
+    pub(super) fn requires_reprojection(&self, presented: &BTreeMap<UiKey, UiButtonState>) -> bool {
+        self.behavior.buttons.keys().any(|key| {
+            presented.get(key).copied().unwrap_or_default()
+                != self.reducers.get(key).copied().unwrap_or_default()
+        })
+    }
+
+    pub(super) fn into_candidate(self) -> UiCompiledCandidate {
+        UiCompiledCandidate::new(self.probe, self.behavior, self.interaction, self.reducers)
+    }
+
     pub(super) fn into_parts(self) -> (UiInteractionSession, BTreeMap<UiKey, UiButtonState>) {
         (self.interaction, self.reducers)
     }
