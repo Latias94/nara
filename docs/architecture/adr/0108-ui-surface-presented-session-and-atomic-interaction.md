@@ -3,11 +3,11 @@
 **Status**: Accepted
 **Date**: 2026-08-08
 **Amended**: 2026-08-09 by the UIF-U1 presentation-reconciliation, UIF-U3C prepared-submission and
-UIF-U4C surface-lifecycle corrections
+UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-focus correction
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
-**Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), UIF-U1, UIF-U3C and UIF-U4C
+**Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), UIF-U1, UIF-U3C and UIF-U4C; [UI Modal Entry Focus Correction](../../plans/2026-08-10-001-refactor-ui-modal-entry-focus-correction-plan.md), UIFM-U1
 
 ## Context
 
@@ -111,6 +111,14 @@ Keyboard, gamepad and accessibility devices for the same player share that seat 
 seat or pointer fails closed before allocating session state. Independent users require distinct
 Surface Slots on distinct targets; shared-target multi-user interaction remains deferred until a
 focused model is accepted.
+
+The Surface Slot endpoint seat is admitted into candidate interaction staging before structural and
+modal reconciliation. A newly presented modal therefore commits its first enabled, visible focus
+target for the owning seat before final visual compilation and semantic publication, including an
+initial modal and a base-to-modal transition that received no prior UI input. An initial non-modal
+frame does not receive implicit focus. This focus mutation is a session/reducer presentation fact;
+semantic projection remains read-only and cannot manufacture it. Endpoint replacement clears the
+predecessor session and seeds only the successor endpoint seat.
 
 All fallible history, session, reducer, journal and input-route admission completes before backend
 submission. The backend acceptance is move-only and bound to the packet plus target, slot,

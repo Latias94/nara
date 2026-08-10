@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "540f8036a0c870bfabe99a0bbe7aae272bfe895deccb321fbc649fe5d732751f"
+source_fingerprint: "8ad6e6e9583e11b6b415cf2d543325e456ac676debe8529fd78719a8b5d1fc5a"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "540f8036a0c870bfabe99a0bbe7aae272bfe895deccb321fbc649fe5d73
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `540f8036a0c870bfabe99a0bbe7aae272bfe895deccb321fbc649fe5d732751f`
-- Immutable records: 402
+- Source fingerprint: `8ad6e6e9583e11b6b415cf2d543325e456ac676debe8529fd78719a8b5d1fc5a`
+- Immutable records: 404
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [UI modal-entry focus correction: UIFM-U1 active](registry/2026-08/2026-08-10T155950Z-ui-modal-entry-focus-correction-codex-root-e29de7d5dfaf44c4934407ff1e4a761a.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [UI modal-entry focus correction: UIFM-U2 active](registry/2026-08/2026-08-10T155956Z-ui-modal-entry-focus-correction-codex-root-93efa48145b143e8905e11e71e2579ea.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [UIFM-U1 Modal Entry Focus Correction](verification/2026-08/2026-08-10T155955Z-uifm-u1-modal-entry-focus-correction-04e51278170c4a839dbeb0c9658741d8.md) - Proves that the Surface Slot owner seat participates in candidate reconciliation and that initial modal focus is committed before final paint and semantic publication.
 - **Verification Evidence**: [RUP-U1 neutral modal-entry focus reproduction](verification/2026-08/2026-08-10T155945Z-rup-u1-neutral-modal-focus-reproduction-cc8d66c49d134e9f9d18d680afe19f7a.md) - Records the renderer-neutral product-triggered failure that pauses RUP-U1 and admits one focused UI Foundation correction.
 - **Verification Evidence**: [RUP-U0 product authority and fixture reconciliation](verification/2026-08/2026-08-10T155800Z-rup-u0-product-authority-and-fixture-reconciliation-c067431accb242a7b69b839b5dd481d4.md) - Closes the focused Reference Game Runtime UI component fixture without Cartesian smoke, opaque hashes, or false desktop/backend claims.
 - **Verification Evidence**: [UIF-U5 Foundation Conformance Baseline](verification/2026-08/2026-08-10T145838Z-uif-u5-foundation-conformance-baseline-70b35505e8da4cb388c36d3ede602259.md) - Pins the renderer-neutral UI public inventory, neutral examples, independent consumer, and exact backend-accepted presentation assertions before product validation.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [UIF-U1 presentation reconciliation correction](verification/2026-08/2026-08-08T142032Z-uif-u1-presentation-reconciliation-correction-055102d378e94c819ef419be51d29159.md) - Closes candidate/session generation splits, remove/reinsert resurrection, release backpressure, and staged reconciliation ownership.
 - **Verification Evidence**: [UIF-U1 atomic presented-session interaction](verification/2026-08/2026-08-08T113450Z-uif-u1-atomic-presented-session-interaction-d13d3f5c4c68440fa5ddacb88ee64eab.md) - Verifies closed dispatch outcomes, atomic reconciliation, invalidation-safe pointer routing, committed focus semantics, and disabled-focus identity.
 - **Verification Evidence**: [UIF-U0 UI Foundation authority and contract rebaseline](verification/2026-08/2026-08-08T105134Z-uif-u0-ui-foundation-authority-and-contract-rebaseline-7425f7e748a543dc9bab48bbf84d0e11.md) - Records the superseded NUI authority, focused ADR set, split product successors, and closed pre-implementation contract baseline.
-- **Verification Evidence**: [NUI-U15A neutral UI conformance and public boundary freeze](verification/2026-08/2026-08-08T051354Z-nui-u15a-neutral-ui-conformance-and-public-boundary-freeze-32535c96ab3b49d3affa4ecdcbb22e39.md) - Freezes the kernel, runtime adapter, and root presentation UI boundaries through three executable public-only examples.
 
 # Integration Notes
 
