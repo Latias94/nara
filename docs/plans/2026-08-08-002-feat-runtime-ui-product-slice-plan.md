@@ -7,7 +7,8 @@ amended: 2026-08-10
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+paused_by: docs/plans/2026-08-10-001-refactor-ui-modal-entry-focus-correction-plan.md
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-10T145838Z-uif-u5-foundation-conformance-baseline-70b35505e8da4cb388c36d3ede602259.md
@@ -36,6 +37,15 @@ operator_execution_authority: external-control-plane
   successor baseline before resuming.
 - **Tail ownership:** This plan closes Runtime UI product validation only. Editor, new shared widgets,
   dynamic asset APIs and generalized authoring infrastructure remain separate work.
+
+### Active correction lineage
+
+RUP-U1 is paused after the renderer-neutral `nara_ui` reproduction
+`initial_modal_presentation_commits_focus_for_the_surface_owner_seat` proved that a newly presented
+modal has no committed focus until an input first creates the endpoint seat. The focused
+[UI modal-entry focus correction](2026-08-10-001-refactor-ui-modal-entry-focus-correction-plan.md)
+owns that shared defect. This plan resumes only after the correction publishes a successor UIF
+baseline and this frontmatter pins it explicitly.
 
 ## Product Contract
 
