@@ -2230,11 +2230,14 @@ dependencies = [
  "nara_hierarchy",
  "nara_input",
  "nara_reflect",
+ "nara_render",
  "nara_scene",
  "nara_text",
  "nara_transform",
  "nara_ui_kernel",
+ "nara_ui_render",
  "nara_ui_widgets",
+ "nara_window",
  "thiserror 2.0.18",
 ]
 

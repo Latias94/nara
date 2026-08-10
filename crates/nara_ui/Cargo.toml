@@ -20,7 +20,10 @@ thiserror.workspace = true
 
 [dev-dependencies]
 nara_asset.workspace = true
+nara_render.workspace = true
 nara_transform.workspace = true
+nara_ui_render.workspace = true
+nara_window.workspace = true
 
 [features]
 default = []
