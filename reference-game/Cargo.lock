@@ -1506,6 +1506,10 @@ name = "nara-reference-game"
 version = "0.1.0"
 dependencies = [
  "nara",
+ "nara_render",
+ "nara_ui",
+ "nara_ui_kernel",
+ "nara_ui_render",
 ]
 
 [[package]]

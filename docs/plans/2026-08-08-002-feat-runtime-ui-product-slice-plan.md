@@ -202,7 +202,8 @@ test surface whose claims match R1-R12.
 
 **Requirements:** R1-R3, R8-R12.
 
-**Files:** `reference-game/tests/ui_product.rs`,
+**Files:** `reference-game/Cargo.toml`, `reference-game/Cargo.lock`,
+`reference-game/src/runtime_ui.rs`, `reference-game/tests/ui_product.rs`,
 `reference-game/tests/support/ui_product_fixture.rs`,
 `reference-game/tests/support/ui_product_fixture/**`, `reference-game/README.md`, and the product
 contract or migration documentation when a claim changes.
@@ -210,15 +211,19 @@ contract or migration documentation when a claim changes.
 **Approach:** Preserve useful structural and behavior helpers. Remove full Cartesian expansion,
 opaque hashes, duplicate packet/glyph construction and debug-string semantic matching. Use scale
 `1.0` for normal cases and one named `1.25` pointer case. Keep direct test presenters labeled as
-component fixtures; do not count them as backend product proof.
+component fixtures; do not count them as backend product proof. If the focused assertions expose a
+product-owned modal lifecycle defect, correct the Reference Game adapter without changing shared UI
+Foundation behavior.
 
 **Test scenarios:** Six bounded visual/behavior states at the canonical target, three target
 readability captures for one representative state, one fractional pointer case, structured HUD and
 terminal facts, safe margin and modal geometry, focus/semantic identity, pending repeat rejection
-and applied removal.
+and applied removal. One transient `1024 x 768` target proves exact letterbox mapping, capture
+reconciliation and non-clamped modal black-bar input.
 
 **Verification:** `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test
-ui_product --test-threads=1` and direct diff review for hash, Cartesian and hidden-presenter claims.
+ui_product --test-threads=1 --no-tests fail` and direct diff review for hash, Cartesian and
+hidden-presenter claims.
 
 **Exit:** The product test compiles, every assertion maps to a named requirement, and no fixture is
 misrepresented as desktop/backend or platform-accessibility evidence.
@@ -306,7 +311,7 @@ updates the high-authority ledger and activates no unrelated successor automatic
 
 - Cargo commands run serially with `CARGO_BUILD_JOBS=1`; focused nextest precedes broader gates.
 - V1: `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test ui_product
-  --test-threads=1` proves the focused product assertions.
+  --test-threads=1 --no-tests fail` proves the focused product assertions.
 - V2: `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --test first_wave
   --test runtime_drive --test headless_snapshot --test headless_cli --test-threads=1` proves the
   gameplay trajectory, typed command boundary and presentation-free headless path.

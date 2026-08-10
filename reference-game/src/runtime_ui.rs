@@ -11,9 +11,9 @@ use nara::{
     scene::SceneEntitySource,
     ui::{
         UiActionConsumerId, UiActionCursor, UiActionJournal, UiBrush, UiButton, UiColorRole,
-        UiNode, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform, UiSurfaceEndpoint,
-        UiSurfaceId, UiSurfaceSlot, UiText, UiTextAlignment, UiTextOverflow, UiVisual,
-        install_ui_surface,
+        UiLayer, UiNode, UiRoot, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
+        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiText, UiTextAlignment, UiTextOverflow,
+        UiVisual, install_ui_surface,
     },
 };
 
@@ -105,7 +105,10 @@ impl Plugin for ReferenceRuntimeUiPlugin {
     }
 
     fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
-        if !context.world().contains_resource::<ReferenceUiActionCursor>() {
+        if !context
+            .world()
+            .contains_resource::<ReferenceUiActionCursor>()
+        {
             return Ok(());
         }
         if !context.world().contains_resource::<UiActionJournal>() {
@@ -147,6 +150,7 @@ pub struct ReferenceHudProjection {
 type RuntimeUiEntity<'a> = (
     Entity,
     &'a SceneEntitySource,
+    Option<&'a mut UiRoot>,
     Option<&'a mut UiNode>,
     Option<&'a mut UiText>,
     Option<&'a mut UiVisual>,
@@ -185,7 +189,7 @@ fn project_runtime_ui(
         retry_enabled,
     };
 
-    for (entity, source, node, text, visual, button) in &mut entities {
+    for (entity, source, root, node, text, visual, button) in &mut entities {
         if !owner.owns_scene_entity(entity, source) {
             continue;
         }
@@ -246,6 +250,13 @@ fn project_runtime_ui(
                 UiTextAlignment::Start,
             ),
             "terminal-overlay" => {
+                if let Some(mut root) = root {
+                    *root = UiRoot::new(if terminal_visible {
+                        UiLayer::Modal
+                    } else {
+                        UiLayer::Overlay
+                    });
+                }
                 if let Some(mut node) = node {
                     *node = UiNode::new(
                         UiStyle::fill()

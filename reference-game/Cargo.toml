@@ -23,6 +23,12 @@ resolver = "3"
 [dependencies]
 nara = { path = "..", default-features = false, features = ["runtime-2d", "runtime-ui", "serde"] }
 
+[dev-dependencies]
+nara_render = { path = "../crates/nara_render" }
+nara_ui = { path = "../crates/nara_ui" }
+nara_ui_kernel = { path = "../crates/nara_ui_kernel" }
+nara_ui_render = { path = "../crates/nara_ui_render" }
+
 [[bin]]
 name = "desktop"
 path = "src/bin/desktop.rs"
