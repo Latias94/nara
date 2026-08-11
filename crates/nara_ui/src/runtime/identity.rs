@@ -10,36 +10,40 @@ const MAX_RETIRED_SURFACE_IDENTITIES: usize = 4_096;
 #[derive(Debug, Default)]
 pub(super) struct UiSurfaceIdentityLedger {
     retired: BTreeMap<UiSurfaceId, UiSurfaceRetirementToken>,
-    exhausted: bool,
 }
 
 impl UiSurfaceIdentityLedger {
-    pub(super) fn validate_new(&self, surface_id: UiSurfaceId) -> Result<(), UiAdapterError> {
-        if self.exhausted {
-            return Err(UiAdapterError::SurfaceIdentitySpaceExhausted);
-        }
+    pub(super) fn validate_new(
+        &self,
+        surface_id: UiSurfaceId,
+        active_surfaces: usize,
+    ) -> Result<(), UiAdapterError> {
         if self.retired.contains_key(&surface_id) {
             return Err(UiAdapterError::RetiredSurface {
                 surface: surface_id.get(),
             });
         }
+        if self.retired.len().saturating_add(active_surfaces) >= MAX_RETIRED_SURFACE_IDENTITIES {
+            return Err(UiAdapterError::SurfaceIdentitySpaceExhausted);
+        }
         Ok(())
     }
 
-    pub(super) fn retire(&mut self, retirement: UiSurfaceRetirementToken) {
+    pub(super) fn commit_retirement(&mut self, retirement: UiSurfaceRetirementToken) {
         let surface_id = retirement.surface_id();
-        if self.exhausted || self.retired.contains_key(&surface_id) {
-            return;
-        }
-        if self.retired.len() == MAX_RETIRED_SURFACE_IDENTITIES {
-            self.exhausted = true;
-            return;
-        }
-        self.retired.insert(surface_id, retirement);
+        debug_assert!(
+            self.retired.len() < MAX_RETIRED_SURFACE_IDENTITIES,
+            "surface installation reserves one exact retirement record"
+        );
+        let replaced = self.retired.insert(surface_id, retirement);
+        debug_assert!(
+            replaced.is_none(),
+            "a surface lifetime retires exactly once"
+        );
     }
 
     pub(super) fn is_retired(&self, surface_id: UiSurfaceId) -> bool {
-        self.exhausted || self.retired.contains_key(&surface_id)
+        self.retired.contains_key(&surface_id)
     }
 
     pub(super) fn retirement(&self, surface_id: UiSurfaceId) -> Option<UiSurfaceRetirementToken> {
@@ -62,7 +66,7 @@ mod tests {
         let mut ledger = UiSurfaceIdentityLedger::default();
         for value in 1..=MAX_RETIRED_SURFACE_IDENTITIES as u64 {
             let surface = UiSurfaceId::new(value).unwrap();
-            ledger.retire(retirement(surface));
+            ledger.commit_retirement(retirement(surface));
             assert!(ledger.is_retired(surface));
             assert_eq!(
                 ledger
@@ -74,12 +78,32 @@ mod tests {
         }
 
         let overflow = UiSurfaceId::new(MAX_RETIRED_SURFACE_IDENTITIES as u64 + 1).unwrap();
-        ledger.retire(retirement(overflow));
-        assert!(ledger.is_retired(overflow));
         assert!(matches!(
-            ledger.validate_new(UiSurfaceId::new(u64::MAX).unwrap()),
+            ledger.validate_new(overflow, 0),
             Err(UiAdapterError::SurfaceIdentitySpaceExhausted)
         ));
+        assert!(!ledger.is_retired(overflow));
+        assert_eq!(ledger.retirement(overflow), None);
         assert_eq!(ledger.retired.len(), MAX_RETIRED_SURFACE_IDENTITIES);
+    }
+
+    #[test]
+    fn installation_reserves_exact_retirement_evidence_for_every_active_surface() {
+        let mut ledger = UiSurfaceIdentityLedger::default();
+        for value in 1..MAX_RETIRED_SURFACE_IDENTITIES as u64 {
+            let surface = UiSurfaceId::new(value).unwrap();
+            ledger.commit_retirement(retirement(surface));
+        }
+
+        let reserved = UiSurfaceId::new(MAX_RETIRED_SURFACE_IDENTITIES as u64).unwrap();
+        ledger.validate_new(reserved, 0).unwrap();
+        let unreserved = UiSurfaceId::new(MAX_RETIRED_SURFACE_IDENTITIES as u64 + 1).unwrap();
+        assert!(matches!(
+            ledger.validate_new(unreserved, 1),
+            Err(UiAdapterError::SurfaceIdentitySpaceExhausted)
+        ));
+
+        ledger.commit_retirement(retirement(reserved));
+        assert_eq!(ledger.retirement(reserved), Some(retirement(reserved)));
     }
 }

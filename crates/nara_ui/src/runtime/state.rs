@@ -644,7 +644,8 @@ impl UiRuntimeState {
                 surface: surface_id.get(),
             });
         }
-        self.identities.validate_new(surface_id)?;
+        self.identities
+            .validate_new(surface_id, self.surfaces.len())?;
         if self.surfaces.len() == MAX_RUNTIME_SURFACES {
             return Err(UiAdapterError::SurfaceLimitExceeded);
         }
@@ -760,7 +761,8 @@ impl UiRuntimeState {
         let removed = self.surfaces.remove(&surface_id);
         debug_assert!(removed.is_some(), "validated UI surface remains installed");
         self.targets.commit_release(prepared.target);
-        self.identities.retire(prepared.retirement.token());
+        self.identities
+            .commit_retirement(prepared.retirement.token());
         prepared.retirement
     }
 

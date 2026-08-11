@@ -26,6 +26,10 @@ use super::{
     },
 };
 
+mod authority;
+
+use authority::VacantPlatformAuthority;
+
 const ROOT_NODE_ID: NodeId = NodeId(1);
 
 pub(crate) struct WinitPlatformAccessibilitySession {
@@ -33,7 +37,7 @@ pub(crate) struct WinitPlatformAccessibilitySession {
     publisher: Option<WinitAccessibilityPublisher>,
     callbacks: PlatformCallbackState,
     actions: PlatformActionMailbox,
-    last_retirement: Option<UiSurfaceRetirementToken>,
+    vacant_authority: Option<VacantPlatformAuthority>,
     next_node_id_floor: u64,
 }
 
@@ -65,7 +69,7 @@ impl WinitPlatformAccessibilitySession {
             publisher: None,
             callbacks,
             actions,
-            last_retirement: None,
+            vacant_authority: None,
             next_node_id_floor: super::FIRST_CONTENT_NODE_ID,
         }
     }
@@ -86,6 +90,11 @@ impl WinitPlatformAccessibilitySession {
     ) -> Result<(), WinitPlatformAccessibilityError> {
         match update {
             WinitAccessibilityPlatformUpdate::Present { snapshot, .. } => {
+                if self.publisher.is_none()
+                    && let Some(vacant) = self.vacant_authority
+                {
+                    vacant.validate_snapshot(&snapshot)?;
+                }
                 let mut publisher = match self.publisher.as_ref() {
                     Some(publisher) if publisher.surface_id() == snapshot.surface_id() => {
                         publisher.candidate_clone()
@@ -102,14 +111,6 @@ impl WinitPlatformAccessibilitySession {
                         self.next_node_id_floor,
                     )?,
                 };
-                if self
-                    .last_retirement
-                    .is_some_and(|retirement| retirement.surface_id() == snapshot.surface_id())
-                {
-                    return Err(WinitPlatformAccessibilityError::RetiredSurfaceReused {
-                        surface: snapshot.surface_id().get(),
-                    });
-                }
                 let receipt = publisher.publish_update(&snapshot)?;
                 let tree = publisher
                     .committed_update()
@@ -120,13 +121,17 @@ impl WinitPlatformAccessibilitySession {
                 self.publish_transition(tree, Some(mapping))?;
                 self.next_node_id_floor = publisher.next_node_id_floor();
                 self.publisher = Some(publisher);
+                self.vacant_authority = None;
             }
             WinitAccessibilityPlatformUpdate::Invalidate {
                 surface_id,
                 successor_slot_generation,
                 ..
             } => {
-                let publisher = if let Some(publisher) = self.publisher.as_ref() {
+                let floor = UiRevision::new(successor_slot_generation)
+                    .ok_or(WinitPlatformAccessibilityError::InvalidationGenerationZero)?;
+                let (publisher, vacant_authority) = if let Some(publisher) = self.publisher.as_ref()
+                {
                     if publisher.surface_id() != surface_id {
                         return Err(WinitAccessibilityError::SurfaceMismatch {
                             expected: publisher.surface_id(),
@@ -135,100 +140,69 @@ impl WinitPlatformAccessibilitySession {
                         .into());
                     }
                     let mut candidate = publisher.candidate_clone();
-                    candidate.invalidate_before(
-                        surface_id,
-                        UiRevision::new(successor_slot_generation)
-                            .ok_or(WinitPlatformAccessibilityError::InvalidationGenerationZero)?,
-                    )?;
-                    Some(candidate)
+                    candidate.invalidate_before(surface_id, floor)?;
+                    (Some(candidate), None)
                 } else {
-                    None
+                    (
+                        None,
+                        Some(self.prepare_vacant_authority(
+                            VacantPlatformAuthority::Invalidated { surface_id, floor },
+                        )?),
+                    )
                 };
                 self.publish_transition(empty_tree_update(), None)?;
                 self.publisher = publisher;
+                self.vacant_authority = vacant_authority;
             }
             WinitAccessibilityPlatformUpdate::Detach {
                 surface_id,
                 successor_slot_generation,
                 ..
             } => {
+                let floor = UiRevision::new(successor_slot_generation)
+                    .ok_or(WinitPlatformAccessibilityError::InvalidationGenerationZero)?;
                 self.stage_detachment(surface_id, successor_slot_generation)?;
+                let vacant_authority =
+                    self.prepare_vacant_authority(VacantPlatformAuthority::Detached {
+                        surface_id,
+                        floor,
+                    })?;
                 self.publish_transition(empty_tree_update(), None)?;
                 self.publisher = None;
+                self.vacant_authority = Some(vacant_authority);
             }
             WinitAccessibilityPlatformUpdate::Suspend {
                 surface_id,
                 slot_generation,
                 ..
             } => {
-                let publisher = if let Some(publisher) = self.publisher.as_ref() {
+                let floor = UiRevision::new(slot_generation)
+                    .expect("a committed Surface Slot has a non-zero generation");
+                let (publisher, vacant_authority) = if let Some(publisher) = self.publisher.as_ref()
+                {
                     let mut candidate = publisher.candidate_clone();
-                    candidate.suspend(super::WinitAccessibilitySuspension::new(
-                        surface_id,
-                        nara_ui_kernel::UiRevision::new(slot_generation)
-                            .expect("a committed Surface Slot has a non-zero generation"),
-                    ))?;
-                    Some(candidate)
+                    candidate
+                        .suspend(super::WinitAccessibilitySuspension::new(surface_id, floor))?;
+                    (Some(candidate), None)
                 } else {
-                    None
+                    (
+                        None,
+                        Some(self.prepare_vacant_authority(
+                            VacantPlatformAuthority::Suspended { surface_id, floor },
+                        )?),
+                    )
                 };
                 self.publish_transition(empty_tree_update(), None)?;
                 self.publisher = publisher;
+                self.vacant_authority = vacant_authority;
             }
             WinitAccessibilityPlatformUpdate::Retire { retirement, .. } => {
                 self.stage_retirement(retirement)?;
+                let vacant_authority =
+                    self.prepare_vacant_authority(VacantPlatformAuthority::Retired(retirement))?;
                 self.publish_transition(empty_tree_update(), None)?;
                 self.publisher = None;
-                self.last_retirement = Some(retirement);
-            }
-            WinitAccessibilityPlatformUpdate::RetireAndPresent {
-                retirement,
-                snapshot,
-                ..
-            } => {
-                if retirement.surface_id() == snapshot.surface_id() {
-                    return Err(WinitPlatformAccessibilityError::RetiredSurfaceReused {
-                        surface: snapshot.surface_id().get(),
-                    });
-                }
-                self.stage_retirement(retirement)?;
-                let mut publisher = WinitAccessibilityPublisher::with_node_id_floor(
-                    snapshot.surface_id(),
-                    self.next_node_id_floor,
-                )?;
-                let receipt = publisher.publish_update(&snapshot)?;
-                let tree = publisher
-                    .committed_update()
-                    .expect("a successful platform handoff retains its exact tree")
-                    .accesskit_update()
-                    .clone();
-                let mapping = publisher.callback_mapping(receipt);
-                self.publish_transition(tree, Some(mapping))?;
-                self.next_node_id_floor = publisher.next_node_id_floor();
-                self.publisher = Some(publisher);
-                self.last_retirement = Some(retirement);
-            }
-            WinitAccessibilityPlatformUpdate::DetachAndPresent {
-                detached_surface_id,
-                successor_slot_generation,
-                snapshot,
-                ..
-            } => {
-                self.stage_detachment(detached_surface_id, successor_slot_generation)?;
-                let mut publisher = WinitAccessibilityPublisher::with_node_id_floor(
-                    snapshot.surface_id(),
-                    self.next_node_id_floor,
-                )?;
-                let receipt = publisher.publish_update(&snapshot)?;
-                let tree = publisher
-                    .committed_update()
-                    .expect("a successful platform detach handoff retains its exact tree")
-                    .accesskit_update()
-                    .clone();
-                let mapping = publisher.callback_mapping(receipt);
-                self.publish_transition(tree, Some(mapping))?;
-                self.next_node_id_floor = publisher.next_node_id_floor();
-                self.publisher = Some(publisher);
+                self.vacant_authority = Some(vacant_authority);
             }
         }
         Ok(())
@@ -278,6 +252,16 @@ impl WinitPlatformAccessibilitySession {
                 .ok_or(WinitPlatformAccessibilityError::InvalidationGenerationZero)?,
         )?;
         Ok(())
+    }
+
+    fn prepare_vacant_authority(
+        &self,
+        next: VacantPlatformAuthority,
+    ) -> Result<VacantPlatformAuthority, WinitPlatformAccessibilityError> {
+        Ok(match self.vacant_authority {
+            Some(current) => current.advance(next)?,
+            None => next,
+        })
     }
 
     fn publish_transition(
@@ -431,6 +415,23 @@ pub(crate) enum WinitPlatformAccessibilityError {
     InvalidationGenerationZero,
     #[error("retired surface {surface} cannot be installed by a platform handoff")]
     RetiredSurfaceReused { surface: u64 },
+    #[error("vacant native target expected surface {expected:?}, but received {actual:?}")]
+    VacantSurfaceMismatch {
+        expected: nara_ui_kernel::UiSurfaceId,
+        actual: nara_ui_kernel::UiSurfaceId,
+    },
+    #[error(
+        "platform snapshot slot generation {candidate:?} does not satisfy vacant transition floor {floor:?}"
+    )]
+    SnapshotPredatesVacantTransition {
+        floor: UiRevision,
+        candidate: UiRevision,
+    },
+    #[error("platform transition generation {candidate:?} predates vacant transition {current:?}")]
+    StaleVacantTransition {
+        current: UiRevision,
+        candidate: UiRevision,
+    },
 }
 
 fn empty_tree_update() -> TreeUpdate {

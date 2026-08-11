@@ -1,7 +1,4 @@
-use std::{
-    collections::{BTreeMap, VecDeque},
-    mem,
-};
+use std::{collections::VecDeque, mem};
 
 use nara_app::{
     __RuntimeDriverPort, App, PluginError, RuntimeDriverScope, RuntimeWorldAccessError,
@@ -13,10 +10,11 @@ use nara_ui_kernel::{
 use nara_window::WindowId;
 use thiserror::Error;
 
-const MAX_ACCESSIBILITY_TARGETS: usize = 16;
+// Two lifecycle synchronizations plus one presentation per active surface fit below this bound.
+const MAX_PENDING_ACCESSIBILITY_UPDATES: usize = 64;
 pub(super) const MAX_PENDING_ACCESSIBILITY_INPUTS: usize = 64;
 
-/// One latest-only platform update for a Host-owned native window.
+/// One ordered platform update for a Host-owned native window.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WinitAccessibilityPlatformUpdate {
     Present {
@@ -42,17 +40,6 @@ pub enum WinitAccessibilityPlatformUpdate {
         window_id: WindowId,
         retirement: UiSurfaceRetirementToken,
     },
-    RetireAndPresent {
-        window_id: WindowId,
-        retirement: UiSurfaceRetirementToken,
-        snapshot: UiSemanticSnapshot,
-    },
-    DetachAndPresent {
-        window_id: WindowId,
-        detached_surface_id: UiSurfaceId,
-        successor_slot_generation: u64,
-        snapshot: UiSemanticSnapshot,
-    },
 }
 
 impl WinitAccessibilityPlatformUpdate {
@@ -63,16 +50,14 @@ impl WinitAccessibilityPlatformUpdate {
             | Self::Invalidate { window_id, .. }
             | Self::Suspend { window_id, .. }
             | Self::Detach { window_id, .. }
-            | Self::Retire { window_id, .. }
-            | Self::RetireAndPresent { window_id, .. }
-            | Self::DetachAndPresent { window_id, .. } => *window_id,
+            | Self::Retire { window_id, .. } => *window_id,
         }
     }
 }
 
 #[derive(Debug, Default, Resource)]
 struct WinitAccessibilityPlatformUpdates {
-    latest_by_window: BTreeMap<WindowId, WinitAccessibilityPlatformUpdate>,
+    pending: VecDeque<WinitAccessibilityPlatformUpdate>,
 }
 
 impl __RuntimeDriverPort for WinitAccessibilityPlatformUpdates {
@@ -80,9 +65,7 @@ impl __RuntimeDriverPort for WinitAccessibilityPlatformUpdates {
     type Output = Vec<WinitAccessibilityPlatformUpdate>;
 
     fn apply_driver_input(&mut self, (): Self::Input) -> Self::Output {
-        mem::take(&mut self.latest_by_window)
-            .into_values()
-            .collect()
+        mem::take(&mut self.pending).into_iter().collect()
     }
 }
 
@@ -129,18 +112,8 @@ impl WinitAccessibilityInputBatch {
 pub enum WinitAccessibilityBridgeError {
     #[error("the Winit accessibility bridge is not installed")]
     NotInstalled,
-    #[error("the Winit accessibility bridge target limit {maximum} was exceeded")]
-    TargetLimitExceeded { maximum: usize },
-    #[error(
-        "surface {surface} cannot be presented after its retirement in the same platform update"
-    )]
-    RetiredSurfaceReused { surface: u64 },
-    #[error(
-        "surface changed from {expected} to {actual} on one native target without a retirement or detach handoff"
-    )]
-    SurfaceChangedWithoutHandoff { expected: u64, actual: u64 },
-    #[error("platform snapshot slot generation {candidate} predates transition floor {floor}")]
-    SnapshotPredatesTransition { floor: u64, candidate: u64 },
+    #[error("the Winit accessibility bridge update limit {maximum} was exceeded")]
+    UpdateLimitExceeded { maximum: usize },
 }
 
 pub fn install_winit_accessibility_bridge(app: &mut App) -> Result<(), PluginError> {
@@ -156,118 +129,12 @@ pub fn publish_winit_accessibility_update(
     let mut updates = world
         .get_resource_mut::<WinitAccessibilityPlatformUpdates>()
         .ok_or(WinitAccessibilityBridgeError::NotInstalled)?;
-    let window_id = update.window_id();
-    if !updates.latest_by_window.contains_key(&window_id)
-        && updates.latest_by_window.len() == MAX_ACCESSIBILITY_TARGETS
-    {
-        return Err(WinitAccessibilityBridgeError::TargetLimitExceeded {
-            maximum: MAX_ACCESSIBILITY_TARGETS,
+    if updates.pending.len() == MAX_PENDING_ACCESSIBILITY_UPDATES {
+        return Err(WinitAccessibilityBridgeError::UpdateLimitExceeded {
+            maximum: MAX_PENDING_ACCESSIBILITY_UPDATES,
         });
     }
-    let update = updates.latest_by_window.get(&window_id).map_or_else(
-        || Ok(update.clone()),
-        |current| coalesce_updates(current, &update),
-    )?;
-    updates.latest_by_window.insert(window_id, update);
-    Ok(())
-}
-
-fn coalesce_updates(
-    current: &WinitAccessibilityPlatformUpdate,
-    next: &WinitAccessibilityPlatformUpdate,
-) -> Result<WinitAccessibilityPlatformUpdate, WinitAccessibilityBridgeError> {
-    match (current, next) {
-        (
-            WinitAccessibilityPlatformUpdate::Retire {
-                window_id,
-                retirement,
-            },
-            WinitAccessibilityPlatformUpdate::Present { snapshot, .. },
-        )
-        | (
-            WinitAccessibilityPlatformUpdate::RetireAndPresent {
-                window_id,
-                retirement,
-                ..
-            },
-            WinitAccessibilityPlatformUpdate::Present { snapshot, .. },
-        ) => {
-            if retirement.surface_id() == snapshot.surface_id() {
-                return Err(WinitAccessibilityBridgeError::RetiredSurfaceReused {
-                    surface: snapshot.surface_id().get(),
-                });
-            }
-            Ok(WinitAccessibilityPlatformUpdate::RetireAndPresent {
-                window_id: *window_id,
-                retirement: *retirement,
-                snapshot: snapshot.clone(),
-            })
-        }
-        (
-            WinitAccessibilityPlatformUpdate::Detach {
-                window_id,
-                surface_id,
-                successor_slot_generation,
-            },
-            WinitAccessibilityPlatformUpdate::Present { snapshot, .. },
-        )
-        | (
-            WinitAccessibilityPlatformUpdate::DetachAndPresent {
-                window_id,
-                detached_surface_id: surface_id,
-                successor_slot_generation,
-                ..
-            },
-            WinitAccessibilityPlatformUpdate::Present { snapshot, .. },
-        ) => Ok(WinitAccessibilityPlatformUpdate::DetachAndPresent {
-            window_id: *window_id,
-            detached_surface_id: *surface_id,
-            successor_slot_generation: *successor_slot_generation,
-            snapshot: snapshot.clone(),
-        }),
-        (
-            WinitAccessibilityPlatformUpdate::Invalidate {
-                surface_id,
-                successor_slot_generation,
-                ..
-            },
-            WinitAccessibilityPlatformUpdate::Present { snapshot, .. },
-        ) => {
-            if *surface_id != snapshot.surface_id() {
-                return Err(
-                    WinitAccessibilityBridgeError::SurfaceChangedWithoutHandoff {
-                        expected: surface_id.get(),
-                        actual: snapshot.surface_id().get(),
-                    },
-                );
-            }
-            validate_transition_floor(*successor_slot_generation, snapshot)?;
-            Ok(next.clone())
-        }
-        (
-            WinitAccessibilityPlatformUpdate::Present {
-                snapshot: current_snapshot,
-                ..
-            },
-            WinitAccessibilityPlatformUpdate::Present { snapshot, .. },
-        ) if current_snapshot.surface_id() != snapshot.surface_id() => Err(
-            WinitAccessibilityBridgeError::SurfaceChangedWithoutHandoff {
-                expected: current_snapshot.surface_id().get(),
-                actual: snapshot.surface_id().get(),
-            },
-        ),
-        _ => Ok(next.clone()),
-    }
-}
-
-fn validate_transition_floor(
-    floor: u64,
-    snapshot: &UiSemanticSnapshot,
-) -> Result<(), WinitAccessibilityBridgeError> {
-    let candidate = snapshot.route().slot_generation().get();
-    if candidate < floor {
-        return Err(WinitAccessibilityBridgeError::SnapshotPredatesTransition { floor, candidate });
-    }
+    updates.pending.push_back(update);
     Ok(())
 }
 
@@ -310,7 +177,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn platform_updates_keep_only_the_latest_fact_per_window() {
+    fn platform_updates_preserve_lifecycle_order_per_window() {
         let mut world = World::new();
         world.insert_resource(WinitAccessibilityPlatformUpdates::default());
         let window_id = WindowId::PRIMARY;
@@ -325,21 +192,31 @@ mod tests {
             },
         )
         .unwrap();
-        let latest = WinitAccessibilityPlatformUpdate::Suspend {
+        let successor = WinitAccessibilityPlatformUpdate::Suspend {
             window_id,
             surface_id,
             slot_generation: 3,
         };
-        publish_winit_accessibility_update(&mut world, latest.clone()).unwrap();
+        publish_winit_accessibility_update(&mut world, successor.clone()).unwrap();
 
         let updates = world
             .resource_mut::<WinitAccessibilityPlatformUpdates>()
             .apply_driver_input(());
-        assert_eq!(updates, vec![latest]);
+        assert_eq!(
+            updates,
+            vec![
+                WinitAccessibilityPlatformUpdate::Suspend {
+                    window_id,
+                    surface_id,
+                    slot_generation: 2,
+                },
+                successor,
+            ]
+        );
     }
 
     #[test]
-    fn retirement_and_successor_presentation_coalesce_into_one_typed_handoff() {
+    fn retirement_precedes_successor_presentation_without_dropping_either_fact() {
         let mut world = World::new();
         world.insert_resource(WinitAccessibilityPlatformUpdates::default());
         let window_id = WindowId::PRIMARY;
@@ -370,14 +247,19 @@ mod tests {
         let updates = world
             .resource_mut::<WinitAccessibilityPlatformUpdates>()
             .apply_driver_input(());
-        assert!(matches!(
-            updates.as_slice(),
-            [WinitAccessibilityPlatformUpdate::RetireAndPresent {
-                retirement: actual_retirement,
-                snapshot: actual_snapshot,
-                ..
-            }] if *actual_retirement == retirement && actual_snapshot == &snapshot
-        ));
+        assert_eq!(
+            updates,
+            vec![
+                WinitAccessibilityPlatformUpdate::Retire {
+                    window_id,
+                    retirement,
+                },
+                WinitAccessibilityPlatformUpdate::Present {
+                    window_id,
+                    snapshot,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -400,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn same_frame_invalidation_rejects_a_snapshot_below_its_floor() {
+    fn same_frame_invalidation_reaches_the_platform_before_a_stale_snapshot() {
         let mut world = World::new();
         world.insert_resource(WinitAccessibilityPlatformUpdates::default());
         let window_id = WindowId::PRIMARY;
@@ -412,27 +294,19 @@ mod tests {
         };
         publish_winit_accessibility_update(&mut world, invalidation.clone()).unwrap();
 
-        assert_eq!(
-            publish_winit_accessibility_update(
-                &mut world,
-                WinitAccessibilityPlatformUpdate::Present {
-                    window_id,
-                    snapshot: test_semantics(surface, 1),
-                },
-            ),
-            Err(WinitAccessibilityBridgeError::SnapshotPredatesTransition {
-                floor: 2,
-                candidate: 1,
-            })
-        );
+        let stale = WinitAccessibilityPlatformUpdate::Present {
+            window_id,
+            snapshot: test_semantics(surface, 1),
+        };
+        publish_winit_accessibility_update(&mut world, stale.clone()).unwrap();
         let updates = world
             .resource_mut::<WinitAccessibilityPlatformUpdates>()
             .apply_driver_input(());
-        assert_eq!(updates, vec![invalidation]);
+        assert_eq!(updates, vec![invalidation, stale]);
     }
 
     #[test]
-    fn detach_and_successor_presentation_coalesce_into_one_typed_handoff() {
+    fn detachment_precedes_successor_presentation_without_losing_its_floor() {
         let mut world = World::new();
         world.insert_resource(WinitAccessibilityPlatformUpdates::default());
         let window_id = WindowId::PRIMARY;
@@ -460,15 +334,20 @@ mod tests {
         let updates = world
             .resource_mut::<WinitAccessibilityPlatformUpdates>()
             .apply_driver_input(());
-        assert!(matches!(
-            updates.as_slice(),
-            [WinitAccessibilityPlatformUpdate::DetachAndPresent {
-                detached_surface_id,
-                successor_slot_generation: 2,
-                snapshot: actual_snapshot,
-                ..
-            }] if *detached_surface_id == detached_surface && actual_snapshot == &snapshot
-        ));
+        assert_eq!(
+            updates,
+            vec![
+                WinitAccessibilityPlatformUpdate::Detach {
+                    window_id,
+                    surface_id: detached_surface,
+                    successor_slot_generation: 2,
+                },
+                WinitAccessibilityPlatformUpdate::Present {
+                    window_id,
+                    snapshot,
+                },
+            ]
+        );
     }
 
     #[test]
@@ -537,6 +416,51 @@ mod tests {
         assert_eq!(inputs.pending.len(), MAX_PENDING_ACCESSIBILITY_INPUTS);
         assert!(inputs.pending.iter().all(|queued| queued == &input));
         assert_eq!(inputs.rejected, 5);
+    }
+
+    #[test]
+    fn platform_update_queue_is_bounded_and_reusable_after_a_drain() {
+        let mut world = World::new();
+        world.insert_resource(WinitAccessibilityPlatformUpdates::default());
+        let surface = UiSurfaceId::new(10).unwrap();
+        for value in 1..=MAX_PENDING_ACCESSIBILITY_UPDATES {
+            publish_winit_accessibility_update(
+                &mut world,
+                WinitAccessibilityPlatformUpdate::Suspend {
+                    window_id: WindowId::new(value as u64),
+                    surface_id: surface,
+                    slot_generation: value as u64,
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            publish_winit_accessibility_update(
+                &mut world,
+                WinitAccessibilityPlatformUpdate::Suspend {
+                    window_id: WindowId::PRIMARY,
+                    surface_id: surface,
+                    slot_generation: MAX_PENDING_ACCESSIBILITY_UPDATES as u64 + 1,
+                },
+            ),
+            Err(WinitAccessibilityBridgeError::UpdateLimitExceeded {
+                maximum: MAX_PENDING_ACCESSIBILITY_UPDATES,
+            })
+        );
+
+        let drained = world
+            .resource_mut::<WinitAccessibilityPlatformUpdates>()
+            .apply_driver_input(());
+        assert_eq!(drained.len(), MAX_PENDING_ACCESSIBILITY_UPDATES);
+        publish_winit_accessibility_update(
+            &mut world,
+            WinitAccessibilityPlatformUpdate::Suspend {
+                window_id: WindowId::new(u64::MAX),
+                surface_id: surface,
+                slot_generation: 1,
+            },
+        )
+        .unwrap();
     }
 
     fn test_input() -> UiAccessibilityInput {
