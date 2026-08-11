@@ -8,6 +8,8 @@ use nara_ui_render::{
     UiPresentationBackendFaultDomain, UiPresentationRuntimeGeneration,
 };
 
+#[cfg(feature = "desktop-winit")]
+mod accessibility;
 mod attempts;
 mod surfaces;
 
@@ -59,6 +61,8 @@ impl Plugin for UiPresentationBridgePlugin {
                 .after(nara_window::WindowSet::ApplyEvents)
                 .before(nara_input::__private::InputSet::RouteUi),
         )?;
+        #[cfg(feature = "desktop-winit")]
+        accessibility::install(app)?;
         app.add_systems(CoreStage::Queue, compile_runtime_ui_packets)?;
         app.add_systems(CoreStage::Cleanup, commit_runtime_ui_presentations)?;
         Ok(())
@@ -377,6 +381,8 @@ fn upsert_draw_packet(packets: &mut Vec<Arc<UiPaintPacket>>, packet: Arc<UiPaint
 }
 
 fn commit_runtime_ui_presentations(world: &mut World) {
+    #[cfg(feature = "desktop-winit")]
+    accessibility::synchronize_platform_surface_lifetimes(world);
     let outcomes = match nara_ui_render::drain_ui_presentation_outcomes(world) {
         Ok(outcomes) => outcomes,
         Err(error) => {
@@ -454,9 +460,15 @@ fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPr
     };
     let _accepted = nara_ui_render::__private::commit_ui_backend_presentation(world, commit);
     let receipt = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
-    let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
-    bridge.presented_packets += 1;
-    bridge.last_presented_receipt = Some(receipt);
+    {
+        let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
+        bridge.presented_packets += 1;
+        bridge.last_presented_receipt = Some(receipt);
+    }
+    #[cfg(feature = "desktop-winit")]
+    if let Err(error) = accessibility::publish_presented(world, receipt) {
+        record_bridge_error(world, error);
+    }
 }
 
 fn defer_submitted_attempt(

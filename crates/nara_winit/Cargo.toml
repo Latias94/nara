@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 accesskit = { workspace = true, optional = true }
+accesskit_winit = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_core.workspace = true
 nara_ecs.workspace = true
@@ -23,4 +24,9 @@ raw-window-handle.workspace = true
 
 [features]
 default = []
-accessibility = ["dep:accesskit", "dep:nara_ui_kernel", "dep:thiserror"]
+accessibility = [
+    "dep:accesskit",
+    "dep:nara_ui_kernel",
+    "dep:thiserror",
+]
+platform-accessibility = ["accessibility", "dep:accesskit_winit"]

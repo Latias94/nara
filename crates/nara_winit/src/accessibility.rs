@@ -10,6 +10,25 @@ use nara_ui_kernel::{
 };
 use thiserror::Error;
 
+#[cfg(feature = "platform-accessibility")]
+mod bridge;
+#[cfg(feature = "platform-accessibility")]
+mod platform;
+
+#[cfg(feature = "platform-accessibility")]
+pub(crate) use platform::WinitPlatformAccessibilitySession;
+
+#[cfg(feature = "platform-accessibility")]
+#[doc(hidden)]
+pub mod __private {
+    pub use super::bridge::{
+        WinitAccessibilityBridgeError, WinitAccessibilityInputBatch,
+        WinitAccessibilityPlatformUpdate, drain_winit_accessibility_inputs,
+        install_winit_accessibility_bridge, publish_winit_accessibility_update,
+        queue_winit_accessibility_inputs, take_winit_accessibility_updates,
+    };
+}
+
 const ROOT_NODE_ID: NodeId = NodeId(1);
 const FIRST_CONTENT_NODE_ID: u64 = 2;
 const FIRST_PUBLICATION_GENERATION: u64 = 1;
@@ -61,14 +80,46 @@ pub struct WinitAccessibilityPublisher {
     committed_update: Option<WinitAccessibilityUpdate>,
     suspension: Option<WinitAccessibilitySuspensionReceipt>,
     retirement: Option<WinitAccessibilityRetirementReceipt>,
+    invalidation_floor: Option<UiRevision>,
+}
+
+#[cfg(feature = "platform-accessibility")]
+#[derive(Debug)]
+pub(super) struct WinitAccessibilityCallbackMapping {
+    publisher: WinitAccessibilityPublisher,
+    receipt: WinitAccessibilityReceipt,
+}
+
+#[cfg(feature = "platform-accessibility")]
+impl WinitAccessibilityCallbackMapping {
+    pub(super) fn map_action(
+        &self,
+        request: ActionRequest,
+    ) -> Result<UiAccessibilityInput, WinitAccessibilityError> {
+        self.publisher
+            .map_action(&self.receipt.bind_action(request))
+    }
 }
 
 impl WinitAccessibilityPublisher {
     pub fn new(surface_id: UiSurfaceId) -> Result<Self, WinitAccessibilityError> {
+        Self::with_node_id_floor(surface_id, FIRST_CONTENT_NODE_ID)
+    }
+
+    pub(super) fn with_node_id_floor(
+        surface_id: UiSurfaceId,
+        next_node_id: u64,
+    ) -> Result<Self, WinitAccessibilityError> {
+        if next_node_id < FIRST_CONTENT_NODE_ID {
+            return Err(WinitAccessibilityError::InvalidNodeIdFloor {
+                minimum: FIRST_CONTENT_NODE_ID,
+                actual: next_node_id,
+            });
+        }
         Ok(Self {
             publisher_id: WinitAccessibilityPublisherId::allocate()?,
             surface_id,
-            next_node_id: FIRST_CONTENT_NODE_ID,
+            next_node_id,
             node_ids: BTreeMap::new(),
             active_keys: BTreeMap::new(),
             active_actions: BTreeMap::new(),
@@ -79,7 +130,13 @@ impl WinitAccessibilityPublisher {
             committed_update: None,
             suspension: None,
             retirement: None,
+            invalidation_floor: None,
         })
+    }
+
+    #[cfg(feature = "platform-accessibility")]
+    pub(super) const fn next_node_id_floor(&self) -> u64 {
+        self.next_node_id
     }
 
     #[must_use]
@@ -90,6 +147,25 @@ impl WinitAccessibilityPublisher {
     #[must_use]
     pub const fn surface_id(&self) -> UiSurfaceId {
         self.surface_id
+    }
+
+    #[cfg(feature = "platform-accessibility")]
+    pub(super) fn callback_mapping(
+        &self,
+        receipt: WinitAccessibilityReceipt,
+    ) -> WinitAccessibilityCallbackMapping {
+        let mut publisher = self.candidate_clone();
+        publisher.committed_update =
+            self.committed_update
+                .as_ref()
+                .map(|update| WinitAccessibilityUpdate {
+                    publisher_id: update.publisher_id,
+                    route: update.route,
+                    frame_revision: update.frame_revision,
+                    publication_generation: update.publication_generation,
+                    update: update.update.clone(),
+                });
+        WinitAccessibilityCallbackMapping { publisher, receipt }
     }
 
     /// Records one semantic snapshot and commits its callback mapping atomically.
@@ -158,6 +234,14 @@ impl WinitAccessibilityPublisher {
                     candidate: next,
                 });
             }
+        }
+        if let Some(floor) = self.invalidation_floor
+            && snapshot.route().slot_generation() < floor
+        {
+            return Err(WinitAccessibilityError::SnapshotPredatesInvalidation {
+                floor,
+                candidate: snapshot.route(),
+            });
         }
         if snapshot.nodes().len() > MAX_NODE_IDENTITIES {
             return Err(WinitAccessibilityError::NodeLimitExceeded {
@@ -315,7 +399,51 @@ impl WinitAccessibilityPublisher {
             committed_update: None,
             suspension: self.suspension,
             retirement: self.retirement,
+            invalidation_floor: self.invalidation_floor,
         }
+    }
+
+    #[cfg(feature = "platform-accessibility")]
+    pub(super) fn invalidate_before(
+        &mut self,
+        surface_id: UiSurfaceId,
+        successor_slot_generation: UiRevision,
+    ) -> Result<(), WinitAccessibilityError> {
+        if surface_id != self.surface_id {
+            return Err(WinitAccessibilityError::SurfaceMismatch {
+                expected: self.surface_id,
+                actual: surface_id,
+            });
+        }
+        if self.retirement.is_some() {
+            return Err(WinitAccessibilityError::SurfaceRetired {
+                surface: self.surface_id,
+            });
+        }
+        if let Some(current) = self.route
+            && successor_slot_generation <= current.slot_generation()
+        {
+            return Err(WinitAccessibilityError::InvalidationGenerationMismatch {
+                current: current.slot_generation(),
+                successor: successor_slot_generation,
+            });
+        }
+        if let Some(current) = self.invalidation_floor
+            && successor_slot_generation < current
+        {
+            return Err(WinitAccessibilityError::StaleInvalidation {
+                current,
+                candidate: successor_slot_generation,
+            });
+        }
+        self.active_keys.clear();
+        self.active_actions.clear();
+        self.active_focusable.clear();
+        self.route = None;
+        self.seat = None;
+        self.committed_update = None;
+        self.invalidation_floor = Some(successor_slot_generation);
+        Ok(())
     }
 
     /// Converts a supported AccessKit request into the exact presented-session input.
@@ -445,6 +573,14 @@ impl WinitAccessibilityPublisher {
                 candidate: suspension.slot_generation(),
             });
         }
+        if let Some(floor) = self.invalidation_floor
+            && suspension.slot_generation() < floor
+        {
+            return Err(WinitAccessibilityError::SuspensionPredatesInvalidation {
+                floor,
+                candidate: suspension.slot_generation(),
+            });
+        }
         let publication_generation = self.next_publication_generation;
         let next_publication_generation = self
             .next_publication_generation
@@ -490,11 +626,11 @@ impl WinitAccessibilityPublisher {
                 surface: self.surface_id,
             });
         }
-        if let Some(expected) = self.route.map(UiRouteStamp::slot_generation) {
-            if expected != retirement.slot_generation() {
-                return Err(WinitAccessibilityError::RetirementGenerationMismatch {
-                    expected,
-                    actual: retirement.slot_generation(),
+        if let Some(current) = self.route.map(UiRouteStamp::slot_generation) {
+            if retirement.slot_generation() < current {
+                return Err(WinitAccessibilityError::RetirementPredatesActiveRoute {
+                    current,
+                    candidate: retirement.slot_generation(),
                 });
             }
         } else if let Some(suspension) = self.suspension
@@ -502,6 +638,13 @@ impl WinitAccessibilityPublisher {
         {
             return Err(WinitAccessibilityError::RetirementPredatesSuspension {
                 suspended: suspension.slot_generation(),
+                candidate: retirement.slot_generation(),
+            });
+        } else if let Some(floor) = self.invalidation_floor
+            && retirement.slot_generation() < floor
+        {
+            return Err(WinitAccessibilityError::RetirementPredatesInvalidation {
+                floor,
                 candidate: retirement.slot_generation(),
             });
         }
@@ -821,6 +964,8 @@ impl WinitAccessibilityRetirementReceipt {
 pub enum WinitAccessibilityError {
     #[error("accessibility publisher identities are exhausted")]
     PublisherIdExhausted,
+    #[error("accessibility node identifier floor {actual} is below minimum {minimum}")]
+    InvalidNodeIdFloor { minimum: u64, actual: u64 },
     #[error(
         "accessibility snapshot surface {actual:?} does not match publisher surface {expected:?}"
     )]
@@ -854,6 +999,13 @@ pub enum WinitAccessibilityError {
     )]
     SnapshotDoesNotSucceedSuspension {
         suspended: UiRevision,
+        candidate: UiRouteStamp,
+    },
+    #[error(
+        "accessibility snapshot route {candidate:?} predates invalidated slot generation {floor:?}"
+    )]
+    SnapshotPredatesInvalidation {
+        floor: UiRevision,
         candidate: UiRouteStamp,
     },
     #[error("accessibility publication generation was exhausted")]
@@ -910,9 +1062,31 @@ pub enum WinitAccessibilityError {
         current: UiRevision,
         candidate: UiRevision,
     },
+    #[error(
+        "invalidation slot generation {successor:?} must succeed active generation {current:?}"
+    )]
+    InvalidationGenerationMismatch {
+        current: UiRevision,
+        successor: UiRevision,
+    },
+    #[error("invalidation slot generation {candidate:?} predates committed floor {current:?}")]
+    StaleInvalidation {
+        current: UiRevision,
+        candidate: UiRevision,
+    },
+    #[error("suspension slot generation {candidate:?} predates invalidation floor {floor:?}")]
+    SuspensionPredatesInvalidation {
+        floor: UiRevision,
+        candidate: UiRevision,
+    },
     #[error("retirement slot generation {candidate:?} predates suspended generation {suspended:?}")]
     RetirementPredatesSuspension {
         suspended: UiRevision,
+        candidate: UiRevision,
+    },
+    #[error("retirement slot generation {candidate:?} predates invalidation floor {floor:?}")]
+    RetirementPredatesInvalidation {
+        floor: UiRevision,
         candidate: UiRevision,
     },
     #[error("retirement token targets surface {actual:?}, expected {expected:?}")]
@@ -921,10 +1095,10 @@ pub enum WinitAccessibilityError {
         actual: UiSurfaceId,
     },
     #[error(
-        "retirement token slot generation {actual:?} does not match active route generation {expected:?}"
+        "retirement token slot generation {candidate:?} predates active route generation {current:?}"
     )]
-    RetirementGenerationMismatch {
-        expected: nara_ui_kernel::UiRevision,
-        actual: nara_ui_kernel::UiRevision,
+    RetirementPredatesActiveRoute {
+        current: nara_ui_kernel::UiRevision,
+        candidate: nara_ui_kernel::UiRevision,
     },
 }

@@ -536,9 +536,9 @@ fn recording_publisher_commits_exact_tree_mapping_and_retirement() {
                 WinitAccessibilityEndpointRetirement::PlatformTreeRemoved,
             )
             .unwrap_err(),
-        WinitAccessibilityError::RetirementGenerationMismatch {
-            expected: slot_two_receipt.slot_generation(),
-            actual: old_retirement.slot_generation(),
+        WinitAccessibilityError::RetirementPredatesActiveRoute {
+            current: slot_two_receipt.slot_generation(),
+            candidate: old_retirement.slot_generation(),
         }
     );
     assert_eq!(

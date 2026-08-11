@@ -126,8 +126,8 @@ pub mod __private {
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
         UiPreparedPresentationAuthority, abort_prepared_ui_presentation,
         commit_prepared_ui_presentation, defer_prepared_ui_presentation, prepare_ui_presentation,
-        retry_deferred_ui_presentation, supersede_deferred_ui_presentation,
-        supersede_prepared_ui_presentation,
+        retired_ui_surface_token, retry_deferred_ui_presentation,
+        supersede_deferred_ui_presentation, supersede_prepared_ui_presentation,
     };
 }
 

@@ -767,6 +767,13 @@ impl UiRuntimeState {
     pub(crate) fn is_retired(&self, surface_id: nara_ui_kernel::UiSurfaceId) -> bool {
         self.identities.is_retired(surface_id)
     }
+
+    pub(crate) fn retirement(
+        &self,
+        surface_id: nara_ui_kernel::UiSurfaceId,
+    ) -> Option<nara_ui_kernel::UiSurfaceRetirementToken> {
+        self.identities.retirement(surface_id)
+    }
 }
 
 pub(super) fn candidate_frame(candidate: &UiCompiledCandidate) -> Arc<UiFrame> {

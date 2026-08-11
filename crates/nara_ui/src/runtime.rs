@@ -450,6 +450,17 @@ pub fn retire_ui_surface(
     })
 }
 
+#[doc(hidden)]
+pub fn retired_ui_surface_token(
+    world: &World,
+    surface_id: UiSurfaceId,
+) -> Result<Option<nara_ui_kernel::UiSurfaceRetirementToken>, UiAdapterError> {
+    let Some(state) = world.get_resource::<UiRuntimeState>() else {
+        return Err(UiAdapterError::RuntimeUnavailable);
+    };
+    Ok(state.retirement(surface_id))
+}
+
 /// Returns the latest compiled immutable frame for one surface.
 pub fn latest_ui_frame(
     world: &World,

@@ -54,6 +54,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 accesskit = "0.24.1"
+accesskit_winit = "0.33.2"
 nara_app = { path = "crates/nara_app" }
 nara_asset = { path = "crates/nara_asset" }
 nara_asset_watch = { path = "crates/nara_asset_watch" }
@@ -219,6 +220,7 @@ presentation-ui = [
     "dep:nara_ui_render",
     "nara_image/render-prepare",
     "nara_render_wgpu?/ui-submitter",
+    "nara_winit?/platform-accessibility",
 ]
 tooling = ["runtime-core", "dep:nara_tooling"]
 asset-watch = ["runtime-core", "dep:nara_asset_watch"]
