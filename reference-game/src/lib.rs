@@ -57,8 +57,8 @@ pub use resources::{
     WaveRetryRejection, WaveRetryStatus, WaveRunGeneration,
 };
 pub use runtime_ui::{
-    REFERENCE_RUNTIME_UI_PLUGIN_ID, REFERENCE_UI_SURFACE_ID, ReferenceHudProjection,
-    ReferenceRuntimeUiPlugin,
+    REFERENCE_RETRY_ACTION, REFERENCE_RUNTIME_UI_PLUGIN_ID, REFERENCE_UI_SURFACE_ID,
+    ReferenceHudProjection, ReferenceRuntimeUiPlugin,
 };
 pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
 #[cfg(feature = "desktop")]
@@ -596,6 +596,17 @@ fn retry_draft() -> GameplayCommandDraft {
         GameplayCommandTypeId::new(resources::RETRY_COMMAND_TYPE)
             .expect("the retry command type is engine-owned and valid"),
     )
+}
+
+fn retry_draft_for_ui_action(sequence: u64) -> GameplayCommandDraft {
+    let mut payload = GameplayCommandPayload::new();
+    payload
+        .insert(
+            resources::RETRY_UI_ACTION_SEQUENCE_FIELD,
+            GameplayCommandValue::String(sequence.to_string()),
+        )
+        .expect("the engine-owned Retry cause payload is bounded");
+    retry_draft().with_payload(payload)
 }
 
 /// Creates the reference game's project-backed run intent.

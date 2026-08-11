@@ -14,6 +14,7 @@ desktop = [
     "nara/desktop-winit",
     "nara/render-wgpu",
 ]
+desktop-accessibility-probe = ["desktop", "dep:windows"]
 editor = ["nara/tooling"]
 host-parity = ["desktop", "editor"]
 
@@ -22,6 +23,15 @@ resolver = "3"
 
 [dependencies]
 nara = { path = "..", default-features = false, features = ["runtime-2d", "runtime-ui", "serde"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_UI_Accessibility",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 accesskit = "0.24.1"
@@ -40,6 +50,11 @@ required-features = ["desktop"]
 name = "desktop_render_probe"
 path = "src/bin/desktop_render_probe.rs"
 required-features = ["desktop"]
+
+[[bin]]
+name = "desktop_accessibility_probe"
+path = "src/bin/desktop_accessibility_probe.rs"
+required-features = ["desktop-accessibility-probe"]
 
 [[bin]]
 name = "host_parity_probe"

@@ -19,11 +19,11 @@ use nara::{
 
 use crate::{
     ReferenceWaveCaptureSet, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
-    WaveSnapshot, resources::WaveRunOwner, retry_draft,
+    WaveSnapshot, resources::WaveRunOwner, retry_draft_for_ui_action,
 };
 
 pub const REFERENCE_RUNTIME_UI_PLUGIN_ID: PluginId = PluginId::new("reference-game.runtime-ui");
-pub(crate) const REFERENCE_RETRY_ACTION: &str = "reference-game.retry";
+pub const REFERENCE_RETRY_ACTION: &str = "reference-game.retry";
 pub const REFERENCE_UI_SURFACE_ID: u64 = 1;
 const REFERENCE_UI_ACTION_CONSUMER: &str = "reference-game.runtime-ui";
 const REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
@@ -364,11 +364,12 @@ fn collect_retry_intents(
     mut commands: ResMut<LocalGameplayCommands>,
     faults: Res<RuntimeFaultReporter>,
 ) {
-    let (semantic, last_sequence) = match ui_actions.pending(&ui_cursor.0) {
+    let (semantic_sequence, last_sequence) = match ui_actions.pending(&ui_cursor.0) {
         Ok(pending) => (
             pending
                 .iter()
-                .any(|event| event.action().as_str() == REFERENCE_RETRY_ACTION),
+                .find(|event| event.action().as_str() == REFERENCE_RETRY_ACTION)
+                .map(|event| event.sequence().get()),
             pending.last().map(|event| event.sequence()),
         ),
         Err(_) => {
@@ -380,7 +381,10 @@ fn collect_retry_intents(
         }
     };
     let retry_is_eligible = snapshot.is_terminal() && retry.phase() != WaveRetryPhase::Pending;
-    if retry_is_eligible && semantic && commands.push(retry_draft()).is_err() {
+    if retry_is_eligible
+        && let Some(sequence) = semantic_sequence
+        && commands.push(retry_draft_for_ui_action(sequence)).is_err()
+    {
         faults.report(RuntimeFault::engine(
             RuntimeFaultKind::LocalIntentLoss,
             "reference-game.retry-intent",

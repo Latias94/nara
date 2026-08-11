@@ -67,10 +67,11 @@ pub fn capture_single_runtime_retry_trajectory(
         .drive(Duration::ZERO)
         .expect("the first Retry activation frame should drive");
     drive_fixed(&mut runtime);
-    assert_eq!(
-        runtime.world().resource::<WaveRetryStatus>().phase(),
-        WaveRetryPhase::Pending
-    );
+    let first_pending_retry = *runtime.world().resource::<WaveRetryStatus>();
+    assert_eq!(first_pending_retry.phase(), WaveRetryPhase::Pending);
+    let first_ui_action_sequence = first_pending_retry
+        .pending_ui_action_sequence()
+        .expect("the pending Retry should retain its exact UI action cause");
     let first_pending = capture(&runtime, target);
     let retry_batches_after_first_activation = runtime
         .world()
@@ -101,6 +102,14 @@ pub fn capture_single_runtime_retry_trajectory(
     assert_replacement_rejected(&runtime);
     drive_fixed(&mut runtime);
     assert_replacement_rejected(&runtime);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<WaveRetryStatus>()
+            .pending_ui_action_sequence(),
+        None,
+        "a rejected replacement must clear its pending UI action cause"
+    );
     let rejected = capture(&runtime, target);
     let second_activation_receipt = runtime
         .world()
@@ -113,10 +122,12 @@ pub fn capture_single_runtime_retry_trajectory(
         .drive(Duration::ZERO)
         .expect("the second Retry activation frame should drive");
     drive_fixed(&mut runtime);
-    assert_eq!(
-        runtime.world().resource::<WaveRetryStatus>().phase(),
-        WaveRetryPhase::Pending
-    );
+    let second_pending_retry = *runtime.world().resource::<WaveRetryStatus>();
+    assert_eq!(second_pending_retry.phase(), WaveRetryPhase::Pending);
+    let second_ui_action_sequence = second_pending_retry
+        .pending_ui_action_sequence()
+        .expect("the second pending Retry should retain its exact UI action cause");
+    assert!(second_ui_action_sequence > first_ui_action_sequence);
     let second_pending = capture(&runtime, target);
 
     release_keyboard(&mut runtime, KeyCode::Enter);
@@ -124,9 +135,12 @@ pub fn capture_single_runtime_retry_trajectory(
         .drive(Duration::ZERO)
         .expect("the second Retry release frame should drive");
     drive_fixed(&mut runtime);
+    let applied_retry = *runtime.world().resource::<WaveRetryStatus>();
+    assert_eq!(applied_retry.phase(), WaveRetryPhase::Applied);
     assert_eq!(
-        runtime.world().resource::<WaveRetryStatus>().phase(),
-        WaveRetryPhase::Applied
+        applied_retry.applied_ui_action_sequence(),
+        Some(second_ui_action_sequence),
+        "the applied replacement must retain the exact pending UI action cause"
     );
     let applied = capture(&runtime, target);
     let (retry_command_batches, retry_trace_overflowed) = {

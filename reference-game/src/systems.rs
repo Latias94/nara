@@ -31,8 +31,9 @@ use crate::{
         ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
         MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_PRESSED_FIELD, MOVE_X_FIELD, MOVE_Y_FIELD,
         MovementDirection, MovementIntent, PLAYER_SCENE_ID, PLAYER_WEAPON_SCENE_ID,
-        PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE, WaveRetryRejection,
-        WaveRetryStatus, WaveRunBaseline, WaveRunGeneration, WaveRunOwner, WaveState,
+        PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE, RETRY_UI_ACTION_SEQUENCE_FIELD,
+        WaveRetryRejection, WaveRetryStatus, WaveRunBaseline, WaveRunGeneration, WaveRunOwner,
+        WaveState,
     },
     snapshot::{WaveOutcome, WaveSnapshot},
 };
@@ -58,6 +59,7 @@ enum RunPublication {
     Startup,
     Retry {
         last_rejection: Option<WaveRetryRejection>,
+        ui_action_sequence: Option<u64>,
     },
 }
 
@@ -282,8 +284,12 @@ fn prepare_reference_run(
     actors.sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut retry = WaveRetryStatus::default();
-    if let RunPublication::Retry { last_rejection } = publication {
-        retry.mark_applied(generation.get(), last_rejection);
+    if let RunPublication::Retry {
+        last_rejection,
+        ui_action_sequence,
+    } = publication
+    {
+        retry.mark_applied(generation.get(), ui_action_sequence, last_rejection);
     }
     Ok(PreparedReferenceRun {
         actors,
@@ -412,15 +418,20 @@ pub(crate) fn begin_wave_tick(world: &mut World) -> Result<(), BevyError> {
 }
 
 pub(crate) fn consume_retry_commands(world: &mut World) -> Result<(), BevyError> {
-    let retry_count = world
-        .resource::<GameplayCommandBatch>()
-        .commands()
-        .iter()
-        .filter(|command| command.command_type().as_str() == RETRY_COMMAND_TYPE)
-        .count();
-    if retry_count == 0 {
-        return Ok(());
-    }
+    let (ui_action_sequence, has_duplicate) = {
+        let batch = world.resource::<GameplayCommandBatch>();
+        let mut retry_commands = batch
+            .iter()
+            .filter(|command| command.command_type().as_str() == RETRY_COMMAND_TYPE);
+        let Some(first_retry) = retry_commands.next() else {
+            return Ok(());
+        };
+        let ui_action_sequence = match first_retry.payload().get(RETRY_UI_ACTION_SEQUENCE_FIELD) {
+            Some(GameplayCommandValue::String(sequence)) => sequence.parse().ok(),
+            _ => None,
+        };
+        (ui_action_sequence, retry_commands.next().is_some())
+    };
 
     let generation = world.resource::<WaveRunGeneration>().get();
     if world.resource::<WaveState>().is_running() {
@@ -430,7 +441,7 @@ pub(crate) fn consume_retry_commands(world: &mut World) -> Result<(), BevyError>
         return Ok(());
     }
     let mut status = world.resource_mut::<WaveRetryStatus>();
-    if status.mark_pending(generation) && retry_count > 1 {
+    if status.mark_pending(generation, ui_action_sequence) && has_duplicate {
         status.reject_duplicate();
     }
 
@@ -453,12 +464,17 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
         .ok_or_else(|| BevyError::error(ReferenceSimulationError::ComponentRegistryUnavailable))?;
 
     world.resource_scope(|world, mut owner: Mut<WaveRunOwner>| {
-        let last_rejection = world.resource::<WaveRetryStatus>().last_rejection();
+        let status = *world.resource::<WaveRetryStatus>();
+        let last_rejection = status.last_rejection();
+        let ui_action_sequence = status.pending_ui_action_sequence();
         let replacement = owner.source().with_expanded_scene(|source, provenance| {
             let prepared = prepare_reference_run(
                 source,
                 next_generation,
-                RunPublication::Retry { last_rejection },
+                RunPublication::Retry {
+                    last_rejection,
+                    ui_action_sequence,
+                },
             )?;
             let limits = SceneProductTransactionLimits::new(
                 ItemLimit::new(MAX_WAVE_SCENE_ENTITIES.saturating_mul(3))
@@ -1334,9 +1350,10 @@ fn retire_expired_entities_inner(world: &mut World) -> Result<(), BevyError> {
                 .map_err(|_| BevyError::error(ReferenceSimulationError::IdentityRetirement))?;
         }
         for (_, token) in expired_projectiles {
-            let placement = HierarchyPlacement::current(world, token.entity()).ok_or_else(|| {
-                BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy)
-            })?;
+            let placement =
+                HierarchyPlacement::current(world, token.entity()).ok_or_else(|| {
+                    BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy)
+                })?;
             HierarchyWriter::new(world)
                 .remove(token.entity(), placement)
                 .map_err(|_| BevyError::error(ReferenceSimulationError::InvalidSpatialHierarchy))?;

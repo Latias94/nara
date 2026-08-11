@@ -15,6 +15,7 @@ pub(crate) const MOVE_X_FIELD: &str = "x";
 pub(crate) const MOVE_Y_FIELD: &str = "y";
 pub(crate) const MOVE_PRESSED_FIELD: &str = "pressed";
 pub(crate) const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
+pub(crate) const RETRY_UI_ACTION_SEQUENCE_FIELD: &str = "ui_action_sequence";
 pub(crate) const PLAYER_SCENE_ID: &str = "player";
 pub(crate) const PLAYER_WEAPON_SCENE_ID: &str = "player-weapon";
 pub(crate) const COMMAND_SOURCE: &str = "reference-game.bundled";
@@ -194,17 +195,23 @@ pub enum WaveRetryRejection {
 /// Inspectable game-owned retry state; it never requests platform or runtime replacement.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
 pub struct WaveRetryStatus {
-    pending_generation: Option<u64>,
-    applied_generation: Option<u64>,
+    pending: Option<WaveRetryAttempt>,
+    applied: Option<WaveRetryAttempt>,
     last_rejection: Option<WaveRetryRejection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WaveRetryAttempt {
+    generation: u64,
+    ui_action_sequence: Option<u64>,
 }
 
 impl WaveRetryStatus {
     #[must_use]
     pub const fn phase(self) -> WaveRetryPhase {
-        if self.pending_generation.is_some() {
+        if self.pending.is_some() {
             WaveRetryPhase::Pending
-        } else if self.applied_generation.is_some() {
+        } else if self.applied.is_some() {
             WaveRetryPhase::Applied
         } else {
             WaveRetryPhase::Idle
@@ -213,12 +220,34 @@ impl WaveRetryStatus {
 
     #[must_use]
     pub const fn pending_generation(self) -> Option<u64> {
-        self.pending_generation
+        match self.pending {
+            Some(attempt) => Some(attempt.generation),
+            None => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn pending_ui_action_sequence(self) -> Option<u64> {
+        match self.pending {
+            Some(attempt) => attempt.ui_action_sequence,
+            None => None,
+        }
     }
 
     #[must_use]
     pub const fn applied_generation(self) -> Option<u64> {
-        self.applied_generation
+        match self.applied {
+            Some(attempt) => Some(attempt.generation),
+            None => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn applied_ui_action_sequence(self) -> Option<u64> {
+        match self.applied {
+            Some(attempt) => attempt.ui_action_sequence,
+            None => None,
+        }
     }
 
     #[must_use]
@@ -226,12 +255,19 @@ impl WaveRetryStatus {
         self.last_rejection
     }
 
-    pub(crate) fn mark_pending(&mut self, generation: u64) -> bool {
-        if self.pending_generation == Some(generation) {
+    pub(crate) fn mark_pending(
+        &mut self,
+        generation: u64,
+        ui_action_sequence: Option<u64>,
+    ) -> bool {
+        if self.pending_generation() == Some(generation) {
             self.last_rejection = Some(WaveRetryRejection::AlreadyPending);
             return false;
         }
-        self.pending_generation = Some(generation);
+        self.pending = Some(WaveRetryAttempt {
+            generation,
+            ui_action_sequence,
+        });
         self.last_rejection = None;
         true
     }
@@ -245,17 +281,21 @@ impl WaveRetryStatus {
     }
 
     pub(crate) fn reject(&mut self, rejection: WaveRetryRejection) {
-        self.pending_generation = None;
+        self.pending = None;
         self.last_rejection = Some(rejection);
     }
 
     pub(crate) fn mark_applied(
         &mut self,
         generation: u64,
+        ui_action_sequence: Option<u64>,
         last_rejection: Option<WaveRetryRejection>,
     ) {
-        self.pending_generation = None;
-        self.applied_generation = Some(generation);
+        self.pending = None;
+        self.applied = Some(WaveRetryAttempt {
+            generation,
+            ui_action_sequence,
+        });
         self.last_rejection = last_rejection;
     }
 }
