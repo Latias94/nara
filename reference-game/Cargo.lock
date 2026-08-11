@@ -19,6 +19,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
 
 [[package]]
+name = "accesskit"
+version = "0.24.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3b7f7f85a7e5f68090000ed7622545829afd484d210358702ae4cb97dd0c320"
+dependencies = [
+ "uuid",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1505,11 +1514,13 @@ dependencies = [
 name = "nara-reference-game"
 version = "0.1.0"
 dependencies = [
+ "accesskit",
  "nara",
  "nara_render",
  "nara_ui",
  "nara_ui_kernel",
  "nara_ui_render",
+ "nara_winit",
 ]
 
 [[package]]
@@ -1919,11 +1930,14 @@ dependencies = [
 name = "nara_winit"
 version = "0.1.0"
 dependencies = [
+ "accesskit",
  "nara_app",
  "nara_core",
  "nara_ecs",
  "nara_input",
+ "nara_ui_kernel",
  "nara_window",
+ "thiserror 2.0.18",
  "winit",
 ]
 

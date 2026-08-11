@@ -12,6 +12,7 @@ use ui_product_fixture::{
     capture_single_runtime_retry_trajectory, exercise_fractional_pointer_retry_activation,
     exercise_paused_retry_activation, exercise_pending_retry_reactivation,
     exercise_resize_cancels_retry_capture, exercise_retry_activation,
+    exercise_winit_accessibility_mapping_canary,
 };
 
 #[test]
@@ -260,6 +261,17 @@ fn component_activations_reach_pending_through_the_retry_adapter() {
         assert_eq!(status.phase(), WaveRetryPhase::Pending, "{activation:?}");
         assert_eq!(status.last_rejection(), None, "{activation:?}");
     }
+}
+
+#[test]
+fn winit_accessibility_mapper_preserves_the_exact_retry_route_and_command() {
+    let outcome = exercise_winit_accessibility_mapping_canary();
+    assert_eq!(outcome.source_route, outcome.published_route);
+    assert_eq!(outcome.source_route, outcome.mapped_route);
+    assert!(outcome.retry_was_published_focused);
+    assert_eq!(outcome.retry_batches, vec![1]);
+    assert_eq!(outcome.status.phase(), WaveRetryPhase::Pending);
+    assert_eq!(outcome.status.last_rejection(), None);
 }
 
 #[test]

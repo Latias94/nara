@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use accesskit::{Action, ActionRequest, TreeId};
 use nara::{
     app::RuntimeInstance,
     input::{
@@ -15,7 +16,8 @@ use nara::{
     },
 };
 use nara_reference_game::WaveSnapshot;
-use nara_ui_kernel::{UiPoint, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform};
+use nara_ui_kernel::{UiPoint, UiRouteStamp, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform};
+use nara_winit::WinitAccessibilityPublisher;
 
 use super::{
     REFERENCE_RETRY_ACTION,
@@ -25,6 +27,14 @@ use super::{
     },
     reference_surface_id,
 };
+
+pub(super) struct WinitAccessibilityMapping {
+    pub(super) input: UiAccessibilityInput,
+    pub(super) source_route: UiRouteStamp,
+    pub(super) published_route: UiRouteStamp,
+    pub(super) mapped_route: UiRouteStamp,
+    pub(super) retry_was_published_focused: bool,
+}
 
 pub(super) fn drive_to_terminal(runtime: &mut RuntimeInstance) {
     for _ in 0..96 {
@@ -121,6 +131,74 @@ pub(super) fn activate_component_accessibility(runtime: &mut RuntimeInstance) {
         .with_driver_scope(|scope| queue_component_accessibility_input(scope, input))
         .unwrap()
         .unwrap();
+}
+
+pub(super) fn map_winit_retry_accessibility_action(
+    runtime: &RuntimeInstance,
+) -> WinitAccessibilityMapping {
+    let receipt = runtime
+        .world()
+        .resource::<ComponentPresentationState>()
+        .latest_receipt()
+        .expect("the component presenter should retain one exact submission");
+    let semantics = ui_semantic_snapshot(runtime.world(), receipt, UiSeatId::PRIMARY).unwrap();
+    let retry = semantics
+        .nodes()
+        .iter()
+        .find(|node| {
+            node.actions()
+                .iter()
+                .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
+        })
+        .expect("terminal UI should expose Retry semantics");
+    let retry_action = retry
+        .actions()
+        .iter()
+        .find(|action| action.as_str() == REFERENCE_RETRY_ACTION)
+        .cloned()
+        .expect("terminal UI should expose the exact Retry action");
+    let expected = UiAccessibilityInput::semantic_action(
+        receipt,
+        UiSeatId::PRIMARY,
+        retry.key().clone(),
+        retry_action,
+    );
+
+    let mut publisher = WinitAccessibilityPublisher::new(reference_surface_id()).unwrap();
+    let accessibility_receipt = publisher.publish_update(&semantics).unwrap();
+    let update = publisher
+        .committed_update()
+        .expect("the first-party publisher should retain the exact committed tree");
+    let retry_node = publisher
+        .node_id(retry.key())
+        .expect("the platform publisher should retain the exact Retry key mapping");
+    let platform_retry = update
+        .accesskit_update()
+        .nodes
+        .iter()
+        .find(|(node, _)| *node == retry_node)
+        .map(|(_, node)| node)
+        .expect("the platform tree should retain the Retry semantic node");
+    assert_eq!(platform_retry.label(), Some(retry.name()));
+    assert!(platform_retry.supports_action(Action::Click));
+    let retry_was_published_focused = update.accesskit_update().focus == retry_node;
+    let input = publisher
+        .map_action(&accessibility_receipt.bind_action(ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: retry_node,
+            data: None,
+        }))
+        .expect("the first-party publisher should map the exact AccessKit Retry action");
+    assert_eq!(input, expected);
+
+    WinitAccessibilityMapping {
+        source_route: UiRouteStamp::from_receipt(receipt),
+        published_route: accessibility_receipt.route(),
+        mapped_route: input.route(),
+        retry_was_published_focused,
+        input,
+    }
 }
 
 pub(super) fn inject_keyboard(runtime: &mut RuntimeInstance, key: KeyCode) {
