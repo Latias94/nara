@@ -3,7 +3,7 @@ title: Runtime UI Product Slice - Plan
 type: feat
 date: 2026-08-08
 deepened: 2026-08-10
-amended: 2026-08-10
+amended: 2026-08-11
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
@@ -206,7 +206,8 @@ authority invariant with broader smoke.
 
 ### RUP-U0 — Product authority and fixture reconciliation
 
-**Status:** Active. This is the sole active unit.
+**Status:** Complete at `80a7270`; evidence record
+`c067431accb242a7b69b839b5dd481d4`.
 
 **Goal:** Convert the existing Reference Game UI work-in-progress into a compilable, focused product
 test surface whose claims match R1-R12.
@@ -242,6 +243,8 @@ misrepresented as desktop/backend or platform-accessibility evidence.
 ### RUP-U1 — One exact gameplay-to-Retry trajectory
 
 **Depends on:** RUP-U0.
+
+**Status:** Active. This is the sole active unit.
 
 **Goal:** Prove one runtime trajectory from authored HUD through terminal activation to a successor
 run generation with exact presented-session semantics.
