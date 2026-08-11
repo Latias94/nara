@@ -14,7 +14,8 @@ use nara::{
     prelude::World,
     project_host::ProjectContentLoader,
     ui::{
-        UiActionId, UiRouteRejection, UiRouteRejectionLog, UiSemanticRole, UiSurfaceId,
+        UiActionEvent, UiActionId, UiPresentationReceipt, UiRouteRejection, UiRouteRejectionLog,
+        UiSeatId, UiSemanticRole, UiSurfaceId,
         advanced::{
             UiKey, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform, active_ui_surface_slots,
             update_ui_surface_slot,
@@ -216,6 +217,17 @@ pub struct PendingRetryReactivation {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct RetryActivationOutcome {
+    pub status: WaveRetryStatus,
+    pub activation_receipt: UiPresentationReceipt,
+    pub retry_key: UiKey,
+    pub ui_actions: Vec<UiActionEvent>,
+    pub ui_action_trace_overflowed: bool,
+    pub retry_batches: Vec<usize>,
+    pub retry_trace_overflowed: bool,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct WinitAccessibilityMappingOutcome {
     pub status: WaveRetryStatus,
     pub retry_batches: Vec<usize>,
@@ -357,7 +369,7 @@ pub fn capture_readability_case(target: UiPhysicalTarget) -> ProductUiCapture {
     capture
 }
 
-pub fn exercise_retry_activation(activation: RetryActivation) -> WaveRetryStatus {
+pub fn exercise_retry_activation(activation: RetryActivation) -> RetryActivationOutcome {
     exercise_retry_activation_at(CANONICAL_UI_TARGET, activation)
 }
 
@@ -369,7 +381,7 @@ fn activate_retry_to_pending(runtime: &mut RuntimeInstance) {
     drive_fixed(runtime);
 }
 
-pub fn exercise_fractional_pointer_retry_activation() -> WaveRetryStatus {
+pub fn exercise_fractional_pointer_retry_activation() -> RetryActivationOutcome {
     exercise_retry_activation_at(FRACTIONAL_INPUT_TARGET, RetryActivation::Pointer)
 }
 
@@ -413,13 +425,30 @@ pub fn exercise_winit_accessibility_mapping_canary() -> WinitAccessibilityMappin
 fn exercise_retry_activation_at(
     target: UiPhysicalTarget,
     activation: RetryActivation,
-) -> WaveRetryStatus {
+) -> RetryActivationOutcome {
     let mut runtime = product_runtime(
         target,
         component_presenter_plugin(),
         bundled_wave_commands(),
     );
     drive_to_terminal(&mut runtime);
+    let activation_receipt = runtime
+        .world()
+        .resource::<presenter::ComponentPresentationState>()
+        .latest_receipt()
+        .expect("the terminal Retry should retain one exact presentation receipt");
+    let retry_key = ui_semantic_snapshot(runtime.world(), activation_receipt, UiSeatId::PRIMARY)
+        .expect("the terminal receipt should retain exact semantic facts")
+        .nodes()
+        .iter()
+        .find(|node| {
+            node.actions()
+                .iter()
+                .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
+        })
+        .expect("the terminal receipt should expose the Retry action")
+        .key()
+        .clone();
 
     match activation {
         RetryActivation::Pointer => inject_pointer_click(&mut runtime),
@@ -436,8 +465,30 @@ fn exercise_retry_activation_at(
         .expect("the product activation frame should drive");
     drive_fixed(&mut runtime);
     let status = *runtime.world().resource::<WaveRetryStatus>();
+    let ui_action_trace = runtime
+        .world()
+        .resource::<presenter::ComponentUiActionTrace>();
+    let ui_actions = ui_action_trace.events().to_vec();
+    let ui_action_trace_overflowed = ui_action_trace.overflowed();
+    let retry_batches = runtime
+        .world()
+        .resource::<presenter::ComponentRetryCommandTrace>()
+        .batches()
+        .to_vec();
+    let retry_trace_overflowed = runtime
+        .world()
+        .resource::<presenter::ComponentRetryCommandTrace>()
+        .overflowed();
     stop_runtime(runtime);
-    status
+    RetryActivationOutcome {
+        status,
+        activation_receipt,
+        retry_key,
+        ui_actions,
+        ui_action_trace_overflowed,
+        retry_batches,
+        retry_trace_overflowed,
+    }
 }
 
 pub fn exercise_pending_retry_reactivation() -> PendingRetryReactivation {

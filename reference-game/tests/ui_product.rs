@@ -3,11 +3,12 @@ mod project_content_fixture;
 #[path = "support/ui_product_fixture.rs"]
 mod ui_product_fixture;
 
+use nara::ui::UiActivationSource;
 use nara_reference_game::WaveRetryPhase;
 use ui_product_fixture::{
     CANONICAL_UI_TARGET, FRACTIONAL_INPUT_TARGET, LETTERBOX_RESIZE_TARGET, ProductUiCapture,
-    ProductUiState, REFERENCE_RETRY_ACTION, RetryActivation, SemanticCapture,
-    SingleRuntimeRetryTrajectory, UI_PHYSICAL_TARGETS, capture_product_states,
+    ProductUiState, REFERENCE_RETRY_ACTION, RetryActivation, RetryActivationOutcome,
+    SemanticCapture, SingleRuntimeRetryTrajectory, UI_PHYSICAL_TARGETS, capture_product_states,
     capture_readability_case, capture_retry_interaction_variants,
     capture_single_runtime_retry_trajectory, exercise_fractional_pointer_retry_activation,
     exercise_paused_retry_activation, exercise_pending_retry_reactivation,
@@ -243,13 +244,12 @@ fn three_physical_targets_preserve_one_readable_longest_content_layout() {
 fn one_fractional_input_scale_maps_pointer_to_the_same_retry_intent() {
     assert_eq!(FRACTIONAL_INPUT_TARGET.render_scale, 2.0);
     assert_eq!(FRACTIONAL_INPUT_TARGET.input_scale_factor, 1.25);
-    let status = exercise_fractional_pointer_retry_activation();
-    assert_eq!(status.phase(), WaveRetryPhase::Pending);
-    assert_eq!(status.last_rejection(), None);
+    let outcome = exercise_fractional_pointer_retry_activation();
+    assert_retry_activation(&outcome, &[UiActivationSource::Pointer]);
 }
 
 #[test]
-fn component_activations_reach_pending_through_the_retry_adapter() {
+fn component_input_modalities_admit_one_retry_command_per_presented_activation() {
     for activation in [
         RetryActivation::Pointer,
         RetryActivation::Keyboard,
@@ -257,9 +257,17 @@ fn component_activations_reach_pending_through_the_retry_adapter() {
         RetryActivation::ComponentAccessibility,
         RetryActivation::ConcurrentKeyboardAndPointer,
     ] {
-        let status = exercise_retry_activation(activation);
-        assert_eq!(status.phase(), WaveRetryPhase::Pending, "{activation:?}");
-        assert_eq!(status.last_rejection(), None, "{activation:?}");
+        let outcome = exercise_retry_activation(activation);
+        let expected_sources = match activation {
+            RetryActivation::Pointer => vec![UiActivationSource::Pointer],
+            RetryActivation::Keyboard => vec![UiActivationSource::Keyboard],
+            RetryActivation::Gamepad => vec![UiActivationSource::Gamepad],
+            RetryActivation::ComponentAccessibility => vec![UiActivationSource::Accessibility],
+            RetryActivation::ConcurrentKeyboardAndPointer => {
+                vec![UiActivationSource::Keyboard, UiActivationSource::Pointer]
+            }
+        };
+        assert_retry_activation(&outcome, &expected_sources);
     }
 }
 
@@ -350,6 +358,46 @@ fn retry_exposes_exact_and_distinct_default_hover_pressed_and_focus_facts() {
         variants.pressed.retry_region_primitives,
         variants.focused.retry_region_primitives
     );
+}
+
+fn assert_retry_activation(
+    outcome: &RetryActivationOutcome,
+    expected_sources: &[UiActivationSource],
+) {
+    let receipt = outcome.activation_receipt;
+    assert!(!outcome.ui_action_trace_overflowed, "{outcome:#?}");
+    assert!(!outcome.retry_trace_overflowed, "{outcome:#?}");
+    assert_eq!(
+        outcome
+            .ui_actions
+            .iter()
+            .map(|event| event.source())
+            .collect::<Vec<_>>(),
+        expected_sources,
+        "{outcome:#?}"
+    );
+    for event in &outcome.ui_actions {
+        assert_eq!(event.surface_id(), receipt.surface_id(), "{outcome:#?}");
+        assert_eq!(
+            event.presentation_epoch(),
+            receipt.presentation_epoch(),
+            "{outcome:#?}"
+        );
+        assert_eq!(
+            event.frame_revision(),
+            receipt.frame_revision().get(),
+            "{outcome:#?}"
+        );
+        assert_eq!(event.target(), &outcome.retry_key, "{outcome:#?}");
+        assert_eq!(
+            event.action().as_str(),
+            REFERENCE_RETRY_ACTION,
+            "{outcome:#?}"
+        );
+    }
+    assert_eq!(outcome.retry_batches, vec![1], "{outcome:#?}");
+    assert_eq!(outcome.status.phase(), WaveRetryPhase::Pending, "{outcome:#?}");
+    assert_eq!(outcome.status.last_rejection(), None, "{outcome:#?}");
 }
 
 fn has_semantic_name(capture: &ProductUiCapture, name: &str) -> bool {

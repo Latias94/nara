@@ -15,10 +15,11 @@ use std::{
 use nara::{
     app::{
         __RuntimeDriverPort, CoreStage, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginId, RuntimeDriverScope, RuntimeGeneration, RuntimeWorldAccessError,
+        PluginId, PluginShutdownContext, PluginShutdownObligationId, RuntimeDriverScope,
+        RuntimeGeneration, RuntimeWorldAccessError,
     },
-    ecs::{Entity, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs},
-    gameplay::{GameplayCommandBatch, GameplayCommandSet},
+    ecs::{Entity, Mut, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs},
+    gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
     prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
     ui::latest_ui_frame,
@@ -29,7 +30,8 @@ use nara_reference_game::{
 };
 use nara_render::RenderTarget;
 use nara_ui::{
-    UiAccessibilityInput, UiPresentationReceipt, UiRouteDisposition, UiSurfaceContentTransform,
+    UiAccessibilityInput, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionJournal,
+    UiPresentationReceipt, UiRouteDisposition, UiSurfaceContentTransform,
     active_ui_surface_slots, dispatch_ui_accessibility_input, update_ui_surface_slot,
 };
 use nara_ui_render::{
@@ -45,18 +47,25 @@ const COMPONENT_PRESENTER_PLUGIN_ID: PluginId =
 const RETRY_REPLACEMENT_REJECTION_FIXTURE_PLUGIN_ID: PluginId =
     PluginId::new("reference-game.test.retry-replacement-rejection-fixture");
 const COMPONENT_PRESENTER_REQUIREMENTS: &[PluginId] = &[REFERENCE_RUNTIME_UI_PLUGIN_ID];
+const COMPONENT_PRESENTER_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
+    PluginShutdownObligationId::new("reference-game.test.component-presenter.ui-action-audit");
+const COMPONENT_PRESENTER_SHUTDOWN_OBLIGATIONS: &[PluginShutdownObligationId] =
+    &[COMPONENT_PRESENTER_SHUTDOWN_OBLIGATION];
 const COMPONENT_PRESENTER_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(COMPONENT_PRESENTER_PLUGIN_ID, PluginCategory::Runtime)
-        .requires_plugins(COMPONENT_PRESENTER_REQUIREMENTS);
+        .requires_plugins(COMPONENT_PRESENTER_REQUIREMENTS)
+        .shutdown_obligations(COMPONENT_PRESENTER_SHUTDOWN_OBLIGATIONS);
 const RETRY_REPLACEMENT_REJECTION_FIXTURE_DECLARATION: PluginDeclaration = PluginDeclaration::new(
     RETRY_REPLACEMENT_REJECTION_FIXTURE_PLUGIN_ID,
     PluginCategory::Runtime,
 )
-.requires_plugins(COMPONENT_PRESENTER_REQUIREMENTS);
+.requires_plugins(COMPONENT_PRESENTER_REQUIREMENTS)
+.shutdown_obligations(COMPONENT_PRESENTER_SHUTDOWN_OBLIGATIONS);
 static NEXT_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_PRESENTATION_ATTEMPT_ID: AtomicU64 = AtomicU64::new(1);
 const RETRY_COMMAND_TYPE: &str = "reference-game.retry-v1";
 const MAX_RECORDED_RETRY_BATCHES: usize = 8;
+const MAX_RECORDED_UI_ACTIONS: usize = 16;
 
 #[derive(Debug, Default)]
 struct ComponentPresenterPlugin;
@@ -68,6 +77,10 @@ impl Plugin for ComponentPresenterPlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         install_component_presenter(app)
+    }
+
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        shutdown_component_presenter(context)
     }
 }
 
@@ -91,6 +104,10 @@ impl Plugin for RetryReplacementRejectionFixturePlugin {
                 .after(GameplayCommandSet::Capture),
         )?;
         Ok(())
+    }
+
+    fn shutdown(&self, context: &mut PluginShutdownContext<'_>) -> Result<(), PluginError> {
+        shutdown_component_presenter(context)
     }
 }
 
@@ -186,6 +203,23 @@ pub(super) struct ComponentRetryCommandTrace {
     overflowed: bool,
 }
 
+#[derive(Debug, Resource)]
+pub(super) struct ComponentUiActionTrace {
+    cursor: UiActionCursor,
+    events: Vec<UiActionEvent>,
+    overflowed: bool,
+}
+
+impl ComponentUiActionTrace {
+    pub(super) fn events(&self) -> &[UiActionEvent] {
+        &self.events
+    }
+
+    pub(super) const fn overflowed(&self) -> bool {
+        self.overflowed
+    }
+}
+
 impl ComponentRetryCommandTrace {
     pub(super) fn batches(&self) -> &[usize] {
         &self.batches
@@ -208,6 +242,22 @@ impl ComponentRetryCommandTrace {
 }
 
 fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
+    let cursor = app
+        .world_mut()?
+        .get_resource_mut::<UiActionJournal>()
+        .ok_or_else(|| fixture_error("UI action journal is not installed"))?
+        .register_consumer(
+            UiActionConsumerId::new("reference-game.test.ui-action-audit")
+                .map_err(|error| fixture_error(error.to_string()))?,
+        )
+        .map_err(|error| fixture_error(error.to_string()))?;
+    app.register_plugin_shutdown_obligation(COMPONENT_PRESENTER_SHUTDOWN_OBLIGATION)?;
+    app.insert_resource(ComponentUiActionTrace {
+        cursor,
+        events: Vec::new(),
+        overflowed: false,
+    })?;
+    add_local_gameplay_command_systems(app, record_component_ui_actions)?;
     app.init_resource::<ComponentPresentationState>()?
         .init_resource::<ComponentAccessibilityInputs>()?
         .init_resource::<ComponentSurfaceUpdates>()?
@@ -226,6 +276,57 @@ fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
         )?
         .add_systems(CoreStage::Cleanup, present_latest_reference_ui_component)?;
     Ok(())
+}
+
+fn shutdown_component_presenter(
+    context: &mut PluginShutdownContext<'_>,
+) -> Result<(), PluginError> {
+    if !context.world().contains_resource::<ComponentUiActionTrace>() {
+        return Ok(());
+    }
+    if !context.world().contains_resource::<UiActionJournal>() {
+        return Err(fixture_error("UI action journal is not installed"));
+    }
+    context.world_mut().resource_scope(
+        |world, mut journal: Mut<UiActionJournal>| -> Result<(), PluginError> {
+            let trace = world
+                .get_resource::<ComponentUiActionTrace>()
+                .expect("validated component UI action trace remains installed");
+            journal
+                .unregister_consumer(&trace.cursor)
+                .map_err(|error| fixture_error(error.to_string()))
+        },
+    )?;
+    context
+        .world_mut()
+        .remove_resource::<ComponentUiActionTrace>();
+    Ok(())
+}
+
+fn record_component_ui_actions(
+    mut journal: ResMut<UiActionJournal>,
+    mut trace: ResMut<ComponentUiActionTrace>,
+) {
+    let Ok(pending) = journal.pending(&trace.cursor) else {
+        trace.overflowed = true;
+        return;
+    };
+    let last_sequence = pending.last().map(UiActionEvent::sequence);
+    let remaining = MAX_RECORDED_UI_ACTIONS.saturating_sub(trace.events.len());
+    trace.events.extend(pending.iter().take(remaining).cloned());
+    trace.overflowed |= pending.len() > remaining;
+    if let Some(sequence) = last_sequence
+        && journal.acknowledge(&trace.cursor, sequence).is_err()
+    {
+        trace.overflowed = true;
+    }
+}
+
+fn fixture_error(message: impl Into<String>) -> PluginError {
+    PluginError::SetupFailed {
+        plugin: COMPONENT_PRESENTER_PLUGIN_ID,
+        message: message.into(),
+    }
 }
 
 fn record_component_retry_commands(
