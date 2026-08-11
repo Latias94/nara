@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-11
+* **Work Registration**: [Runtime UI product slice: RUP-U2 active](registry/2026-08/2026-08-11T074415Z-engine-foundation-contract-completion-codex-root-9d1af91973c3432bba049dbeaa5af929.md) - Closes the exact gameplay-to-Retry behavior trajectory and activates authoring, surface, and packaged delivery closure.
+* **Verification Evidence**: [RUP-U1 exact gameplay-to-Retry trajectory](verification/2026-08/2026-08-11T074247Z-rup-u1-exact-gameplay-to-retry-trajectory-882397b5b744448cbd5cb8d5c3d0568a.md) - Closes the exact Runtime UI behavior trajectory with typed input evidence, native Windows UI Automation ingress, backend-submitted successor presentation, and causal Retry replacement.
+
 ## 2026-08-10
 * **Work Registration**: [Runtime UI product slice: RUP-U1 reactivated](registry/2026-08/2026-08-10T155958Z-runtime-ui-product-slice-codex-root-c561d92562464eadb2904a61f0c14465.md) - Pins the UIFM successor baseline and resumes the exact gameplay-to-Retry product trajectory.
 * **Verification Evidence**: [UIFM-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md) - Publishes the modal-entry-focus correction as the successor shared UI baseline and permits an explicit RUP-U1 rebase.
@@ -149,5 +153,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-28
 * **Work Registration**: [Reference-game delivery hardening: U8 hosted CI refresh](registry/2026-07/2026-07-28T232059Z-engine-foundation-contract-completion-codex-root-658d0197b447461d9dd30c1fde607548.md) - Closes refreshed RGD-U7 runtime and host authority and activates the final-revision hosted CI refresh.
-* **Verification Evidence**: [RGD-U7 refreshed runtime and host authority verification](verification/2026-07/2026-07-28T232042Z-rgd-u7-refreshed-runtime-and-host-authority-verification-82512f2b3f4d4887bef7431f1b703e7d.md) - Closes the refreshed Runtime-first and dependent Host compatibility review after the direct fault-bridge bypass repair.
-* **Decision**: [RGD-U7 refreshed Runtime and Host independent decision matrix](decisions/2026-07/2026-07-28T214815Z-rgd-u7-refreshed-runtime-and-host-independent-decision-matrix-cb08ecb6f5054f938f8a6d7de30941e4.md) - Records the post-registry-authority refresh ADR 0084 Runtime verdict, dependent ADR 0082 Host verdict, compatible-pair scope, and next delivery gate.

@@ -244,7 +244,8 @@ misrepresented as desktop/backend or platform-accessibility evidence.
 
 **Depends on:** RUP-U0.
 
-**Status:** Active. This is the sole active unit.
+**Status:** Complete at `e88ad06`; evidence record
+`882397b5b744448cbd5cb8d5c3d0568a`.
 
 **Goal:** Prove one runtime trajectory from authored HUD through terminal activation to a successor
 run generation with exact presented-session semantics.
@@ -271,6 +272,8 @@ next run generation appears only after its successor presentation commits.
 ### RUP-U2 — Authoring, surface and packaged delivery closure
 
 **Depends on:** RUP-U1.
+
+**Status:** Active. This is the sole active unit.
 
 **Goal:** Prove that ordinary project data and one Runtime UI adapter survive source editing,
 physical mapping, headless execution and packaging.
