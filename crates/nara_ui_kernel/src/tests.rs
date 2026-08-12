@@ -3,10 +3,29 @@ use std::sync::Arc;
 use nara_text::bundled_font_face;
 
 use crate::{
-    UiAuthoringSnapshotBuilder, UiCompiler, UiDimension, UiEnvironment, UiLayer, UiLocalKey,
-    UiNode, UiRoot, UiRootKey, UiRootStatus, UiRouteStamp, UiStyle, UiSurfaceId, UiText,
-    UiTextAlignment, UiTheme, UiVisual,
+    UiAuthoringSnapshotBuilder, UiBrush, UiColorRole, UiCompiler, UiDimension, UiEnvironment,
+    UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiRootStatus, UiRouteStamp, UiStyle,
+    UiSurfaceId, UiText, UiTextAlignment, UiTextOverflow, UiTheme, UiVisual,
 };
+
+#[test]
+fn dynamic_text_content_preserves_authored_presentation() {
+    let authored = UiText::new("Score", 16.0)
+        .unwrap()
+        .with_brush(UiBrush::Role(UiColorRole::Warning))
+        .with_alignment(UiTextAlignment::Center)
+        .with_overflow(UiTextOverflow::Clip)
+        .with_semantic_text("Authored score");
+
+    let projected = authored.clone().with_content("Score 000300");
+
+    assert_eq!(projected.content(), "Score 000300");
+    assert_eq!(projected.logical_size(), authored.logical_size());
+    assert_eq!(projected.brush(), authored.brush());
+    assert_eq!(projected.alignment(), authored.alignment());
+    assert_eq!(projected.overflow(), authored.overflow());
+    assert_eq!(projected.semantic_text(), authored.semantic_text());
+}
 
 #[test]
 fn public_surface_compiles_without_renderer_or_ecs_types() {

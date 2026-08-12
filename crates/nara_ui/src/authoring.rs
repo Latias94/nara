@@ -105,6 +105,13 @@ impl UiText {
         nara_ui_kernel::UiText::new(content, logical_size).map(Self)
     }
 
+    /// Replaces dynamic display content without changing authored presentation fields.
+    #[must_use]
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.0 = self.0.with_content(content);
+        self
+    }
+
     #[must_use]
     pub fn with_brush(mut self, brush: UiBrush) -> Self {
         self.0 = self.0.with_brush(brush);

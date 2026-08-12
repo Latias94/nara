@@ -702,6 +702,14 @@ impl UiText {
         })
     }
 
+    /// Replaces display content while preserving authored typography, brush, alignment and
+    /// semantic-text policy.
+    #[must_use]
+    pub fn with_content(mut self, content: impl Into<String>) -> Self {
+        self.content = content.into();
+        self
+    }
+
     #[must_use]
     pub fn with_brush(mut self, brush: UiBrush) -> Self {
         self.brush = brush;

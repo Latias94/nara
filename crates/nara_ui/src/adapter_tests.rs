@@ -36,15 +36,37 @@ use nara_ui_kernel::{
 use crate::interaction::dispatch_presented_ui_input;
 use crate::{
     UiActionAdmissionError, UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal,
-    UiAdapterError, UiButton, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin, UiRoot,
-    UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRuntimeKey, UiSemantics, UiStyle,
-    UiSurfaceAvailability, UiSurfaceEndpoint, UiSurfaceSlot, UiSurfaceSuspensionReason, UiVisual,
-    active_ui_surface_slots, dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame,
-    register_ui_components, restore_ui_surface, retire_ui_surface, suspend_ui_surface,
-    ui_semantic_snapshot, ui_surface_slot_snapshots, update_ui_surface_slot,
+    UiAdapterError, UiBrush, UiButton, UiButtonVisuals, UiColor, UiColorRole, UiNode, UiPlugin,
+    UiRoot, UiRouteDisposition, UiRouteRejection, UiRouteRejectionLog, UiRuntimeKey, UiSemantics,
+    UiStyle, UiSurfaceAvailability, UiSurfaceEndpoint, UiSurfaceSlot, UiSurfaceSuspensionReason,
+    UiText, UiTextAlignment, UiTextOverflow, UiVisual, active_ui_surface_slots,
+    dispatch_ui_accessibility_input, install_ui_surface, latest_ui_frame, register_ui_components,
+    restore_ui_surface, retire_ui_surface, suspend_ui_surface, ui_semantic_snapshot,
+    ui_surface_slot_snapshots, update_ui_surface_slot,
 };
 
 const TEST_DOMAIN: &str = "nara.test.ui";
+
+#[test]
+fn dynamic_text_content_preserves_authored_adapter_presentation() {
+    let authored = UiText::new("Score", 16.0)
+        .unwrap()
+        .with_brush(UiBrush::Role(UiColorRole::Warning))
+        .with_alignment(UiTextAlignment::Center)
+        .with_overflow(UiTextOverflow::Clip)
+        .with_semantic_text("Authored score");
+
+    let projected = authored.clone().with_content("Score 000300");
+    let authored = authored.kernel();
+    let projected = projected.kernel();
+
+    assert_eq!(projected.content(), "Score 000300");
+    assert_eq!(projected.logical_size(), authored.logical_size());
+    assert_eq!(projected.brush(), authored.brush());
+    assert_eq!(projected.alignment(), authored.alignment());
+    assert_eq!(projected.overflow(), authored.overflow());
+    assert_eq!(projected.semantic_text(), authored.semantic_text());
+}
 
 #[derive(Debug, Default, Resource)]
 struct CapturedGameplayPhases(Vec<ActionPhase>);
