@@ -288,7 +288,8 @@ next run generation appears only after its successor presentation commits.
 
 **Depends on:** RUP-U1.
 
-**Status:** Active. This is the sole active unit.
+**Status:** Complete at `ec38c43`; evidence record
+`7bf5d3a0da2c45ad98ced5f01482cf21`.
 
 **Goal:** Prove that ordinary project data and one Runtime UI adapter survive source editing,
 physical mapping, headless execution and packaging.
@@ -324,6 +325,8 @@ target has structured evidence rather than a digest-only pass.
 ### RUP-U3 — Product-Validated baseline and handoff
 
 **Depends on:** RUP-U2.
+
+**Status:** Active. This is the sole active unit.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 

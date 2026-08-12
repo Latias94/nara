@@ -10,7 +10,8 @@ Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316`. Completed fo
 plans remain immutable lineage evidence. Legacy rows that still name NUI-U15B/U16 describe the last
 completed NUI baseline; ADR 0107-0109 and the successor UIF baseline own shared contracts while RUP
 owns product validation. RUP-U1 is implemented at `e88ad06` with evidence record
-`882397b5b744448cbd5cb8d5c3d0568a`; RUP-U2 is the sole active unit.
+`882397b5b744448cbd5cb8d5c3d0568a`; RUP-U2 is implemented at `ec38c43` with evidence record
+`7bf5d3a0da2c45ad98ced5f01482cf21`; RUP-U3 is the sole active unit.
 
 ## Current UI correction lineage (2026-08-12)
 
@@ -22,7 +23,8 @@ UIF-U3C is complete for prepared submission authority, exact backend permits and
 commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target ownership and Host
 platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; UIFM-U1 is
 complete at `40d3f87`; UIFM-U2 published the predecessor baseline; RUP-U1 is complete at `e88ad06`;
-UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-U2 is active.
+UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-U2 is complete at
+`ec38c43`; RUP-U3 is active.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
 `WinitAccessibilityBridge` symbol in older anchors.
 
@@ -36,7 +38,8 @@ UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-
 | UIFM-U1 | implemented | Surface-owner modal-entry focus reconciliation before final paint and semantic publication; commit `40d3f87` and verification `04e51278170c4a839dbeb0c9658741d8` |
 | UIFM-U2 | implemented | successor Foundation Conformance Baseline `19cfa496dc2346368764057367cc2163` and explicit RUP-U1 rebase |
 | RUP-U1 | implemented | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress; commit `e88ad06` and record `882397b5b744448cbd5cb8d5c3d0568a` |
-| RUP-U2 | active | authoring, surface and packaged delivery closure against UIFD successor baseline `a628828a8ff941239d79a0b8b3d60316` |
+| RUP-U2 | implemented | authored source, structured surface, exact WGPU payload, headless parity and clean-commit package delivery closure; commit `ec38c43` and record `7bf5d3a0da2c45ad98ced5f01482cf21` |
+| RUP-U3 | active | final simplification, Standards/Spec review, committed-scope gates, high-authority ledger closure and Product-Validated baseline publication |
 | UIFD-U1 | implemented | immutable content-only `UiText` replacement that preserves authored presentation and semantic policy; commit `ba918db` and record `ecea4e791ef449afb0b57fece9f8ecda` |
 | UIFD-U2 | implemented | successor Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316` and explicit RUP-U2 rebase |
 
