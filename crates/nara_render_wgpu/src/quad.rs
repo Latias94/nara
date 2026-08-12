@@ -11,7 +11,9 @@ use wgpu::util::DeviceExt;
 const VERTICES_PER_QUAD: u32 = 6;
 const MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME: u64 = 64 * 1024 * 1024;
 pub(crate) const WGPU_QUAD_SHAPE_PLAIN: u32 = 0;
+#[cfg(feature = "ui-submitter")]
 pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_FILL: u32 = 1;
+#[cfg(feature = "ui-submitter")]
 pub(crate) const WGPU_QUAD_SHAPE_ROUNDED_BORDER: u32 = 2;
 
 #[repr(C)]

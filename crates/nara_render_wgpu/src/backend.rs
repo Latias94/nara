@@ -22,6 +22,7 @@ use nara_window::{
     backend::{BackendWindowHandles, WindowTargetError},
 };
 
+use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::{
     WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
@@ -38,10 +39,7 @@ use crate::telemetry::{
 };
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::texture::WgpuSpriteTextureCache;
-use crate::{
-    PreparedSubmitterDraw, WGPU_RENDER_BACKEND, WgpuCapturedFrame, WgpuFramePayload,
-    WgpuRenderError, render_acquired_texture,
-};
+use crate::{PreparedSubmitterDraw, WGPU_RENDER_BACKEND, WgpuRenderError, render_acquired_texture};
 
 static NEXT_WGPU_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 const WGPU_FORCE_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK";
@@ -196,7 +194,7 @@ impl WgpuFrameTransactionStats {
     }
 
     #[cfg(feature = "ui-submitter")]
-    pub(crate) fn record_ui_payload(&mut self, facts: crate::WgpuUiPayloadFacts) {
+    pub(crate) fn record_ui_payload(&mut self, facts: crate::frame::WgpuUiPayloadFacts) {
         let previous_count = self.ui_packet_count;
         self.ui_packet_count = previous_count.saturating_add(facts.packet_count);
         self.ui_packet_identity = match (previous_count, facts.packet_count) {
@@ -418,7 +416,9 @@ impl WgpuRenderBackend {
         &mut self,
         handles: Option<&BackendWindowHandles>,
         captured: WgpuCapturedFrame,
-        #[cfg(feature = "ui-submitter")] ui_submissions: &mut crate::WgpuUiSubmissionState,
+        #[cfg(feature = "ui-submitter")] ui_submissions: Option<
+            &mut crate::frame::WgpuUiSubmissionState,
+        >,
         frame: &mut RenderFrame,
         stats: &mut FrameStats,
         status: &mut RenderBackendStatus,
@@ -495,7 +495,7 @@ impl WgpuRenderBackend {
         self.ensure_device(window.id)?;
         self.fail_if_device_lost()?;
         #[cfg(feature = "ui-submitter")]
-        {
+        if let Some(ui_submissions) = ui_submissions {
             let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(
                 self.instance_id(),
                 self.device_epoch(),
@@ -1347,12 +1347,12 @@ mod tests {
             state: nara_render::RenderFrameState::Rendering,
         };
         #[cfg(feature = "ui-submitter")]
-        let mut ui_submissions = crate::WgpuUiSubmissionState::Prepared(Vec::new());
+        let mut ui_submissions = crate::frame::WgpuUiSubmissionState::Prepared(Vec::new());
         backend.render_packet(
             None,
             packet,
             #[cfg(feature = "ui-submitter")]
-            &mut ui_submissions,
+            Some(&mut ui_submissions),
             &mut frame,
             &mut FrameStats::default(),
             &mut RenderBackendStatus::default(),

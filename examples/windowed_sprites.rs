@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             )),
         },
         WgpuBackendPlugins,
+        WgpuSpriteSubmitterPlugin,
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.world_mut()?.insert_resource(AssetServer::new());

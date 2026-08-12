@@ -102,6 +102,7 @@ impl WgpuRenderError {
     }
 
     #[must_use]
+    #[cfg(feature = "ui-submitter")]
     pub(crate) const fn is_target_fault(&self) -> bool {
         self.target_window().is_some()
     }

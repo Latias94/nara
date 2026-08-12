@@ -229,6 +229,7 @@ fn run_windowed() -> Result<(), Box<dyn Error>> {
             )),
         },
         WgpuBackendPlugins,
+        WgpuUiSubmitterPlugin,
     ))?;
     app.add_systems(StartupStage::Scene, setup_gallery)?;
     app.world_mut()?.insert_resource(AssetServer::new());

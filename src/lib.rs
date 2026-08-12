@@ -403,6 +403,10 @@ pub mod backend_prelude {
     pub use crate::DesktopWinitPlugins;
     #[cfg(feature = "render-wgpu")]
     pub use crate::WgpuBackendPlugins;
+    #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
+    pub use nara_render_wgpu::WgpuSpriteSubmitterPlugin;
+    #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
+    pub use nara_render_wgpu::WgpuUiSubmitterPlugin;
     #[cfg(feature = "render-wgpu")]
     pub use nara_render_wgpu::{
         SurfaceAcquireAction, SurfaceResizeAction, SurfaceTextureStatus, WgpuBackendState,

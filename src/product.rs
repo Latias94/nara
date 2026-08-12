@@ -623,6 +623,12 @@ const SLOT_UI_PRESENTATION_BRIDGE: PluginSlotId =
 const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 #[cfg(feature = "render-wgpu")]
 const SLOT_WGPU_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render-wgpu");
+#[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
+const SLOT_WGPU_SPRITE_SUBMITTER: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.sprite-submitter");
+#[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
+const SLOT_WGPU_UI_SUBMITTER: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-wgpu.ui-submitter");
 const SLOT_STARTUP_SCENE_ACTIVATION: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.startup-scene-activation");
 
@@ -1031,6 +1037,44 @@ impl PluginGroup for ProjectProfilePlugins {
             .contains(nara_project::ProductCapability::RenderWgpu)
         {
             builder.add_group(WgpuBackendPlugins)
+        } else {
+            builder
+        };
+
+        #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
+        let builder = if self
+            .capabilities
+            .contains(nara_project::ProductCapability::Presentation2d)
+            && self
+                .capabilities
+                .contains(nara_project::ProductCapability::RenderWgpu)
+        {
+            builder.add_slot(
+                PluginSlot::required(
+                    SLOT_WGPU_SPRITE_SUBMITTER,
+                    nara_render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render_wgpu::WgpuSpriteSubmitterPlugin>(),
+            )
+        } else {
+            builder
+        };
+
+        #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
+        let builder = if self
+            .capabilities
+            .contains(nara_project::ProductCapability::PresentationUi)
+            && self
+                .capabilities
+                .contains(nara_project::ProductCapability::RenderWgpu)
+        {
+            builder.add_slot(
+                PluginSlot::required(
+                    SLOT_WGPU_UI_SUBMITTER,
+                    nara_render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render_wgpu::WgpuUiSubmitterPlugin>(),
+            )
         } else {
             builder
         };

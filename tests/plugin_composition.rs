@@ -2192,9 +2192,21 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         UI_RENDER_PLUGIN_ID,
         WINDOW_PLUGIN_ID,
         WGPU_RENDER_PLUGIN_ID,
+        nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
     ] {
-        assert!(entries.iter().any(|entry| entry.plugin_id() == plugin));
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.plugin_id() == plugin)
+                .count(),
+            1
+        );
     }
+    assert!(
+        entries.iter().all(|entry| {
+            entry.plugin_id() != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
+        })
+    );
     assert!(
         plan.schema_validation()
             .provider_ids()
@@ -2246,6 +2258,49 @@ requested = ["runtime-2d", "presentation-2d"]
     }
 }
 
+#[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
+#[test]
+fn presentation_2d_wgpu_profile_installs_only_the_sprite_contribution() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Presentation 2D WGPU Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d", "presentation-2d", "render-wgpu"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    let entries = plan.plugin_plan().entries();
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_RENDER_PLUGIN_ID })
+    );
+    assert!(
+        entries.iter().any(|entry| {
+            entry.plugin_id() == nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
+        })
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.plugin_id() != nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+    );
+}
+
 #[cfg(feature = "presentation-ui")]
 #[test]
 fn presentation_ui_profile_satisfies_shared_image_prepare_and_render_plugins() {
@@ -2286,6 +2341,150 @@ requested = ["runtime-ui", "presentation-ui"]
     }
 }
 
+#[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
+#[test]
+fn presentation_ui_wgpu_profile_installs_only_the_ui_contribution() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Presentation UI WGPU Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-ui", "presentation-ui", "render-wgpu"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    let entries = plan.plugin_plan().entries();
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_RENDER_PLUGIN_ID })
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.plugin_id() == nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+    );
+    assert!(
+        entries.iter().all(|entry| {
+            entry.plugin_id() != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
+        })
+    );
+}
+
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "runtime-ui",
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "render-wgpu"
+))]
+#[test]
+fn combined_wgpu_profile_installs_each_contribution_once() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Combined WGPU Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-ui", "presentation-2d", "presentation-ui", "render-wgpu"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    let entries = plan.plugin_plan().entries();
+
+    for plugin in [
+        nara::render_wgpu::WGPU_RENDER_PLUGIN_ID,
+        nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
+        nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+    ] {
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| entry.plugin_id() == plugin)
+                .count(),
+            1
+        );
+    }
+}
+
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "presentation-2d",
+    feature = "render-wgpu"
+))]
+#[test]
+fn direct_app_selects_the_sprite_wgpu_contribution_explicitly() {
+    let mut app = nara::app::App::new();
+    app.add_plugins((
+        nara::Runtime2dPlugins,
+        nara::Presentation2dPlugins,
+        nara::WgpuBackendPlugins,
+        nara::render_wgpu::WgpuSpriteSubmitterPlugin,
+    ))
+    .unwrap();
+
+    assert!(
+        app.installed_plugins()
+            .any(|plugin| { plugin.id == nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID })
+    );
+    assert!(
+        app.installed_plugins()
+            .all(|plugin| plugin.id != nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+    );
+    app.seal().unwrap();
+}
+
+#[cfg(all(
+    feature = "runtime-ui",
+    feature = "presentation-ui",
+    feature = "render-wgpu"
+))]
+#[test]
+fn direct_app_selects_the_ui_wgpu_contribution_explicitly() {
+    let mut app = nara::app::App::new();
+    app.add_plugins((
+        nara::RuntimeUiPlugins,
+        nara::PresentationUiPlugins,
+        nara::WgpuBackendPlugins,
+        nara::render_wgpu::WgpuUiSubmitterPlugin,
+    ))
+    .unwrap();
+
+    assert!(
+        app.installed_plugins()
+            .any(|plugin| plugin.id == nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID)
+    );
+    assert!(
+        app.installed_plugins()
+            .all(|plugin| { plugin.id != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID })
+    );
+    app.seal().unwrap();
+}
+
 #[cfg(feature = "render-wgpu")]
 #[test]
 fn render_wgpu_profile_satisfies_the_shared_render_plugin() {
@@ -2311,12 +2510,24 @@ requested = ["render-wgpu"]
     )
     .unwrap();
 
+    let entries = plan.plugin_plan().entries();
     assert!(
-        plan.plugin_plan()
-            .entries()
+        entries
             .iter()
             .any(|entry| entry.plugin_id() == nara::render::RENDER_PLUGIN_ID)
     );
+    assert!(
+        entries
+            .iter()
+            .any(|entry| { entry.plugin_id() == nara::render_wgpu::WGPU_RENDER_PLUGIN_ID })
+    );
+    assert!(entries.iter().all(|entry| {
+        !matches!(
+            entry.plugin_id(),
+            nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
+                | nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID
+        )
+    }));
 }
 
 #[cfg(feature = "tooling")]

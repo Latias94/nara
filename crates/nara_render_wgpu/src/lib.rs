@@ -1,11 +1,12 @@
 //! Wgpu backend for backend-neutral nara render data.
 
-#[cfg(feature = "ui-submitter")]
+#[cfg(all(feature = "ui-submitter", test))]
 use std::sync::Arc;
-use std::time::Instant;
 
 mod backend;
 mod error;
+mod frame;
+mod plugin;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod quad;
 #[cfg(feature = "sprite-submitter")]
@@ -18,6 +19,9 @@ mod texture;
 mod ui;
 
 use crate::backend::render_backend_state;
+#[cfg(all(feature = "ui-submitter", test))]
+use crate::frame::WgpuUiSubmissionState;
+use crate::frame::{WgpuFrameCaptureError, WgpuFramePacketSlot};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::{
     WgpuQuadBatch, WgpuQuadBatchBuffer, WgpuQuadPipelineDrawRef, draw_quad_batch_buffers,
@@ -28,40 +32,34 @@ use nara_app::{
     PluginShutdownContext, RuntimeDriverScope, RuntimeFault, RuntimeFaultKind,
     RuntimeFaultReporter, RuntimeGeneration, RuntimeState, RuntimeWorldAccessError,
 };
-use nara_ecs::{
-    Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs, system::NonSendMarker,
-};
+#[cfg(test)]
+use nara_ecs::Resource;
+use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_material::AlphaMode2d;
 #[cfg(test)]
 use nara_render::Extent2d;
-#[cfg(feature = "ui-submitter")]
+#[cfg(all(feature = "ui-submitter", test))]
 use nara_render::RenderFrameState;
 use nara_render::{
     Color, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFramePacket, RenderFramePacketError, RenderFrameSkipReason, build_render_frame_packet,
+    RenderFrameSkipReason, build_render_frame_packet,
 };
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use nara_render::{RenderTarget, ViewportRect};
-#[cfg(feature = "sprite-submitter")]
-use nara_sprite_render::SpriteBatches;
 #[cfg(all(feature = "ui-submitter", test))]
 use nara_ui_render::__private::UiPreparedBackendSubmission;
+#[cfg(all(feature = "ui-submitter", test))]
+use nara_ui_render::__private::{UiBackendSubmission, UiSubmittedBackendSubmission};
 #[cfg(feature = "ui-submitter")]
-use nara_ui_render::__private::{
-    UiBackendSubmission, UiBackendSubmissionReader, UiPresentationOutcomes,
-    UiSubmittedBackendSubmission,
-};
-#[cfg(feature = "ui-submitter")]
-use nara_ui_render::{
-    UiPacketPrimitive, UiPaintPacket, UiPaintPacketIdentity, UiPresentationBackendFaultDomain,
-    UiPresentationBackendGeneration, UiPresentationIntegrationError,
-};
+use nara_ui_render::__private::{UiBackendSubmissionReader, UiPresentationOutcomes};
 #[cfg(all(feature = "ui-submitter", test))]
 use nara_ui_render::{
-    UiPresentationAttemptId, UiPresentationCapabilityGeneration, UiPresentationEpoch,
-    UiPresentationOutcome, UiPresentationRuntimeGeneration,
+    UiPaintPacket, UiPresentationAttemptId, UiPresentationCapabilityGeneration,
+    UiPresentationEpoch, UiPresentationOutcome, UiPresentationRuntimeGeneration,
 };
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::{UiPresentationBackendFaultDomain, UiPresentationBackendGeneration};
 use nara_window::{
     PrimaryWindowId, Window, WindowId,
     backend::{BackendWindowHandles, WindowSurfaceRetirementDriver, WindowSurfaceRetirementError},
@@ -69,6 +67,15 @@ use nara_window::{
 
 pub use crate::backend::{WgpuBackendState, WgpuFrameTransactionStats, WgpuRenderBackend};
 pub use crate::error::WgpuRenderError;
+#[cfg(feature = "sprite-submitter")]
+pub use crate::plugin::{
+    WGPU_SPRITE_SUBMITTER_PLUGIN_DECLARATION, WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
+    WgpuSpriteSubmitterPlugin,
+};
+#[cfg(feature = "ui-submitter")]
+pub use crate::plugin::{
+    WGPU_UI_SUBMITTER_PLUGIN_DECLARATION, WGPU_UI_SUBMITTER_PLUGIN_ID, WgpuUiSubmitterPlugin,
+};
 pub use crate::telemetry::{
     MAX_ADAPTER_SUMMARY_FIELD_BYTES, MAX_BUFFERED_FRAME_COMPLETIONS, MAX_PENDING_FRAME_COMPLETIONS,
     WgpuAdapterSummary, WgpuBackendTelemetryConfig, WgpuFrameCompletionSample,
@@ -93,12 +100,6 @@ pub const WGPU_BACKEND_SHUTDOWN_OBLIGATION: nara_app::PluginShutdownObligationId
     nara_app::PluginShutdownObligationId::new("nara.render-wgpu.backend");
 const WGPU_RENDER_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
     &[nara_app::PluginProductCapability::new("render-wgpu")];
-#[cfg(feature = "ui-submitter")]
-const WGPU_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
-    nara_render::RENDER_PLUGIN_ID,
-    nara_ui_render::UI_RENDER_PLUGIN_ID,
-];
-#[cfg(not(feature = "ui-submitter"))]
 const WGPU_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[nara_render::RENDER_PLUGIN_ID];
 pub const WGPU_RENDER_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(WGPU_RENDER_PLUGIN_ID, nara_app::PluginCategory::Backend)
@@ -132,11 +133,26 @@ impl Plugin for WgpuRenderPlugin {
         world
             .resource_mut::<RenderBackendStatus>()
             .mark_state(WGPU_RENDER_BACKEND, RenderBackendState::Uninitialized);
-        app.add_systems(
+        app.configure_sets(
             CoreStage::Render,
-            (capture_wgpu_frame_packet, render_wgpu_surfaces)
+            (
+                frame::WgpuFrameSet::Reset,
+                frame::WgpuFrameSet::CollectSprite,
+                frame::WgpuFrameSet::CollectUi,
+                frame::WgpuFrameSet::Seal,
+                frame::WgpuFrameSet::Submit,
+                frame::WgpuFrameSet::CompleteUi,
+            )
                 .chain()
                 .after(nara_render::begin_render_frame),
+        )?;
+        app.add_systems(
+            CoreStage::Render,
+            (
+                reset_wgpu_frame_packet.in_set(frame::WgpuFrameSet::Reset),
+                capture_wgpu_frame_packet.in_set(frame::WgpuFrameSet::Seal),
+                render_wgpu_surfaces.in_set(frame::WgpuFrameSet::Submit),
+            ),
         )?;
         app.register_plugin_shutdown_obligation(WGPU_BACKEND_SHUTDOWN_OBLIGATION)?;
         Ok(())
@@ -195,114 +211,6 @@ impl __RuntimeDriverPort for WgpuRenderBackend {
     }
 }
 
-#[derive(Debug, Default)]
-struct WgpuFramePayload {
-    primary_window_id: Option<WindowId>,
-    #[cfg(feature = "sprite-submitter")]
-    sprite_batches: Option<SpriteBatches>,
-    #[cfg(feature = "ui-submitter")]
-    ui_packets: Vec<Arc<UiPaintPacket>>,
-}
-
-#[cfg(feature = "ui-submitter")]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct WgpuUiPayloadFacts {
-    packet_count: u64,
-    packet_identity: Option<UiPaintPacketIdentity>,
-    primitives: u64,
-    glyph_primitives: u64,
-    glyph_pages: u64,
-}
-
-#[derive(Debug)]
-struct WgpuCapturedFrame {
-    topology: RenderFramePacket,
-    payload: WgpuFramePayload,
-    app_frame_index: u64,
-    work_started_at: Instant,
-}
-
-#[cfg(feature = "ui-submitter")]
-fn render_targets_match(
-    left: RenderTarget,
-    right: RenderTarget,
-    primary_window_id: Option<WindowId>,
-) -> bool {
-    match (
-        left.window_id(primary_window_id),
-        right.window_id(primary_window_id),
-    ) {
-        (Some(left), Some(right)) => left == right,
-        (None, None) => left == right,
-        _ => false,
-    }
-}
-
-impl WgpuFramePayload {
-    #[cfg(feature = "ui-submitter")]
-    fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
-        let mut facts = WgpuUiPayloadFacts::default();
-        for packet in self
-            .ui_packets
-            .iter()
-            .filter(|packet| render_targets_match(packet.target(), target, self.primary_window_id))
-        {
-            facts.packet_count = facts.packet_count.saturating_add(1);
-            facts.packet_identity = if facts.packet_count == 1 {
-                Some(packet.identity())
-            } else {
-                None
-            };
-            facts.primitives = packet
-                .primitives()
-                .iter()
-                .fold(facts.primitives, |count, _| count.saturating_add(1));
-            facts.glyph_primitives = packet
-                .primitives()
-                .iter()
-                .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
-                .fold(facts.glyph_primitives, |count, _| count.saturating_add(1));
-            facts.glyph_pages = packet
-                .glyph_pages()
-                .iter()
-                .fold(facts.glyph_pages, |count, _| count.saturating_add(1));
-        }
-        facts
-    }
-
-    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    fn quad_batches(
-        &self,
-        target: RenderTarget,
-        viewport: ViewportRect,
-    ) -> Result<Vec<WgpuQuadBatch>, WgpuRenderError> {
-        #[cfg(feature = "sprite-submitter")]
-        let content = self
-            .sprite_batches
-            .as_ref()
-            .map_or_else(Vec::new, |batches| {
-                sprite::collect_sprite_quad_batches(batches, 0)
-            });
-        #[cfg(not(feature = "sprite-submitter"))]
-        let content = Vec::new();
-        #[cfg(feature = "ui-submitter")]
-        let ui =
-            ui::collect_ui_quad_batches(&self.ui_packets, target, self.primary_window_id, viewport)
-                .map_err(|error| WgpuRenderError::UiPacketInvariant {
-                    message: error.to_string(),
-                })?;
-        #[cfg(not(feature = "ui-submitter"))]
-        let ui = {
-            let _ = (target, viewport);
-            Vec::new()
-        };
-
-        Ok(nara_render::__private::assemble_first_party_draws(
-            content, ui,
-        ))
-    }
-}
-
 impl PreparedSubmitterDraw {
     fn instance_buffer_bytes(&self) -> u64 {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
@@ -318,64 +226,33 @@ impl PreparedSubmitterDraw {
     }
 }
 
-#[derive(Debug, Default, Resource)]
-struct WgpuFramePacketSlot {
-    current: Option<Result<Option<WgpuCapturedFrame>, WgpuFrameCaptureError>>,
-    #[cfg(feature = "ui-submitter")]
-    ui_submissions: Vec<UiBackendSubmission>,
+fn reset_wgpu_frame_packet(mut slot: ResMut<WgpuFramePacketSlot>) {
+    slot.reset();
+}
+
+#[cfg(feature = "sprite-submitter")]
+fn collect_wgpu_sprite_payload(
+    sprite_batches: Res<nara_sprite_render::SpriteBatches>,
+    mut slot: ResMut<WgpuFramePacketSlot>,
+) {
+    slot.collect_sprite(sprite_batches.clone());
 }
 
 #[cfg(feature = "ui-submitter")]
-#[derive(Debug)]
-enum WgpuUiSubmissionState {
-    Prepared(Vec<UiBackendSubmission>),
-    Submitted(Vec<UiSubmittedBackendSubmission>),
-}
-
-#[cfg(feature = "ui-submitter")]
-impl WgpuUiSubmissionState {
-    fn bind_backend(
-        &mut self,
-        backend_generation: UiPresentationBackendGeneration,
-    ) -> Result<(), WgpuRenderError> {
-        let Self::Prepared(prepared) = self else {
-            return Ok(());
-        };
-        match nara_ui_render::__private::bind_backend_submission_batch(
-            std::mem::take(prepared),
-            backend_generation,
-        ) {
-            Ok(submissions) => {
-                *self = Self::Submitted(submissions);
-                Ok(())
-            }
-            Err(error) => {
-                let message = format!(
-                    "UI backend attempt {} requires generation ({}, {}) but the live generation is ({}, {})",
-                    error.admission_id().get(),
-                    error.required().backend_instance_id(),
-                    error.required().device_epoch(),
-                    error.actual().backend_instance_id(),
-                    error.actual().device_epoch(),
-                );
-                *prepared = error.into_submissions();
-                Err(WgpuRenderError::UiSubmissionRejected { message })
-            }
-        }
+fn collect_wgpu_ui_payload(
+    mut submissions: UiBackendSubmissionReader,
+    mut slot: ResMut<WgpuFramePacketSlot>,
+) {
+    if !slot.accepts_ui_collection() {
+        return;
     }
-}
-
-#[derive(Debug, thiserror::Error)]
-enum WgpuFrameCaptureError {
-    #[error("managed runtime generation is unavailable")]
-    MissingRuntimeGeneration,
-    #[error(transparent)]
-    Topology(#[from] RenderFramePacketError),
-    #[error("a render batch does not belong to the admitted view and target")]
-    BatchTopologyMismatch,
-    #[cfg(feature = "ui-submitter")]
-    #[error(transparent)]
-    UiPresentation(#[from] UiPresentationIntegrationError),
+    match submissions.take() {
+        Ok(frame) => {
+            let (packets, submissions) = frame.into_parts();
+            slot.collect_ui(packets, submissions);
+        }
+        Err(error) => slot.reject_ui_collection(error),
+    }
 }
 
 fn capture_wgpu_frame_packet(
@@ -385,91 +262,35 @@ fn capture_wgpu_frame_packet(
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
     views: Res<ExtractedViews>,
-    #[cfg(feature = "sprite-submitter")] sprite_batches: Option<Res<SpriteBatches>>,
-    #[cfg(feature = "ui-submitter")] mut ui_submissions: UiBackendSubmissionReader,
     mut slot: ResMut<WgpuFramePacketSlot>,
 ) {
     let Some(generation) = generation.map(|generation| *generation) else {
-        slot.current = Some(Err(WgpuFrameCaptureError::MissingRuntimeGeneration));
+        slot.reject_capture(WgpuFrameCaptureError::MissingRuntimeGeneration);
         return;
     };
     let primary_window_id = primary_window_id.map(|primary| primary.0);
-    #[cfg(feature = "ui-submitter")]
-    let (ui_packets, prepared_submissions) = match ui_submissions.take() {
-        Ok(frame) => frame.into_parts(),
-        Err(error) => {
-            slot.current = Some(Err(WgpuFrameCaptureError::UiPresentation(error)));
-            return;
-        }
-    };
-    #[cfg(feature = "ui-submitter")]
-    {
-        slot.ui_submissions = prepared_submissions;
-    }
-    let payload = WgpuFramePayload {
-        primary_window_id,
-        #[cfg(feature = "sprite-submitter")]
-        sprite_batches: sprite_batches.as_deref().cloned(),
+    if !slot.payload_matches_topology(
+        &views,
         #[cfg(feature = "ui-submitter")]
-        ui_packets,
-    };
-    if !payload_batches_match_topology(&payload, &views, primary_window_id) {
-        slot.current = Some(Err(WgpuFrameCaptureError::BatchTopologyMismatch));
+        primary_window_id,
+    ) {
+        slot.reject_capture(WgpuFrameCaptureError::BatchTopologyMismatch);
         return;
     }
-    slot.current = Some(
-        build_render_frame_packet(
-            generation,
-            frame.index,
-            primary_window_id,
-            windows.iter(),
-            &views,
-        )
-        .map(|topology| {
-            topology.map(|topology| WgpuCapturedFrame {
-                topology,
-                payload,
-                app_frame_index: frame_start.frame(),
-                work_started_at: frame_start.started_at(),
-            })
-        })
-        .map_err(WgpuFrameCaptureError::from),
+    let captured = build_render_frame_packet(
+        generation,
+        frame.index,
+        primary_window_id,
+        windows.iter(),
+        &views,
     );
-}
-
-fn payload_batches_match_topology(
-    payload: &WgpuFramePayload,
-    views: &ExtractedViews,
-    primary_window_id: Option<WindowId>,
-) -> bool {
-    let Some(view) = views.as_slice().first() else {
-        return true;
-    };
-    #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-    let _ = (payload, view);
-    #[cfg(not(feature = "ui-submitter"))]
-    let _ = primary_window_id;
-    #[cfg(feature = "sprite-submitter")]
-    if payload.sprite_batches.as_ref().is_some_and(|batches| {
-        batches
-            .as_slice()
-            .iter()
-            .any(|batch| batch.view_index != 0 || batch.target != view.target)
-    }) {
-        return false;
-    }
-    #[cfg(feature = "ui-submitter")]
-    {
-        let view_window = view.target.window_id(primary_window_id);
-        if payload
-            .ui_packets
-            .iter()
-            .any(|packet| packet.target().window_id(primary_window_id) != view_window)
-        {
-            return false;
-        }
-    }
-    true
+    slot.seal(
+        #[cfg(feature = "ui-submitter")]
+        primary_window_id,
+        captured,
+        frame_start.frame(),
+        frame_start.started_at(),
+    );
 }
 
 #[derive(Debug, Default)]
@@ -486,7 +307,6 @@ fn render_wgpu_surfaces(
     mut backend: ResMut<WgpuRenderBackend>,
     handles: Option<Res<BackendWindowHandles>>,
     mut packet_slot: ResMut<WgpuFramePacketSlot>,
-    #[cfg(feature = "ui-submitter")] mut ui_outcomes: ResMut<UiPresentationOutcomes>,
     mut frame: ResMut<RenderFrame>,
     mut stats: ResMut<FrameStats>,
     mut status: ResMut<RenderBackendStatus>,
@@ -495,15 +315,14 @@ fn render_wgpu_surfaces(
 ) {
     backend.begin_frame_transaction(frame.index);
     #[cfg(feature = "ui-submitter")]
-    let mut ui_submission_state =
-        WgpuUiSubmissionState::Prepared(std::mem::take(&mut packet_slot.ui_submissions));
-    let capture = packet_slot.current.take();
+    let mut ui_submission_state = packet_slot.take_ui_submissions();
+    let capture = packet_slot.take_capture();
     let result = match capture {
         Some(Ok(Some(packet))) => backend.render_packet(
             handles.as_deref(),
             packet,
             #[cfg(feature = "ui-submitter")]
-            &mut ui_submission_state,
+            ui_submission_state.as_mut(),
             &mut frame,
             &mut stats,
             &mut status,
@@ -544,21 +363,25 @@ fn render_wgpu_surfaces(
     };
     #[cfg(feature = "ui-submitter")]
     let device_fault_generation = result.as_ref().err().and_then(|error| {
-        (classify_ui_backend_fault(error) == UiPresentationBackendFaultDomain::Device)
+        (frame::classify_ui_backend_fault(error) == UiPresentationBackendFaultDomain::Device)
             .then(|| {
                 UiPresentationBackendGeneration::new(backend.instance_id(), backend.device_epoch())
             })
             .flatten()
     });
     #[cfg(feature = "ui-submitter")]
-    publish_ui_outcomes(
-        &mut ui_outcomes,
-        ui_submission_state,
-        &result,
-        frame.state,
-        device_fault_generation,
-        status.last_skip().and_then(|skip| skip.message()),
-    );
+    if let Some(ui_submission_state) = ui_submission_state {
+        packet_slot.finish_ui(
+            ui_submission_state,
+            result.clone(),
+            frame.state,
+            device_fault_generation,
+            status
+                .last_skip()
+                .and_then(|skip| skip.message())
+                .map(str::to_owned),
+        );
+    }
     if let Err(error) = result {
         handle_wgpu_render_error(
             &mut backend,
@@ -569,6 +392,14 @@ fn render_wgpu_surfaces(
         );
         frame.mark_skipped();
     }
+}
+
+#[cfg(feature = "ui-submitter")]
+fn complete_wgpu_ui_presentation(
+    mut packet_slot: ResMut<WgpuFramePacketSlot>,
+    mut outcomes: ResMut<UiPresentationOutcomes>,
+) {
+    packet_slot.complete_ui(&mut outcomes);
 }
 
 fn handle_wgpu_render_error(
@@ -640,78 +471,6 @@ fn handle_wgpu_render_error(
             RuntimeFaultKind::RequiredService,
             "nara.render-wgpu.frame",
         ));
-    }
-}
-
-#[cfg(feature = "ui-submitter")]
-fn publish_ui_outcomes(
-    outcomes: &mut UiPresentationOutcomes,
-    submissions: WgpuUiSubmissionState,
-    result: &Result<(), WgpuRenderError>,
-    frame_state: RenderFrameState,
-    device_fault_generation: Option<UiPresentationBackendGeneration>,
-    skip_message: Option<&str>,
-) {
-    match submissions {
-        WgpuUiSubmissionState::Prepared(submissions) => {
-            for envelope in submissions {
-                let completed = match result {
-                    Err(error) if error.is_content_rejection() => {
-                        envelope.content_rejected(error.to_string())
-                    }
-                    Err(error) => envelope.backend_fault(
-                        (classify_ui_backend_fault(error)
-                            == UiPresentationBackendFaultDomain::Device)
-                            .then_some(device_fault_generation)
-                            .flatten(),
-                        classify_ui_backend_fault(error),
-                        error.to_string(),
-                    ),
-                    Ok(()) => envelope.backend_fault(
-                        None,
-                        UiPresentationBackendFaultDomain::Target,
-                        skip_message
-                            .unwrap_or(
-                                "the target did not reach a live device generation before submit",
-                            )
-                            .to_owned(),
-                    ),
-                };
-                outcomes.commit_backend(completed);
-            }
-        }
-        WgpuUiSubmissionState::Submitted(submissions) => {
-            for submission in submissions {
-                let completed = match result {
-                    Ok(()) if frame_state == RenderFrameState::Submitted => submission.presented(),
-                    Ok(()) => submission.backend_fault(
-                        UiPresentationBackendFaultDomain::Target,
-                        skip_message
-                            .unwrap_or("the target surface did not submit the exact UI packet")
-                            .to_owned(),
-                    ),
-                    Err(error) if error.is_deferred() => submission.deferred(error.to_string()),
-                    Err(error) if error.is_content_rejection() => submission.backend_fault(
-                        UiPresentationBackendFaultDomain::Attempt,
-                        error.to_string(),
-                    ),
-                    Err(error) => submission
-                        .backend_fault(classify_ui_backend_fault(error), error.to_string()),
-                };
-                outcomes.commit_backend(completed);
-            }
-        }
-    }
-}
-
-#[cfg(feature = "ui-submitter")]
-const fn classify_ui_backend_fault(error: &WgpuRenderError) -> UiPresentationBackendFaultDomain {
-    if error.is_target_fault() {
-        UiPresentationBackendFaultDomain::Target
-    } else if error.is_attempt_fault() {
-        UiPresentationBackendFaultDomain::Attempt
-    } else {
-        UiPresentationBackendFaultDomain::Device
     }
 }
 
@@ -794,6 +553,8 @@ fn render_acquired_texture(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "sprite-submitter")]
+    use nara_ecs::Entity;
     use nara_ecs::{
         Commands,
         system::{IntoSystem, System},
@@ -810,7 +571,7 @@ mod tests {
             .unwrap()
     }
 
-    fn install_test_plugins(app: &mut App, with_window: bool) {
+    fn install_render_foundation(app: &mut App, with_window: bool) {
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
             nara_hierarchy::HierarchyPlugin,
@@ -822,6 +583,10 @@ mod tests {
             app.add_plugins(nara_window::WindowPlugin::default())
                 .unwrap();
         }
+    }
+
+    fn install_test_plugins(app: &mut App, with_window: bool) {
+        install_render_foundation(app, with_window);
         #[cfg(feature = "ui-submitter")]
         app.add_plugins((
             nara_image::ImagePreparePlugin,
@@ -829,6 +594,104 @@ mod tests {
         ))
         .unwrap();
         app.add_plugins(WgpuRenderPlugin).unwrap();
+        #[cfg(feature = "ui-submitter")]
+        app.add_plugins(WgpuUiSubmitterPlugin).unwrap();
+    }
+
+    #[cfg(feature = "sprite-submitter")]
+    #[derive(Debug, Default, Resource)]
+    struct UninstalledSpriteContributionObservation {
+        source_instances: usize,
+        collected_instances: Option<usize>,
+    }
+
+    #[cfg(feature = "sprite-submitter")]
+    fn inject_sprite_domain_work(
+        mut views: ResMut<ExtractedViews>,
+        mut sprites: ResMut<nara_sprite_render::ExtractedSprites>,
+    ) {
+        views.clear();
+        views.push(nara_render::ExtractedView {
+            camera_entity: Entity::PLACEHOLDER,
+            target: nara_render::RenderTarget::PrimaryWindow,
+            viewport: nara_render::ViewportRect::new(0, 0, 16, 16).unwrap(),
+            world_position: nara_core::Vec2::ZERO,
+            viewport_height: 16.0,
+            order: 0,
+            clear_color: nara_core::Color::BLACK,
+        });
+        sprites.clear();
+        sprites.push(nara_sprite_render::ExtractedSprite {
+            entity: Entity::PLACEHOLDER,
+            source_order: 0,
+            kind: nara_sprite_render::ExtractedSpriteKind::Sprite,
+            material: nara_sprite_render::ExtractedSpriteMaterial::from_color(
+                nara_core::Color::WHITE,
+            ),
+            texture_region: nara_sprite_render::TextureUvRect::FULL,
+            world_center: nara_core::Vec2::ZERO,
+            world_x_axis: nara_core::Vec2::X,
+            world_y_axis: nara_core::Vec2::Y,
+            color: nara_core::Color::WHITE,
+            layer: 0,
+            sort_key: 0,
+        });
+    }
+
+    #[cfg(feature = "sprite-submitter")]
+    fn observe_uninstalled_sprite_contribution(
+        batches: Res<nara_sprite_render::SpriteBatches>,
+        slot: Res<WgpuFramePacketSlot>,
+        mut observation: ResMut<UninstalledSpriteContributionObservation>,
+        mut views: ResMut<ExtractedViews>,
+    ) {
+        observation.source_instances = batches.total_instances();
+        observation.collected_instances = slot.collected_sprite_instances();
+        views.clear();
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[derive(Debug, Default, Resource)]
+    struct UninstalledUiContributionObservation {
+        packet_count: usize,
+        submission_count: usize,
+        submissions: Vec<UiBackendSubmission>,
+        outcomes: Vec<UiPresentationOutcome>,
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn observe_undrained_ui_backend_frame(
+        mut reader: UiBackendSubmissionReader,
+        mut observation: ResMut<UninstalledUiContributionObservation>,
+    ) {
+        let frame = reader
+            .take()
+            .expect("the uninstalled contribution must leave the backend frame available");
+        let (packets, submissions) = frame.into_parts();
+        observation.packet_count = packets.len();
+        observation.submission_count = submissions.len();
+        observation.submissions = submissions;
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn reject_observed_ui_backend_frame(
+        mut observation: ResMut<UninstalledUiContributionObservation>,
+        mut outcomes: ResMut<UiPresentationOutcomes>,
+    ) {
+        for submission in std::mem::take(&mut observation.submissions) {
+            outcomes.commit_backend(submission.content_rejected(
+                "the isolation test deliberately rejected the undrained frame".to_owned(),
+            ));
+        }
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn record_ui_isolation_outcomes(world: &mut nara_ecs::World) {
+        let outcomes = nara_ui_render::drain_ui_presentation_outcomes(world)
+            .expect("the test-owned rejection must release every backend permit");
+        world
+            .resource_mut::<UninstalledUiContributionObservation>()
+            .outcomes = outcomes;
     }
 
     #[derive(Debug, Default, Resource)]
@@ -868,6 +731,113 @@ mod tests {
                 .driver(),
             WGPU_RENDER_BACKEND
         );
+    }
+
+    #[cfg(feature = "sprite-submitter")]
+    #[test]
+    fn compiled_but_uninstalled_sprite_contribution_does_not_collect_domain_batches() {
+        let mut app = App::new();
+        install_render_foundation(&mut app, false);
+        app.add_plugins((
+            nara_image::ImagePreparePlugin,
+            nara_sprite_render::SpriteRenderPlugin,
+        ))
+        .unwrap();
+        app.add_plugins(WgpuRenderPlugin).unwrap();
+        app.insert_resource(UninstalledSpriteContributionObservation::default())
+            .unwrap();
+        app.add_systems(CoreStage::Prepare, inject_sprite_domain_work)
+            .unwrap();
+        app.add_systems(
+            CoreStage::Render,
+            observe_uninstalled_sprite_contribution
+                .after(frame::WgpuFrameSet::CollectSprite)
+                .before(frame::WgpuFrameSet::Seal),
+        )
+        .unwrap();
+        let candidate = admit_runtime(app);
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        let observation = runtime
+            .world()
+            .resource::<UninstalledSpriteContributionObservation>();
+        assert_eq!(observation.source_instances, 1);
+        assert_eq!(observation.collected_instances, None);
+        let stats = runtime.world().resource::<FrameStats>();
+        assert_eq!(stats.draw_calls, 0);
+        assert_eq!(stats.sprites, 0);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn compiled_but_uninstalled_ui_contribution_does_not_drain_the_backend_frame() {
+        use nara_ui_kernel::UiSurfaceId;
+        use nara_ui_render::__private::{
+            UiPresentationRoute, replace_ui_backend_frame, replace_ui_presentation_routes,
+            snapshot_ui_paint_packets,
+        };
+
+        let mut app = App::new();
+        install_render_foundation(&mut app, false);
+        app.add_plugins((
+            nara_image::ImagePreparePlugin,
+            nara_ui_render::UiRenderPlugin,
+        ))
+        .unwrap();
+        app.add_plugins(WgpuRenderPlugin).unwrap();
+        app.insert_resource(UninstalledUiContributionObservation::default())
+            .unwrap();
+        app.add_systems(
+            CoreStage::Render,
+            (
+                observe_undrained_ui_backend_frame,
+                reject_observed_ui_backend_frame,
+                record_ui_isolation_outcomes,
+            )
+                .chain()
+                .after(frame::WgpuFrameSet::Submit),
+        )
+        .unwrap();
+
+        let surface_id = UiSurfaceId::new(1).unwrap();
+        let world = app.world_mut().unwrap();
+        replace_ui_presentation_routes(
+            world,
+            [UiPresentationRoute::new(surface_id, WindowId::PRIMARY).unwrap()],
+        )
+        .unwrap();
+        nara_ui_render::compile_ui_paint_packets(world, &[ui_outcome_frame()]).unwrap();
+        let (mut planned, _) = snapshot_ui_paint_packets(world).unwrap().into_parts();
+        let packet = planned
+            .pop()
+            .expect("the planner must publish one exact backend packet");
+        assert!(
+            replace_ui_backend_frame(
+                world,
+                vec![Arc::clone(&packet)],
+                vec![prepared_ui_attempt(packet, 61, 41)],
+            )
+            .unwrap()
+            .is_empty()
+        );
+
+        let candidate = admit_runtime(app);
+        let mut runtime = candidate.complete_startup().unwrap().promote();
+        runtime.drive(std::time::Duration::ZERO).unwrap();
+
+        let observation = runtime
+            .world()
+            .resource::<UninstalledUiContributionObservation>();
+        assert_eq!(observation.packet_count, 1);
+        assert_eq!(observation.submission_count, 1);
+        assert!(observation.submissions.is_empty());
+        assert!(matches!(
+            observation.outcomes.as_slice(),
+            [UiPresentationOutcome::ContentRejected { attempt, .. }]
+                if attempt.admission_id().is_some_and(|id| id.get() == 61)
+        ));
     }
 
     #[test]
@@ -1084,7 +1054,7 @@ mod tests {
     #[test]
     fn enabled_submitter_input_has_no_quad_work() {
         assert!(
-            WgpuFramePayload::default()
+            frame::WgpuFramePayload::default()
                 .quad_batches(
                     RenderTarget::PrimaryWindow,
                     ViewportRect::new(0, 0, 1, 1).unwrap(),
@@ -1237,7 +1207,7 @@ mod tests {
             backend_generation,
         );
 
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Submitted(vec![submitted]),
             &Ok(()),
@@ -1268,7 +1238,7 @@ mod tests {
             30,
             backend_generation,
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Submitted(vec![submitted]),
             &deferred,
@@ -1304,7 +1274,7 @@ mod tests {
         let mut outcomes = UiPresentationOutcomes::default();
         let prepared = prepared_ui_attempt(packet, 43, 31);
         let prepared = admit_ui_attempt(&mut outcomes, prepared);
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Prepared(vec![prepared]),
             &Ok(()),
@@ -1336,7 +1306,7 @@ mod tests {
             &mut outcomes,
             prepared_ui_attempt(Arc::clone(&packet), 44, 32),
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Prepared(vec![prepared]),
             &Err(WgpuRenderError::ContentRejected {
@@ -1361,7 +1331,7 @@ mod tests {
             &mut outcomes,
             prepared_ui_attempt(Arc::clone(&packet), 45, 33),
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Prepared(vec![prepared]),
             &Err(WgpuRenderError::DeviceLost),
@@ -1392,7 +1362,7 @@ mod tests {
             34,
             backend_generation,
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Submitted(vec![submitted]),
             &Err(WgpuRenderError::SurfaceMissing {
@@ -1425,7 +1395,7 @@ mod tests {
             35,
             backend_generation,
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Submitted(vec![submitted]),
             &Err(WgpuRenderError::ContentRejected {
@@ -1455,7 +1425,7 @@ mod tests {
             &mut outcomes,
             prepared_ui_attempt(Arc::clone(&packet), 48, 36),
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Prepared(vec![prepared]),
             &Err(WgpuRenderError::UiSubmissionRejected {
@@ -1487,7 +1457,7 @@ mod tests {
             37,
             backend_generation,
         );
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Submitted(vec![submitted]),
             &Ok(()),
@@ -1512,7 +1482,7 @@ mod tests {
 
         let mut outcomes = UiPresentationOutcomes::default();
         let submitted = submitted_ui_attempt(&mut outcomes, packet, 50, 38, backend_generation);
-        publish_ui_outcomes(
+        frame::publish_ui_outcomes(
             &mut outcomes,
             WgpuUiSubmissionState::Submitted(vec![submitted]),
             &Err(WgpuRenderError::BackendUnavailable),
@@ -1580,7 +1550,7 @@ mod tests {
     }
 
     #[cfg(feature = "ui-submitter")]
-    fn ui_outcome_packet_for(target: RenderTarget) -> Arc<UiPaintPacket> {
+    fn ui_outcome_frame() -> Arc<nara_ui_kernel::UiFrame> {
         use nara_text::bundled_font_face;
         use nara_ui_kernel::{
             UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
@@ -1605,12 +1575,20 @@ mod tests {
             .unwrap();
         let environment =
             UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 16.0, 16.0, 1.0, 1, 1, 1, 1).unwrap();
-        let frame = UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+        UiCompiler::new(bundled_font_face().unwrap(), Default::default())
             .unwrap()
             .compile(&snapshot, environment, UiTheme::default())
-            .unwrap();
+            .unwrap()
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn ui_outcome_packet_for(target: RenderTarget) -> Arc<UiPaintPacket> {
         nara_ui_render::UiPresentationPlanner::default()
-            .plan(frame, target, &nara_ui_render::UiPreparedImages::default())
+            .plan(
+                ui_outcome_frame(),
+                target,
+                &nara_ui_render::UiPreparedImages::default(),
+            )
             .unwrap()
     }
 
@@ -1624,7 +1602,7 @@ mod tests {
     fn payload_facts_bind_glyph_work_to_one_exact_ui_packet() {
         let packet = ui_outcome_packet();
         let identity = packet.identity();
-        let payload = WgpuFramePayload {
+        let payload = frame::WgpuFramePayload {
             primary_window_id: Some(WindowId::PRIMARY),
             #[cfg(feature = "sprite-submitter")]
             sprite_batches: None,
@@ -1650,7 +1628,7 @@ mod tests {
         let first_packet = ui_outcome_packet_for(first_target);
         let first_identity = first_packet.identity();
         let second_packet = ui_outcome_packet_for(second_target);
-        let payload = WgpuFramePayload {
+        let payload = frame::WgpuFramePayload {
             primary_window_id: Some(WindowId::PRIMARY),
             #[cfg(feature = "sprite-submitter")]
             sprite_batches: None,
@@ -1670,7 +1648,7 @@ mod tests {
     #[test]
     fn transaction_facts_only_name_an_identity_for_one_frame_wide_packet() {
         let packet = ui_outcome_packet();
-        let facts = WgpuUiPayloadFacts {
+        let facts = frame::WgpuUiPayloadFacts {
             packet_count: 1,
             packet_identity: Some(packet.identity()),
             primitives: 3,
@@ -1682,7 +1660,7 @@ mod tests {
         transaction.record_ui_payload(facts);
         assert_eq!(transaction.ui_packet_identity(), Some(packet.identity()));
 
-        transaction.record_ui_payload(WgpuUiPayloadFacts::default());
+        transaction.record_ui_payload(frame::WgpuUiPayloadFacts::default());
         assert_eq!(transaction.ui_packet_identity(), Some(packet.identity()));
 
         transaction.record_ui_payload(facts);
