@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit
+**Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0025](0025-runtime-ui-system.md),
@@ -18,7 +18,7 @@
 **Refined By**: [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md),
 [ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md), and
 [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md)
-**Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), followed by the inactive [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md)
+**Implementation Plans**: completed [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md) lineage and the current [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md); unit activation belongs to the plan registration rather than this ADR
 
 ## Context
 
@@ -136,7 +136,9 @@ flowchart LR
 - The first authoring vocabulary is closed: root, node/style, visual, display text, controlled
   button, optional semantics, immutable theme, bounded action ID, and typed semantic intent. It has
   no callback with World/Editor authority, property bag, generic Widget component, CSS selector
-  language, or second retained object model.
+  language, or second retained object model. A product adapter may replace display content on the
+  existing immutable text value, but logical size, brush, alignment, overflow and semantic-text
+  policy remain authored facts rather than fields reconstructed from product defaults.
 - `nara_text` owns bounded deterministic font admission, shaping, bidi/line layout, measurement,
   glyph keys/raster requests, and diagnostics without system-font discovery. Atlas allocation and
   GPU residency remain presentation-owner responsibilities.

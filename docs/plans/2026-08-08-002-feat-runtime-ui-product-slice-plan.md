@@ -7,13 +7,12 @@ amended: 2026-08-12
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: inactive
-paused_by: docs/plans/2026-08-12-001-refactor-ui-dynamic-text-content-correction-plan.md
+execution_state: active
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
-depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md
+depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md
 supersedes: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
-baseline_record: 19cfa496dc2346368764057367cc2163
+baseline_record: a628828a8ff941239d79a0b8b3d60316
 plan_id: runtime-ui-product-slice-2026-08
 unit_namespace: RUP
 operator_execution_authority: external-control-plane
@@ -23,7 +22,7 @@ operator_execution_authority: external-control-plane
 
 ## Goal Capsule
 
-- **Objective:** Consume successor UIF baseline `19cfa496dc2346368764057367cc2163` to prove one
+- **Objective:** Consume successor UIF baseline `a628828a8ff941239d79a0b8b3d60316` to prove one
   data-authored Runtime UI workflow from gameplay state through backend-accepted presentation,
   exact input activation, restart, headless execution and packaged launch.
 - **Authority:** ADR 0102 and ADR 0107-0109 own shared UI decisions. This plan owns product
@@ -47,15 +46,16 @@ modal has no committed focus until an input first creates the endpoint seat. The
 owned that shared defect. UIFM-U1 corrected it at `40d3f87`; UIFM-U2 published successor baseline
 `19cfa496dc2346368764057367cc2163`, which this plan now pins before resuming RUP-U1.
 
-### Active dynamic-text correction lineage
+### Completed dynamic-text correction lineage
 
-RUP-U2 is paused after the renderer-neutral
+RUP-U2 was paused after the renderer-neutral
 `dynamic_text_content_preserves_authored_adapter_presentation` reproduction proved that the public
 Runtime UI adapter cannot replace dynamic display content without reconstructing and potentially
 overwriting Scene/Prefab-authored presentation fields. The focused
 [UI dynamic text content correction](2026-08-12-001-refactor-ui-dynamic-text-content-correction-plan.md)
-owns that shared value-contract defect. This plan resumes only after the correction publishes a
-successor Foundation baseline and this frontmatter pins it explicitly.
+owned that shared value-contract defect. UIFD-U1 corrected it at `ba918db`; UIFD-U2 published
+successor baseline `a628828a8ff941239d79a0b8b3d60316`, which this plan now pins before resuming
+RUP-U2.
 
 ## Product Contract
 
@@ -80,8 +80,8 @@ themselves establish a Product-Validated Baseline.
 #### Baseline and authority
 
 - R1. All new product evidence pins successor Foundation record
-  `19cfa496dc2346368764057367cc2163`, which preserves UIF-U5 and incorporates UIFM-U1 commit
-  `40d3f87`.
+  `a628828a8ff941239d79a0b8b3d60316`, which preserves UIF-U5/UIFM and incorporates UIFD-U1 commit
+  `ba918db`.
 - R2. Product code uses the frozen public Runtime UI and presentation composition; hidden Host
   authority is permitted only inside the named first-party backend presenter.
 - R3. A shared contract may change only after a renderer-neutral reproduction fails against the
