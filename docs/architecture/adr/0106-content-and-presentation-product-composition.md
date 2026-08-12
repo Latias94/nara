@@ -47,6 +47,10 @@ flowchart LR
   `project_host::advanced`; raw direct-App plugins remain a separate explicit path. Neither ordinary
   intents nor advanced Host overlays carry an independent schema-provider list. A schema-owning
   file-backed extension uses `SchemaContribution`.
+- Capability normalization, concrete-contribution selection, plugin-plan resolution and schema
+  resolution reject before candidate App creation. Plugin build and Host bridge capture remain
+  fallible candidate work: failure poisons and retires the unpublished candidate rather than
+  claiming arbitrary Rust side effects were rolled back.
 - These concrete contribution plugins are first-party closed topology. They do not make backend
   replacement, dynamic plugin discovery or a general contribution registry supported contracts.
 

@@ -64,10 +64,10 @@ hidden inside ordinary Headless, Desktop or Editor intents. A schema-owning exte
 file-backed Host only through `SchemaContribution`; no advanced Host overlay carries an independent
 schema-provider list.
 
-Direct Rust products select concrete first-party contributions explicitly. `WgpuBackendPlugins`
-remains base-only by default and provides named Sprite/UI submitter configuration;
-`PresentationUiPlugins` similarly provides named Winit accessibility configuration. These are
-closed product choices rather than inferred behavior or a generic registry.
+Direct Rust products select concrete first-party contribution plugins explicitly from the backend
+surface. `WgpuBackendPlugins` remains base-only, and `PresentationUiPlugins` remains
+backend/platform-neutral. These are closed product choices rather than inferred behavior, another
+cross-product group or a generic registry.
 
 ## Requirements
 
@@ -97,8 +97,10 @@ closed product choices rather than inferred behavior or a generic registry.
 - R9. Under both a narrow relevant compiled ceiling and the all-features ceiling, requested-subset
   tests prove exact plugin absence and presence for base WGPU, 2D presentation, UI presentation and
   desktop accessibility combinations.
-- R10. All rejection remains pre-mutation, and the same request resolves to the same plugin closure
-  regardless of unrelated compiled features.
+- R10. Capability normalization, contribution selection, plugin-plan resolution and schema
+  resolution reject before candidate App creation. A later plugin build or bridge-capture failure
+  poisons and retires the unpublished candidate; it does not publish a runtime. The same request
+  resolves to the same plugin closure regardless of unrelated compiled features.
 
 ## Implementation Units
 
@@ -107,19 +109,24 @@ closed product choices rather than inferred behavior or a generic registry.
 **Goal:** Make base WGPU feature-invariant and move Sprite/UI payload ownership into two installed
 first-party contribution plugins.
 
-**Files:** `crates/nara_render_wgpu/src/{lib,plugin,frame}.rs`, existing backend/submitter modules,
-`src/product.rs`, backend facade exports and focused composition tests.
+**Files:** `crates/nara_render_wgpu/src/{lib,backend,frame,plugin,sprite,ui}.rs`, `src/product.rs`,
+backend facade exports and focused composition tests. `frame.rs` and `plugin.rs` are created as the
+private frame-transaction and concrete-plugin modules.
 
 **Approach:** Keep one private WGPU frame owner with ordered reset, collect, seal, submit and
 complete sets. The base plugin owns device, queue, surfaces, caches, topology sealing and submit.
-Concrete contribution systems write to the private frame slot; the UI contribution alone drains and
-completes exact UI backend attempts. `WgpuBackendPlugins` is base-only by default and offers named
-Sprite/UI configuration for direct Rust products; `ProjectProfilePlugins` applies those choices from
-the requested capability intersections.
+The Sprite contribution writes only Sprite payload before seal. The UI contribution drains exact
+prepared attempts and writes UI payload before seal; base submit writes one private terminal record;
+the UI contribution alone consumes that record after submit and completes every exact attempt.
+`ProjectProfilePlugins` installs concrete contributions from requested capability intersections.
+Direct Rust products explicitly add `WgpuSpriteSubmitterPlugin` or `WgpuUiSubmitterPlugin` from the
+backend surface; neither concrete plugin enters the gameplay prelude or another cross-product group.
 
-**Test scenarios:** Base-only clear path under all features; compiled-but-uninstalled Sprite/UI
-isolation; Sprite-only contribution; UI-only contribution; both contributions exactly once; topology
-rejection without surface acquisition; every admitted UI reservation completes exactly once.
+**Test scenarios:** A native `desktop-winit + render-wgpu` base-only clear path under all features;
+a no-view base-only path without a desktop target; compiled-but-uninstalled Sprite/UI isolation;
+direct-App Sprite-only contribution; direct-App UI-only contribution; resolved product with both
+contributions exactly once; topology rejection without surface acquisition; every admitted UI
+reservation completes exactly once; `App::add_plugins(ProductRecipe)` remains valid.
 
 **Exit:** The original `render-wgpu`-only red reproduction passes and no base declaration or system
 parameter varies with a submitter compile feature.
@@ -132,12 +139,16 @@ side effect.
 **Files:** `crates/nara_winit/src/{lib,accessibility}.rs`, `src/ui_presentation.rs`,
 `src/ui_presentation/accessibility.rs`, `src/product.rs` and focused Winit/product tests.
 
-**Approach:** The root contribution installs both halves of the existing bridge and an opaque Winit
-activation fact atomically. The runner captures that fact once and gates hidden-window startup,
-AccessKit sessions, update draining, event forwarding and wake handling on it. Absence is a valid
-disabled mode; partial bridge installation rejects closed. `PresentationUiPlugins` provides one
-named configuration for direct Rust products, while `ProjectProfilePlugins` selects it from the
-requested `desktop-winit + presentation-ui` intersection.
+**Approach:** Composition admission verifies the root contribution before candidate App creation.
+Its build installs both halves of the existing bridge and an opaque Winit activation fact; a
+partial build poisons the unpublished candidate and can never reach runner startup. Before native
+window startup, the runner captures exactly one
+crate-private result: `Disabled`, `Enabled(opaque access)` or `Partial(error)`. Every hidden-window,
+AccessKit session, update-drain, event-forwarding and wake path reads that captured mode. Absence is
+a valid disabled mode; `Partial` rejects before runner/window startup and the unpublished candidate
+is retired. `ProjectProfilePlugins` installs the root contribution from the requested
+`desktop-winit + presentation-ui` intersection; direct Rust products add the same concrete root
+contribution explicitly.
 
 **Test scenarios:** Desktop-only and presentation-UI-only requests install no contribution; the pair
 installs exactly one; compiled-but-disabled runner mode creates no accessibility session; complete
@@ -155,11 +166,14 @@ composition.
 advanced facade exports, recipe and Host boundary tests, first-party recipes/fixtures and the
 migration guide.
 
-**Approach:** Delete raw edit/provider fields and fluent methods from ordinary intents. Migrate real
-callers to one replayable recipe. Move recipe-anchored non-replayable Host overlays into
-`project_host::advanced`, keep raw `App` plugins as a separate direct path, and remove schema-provider
-lists from both ordinary intents and advanced overlays. Do not add a public base intent or generic
-contribution trait.
+**Approach:** Delete raw edit/provider fields and fluent methods from ordinary intents. A recipe may
+only add or configure recipe-owned plugins; profile-owned Image, Tilemap, window and other built-in
+settings remain project/profile facts. Move recipe-anchored non-replayable Host overlays into an
+explicit `project_host::advanced` harness that lowers through `project_runtime_plugins` and
+`resolve_runtime_plan`; keep raw `App` plugins as a separate direct path, and remove schema-provider
+lists from both ordinary intents and advanced overlays. Existing helpers that duplicate a whole
+product closure migrate to the official recipe plus one probe overlay or are deleted. Do not add a
+public base intent, implicit edit DSL or generic contribution trait.
 
 **Test scenarios:** Shared recipe parity across Headless/Desktop/Editor; configured runtime-only
 entry; schema contribution parity; stale raw ordinary methods absent; internal Editor runtime bridge
@@ -198,13 +212,19 @@ green.
   `cargo nextest run --locked --all-features --test plugin_composition -E
   'test(render_wgpu_profile_satisfies_the_shared_render_plugin)' --test-threads=1 --no-tests fail`
   becomes green without weakening its requested subset.
-- V2: the same named plugin-composition requests run under a narrow relevant feature ceiling and
-  `--all-features`, proving identical base-only, Sprite-only, UI-only, combined and
-  desktop-accessibility closures with exact absence as well as presence assertions.
-- V3: focused `nara_render_wgpu` tests prove installed-contribution queue ownership, topology and UI
-  completion; focused `nara_winit` tests prove disabled, enabled and partial-bridge runner modes.
-- V4: Host/runtime tests prove one recipe across Headless/Desktop/Editor and retain explicit advanced
-  direct-plan composition without exposing it through ordinary intents.
+- V2: the same named root `plugin_composition` requests run once with their narrow relevant feature
+  ceiling and once with `--all-features`, proving identical base-only, Sprite-only, UI-only,
+  combined and desktop-accessibility closures with exact absence as well as presence assertions.
+- V3: serial `cargo nextest run --locked -p nara_render_wgpu --features sprite-submitter`,
+  `cargo nextest run --locked -p nara_render_wgpu --features ui-submitter`, and
+  `cargo nextest run --locked -p nara_render_wgpu --features sprite-submitter,ui-submitter` gates
+  prove installed-contribution queue ownership, topology and UI completion. A serial
+  `cargo nextest run --locked -p nara_winit --features platform-accessibility` gate proves
+  disabled, enabled and partial runner modes. Focus expressions may narrow these commands while a
+  unit is active; the baseline records the complete commands.
+- V4: focused root Host/runtime nextest gates prove one recipe across Headless/Desktop/Editor, the
+  direct-App concrete contribution fixtures, and explicit advanced recipe-anchored overlays without
+  exposing raw edits through ordinary intents.
 - V5: `cargo fmt --all -- --check`, scoped strict Clippy, `git diff --check`, engineering-memory
   validation/render checks and a final Standards/Spec review close PCC-U4.
 - Do not add a Cartesian Cargo powerset runner. The named requested-subset matrix is the complete
@@ -228,7 +248,8 @@ green.
 | Requested concrete contributions | Exactly once | Combined product plan snapshots |
 | Ordinary Host plugin/provider authorities | 1 `ProductRecipe` | Public inventory and migrated consumer tests |
 | Generic registries, submitter traits or new public render phases | 0 | Dependency/API review |
-| Failed composition mutation | 0 | Retryable preflight tests |
+| Failed pre-candidate composition mutation | 0 | Retryable normalization/plan/schema tests |
+| Failed candidate build publication | 0 runtimes | Candidate poison/retirement tests |
 
 ## Risks and Mitigations
 
