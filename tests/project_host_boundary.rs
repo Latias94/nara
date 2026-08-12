@@ -21,12 +21,13 @@ const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
     "HeadlessRunReport",
 ];
 
-const ALLOWED_PUBLIC_METHODS: [&str; 15] = [
+const ALLOWED_PUBLIC_METHODS: [&str; 17] = [
     "configure",
     "diagnostics",
     "disable",
     "execute",
     "execute_bounded",
+    "from_recipe",
     "insert_after",
     "insert_before",
     "into_outcome",
@@ -36,6 +37,7 @@ const ALLOWED_PUBLIC_METHODS: [&str; 15] = [
     "with_cleanup_timeout",
     "with_control_flow",
     "with_profile",
+    "with_recipe",
     "with_schema_provider",
 ];
 
@@ -116,7 +118,7 @@ fn ordinary_reference_binary_names_only_product_level_concepts() {
     }
     for required in [
         "HeadlessRunOutcome",
-        "bundled_wave_run_with_completed_tick_observer",
+        "bundled_wave_product_run_with_completed_tick_observer",
         "diagnostics",
         "execute_bounded",
         "open_project_root",

@@ -6,6 +6,11 @@ use std::{
 use toml::Value as TomlValue;
 use yaml_rust2::{Yaml, YamlLoader, yaml::Hash};
 
+#[path = "support/reference_game_manifest.rs"]
+mod reference_game_manifest;
+
+use reference_game_manifest::REFERENCE_GAME_MANIFEST_DEPENDENCIES;
+
 const CI_WORKFLOW: &str = ".github/workflows/ci.yml";
 const CANDIDATE_WORKFLOW: &str = ".github/workflows/reference-game-candidate.yml";
 const MAIN_CANDIDATE_GUARD: &str = "${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.run_attempt == '1' }}";
@@ -282,8 +287,12 @@ fn assert_external_manifest_boundaries() {
     );
     assert_eq!(
         dependency_keys(&reference),
-        owned_string_set(["dependencies.nara"]),
-        "reference-game must consume only the root facade"
+        REFERENCE_GAME_MANIFEST_DEPENDENCIES
+            .into_iter()
+            .filter(|dependency| !dependency.starts_with("target."))
+            .map(str::to_owned)
+            .collect(),
+        "reference-game production code must consume only the root facade while component probes use the audited test-only dependencies"
     );
     assert_no_workspace_dependencies(&reference, "reference-game");
 

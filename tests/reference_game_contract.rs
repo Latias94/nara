@@ -6,6 +6,11 @@ use std::{
 
 use syn::visit::Visit;
 
+#[path = "support/reference_game_manifest.rs"]
+mod reference_game_manifest;
+
+use reference_game_manifest::REFERENCE_GAME_MANIFEST_DEPENDENCIES;
+
 const FORBIDDEN_LIFECYCLE_IDENTIFIERS: [&str; 13] = [
     "RuntimeAdmissionFailure",
     "RuntimeAdmissionRetirement",
@@ -23,7 +28,7 @@ const FORBIDDEN_LIFECYCLE_IDENTIFIERS: [&str; 13] = [
 ];
 
 #[test]
-fn reference_game_is_an_isolated_consumer_of_the_public_root_crate() {
+fn reference_game_uses_the_root_facade_for_production_engine_code() {
     let root = reference_game_root();
     let manifest_source = fs::read_to_string(root.join("Cargo.toml")).unwrap();
     let manifest = toml::from_str::<toml::Value>(&manifest_source).unwrap();
@@ -31,7 +36,7 @@ fn reference_game_is_an_isolated_consumer_of_the_public_root_crate() {
     collect_dependency_entries(&manifest, &mut Vec::new(), &mut dependencies);
     dependencies.sort();
 
-    assert_eq!(dependencies, ["dependencies.nara"]);
+    assert_eq!(dependencies, REFERENCE_GAME_MANIFEST_DEPENDENCIES);
     let nara = manifest
         .get("dependencies")
         .and_then(|dependencies| dependencies.get("nara"))
@@ -105,7 +110,11 @@ fn headless_product_surface_is_bundled_typed_and_bounded() {
         );
     }
     assert!(snapshot.contains("pub struct WaveSnapshot"));
-    for required in ["bundled_wave_run", "--max-ticks", "MAXIMUM_CLI_TICKS"] {
+    for required in [
+        "bundled_wave_product_run_with_completed_tick_observer",
+        "--max-ticks",
+        "MAXIMUM_CLI_TICKS",
+    ] {
         assert!(
             binary.contains(required),
             "missing CLI contract: {required}"
