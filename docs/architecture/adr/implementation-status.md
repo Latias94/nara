@@ -15,14 +15,15 @@ focused correction publishes and pins a successor baseline.
 ## Current UI correction lineage (2026-08-12)
 
 The rows below retain their historical ADR evidence anchors and are not rewritten in place. The
-current authority is successor Foundation Conformance Baseline
-`19cfa496dc2346368764057367cc2163` and the active Runtime UI Product Slice plan: UIF-U2C is
-complete for snapshot-profile identity, attempted text-work accounting and modal failure algebra;
+current shared baseline remains `19cfa496dc2346368764057367cc2163` while the focused UIFD plan
+publishes its successor; the Runtime UI Product Slice remains paused. UIF-U2C is complete for
+snapshot-profile identity, attempted text-work accounting and modal failure algebra;
 UIF-U3C is complete for prepared submission authority, exact backend permits and infallible receipt
 commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target ownership and Host
 platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; UIFM-U1 is
-complete at `40d3f87`; UIFM-U2 published the successor baseline; RUP-U1 is complete at `e88ad06`;
-RUP-U2 is paused and UIFD-U1 is active for immutable content-only text replacement.
+complete at `40d3f87`; UIFM-U2 published the predecessor baseline; RUP-U1 is complete at `e88ad06`;
+RUP-U2 is paused; UIFD-U1 is complete at `ba918db`; UIFD-U2 is active for successor baseline
+publication and explicit RUP-U2 rebase.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
 `WinitAccessibilityBridge` symbol in older anchors.
 
@@ -37,7 +38,8 @@ RUP-U2 is paused and UIFD-U1 is active for immutable content-only text replaceme
 | UIFM-U2 | implemented | successor Foundation Conformance Baseline `19cfa496dc2346368764057367cc2163` and explicit RUP-U1 rebase |
 | RUP-U1 | implemented | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress; commit `e88ad06` and record `882397b5b744448cbd5cb8d5c3d0568a` |
 | RUP-U2 | partial | authoring, surface and packaged delivery closure paused after a neutral public text-value reproduction |
-| UIFD-U1 | active | immutable content-only `UiText` replacement that preserves authored presentation and semantic policy |
+| UIFD-U1 | implemented | immutable content-only `UiText` replacement that preserves authored presentation and semantic policy; commit `ba918db` and record `ecea4e791ef449afb0b57fece9f8ecda` |
+| UIFD-U2 | active | successor Foundation Conformance Baseline publication and explicit RUP-U2 rebase |
 
 ## Schema
 

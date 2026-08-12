@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-12
+* **Work Registration**: [UI dynamic text content correction: UIFD-U2 active](registry/2026-08/2026-08-12T050810Z-engine-foundation-contract-completion-codex-root-b04938a20b1447868c3fae587bb29c2c.md) - Closes the immutable text content correction and activates successor Foundation baseline publication plus explicit RUP-U2 rebase.
+* **Verification Evidence**: [UIFD-U1 immutable dynamic text content correction](verification/2026-08/2026-08-12T050655Z-uifd-u1-immutable-dynamic-text-content-correction-ecea4e791ef449afb0b57fece9f8ecda.md) - Proves that dynamic display content can replace one immutable text value without changing authored presentation or semantic policy.
 * **Work Registration**: [UI dynamic text content correction: UIFD-U1 active](registry/2026-08/2026-08-12T050036Z-engine-foundation-contract-completion-codex-root-fa0f019866ae421f9567f841ff78cf3d.md) - Pauses RUP-U2 after a renderer-neutral public-value failure and activates the focused immutable text content correction.
 * **Verification Evidence**: [RUP-U2 neutral dynamic text content reproduction](verification/2026-08/2026-08-12T045955Z-rup-u2-neutral-dynamic-text-content-reproduction-05a05e7d4cad4668aab8fa5026263b12.md) - Records the renderer-neutral public-value failure that pauses RUP-U2 and admits one focused UI Foundation correction.
 
@@ -151,5 +153,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-07-29
 * **Work Registration**: [Reference-game delivery hardening: U9 baseline refreshed](registry/2026-07/2026-07-29T182757Z-engine-foundation-contract-completion-codex-root-74e04edd91fb4dd38af9264a5f5cc97e.md) - Closes the current first-playable baseline with an isolated Windows population and Redirect verdict; records U10 as the next separately authorized delivery gate.
-* **Verification Evidence**: [RGD-U9 refreshed first-playable product baseline verification](verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md) - Records the current isolated Windows first-playable population, deterministic Redirect verdict, missing product evidence, and non-claims.
-* **Work Registration**: [Reference-game delivery hardening: U9 baseline refresh](registry/2026-07/2026-07-29T163416Z-engine-foundation-contract-completion-codex-root-b3e0c9dc77af407c86488e42c1816906.md) - Closes final-revision U8 hosted CI and activates a fresh first-playable baseline for the current source.
