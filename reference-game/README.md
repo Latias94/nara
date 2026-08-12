@@ -40,6 +40,7 @@ See `CONTROLS.md` for the input map.
 
 - `scenes/startup.scene.json`
 - `prefabs/enemy.prefab.json`
+- `prefabs/reference-ui.prefab.json`
 - the referenced image assets and `.meta` records under `assets/`
 - the component schema fixtures under `schema/`
 
@@ -56,6 +57,7 @@ nara-reference-game/
   CONTROLS.md
   LICENSE-MIT
   LICENSE-APACHE
+  FiraSans-LICENSE.txt
   bin/
     headless[.exe]
     desktop[.exe]
@@ -82,3 +84,6 @@ documented hosted Windows and Linux candidate and no-checkout consumer jobs pass
 
 The Tiny Dungeon art is provided by Kenney under CC0. The bundled attribution record is
 `assets/kenney-tiny-dungeon.LICENSE.txt`.
+
+The desktop binary embeds Fira Sans Bold for deterministic UI shaping and rasterization. The
+candidate root includes `FiraSans-LICENSE.txt`, the SIL Open Font License that governs that font.

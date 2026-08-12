@@ -169,6 +169,7 @@ fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     for relative in [
         "LICENSE-MIT",
         "LICENSE-APACHE",
+        "crates/nara_text/assets/FiraSans-LICENSE.txt",
         "reference-game/README.md",
         "reference-game/CONTROLS.md",
         "reference-game/nara.toml",
@@ -178,6 +179,7 @@ fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
         "reference-game/assets/textures/tiny-dungeon.png",
         "reference-game/assets/textures/tiny-dungeon.png.meta",
         "reference-game/prefabs/enemy.prefab.json",
+        "reference-game/prefabs/reference-ui.prefab.json",
         "reference-game/scenes/startup.scene.json",
         "reference-game/schema/component-schema-v1.json",
         "reference-game/schema/component-schema-v2.json",
@@ -195,6 +197,36 @@ fn create_repository_fixture(root: &Path) -> (PathBuf, PathBuf, PathBuf) {
     fs::write(&desktop, b"desktop binary").expect("desktop fixture must be writable");
 
     (repository, headless, desktop)
+}
+
+fn assert_required_package_source_is_fail_closed(relative: &str) {
+    let temporary = TemporaryDirectory::new("missing-package-source");
+    let (repository, headless, desktop) = create_repository_fixture(temporary.path());
+    fs::remove_file(repository.join(relative)).expect("fixture source must be removable");
+    let archive = temporary.path().join("candidate.zip");
+
+    let packaged = run_package(&repository, &headless, &desktop, &archive);
+
+    assert!(
+        !packaged.status.success(),
+        "missing {relative} must be rejected"
+    );
+    assert!(
+        !archive.exists(),
+        "a rejected source closure must not publish an archive"
+    );
+}
+
+#[test]
+fn package_rejects_a_missing_runtime_ui_prefab() {
+    assert_required_package_source_is_fail_closed(
+        "reference-game/prefabs/reference-ui.prefab.json",
+    );
+}
+
+#[test]
+fn package_rejects_a_missing_embedded_font_license() {
+    assert_required_package_source_is_fail_closed("crates/nara_text/assets/FiraSans-LICENSE.txt");
 }
 
 #[test]
@@ -258,6 +290,12 @@ fn package_creates_a_fixed_checkout_free_payload() {
     assert!(package_root.join("README.md").is_file());
     assert!(package_root.join("LICENSE-MIT").is_file());
     assert!(package_root.join("LICENSE-APACHE").is_file());
+    assert!(package_root.join("FiraSans-LICENSE.txt").is_file());
+    assert!(
+        package_root
+            .join("project/prefabs/reference-ui.prefab.json")
+            .is_file()
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -456,7 +494,12 @@ with tempfile.TemporaryDirectory(prefix="nara-smoke-runner-policy-") as temporar
     assert smoke.parse_environment(["nara_wgpu_force_fallback=1"]) == {
         "NARA_WGPU_FORCE_FALLBACK": "1"
     }
-    for protected in ["home=outside", "Temp=outside", "cargo_home=outside"]:
+    for protected in [
+        "home=outside",
+        "Temp=outside",
+        "cargo_home=outside",
+        "NARA_REFERENCE_UI_OBSERVATION=0",
+    ]:
         try:
             smoke.parse_environment([protected])
         except smoke.ArtifactError as error:
@@ -555,6 +598,81 @@ from types import SimpleNamespace
 sys.path.insert(0, sys.argv[1])
 import smoke_artifact as smoke
 
+def ui_observation(presented):
+    observation = {
+        "schema": smoke.UI_OBSERVATION_SCHEMA,
+        "surface_id": 1,
+        "authored_size": [960.0, 540.0],
+        "retry": {
+            "entity_id": "reference-ui/retry-button",
+            "source_document": "reference-ui.prefab.json",
+            "source_entity": "retry-button",
+            "action": "reference-game.retry",
+            "name": "Retry",
+            "enabled": True,
+            "authored_size": [176.0, 48.0],
+        },
+        "presentation": None,
+    }
+    if presented:
+        observation["presentation"] = {
+            "frame_revision": 1,
+            "source_revision": 1,
+            "slot_generation": 1,
+            "route_revision": 1,
+            "geometry_generation": 1,
+            "presentation_revision": 1,
+            "theme_revision": 1,
+            "font_revision": 1,
+            "physical_size": [1280.0, 720.0],
+            "content_origin": [0.0, 0.0],
+            "content_size": [1280.0, 720.0],
+            "platform_scale_factor": 1.0,
+            "content_scale_factor": 4.0 / 3.0,
+            "retry_rect": [396.0, 280.0, 176.0, 48.0],
+            "retry_physical_rect": [528, 373, 763, 437],
+            "semantic_nodes": 15,
+            "paint_primitives": 32,
+        }
+    return observation
+
+def headless_output():
+    records = [
+        {"schema": smoke.HEADLESS_SUMMARY_SCHEMA},
+        ui_observation(False),
+    ]
+    return "".join(json.dumps(record) + "\n" for record in records).encode("ascii")
+
+def desktop_output():
+    performance = {
+        "schema": smoke.UI_PERFORMANCE_SCHEMA,
+        "frame_index": 12,
+        "device_epoch": 1,
+        "warmup_samples": 4,
+        "completion_sample_loss": 0,
+        "completion_samples": [
+            {"frame_index": 11, "duration_ns": 1000000},
+            {"frame_index": 12, "duration_ns": 1100000},
+        ],
+        "ui_packet_count": 1,
+        "ui_primitives": 32,
+        "ui_glyph_primitives": 20,
+        "ui_glyph_pages": 1,
+        "uploaded_glyph_pages": 1,
+        "reused_glyph_pages": 0,
+        "current_texture_bytes": 4096,
+        "peak_texture_bytes": 4096,
+        "peak_instance_buffer_bytes": 2048,
+        "peak_total_bytes": 6144,
+    }
+    return (
+        json.dumps(ui_observation(True)).encode("ascii")
+        + b"\n"
+        + json.dumps(performance).encode("ascii")
+        + b"\n"
+        + smoke.DESKTOP_SMOKE_SUCCESS
+    )
+
 validated = SimpleNamespace(
     archive_sha256="0" * 64,
     archive_size_bytes=1,
@@ -581,8 +699,9 @@ commands = []
 def run_fixture(command, cwd, environment, subject):
     command = tuple(str(part) for part in command)
     commands.append((command, subject))
+    assert environment[smoke.UI_OBSERVATION_ENV] == "1"
     if subject == "headless candidate":
-        return json.dumps({"schema": smoke.HEADLESS_SUMMARY_SCHEMA}).encode("ascii")
+        return headless_output()
     if subject == "desktop candidate":
         assert Path(command[-2]).name == "desktop.exe", command
         assert command[-1] == "--candidate-smoke", command
@@ -602,9 +721,9 @@ with tempfile.TemporaryDirectory(prefix="nara-formal-desktop-policy-") as tempor
 
     def successful_run_fixture(command, cwd, environment, subject):
         if subject == "headless candidate":
-            return json.dumps({"schema": smoke.HEADLESS_SUMMARY_SCHEMA}).encode("ascii")
+            return headless_output()
         if subject == "desktop candidate":
-            return smoke.DESKTOP_SMOKE_SUCCESS
+            return desktop_output()
         raise AssertionError((command, subject))
 
     smoke.run_bounded = successful_run_fixture

@@ -7,6 +7,7 @@ import argparse
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import shutil
@@ -24,6 +25,9 @@ import package
 
 
 HEADLESS_SUMMARY_SCHEMA = "nara-reference-game.wave-summary-v1"
+UI_OBSERVATION_SCHEMA = "nara-reference-game.ui-observation-v1"
+UI_PERFORMANCE_SCHEMA = "nara-reference-game.ui-performance-v1"
+UI_OBSERVATION_ENV = "NARA_REFERENCE_UI_OBSERVATION"
 DESKTOP_SMOKE_SUCCESS = b"desktop_candidate_smoke: ok\n"
 MAX_PROCESS_OUTPUT_BYTES = 64 * 1024
 MAX_PROCESS_TIMEOUT_SECONDS = 60
@@ -538,7 +542,7 @@ def parse_environment(values: Sequence[str]) -> dict[str, str]:
             or key.startswith(
                 ("CARGO_", "RUST", "GIT_", "HOME", "USERPROFILE", "XDG_")
             )
-            or key in {"TMP", "TEMP", "TMPDIR"}
+            or key in {"TMP", "TEMP", "TMPDIR", UI_OBSERVATION_ENV}
         ):
             raise ArtifactError("desktop environment override is invalid")
         if key in environment:
@@ -709,6 +713,218 @@ def run_bounded(
     return bytes(stdout)
 
 
+def parse_json_lines(output: bytes, subject: str, expected_count: int) -> list[dict[str, Any]]:
+    try:
+        lines = output.decode("utf-8").splitlines()
+        values = [json.loads(line) for line in lines]
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
+        raise ArtifactError(f"{subject} did not emit bounded JSON records") from error
+    if len(values) != expected_count or not all(isinstance(value, dict) for value in values):
+        raise ArtifactError(f"{subject} emitted an unexpected record count")
+    return values
+
+
+def is_finite_vector(value: object, length: int, *, positive: bool = False) -> bool:
+    if not isinstance(value, list) or len(value) != length:
+        return False
+    if not all(type(item) in {int, float} and math.isfinite(item) for item in value):
+        return False
+    return not positive or all(item > 0 for item in value)
+
+
+def is_positive_integer(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def vectors_close(left: object, right: object, length: int) -> bool:
+    return (
+        is_finite_vector(left, length)
+        and is_finite_vector(right, length)
+        and all(
+            math.isclose(left[index], right[index], rel_tol=0.0, abs_tol=1e-4)
+            for index in range(length)
+        )
+    )
+
+
+def validate_ui_observation(
+    value: dict[str, Any], subject: str, require_presentation: bool
+) -> dict[str, object]:
+    expected_keys = {
+        "schema",
+        "surface_id",
+        "authored_size",
+        "retry",
+        "presentation",
+    }
+    retry = value.get("retry")
+    presentation = value.get("presentation")
+    if (
+        set(value) != expected_keys
+        or value.get("schema") != UI_OBSERVATION_SCHEMA
+        or not is_positive_integer(value.get("surface_id"))
+        or value.get("authored_size") != [960.0, 540.0]
+        or not isinstance(retry, dict)
+        or set(retry)
+        != {
+            "entity_id",
+            "source_document",
+            "source_entity",
+            "action",
+            "name",
+            "enabled",
+            "authored_size",
+        }
+        or retry.get("entity_id") != "reference-ui/retry-button"
+        or retry.get("source_document") != "reference-ui.prefab.json"
+        or retry.get("source_entity") != "retry-button"
+        or not isinstance(retry.get("action"), str)
+        or not retry["action"]
+        or not isinstance(retry.get("name"), str)
+        or not retry["name"]
+        or type(retry.get("enabled")) is not bool
+        or not is_finite_vector(retry.get("authored_size"), 2, positive=True)
+    ):
+        raise ArtifactError(f"{subject} emitted an invalid UI observation")
+    if require_presentation:
+        if (
+            not isinstance(presentation, dict)
+            or set(presentation)
+            != {
+                "frame_revision",
+                "source_revision",
+                "slot_generation",
+                "route_revision",
+                "geometry_generation",
+                "presentation_revision",
+                "theme_revision",
+                "font_revision",
+                "physical_size",
+                "content_origin",
+                "content_size",
+                "platform_scale_factor",
+                "content_scale_factor",
+                "retry_rect",
+                "retry_physical_rect",
+                "semantic_nodes",
+                "paint_primitives",
+            }
+            or not all(
+                is_positive_integer(presentation.get(field))
+                for field in {
+                    "frame_revision",
+                    "source_revision",
+                    "slot_generation",
+                    "route_revision",
+                    "geometry_generation",
+                    "presentation_revision",
+                    "theme_revision",
+                    "font_revision",
+                    "semantic_nodes",
+                    "paint_primitives",
+                }
+            )
+            or not is_finite_vector(presentation.get("physical_size"), 2, positive=True)
+            or not is_finite_vector(presentation.get("content_origin"), 2)
+            or not is_finite_vector(presentation.get("content_size"), 2, positive=True)
+            or type(presentation.get("platform_scale_factor")) not in {int, float}
+            or not math.isfinite(presentation["platform_scale_factor"])
+            or presentation["platform_scale_factor"] <= 0
+            or type(presentation.get("content_scale_factor")) not in {int, float}
+            or not math.isfinite(presentation["content_scale_factor"])
+            or presentation["content_scale_factor"] <= 0
+            or not is_finite_vector(presentation.get("retry_rect"), 4)
+            or presentation["retry_rect"][2] <= 0
+            or presentation["retry_rect"][3] <= 0
+            or not vectors_close(
+                presentation["retry_rect"][2:], retry["authored_size"], 2
+            )
+            or not isinstance(presentation.get("retry_physical_rect"), list)
+            or len(presentation["retry_physical_rect"]) != 4
+            or not all(type(item) is int for item in presentation["retry_physical_rect"])
+            or presentation["retry_physical_rect"][2]
+            <= presentation["retry_physical_rect"][0]
+            or presentation["retry_physical_rect"][3]
+            <= presentation["retry_physical_rect"][1]
+        ):
+            raise ArtifactError(f"{subject} emitted invalid presentation facts")
+    elif presentation is not None:
+        raise ArtifactError(f"{subject} unexpectedly claimed presentation facts")
+    return {
+        "authored_size": value["authored_size"],
+        "retry_entity_id": retry["entity_id"],
+        "retry_source_document": retry["source_document"],
+        "retry_source_entity": retry["source_entity"],
+        "retry_action": retry["action"],
+        "retry_name": retry["name"],
+        "retry_authored_size": retry["authored_size"],
+    }
+
+
+def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, object]:
+    expected_keys = {
+        "schema",
+        "frame_index",
+        "device_epoch",
+        "warmup_samples",
+        "completion_sample_loss",
+        "completion_samples",
+        "ui_packet_count",
+        "ui_primitives",
+        "ui_glyph_primitives",
+        "ui_glyph_pages",
+        "uploaded_glyph_pages",
+        "reused_glyph_pages",
+        "current_texture_bytes",
+        "peak_texture_bytes",
+        "peak_instance_buffer_bytes",
+        "peak_total_bytes",
+    }
+    samples = value.get("completion_samples")
+    nonnegative_fields = {
+        "completion_sample_loss",
+        "uploaded_glyph_pages",
+        "reused_glyph_pages",
+    }
+    positive_fields = {
+        "frame_index",
+        "device_epoch",
+        "ui_primitives",
+        "ui_glyph_primitives",
+        "ui_glyph_pages",
+        "current_texture_bytes",
+        "peak_texture_bytes",
+        "peak_instance_buffer_bytes",
+        "peak_total_bytes",
+    }
+    if (
+        set(value) != expected_keys
+        or value.get("schema") != UI_PERFORMANCE_SCHEMA
+        or value.get("warmup_samples") != 4
+        or value.get("completion_sample_loss") != 0
+        or value.get("ui_packet_count") != 1
+        or not isinstance(samples, list)
+        or not samples
+        or not all(
+            isinstance(sample, dict)
+            and set(sample) == {"frame_index", "duration_ns"}
+            and is_positive_integer(sample.get("frame_index"))
+            and is_positive_integer(sample.get("duration_ns"))
+            for sample in samples
+        )
+        or not any(sample["frame_index"] == value.get("frame_index") for sample in samples)
+        or not all(is_positive_integer(value.get(field)) for field in positive_fields)
+        or not all(type(value.get(field)) is int and value[field] >= 0 for field in nonnegative_fields)
+        or value["ui_glyph_primitives"] > value["ui_primitives"]
+        or value["uploaded_glyph_pages"] + value["reused_glyph_pages"] <= 0
+        or value["peak_texture_bytes"] < value["current_texture_bytes"]
+        or value["peak_total_bytes"] < value["peak_texture_bytes"]
+        or value["peak_total_bytes"] < value["peak_instance_buffer_bytes"]
+    ):
+        raise ArtifactError(f"{subject} emitted invalid UI performance facts")
+    return value
+
+
 def smoke_candidate(
     archive_path: Path,
     work_parent: Path,
@@ -753,6 +969,7 @@ def smoke_candidate_in_root(
     launcher = parse_launcher(desktop_launcher_json)
     overrides = parse_environment(desktop_environment)
     environment, cwd = smoke_environment(smoke_root, overrides)
+    environment[UI_OBSERVATION_ENV] = "1"
     package_root = destination / validated.layout.package_root
     isolated_paths = {
         Path(environment["HOME"]),
@@ -767,12 +984,12 @@ def smoke_candidate_in_root(
     headless_stdout = run_bounded(
         [str(headless), "--max-ticks", "96"], cwd, environment, "headless candidate"
     )
-    try:
-        summary = json.loads(headless_stdout)
-    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-        raise ArtifactError("headless candidate did not emit its stable JSON summary") from error
+    summary, headless_ui = parse_json_lines(headless_stdout, "headless candidate", 2)
     if not isinstance(summary, dict) or summary.get("schema") != HEADLESS_SUMMARY_SCHEMA:
         raise ArtifactError("headless candidate emitted an unexpected summary")
+    headless_authoring = validate_ui_observation(
+        headless_ui, "headless candidate", require_presentation=False
+    )
     desktop = package_root / validated.manifest["layout"]["desktop"]
     desktop_stdout = run_bounded(
         [*launcher, str(desktop), "--candidate-smoke"],
@@ -780,10 +997,24 @@ def smoke_candidate_in_root(
         environment,
         "desktop candidate",
     )
-    if desktop_stdout != DESKTOP_SMOKE_SUCCESS:
+    desktop_lines = desktop_stdout.splitlines(keepends=True)
+    if len(desktop_lines) != 3 or desktop_lines[2] != DESKTOP_SMOKE_SUCCESS:
         raise ArtifactError("desktop candidate did not complete its bounded product smoke")
+    desktop_ui = parse_json_lines(desktop_lines[0], "desktop candidate", 1)[0]
+    desktop_performance = parse_json_lines(desktop_lines[1], "desktop candidate", 1)[0]
+    desktop_authoring = validate_ui_observation(
+        desktop_ui, "desktop candidate", require_presentation=True
+    )
+    desktop_performance = validate_ui_performance(
+        desktop_performance, "desktop candidate"
+    )
+    if desktop_authoring != headless_authoring:
+        raise ArtifactError("desktop and headless consumed different authored UI facts")
     result = receipt(validated)
     result["headless_summary_schema"] = HEADLESS_SUMMARY_SCHEMA
+    result["ui_observation_schema"] = UI_OBSERVATION_SCHEMA
+    result["ui_authoring"] = headless_authoring
+    result["ui_performance"] = desktop_performance
     result["desktop"] = "candidate-smoke-completed"
     return result
 

@@ -17,6 +17,10 @@
     {
       "source": "LICENSE-APACHE",
       "destination": "LICENSE-APACHE"
+    },
+    {
+      "source": "crates/nara_text/assets/FiraSans-LICENSE.txt",
+      "destination": "FiraSans-LICENSE.txt"
     }
   ],
   "project_files": [
@@ -27,6 +31,7 @@
     "assets/textures/tiny-dungeon.png",
     "assets/textures/tiny-dungeon.png.meta",
     "prefabs/enemy.prefab.json",
+    "prefabs/reference-ui.prefab.json",
     "scenes/startup.scene.json",
     "schema/component-schema-v1.json",
     "schema/component-schema-v2.json",
