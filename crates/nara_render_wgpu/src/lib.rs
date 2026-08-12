@@ -54,8 +54,8 @@ use nara_ui_render::__private::{
 };
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
-    UiPaintPacket, UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
-    UiPresentationIntegrationError,
+    UiPacketPrimitive, UiPaintPacket, UiPaintPacketIdentity, UiPresentationBackendFaultDomain,
+    UiPresentationBackendGeneration, UiPresentationIntegrationError,
 };
 #[cfg(all(feature = "ui-submitter", test))]
 use nara_ui_render::{
@@ -204,6 +204,16 @@ struct WgpuFramePayload {
     ui_packets: Vec<Arc<UiPaintPacket>>,
 }
 
+#[cfg(feature = "ui-submitter")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct WgpuUiPayloadFacts {
+    packet_count: u64,
+    packet_identity: Option<UiPaintPacketIdentity>,
+    primitives: u64,
+    glyph_primitives: u64,
+    glyph_pages: u64,
+}
+
 #[derive(Debug)]
 struct WgpuCapturedFrame {
     topology: RenderFramePacket,
@@ -212,7 +222,54 @@ struct WgpuCapturedFrame {
     work_started_at: Instant,
 }
 
+#[cfg(feature = "ui-submitter")]
+fn render_targets_match(
+    left: RenderTarget,
+    right: RenderTarget,
+    primary_window_id: Option<WindowId>,
+) -> bool {
+    match (
+        left.window_id(primary_window_id),
+        right.window_id(primary_window_id),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        (None, None) => left == right,
+        _ => false,
+    }
+}
+
 impl WgpuFramePayload {
+    #[cfg(feature = "ui-submitter")]
+    fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
+        let mut facts = WgpuUiPayloadFacts::default();
+        for packet in self
+            .ui_packets
+            .iter()
+            .filter(|packet| render_targets_match(packet.target(), target, self.primary_window_id))
+        {
+            facts.packet_count = facts.packet_count.saturating_add(1);
+            facts.packet_identity = if facts.packet_count == 1 {
+                Some(packet.identity())
+            } else {
+                None
+            };
+            facts.primitives = packet
+                .primitives()
+                .iter()
+                .fold(facts.primitives, |count, _| count.saturating_add(1));
+            facts.glyph_primitives = packet
+                .primitives()
+                .iter()
+                .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
+                .fold(facts.glyph_primitives, |count, _| count.saturating_add(1));
+            facts.glyph_pages = packet
+                .glyph_pages()
+                .iter()
+                .fold(facts.glyph_pages, |count, _| count.saturating_add(1));
+        }
+        facts
+    }
+
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn quad_batches(
         &self,
@@ -1523,11 +1580,11 @@ mod tests {
     }
 
     #[cfg(feature = "ui-submitter")]
-    fn ui_outcome_packet() -> Arc<UiPaintPacket> {
+    fn ui_outcome_packet_for(target: RenderTarget) -> Arc<UiPaintPacket> {
         use nara_text::bundled_font_face;
         use nara_ui_kernel::{
             UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
-            UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+            UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTheme, UiVisual,
         };
 
         let snapshot = UiAuthoringSnapshotBuilder::new(1)
@@ -1540,7 +1597,8 @@ mod tests {
                 .with_child(
                     UiNode::new(UiStyle::absolute(0.0, 0.0, 16.0, 16.0))
                         .with_key(UiLocalKey::runtime("wgpu-outcome", "node").unwrap())
-                        .with_visual(UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
+                        .with_visual(UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)))
+                        .with_text(UiText::new("UI", 12.0).unwrap()),
                 ),
             )
             .build()
@@ -1552,11 +1610,86 @@ mod tests {
             .compile(&snapshot, environment, UiTheme::default())
             .unwrap();
         nara_ui_render::UiPresentationPlanner::default()
-            .plan(
-                frame,
-                RenderTarget::Window(WindowId::PRIMARY),
-                &nara_ui_render::UiPreparedImages::default(),
-            )
+            .plan(frame, target, &nara_ui_render::UiPreparedImages::default())
             .unwrap()
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn ui_outcome_packet() -> Arc<UiPaintPacket> {
+        ui_outcome_packet_for(RenderTarget::Window(WindowId::PRIMARY))
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn payload_facts_bind_glyph_work_to_one_exact_ui_packet() {
+        let packet = ui_outcome_packet();
+        let identity = packet.identity();
+        let payload = WgpuFramePayload {
+            primary_window_id: Some(WindowId::PRIMARY),
+            #[cfg(feature = "sprite-submitter")]
+            sprite_batches: None,
+            ui_packets: vec![packet],
+        };
+
+        let facts = payload.ui_facts(RenderTarget::Window(WindowId::PRIMARY));
+
+        assert_eq!(facts.packet_count, 1);
+        assert_eq!(facts.packet_identity, Some(identity));
+        assert!(facts.primitives > 0);
+        assert!(facts.glyph_primitives > 0);
+        assert!(facts.glyph_pages > 0);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn payload_facts_do_not_merge_distinct_image_targets() {
+        let first_target =
+            RenderTarget::Image(nara_asset::Handle::new(nara_asset::AssetId::from_raw(101)));
+        let second_target =
+            RenderTarget::Image(nara_asset::Handle::new(nara_asset::AssetId::from_raw(102)));
+        let first_packet = ui_outcome_packet_for(first_target);
+        let first_identity = first_packet.identity();
+        let second_packet = ui_outcome_packet_for(second_target);
+        let payload = WgpuFramePayload {
+            primary_window_id: Some(WindowId::PRIMARY),
+            #[cfg(feature = "sprite-submitter")]
+            sprite_batches: None,
+            ui_packets: vec![first_packet, second_packet],
+        };
+
+        let facts = payload.ui_facts(first_target);
+
+        assert_eq!(facts.packet_count, 1);
+        assert_eq!(facts.packet_identity, Some(first_identity));
+        assert!(facts.primitives > 0);
+        assert!(facts.glyph_primitives > 0);
+        assert!(facts.glyph_pages > 0);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn transaction_facts_only_name_an_identity_for_one_frame_wide_packet() {
+        let packet = ui_outcome_packet();
+        let facts = WgpuUiPayloadFacts {
+            packet_count: 1,
+            packet_identity: Some(packet.identity()),
+            primitives: 3,
+            glyph_primitives: 2,
+            glyph_pages: 1,
+        };
+        let mut transaction = WgpuFrameTransactionStats::default();
+
+        transaction.record_ui_payload(facts);
+        assert_eq!(transaction.ui_packet_identity(), Some(packet.identity()));
+
+        transaction.record_ui_payload(WgpuUiPayloadFacts::default());
+        assert_eq!(transaction.ui_packet_identity(), Some(packet.identity()));
+
+        transaction.record_ui_payload(facts);
+        assert_eq!(transaction.ui_packet_count(), 2);
+        assert_eq!(transaction.ui_packet_identity(), None);
+        assert_eq!(transaction.ui_primitives(), 6);
+        assert_eq!(transaction.ui_glyph_primitives(), 4);
+        assert_eq!(transaction.ui_glyph_pages(), 2);
     }
 }

@@ -15,6 +15,8 @@ use nara_render::{
     Color, Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
     RenderFrameSkipReason, RenderTarget, RenderWindowPacket, ViewportRect,
 };
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::UiPaintPacketIdentity;
 use nara_window::{
     WindowId,
     backend::{BackendWindowHandles, WindowTargetError},
@@ -110,6 +112,16 @@ pub struct WgpuFrameTransactionStats {
     surface_acquires: u64,
     queue_submissions: u64,
     presents: u64,
+    #[cfg(feature = "ui-submitter")]
+    ui_packet_count: u64,
+    #[cfg(feature = "ui-submitter")]
+    ui_packet_identity: Option<UiPaintPacketIdentity>,
+    #[cfg(feature = "ui-submitter")]
+    ui_primitives: u64,
+    #[cfg(feature = "ui-submitter")]
+    ui_glyph_primitives: u64,
+    #[cfg(feature = "ui-submitter")]
+    ui_glyph_pages: u64,
 }
 
 impl WgpuFrameTransactionStats {
@@ -146,6 +158,57 @@ impl WgpuFrameTransactionStats {
     #[must_use]
     pub const fn presents(self) -> u64 {
         self.presents
+    }
+
+    /// Returns the number of UI packets admitted for this exact backend frame transaction.
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub const fn ui_packet_count(self) -> u64 {
+        self.ui_packet_count
+    }
+
+    /// Returns the immutable packet identity when exactly one UI packet targeted this frame.
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub const fn ui_packet_identity(self) -> Option<UiPaintPacketIdentity> {
+        self.ui_packet_identity
+    }
+
+    /// Returns the expanded UI primitive count referenced by this exact frame transaction.
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub const fn ui_primitives(self) -> u64 {
+        self.ui_primitives
+    }
+
+    /// Returns the glyph primitive count referenced by this exact backend frame transaction.
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub const fn ui_glyph_primitives(self) -> u64 {
+        self.ui_glyph_primitives
+    }
+
+    /// Returns the glyph-atlas page reference count retained by this exact transaction.
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub const fn ui_glyph_pages(self) -> u64 {
+        self.ui_glyph_pages
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    pub(crate) fn record_ui_payload(&mut self, facts: crate::WgpuUiPayloadFacts) {
+        let previous_count = self.ui_packet_count;
+        self.ui_packet_count = previous_count.saturating_add(facts.packet_count);
+        self.ui_packet_identity = match (previous_count, facts.packet_count) {
+            (_, 0) => self.ui_packet_identity,
+            (0, 1) => facts.packet_identity,
+            _ => None,
+        };
+        self.ui_primitives = self.ui_primitives.saturating_add(facts.primitives);
+        self.ui_glyph_primitives = self
+            .ui_glyph_primitives
+            .saturating_add(facts.glyph_primitives);
+        self.ui_glyph_pages = self.ui_glyph_pages.saturating_add(facts.glyph_pages);
     }
 
     fn begin(frame_index: u64) -> Self {
@@ -463,6 +526,11 @@ impl WgpuRenderBackend {
             return Ok(());
         }
         let view_format = self.surface_view_format(window.id)?;
+        #[cfg(feature = "ui-submitter")]
+        {
+            let ui = payload.ui_facts(packet.view().target);
+            self.frame_transaction_stats.record_ui_payload(ui);
+        }
         let draw = match self.prepare_submitter_draw(
             view_format,
             packet.view().target,
