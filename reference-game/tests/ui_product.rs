@@ -177,7 +177,7 @@ fn canonical_target_covers_the_six_product_states() {
     assert_enabled_retry(defeated, true);
 
     let pending_retry = pending.retry().expect("pending Retry semantics");
-    assert_eq!(pending_retry.name, "Retrying...");
+    assert_eq!(pending_retry.name, "Retry");
     assert!(!pending_retry.enabled);
     assert!(pending_retry.focused);
     assert!(!pending_retry.focusable);

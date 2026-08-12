@@ -51,6 +51,30 @@ fn opt_in_startup_marker_precedes_the_terminal_summary() {
 }
 
 #[test]
+fn opt_in_ui_observation_reports_authored_retry_facts_after_the_wave_summary() {
+    let output = Command::new(env!("CARGO_BIN_EXE_headless"))
+        .env("NARA_REFERENCE_UI_OBSERVATION", "1")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains("\"schema\":\"nara-reference-game.wave-summary-v1\""));
+    assert!(lines[1].contains("\"schema\":\"nara-reference-game.ui-observation-v1\""));
+    assert!(lines[1].contains("\"authored_size\":[960,540]"));
+    assert!(lines[1].contains("\"action\":\"reference-game.retry\""));
+    assert!(lines[1].contains("\"name\":\"Retry\""));
+    assert!(lines[1].contains("\"authored_size\":[176,48]"));
+}
+
+#[test]
 fn tick_limit_is_a_failure_without_a_success_snapshot() {
     let output = Command::new(env!("CARGO_BIN_EXE_headless"))
         .args(["--max-ticks", "1"])

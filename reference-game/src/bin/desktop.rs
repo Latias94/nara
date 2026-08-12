@@ -1,6 +1,6 @@
 use std::{
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     io::{self, Write},
     process::ExitCode,
     time::{Duration, Instant},
@@ -16,12 +16,13 @@ use nara_reference_game::bundled_desktop_run;
 mod desktop_candidate_smoke;
 mod desktop_support;
 mod support;
-use desktop_candidate_smoke::candidate_smoke_run;
+use desktop_candidate_smoke::{CandidateSmokeEvidenceSink, candidate_smoke_run};
 use support::project_root::open_project_root;
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
 const CANDIDATE_SMOKE_ARGUMENT: &str = "--candidate-smoke";
 const CANDIDATE_SMOKE_SUCCESS: &str = "desktop_candidate_smoke: ok";
+const UI_OBSERVATION_ENV: &str = "NARA_REFERENCE_UI_OBSERVATION";
 
 fn main() -> ExitCode {
     let mode = match DesktopMode::parse(env::args_os().skip(1)) {
@@ -39,7 +40,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut run = desktop_run(project_root, mode);
+    let (mut run, observation) = desktop_run(project_root, mode);
     let exit = drive_desktop_process(
         || lower_run_report(&run.execute()),
         Instant::now,
@@ -56,6 +57,24 @@ fn main() -> ExitCode {
                 "Desktop candidate exited before submitting its bounded product frame",
             );
             return ExitCode::FAILURE;
+        }
+        if env::var_os(UI_OBSERVATION_ENV).as_deref() == Some(OsStr::new("1")) {
+            let observation = match observation
+                .as_ref()
+                .and_then(|observation| observation.lock().ok())
+                .and_then(|observation| observation.clone())
+            {
+                Some(observation) => observation,
+                None => {
+                    emit_static_error(
+                        "reference-game.desktop.ui-observation-missing",
+                        "Desktop candidate did not retain its immutable UI observation",
+                    );
+                    return ExitCode::FAILURE;
+                }
+            };
+            print!("{}", observation.ui().to_json_line());
+            print!("{}", observation.backend_json_line());
         }
         println!("{CANDIDATE_SMOKE_SUCCESS}");
     }
@@ -93,10 +112,16 @@ impl DesktopMode {
     }
 }
 
-fn desktop_run(project_root: nara::fs::DirectoryCapability, mode: DesktopMode) -> DesktopRun {
+fn desktop_run(
+    project_root: nara::fs::DirectoryCapability,
+    mode: DesktopMode,
+) -> (DesktopRun, Option<CandidateSmokeEvidenceSink>) {
     match mode {
-        DesktopMode::Interactive => bundled_desktop_run(project_root),
-        DesktopMode::CandidateSmoke => candidate_smoke_run(project_root),
+        DesktopMode::Interactive => (bundled_desktop_run(project_root), None),
+        DesktopMode::CandidateSmoke => {
+            let (run, observation) = candidate_smoke_run(project_root);
+            (run, Some(observation))
+        }
     }
 }
 

@@ -7,6 +7,7 @@ mod resources;
 mod runtime_ui;
 mod snapshot;
 mod systems;
+mod ui_observation;
 #[cfg(feature = "desktop")]
 mod ui;
 
@@ -59,6 +60,10 @@ pub use resources::{
 pub use runtime_ui::{
     REFERENCE_RETRY_ACTION, REFERENCE_RUNTIME_UI_PLUGIN_ID, REFERENCE_UI_SURFACE_ID,
     ReferenceHudProjection, ReferenceRuntimeUiPlugin,
+};
+pub use ui_observation::{
+    ReferenceProductObservation, ReferenceUiObservation, ReferenceUiPhysicalRect,
+    ReferenceUiPresentationObservation, ReferenceUiRect,
 };
 pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
 #[cfg(feature = "desktop")]
@@ -370,6 +375,27 @@ pub fn bundled_wave_run_with_completed_tick_observer(
         maximum_fixed_ticks,
         bundled_wave_commands(),
         observer,
+    )
+}
+
+/// Runs the ordinary bundled wave while retaining the immutable Runtime UI observation captured
+/// after each complete frame.
+#[doc(hidden)]
+#[must_use]
+pub fn bundled_wave_product_run_with_completed_tick_observer(
+    project_root: DirectoryCapability,
+    maximum_fixed_ticks: NonZeroU32,
+    observer: impl Fn(&WaveSnapshot) + Send + 'static,
+) -> HeadlessRun<ReferenceProductObservation> {
+    HeadlessRun::new(
+        project_root,
+        HeadlessRunIntent::new(maximum_fixed_ticks)
+            .with_recipe(wave_recipe_or_panic())
+            .stop_when(move |observation: &ReferenceProductObservation| {
+                observer(observation.wave());
+                observation.wave().is_terminal()
+            }),
+        bundled_wave_commands(),
     )
 }
 

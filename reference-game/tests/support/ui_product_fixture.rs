@@ -1,4 +1,5 @@
 use std::{
+    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -22,15 +23,21 @@ use nara::{
         },
         latest_ui_frame, ui_semantic_snapshot,
     },
+    window::WindowId,
 };
 use nara_reference_game::{
     REFERENCE_UI_SURFACE_ID, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
     WaveRunGeneration, WaveSnapshot, bundled_wave_commands,
 };
+use nara_render::RenderTarget;
 use nara_ui_kernel::{UiPaintPrimitive, UiRouteStamp};
-use nara_ui_render::{UiPacketPrimitive, UiPacketRect};
+use nara_ui_render::{
+    UiPacketPrimitive, UiPacketRect, UiPreparedImages, UiPresentationPlanner,
+};
 
-use super::project_content_fixture::headless_wave_candidate_plan_and_root_with;
+use super::project_content_fixture::{
+    headless_wave_candidate_plan_and_root_with, headless_wave_candidate_plan_and_root_with_at,
+};
 
 #[path = "ui_product_fixture/interaction.rs"]
 mod interaction;
@@ -97,6 +104,9 @@ pub const LETTERBOX_RESIZE_TARGET: UiPhysicalTarget = UiPhysicalTarget {
     render_scale: 1_024.0 / 960.0,
     input_scale_factor: 1.0,
 };
+
+const PLANNER_WARMUP_SAMPLES: usize = 4;
+const PLANNER_RECORDED_SAMPLES: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProductUiState {
@@ -176,6 +186,14 @@ pub struct ProductUiCapture {
     pub glyph_pages: usize,
     pub has_nonblank_glyphs: bool,
     pub packet_bounds: Option<UiPacketRect>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerPerformanceCapture {
+    pub warmup_samples: usize,
+    pub durations_ns: Vec<u64>,
+    pub packet_primitives: usize,
+    pub glyph_pages: usize,
 }
 
 #[derive(Debug, PartialEq)]
@@ -345,11 +363,74 @@ pub fn capture_product_states(target: UiPhysicalTarget) -> ProductStateCaptureSe
 }
 
 pub fn capture_readability_case(target: UiPhysicalTarget) -> ProductUiCapture {
-    let mut runtime = product_runtime(
+    let runtime = product_runtime(
         target,
         retry_replacement_rejection_fixture_plugin(),
         bundled_wave_commands(),
     );
+    capture_rejected_readability(runtime, target)
+}
+
+#[allow(dead_code)]
+pub fn capture_planner_performance() -> PlannerPerformanceCapture {
+    let mut runtime = product_runtime(
+        UI_PHYSICAL_TARGETS[0],
+        component_presenter_plugin(),
+        bundled_wave_commands(),
+    );
+    drive_to_terminal(&mut runtime);
+    let frame = latest_ui_frame(runtime.world(), reference_surface_id())
+        .expect("the product UI adapter should remain installed")
+        .expect("the terminal product state should compile one immutable frame");
+    let mut planner = UiPresentationPlanner::default();
+    let prepared = UiPreparedImages::default();
+    let mut durations_ns = Vec::with_capacity(PLANNER_RECORDED_SAMPLES);
+    let mut packet_primitives = 0;
+    let mut glyph_pages = 0;
+
+    for sample in 0..PLANNER_WARMUP_SAMPLES + PLANNER_RECORDED_SAMPLES {
+        let started = Instant::now();
+        let packet = planner
+            .plan(
+                Arc::clone(&frame),
+                RenderTarget::Window(WindowId::PRIMARY),
+                &prepared,
+            )
+            .expect("the product frame should remain planable within the default budget");
+        let elapsed_ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        packet_primitives = packet.primitives().len();
+        glyph_pages = packet.glyph_pages().len();
+        if sample >= PLANNER_WARMUP_SAMPLES {
+            durations_ns.push(elapsed_ns.max(1));
+        }
+    }
+
+    PlannerPerformanceCapture {
+        warmup_samples: PLANNER_WARMUP_SAMPLES,
+        durations_ns,
+        packet_primitives,
+        glyph_pages,
+    }
+}
+
+#[allow(dead_code)]
+pub fn capture_readability_case_at(
+    project_root: &Path,
+    target: UiPhysicalTarget,
+) -> ProductUiCapture {
+    let runtime = product_runtime_at(
+        project_root,
+        target,
+        retry_replacement_rejection_fixture_plugin(),
+        bundled_wave_commands(),
+    );
+    capture_rejected_readability(runtime, target)
+}
+
+fn capture_rejected_readability(
+    mut runtime: RuntimeInstance,
+    target: UiPhysicalTarget,
+) -> ProductUiCapture {
     drive_to_terminal(&mut runtime);
     activate_retry_to_pending(&mut runtime);
     assert_eq!(
@@ -702,7 +783,36 @@ fn product_runtime(
     plugin: PluginDefinition,
     initial_commands: Vec<GameplayCommandSubmission>,
 ) -> RuntimeInstance {
-    let (project, plan, root) = headless_wave_candidate_plan_and_root_with(plugin);
+    product_runtime_from_project(
+        target,
+        headless_wave_candidate_plan_and_root_with(plugin),
+        initial_commands,
+    )
+}
+
+#[allow(dead_code)]
+fn product_runtime_at(
+    project_root: &Path,
+    target: UiPhysicalTarget,
+    plugin: PluginDefinition,
+    initial_commands: Vec<GameplayCommandSubmission>,
+) -> RuntimeInstance {
+    product_runtime_from_project(
+        target,
+        headless_wave_candidate_plan_and_root_with_at(project_root, plugin),
+        initial_commands,
+    )
+}
+
+fn product_runtime_from_project(
+    target: UiPhysicalTarget,
+    (project, plan, root): (
+        nara::project_host::ProjectSettingsCandidate,
+        nara::project_host::RuntimePlan,
+        nara::fs::DirectoryCapability,
+    ),
+    initial_commands: Vec<GameplayCommandSubmission>,
+) -> RuntimeInstance {
     let loader = ProjectContentLoader::new(root).unwrap();
     let snapshot = loader.load(&project, &plan).unwrap();
     let source = snapshot.startup_scene_source();

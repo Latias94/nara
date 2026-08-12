@@ -177,19 +177,27 @@ pub fn desktop_candidate_plan_and_root()
 
 pub fn headless_wave_candidate_plan_and_root()
 -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
-    headless_wave_candidate_plan_and_root_with_test_plugin(None)
+    headless_wave_candidate_plan_and_root_with_test_plugin(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        None,
+    )
 }
 
 pub fn headless_wave_candidate_plan_and_root_with(
     test_plugin: PluginDefinition,
 ) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
-    headless_wave_candidate_plan_and_root_with_test_plugin(Some(test_plugin))
+    headless_wave_candidate_plan_and_root_with_test_plugin(
+        Path::new(env!("CARGO_MANIFEST_DIR")),
+        Some(test_plugin),
+    )
 }
 
 fn headless_wave_candidate_plan_and_root_with_test_plugin(
+    path: &Path,
     test_plugin: Option<PluginDefinition>,
 ) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
-    let root = try_project_root_capability().expect("reference project root should be authorized");
+    let root = try_project_root_capability_at(path)
+        .expect("reference project root should be authorized");
     let manifest_path = RelativePath::new("nara.toml").unwrap();
     let manifest = root.open_file(&manifest_path).unwrap();
     let candidate = ingest_project_manifest(&manifest, None).unwrap();
@@ -209,6 +217,13 @@ fn headless_wave_candidate_plan_and_root_with_test_plugin(
     providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
     let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
     (candidate, plan, root)
+}
+
+pub fn headless_wave_candidate_plan_and_root_with_at(
+    path: &Path,
+    test_plugin: PluginDefinition,
+) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
+    headless_wave_candidate_plan_and_root_with_test_plugin(path, Some(test_plugin))
 }
 
 pub fn try_candidate_plan_and_root(

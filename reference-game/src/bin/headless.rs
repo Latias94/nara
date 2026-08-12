@@ -1,6 +1,6 @@
 use std::{
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     io::{self, Write},
     num::NonZeroU32,
     process::ExitCode,
@@ -11,7 +11,10 @@ use nara::{
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
     project_host::{HeadlessRunOutcome, HeadlessRunReport},
 };
-use nara_reference_game::{WaveSnapshot, bundled_wave_run_with_completed_tick_observer};
+use nara_reference_game::{
+    ReferenceProductObservation, WaveSnapshot,
+    bundled_wave_product_run_with_completed_tick_observer,
+};
 
 mod startup_marker;
 mod support;
@@ -25,6 +28,7 @@ const CLI_ARGUMENT_ERROR_CODE: &str = "reference-game.cli.invalid-arguments";
 const CLI_ARGUMENT_ERROR_SUMMARY: &str = "Headless arguments are invalid";
 const CLEANUP_TIMEOUT_CODE: &str = "reference-game.run.cleanup-timeout";
 const CLEANUP_TIMEOUT_SUMMARY: &str = "Headless runtime cleanup exceeded its deadline";
+const UI_OBSERVATION_ENV: &str = "NARA_REFERENCE_UI_OBSERVATION";
 
 fn main() -> ExitCode {
     let maximum_ticks = match parse_maximum_ticks(env::args_os().skip(1)) {
@@ -50,9 +54,10 @@ fn main() -> ExitCode {
         }
     };
     let observer = std::sync::Arc::clone(&marker);
-    let mut run = bundled_wave_run_with_completed_tick_observer(root, maximum_ticks, move |_| {
-        let _ = observer.emit();
-    });
+    let mut run =
+        bundled_wave_product_run_with_completed_tick_observer(root, maximum_ticks, move |_| {
+            let _ = observer.emit();
+        });
     let deadline = Instant::now() + Duration::from_secs(5);
     let terminal = drive_to_terminal(
         || classify_run_report(run.execute_bounded()),
@@ -60,18 +65,25 @@ fn main() -> ExitCode {
         Instant::now,
         || std::thread::park_timeout(Duration::from_millis(1)),
     );
-    if matches!(&terminal, CliRunTerminal::Completed(_)) {
-        if let Err(error) = marker.verify_success() {
-            let summary = error.to_string();
-            emit_static_error(error.code(), &summary);
-            return ExitCode::FAILURE;
-        }
+    if matches!(&terminal, CliRunTerminal::Completed(_))
+        && let Err(error) = marker.verify_success()
+    {
+        let summary = error.to_string();
+        emit_static_error(error.code(), &summary);
+        return ExitCode::FAILURE;
     }
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
-    write_terminal(terminal, &mut stdout, &mut stderr)
+    let emit_ui_observation =
+        env::var_os(UI_OBSERVATION_ENV).as_deref() == Some(OsStr::new("1"));
+    write_terminal(
+        terminal,
+        &mut stdout,
+        &mut stderr,
+        emit_ui_observation,
+    )
 }
 
 fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<NonZeroU32> {
@@ -94,20 +106,24 @@ fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<
 }
 
 enum CliRunProgress {
-    Completed(WaveSnapshot),
+    Completed(Box<ReferenceProductObservation>),
     Failed(DiagnosticReport),
     CleanupIncomplete(DiagnosticReport),
 }
 
 enum CliRunTerminal {
-    Completed(WaveSnapshot),
+    Completed(Box<ReferenceProductObservation>),
     Failed(DiagnosticReport),
     CleanupTimedOut(DiagnosticReport),
 }
 
-fn classify_run_report(report: HeadlessRunReport<WaveSnapshot>) -> CliRunProgress {
+fn classify_run_report(
+    report: HeadlessRunReport<ReferenceProductObservation>,
+) -> CliRunProgress {
     match report.outcome() {
-        HeadlessRunOutcome::Completed(snapshot) => CliRunProgress::Completed(snapshot.clone()),
+        HeadlessRunOutcome::Completed(snapshot) => {
+            CliRunProgress::Completed(Box::new(snapshot.clone()))
+        }
         HeadlessRunOutcome::Failed => CliRunProgress::Failed(report.diagnostics().clone()),
         HeadlessRunOutcome::CleanupIncomplete => {
             CliRunProgress::CleanupIncomplete(report.diagnostics().clone())
@@ -137,9 +153,12 @@ fn write_terminal(
     terminal: CliRunTerminal,
     stdout: &mut impl Write,
     stderr: &mut impl Write,
+    emit_ui_observation: bool,
 ) -> ExitCode {
     match terminal {
-        CliRunTerminal::Completed(snapshot) => write_terminal_success(stdout, stderr, &snapshot),
+        CliRunTerminal::Completed(observation) => {
+            write_terminal_success(stdout, stderr, &observation, emit_ui_observation)
+        }
         CliRunTerminal::Failed(report) => {
             let _ = write_diagnostics(stderr, &report);
             ExitCode::FAILURE
@@ -155,8 +174,10 @@ fn write_terminal(
 fn write_terminal_success(
     stdout: &mut impl Write,
     stderr: &mut impl Write,
-    snapshot: &WaveSnapshot,
+    observation: &ReferenceProductObservation,
+    emit_ui_observation: bool,
 ) -> ExitCode {
+    let snapshot = observation.wave();
     if !snapshot.is_terminal() {
         let _ = write_static_error(
             stderr,
@@ -165,11 +186,34 @@ fn write_terminal_success(
         );
         return ExitCode::FAILURE;
     }
+    let ui = if emit_ui_observation {
+        let Some(ui) = observation.ui() else {
+            let _ = write_static_error(
+                stderr,
+                "reference-game.ui-observation.missing",
+                "Headless run did not retain its immutable UI observation",
+            );
+            return ExitCode::FAILURE;
+        };
+        Some(ui)
+    } else {
+        None
+    };
     if write_success(stdout, snapshot).is_err() {
         let _ = write_static_error(
             stderr,
             "reference-game.cli.stdout-write",
             "Headless result could not be written",
+        );
+        return ExitCode::FAILURE;
+    }
+    if let Some(ui) = ui
+        && stdout.write_all(ui.to_json_line().as_bytes()).is_err()
+    {
+        let _ = write_static_error(
+            stderr,
+            "reference-game.cli.stdout-write",
+            "Headless UI observation could not be written",
         );
         return ExitCode::FAILURE;
     }
@@ -274,7 +318,8 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 
-        let exit = write_terminal_success(&mut stdout, &mut stderr, &snapshot);
+        let observation = ReferenceProductObservation::new(snapshot, None);
+        let exit = write_terminal_success(&mut stdout, &mut stderr, &observation, false);
 
         assert_eq!(exit, ExitCode::SUCCESS);
         assert!(stderr.is_empty());
@@ -312,7 +357,7 @@ mod tests {
             },
             || waits.set(waits.get() + 1),
         );
-        let exit = write_terminal(terminal, &mut stdout, &mut stderr);
+        let exit = write_terminal(terminal, &mut stdout, &mut stderr, false);
 
         assert_eq!(exit, ExitCode::FAILURE);
         assert_eq!(steps.get(), 2);

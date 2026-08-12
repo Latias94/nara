@@ -35,7 +35,7 @@ mod desktop_support;
 mod startup_marker;
 mod support;
 
-use desktop_support::submitted_product_frame;
+use desktop_support::{resident_product_glyphs, submitted_product_frame};
 use startup_marker::StartupMarker;
 use support::project_root::open_project_root;
 
@@ -86,13 +86,20 @@ fn main() -> ExitCode {
         }
         std::thread::park_timeout(Duration::from_millis(1));
     };
+    let timed_out = evidence.timed_out.load(Ordering::SeqCst);
+    let prepared_image = evidence.prepared_image.load(Ordering::SeqCst);
+    let textured_batch = evidence.textured_batch.load(Ordering::SeqCst);
+    let ui_glyph_texture = evidence.ui_glyph_texture.load(Ordering::SeqCst);
+    let submitted_frame = evidence.submitted_frame.load(Ordering::SeqCst);
+    let retry_continuity = evidence.retry_continuity.load(Ordering::SeqCst);
     if report.outcome() != DesktopRunOutcome::Completed(AppExit::Requested)
         || report.diagnostics().has_errors()
-        || evidence.timed_out.load(Ordering::SeqCst)
-        || !evidence.prepared_image.load(Ordering::SeqCst)
-        || !evidence.textured_batch.load(Ordering::SeqCst)
-        || !evidence.submitted_frame.load(Ordering::SeqCst)
-        || !evidence.retry_continuity.load(Ordering::SeqCst)
+        || timed_out
+        || !prepared_image
+        || !textured_batch
+        || !ui_glyph_texture
+        || !submitted_frame
+        || !retry_continuity
     {
         let diagnostics = report
             .diagnostics()
@@ -100,13 +107,14 @@ fn main() -> ExitCode {
             .map(|diagnostic| (diagnostic.code().as_str(), diagnostic.fields()))
             .collect::<Vec<_>>();
         eprintln!(
-            "desktop_render_probe.details outcome={:?} timed_out={} prepared_image={} textured_batch={} submitted_frame={} retry_continuity={} diagnostics={diagnostics:?}",
+            "desktop_render_probe.details outcome={:?} timed_out={} prepared_image={} textured_batch={} ui_glyph_texture={} submitted_frame={} retry_continuity={} diagnostics={diagnostics:?}",
             report.outcome(),
-            evidence.timed_out.load(Ordering::SeqCst),
-            evidence.prepared_image.load(Ordering::SeqCst),
-            evidence.textured_batch.load(Ordering::SeqCst),
-            evidence.submitted_frame.load(Ordering::SeqCst),
-            evidence.retry_continuity.load(Ordering::SeqCst),
+            timed_out,
+            prepared_image,
+            textured_batch,
+            ui_glyph_texture,
+            submitted_frame,
+            retry_continuity,
         );
         return fail("desktop_render_probe.product_path_failed");
     }
@@ -127,6 +135,7 @@ fn fail(code: &'static str) -> ExitCode {
 struct ProductRenderEvidence {
     prepared_image: AtomicBool,
     textured_batch: AtomicBool,
+    ui_glyph_texture: AtomicBool,
     submitted_frame: AtomicBool,
     retry_continuity: AtomicBool,
     timed_out: AtomicBool,
@@ -287,7 +296,8 @@ fn observe_product_render(
         }
         ProductProbePhase::ResetFrame if inputs.wave_generation.get() >= 2 => {
             let floor = *probe.reset_frame_floor.get_or_insert(inputs.frame.index);
-            if inputs.frame.index > floor && product_frame_ready {
+            let observed_ui_glyph_texture = resident_product_glyphs(&inputs.backend);
+            if inputs.frame.index > floor && product_frame_ready && observed_ui_glyph_texture {
                 let continuity = capture_continuity(&inputs);
                 let preserved = probe
                     .baseline
@@ -302,6 +312,10 @@ fn observe_product_render(
                     .evidence
                     .textured_batch
                     .store(textured_batch, Ordering::SeqCst);
+                probe
+                    .evidence
+                    .ui_glyph_texture
+                    .store(observed_ui_glyph_texture, Ordering::SeqCst);
                 probe
                     .evidence
                     .submitted_frame
@@ -335,9 +349,28 @@ fn observe_startup_present(
         .as_slice()
         .iter()
         .any(|batch| batch.image.is_some());
+    let ui_glyph_texture = resident_product_glyphs(&inputs.backend);
+    let submitted_frame = submitted_product_frame(&inputs.frame, &inputs.backend);
+    probe
+        .evidence
+        .prepared_image
+        .fetch_or(prepared_image, Ordering::SeqCst);
+    probe
+        .evidence
+        .textured_batch
+        .fetch_or(textured_batch, Ordering::SeqCst);
+    probe
+        .evidence
+        .ui_glyph_texture
+        .fetch_or(ui_glyph_texture, Ordering::SeqCst);
+    probe
+        .evidence
+        .submitted_frame
+        .fetch_or(submitted_frame, Ordering::SeqCst);
     if prepared_image
         && textured_batch
-        && submitted_product_frame(&inputs.frame, &inputs.backend)
+        && ui_glyph_texture
+        && submitted_frame
         && probe.marker.emit().is_err()
     {
         probe.evidence.timed_out.store(true, Ordering::SeqCst);

@@ -1,25 +1,31 @@
 use nara::ecs::schedule::IntoScheduleConfigs;
+use nara::ecs as bevy_ecs;
 use nara::{
     app::{
         CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
         PluginProductCapability, PluginShutdownContext, PluginShutdownObligationId, RuntimeFault,
         RuntimeFaultKind, RuntimeFaultReporter,
     },
-    ecs::{Entity, Mut, Query, Res, ResMut, Resource},
+    ecs::{
+        Commands, Component, Entity, Mut, Query, Res, ResMut, Resource, system::SystemParam,
+    },
     gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
     input::{InputPointerId, InputSeatId, InputWindowId},
     scene::SceneEntitySource,
     ui::{
-        UiActionConsumerId, UiActionCursor, UiActionJournal, UiBrush, UiButton, UiColorRole,
-        UiLayer, UiNode, UiRoot, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
-        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiText, UiTextAlignment, UiTextOverflow,
-        UiVisual, install_ui_surface,
+        UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal, UiButton, UiDimension,
+        UiLayer, UiNode, UiRoot, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
+        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiText, install_ui_surface,
     },
 };
 
 use crate::{
     ReferenceWaveCaptureSet, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
     WaveSnapshot, resources::WaveRunOwner, retry_draft_for_ui_action,
+    ui_observation::{
+        ReferenceProductObservation, capture_reference_product_observation,
+        reference_ui_source_entity,
+    },
 };
 
 pub const REFERENCE_RUNTIME_UI_PLUGIN_ID: PluginId = PluginId::new("reference-game.runtime-ui");
@@ -30,7 +36,6 @@ const REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
     PluginShutdownObligationId::new("reference-game.runtime-ui.action-consumer");
 const LOGICAL_WIDTH: f32 = 960.0;
 const LOGICAL_HEIGHT: f32 = 540.0;
-const HEALTH_BAR_WIDTH: f32 = 280.0;
 
 const REFERENCE_RUNTIME_UI_REQUIREMENTS: &[PluginId] = &[
     crate::REFERENCE_WAVE_PLUGIN_ID,
@@ -81,10 +86,13 @@ impl Plugin for ReferenceRuntimeUiPlugin {
         install_ui_surface(app.world_mut()?, slot)
             .map_err(|error| setup_error(error.to_string()))?;
         app.insert_resource(ReferenceHudProjection::default())?;
+        app.insert_resource(ReferenceProductObservation::default())?;
         add_local_gameplay_command_systems(app, collect_retry_intents)?;
         app.add_systems(
             CoreStage::FixedUpdate,
-            project_runtime_ui.in_set(ReferenceWaveCaptureSet::Presentation),
+            (project_runtime_ui, capture_reference_product_observation)
+                .chain()
+                .in_set(ReferenceWaveCaptureSet::Presentation),
         )?;
         let consumer = UiActionConsumerId::new(REFERENCE_UI_ACTION_CONSUMER)
             .map_err(|error| setup_error(error.to_string()))?;
@@ -153,11 +161,15 @@ type RuntimeUiEntity<'a> = (
     Option<&'a mut UiRoot>,
     Option<&'a mut UiNode>,
     Option<&'a mut UiText>,
-    Option<&'a mut UiVisual>,
     Option<&'a mut UiButton>,
+    Option<&'a ReferenceAuthoredHealthWidth>,
 );
 
+#[derive(Debug, Clone, Copy, Component)]
+struct ReferenceAuthoredHealthWidth(f32);
+
 fn project_runtime_ui(
+    mut commands: Commands,
     snapshot: Res<WaveSnapshot>,
     retry: Res<WaveRetryStatus>,
     owner: Option<Res<WaveRunOwner>>,
@@ -177,77 +189,73 @@ fn project_runtime_ui(
     };
     let terminal_visible = snapshot.outcome.is_terminal();
     let retry_enabled = terminal_visible && retry.phase() != WaveRetryPhase::Pending;
-    *projection = ReferenceHudProjection {
+    let mut next_projection = ReferenceHudProjection {
         health_current,
         health_maximum,
-        health_width: HEALTH_BAR_WIDTH * health_ratio,
+        health_width: 0.0,
         defeated_enemies: snapshot.defeated_enemies,
         planned_enemies: snapshot.planned_enemies,
-        progress_width: HEALTH_BAR_WIDTH * progress_ratio,
+        progress_width: 0.0,
         outcome: snapshot.outcome,
         terminal_visible,
         retry_enabled,
     };
 
-    for (entity, source, root, node, text, visual, button) in &mut entities {
+    for (entity, source, root, node, text, button, authored_health_width) in &mut entities {
         if !owner.owns_scene_entity(entity, source) {
             continue;
         }
-        match source.source_entity_id.as_str() {
+        let Some(source_entity) = reference_ui_source_entity(source) else {
+            continue;
+        };
+        match source_entity {
             "health-fill" => {
                 if let Some(mut node) = node {
+                    let authored_width = authored_health_width.map_or_else(
+                        || match node.style().width() {
+                            UiDimension::Px(width) => {
+                                commands
+                                    .entity(entity)
+                                    .insert(ReferenceAuthoredHealthWidth(width));
+                                width
+                            }
+                            UiDimension::Auto | UiDimension::Percent(_) => 0.0,
+                        },
+                        |width| width.0,
+                    );
+                    next_projection.health_width = authored_width * health_ratio;
+                    next_projection.progress_width = authored_width * progress_ratio;
                     *node = UiNode::new(
-                        UiStyle::absolute(0.0, 0.0, projection.health_width, 32.0).with_z_index(1),
+                        node.style()
+                            .with_width(UiDimension::Px(next_projection.health_width)),
                     );
                 }
-                if let Some(mut visual) = visual {
-                    *visual = UiVisual::role(if health_current == 0 {
-                        UiColorRole::Danger
-                    } else {
-                        UiColorRole::Positive
-                    });
-                }
             }
-            "health-label" => replace_text(
+            "health-label" => replace_text_content(
                 text,
                 format!("HEALTH {health_current:02} / {health_maximum:02}"),
-                16.0,
-                UiColorRole::PrimaryText,
-                UiTextAlignment::Start,
             ),
-            "wave-status" => replace_text(
+            "wave-status" => replace_text_content(
                 text,
                 format!(
                     "WAVE {:02} / {:02}",
                     snapshot.defeated_enemies, snapshot.planned_enemies
                 ),
-                16.0,
-                UiColorRole::PrimaryText,
-                UiTextAlignment::Start,
             ),
-            "score-status" => replace_text(
+            "score-status" => replace_text_content(
                 text,
                 format!("SCORE {:06}", snapshot.score),
-                16.0,
-                UiColorRole::Warning,
-                UiTextAlignment::Start,
             ),
-            "movement-status" => replace_text(
+            "movement-status" => replace_text_content(
                 text,
                 format!(
                     "MOVE {:+05.1} {:+05.1}",
                     snapshot.player.position.x, snapshot.player.position.y
                 ),
-                16.0,
-                UiColorRole::SecondaryText,
-                UiTextAlignment::Start,
             ),
-            "autofire-status" => replace_text(
+            "autofire-status" => replace_text_content(
                 text,
                 format!("AUTO-FIRE ACTIVE  SHOTS {:02}", snapshot.projectiles.len()),
-                16.0,
-                UiColorRole::Accent,
-                UiTextAlignment::Start,
             ),
             "terminal-overlay" => {
                 if let Some(mut root) = root {
@@ -258,85 +266,39 @@ fn project_runtime_ui(
                     });
                 }
                 if let Some(mut node) = node {
-                    *node = UiNode::new(
-                        UiStyle::fill()
-                            .with_visible(terminal_visible)
-                            .with_stacking_context(true),
-                    );
+                    *node = UiNode::new(node.style().with_visible(terminal_visible));
                 }
             }
-            "outcome-label" => replace_text(
+            "outcome-label" => replace_text_content(
                 text,
                 match snapshot.outcome {
                     WaveOutcome::Completed => "VICTORY",
                     WaveOutcome::Defeated => "DEFEAT",
                     WaveOutcome::Running => "",
                 },
-                28.0,
-                if snapshot.outcome == WaveOutcome::Completed {
-                    UiColorRole::Positive
-                } else {
-                    UiColorRole::Danger
-                },
-                UiTextAlignment::Center,
             ),
-            "run-summary" => replace_text(
+            "run-summary" => replace_text_content(
                 text,
                 format!(
                     "FINAL SCORE {:06}  ENEMIES {:02}/{:02}",
                     snapshot.score, snapshot.defeated_enemies, snapshot.planned_enemies
                 ),
-                18.0,
-                UiColorRole::PrimaryText,
-                UiTextAlignment::Center,
             ),
             "retry-button" => {
                 if let Some(mut button) = button {
-                    *button = UiButton::new(
-                        if retry.phase() == WaveRetryPhase::Pending {
-                            "Retrying..."
-                        } else {
-                            "Retry"
-                        },
-                        nara::ui::UiActionId::new(REFERENCE_RETRY_ACTION)
-                            .expect("the reference retry action is valid"),
-                        18.0,
-                    )
-                    .expect("the reference retry button is valid")
-                    .with_enabled(retry_enabled);
+                    *button = button.clone().with_enabled(retry_enabled);
                 }
             }
-            "input-hint" => replace_text(
-                text,
-                retry_hint(*retry),
-                14.0,
-                if retry.last_rejection().is_some() {
-                    UiColorRole::Danger
-                } else {
-                    UiColorRole::SecondaryText
-                },
-                UiTextAlignment::Center,
-            ),
+            "input-hint" => replace_text_content(text, retry_hint(*retry)),
             _ => {}
         }
     }
+    *projection = next_projection;
 }
 
-fn replace_text(
-    text: Option<nara::ecs::Mut<'_, UiText>>,
-    content: impl Into<String>,
-    size: f32,
-    role: UiColorRole,
-    alignment: UiTextAlignment,
-) {
+fn replace_text_content(text: Option<nara::ecs::Mut<'_, UiText>>, content: impl Into<String>) {
     if let Some(mut text) = text {
-        let content = content.into();
-        *text = UiText::new(content.clone(), size)
-            .expect("reference UI text facts are bounded")
-            .with_brush(UiBrush::Role(role))
-            .with_alignment(alignment)
-            .with_overflow(UiTextOverflow::Clip)
-            .with_semantic_text(content);
+        *text = text.clone().with_content(content);
     }
 }
 
@@ -356,19 +318,48 @@ fn retry_hint(retry: WaveRetryStatus) -> &'static str {
     }
 }
 
+#[derive(SystemParam)]
+struct ReferenceRetryIntentContext<'w, 's> {
+    snapshot: Res<'w, WaveSnapshot>,
+    retry: Res<'w, WaveRetryStatus>,
+    owner: Option<Res<'w, WaveRunOwner>>,
+    buttons: Query<
+        'w,
+        's,
+        (Entity, &'static SceneEntitySource, &'static UiButton),
+    >,
+}
+
+impl ReferenceRetryIntentContext<'_, '_> {
+    fn authored_retry_action(&self) -> Option<UiActionId> {
+        let owner = self.owner.as_deref()?;
+        self.buttons
+            .iter()
+            .find(|(entity, source, _)| {
+                reference_ui_source_entity(source) == Some("retry-button")
+                    && owner.owns_scene_entity(*entity, source)
+            })
+            .map(|(_, _, button)| button.action().clone())
+    }
+}
+
 fn collect_retry_intents(
     mut ui_actions: ResMut<UiActionJournal>,
     ui_cursor: Res<ReferenceUiActionCursor>,
-    snapshot: Res<WaveSnapshot>,
-    retry: Res<WaveRetryStatus>,
+    context: ReferenceRetryIntentContext<'_, '_>,
     mut commands: ResMut<LocalGameplayCommands>,
     faults: Res<RuntimeFaultReporter>,
 ) {
+    let retry_action = context.authored_retry_action();
     let (semantic_sequence, last_sequence) = match ui_actions.pending(&ui_cursor.0) {
         Ok(pending) => (
             pending
                 .iter()
-                .find(|event| event.action().as_str() == REFERENCE_RETRY_ACTION)
+                .find(|event| {
+                    retry_action
+                        .as_ref()
+                        .is_some_and(|action| event.action() == action)
+                })
                 .map(|event| event.sequence().get()),
             pending.last().map(|event| event.sequence()),
         ),
@@ -380,7 +371,8 @@ fn collect_retry_intents(
             return;
         }
     };
-    let retry_is_eligible = snapshot.is_terminal() && retry.phase() != WaveRetryPhase::Pending;
+    let retry_is_eligible =
+        context.snapshot.is_terminal() && context.retry.phase() != WaveRetryPhase::Pending;
     if retry_is_eligible
         && let Some(sequence) = semantic_sequence
         && commands.push(retry_draft_for_ui_action(sequence)).is_err()
