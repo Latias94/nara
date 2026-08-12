@@ -7,7 +7,8 @@ amended: 2026-08-12
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+paused_by: docs/plans/2026-08-12-002-refactor-product-composition-contribution-correction-plan.md
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md
@@ -29,11 +30,12 @@ operator_execution_authority: external-control-plane
   integration only. It is the canonical successor for the still-open NUI-U15B product obligations;
   the superseded NUI plan is not reactivated.
 - **Execution profile:** Use the Reference Game as an acceptance carrier. Fix product adapters and
-  data first. A neutral reproduction must prove an owning Foundation defect before shared contracts
-  change.
+  data first. An owner-local neutral reproduction must prove a shared contract defect before that
+  contract changes.
 - **Stop condition:** Suspend this plan if a required product behavior cannot be expressed through
-  the pinned public inventory. Publish a focused UIF correction and explicitly rebase this plan to a
-  successor baseline before resuming.
+  the pinned public inventory or an owner-local neutral reproduction proves another shared contract
+  defective. Publish a focused correction owned by that contract and pin its independent baseline
+  before resuming. Only a UI Foundation defect replaces the UI `baseline_record`.
 - **Tail ownership:** This plan closes Runtime UI product validation only. Editor, new shared widgets,
   dynamic asset APIs and generalized authoring infrastructure remain separate work.
 
@@ -56,6 +58,18 @@ overwriting Scene/Prefab-authored presentation fields. The focused
 owned that shared value-contract defect. UIFD-U1 corrected it at `ba918db`; UIFD-U2 published
 successor baseline `a628828a8ff941239d79a0b8b3d60316`, which this plan now pins before resuming
 RUP-U2.
+
+### Active product-composition correction lineage
+
+RUP-U3 is paused after the all-features requested-subset reproduction proved that compiled
+`ui-submitter` code changes the base `WgpuRenderPlugin` dependency closure for a product requesting
+only `render-wgpu`. The same ownership defect lets compiled Winit accessibility code create native
+product behavior without the `presentation-ui + desktop-winit` request pair. The focused
+[Product Composition Contribution Correction](2026-08-12-002-refactor-product-composition-contribution-correction-plan.md)
+owns the backend/platform contribution split and ordinary `ProductRecipe` authority correction.
+This plan resumes only after that correction publishes a Product Composition Conformance Baseline
+and this frontmatter pins it independently as `composition_baseline_record`; the existing UI
+Foundation `baseline_record` remains unchanged.
 
 ## Product Contract
 
@@ -84,8 +98,8 @@ themselves establish a Product-Validated Baseline.
   `ba918db`.
 - R2. Product code uses the frozen public Runtime UI and presentation composition; hidden Host
   authority is permitted only inside the named first-party backend presenter.
-- R3. A shared contract may change only after a renderer-neutral reproduction fails against the
-  owning module and this plan is suspended.
+- R3. A shared contract may change only after an owner-local neutral reproduction fails against the
+  owning module and this plan is suspended for a focused correction owned by that contract.
 
 #### Product trajectory and interaction
 
@@ -326,7 +340,7 @@ target has structured evidence rather than a digest-only pass.
 
 **Depends on:** RUP-U2.
 
-**Status:** Active. This is the sole active unit.
+**Status:** Paused by the registered Product Composition Contribution Correction.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 

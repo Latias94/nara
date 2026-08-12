@@ -4,29 +4,42 @@
 **Last Verified**: 2026-08-12
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole
-active execution contract is the [Runtime UI Product Slice
-plan](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md), which pins successor
-Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316`. Completed focused correction
-plans remain immutable lineage evidence. Legacy rows that still name NUI-U15B/U16 describe the last
-completed NUI baseline; ADR 0107-0109 and the successor UIF baseline own shared contracts while RUP
-owns product validation. RUP-U1 is implemented at `e88ad06` with evidence record
+active execution contract is the [Product Composition Contribution Correction
+plan](../../plans/2026-08-12-002-refactor-product-composition-contribution-correction-plan.md). The
+[Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) is
+paused after RUP-U2 and continues to pin successor Foundation Conformance Baseline
+`a628828a8ff941239d79a0b8b3d60316`. Completed focused correction plans remain immutable lineage
+evidence. Legacy rows that still name NUI-U15B/U16 describe the last completed NUI baseline; ADR
+0107-0109 and the successor UIF baseline own shared UI contracts while PCC restores the root
+product-composition contract. RUP-U1 is implemented at `e88ad06` with evidence record
 `882397b5b744448cbd5cb8d5c3d0568a`; RUP-U2 is implemented at `ec38c43` with evidence record
-`7bf5d3a0da2c45ad98ced5f01482cf21`; RUP-U3 is the sole active unit.
+`7bf5d3a0da2c45ad98ced5f01482cf21`; RUP-U3 is paused and PCC-U1 is active.
 
 ## Current UI correction lineage (2026-08-12)
 
 The rows below retain their historical ADR evidence anchors and are not rewritten in place. The
-current shared baseline is `a628828a8ff941239d79a0b8b3d60316`; the Runtime UI Product Slice owns
-current product execution. UIF-U2C is complete for
+current shared UI baseline is `a628828a8ff941239d79a0b8b3d60316`; the Runtime UI Product Slice owns
+the paused product-validation lineage while PCC owns current execution. UIF-U2C is complete for
 snapshot-profile identity, attempted text-work accounting and modal failure algebra;
 UIF-U3C is complete for prepared submission authority, exact backend permits and infallible receipt
 commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target ownership and Host
 platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; UIFM-U1 is
 complete at `40d3f87`; UIFM-U2 published the predecessor baseline; RUP-U1 is complete at `e88ad06`;
 UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-U2 is complete at
-`ec38c43`; RUP-U3 is active.
+`ec38c43`; RUP-U3 is paused by the registered PCC correction.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
 `WinitAccessibilityBridge` symbol in older anchors.
+
+## Current product-composition correction (2026-08-12)
+
+The all-features requested-subset reproduction record
+`4f2f32ff95af4504a2e224d0868ec7a0` reopens the implementation evidence for ADR 0040, ADR 0046,
+ADR 0079 and ADR 0106 without changing their Accepted decisions. The current implementation lets
+compiled WGPU UI and Winit accessibility integrations change an unrequested product's plugin and
+native-runtime behavior. PCC-U1 is the sole active unit; it first separates concrete WGPU
+contributions from the base backend, followed by explicit Winit accessibility activation and
+ordinary `ProductRecipe` authority closure. These ADR rows remain `partial` until the Product
+Composition Conformance Baseline binds clean implementation and requested-subset evidence.
 
 | Current corrective owner | Status | Durable scope |
 |---|---|---|
@@ -39,7 +52,7 @@ UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-
 | UIFM-U2 | implemented | successor Foundation Conformance Baseline `19cfa496dc2346368764057367cc2163` and explicit RUP-U1 rebase |
 | RUP-U1 | implemented | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress; commit `e88ad06` and record `882397b5b744448cbd5cb8d5c3d0568a` |
 | RUP-U2 | implemented | authored source, structured surface, exact WGPU payload, headless parity and clean-commit package delivery closure; commit `ec38c43` and record `7bf5d3a0da2c45ad98ced5f01482cf21` |
-| RUP-U3 | active | final simplification, Standards/Spec review, committed-scope gates, high-authority ledger closure and Product-Validated baseline publication |
+| RUP-U3 | paused | final simplification, Standards/Spec review, committed-scope gates, high-authority ledger closure and Product-Validated baseline publication; resumes after PCC baseline publication |
 | UIFD-U1 | implemented | immutable content-only `UiText` replacement that preserves authored presentation and semantic policy; commit `ba918db` and record `ecea4e791ef449afb0b57fece9f8ecda` |
 | UIFD-U2 | implemented | successor Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316` and explicit RUP-U2 rebase |
 

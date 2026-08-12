@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-16
+**Last Revised**: 2026-08-12
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -12,8 +12,20 @@ Execution Boundary and Evidence-Gated Extensions; ADR 0096: Evidence-Gated Rende
 Upload Policy;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
 UI, Text, Widget, and Presented-Frame Topology; [ADR 0105](0105-closed-first-party-render-plan.md):
-Closed First-Party Render Plan; [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md):
-Root-Local UI Compilation and Presentation Closure
+Closed First-Party Render Plan; [ADR 0106](0106-content-and-presentation-product-composition.md):
+Content and Presentation Product Composition;
+[ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md): Root-Local UI Compilation and
+Presentation Closure
+
+## ADR 0106 Product-Contribution Refinement
+
+ADR 0106 distinguishes a closed first-party contribution plugin from an independently replaceable
+submitter SPI. `WgpuRenderPlugin` owns device, queue, surface, cache and the sealed backend frame
+transaction. Concrete `WgpuSpriteSubmitterPlugin` and `WgpuUiSubmitterPlugin` may install the
+first-party systems that contribute already-owned domain packets to that private transaction, but
+they expose no submitter trait, registry, dynamic phase or backend-replacement contract. Their
+installation is selected by the requested product closure, never by whether their Cargo code was
+compiled.
 
 ## ADR 0096 Refinement
 
@@ -88,8 +100,9 @@ Rules:
   minimal execution kernel, and a logical graph. The pressure does not itself select `RenderGraph`.
 - `WgpuRenderPlugin` owns wgpu device/surface/backend resources. Sprite, tilemap, UI, text, gizmo,
   and future 3D domains own extraction and batch data. Stock wgpu may encode concrete batches in
-  private feature-gated modules; a separately installable submitter SPI requires a complete external
-  feature tracer rather than being inferred from domain ownership.
+  private feature-gated modules whose concrete first-party contribution plugins are installed only
+  by the requested product closure. An independently replaceable submitter SPI still requires a
+  complete external feature tracer rather than being inferred from domain ownership.
 - Internal aliasing such as using sprite-like quad instances for UI is acceptable as a backend
   implementation detail. Public UI render contracts must remain UI-owned (`UiBatches`, UI material
   keys, clip data, text runs later) rather than exposing sprite semantics as UI API.
@@ -148,8 +161,9 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 
 - `nara_render_wgpu` should grow explicit cache lifetime/eviction diagnostics before more resource
   classes are added.
-- `WgpuRenderPlugin` may keep concrete feature encoders behind compiled integration flags; domains
-  own batches, while independent submitter plugins remain unadmitted.
+- `WgpuRenderPlugin` may keep concrete encoders behind compiled integration flags; domains own
+  batches, and requested products install only the matching closed first-party contribution
+  plugins. Independently replaceable submitters and a public submitter SPI remain unadmitted.
 - The full render graph remains deferred, but resource lifetime is no longer deferred.
 
 ## Open Questions

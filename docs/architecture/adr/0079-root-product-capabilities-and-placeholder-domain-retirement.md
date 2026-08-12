@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-08-12
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 **Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md);
@@ -10,6 +10,14 @@ ADR 0070
 Installation;
 [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
 Composition
+
+## ADR 0106 Product-Contribution Refinement
+
+Root weak feature forwarding only makes a concrete first-party implementation available inside the
+compiled Cargo ceiling. It does not install that implementation, change a base plugin declaration,
+register systems or create platform behavior. The normalized requested product and resolved plugin
+closure install concrete WGPU Sprite/UI and Winit accessibility contribution plugins only for their
+explicit capability intersections.
 
 ## ADR 0104 Refinement
 
@@ -174,8 +182,9 @@ between 2D, UI, and wgpu groups converges only when slot/plugin/definition ident
 The base wgpu adapter owns clear/target/backend operation without permanently compiling every
 submitter. `nara_render_wgpu` uses internal optional `sprite-submitter` and `ui-submitter` features.
 Their shared backend-private quad representation must not make UI depend on the sprite/tilemap
-domain. Root weak feature forwarding activates a submitter only when both its domain capability and
-`render-wgpu` are active.
+domain. Root weak feature forwarding compiles a submitter implementation only when its domain code
+and `render-wgpu` are available; the requested product closure separately installs the matching
+concrete contribution plugin.
 
 ### Project manifest ingest
 
