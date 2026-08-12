@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-12
+* **Work Registration**: [UI dynamic text content correction: UIFD-U1 active](registry/2026-08/2026-08-12T050036Z-engine-foundation-contract-completion-codex-root-fa0f019866ae421f9567f841ff78cf3d.md) - Pauses RUP-U2 after a renderer-neutral public-value failure and activates the focused immutable text content correction.
+* **Verification Evidence**: [RUP-U2 neutral dynamic text content reproduction](verification/2026-08/2026-08-12T045955Z-rup-u2-neutral-dynamic-text-content-reproduction-05a05e7d4cad4668aab8fa5026263b12.md) - Records the renderer-neutral public-value failure that pauses RUP-U2 and admits one focused UI Foundation correction.
+
 ## 2026-08-11
 * **Work Registration**: [Runtime UI product slice: RUP-U2 active](registry/2026-08/2026-08-11T074415Z-engine-foundation-contract-completion-codex-root-9d1af91973c3432bba049dbeaa5af929.md) - Closes the exact gameplay-to-Retry behavior trajectory and activates authoring, surface, and packaged delivery closure.
 * **Verification Evidence**: [RUP-U1 exact gameplay-to-Retry trajectory](verification/2026-08/2026-08-11T074247Z-rup-u1-exact-gameplay-to-retry-trajectory-882397b5b744448cbd5cb8d5c3d0568a.md) - Closes the exact Runtime UI behavior trajectory with typed input evidence, native Windows UI Automation ingress, backend-submitted successor presentation, and causal Retry replacement.
@@ -149,7 +153,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Reference-game delivery hardening: U9 baseline refreshed](registry/2026-07/2026-07-29T182757Z-engine-foundation-contract-completion-codex-root-74e04edd91fb4dd38af9264a5f5cc97e.md) - Closes the current first-playable baseline with an isolated Windows population and Redirect verdict; records U10 as the next separately authorized delivery gate.
 * **Verification Evidence**: [RGD-U9 refreshed first-playable product baseline verification](verification/2026-07/2026-07-29T182729Z-rgd-u9-refreshed-first-playable-product-baseline-verification-406733392389447c879f6de86245151e.md) - Records the current isolated Windows first-playable population, deterministic Redirect verdict, missing product evidence, and non-claims.
 * **Work Registration**: [Reference-game delivery hardening: U9 baseline refresh](registry/2026-07/2026-07-29T163416Z-engine-foundation-contract-completion-codex-root-b3e0c9dc77af407c86488e42c1816906.md) - Closes final-revision U8 hosted CI and activates a fresh first-playable baseline for the current source.
-* **Verification Evidence**: [RGD-U8 final hosted three-workspace CI refresh](verification/2026-07/2026-07-29T163302Z-rgd-u8-final-hosted-three-workspace-ci-refresh-b3883a881dda4296b19b5490153dc3fc.md) - Closes the final-revision Windows/Linux root, reference-game, and module-consumer CI matrix at ef8f300.
-
-## 2026-07-28
-* **Work Registration**: [Reference-game delivery hardening: U8 hosted CI refresh](registry/2026-07/2026-07-28T232059Z-engine-foundation-contract-completion-codex-root-658d0197b447461d9dd30c1fde607548.md) - Closes refreshed RGD-U7 runtime and host authority and activates the final-revision hosted CI refresh.

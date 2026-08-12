@@ -3,11 +3,12 @@ title: Runtime UI Product Slice - Plan
 type: feat
 date: 2026-08-08
 deepened: 2026-08-10
-amended: 2026-08-11
+amended: 2026-08-12
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+paused_by: docs/plans/2026-08-12-001-refactor-ui-dynamic-text-content-correction-plan.md
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md
@@ -45,6 +46,16 @@ modal has no committed focus until an input first creates the endpoint seat. The
 [UI modal-entry focus correction](2026-08-10-001-refactor-ui-modal-entry-focus-correction-plan.md)
 owned that shared defect. UIFM-U1 corrected it at `40d3f87`; UIFM-U2 published successor baseline
 `19cfa496dc2346368764057367cc2163`, which this plan now pins before resuming RUP-U1.
+
+### Active dynamic-text correction lineage
+
+RUP-U2 is paused after the renderer-neutral
+`dynamic_text_content_preserves_authored_adapter_presentation` reproduction proved that the public
+Runtime UI adapter cannot replace dynamic display content without reconstructing and potentially
+overwriting Scene/Prefab-authored presentation fields. The focused
+[UI dynamic text content correction](2026-08-12-001-refactor-ui-dynamic-text-content-correction-plan.md)
+owns that shared value-contract defect. This plan resumes only after the correction publishes a
+successor Foundation baseline and this frontmatter pins it explicitly.
 
 ## Product Contract
 
@@ -113,8 +124,12 @@ themselves establish a Product-Validated Baseline.
   project data and Runtime UI adapter. Package evidence proves resource and font closure.
 - R16. At least one real platform accessibility ingress maps an exposed node/action to the exact
   presented session; direct internal numeric action injection remains component evidence only.
-- R17. Verification records representative compile, plan and presentation latency plus packet,
-  atlas and retained-resource observations. This plan gathers a baseline and does not freeze an SLA.
+- R17. Verification records warmed canonical 1280 x 720 samples for packet-planner CPU work on one
+  exact product frame and for the real desktop `FrameExecutionStart`-to-GPU-completion boundary,
+  which includes product projection, candidate compilation, planning and submission. It also records
+  exact packet primitives, glyph references/pages and retained GPU-resource observations. The
+  record states the measurement boundaries and raw samples. This plan gathers a baseline and does
+  not freeze an SLA.
 
 ### Acceptance Examples
 
@@ -285,9 +300,12 @@ physical mapping, headless execution and packaging.
 `reference-game/packaging/package-layout-v1.json`, `reference-game/tools/package.py`, package policy
 tests and focused product tests.
 
-**Approach:** Use an isolated project copy for the authoring roundtrip. Change source data through
-the ordinary loader/canonical writer path, then restart or reload. Reuse the same adapter for
-desktop, headless and package modes. Exercise all three 16:9 targets, one 4:3 physical resize and one
+**Approach:** Use an isolated project copy for the canonical-writer authoring roundtrip and make one
+named geometry edit in the ordinary repository source. Change source data through the ordinary
+loader/canonical writer path, then restart or reload. Reuse the same adapter for desktop, headless
+and package modes. The local desktop candidate, presentation-free headless run and archive smoke
+must report the same structured authored tuple `(source identity, action identity, logical width)`
+from that repository root. Exercise all three 16:9 targets, one 4:3 physical resize and one
 fractional pointer case without multiplying the full state matrix.
 
 **Test scenarios:** Safe-area readability, non-overlap and text bounds; letterbox black-bar input;
@@ -295,8 +313,10 @@ source label or geometry change; desktop/WGPU glyph and packet residency; presen
 headless facts; arbitrary-CWD packaged launch; missing resource and font closure failure.
 
 **Verification:** Serial focused nextest, one real desktop/WGPU presentation probe, the existing
-cross-platform package tool, arbitrary-CWD launch and headless product gate. Record exact commands
-and which assertions are automated or bounded observations.
+cross-platform package tool, arbitrary-CWD launch and headless product gate. In guarded repository
+copies, package creation must reject a missing `reference-ui.prefab.json` and a missing embedded-font
+license before producing an archive. Record exact commands and which assertions are automated or
+bounded observations.
 
 **Exit:** Desktop, headless and package consume the same changed source data and adapter, and each
 target has structured evidence rather than a digest-only pass.
@@ -341,14 +361,22 @@ updates the high-authority ledger and activates no unrelated successor automatic
 - V5: `python reference-game/tools/package.py create --repository-root . --platform
   windows-x86_64 --version 0.1.0 --source-revision <git-sha> --headless-binary <headless-binary>
   --desktop-binary <desktop-binary> --output <candidate.zip>` creates the candidate, which is then
-  launched from an unrelated working directory while the V2 headless path consumes the same source
-  data.
-- V6: the authoring roundtrip changes source data without Rust changes and is observed by desktop,
-  headless and package paths.
+  launched from an unrelated working directory. Two guarded-copy negative invocations delete the
+  required UI Prefab and embedded-font license respectively and must fail before creating an
+  archive.
+- V6: the isolated canonical-writer roundtrip changes source data without Rust changes. The local
+  desktop candidate, presentation-free headless binary and archive smoke then report an equal
+  structured Retry tuple from the same ordinary repository source; a test-private presenter or
+  digest comparison cannot satisfy this gate.
 - V7: `cargo fmt --all -- --check`, scoped strict clippy, `git diff --check`, engineering-memory
   validation and deterministic rollup rendering pass.
 - V8: structural assertions and exact identities are authoritative. Cartesian state/target smoke and
   opaque hashes are prohibited as completion gates.
+- V9: one warmed canonical 1280 x 720 component observation records raw planner durations for the
+  exact product frame, and the bounded real desktop candidate records raw
+  `FrameExecutionStart`-to-GPU-completion durations plus exact packet primitive/glyph counts, glyph
+  pages and retained GPU-resource facts. V9 is an observation record, not a benchmark framework,
+  pass/fail threshold or CI matrix.
 
 ## Definition of Done
 
