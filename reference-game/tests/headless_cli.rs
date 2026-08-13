@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use serde_json::Value;
+
 #[test]
 fn bundled_cli_emits_one_stable_json_summary() {
     let output = Command::new(env!("CARGO_BIN_EXE_headless"))
@@ -67,11 +69,42 @@ fn opt_in_ui_observation_reports_authored_retry_facts_after_the_wave_summary() {
     let lines = stdout.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2);
     assert!(lines[0].contains("\"schema\":\"nara-reference-game.wave-summary-v1\""));
-    assert!(lines[1].contains("\"schema\":\"nara-reference-game.ui-observation-v2\""));
-    assert!(lines[1].contains("\"authored_size\":[960,540]"));
-    assert!(lines[1].contains("\"action\":\"reference-game.retry\""));
-    assert!(lines[1].contains("\"name\":\"Retry\""));
-    assert!(lines[1].contains("\"authored_size\":[176,48]"));
+    let observation: Value =
+        serde_json::from_str(lines[1]).expect("UI observation must be valid JSON");
+    assert_eq!(
+        observation["schema"],
+        Value::String("nara-reference-game.ui-observation-v2".to_owned())
+    );
+    assert_eq!(observation["authored_size"], serde_json::json!([960, 540]));
+    let retry = &observation["retry"];
+    assert_eq!(
+        retry["entity_id"],
+        Value::String("reference-ui/retry-button".to_owned())
+    );
+    assert_eq!(
+        retry["source_document"],
+        Value::String("reference-ui.prefab.json".to_owned())
+    );
+    assert_eq!(
+        retry["source_entity"],
+        Value::String("retry-button".to_owned())
+    );
+    assert_eq!(
+        retry["action"],
+        Value::String("reference-game.retry".to_owned())
+    );
+    assert_eq!(retry["name"], Value::String("Retry".to_owned()));
+    assert_eq!(retry["enabled"], Value::Bool(true));
+    let authored_size = retry["authored_size"]
+        .as_array()
+        .expect("Retry authored size must be a pair");
+    assert_eq!(authored_size.len(), 2);
+    assert!(
+        authored_size
+            .iter()
+            .all(|value| value.as_f64().is_some_and(|value| value > 0.0))
+    );
+    assert!(observation["presentation"].is_null());
 }
 
 #[test]

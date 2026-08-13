@@ -1855,6 +1855,7 @@ dependencies = [
  "nara_ui_kernel",
  "nara_ui_render",
  "nara_winit",
+ "serde_json",
  "windows",
 ]
 
