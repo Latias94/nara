@@ -355,8 +355,9 @@ target has structured evidence rather than a digest-only pass.
 
 **Depends on:** RUP-U2.
 
-**Status:** Paused by the registered Presented UI Evidence Correlation Correction after Reviewed
-Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`.
+**Status:** Active after Presented UI Evidence Correlation Conformance record
+`a87355beec2241669936985528c9c172`; Reviewed Product Composition Conformance Baseline
+`56264181873249c18d5477ce2170c8b1` remains pinned.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 
