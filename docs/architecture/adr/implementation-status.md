@@ -1,7 +1,7 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified**: 2026-08-12
+**Last Verified**: 2026-08-13
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole
 active execution contract is the [Product Composition Contribution Correction
@@ -13,7 +13,8 @@ evidence. Legacy rows that still name NUI-U15B/U16 describe the last completed N
 0107-0109 and the successor UIF baseline own shared UI contracts while PCC restores the root
 product-composition contract. RUP-U1 is implemented at `e88ad06` with evidence record
 `882397b5b744448cbd5cb8d5c3d0568a`; RUP-U2 is implemented at `ec38c43` with evidence record
-`7bf5d3a0da2c45ad98ced5f01482cf21`; RUP-U3 is paused and PCC-U1 is active.
+`7bf5d3a0da2c45ad98ced5f01482cf21`; RUP-U3 is paused, PCC-U2 is implemented at `18ec878` with
+verification record `c7031e35724f4c55928c2dd77dc0b63d`, and PCC-U3 is active.
 
 ## Current UI correction lineage (2026-08-12)
 
@@ -26,19 +27,21 @@ commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target 
 platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; UIFM-U1 is
 complete at `40d3f87`; UIFM-U2 published the predecessor baseline; RUP-U1 is complete at `e88ad06`;
 UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-U2 is complete at
-`ec38c43`; RUP-U3 is paused by the registered PCC correction.
+`ec38c43`; RUP-U3 is paused by the registered PCC correction. PCC-U2 is implemented at
+`18ec878` with exact receipt-stamped platform publication evidence.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
 `WinitAccessibilityBridge` symbol in older anchors.
 
-## Current product-composition correction (2026-08-12)
+## Current product-composition correction (2026-08-13)
 
 The all-features requested-subset reproduction record
 `4f2f32ff95af4504a2e224d0868ec7a0` reopens the implementation evidence for ADR 0040, ADR 0046,
 ADR 0079 and ADR 0106 without changing their Accepted decisions. The current implementation lets
 compiled WGPU UI and Winit accessibility integrations change an unrequested product's plugin and
-native-runtime behavior. PCC-U1 is the sole active unit; it first separates concrete WGPU
-contributions from the base backend, followed by explicit Winit accessibility activation and
-ordinary `ProductRecipe` authority closure. These ADR rows remain `partial` until the Product
+native-runtime behavior. PCC-U2 is implemented; PCC-U3 is the sole active unit. PCC-U1 separated
+concrete WGPU contributions from the base backend, PCC-U2 made Winit accessibility an explicit
+requested contribution, and PCC-U3 owns ordinary `ProductRecipe` authority closure. These ADR rows
+remain `partial` until the Product
 Composition Conformance Baseline binds clean implementation and requested-subset evidence.
 
 | Current corrective owner | Status | Durable scope |
@@ -52,6 +55,9 @@ Composition Conformance Baseline binds clean implementation and requested-subset
 | UIFM-U2 | implemented | successor Foundation Conformance Baseline `19cfa496dc2346368764057367cc2163` and explicit RUP-U1 rebase |
 | RUP-U1 | implemented | one managed gameplay-to-Retry trajectory with exact typed command, matching receipt and first-party platform ingress; commit `e88ad06` and record `882397b5b744448cbd5cb8d5c3d0568a` |
 | RUP-U2 | implemented | authored source, structured surface, exact WGPU payload, headless parity and clean-commit package delivery closure; commit `ec38c43` and record `7bf5d3a0da2c45ad98ced5f01482cf21` |
+| PCC-U1 | implemented | feature-invariant WGPU base and explicit Sprite/UI contribution split; commit `742c1e8` and verification record `55abac61d345418ca2dc60328bee6111` |
+| PCC-U2 | implemented | explicit Winit accessibility contribution, captured activation modes and exact receipt-stamped platform publication; commit `18ec878` and verification `c7031e35724f4c55928c2dd77dc0b63d` |
+| PCC-U3 | active | `ProductRecipe` ordinary Host composition authority; removes the second raw plugin/provider edit channel while retaining advanced/direct-App composition |
 | RUP-U3 | paused | final simplification, Standards/Spec review, committed-scope gates, high-authority ledger closure and Product-Validated baseline publication; resumes after PCC baseline publication |
 | UIFD-U1 | implemented | immutable content-only `UiText` replacement that preserves authored presentation and semantic policy; commit `ba918db` and record `ecea4e791ef449afb0b57fece9f8ecda` |
 | UIFD-U2 | implemented | successor Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316` and explicit RUP-U2 rebase |
