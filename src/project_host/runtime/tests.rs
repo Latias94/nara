@@ -49,10 +49,12 @@ use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWork
 use crate::project_content::{
     ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
 };
-use crate::project_host::{
-    built_in_schema_providers, ingest_project_manifest, project_runtime_plugins,
-    resolve_runtime_plan,
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+use crate::project_host::advanced::{RuntimeProbe, desktop_run_with_probe};
+use crate::project_host::advanced::{
+    built_in_schema_providers, project_runtime_plugins, resolve_runtime_plan,
 };
+use crate::project_host::ingest_project_manifest;
 use crate::startup_scene::{
     StartupSceneActivation, StartupSceneActivationOwner, StartupSceneActivationSet,
 };
@@ -1432,10 +1434,15 @@ fn desktop_product_report_preserves_a_real_candidate_startup_failure() {
     let project = TestProject::new("desktop-startup-failure");
     let builds = Arc::new(AtomicUsize::new(0));
     let closes = Arc::new(AtomicUsize::new(0));
-    let intent = DesktopRunIntent::new()
-        .insert_after::<GameplayCommandPlugin>(close_probe_definition(&builds, &closes))
-        .insert_after::<CloseProbePlugin>(startup_failure_definition());
-    let mut run = DesktopRun::new(project.capability(), intent);
+    let recipe = crate::ProductRecipe::new()
+        .add_plugin::<StartupFailurePlugin>()
+        .unwrap();
+    let intent = DesktopRunIntent::new().with_recipe(recipe);
+    let mut run = desktop_run_with_probe(
+        project.capability(),
+        intent,
+        RuntimeProbe::new(close_probe_definition(&builds, &closes)),
+    );
 
     let first = run.execute();
     assert_eq!(first.outcome(), DesktopRunOutcome::CleanupIncomplete);
@@ -1898,14 +1905,6 @@ fn admission_scope_failure_definition() -> PluginDefinition {
         ADMISSION_SCOPE_FAILURE_DEFINITION_ID,
         b"project-admission-scope-failure-v1",
         AdmissionScopeFailurePlugin::default,
-    )
-}
-
-fn startup_failure_definition() -> PluginDefinition {
-    PluginDefinition::infallible::<StartupFailurePlugin, _>(
-        STARTUP_FAILURE_DEFINITION_ID,
-        b"project-startup-failure-v1",
-        StartupFailurePlugin::default,
     )
 }
 
