@@ -7,7 +7,8 @@ amended: 2026-08-13
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+completion_evidence: docs/knowledge/engineering/verification/2026-08/2026-08-13T155950Z-rup-u3-runtime-ui-product-validated-baseline-a203485f0c8e478eb3ec1e03426aca67.md
 presented_evidence_record: a87355beec2241669936985528c9c172
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
@@ -84,7 +85,8 @@ Correction](2026-08-13-001-refactor-presented-ui-evidence-correlation-correction
 shared evidence-contract repair. PUEC-U3 completed at commits `d028e4c` and `eff8620`; immutable
 conformance record `a87355beec2241669936985528c9c172` binds the exact owner-produced presentation,
 dual frame identities, post-readiness measurement state machine and final no-P0/P1 review. The UI
-Foundation and Product Composition baselines remain unchanged, and RUP-U3 is active again.
+Foundation and Product Composition baselines remained unchanged, and RUP-U3 resumed before this
+plan later completed at the Product-Validated baseline.
 
 ## Product Contract
 
@@ -355,9 +357,11 @@ target has structured evidence rather than a digest-only pass.
 
 **Depends on:** RUP-U2.
 
-**Status:** Active after Presented UI Evidence Correlation Conformance record
-`a87355beec2241669936985528c9c172`; Reviewed Product Composition Conformance Baseline
-`56264181873249c18d5477ce2170c8b1` remains pinned.
+**Status:** Complete at `fa9c43c`; Product-Validated evidence record
+`a203485f0c8e478eb3ec1e03426aca67`. UI Foundation record
+`a628828a8ff941239d79a0b8b3d60316`, Product Composition record
+`56264181873249c18d5477ce2170c8b1`, and Presented UI Evidence Correlation record
+`a87355beec2241669936985528c9c172` remain pinned and unchanged.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 

@@ -1,9 +1,9 @@
 # Reference-Game UI Product Slice
 
-**Status**: Runtime UI product contract; execution state belongs only to the active plan and its engineering-memory registration
+**Status**: Product-validated Runtime UI contract; future execution requires a new active plan and engineering-memory registration
 **Date**: 2026-08-05
-**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint; 2026-08-07 for the example-first NUI-U15A/NUI-U15B split; 2026-08-08 for the UIF/RUP rebaseline
-**Authority**: ADR 0102 and ADR 0107-0109; execution state and the exact Foundation baseline belong to the registered [Runtime UI Product Slice plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) or its registered focused correction
+**Amended**: 2026-08-06 for the NUI-U17 ownership checkpoint; 2026-08-07 for the example-first NUI-U15A/NUI-U15B split; 2026-08-08 for the UIF/RUP rebaseline; 2026-08-13 for Product-Validated closure
+**Authority**: ADR 0102 and ADR 0107-0109; completed execution lineage belongs to the [Runtime UI Product Slice plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md), Product-Validated record `a203485f0c8e478eb3ec1e03426aca67`, and their registered focused corrections
 **Scope**: The first complete data-driven runtime UI proof for the reference game
 
 This document is a product input for the renderer-neutral UI work. It is intentionally narrower

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3b994cc004da73bc88dfedf8b2fc4ffc84e00cdb95b47b42bcfffb9e93248f52"
+source_fingerprint: "3d31447876ffe4805037807b47cd594c24fc986bb1f165587f7eb33c30a6551d"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "3b994cc004da73bc88dfedf8b2fc4ffc84e00cdb95b47b42bcfffb9e932
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3b994cc004da73bc88dfedf8b2fc4ffc84e00cdb95b47b42bcfffb9e93248f52`
-- Immutable records: 435
-- Active lane heads: 1
+- Source fingerprint: `3d31447876ffe4805037807b47cd594c24fc986bb1f165587f7eb33c30a6551d`
+- Immutable records: 437
+- Active lane heads: 0
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Presented UI evidence conformance complete; RUP-U3 active](registry/2026-08/2026-08-13T155500Z-engine-foundation-contract-completion-codex-root-c1faa154867e4ef0b4c72db947fa4b77.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [RUP-U3 Runtime UI Product-Validated Baseline](verification/2026-08/2026-08-13T155950Z-rup-u3-runtime-ui-product-validated-baseline-a203485f0c8e478eb3ec1e03426aca67.md) - Closes the data-authored Runtime UI product slice with exact desktop, headless, accessibility, package and performance evidence.
 - **Verification Evidence**: [PUEC-U3 Presented UI Evidence Correlation Conformance](verification/2026-08/2026-08-13T155000Z-puec-u3-presented-evidence-correlation-conformance-a87355beec2241669936985528c9c172.md) - Closes the focused correction with exact backend-to-receipt correlation and bounded post-readiness product measurement.
 - **Verification Evidence**: [PUEC-U2 receipt-bound presented observation](verification/2026-08/2026-08-13T110513Z-puec-u2-receipt-bound-presented-observation-97aa78c6bbf74fada0b7d99219e271a6.md) - Proves that the presentation owner publishes one immutable observation from the exact accepted WGPU packet only after committing its matching receipt.
 - **Verification Evidence**: [PUEC-U1 exact WGPU frame identity](verification/2026-08/2026-08-13T090735Z-puec-u1-exact-wgpu-frame-identity-5207658a400a48c99783ed034b5b5125.md) - Proves that WGPU transaction and completion evidence retains distinct App-frame and Render-transaction identities.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [PCC-U1 concrete WGPU contribution split](verification/2026-08/2026-08-12T120000Z-pcc-u1-concrete-wgpu-contributions-55abac61d345418ca2dc60328bee6111.md) - Verifies that the base WGPU backend is feature-invariant and Sprite/UI submission is installed only as an explicit requested contribution.
 - **Verification Evidence**: [Product composition requested-subset reproduction](verification/2026-08/2026-08-12T110921Z-product-composition-requested-subset-reproduction-4f2f32ff95af4504a2e224d0868ec7a0.md) - Reproduces the all-features compile-ceiling leak that changes a render-wgpu-only requested plugin closure.
 - **Verification Evidence**: [RUP-U2 authored UI and packaged delivery closure](verification/2026-08/2026-08-12T083431Z-rup-u2-authored-ui-and-packaged-delivery-closure-7bf5d3a0da2c45ad98ced5f01482cf21.md) - Closes ordinary Scene/Prefab authoring, structured surface mapping, exact WGPU payload facts, headless parity, and clean-commit arbitrary-CWD package delivery.
-- **Verification Evidence**: [UIFD-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md) - Publishes immutable dynamic text content replacement as the successor shared UI baseline and permits an explicit RUP-U2 rebase.
 
 # Integration Notes
 
