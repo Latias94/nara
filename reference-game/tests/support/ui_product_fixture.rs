@@ -32,7 +32,8 @@ use nara_reference_game::{
 use nara_render::RenderTarget;
 use nara_ui_kernel::{UiPaintPrimitive, UiRouteStamp};
 use nara_ui_render::{
-    UiPacketPrimitive, UiPacketRect, UiPreparedImages, UiPresentationPlanner,
+    UiGlyphAtlasPageKey, UiPacketPrimitive, UiPacketRect, UiPaintPacketIdentity, UiPreparedImages,
+    UiPresentationPlanner,
 };
 
 use super::project_content_fixture::{
@@ -190,10 +191,20 @@ pub struct ProductUiCapture {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannerPerformanceCapture {
+    pub identity: PlannerPerformanceIdentity,
     pub warmup_samples: usize,
     pub durations_ns: Vec<u64>,
     pub packet_primitives: usize,
-    pub glyph_pages: usize,
+    pub packet_glyph_primitives: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannerPerformanceIdentity {
+    pub target_window_id: u64,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub packet: UiPaintPacketIdentity,
+    pub glyph_page_keys: Vec<UiGlyphAtlasPageKey>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -386,7 +397,8 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
     let prepared = UiPreparedImages::default();
     let mut durations_ns = Vec::with_capacity(PLANNER_RECORDED_SAMPLES);
     let mut packet_primitives = 0;
-    let mut glyph_pages = 0;
+    let mut packet_glyph_primitives = 0;
+    let mut exact_identity = None;
 
     for sample in 0..PLANNER_WARMUP_SAMPLES + PLANNER_RECORDED_SAMPLES {
         let started = Instant::now();
@@ -398,18 +410,43 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
             )
             .expect("the product frame should remain planable within the default budget");
         let elapsed_ns = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let physical_size = packet
+            .frame()
+            .environment()
+            .content_transform()
+            .physical_surface_size();
+        assert_eq!(packet.target(), RenderTarget::Window(WindowId::PRIMARY));
+        assert_eq!(physical_size.width(), UI_PHYSICAL_TARGETS[0].width as f32);
+        assert_eq!(physical_size.height(), UI_PHYSICAL_TARGETS[0].height as f32);
+        let sample_identity = PlannerPerformanceIdentity {
+            target_window_id: WindowId::PRIMARY.get(),
+            physical_width: UI_PHYSICAL_TARGETS[0].width,
+            physical_height: UI_PHYSICAL_TARGETS[0].height,
+            packet: packet.identity(),
+            glyph_page_keys: packet.glyph_pages().iter().map(|page| page.key()).collect(),
+        };
+        if let Some(identity) = exact_identity.as_ref() {
+            assert_eq!(identity, &sample_identity);
+        } else {
+            exact_identity = Some(sample_identity);
+        }
         packet_primitives = packet.primitives().len();
-        glyph_pages = packet.glyph_pages().len();
+        packet_glyph_primitives = packet
+            .primitives()
+            .iter()
+            .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
+            .count();
         if sample >= PLANNER_WARMUP_SAMPLES {
             durations_ns.push(elapsed_ns.max(1));
         }
     }
 
     PlannerPerformanceCapture {
+        identity: exact_identity.expect("the bounded planner loop must produce one exact identity"),
         warmup_samples: PLANNER_WARMUP_SAMPLES,
         durations_ns,
         packet_primitives,
-        glyph_pages,
+        packet_glyph_primitives,
     }
 }
 

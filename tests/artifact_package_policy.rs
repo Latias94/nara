@@ -665,9 +665,14 @@ performance = {
     "referenced_texture_bindings": 1,
     "frame_submitted_sprites": 4,
     "frame_submitted_image_sprites": 3,
-    "presented_texture_bytes": 4096,
-    "presented_instance_buffer_bytes": 2048,
-    "presented_total_bytes": 6144,
+    "submitted_frame_logical_texture_bytes": 4096,
+    "submitted_frame_logical_instance_buffer_bytes": 2048,
+    "submitted_frame_logical_total_bytes": 6144,
+    "measurement_end_current_texture_bytes": 4096,
+    "measurement_end_current_instance_buffer_bytes": 0,
+    "measurement_end_current_total_bytes": 4096,
+    "measurement_end_pending_retirements": 0,
+    "measurement_end_lost_retirements": 0,
     "candidate_run_peak_texture_bytes": 4096,
     "candidate_run_peak_instance_buffer_bytes": 2048,
     "candidate_run_peak_total_bytes": 6144,
@@ -721,6 +726,29 @@ for field, replacement in integer_mutations:
         pass
     else:
         raise AssertionError(f"non-integer field was accepted: {field}")
+
+resource_mutations = [
+    ("measurement_end_pending_retirements", 1),
+    ("measurement_end_lost_retirements", 1),
+]
+for field, replacement in resource_mutations:
+    mutated = copy.deepcopy(performance)
+    mutated[field] = replacement
+    try:
+        smoke.validate_ui_performance(mutated, field)
+    except smoke.ArtifactError:
+        pass
+    else:
+        raise AssertionError(f"invalid measurement-end resource fact was accepted: {field}")
+
+bounded_warmup = copy.deepcopy(performance)
+bounded_warmup["warmup_samples"] = 1
+smoke.validate_ui_performance(bounded_warmup, "bounded.warmup_samples")
+
+bounded_measurement = copy.deepcopy(performance)
+bounded_measurement["measurement_samples"] = 1
+bounded_measurement["completion_samples"] = bounded_measurement["completion_samples"][:1]
+smoke.validate_ui_performance(bounded_measurement, "bounded.measurement_samples")
 
 sample_mutations = [
     ("presented_completion", "duration_ns", True),
@@ -860,9 +888,14 @@ def desktop_output():
         "referenced_texture_bindings": 1,
         "frame_submitted_sprites": 4,
         "frame_submitted_image_sprites": 3,
-        "presented_texture_bytes": 4096,
-        "presented_instance_buffer_bytes": 2048,
-        "presented_total_bytes": 6144,
+        "submitted_frame_logical_texture_bytes": 4096,
+        "submitted_frame_logical_instance_buffer_bytes": 2048,
+        "submitted_frame_logical_total_bytes": 6144,
+        "measurement_end_current_texture_bytes": 4096,
+        "measurement_end_current_instance_buffer_bytes": 0,
+        "measurement_end_current_total_bytes": 4096,
+        "measurement_end_pending_retirements": 0,
+        "measurement_end_lost_retirements": 0,
         "candidate_run_peak_texture_bytes": 4096,
         "candidate_run_peak_instance_buffer_bytes": 2048,
         "candidate_run_peak_total_bytes": 6144,

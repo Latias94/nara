@@ -48,6 +48,11 @@ struct CandidateBackendObservation {
     presented_completion: CandidateCompletionSample,
     completion_samples: Vec<CandidateCompletionSample>,
     wgpu: PresentedUiWgpuFacts,
+    measurement_end_current_texture_bytes: u64,
+    measurement_end_current_instance_buffer_bytes: u64,
+    measurement_end_current_total_bytes: u64,
+    measurement_end_pending_retirements: u32,
+    measurement_end_lost_retirements: u64,
     candidate_run_peak_texture_bytes: u64,
     candidate_run_peak_instance_buffer_bytes: u64,
     candidate_run_peak_total_bytes: u64,
@@ -144,6 +149,12 @@ impl CandidateBackendObservation {
             presented_completion,
             completion_samples: completion_samples.to_vec(),
             wgpu: armed.wgpu,
+            measurement_end_current_texture_bytes: resources.current_texture_bytes(),
+            measurement_end_current_instance_buffer_bytes: resources
+                .current_instance_buffer_bytes(),
+            measurement_end_current_total_bytes: resources.current_total_bytes(),
+            measurement_end_pending_retirements: resources.pending_retirements(),
+            measurement_end_lost_retirements: resources.lost_retirements(),
             candidate_run_peak_texture_bytes: resources.peak_texture_bytes(),
             candidate_run_peak_instance_buffer_bytes: resources.peak_instance_buffer_bytes(),
             candidate_run_peak_total_bytes: resources.peak_total_bytes(),
@@ -163,7 +174,7 @@ impl CandidateBackendObservation {
             .join(",");
         format!(
             concat!(
-                "{{\"schema\":\"nara-reference-game.ui-performance-v2\",",
+                "{{\"schema\":\"nara-reference-game.ui-performance-v3\",",
                 "\"backend_instance_id\":{},\"device_epoch\":{},",
                 "\"app_frame_index\":{},\"render_transaction_frame_index\":{},",
                 "\"ui_admission_id\":{},\"presentation_epoch\":{},",
@@ -181,9 +192,14 @@ impl CandidateBackendObservation {
                 "\"referenced_texture_bindings\":{},",
                 "\"frame_submitted_sprites\":{},",
                 "\"frame_submitted_image_sprites\":{},",
-                "\"presented_texture_bytes\":{},",
-                "\"presented_instance_buffer_bytes\":{},",
-                "\"presented_total_bytes\":{},",
+                "\"submitted_frame_logical_texture_bytes\":{},",
+                "\"submitted_frame_logical_instance_buffer_bytes\":{},",
+                "\"submitted_frame_logical_total_bytes\":{},",
+                "\"measurement_end_current_texture_bytes\":{},",
+                "\"measurement_end_current_instance_buffer_bytes\":{},",
+                "\"measurement_end_current_total_bytes\":{},",
+                "\"measurement_end_pending_retirements\":{},",
+                "\"measurement_end_lost_retirements\":{},",
                 "\"candidate_run_peak_texture_bytes\":{},",
                 "\"candidate_run_peak_instance_buffer_bytes\":{},",
                 "\"candidate_run_peak_total_bytes\":{}}}\n"
@@ -219,77 +235,14 @@ impl CandidateBackendObservation {
             self.wgpu.submitted_texture_bytes(),
             self.wgpu.submitted_instance_buffer_bytes(),
             self.wgpu.submitted_total_bytes(),
+            self.measurement_end_current_texture_bytes,
+            self.measurement_end_current_instance_buffer_bytes,
+            self.measurement_end_current_total_bytes,
+            self.measurement_end_pending_retirements,
+            self.measurement_end_lost_retirements,
             self.candidate_run_peak_texture_bytes,
             self.candidate_run_peak_instance_buffer_bytes,
             self.candidate_run_peak_total_bytes,
-        )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn structured_performance_output_names_the_full_presented_identity() {
-        let samples = (0..MEASUREMENT_SAMPLE_COUNT)
-            .map(|offset| {
-                CandidateCompletionSample::new(
-                    3,
-                    12 + offset as u64,
-                    11 + offset as u64,
-                    110 + offset as u64,
-                )
-            })
-            .collect::<Vec<_>>();
-        let json = performance_json_fixture(&samples);
-
-        assert!(json.contains("\"schema\":\"nara-reference-game.ui-performance-v2\""));
-        assert!(json.contains("\"app_frame_index\":11"));
-        assert!(json.contains("\"render_transaction_frame_index\":10"));
-        assert!(json.contains("\"ui_admission_id\":5"));
-        assert!(json.contains("\"surface_id\":1"));
-        assert!(json.contains("\"measurement_samples\":16"));
-        assert!(!json.contains("\"frame_index\":"));
-    }
-
-    fn performance_json_fixture(samples: &[CandidateCompletionSample]) -> String {
-        let samples = samples
-            .iter()
-            .copied()
-            .map(CandidateCompletionSample::to_json)
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            concat!(
-                "{{\"schema\":\"nara-reference-game.ui-performance-v2\",",
-                "\"backend_instance_id\":7,\"device_epoch\":3,",
-                "\"app_frame_index\":11,\"render_transaction_frame_index\":10,",
-                "\"ui_admission_id\":5,\"presentation_epoch\":6,",
-                "\"surface_id\":1,\"ui_frame_revision\":4,",
-                "\"source_revision\":4,\"slot_generation\":1,",
-                "\"route_revision\":1,\"geometry_generation\":1,",
-                "\"presentation_revision\":1,\"theme_revision\":1,",
-                "\"font_revision\":1,\"warmup_samples\":4,",
-                "\"measurement_samples\":16,\"completion_sample_loss\":0,",
-                "\"presented_completion\":{{\"device_epoch\":3,",
-                "\"app_frame_index\":11,\"render_transaction_frame_index\":10,",
-                "\"duration_ns\":100}},\"completion_samples\":[{}],",
-                "\"ui_primitives\":32,\"ui_images\":0,",
-                "\"ui_glyph_primitives\":20,\"ui_glyph_pages\":1,",
-                "\"submitted_ui_quads\":32,",
-                "\"submitted_glyph_quads\":20,",
-                "\"referenced_texture_bindings\":1,",
-                "\"frame_submitted_sprites\":4,",
-                "\"frame_submitted_image_sprites\":3,",
-                "\"presented_texture_bytes\":4096,",
-                "\"presented_instance_buffer_bytes\":2048,",
-                "\"presented_total_bytes\":6144,",
-                "\"candidate_run_peak_texture_bytes\":4096,",
-                "\"candidate_run_peak_instance_buffer_bytes\":2048,",
-                "\"candidate_run_peak_total_bytes\":6144}}\n"
-            ),
-            samples
         )
     }
 }

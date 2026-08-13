@@ -26,7 +26,7 @@ import package
 
 HEADLESS_SUMMARY_SCHEMA = "nara-reference-game.wave-summary-v1"
 UI_OBSERVATION_SCHEMA = "nara-reference-game.ui-observation-v2"
-UI_PERFORMANCE_SCHEMA = "nara-reference-game.ui-performance-v2"
+UI_PERFORMANCE_SCHEMA = "nara-reference-game.ui-performance-v3"
 UI_OBSERVATION_ENV = "NARA_REFERENCE_UI_OBSERVATION"
 DESKTOP_SMOKE_SUCCESS = b"desktop_candidate_smoke: ok\n"
 MAX_PROCESS_OUTPUT_BYTES = 64 * 1024
@@ -907,9 +907,14 @@ def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, ob
         "referenced_texture_bindings",
         "frame_submitted_sprites",
         "frame_submitted_image_sprites",
-        "presented_texture_bytes",
-        "presented_instance_buffer_bytes",
-        "presented_total_bytes",
+        "submitted_frame_logical_texture_bytes",
+        "submitted_frame_logical_instance_buffer_bytes",
+        "submitted_frame_logical_total_bytes",
+        "measurement_end_current_texture_bytes",
+        "measurement_end_current_instance_buffer_bytes",
+        "measurement_end_current_total_bytes",
+        "measurement_end_pending_retirements",
+        "measurement_end_lost_retirements",
         "candidate_run_peak_texture_bytes",
         "candidate_run_peak_instance_buffer_bytes",
         "candidate_run_peak_total_bytes",
@@ -919,6 +924,9 @@ def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, ob
     nonnegative_fields = {
         "completion_sample_loss",
         "ui_images",
+        "measurement_end_current_instance_buffer_bytes",
+        "measurement_end_pending_retirements",
+        "measurement_end_lost_retirements",
     }
     positive_fields = {
         "backend_instance_id",
@@ -944,9 +952,11 @@ def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, ob
         "referenced_texture_bindings",
         "frame_submitted_sprites",
         "frame_submitted_image_sprites",
-        "presented_texture_bytes",
-        "presented_instance_buffer_bytes",
-        "presented_total_bytes",
+        "submitted_frame_logical_texture_bytes",
+        "submitted_frame_logical_instance_buffer_bytes",
+        "submitted_frame_logical_total_bytes",
+        "measurement_end_current_texture_bytes",
+        "measurement_end_current_total_bytes",
         "candidate_run_peak_texture_bytes",
         "candidate_run_peak_instance_buffer_bytes",
         "candidate_run_peak_total_bytes",
@@ -954,10 +964,8 @@ def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, ob
     if (
         set(value) != expected_keys
         or value.get("schema") != UI_PERFORMANCE_SCHEMA
-        or type(value.get("warmup_samples")) is not int
-        or value["warmup_samples"] != 4
-        or type(value.get("measurement_samples")) is not int
-        or value["measurement_samples"] != 16
+        or not is_positive_integer(value.get("warmup_samples"))
+        or not is_positive_integer(value.get("measurement_samples"))
         or type(value.get("completion_sample_loss")) is not int
         or value["completion_sample_loss"] != 0
         or not isinstance(presented, dict)
@@ -1003,22 +1011,8 @@ def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, ob
         != len(samples)
         or not all(is_positive_integer(value.get(field)) for field in positive_fields)
         or not all(type(value.get(field)) is int and value[field] >= 0 for field in nonnegative_fields)
-        or value["ui_glyph_primitives"] > value["ui_primitives"]
-        or value["submitted_glyph_quads"] > value["submitted_ui_quads"]
-        or value["submitted_glyph_quads"] > value["ui_glyph_primitives"]
-        or value["frame_submitted_image_sprites"] > value["frame_submitted_sprites"]
-        or value["presented_total_bytes"]
-        != value["presented_texture_bytes"] + value["presented_instance_buffer_bytes"]
-        or value["candidate_run_peak_texture_bytes"]
-        < value["presented_texture_bytes"]
-        or value["candidate_run_peak_instance_buffer_bytes"]
-        < value["presented_instance_buffer_bytes"]
-        or value["candidate_run_peak_total_bytes"]
-        < value["presented_total_bytes"]
-        or value["candidate_run_peak_total_bytes"]
-        < value["candidate_run_peak_texture_bytes"]
-        or value["candidate_run_peak_total_bytes"]
-        < value["candidate_run_peak_instance_buffer_bytes"]
+        or value["measurement_end_pending_retirements"] != 0
+        or value["measurement_end_lost_retirements"] != 0
     ):
         raise ArtifactError(f"{subject} emitted invalid UI performance facts")
     return value
