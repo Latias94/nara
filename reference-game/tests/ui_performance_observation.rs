@@ -14,10 +14,14 @@ fn warmed_product_frame_planner_emits_bounded_raw_observations() {
     assert_eq!(capture.warmup_samples, 4);
     assert_eq!(capture.durations_ns.len(), 16);
     assert!(capture.durations_ns.iter().all(|duration| *duration > 0));
-    assert!(capture.packet_primitives > 0);
-    assert!(capture.packet_glyph_primitives > 0);
 
     let identity = &capture.identity;
+    assert!(identity.packet_primitives > 0);
+    assert!(identity.packet_glyph_primitives > 0);
+    assert_eq!(
+        identity.packet_glyph_primitives,
+        identity.glyph_page_references.len()
+    );
     assert!(!identity.glyph_page_keys.is_empty());
     let packet = identity.packet;
     let durations = capture
@@ -67,8 +71,8 @@ fn warmed_product_frame_planner_emits_bounded_raw_observations() {
         capture.warmup_samples,
         capture.durations_ns.len(),
         durations,
-        capture.packet_primitives,
-        capture.packet_glyph_primitives,
+        identity.packet_primitives,
+        identity.packet_glyph_primitives,
         glyph_page_keys,
     );
 }

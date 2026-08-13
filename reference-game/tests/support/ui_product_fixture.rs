@@ -194,8 +194,6 @@ pub struct PlannerPerformanceCapture {
     pub identity: PlannerPerformanceIdentity,
     pub warmup_samples: usize,
     pub durations_ns: Vec<u64>,
-    pub packet_primitives: usize,
-    pub packet_glyph_primitives: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -204,7 +202,10 @@ pub struct PlannerPerformanceIdentity {
     pub physical_width: u32,
     pub physical_height: u32,
     pub packet: UiPaintPacketIdentity,
+    pub packet_primitives: usize,
+    pub packet_glyph_primitives: usize,
     pub glyph_page_keys: Vec<UiGlyphAtlasPageKey>,
+    pub glyph_page_references: Vec<UiGlyphAtlasPageKey>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -396,8 +397,6 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
     let mut planner = UiPresentationPlanner::default();
     let prepared = UiPreparedImages::default();
     let mut durations_ns = Vec::with_capacity(PLANNER_RECORDED_SAMPLES);
-    let mut packet_primitives = 0;
-    let mut packet_glyph_primitives = 0;
     let mut exact_identity = None;
 
     for sample in 0..PLANNER_WARMUP_SAMPLES + PLANNER_RECORDED_SAMPLES {
@@ -418,24 +417,40 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
         assert_eq!(packet.target(), RenderTarget::Window(WindowId::PRIMARY));
         assert_eq!(physical_size.width(), UI_PHYSICAL_TARGETS[0].width as f32);
         assert_eq!(physical_size.height(), UI_PHYSICAL_TARGETS[0].height as f32);
+        let glyph_page_keys = packet
+            .glyph_pages()
+            .iter()
+            .map(|page| page.key())
+            .collect::<Vec<_>>();
+        let glyph_page_references = packet
+            .primitives()
+            .iter()
+            .filter_map(|primitive| match primitive {
+                UiPacketPrimitive::Glyph { page_index, .. } => Some(
+                    packet
+                        .glyph_pages()
+                        .get(usize::from(*page_index))
+                        .expect("each glyph primitive should reference a retained packet page")
+                        .key(),
+                ),
+                UiPacketPrimitive::Rect { .. } => None,
+            })
+            .collect::<Vec<_>>();
         let sample_identity = PlannerPerformanceIdentity {
             target_window_id: WindowId::PRIMARY.get(),
             physical_width: UI_PHYSICAL_TARGETS[0].width,
             physical_height: UI_PHYSICAL_TARGETS[0].height,
             packet: packet.identity(),
-            glyph_page_keys: packet.glyph_pages().iter().map(|page| page.key()).collect(),
+            packet_primitives: packet.primitives().len(),
+            packet_glyph_primitives: glyph_page_references.len(),
+            glyph_page_keys,
+            glyph_page_references,
         };
         if let Some(identity) = exact_identity.as_ref() {
             assert_eq!(identity, &sample_identity);
         } else {
             exact_identity = Some(sample_identity);
         }
-        packet_primitives = packet.primitives().len();
-        packet_glyph_primitives = packet
-            .primitives()
-            .iter()
-            .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
-            .count();
         if sample >= PLANNER_WARMUP_SAMPLES {
             durations_ns.push(elapsed_ns.max(1));
         }
@@ -445,8 +460,6 @@ pub fn capture_planner_performance() -> PlannerPerformanceCapture {
         identity: exact_identity.expect("the bounded planner loop must produce one exact identity"),
         warmup_samples: PLANNER_WARMUP_SAMPLES,
         durations_ns,
-        packet_primitives,
-        packet_glyph_primitives,
     }
 }
 
