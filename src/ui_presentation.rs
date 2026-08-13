@@ -11,9 +11,13 @@ use nara_ui_render::{
 #[cfg(feature = "desktop-winit")]
 mod accessibility;
 mod attempts;
+mod observation;
 mod surfaces;
 
 use attempts::{UiPresentationAttempt, UiPresentationAttemptLedger};
+#[cfg(feature = "render-wgpu")]
+pub use observation::PresentedUiWgpuFacts;
+pub use observation::{PresentedUiObservation, latest_presented_ui_observation};
 
 #[derive(Clone, Copy, nara_ecs::Resource)]
 struct NativeAccessibilityPresentationPort {
@@ -75,6 +79,7 @@ impl Plugin for UiPresentationBridgePlugin {
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.init_resource::<UiPresentationBridgeStats>()?;
         app.init_resource::<UiPresentationAttemptLedger>()?;
+        app.init_resource::<observation::PresentedUiObservationStore>()?;
         app.add_systems(
             CoreStage::First,
             surfaces::synchronize_runtime_ui_surface_metrics
@@ -538,12 +543,19 @@ fn commit_presented_attempt(world: &mut World, commit: nara_ui_render::OneShotPr
         ));
         return;
     };
-    let _accepted = nara_ui_render::__private::commit_ui_backend_presentation(world, commit);
+    let accepted = nara_ui_render::__private::commit_ui_backend_presentation(world, commit);
+    let staged_observation = observation::stage_presented_ui_observation(world, &accepted);
     let receipt = nara_ui::__private::commit_prepared_ui_presentation(world, authority);
     {
         let mut bridge = world.resource_mut::<UiPresentationBridgeStats>();
         bridge.presented_packets += 1;
         bridge.last_presented_receipt = Some(receipt);
+    }
+    match staged_observation {
+        Ok(staged) => world
+            .resource_mut::<observation::PresentedUiObservationStore>()
+            .publish(staged.commit(receipt)),
+        Err(error) => record_bridge_error(world, error),
     }
     if let Err(error) = NativeAccessibilityPresentationPort::publish_if_installed(world, receipt) {
         record_bridge_error(world, error);

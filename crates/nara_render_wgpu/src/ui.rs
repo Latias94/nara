@@ -1,8 +1,10 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use nara_material::{AlphaMode2d, SamplerDescriptor};
 use nara_render::{RenderTarget, ViewportRect};
-use nara_ui_render::{UiPacketFill, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket};
+use nara_ui_render::{
+    UiPacketFill, UiPacketPrimitive, UiPacketRect, UiPacketUv, UiPaintPacket, UiPaintPacketIdentity,
+};
 use thiserror::Error;
 
 use crate::quad::{
@@ -10,29 +12,101 @@ use crate::quad::{
     WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture, WgpuScissorRect,
 };
 
+pub(crate) fn ui_packet_targets_view(
+    packet: &UiPaintPacket,
+    target: RenderTarget,
+    primary_window_id: Option<nara_window::WindowId>,
+) -> bool {
+    let Some(target_window_id) = target.window_id(primary_window_id) else {
+        return false;
+    };
+    packet.target().window_id(primary_window_id) == Some(target_window_id)
+}
+
+#[cfg(test)]
 pub(crate) fn collect_ui_quad_batches(
     packets: &[Arc<UiPaintPacket>],
     target: RenderTarget,
     primary_window_id: Option<nara_window::WindowId>,
     viewport: ViewportRect,
 ) -> Result<Vec<WgpuQuadBatch>, WgpuUiPacketError> {
-    let Some(target_window_id) = target.window_id(primary_window_id) else {
-        return Ok(Vec::new());
-    };
+    Ok(lower_ui_packets(packets, target, primary_window_id, viewport)?.batches)
+}
+
+pub(crate) fn lower_ui_packets(
+    packets: &[Arc<UiPaintPacket>],
+    target: RenderTarget,
+    primary_window_id: Option<nara_window::WindowId>,
+    viewport: ViewportRect,
+) -> Result<WgpuUiLowering, WgpuUiPacketError> {
     let mut batches = Vec::<WgpuQuadBatch>::new();
+    let mut packet_facts = Vec::new();
     for packet in packets
         .iter()
-        .filter(|packet| packet.target().window_id(primary_window_id) == Some(target_window_id))
+        .filter(|packet| ui_packet_targets_view(packet, target, primary_window_id))
     {
+        let mut facts = WgpuLoweredUiPacketFacts::new(packet);
         for primitive in packet.primitives() {
-            append_primitive(&mut batches, packet, primitive, viewport)?;
+            append_primitive(&mut batches, &mut facts, packet, primitive, viewport)?;
+        }
+        packet_facts.push(facts);
+    }
+    Ok(WgpuUiLowering {
+        batches,
+        packet_facts,
+    })
+}
+
+#[derive(Debug)]
+pub(crate) struct WgpuUiLowering {
+    pub(crate) batches: Vec<WgpuQuadBatch>,
+    pub(crate) packet_facts: Vec<WgpuLoweredUiPacketFacts>,
+}
+
+#[derive(Debug)]
+pub(crate) struct WgpuLoweredUiPacketFacts {
+    pub(crate) packet: UiPaintPacketIdentity,
+    pub(crate) primitive_count: u64,
+    pub(crate) image_count: u64,
+    pub(crate) glyph_primitive_count: u64,
+    pub(crate) glyph_page_count: u64,
+    pub(crate) submitted_quad_count: u64,
+    pub(crate) submitted_glyph_quad_count: u64,
+    pub(crate) resources: BTreeSet<WgpuQuadMaterialKey>,
+}
+
+impl WgpuLoweredUiPacketFacts {
+    fn new(packet: &UiPaintPacket) -> Self {
+        Self {
+            packet: packet.identity(),
+            primitive_count: crate::saturating_u64(packet.primitives().len()),
+            image_count: crate::saturating_u64(packet.images().len()),
+            glyph_primitive_count: crate::saturating_u64(
+                packet
+                    .primitives()
+                    .iter()
+                    .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
+                    .count(),
+            ),
+            glyph_page_count: crate::saturating_u64(packet.glyph_pages().len()),
+            submitted_quad_count: 0,
+            submitted_glyph_quad_count: 0,
+            resources: BTreeSet::new(),
         }
     }
-    Ok(batches)
+
+    fn record_quad(&mut self, material: WgpuQuadMaterialKey, texture: &WgpuQuadTexture) {
+        self.submitted_quad_count = self.submitted_quad_count.saturating_add(1);
+        if matches!(texture, WgpuQuadTexture::Glyph(_)) {
+            self.submitted_glyph_quad_count = self.submitted_glyph_quad_count.saturating_add(1);
+        }
+        self.resources.insert(material);
+    }
 }
 
 fn append_primitive(
     batches: &mut Vec<WgpuQuadBatch>,
+    facts: &mut WgpuLoweredUiPacketFacts,
     packet: &UiPaintPacket,
     primitive: &UiPacketPrimitive,
     viewport: ViewportRect,
@@ -80,7 +154,7 @@ fn append_primitive(
                     WgpuUiShape::fill(*corner_radius),
                     viewport,
                 ) {
-                    append_quad(batches, texture, scissor, instance);
+                    append_quad(batches, facts, texture, scissor, instance);
                 }
             }
             if let Some(border) = border.filter(|border| border.width() > 0.0)
@@ -93,7 +167,7 @@ fn append_primitive(
                     viewport,
                 )
             {
-                append_quad(batches, WgpuQuadTexture::Fallback, scissor, instance);
+                append_quad(batches, facts, WgpuQuadTexture::Fallback, scissor, instance);
             }
         }
         UiPacketPrimitive::Glyph {
@@ -117,6 +191,7 @@ fn append_primitive(
             ) {
                 append_quad(
                     batches,
+                    facts,
                     WgpuQuadTexture::Glyph(page.clone()),
                     scissor,
                     instance,
@@ -129,6 +204,7 @@ fn append_primitive(
 
 fn append_quad(
     batches: &mut Vec<WgpuQuadBatch>,
+    facts: &mut WgpuLoweredUiPacketFacts,
     texture: WgpuQuadTexture,
     scissor: Option<WgpuScissorRect>,
     instance: WgpuQuadInstance,
@@ -138,6 +214,7 @@ fn append_quad(
         sampler: SamplerDescriptor::default(),
         alpha_mode: AlphaMode2d::Blend,
     };
+    facts.record_quad(material, &texture);
     if let Some(batch) = batches.last_mut()
         && batch.material == material
         && batch.texture == texture

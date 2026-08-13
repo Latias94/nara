@@ -9,6 +9,7 @@ use nara_ui::{
     UiSurfaceContentTransform, UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot,
     UiSurfaceSuspensionReason, UiVisual,
 };
+use std::sync::Arc;
 
 use super::*;
 use crate::{PresentationUiPlugins, RuntimeUiPlugins};
@@ -610,6 +611,27 @@ fn host_acceptance_commits_one_exact_receipt_without_a_post_submit_failure() {
     assert_eq!(stats.presented_packets, 1);
     assert_eq!(stats.aborted_packets, 0);
     assert!(stats.last_presented_receipt.is_some());
+    let observation = latest_presented_ui_observation(app.world())
+        .expect("one accepted packet should publish one presented observation");
+    let receipt = stats
+        .last_presented_receipt
+        .expect("one accepted packet should commit one receipt");
+    assert_eq!(observation.receipt(), receipt);
+    assert!(observation.submission().matches_receipt(receipt));
+    assert_eq!(
+        observation.backend_generation(),
+        nara_ui_render::UiPresentationBackendGeneration::new(77, 1).unwrap()
+    );
+    let packet = observation.packet();
+    let frame = observation.frame();
+    assert_eq!(packet.identity(), observation.submission().packet());
+    assert_eq!(frame.revision(), receipt.frame_revision());
+    assert!(Arc::ptr_eq(&packet.frame(), &frame));
+    #[cfg(feature = "render-wgpu")]
+    assert!(
+        observation.wgpu().is_none(),
+        "a non-WGPU fake backend must not inherit unrelated WGPU transaction facts"
+    );
     assert!(
         app.world()
             .resource::<UiPresentationAttemptLedger>()
@@ -632,6 +654,7 @@ fn host_aborts_an_unconsumed_backend_frame_before_later_acceptance() {
         assert_eq!(stats.presented_packets, 0);
         assert!(stats.last_presented_receipt.is_none());
     }
+    assert!(latest_presented_ui_observation(app.world()).is_none());
     assert!(
         !app.world()
             .resource::<UiPresentationAttemptLedger>()
@@ -698,6 +721,13 @@ fn host_discards_a_late_backend_acceptance_after_committing_its_successor() {
     assert_eq!(stats.aborted_packets, 1);
     assert_eq!(stats.stale_backend_acceptances, 1);
     assert_ne!(receipt.presentation_epoch(), stale_epoch.get());
+    let observation = latest_presented_ui_observation(app.world())
+        .expect("the successor should publish the only presented observation");
+    assert_eq!(observation.receipt(), receipt);
+    assert_ne!(
+        observation.submission().presentation_epoch().get(),
+        stale_epoch.get()
+    );
     let (_, presented) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
         .expect("the planner should retain the successor packet")
         .into_parts();
@@ -717,6 +747,80 @@ fn host_discards_a_late_backend_acceptance_after_committing_its_successor() {
         app.world()
             .resource::<UiPresentationAttemptLedger>()
             .is_empty()
+    );
+}
+
+#[test]
+fn a_newer_unpresented_candidate_cannot_replace_the_presented_observation() {
+    let mut app = App::new();
+    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+        .expect("runtime and presentation UI products should install");
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+    let root = install_test_surface_and_root(&mut app, 14, 1);
+
+    app.update().expect("the initial candidate should present");
+    let presented = latest_presented_ui_observation(app.world())
+        .expect("the initial packet should publish an observation");
+    let presented_frame = presented.frame();
+
+    app.world_mut()
+        .expect("test app should expose its world")
+        .entity_mut(root)
+        .insert(UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0)));
+    *app.world_mut()
+        .expect("test app should expose its world")
+        .resource_mut::<FakeBackendMode>() = FakeBackendMode::HoldAcceptance;
+    app.update()
+        .expect("the newer candidate should remain unpresented");
+
+    let latest_candidate = nara_ui::latest_ui_frame(
+        app.world(),
+        UiSurfaceId::new(14).expect("test surface should be non-zero"),
+    )
+    .expect("the UI runtime should remain available")
+    .expect("the changed root should produce a newer candidate");
+    let retained = latest_presented_ui_observation(app.world())
+        .expect("the previous presented observation should remain available");
+    assert_ne!(
+        latest_candidate.revision(),
+        presented.receipt().frame_revision()
+    );
+    assert_eq!(retained.receipt(), presented.receipt());
+    assert!(Arc::ptr_eq(&retained.frame(), &presented_frame));
+}
+
+#[test]
+fn a_rejected_successor_keeps_the_previous_presented_observation() {
+    let mut app = App::new();
+    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+        .expect("runtime and presentation UI products should install");
+    let root = install_test_surface_and_root(&mut app, 15, 1);
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+
+    app.update().expect("the initial candidate should present");
+    let presented = latest_presented_ui_observation(app.world())
+        .expect("the initial packet should publish an observation");
+    let presented_frame = presented.frame();
+
+    app.world_mut()
+        .expect("test app should expose its world")
+        .entity_mut(root)
+        .insert(UiVisual::solid(UiColor::rgba(0.0, 1.0, 0.0, 1.0)));
+    *app.world_mut()
+        .expect("test app should expose its world")
+        .resource_mut::<FakeBackendMode>() = FakeBackendMode::FaultWindow(1);
+    app.update()
+        .expect("the rejected successor should terminate without replacing presentation");
+
+    let retained = latest_presented_ui_observation(app.world())
+        .expect("the previous presented observation should remain available");
+    assert_eq!(retained.receipt(), presented.receipt());
+    assert!(Arc::ptr_eq(&retained.frame(), &presented_frame));
+    assert_eq!(
+        app.world()
+            .resource::<UiPresentationBridgeStats>()
+            .backend_faults,
+        1
     );
 }
 

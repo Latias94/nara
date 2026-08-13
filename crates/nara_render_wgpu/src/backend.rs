@@ -16,7 +16,9 @@ use nara_render::{
     RenderFrameSkipReason, RenderTarget, RenderWindowPacket, ViewportRect,
 };
 #[cfg(feature = "ui-submitter")]
-use nara_ui_render::UiPaintPacketIdentity;
+use nara_ui_render::{
+    UiBackendSubmissionIdentity, UiPaintPacketIdentity, UiPresentationBackendGeneration,
+};
 use nara_window::{
     WindowId,
     backend::{BackendWindowHandles, WindowTargetError},
@@ -121,6 +123,86 @@ pub struct WgpuFrameTransactionStats {
     ui_glyph_primitives: u64,
     #[cfg(feature = "ui-submitter")]
     ui_glyph_pages: u64,
+}
+
+/// Immutable WGPU facts for one exact UI packet in the most recent submitted frame transaction.
+///
+/// The record is packet-local even when multiple UI surfaces share the same native target. It is
+/// produced only after the surface submission succeeds and is retained for the presentation owner
+/// to bind to the matching one-shot backend acceptance.
+#[cfg(feature = "ui-submitter")]
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuSubmittedUiPacketFacts {
+    submission: UiBackendSubmissionIdentity,
+    backend_generation: UiPresentationBackendGeneration,
+    app_frame_index: u64,
+    render_transaction_frame_index: u64,
+    primitive_count: u64,
+    image_count: u64,
+    glyph_primitive_count: u64,
+    glyph_page_count: u64,
+    submitted_quad_count: u64,
+    submitted_glyph_quad_count: u64,
+    resident_texture_binding_count: u64,
+}
+
+#[cfg(feature = "ui-submitter")]
+impl WgpuSubmittedUiPacketFacts {
+    #[must_use]
+    pub const fn submission(self) -> UiBackendSubmissionIdentity {
+        self.submission
+    }
+
+    #[must_use]
+    pub const fn backend_generation(self) -> UiPresentationBackendGeneration {
+        self.backend_generation
+    }
+
+    #[must_use]
+    pub const fn app_frame_index(self) -> u64 {
+        self.app_frame_index
+    }
+
+    #[must_use]
+    pub const fn render_transaction_frame_index(self) -> u64 {
+        self.render_transaction_frame_index
+    }
+
+    #[must_use]
+    pub const fn primitive_count(self) -> u64 {
+        self.primitive_count
+    }
+
+    #[must_use]
+    pub const fn image_count(self) -> u64 {
+        self.image_count
+    }
+
+    #[must_use]
+    pub const fn glyph_primitive_count(self) -> u64 {
+        self.glyph_primitive_count
+    }
+
+    #[must_use]
+    pub const fn glyph_page_count(self) -> u64 {
+        self.glyph_page_count
+    }
+
+    #[must_use]
+    pub const fn submitted_quad_count(self) -> u64 {
+        self.submitted_quad_count
+    }
+
+    #[must_use]
+    pub const fn submitted_glyph_quad_count(self) -> u64 {
+        self.submitted_glyph_quad_count
+    }
+
+    #[must_use]
+    pub const fn resident_texture_binding_count(self) -> u64 {
+        self.resident_texture_binding_count
+    }
 }
 
 impl WgpuFrameTransactionStats {
@@ -238,6 +320,8 @@ pub struct WgpuRenderBackend {
     runtime_generation: Option<u64>,
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
+    #[cfg(feature = "ui-submitter")]
+    submitted_ui_packets: Vec<WgpuSubmittedUiPacketFacts>,
     telemetry: WgpuBackendTelemetry,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
@@ -296,6 +380,20 @@ impl WgpuRenderBackend {
     #[must_use]
     pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         self.frame_transaction_stats
+    }
+
+    /// Returns the exact submitted facts for one presentation attempt in the latest transaction.
+    #[cfg(feature = "ui-submitter")]
+    #[doc(hidden)]
+    #[must_use]
+    pub(crate) fn submitted_ui_packet_facts(
+        &self,
+        submission: UiBackendSubmissionIdentity,
+        backend_generation: UiPresentationBackendGeneration,
+    ) -> Option<WgpuSubmittedUiPacketFacts> {
+        self.submitted_ui_packets.iter().copied().find(|facts| {
+            facts.submission == submission && facts.backend_generation == backend_generation
+        })
     }
 
     /// Monotonic identity of the currently initialized device within this backend instance.
@@ -384,6 +482,8 @@ impl WgpuRenderBackend {
     ) {
         self.frame_transaction_stats =
             WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
+        #[cfg(feature = "ui-submitter")]
+        self.submitted_ui_packets.clear();
     }
 
     pub(super) fn reject_captured_packet(&mut self) {
@@ -408,6 +508,8 @@ impl WgpuRenderBackend {
             self.quad_pipelines.clear();
             self.quad_textures.clear();
         }
+        #[cfg(feature = "ui-submitter")]
+        self.submitted_ui_packets.clear();
         self.telemetry.retire_device_epoch();
         retirement_result
     }
@@ -428,7 +530,7 @@ impl WgpuRenderBackend {
         &mut self,
         handles: Option<&BackendWindowHandles>,
         captured: WgpuCapturedFrame,
-        #[cfg(feature = "ui-submitter")] ui_submissions: Option<
+        #[cfg(feature = "ui-submitter")] mut ui_submissions: Option<
             &mut crate::frame::WgpuUiSubmissionState,
         >,
         frame: &mut RenderFrame,
@@ -507,7 +609,7 @@ impl WgpuRenderBackend {
         self.ensure_device(window.id)?;
         self.fail_if_device_lost()?;
         #[cfg(feature = "ui-submitter")]
-        if let Some(ui_submissions) = ui_submissions {
+        if let Some(ui_submissions) = ui_submissions.as_deref_mut() {
             let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(
                 self.instance_id(),
                 self.device_epoch(),
@@ -572,6 +674,15 @@ impl WgpuRenderBackend {
         let submitted = submitted?;
 
         if submitted {
+            #[cfg(feature = "ui-submitter")]
+            if let Some(ui_submissions) = ui_submissions.as_deref() {
+                self.record_submitted_ui_packets(
+                    ui_submissions.bound_submissions(),
+                    &draw.ui_packets,
+                    app_frame_index,
+                    packet.frame_index(),
+                );
+            }
             stats.draw_calls = draw.draw_calls;
             stats.sprites = draw.sprites;
             frame.mark_submitted();
@@ -584,6 +695,39 @@ impl WgpuRenderBackend {
             );
         }
         Ok(())
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    pub(crate) fn record_submitted_ui_packets(
+        &mut self,
+        submissions: &[nara_ui_render::__private::UiSubmittedBackendSubmission],
+        prepared: &[crate::ui::WgpuLoweredUiPacketFacts],
+        app_frame_index: u64,
+        render_transaction_frame_index: u64,
+    ) {
+        self.submitted_ui_packets.clear();
+        for submission in submissions {
+            let submitted = submission.submission();
+            let Some(prepared) = prepared
+                .iter()
+                .find(|facts| facts.packet == submitted.packet().identity())
+            else {
+                continue;
+            };
+            self.submitted_ui_packets.push(WgpuSubmittedUiPacketFacts {
+                submission: submitted.identity(),
+                backend_generation: submitted.backend_generation(),
+                app_frame_index,
+                render_transaction_frame_index,
+                primitive_count: prepared.primitive_count,
+                image_count: prepared.image_count,
+                glyph_primitive_count: prepared.glyph_primitive_count,
+                glyph_page_count: prepared.glyph_page_count,
+                submitted_quad_count: prepared.submitted_quad_count,
+                submitted_glyph_quad_count: prepared.submitted_glyph_quad_count,
+                resident_texture_binding_count: crate::saturating_u64(prepared.resources.len()),
+            });
+        }
     }
 
     fn admit_packet(&mut self, generation: u64, frame_index: u64) -> Result<(), WgpuRenderError> {
@@ -904,10 +1048,17 @@ impl WgpuRenderBackend {
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
-            let batches = payload.quad_batches(target, viewport)?;
+            let lowered = payload.lower_draw(target, viewport)?;
+            let batches = lowered.batches;
+            #[cfg(feature = "ui-submitter")]
+            let ui_packets = lowered.ui_packets;
             let stats = quad_batch_draw_stats(&batches);
             if batches.is_empty() {
-                return Ok(PreparedSubmitterDraw::default());
+                return Ok(PreparedSubmitterDraw {
+                    #[cfg(feature = "ui-submitter")]
+                    ui_packets,
+                    ..PreparedSubmitterDraw::default()
+                });
             }
             admit_quad_instance_buffers(&batches).map_err(|error| {
                 WgpuRenderError::ContentRejected {
@@ -955,6 +1106,8 @@ impl WgpuRenderBackend {
             Ok(PreparedSubmitterDraw {
                 pipelines,
                 buffers,
+                #[cfg(feature = "ui-submitter")]
+                ui_packets,
                 draw_calls: stats.draw_calls,
                 sprites: stats.sprites,
             })

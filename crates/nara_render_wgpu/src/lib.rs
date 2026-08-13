@@ -90,7 +90,28 @@ pub use crate::surface::{
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 
+#[doc(hidden)]
+pub mod __private {
+    #[cfg(feature = "ui-submitter")]
+    pub use crate::backend::WgpuSubmittedUiPacketFacts;
+
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub fn submitted_ui_packet_facts(
+        backend: &crate::WgpuRenderBackend,
+        submission: nara_ui_render::UiBackendSubmissionIdentity,
+        backend_generation: nara_ui_render::UiPresentationBackendGeneration,
+    ) -> Option<WgpuSubmittedUiPacketFacts> {
+        backend.submitted_ui_packet_facts(submission, backend_generation)
+    }
+}
+
 const WGPU_RENDER_BACKEND: &str = "wgpu";
+
+#[cfg(feature = "ui-submitter")]
+fn saturating_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuRenderPlugin;
@@ -299,6 +320,8 @@ struct PreparedSubmitterDraw {
     pipelines: Vec<WgpuQuadPipelineDrawRef>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     buffers: Vec<WgpuQuadBatchBuffer>,
+    #[cfg(feature = "ui-submitter")]
+    ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
     draw_calls: u32,
     sprites: u32,
 }
@@ -1176,11 +1199,12 @@ mod tests {
     fn enabled_submitter_input_has_no_quad_work() {
         assert!(
             frame::WgpuFramePayload::default()
-                .quad_batches(
+                .lower_draw(
                     RenderTarget::PrimaryWindow,
                     ViewportRect::new(0, 0, 1, 1).unwrap(),
                 )
                 .unwrap()
+                .batches
                 .is_empty()
         );
     }
@@ -1741,11 +1765,9 @@ mod tests {
 
     #[cfg(feature = "ui-submitter")]
     #[test]
-    fn payload_facts_do_not_merge_distinct_image_targets() {
-        let first_target =
-            RenderTarget::Image(nara_asset::Handle::new(nara_asset::AssetId::from_raw(101)));
-        let second_target =
-            RenderTarget::Image(nara_asset::Handle::new(nara_asset::AssetId::from_raw(102)));
+    fn payload_facts_follow_the_same_window_target_as_the_submitter() {
+        let first_target = RenderTarget::Window(WindowId::new(101));
+        let second_target = RenderTarget::Window(WindowId::new(102));
         let first_packet = ui_outcome_packet_for(first_target);
         let first_identity = first_packet.identity();
         let second_packet = ui_outcome_packet_for(second_target);
@@ -1763,6 +1785,50 @@ mod tests {
         assert!(facts.primitives > 0);
         assert!(facts.glyph_primitives > 0);
         assert!(facts.glyph_pages > 0);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn submitted_packet_facts_preserve_distinct_app_and_render_identities() {
+        let packet = ui_outcome_packet();
+        let lowering = crate::ui::lower_ui_packets(
+            std::slice::from_ref(&packet),
+            RenderTarget::Window(WindowId::PRIMARY),
+            Some(WindowId::PRIMARY),
+            ViewportRect::new(0, 0, 16, 16).unwrap(),
+        )
+        .unwrap();
+        let prepared = lowering.packet_facts;
+        let mut outcomes = UiPresentationOutcomes::default();
+        let backend_generation = UiPresentationBackendGeneration::new(77, 3).unwrap();
+        let submitted = submitted_ui_attempt(
+            &mut outcomes,
+            Arc::clone(&packet),
+            81,
+            91,
+            backend_generation,
+        );
+        let state = frame::WgpuUiSubmissionState::Submitted(vec![submitted]);
+        let bound = state
+            .bound_submissions()
+            .first()
+            .expect("one submitted attempt should remain available");
+        let mut backend = WgpuRenderBackend::default();
+        backend.record_submitted_ui_packets(state.bound_submissions(), &prepared, 10, 9);
+        let facts = backend
+            .submitted_ui_packet_facts(bound.submission().identity(), backend_generation)
+            .expect("the exact submitted packet should retain its first-pass lowering facts");
+
+        assert_eq!(facts.submission(), bound.submission().identity());
+        assert_eq!(facts.backend_generation(), backend_generation);
+        assert_eq!(facts.app_frame_index(), 10);
+        assert_eq!(facts.render_transaction_frame_index(), 9);
+        assert!(facts.primitive_count() > 0);
+        assert!(facts.glyph_primitive_count() > 0);
+        assert!(facts.glyph_page_count() > 0);
+        assert!(facts.submitted_quad_count() > 0);
+        assert!(facts.submitted_glyph_quad_count() > 0);
+        assert!(facts.resident_texture_binding_count() > 0);
     }
 
     #[cfg(feature = "ui-submitter")]

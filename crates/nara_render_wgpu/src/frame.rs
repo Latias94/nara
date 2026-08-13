@@ -27,6 +27,8 @@ use nara_window::WindowId;
 use crate::WgpuRenderError;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::WgpuQuadBatch;
+#[cfg(feature = "ui-submitter")]
+use crate::ui::WgpuLoweredUiPacketFacts;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
 pub(crate) enum WgpuFrameSet {
@@ -119,6 +121,13 @@ impl WgpuUiSubmissionState {
                 Err(WgpuRenderError::UiSubmissionRejected { message })
             }
         }
+    }
+
+    pub(crate) fn bound_submissions(&self) -> &[UiSubmittedBackendSubmission] {
+        let Self::Submitted(submissions) = self else {
+            return &[];
+        };
+        submissions
     }
 }
 
@@ -289,60 +298,42 @@ impl WgpuFramePacketSlot {
     }
 }
 
-#[cfg(feature = "ui-submitter")]
-fn render_targets_match(
-    left: RenderTarget,
-    right: RenderTarget,
-    primary_window_id: Option<WindowId>,
-) -> bool {
-    match (
-        left.window_id(primary_window_id),
-        right.window_id(primary_window_id),
-    ) {
-        (Some(left), Some(right)) => left == right,
-        (None, None) => left == right,
-        _ => false,
-    }
-}
-
 impl WgpuFramePayload {
     #[cfg(feature = "ui-submitter")]
     pub(crate) fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
         let mut facts = WgpuUiPayloadFacts::default();
-        for packet in self
-            .ui_packets
-            .iter()
-            .filter(|packet| render_targets_match(packet.target(), target, self.primary_window_id))
-        {
+        for packet in self.ui_packets.iter().filter(|packet| {
+            crate::ui::ui_packet_targets_view(packet, target, self.primary_window_id)
+        }) {
             facts.packet_count = facts.packet_count.saturating_add(1);
             facts.packet_identity = if facts.packet_count == 1 {
                 Some(packet.identity())
             } else {
                 None
             };
-            facts.primitives = packet
-                .primitives()
-                .iter()
-                .fold(facts.primitives, |count, _| count.saturating_add(1));
-            facts.glyph_primitives = packet
-                .primitives()
-                .iter()
-                .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
-                .fold(facts.glyph_primitives, |count, _| count.saturating_add(1));
-            facts.glyph_pages = packet
-                .glyph_pages()
-                .iter()
-                .fold(facts.glyph_pages, |count, _| count.saturating_add(1));
+            facts.primitives = facts
+                .primitives
+                .saturating_add(crate::saturating_u64(packet.primitives().len()));
+            facts.glyph_primitives = facts.glyph_primitives.saturating_add(crate::saturating_u64(
+                packet
+                    .primitives()
+                    .iter()
+                    .filter(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
+                    .count(),
+            ));
+            facts.glyph_pages = facts
+                .glyph_pages
+                .saturating_add(crate::saturating_u64(packet.glyph_pages().len()));
         }
         facts
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-    pub(crate) fn quad_batches(
+    pub(crate) fn lower_draw(
         &self,
         target: RenderTarget,
         viewport: ViewportRect,
-    ) -> Result<Vec<WgpuQuadBatch>, WgpuRenderError> {
+    ) -> Result<WgpuLoweredFrameDraw, WgpuRenderError> {
         #[cfg(feature = "sprite-submitter")]
         let content = self
             .sprite_batches
@@ -353,25 +344,33 @@ impl WgpuFramePayload {
         #[cfg(not(feature = "sprite-submitter"))]
         let content = Vec::new();
         #[cfg(feature = "ui-submitter")]
-        let ui = crate::ui::collect_ui_quad_batches(
-            &self.ui_packets,
-            target,
-            self.primary_window_id,
-            viewport,
-        )
-        .map_err(|error| WgpuRenderError::UiPacketInvariant {
-            message: error.to_string(),
-        })?;
+        let ui =
+            crate::ui::lower_ui_packets(&self.ui_packets, target, self.primary_window_id, viewport)
+                .map_err(|error| WgpuRenderError::UiPacketInvariant {
+                    message: error.to_string(),
+                })?;
         #[cfg(not(feature = "ui-submitter"))]
-        let ui = {
+        let ui_batches = {
             let _ = (target, viewport);
             Vec::new()
         };
+        #[cfg(feature = "ui-submitter")]
+        let ui_batches = ui.batches;
 
-        Ok(nara_render::__private::assemble_first_party_draws(
-            content, ui,
-        ))
+        Ok(WgpuLoweredFrameDraw {
+            batches: nara_render::__private::assemble_first_party_draws(content, ui_batches),
+            #[cfg(feature = "ui-submitter")]
+            ui_packets: ui.packet_facts,
+        })
     }
+}
+
+#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[derive(Debug, Default)]
+pub(crate) struct WgpuLoweredFrameDraw {
+    pub(crate) batches: Vec<WgpuQuadBatch>,
+    #[cfg(feature = "ui-submitter")]
+    pub(crate) ui_packets: Vec<WgpuLoweredUiPacketFacts>,
 }
 
 fn payload_batches_match_topology(

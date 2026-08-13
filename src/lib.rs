@@ -83,6 +83,9 @@ pub mod ui_render {
 
     /// Explicit packet/compiler boundary for Host, backend, and product-verification integrations.
     pub mod advanced {
+        #[cfg(feature = "render-wgpu")]
+        pub use crate::ui_presentation::PresentedUiWgpuFacts;
+        pub use crate::ui_presentation::{PresentedUiObservation, latest_presented_ui_observation};
         pub use nara_ui_render::advanced::*;
     }
 }
