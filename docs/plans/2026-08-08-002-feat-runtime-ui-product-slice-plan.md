@@ -13,7 +13,7 @@ origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md
 supersedes: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 baseline_record: a628828a8ff941239d79a0b8b3d60316
-composition_baseline_record: 180d0dfe0a41417a9633c11cccb91eab
+composition_baseline_record: 56264181873249c18d5477ce2170c8b1
 plan_id: runtime-ui-product-slice-2026-08
 unit_namespace: RUP
 operator_execution_authority: external-control-plane
@@ -67,7 +67,7 @@ only `render-wgpu`. The same ownership defect lets compiled Winit accessibility 
 product behavior without the `presentation-ui + desktop-winit` request pair. The focused
 [Product Composition Contribution Correction](2026-08-12-002-refactor-product-composition-contribution-correction-plan.md)
 completed the backend/platform contribution split and ordinary `ProductRecipe` authority
-correction. Product Composition Conformance Baseline `180d0dfe0a41417a9633c11cccb91eab`
+correction. Reviewed Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`
 is pinned independently as `composition_baseline_record`; the existing UI Foundation
 `baseline_record` remains unchanged. RUP-U3 is now active against both records.
 
@@ -340,8 +340,8 @@ target has structured evidence rather than a digest-only pass.
 
 **Depends on:** RUP-U2.
 
-**Status:** Active after Product Composition Conformance Baseline
-`180d0dfe0a41417a9633c11cccb91eab`.
+**Status:** Active after Reviewed Product Composition Conformance Baseline
+`56264181873249c18d5477ce2170c8b1`.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 

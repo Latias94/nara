@@ -11,7 +11,7 @@ product_contract_source: docs/architecture/adr/0106-content-and-presentation-pro
 origin: docs/plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T083431Z-rup-u2-authored-ui-and-packaged-delivery-closure-7bf5d3a0da2c45ad98ced5f01482cf21.md
 pauses: docs/plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md
-completion_evidence: docs/knowledge/engineering/verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md
+completion_evidence: docs/knowledge/engineering/verification/2026-08/2026-08-13T073115Z-pcc-u4-reviewed-product-composition-conformance-baseline-56264181873249c18d5477ce2170c8b1.md
 plan_id: product-composition-contribution-correction-2026-08
 unit_namespace: PCC
 operator_execution_authority: external-control-plane
@@ -190,8 +190,8 @@ intent can detach a plugin from its schema authority.
 
 **Depends on:** PCC-U1, PCC-U2 and PCC-U3.
 
-**Status:** Complete at Product Composition Conformance Baseline
-`180d0dfe0a41417a9633c11cccb91eab`.
+**Status:** Complete at Reviewed Product Composition Conformance Baseline
+`56264181873249c18d5477ce2170c8b1`.
 
 **Goal:** Publish the corrected product-composition lineage and resume Runtime UI validation without
 rewriting prior evidence.
@@ -199,8 +199,8 @@ rewriting prior evidence.
 **Files:** immutable verification/registration shards, this plan, the RUP frontmatter, ADR ledger,
 migration guide and derived engineering-memory rollups.
 
-**Exit:** Product Composition Conformance Baseline `180d0dfe0a41417a9633c11cccb91eab`
-names the proving commits and exact serial gates. This plan is inactive. RUP retains its UI
+**Exit:** Reviewed Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`
+names the proving commits, final review correction and exact serial gates. This plan is inactive. RUP retains its UI
 Foundation `baseline_record`, pins the distinct `composition_baseline_record`, and RUP-U3 is again
 the sole active product unit.
 

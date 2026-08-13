@@ -14,7 +14,7 @@
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U5 and NUI-U15; [Product Composition Contribution Correction](../../plans/2026-08-12-002-refactor-product-composition-contribution-correction-plan.md)
 
-**Composition Baseline**: [PCC-U4 Product Composition Conformance Baseline](../../knowledge/engineering/verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md)
+**Composition Baseline**: [PCC-U4 Reviewed Product Composition Conformance Baseline](../../knowledge/engineering/verification/2026-08/2026-08-13T073115Z-pcc-u4-reviewed-product-composition-conformance-baseline-56264181873249c18d5477ce2170c8b1.md)
 
 ## 2026-08-12 Product-Contribution Amendment
 
