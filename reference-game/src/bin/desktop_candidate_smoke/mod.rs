@@ -103,7 +103,9 @@ impl CandidateBackendObservation {
                 "desktop candidate GPU resource retirement was incomplete",
             )));
         }
-        let frame_index = transaction.frame_index().ok_or_else(|| {
+        let frame_index = transaction
+            .render_transaction_frame_index()
+            .ok_or_else(|| {
             BevyError::error(CandidateSmokeMeasurementIncomplete(
                 "desktop candidate transaction had no frame identity",
             ))
@@ -119,7 +121,7 @@ impl CandidateBackendObservation {
                     )));
                 }
                 Ok(CandidateCompletionSample {
-                    frame_index: sample.frame_index(),
+                    frame_index: sample.render_transaction_frame_index(),
                     duration_ns: sample.duration_ns(),
                 })
             })

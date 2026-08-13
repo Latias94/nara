@@ -313,7 +313,7 @@ fn render_wgpu_surfaces(
     faults: Option<Res<RuntimeFaultReporter>>,
     _main_thread: NonSendMarker,
 ) {
-    backend.begin_frame_transaction(frame.index);
+    backend.begin_frame_transaction(frame.index, None);
     #[cfg(feature = "ui-submitter")]
     let mut ui_submission_state = packet_slot.take_ui_submissions();
     let capture = packet_slot.take_capture();
@@ -1035,7 +1035,10 @@ mod tests {
             .world()
             .resource::<WgpuRenderBackend>()
             .frame_transaction_stats();
-        assert_eq!(first.frame_index(), Some(first_frame.index));
+        assert_eq!(
+            first.render_transaction_frame_index(),
+            Some(first_frame.index)
+        );
         assert_eq!(first.packet_admissions(), 1);
         assert_eq!(first.packet_rejections(), 0);
         assert_eq!(first.surface_acquire_attempts(), 0);
@@ -1051,7 +1054,10 @@ mod tests {
             .world()
             .resource::<WgpuRenderBackend>()
             .frame_transaction_stats();
-        assert_eq!(rejected.frame_index(), Some(rejected_frame.index));
+        assert_eq!(
+            rejected.render_transaction_frame_index(),
+            Some(rejected_frame.index)
+        );
         assert_eq!(rejected.packet_admissions(), 0);
         assert_eq!(rejected.packet_rejections(), 1);
         assert_eq!(rejected.surface_acquire_attempts(), 0);

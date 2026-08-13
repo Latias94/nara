@@ -179,25 +179,42 @@ pub enum WgpuTelemetryConfigError {
 }
 
 /// One App-frame-start-to-GPU-completion duration for an exact submitted frame and device epoch.
+///
+/// The App frame and the render transaction frame are deliberately retained as separate
+/// identities. A paused or stepped runtime may advance the App-frame counter without advancing
+/// the render transaction counter, so treating either one as the other would permit completion
+/// evidence to be correlated with the wrong submission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuFrameCompletionSample {
-    frame_index: u64,
+    app_frame_index: u64,
+    render_transaction_frame_index: u64,
     device_epoch: u64,
     duration_ns: u64,
 }
 
 impl WgpuFrameCompletionSample {
-    const fn new(frame_index: u64, device_epoch: u64, duration_ns: u64) -> Self {
+    const fn new(
+        app_frame_index: u64,
+        render_transaction_frame_index: u64,
+        device_epoch: u64,
+        duration_ns: u64,
+    ) -> Self {
         Self {
-            frame_index,
+            app_frame_index,
+            render_transaction_frame_index,
             device_epoch,
             duration_ns,
         }
     }
 
     #[must_use]
-    pub const fn frame_index(self) -> u64 {
-        self.frame_index
+    pub const fn app_frame_index(self) -> u64 {
+        self.app_frame_index
+    }
+
+    #[must_use]
+    pub const fn render_transaction_frame_index(self) -> u64 {
+        self.render_transaction_frame_index
     }
 
     #[must_use]
@@ -459,7 +476,8 @@ impl WgpuBackendTelemetry {
 
     pub(crate) fn begin_frame_submission(
         &self,
-        frame_index: u64,
+        app_frame_index: u64,
+        render_transaction_frame_index: u64,
         device_epoch: u64,
         started_at: Instant,
     ) -> Option<WgpuFrameCompletionToken> {
@@ -500,7 +518,8 @@ impl WgpuBackendTelemetry {
             shared: Arc::clone(&self.shared),
             completion_generation,
             resource_generation: state.resource_generation,
-            frame_index,
+            app_frame_index,
+            render_transaction_frame_index,
             device_epoch,
             started_at,
             instance_buffer_bytes,
@@ -553,7 +572,8 @@ pub(crate) struct WgpuFrameCompletionToken {
     shared: Arc<Mutex<WgpuTelemetryState>>,
     completion_generation: Option<u64>,
     resource_generation: u64,
-    frame_index: u64,
+    app_frame_index: u64,
+    render_transaction_frame_index: u64,
     device_epoch: u64,
     started_at: Instant,
     instance_buffer_bytes: u64,
@@ -609,7 +629,8 @@ impl WgpuFrameCompletionToken {
         state
             .completed_frames
             .push_back(WgpuFrameCompletionSample::new(
-                self.frame_index,
+                self.app_frame_index,
+                self.render_transaction_frame_index,
                 self.device_epoch,
                 u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX),
             ));
@@ -703,17 +724,21 @@ mod tests {
         let started = Instant::now();
 
         let first = telemetry
-            .begin_frame_submission(10, 7, started)
+            .begin_frame_submission(10, 10, 7, started)
             .expect("the first completion must be admitted");
         let second = telemetry
-            .begin_frame_submission(11, 7, started)
+            .begin_frame_submission(11, 11, 7, started)
             .expect("the second completion must be admitted");
-        assert!(telemetry.begin_frame_submission(12, 7, started).is_none());
+        assert!(
+            telemetry
+                .begin_frame_submission(12, 12, 7, started)
+                .is_none()
+        );
 
         first.complete_with_duration(Duration::from_nanos(10));
         second.complete_with_duration(Duration::from_nanos(11));
         let third = telemetry
-            .begin_frame_submission(13, 7, started)
+            .begin_frame_submission(13, 13, 7, started)
             .expect("capacity must return after completion");
         third.complete_with_duration(Duration::from_nanos(13));
 
@@ -727,13 +752,41 @@ mod tests {
             samples
                 .iter()
                 .map(|sample| (
-                    sample.frame_index(),
+                    sample.app_frame_index(),
+                    sample.render_transaction_frame_index(),
                     sample.device_epoch(),
                     sample.duration_ns()
                 ))
                 .collect::<Vec<_>>(),
-            vec![(11, 7, 11), (13, 7, 13)]
+            vec![(11, 11, 7, 11), (13, 13, 7, 13)]
         );
+    }
+
+    #[test]
+    fn completion_samples_do_not_conflate_app_and_render_frame_counters() {
+        let telemetry = WgpuBackendTelemetry::default();
+        telemetry.configure(WgpuBackendTelemetryConfig::new(2, 2).unwrap());
+        telemetry.begin_device_epoch(7);
+        let started = Instant::now();
+
+        let prior = telemetry
+            .begin_frame_submission(10, 9, 7, started)
+            .expect("the prior completion must be admitted");
+        let current = telemetry
+            .begin_frame_submission(11, 10, 7, started)
+            .expect("the current completion must be admitted");
+        prior.complete_with_duration(Duration::from_nanos(10));
+        current.complete_with_duration(Duration::from_nanos(11));
+
+        let samples = telemetry.drain_completed_frames();
+        assert_eq!(samples[0].app_frame_index(), 10);
+        assert_eq!(samples[0].render_transaction_frame_index(), 9);
+        let exact = samples
+            .iter()
+            .find(|sample| sample.render_transaction_frame_index() == 10)
+            .expect("the exact render transaction completion must be retained");
+        assert_eq!(exact.app_frame_index(), 11);
+        assert_eq!(exact.duration_ns(), 11);
     }
 
     #[test]
@@ -742,13 +795,13 @@ mod tests {
         telemetry.configure(WgpuBackendTelemetryConfig::new(2, 2).unwrap());
         telemetry.begin_device_epoch(7);
         let obsolete = telemetry
-            .begin_frame_submission(10, 7, Instant::now())
+            .begin_frame_submission(10, 10, 7, Instant::now())
             .unwrap();
 
         telemetry.begin_device_epoch(8);
         obsolete.complete_with_duration(Duration::from_nanos(10));
         let current = telemetry
-            .begin_frame_submission(11, 8, Instant::now())
+            .begin_frame_submission(11, 11, 8, Instant::now())
             .unwrap();
         current.complete_with_duration(Duration::from_nanos(11));
 
@@ -759,7 +812,7 @@ mod tests {
         assert_eq!(stats.lost_samples(), 1);
         assert_eq!(
             telemetry.drain_completed_frames(),
-            vec![WgpuFrameCompletionSample::new(11, 8, 11)]
+            vec![WgpuFrameCompletionSample::new(11, 11, 8, 11)]
         );
     }
 
@@ -770,7 +823,7 @@ mod tests {
         telemetry.begin_device_epoch(7);
         telemetry.observe_gpu_resources(4, 64);
         let obsolete = telemetry
-            .begin_frame_submission(10, 7, Instant::now())
+            .begin_frame_submission(10, 10, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
 
@@ -795,7 +848,7 @@ mod tests {
         telemetry.begin_device_epoch(7);
         telemetry.observe_gpu_resources(4, 64);
         let dropped = telemetry
-            .begin_frame_submission(10, 7, Instant::now())
+            .begin_frame_submission(10, 10, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
 
@@ -820,14 +873,14 @@ mod tests {
         telemetry.begin_device_epoch(7);
         telemetry.observe_gpu_resources(4, 64);
         let obsolete = telemetry
-            .begin_frame_submission(10, 7, Instant::now())
+            .begin_frame_submission(10, 10, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
 
         telemetry.configure(WgpuBackendTelemetryConfig::new(2, 2).unwrap());
         telemetry.observe_gpu_resources(8, 32);
         let current = telemetry
-            .begin_frame_submission(11, 7, Instant::now())
+            .begin_frame_submission(11, 11, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
         let overlapping = telemetry.gpu_resource_stats();
@@ -850,7 +903,7 @@ mod tests {
         assert_eq!(stats.lost_samples(), 1);
         assert_eq!(
             telemetry.drain_completed_frames(),
-            vec![WgpuFrameCompletionSample::new(11, 7, 11)]
+            vec![WgpuFrameCompletionSample::new(11, 11, 7, 11)]
         );
         let resources = telemetry.gpu_resource_stats();
         assert_eq!(resources.current_instance_buffer_bytes(), 0);
@@ -866,12 +919,12 @@ mod tests {
 
         telemetry.observe_gpu_resources(4, 64);
         let first = telemetry
-            .begin_frame_submission(10, 7, Instant::now())
+            .begin_frame_submission(10, 10, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
         telemetry.observe_gpu_resources(8, 32);
         let second = telemetry
-            .begin_frame_submission(11, 7, Instant::now())
+            .begin_frame_submission(11, 11, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
         let stats = telemetry.gpu_resource_stats();
@@ -921,7 +974,7 @@ mod tests {
 
         assert!(
             telemetry
-                .begin_frame_submission(10, 7, Instant::now())
+                .begin_frame_submission(10, 10, 7, Instant::now())
                 .is_none()
         );
         telemetry.finish_prepared_gpu_resources();
@@ -942,14 +995,14 @@ mod tests {
         telemetry.begin_device_epoch(7);
         telemetry.observe_gpu_resources(4, 64);
         let first = telemetry
-            .begin_frame_submission(10, 7, Instant::now())
+            .begin_frame_submission(10, 10, 7, Instant::now())
             .unwrap();
         telemetry.finish_prepared_gpu_resources();
 
         telemetry.observe_gpu_resources(8, 32);
         assert!(
             telemetry
-                .begin_frame_submission(11, 7, Instant::now())
+                .begin_frame_submission(11, 11, 7, Instant::now())
                 .is_none()
         );
         telemetry.finish_prepared_gpu_resources();

@@ -232,7 +232,10 @@ fn verify_resize_then_exit(
         return;
     }
     let transaction = backend.frame_transaction_stats();
-    assert_eq!(transaction.frame_index(), Some(frame.index));
+    assert_eq!(
+        transaction.render_transaction_frame_index(),
+        Some(frame.index)
+    );
     assert_eq!(transaction.packet_admissions(), 1);
     assert_eq!(transaction.packet_rejections(), 0);
     assert_eq!(transaction.surface_acquire_attempts(), 1);

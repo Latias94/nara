@@ -103,7 +103,8 @@ pub enum WgpuBackendState {
 /// prove that no surface was acquired, submitted, or presented.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WgpuFrameTransactionStats {
-    frame_index: Option<u64>,
+    app_frame_index: Option<u64>,
+    render_transaction_frame_index: Option<u64>,
     packet_admissions: u64,
     packet_rejections: u64,
     surface_acquire_attempts: u64,
@@ -124,8 +125,13 @@ pub struct WgpuFrameTransactionStats {
 
 impl WgpuFrameTransactionStats {
     #[must_use]
-    pub const fn frame_index(self) -> Option<u64> {
-        self.frame_index
+    pub const fn app_frame_index(self) -> Option<u64> {
+        self.app_frame_index
+    }
+
+    #[must_use]
+    pub const fn render_transaction_frame_index(self) -> Option<u64> {
+        self.render_transaction_frame_index
     }
 
     #[must_use]
@@ -209,9 +215,10 @@ impl WgpuFrameTransactionStats {
         self.ui_glyph_pages = self.ui_glyph_pages.saturating_add(facts.glyph_pages);
     }
 
-    fn begin(frame_index: u64) -> Self {
+    fn begin(render_transaction_frame_index: u64, app_frame_index: Option<u64>) -> Self {
         Self {
-            frame_index: Some(frame_index),
+            app_frame_index,
+            render_transaction_frame_index: Some(render_transaction_frame_index),
             ..Self::default()
         }
     }
@@ -370,8 +377,13 @@ impl WgpuRenderBackend {
             })
     }
 
-    pub(super) fn begin_frame_transaction(&mut self, frame_index: u64) {
-        self.frame_transaction_stats = WgpuFrameTransactionStats::begin(frame_index);
+    pub(super) fn begin_frame_transaction(
+        &mut self,
+        render_transaction_frame_index: u64,
+        app_frame_index: Option<u64>,
+    ) {
+        self.frame_transaction_stats =
+            WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
     }
 
     pub(super) fn reject_captured_packet(&mut self) {
@@ -431,7 +443,7 @@ impl WgpuRenderBackend {
         } = captured;
         stats.draw_calls = 0;
         stats.sprites = 0;
-        self.begin_frame_transaction(packet.frame_index());
+        self.begin_frame_transaction(packet.frame_index(), Some(app_frame_index));
         if let Err(error) = self.admit_packet(packet.generation().get(), packet.frame_index()) {
             self.frame_transaction_stats.packet_rejections = 1;
             return Err(error);
@@ -553,6 +565,7 @@ impl WgpuRenderBackend {
             packet.view().clear_color,
             &draw,
             app_frame_index,
+            packet.frame_index(),
             work_started_at,
         );
         self.telemetry.finish_prepared_gpu_resources();
@@ -715,7 +728,8 @@ impl WgpuRenderBackend {
         viewport: nara_render::ViewportRect,
         clear_color: Color,
         draw: &PreparedSubmitterDraw,
-        frame_index: u64,
+        app_frame_index: u64,
+        render_transaction_frame_index: u64,
         work_started_at: std::time::Instant,
     ) -> Result<bool, WgpuRenderError> {
         let device = self
@@ -748,7 +762,8 @@ impl WgpuRenderBackend {
                     draw,
                 )?;
                 if let Some(completion) = self.telemetry.begin_frame_submission(
-                    frame_index,
+                    app_frame_index,
+                    render_transaction_frame_index,
                     self.device_epoch,
                     work_started_at,
                 ) {
@@ -771,7 +786,8 @@ impl WgpuRenderBackend {
                     draw,
                 )?;
                 if let Some(completion) = self.telemetry.begin_frame_submission(
-                    frame_index,
+                    app_frame_index,
+                    render_transaction_frame_index,
                     self.device_epoch,
                     work_started_at,
                 ) {
@@ -1185,7 +1201,7 @@ mod tests {
         backend.telemetry.observe_gpu_resources(4, 64);
         let obsolete = backend
             .telemetry
-            .begin_frame_submission(10, 7, std::time::Instant::now())
+            .begin_frame_submission(10, 10, 7, std::time::Instant::now())
             .unwrap();
         backend.telemetry.finish_prepared_gpu_resources();
 
@@ -1396,7 +1412,8 @@ mod tests {
         assert_eq!(
             backend.frame_transaction_stats(),
             WgpuFrameTransactionStats {
-                frame_index: Some(12),
+                app_frame_index: Some(12),
+                render_transaction_frame_index: Some(12),
                 packet_rejections: 1,
                 ..WgpuFrameTransactionStats::default()
             }
@@ -1426,7 +1443,8 @@ mod tests {
         assert_eq!(
             backend.frame_transaction_stats(),
             WgpuFrameTransactionStats {
-                frame_index: Some(10),
+                app_frame_index: Some(10),
+                render_transaction_frame_index: Some(10),
                 packet_rejections: 1,
                 ..WgpuFrameTransactionStats::default()
             }
