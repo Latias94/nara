@@ -4,10 +4,8 @@
 **Last Verified**: 2026-08-13
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. Its sole
-active execution contract is the [Presented UI Evidence Correlation
-Correction](../../plans/2026-08-13-001-refactor-presented-ui-evidence-correlation-correction-plan.md).
-The [Runtime UI Product Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) is
-paused at RUP-U3. It keeps
+active execution contract is the [Runtime UI Product
+Slice](../../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) at RUP-U3. It keeps
 successor UI Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316` and independently
 pins Reviewed Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`.
 The completed [Product Composition Contribution
@@ -17,8 +15,8 @@ completed NUI baseline; ADR 0107-0109 and the successor UIF baseline own shared 
 PCC closes the root product-composition correction. RUP-U1 is implemented at `e88ad06` with
 evidence record `882397b5b744448cbd5cb8d5c3d0568a`; RUP-U2 is implemented at `ec38c43` with
 evidence record `7bf5d3a0da2c45ad98ced5f01482cf21`; PCC-U1 through PCC-U4 are complete. PUEC-U1
-is implemented at `aed0729`; PUEC-U2 is implemented at `89aadf2`; PUEC-U3 is active after the
-exact-frame identity and presented-observation corrections paused RUP-U3.
+is implemented at `aed0729`; PUEC-U2 is implemented at `89aadf2`; PUEC-U3 is implemented at
+`d028e4c` plus `eff8620`, with conformance record `a87355beec2241669936985528c9c172`.
 
 ## Current UI correction lineage (2026-08-12)
 
@@ -32,8 +30,8 @@ commit; UIF-U4C is complete for suspended Surface Slot lifecycle, unique target 
 platform closure; UIF-U5 is complete at `e307cb3`; RUP-U0 is complete at `80a7270`; UIFM-U1 is
 complete at `40d3f87`; UIFM-U2 published the predecessor baseline; RUP-U1 is complete at `e88ad06`;
 UIFD-U1 is complete at `ba918db`; UIFD-U2 published the successor baseline; RUP-U2 is complete at
-`ec38c43`; PCC-U1 through PCC-U4 are complete; RUP-U3 is paused, PUEC-U1 and PUEC-U2 are complete,
-and PUEC-U3 is active. PCC-U2 is
+`ec38c43`; PCC-U1 through PCC-U4 and PUEC-U1 through PUEC-U3 are complete, and RUP-U3 is active.
+PCC-U2 is
 implemented at
 `18ec878` with exact receipt-stamped platform publication evidence.
 `WinitAccessibilityPublisher` and commits `e0948b5` plus `d28efcf` supersede the historical
@@ -69,10 +67,10 @@ obligations; the compiled-ceiling/requested-product/installed-contribution slice
 | PCC-U2 | implemented | explicit Winit accessibility contribution, captured activation modes and exact receipt-stamped platform publication; commit `18ec878` and verification `c7031e35724f4c55928c2dd77dc0b63d` |
 | PCC-U3 | implemented | `ProductRecipe` ordinary Host composition authority, explicit one-definition advanced probes and private Editor bridge lowering; commits `864c151`, `3ff5675` and verification `02de9ad341db4dcbb1519e0f5e8843f1` |
 | PCC-U4 | implemented | reviewed Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`, superseding initial evidence `180d0dfe0a41417a9633c11cccb91eab`, and explicit RUP-U3 rebase |
-| RUP-U3 | paused | Product-Validated closure resumes after the Presented UI Evidence Correlation Conformance record; existing UI Foundation and Product Composition baselines remain pinned |
+| RUP-U3 | active | Product-Validated closure consumes the completed Presented UI Evidence Correlation Conformance record while preserving the existing UI Foundation and Product Composition baselines |
 | PUEC-U1 | implemented | distinct App-frame and Render-transaction completion identity; commit `aed0729` and verification `5207658a400a48c99783ed034b5b5125` |
 | PUEC-U2 | implemented | owner-produced immutable observation binding the exact accepted packet, frame, backend facts and committed presentation receipt; commit `89aadf2` and verification `97aa78c6bbf74fada0b7d99219e271a6` |
-| PUEC-U3 | active | post-readiness candidate measurement consuming exact owner-produced observations without cross-frame sticky joins |
+| PUEC-U3 | implemented | exact owner-produced presented observations, distinct App/Render identities, bounded post-readiness measurement and product-local semantic matching; commits `d028e4c`, `eff8620` and record `a87355beec2241669936985528c9c172` |
 | UIFD-U1 | implemented | immutable content-only `UiText` replacement that preserves authored presentation and semantic policy; commit `ba918db` and record `ecea4e791ef449afb0b57fece9f8ecda` |
 | UIFD-U2 | implemented | successor Foundation Conformance Baseline `a628828a8ff941239d79a0b8b3d60316` and explicit RUP-U2 rebase |
 

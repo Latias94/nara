@@ -7,8 +7,8 @@ amended: 2026-08-13
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: inactive
-paused_by: docs/plans/2026-08-13-001-refactor-presented-ui-evidence-correlation-correction-plan.md
+execution_state: active
+presented_evidence_record: a87355beec2241669936985528c9c172
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md
@@ -73,16 +73,18 @@ is pinned independently as `composition_baseline_record`; the existing UI Founda
 `baseline_record` remains unchanged. RUP-U3 was then reactivated against both records before the
 presented-evidence correction below paused it again.
 
-### Active presented-evidence correction lineage
+### Completed presented-evidence correction lineage
 
-RUP-U3 is paused after an owner-local WGPU reproduction proved that completion samples expose the
+RUP-U3 was paused after an owner-local WGPU reproduction proved that completion samples exposed the
 App-frame identity while the product probe compares them with a distinct Render-transaction
 identity. The same audit proved that the product probe reads the latest compiled candidate rather
 than one owner-produced fact binding the accepted packet, backend transaction and committed
 receipt. The focused [Presented UI Evidence Correlation
 Correction](2026-08-13-001-refactor-presented-ui-evidence-correlation-correction-plan.md) owns this
-shared evidence-contract repair. The UI Foundation and Product Composition baselines remain
-unchanged. RUP-U3 resumes only after the correction publishes its own conformance record.
+shared evidence-contract repair. PUEC-U3 completed at commits `d028e4c` and `eff8620`; immutable
+conformance record `a87355beec2241669936985528c9c172` binds the exact owner-produced presentation,
+dual frame identities, post-readiness measurement state machine and final no-P0/P1 review. The UI
+Foundation and Product Composition baselines remain unchanged, and RUP-U3 is active again.
 
 ## Product Contract
 
