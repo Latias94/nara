@@ -660,13 +660,12 @@ pub fn resolve_runtime_plan(
         entry
             .group_provenance()
             .contains(&PROJECT_RUNTIME_OVERLAY_GROUP_ID)
-    }) {
-        if !overlay.declaration().provides_schema.is_empty() {
-            return Err(CompositionError::AdvancedProbeProvidesSchema {
-                plugin: overlay.plugin_id(),
-            }
-            .into());
+    }) && !overlay.declaration().provides_schema.is_empty()
+    {
+        return Err(CompositionError::AdvancedProbeProvidesSchema {
+            plugin: overlay.plugin_id(),
         }
+        .into());
     }
     let required = resolve_product_requirements(candidate, &plugin_plan)?;
     let schema_validation = resolve_schema_validation(
