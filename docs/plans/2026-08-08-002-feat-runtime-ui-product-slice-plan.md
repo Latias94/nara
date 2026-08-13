@@ -388,8 +388,10 @@ updates the high-authority ledger and activates no unrelated successor automatic
   gameplay trajectory, typed command boundary and presentation-free headless path.
 - V3: `cargo nextest run --manifest-path reference-game/Cargo.toml --locked --features desktop
   --test desktop_flow --test desktop_render --test desktop_parity --test-threads=1` plus one bounded
-  `desktop_render_probe` run proves backend acceptance, packet/resource closure and matching receipt;
-  an internal direct presenter cannot satisfy V3.
+  `desktop --candidate-smoke` run proves backend acceptance and binds the exact packet, glyph-page,
+  retained-resource and WGPU transaction facts to the matching presented receipt. The legacy
+  `desktop_render_probe` remains only a Host/window/backend Retry continuity regression; neither it
+  nor an internal direct presenter can satisfy the matching-receipt claim.
 - V4: one platform accessibility path proves node/action mapping into the exact presented session;
   direct internal action injection cannot satisfy V4.
 - V5: `python reference-game/tools/package.py create --repository-root . --platform
