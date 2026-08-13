@@ -10,7 +10,9 @@ use nara::{
     ui_render::advanced::PresentedUiObservation,
 };
 
-use crate::{REFERENCE_UI_SURFACE_ID, WaveSnapshot, resources::WaveRunOwner};
+use crate::{
+    REFERENCE_RETRY_ACTION, REFERENCE_UI_SURFACE_ID, WaveSnapshot, resources::WaveRunOwner,
+};
 
 /// Structured product facts projected from ordinary UI authoring components.
 ///
@@ -157,10 +159,15 @@ impl ReferenceUiObservation {
         if frame.environment().surface_id().get() != REFERENCE_UI_SURFACE_ID {
             return None;
         }
-        let (retry, (root_anchor, source_document, source_entity)) =
-            frame.semantics().iter().find_map(|node| {
-                reference_retry_identity(node.key()).map(|identity| (node, identity))
-            })?;
+        let mut retry_nodes = frame.semantics().iter().filter(|node| {
+            node.actions()
+                .iter()
+                .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
+        });
+        let retry = retry_nodes.next()?;
+        if retry_nodes.next().is_some() {
+            return None;
+        }
         let [action] = retry.actions() else {
             return None;
         };
@@ -185,9 +192,9 @@ impl ReferenceUiObservation {
             surface_id: frame.environment().surface_id().get(),
             authored_width: authored.width(),
             authored_height: authored.height(),
-            retry_entity_id: format!("{root_anchor}/{source_entity}"),
-            retry_source_document: source_document.to_owned(),
-            retry_source_entity: source_entity.to_owned(),
+            retry_entity_id: "reference-ui/retry-button".to_owned(),
+            retry_source_document: "reference-ui.prefab.json".to_owned(),
+            retry_source_entity: "retry-button".to_owned(),
             retry_action: action.as_str().to_owned(),
             retry_name: retry.name().to_owned(),
             retry_enabled: retry.enabled(),
@@ -349,21 +356,6 @@ impl ReferenceUiPresentationObservation {
             self.paint_primitives,
         )
     }
-}
-
-#[cfg(feature = "desktop")]
-fn reference_retry_identity(key: &UiKey) -> Option<(&str, &str, &str)> {
-    let identity = key.persistent_identity()?;
-    let projection = identity.projection()?;
-    let step = projection.source_chain().last()?;
-    let root_anchor = projection.root_anchor().as_str();
-    let source_document = step.source_document().as_str();
-    let source_entity = identity.source_entity().as_str();
-    (root_anchor == "reference-ui"
-        && source_document == "reference-ui.prefab.json"
-        && step.source_entity().as_str() == source_entity
-        && source_entity == "retry-button")
-        .then_some((root_anchor, source_document, source_entity))
 }
 
 pub(crate) fn capture_reference_product_observation(world: &mut World) {

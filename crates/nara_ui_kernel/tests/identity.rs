@@ -28,31 +28,6 @@ fn projected_identity_keeps_source_separate_from_instance_location() {
 }
 
 #[test]
-fn scoped_key_exposes_its_structured_persistent_local_identity() {
-    let source = UiOpaqueId::new("retry-button").unwrap();
-    let path = UiProjectionPath::new(UiOpaqueId::new("reference-ui").unwrap())
-        .with_step(UiProjectionStep::new(
-            UiOpaqueId::new("reference-ui.prefab.json").unwrap(),
-            source.clone(),
-        ))
-        .unwrap();
-    let identity = UiPersistentIdentity::projected(source, path);
-    let local = UiLocalKey::persistent(identity.clone()).unwrap();
-    let key = UiKey::scoped(UiRootKey::runtime("reference", "root").unwrap(), local).unwrap();
-
-    assert_eq!(key.persistent_identity(), Some(&identity));
-    assert!(
-        UiKey::scoped(
-            UiRootKey::runtime("reference", "root").unwrap(),
-            UiLocalKey::runtime("reference", "runtime").unwrap(),
-        )
-        .unwrap()
-        .persistent_identity()
-        .is_none()
-    );
-}
-
-#[test]
 fn exact_scoped_keys_do_not_use_a_digest_or_root_global_namespace() {
     let first_root = UiRootKey::runtime("reference", "hud-a").unwrap();
     let second_root = UiRootKey::runtime("reference", "hud-b").unwrap();

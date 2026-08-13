@@ -245,13 +245,6 @@ impl UiLocalKey {
         Ok(Self(Arc::new(identity)))
     }
 
-    fn persistent_identity(&self) -> Option<&UiPersistentIdentity> {
-        match self.0.as_ref() {
-            UiIdentity::Persistent(identity) => Some(identity),
-            UiIdentity::Runtime(_) => None,
-        }
-    }
-
     fn encoded_len(&self) -> usize {
         self.0.encoded_len()
     }
@@ -286,13 +279,6 @@ impl UiKey {
     #[must_use]
     pub const fn local_key(&self) -> Option<&UiLocalKey> {
         self.local.as_ref()
-    }
-
-    /// Returns the structured authoring identity of this exact frame key, when it is persistent.
-    #[must_use]
-    #[doc(hidden)]
-    pub fn persistent_identity(&self) -> Option<&UiPersistentIdentity> {
-        self.local.as_ref()?.persistent_identity()
     }
 
     pub(crate) fn encoded_len(&self) -> usize {
