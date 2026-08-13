@@ -10,9 +10,9 @@ use nara::{
     ui_render::advanced::PresentedUiObservation,
 };
 
-use crate::{
-    REFERENCE_RETRY_ACTION, REFERENCE_UI_SURFACE_ID, WaveSnapshot, resources::WaveRunOwner,
-};
+#[cfg(feature = "desktop")]
+use crate::REFERENCE_RETRY_ACTION;
+use crate::{REFERENCE_UI_SURFACE_ID, WaveSnapshot, resources::WaveRunOwner};
 
 /// Structured product facts projected from ordinary UI authoring components.
 ///
