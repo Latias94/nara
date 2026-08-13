@@ -17,8 +17,6 @@ use nara::{
 use nara_reference_game::wave_desktop_intent;
 
 #[cfg(windows)]
-mod desktop_support;
-#[cfg(windows)]
 mod desktop_accessibility_probe {
     pub(crate) mod evidence;
     pub(crate) mod platform;
@@ -92,7 +90,7 @@ fn main() -> ExitCode {
         .as_ref()
         .expect("a complete probe retains exact journal evidence");
     println!(
-        "desktop_accessibility_probe: ok hwnd={} runtime_id={:?} journal={}<{}<={} armed_frame_revision={} presentation_epoch={} frame_revision={} target={:?} generation={} wgpu_frames={}..{}",
+        "desktop_accessibility_probe: ok hwnd={} runtime_id={:?} journal={}<{}<={} armed_presentation_epoch={} armed_frame_revision={} action_presentation_epoch={} action_frame_revision={} successor_presentation_epoch={} successor_frame_revision={} target={:?} generation={} wgpu_frames={}..{}",
         trace.hwnd.expect("a complete probe retains the exact HWND"),
         trace
             .retry_runtime_id
@@ -106,10 +104,19 @@ fn main() -> ExitCode {
             .journal_barrier
             .expect("a complete probe retains the post-platform journal barrier"),
         trace
+            .armed_presentation_epoch
+            .expect("a complete probe retains the runtime-armed presentation epoch"),
+        trace
             .armed_frame_revision
             .expect("a complete probe retains the runtime-armed frame revision"),
         action.presentation_epoch,
         action.frame_revision,
+        trace
+            .after_presentation_epoch
+            .expect("a complete probe retains the successor presentation epoch"),
+        trace
+            .after_frame_revision
+            .expect("a complete probe retains the successor frame revision"),
         action.target,
         trace
             .run_generation

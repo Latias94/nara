@@ -25,7 +25,7 @@ fn action(sequence: u64) -> ProbeActionEvidence {
 fn arm(evidence: &ProbeEvidence) {
     evidence.observe_terminal_frame("Nara Reference Wave", 12);
     evidence.request_arm(41, vec![42, 7]).unwrap();
-    evidence.arm_runtime(4, 9, retry_target()).unwrap();
+    evidence.arm_runtime(4, 7, 9, retry_target()).unwrap();
     evidence.begin_invoke(41, &[42, 7]).unwrap();
 }
 
@@ -36,15 +36,17 @@ fn exact_platform_trajectory_advances_monotonically() {
     evidence.confirm_invoke().unwrap();
     evidence.observe_action(action(5)).unwrap();
     evidence.observe_retry_applied(2, Some(5)).unwrap();
-    evidence.observe_successor_frame(12).unwrap();
+    assert!(!evidence.observe_successor_presentation(8, 10, 12).unwrap());
     assert_eq!(evidence.snapshot().phase, ProbePhase::RetryApplied);
-    evidence.observe_successor_frame(13).unwrap();
+    assert!(evidence.observe_successor_presentation(8, 10, 13).unwrap());
     evidence.observe_successor_tree(41).unwrap();
     evidence.complete_after_journal_barrier(5).unwrap();
 
     let trace = evidence.snapshot();
     assert!(trace.is_complete());
     assert_eq!(trace.before_wgpu_frame, Some(12));
+    assert_eq!(trace.after_presentation_epoch, Some(8));
+    assert_eq!(trace.after_frame_revision, Some(10));
     assert_eq!(trace.after_wgpu_frame, Some(13));
     assert_eq!(trace.journal_floor, Some(4));
     assert_eq!(trace.journal_barrier, Some(5));
@@ -67,7 +69,7 @@ fn in_flight_callback_waits_for_successful_invoke_before_advancing() {
     arm(&evidence);
     evidence.observe_action(action(5)).unwrap();
     evidence.observe_retry_applied(2, Some(5)).unwrap();
-    evidence.observe_successor_frame(13).unwrap();
+    evidence.observe_successor_presentation(8, 10, 13).unwrap();
 
     let trace = evidence.snapshot();
     assert_eq!(trace.phase, ProbePhase::InvokeReserved);
@@ -116,15 +118,28 @@ fn action_must_match_the_runtime_armed_target() {
 }
 
 #[test]
-fn equivalent_successor_frame_may_carry_the_exact_armed_target() {
+fn equivalent_successor_presentation_may_carry_the_exact_armed_target() {
     let evidence = ProbeEvidence::default();
     arm(&evidence);
     evidence.confirm_invoke().unwrap();
     let mut successor = action(5);
+    successor.presentation_epoch = 8;
     successor.frame_revision = 10;
 
     evidence.observe_action(successor).unwrap();
     assert_eq!(evidence.snapshot().phase, ProbePhase::ActionObserved);
+}
+
+#[test]
+fn action_from_a_pre_arm_presentation_epoch_is_rejected() {
+    let evidence = ProbeEvidence::default();
+    arm(&evidence);
+    evidence.confirm_invoke().unwrap();
+    let mut mismatched = action(5);
+    mismatched.presentation_epoch = 6;
+
+    assert!(evidence.observe_action(mismatched).is_err());
+    assert!(evidence.snapshot().has_failed());
 }
 
 #[test]
@@ -145,7 +160,7 @@ fn duplicate_after_completion_invalidates_the_probe() {
     evidence.confirm_invoke().unwrap();
     evidence.observe_action(action(5)).unwrap();
     evidence.observe_retry_applied(2, Some(5)).unwrap();
-    evidence.observe_successor_frame(13).unwrap();
+    evidence.observe_successor_presentation(8, 10, 13).unwrap();
     evidence.observe_successor_tree(41).unwrap();
     evidence.complete_after_journal_barrier(5).unwrap();
 

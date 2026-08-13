@@ -1,18 +1,15 @@
-use std::{sync::Arc, time::Duration, time::Instant};
+use std::{collections::VecDeque, sync::Arc, time::Duration, time::Instant};
 
 use nara::{
     app::{
         AppExitRequests, PluginCategory, PluginDeclaration, PluginDefinition, PluginDefinitionId,
         PluginError, PluginId, PluginShutdownContext, PluginShutdownObligationId,
+        RuntimeTimeSettings,
     },
     ecs::{Mut, Resource, With, World},
     prelude::{App, CoreStage, Plugin},
-    render::RenderFrame,
-    render_wgpu::WgpuRenderBackend,
-    ui::{
-        UiActionConsumerId, UiActionCursor, UiActionJournal, UiSurfaceId, advanced::UiKey,
-        latest_ui_frame,
-    },
+    ui::{UiActionConsumerId, UiActionCursor, UiActionJournal, advanced::UiKey},
+    ui_render::advanced::{PresentedUiObservation, latest_presented_ui_observation},
     window::{PrimaryWindow, Window},
 };
 use nara_reference_game::{
@@ -20,14 +17,13 @@ use nara_reference_game::{
     WaveRunGeneration,
 };
 
-use crate::desktop_support::{resident_product_glyphs, submitted_product_frame};
-
 use super::evidence::{ProbeActionEvidence, ProbeEvidence, ProbePhase};
 
 const PROBE_PLUGIN_ID: PluginId = PluginId::new("reference-game.desktop-accessibility-probe");
 const PROBE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("reference-game.desktop-accessibility-probe", 1);
 const PROBE_CONSUMER: &str = "reference-game.desktop-accessibility-probe";
+const PRESENTED_HISTORY_LIMIT: usize = 3;
 const PROBE_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
     PluginShutdownObligationId::new("reference-game.desktop-accessibility-probe.action-consumer");
 const PROBE_REQUIREMENTS: &[PluginId] = &[REFERENCE_DESKTOP_PLUGIN_ID];
@@ -78,6 +74,7 @@ impl Plugin for DesktopAccessibilityProbePlugin {
                     .checked_add(self.timeout)
                     .unwrap_or_else(Instant::now),
                 journal_high_water: 0,
+                presented_history: VecDeque::new(),
             })?
             .add_systems(CoreStage::Last, observe_runtime_trajectory)?;
         Ok(())
@@ -110,9 +107,42 @@ struct RuntimeProbeState {
     evidence: Arc<ProbeEvidence>,
     deadline: Instant,
     journal_high_water: u64,
+    presented_history: VecDeque<PresentedUiObservation>,
+}
+
+impl RuntimeProbeState {
+    fn remember_presented(&mut self, presented: PresentedUiObservation) {
+        if self
+            .presented_history
+            .front()
+            .is_some_and(|current| current.receipt() == presented.receipt())
+        {
+            return;
+        }
+        self.presented_history.push_front(presented);
+        self.presented_history.truncate(PRESENTED_HISTORY_LIMIT);
+    }
+
+    fn presented_for_action(
+        &self,
+        action: &ProbeActionEvidence,
+    ) -> Option<&PresentedUiObservation> {
+        self.presented_history.iter().find(|presented| {
+            let receipt = presented.receipt();
+            receipt.surface_id().get() == action.surface_id
+                && receipt.presentation_epoch() == action.presentation_epoch
+                && receipt.frame_revision().get() == action.frame_revision
+        })
+    }
 }
 
 fn observe_runtime_trajectory(world: &mut World) {
+    let latest_presented = latest_presented_ui_observation(world);
+    if let Some(presented) = latest_presented.clone() {
+        world
+            .resource_mut::<RuntimeProbeState>()
+            .remember_presented(presented);
+    }
     let evidence = Arc::clone(&world.resource::<RuntimeProbeState>().evidence);
     let drain = match drain_retry_actions(world) {
         Ok(drain) => drain,
@@ -131,36 +161,38 @@ fn observe_runtime_trajectory(world: &mut World) {
     let generation = world.resource::<WaveRunGeneration>().get();
     let retry = *world.resource::<WaveRetryStatus>();
     let projection = *world.resource::<ReferenceHudProjection>();
-    let frame = *world.resource::<RenderFrame>();
-    let backend = world.resource::<WgpuRenderBackend>();
-    let submitted = submitted_product_frame(&frame, backend);
-    let ui_glyphs_resident = resident_product_glyphs(backend);
+    let terminal_wgpu_frame = latest_presented
+        .as_ref()
+        .and_then(|presented| presented_product_wgpu_frame(presented).ok());
 
     if generation == 1
         && projection.terminal_visible
         && projection.retry_enabled
-        && submitted
-        && ui_glyphs_resident
+        && let Some(wgpu_frame) = terminal_wgpu_frame
     {
         match primary_window_title(world) {
-            Ok(title) => evidence.observe_terminal_frame(&title, frame.index),
+            Ok(title) => evidence.observe_terminal_frame(&title, wgpu_frame),
             Err(error) => evidence.fail(error),
         }
     }
 
     let armed_this_tick = if evidence.arm_is_requested() {
-        if generation != 1
-            || !projection.terminal_visible
-            || !projection.retry_enabled
-            || !submitted
-            || !ui_glyphs_resident
-        {
+        if generation != 1 || !projection.terminal_visible || !projection.retry_enabled {
             evidence.fail("runtime Retry arming lost the exact submitted terminal state");
             false
         } else {
-            match armed_retry_target(world) {
-                Ok((frame_revision, target)) => evidence
-                    .arm_runtime(journal_high_water, frame_revision, target)
+            match latest_presented
+                .as_ref()
+                .ok_or_else(|| "the presented Retry observation is unavailable".to_owned())
+                .and_then(armed_retry_target)
+            {
+                Ok((presentation_epoch, frame_revision, target)) => evidence
+                    .arm_runtime(
+                        journal_high_water,
+                        presentation_epoch,
+                        frame_revision,
+                        target,
+                    )
                     .is_ok(),
                 Err(error) => {
                     evidence.fail(error);
@@ -175,6 +207,10 @@ fn observe_runtime_trajectory(world: &mut World) {
     let had_retry_actions = !drain.retry_actions.is_empty();
     if !armed_this_tick {
         for action in drain.retry_actions {
+            if let Err(error) = validate_presented_retry_action(world, &action) {
+                evidence.fail(error);
+                break;
+            }
             if evidence.observe_action(action).is_err() {
                 break;
             }
@@ -189,9 +225,23 @@ fn observe_runtime_trajectory(world: &mut World) {
         if evidence
             .observe_retry_applied(generation, retry.applied_ui_action_sequence())
             .is_ok()
-            && submitted
+            && let Some(presented) = latest_presented.as_ref()
         {
-            let _ = evidence.observe_successor_frame(frame.index);
+            match successor_presentation(presented) {
+                Ok(Some((presentation_epoch, frame_revision, wgpu_frame))) => {
+                    match evidence.observe_successor_presentation(
+                        presentation_epoch,
+                        frame_revision,
+                        wgpu_frame,
+                    ) {
+                        Ok(true) => world.resource_mut::<RuntimeTimeSettings>().set_paused(true),
+                        Ok(false) => {}
+                        Err(error) => evidence.fail(error),
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => evidence.fail(error),
+            }
         }
     } else if evidence.has_observed_action() && retry.last_rejection().is_some() {
         evidence.fail(format!("product Retry was rejected: {retry:?}"));
@@ -209,12 +259,10 @@ fn observe_runtime_trajectory(world: &mut World) {
     }
 }
 
-fn armed_retry_target(world: &World) -> Result<(u64, UiKey), String> {
-    let surface_id = UiSurfaceId::new(nara_reference_game::REFERENCE_UI_SURFACE_ID)
-        .ok_or_else(|| "reference UI surface identity is invalid".to_owned())?;
-    let frame = latest_ui_frame(world, surface_id)
-        .map_err(|error| format!("failed to read the current Retry frame: {error}"))?
-        .ok_or_else(|| "the current Retry frame is unavailable".to_owned())?;
+fn armed_retry_target(presented: &PresentedUiObservation) -> Result<(u64, u64, UiKey), String> {
+    let _ = presented_product_wgpu_frame(presented)?;
+    let receipt = presented.receipt();
+    let frame = presented.frame();
     let mut targets = frame.semantics().iter().filter(|node| {
         node.enabled()
             && node
@@ -233,7 +281,55 @@ fn armed_retry_target(world: &World) -> Result<(u64, UiKey), String> {
             "the submitted terminal frame has multiple enabled Retry semantic targets".to_owned(),
         );
     }
-    Ok((frame.revision().get(), target))
+    Ok((
+        receipt.presentation_epoch(),
+        receipt.frame_revision().get(),
+        target,
+    ))
+}
+
+fn successor_presentation(
+    presented: &PresentedUiObservation,
+) -> Result<Option<(u64, u64, u64)>, String> {
+    let wgpu_frame = presented_product_wgpu_frame(presented)?;
+    let frame = presented.frame();
+    if frame.semantics().iter().any(|node| {
+        node.actions()
+            .iter()
+            .any(|action| action.as_str() == REFERENCE_RETRY_ACTION)
+    }) {
+        return Ok(None);
+    }
+    Ok(Some((
+        presented.receipt().presentation_epoch(),
+        presented.receipt().frame_revision().get(),
+        wgpu_frame,
+    )))
+}
+
+fn presented_product_wgpu_frame(presented: &PresentedUiObservation) -> Result<u64, String> {
+    let receipt = presented.receipt();
+    let frame = presented.frame();
+    if receipt.surface_id().get() != nara_reference_game::REFERENCE_UI_SURFACE_ID
+        || frame.environment().surface_id() != receipt.surface_id()
+        || frame.revision() != receipt.frame_revision()
+        || !presented.submission().matches_receipt(receipt)
+    {
+        return Err("the presented UI frame does not match its exact receipt".to_owned());
+    }
+    let wgpu = presented
+        .wgpu()
+        .ok_or_else(|| "the presented UI observation lacks WGPU submission facts".to_owned())?;
+    if wgpu.primitive_count() == 0
+        || wgpu.glyph_primitive_count() == 0
+        || wgpu.glyph_page_count() == 0
+        || wgpu.submitted_quad_count() == 0
+        || wgpu.submitted_glyph_quad_count() == 0
+        || wgpu.referenced_texture_binding_count() == 0
+    {
+        return Err("the presented UI observation has an incomplete WGPU payload".to_owned());
+    }
+    Ok(wgpu.render_transaction_frame_index())
 }
 
 fn primary_window_title(world: &mut World) -> Result<String, String> {
@@ -289,6 +385,37 @@ fn drain_retry_actions(world: &mut World) -> Result<JournalDrain, String> {
             })
         },
     )
+}
+
+fn validate_presented_retry_action(
+    world: &World,
+    action: &ProbeActionEvidence,
+) -> Result<(), String> {
+    let presented = world
+        .resource::<RuntimeProbeState>()
+        .presented_for_action(action)
+        .ok_or_else(|| {
+            format!(
+                "the UIA Retry action has no retained owner-produced presentation: epoch={}, frame={}",
+                action.presentation_epoch, action.frame_revision,
+            )
+        })?;
+    let frame = presented.frame();
+    let mut targets = frame.semantics().iter().filter(|node| {
+        node.key() == &action.target
+            && node.enabled()
+            && node
+                .actions()
+                .iter()
+                .any(|candidate| candidate == &action.action)
+    });
+    if targets.next().is_none() || targets.next().is_some() {
+        return Err(
+            "the exact presented receipt does not contain one enabled Retry semantic target"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn finish_with_failure(world: &mut World, message: impl Into<String>) {

@@ -16,12 +16,13 @@ use windows::{
                 SafeArrayDestroy, SafeArrayGetDim, SafeArrayGetElement, SafeArrayGetElemsize,
                 SafeArrayGetLBound, SafeArrayGetUBound,
             },
+            Variant::VARIANT,
         },
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomationCondition, IUIAutomationElement,
                 IUIAutomationInvokePattern, TreeScope_Descendants, UIA_ButtonControlTypeId,
-                UIA_InvokePatternId,
+                UIA_ControlTypePropertyId, UIA_InvokePatternId,
             },
             WindowsAndMessaging::{
                 EnumWindows, GetClassNameW, GetWindowTextLengthW, GetWindowTextW,
@@ -36,7 +37,6 @@ use super::evidence::ProbeEvidence;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const EXPECTED_WINIT_WINDOW_CLASS: &str = "Window Class";
-const SUCCESSOR_HEALTH_LABEL: &str = "HEALTH 20 / 20";
 const MAX_RUNTIME_ID_ELEMENTS: usize = 32;
 
 pub(crate) fn spawn(
@@ -112,12 +112,8 @@ fn wait_for_retry(
         ensure_running(evidence, deadline, "enabled Retry platform node")?;
         match window.tree() {
             Ok(PlatformTree::RetryReady(element)) => return Ok(element),
-            Ok(
-                PlatformTree::RetryPending
-                | PlatformTree::Successor
-                | PlatformTree::Absent
-                | PlatformTree::Indeterminate,
-            ) => {}
+            Ok(PlatformTree::RetryPending | PlatformTree::Absent | PlatformTree::Indeterminate) => {
+            }
             Err(error) => last_error = Some(error),
         }
         if Instant::now() >= deadline {
@@ -159,7 +155,7 @@ fn wait_for_armed_retry(
                 return Ok(element);
             }
             PlatformTree::Indeterminate => std::thread::sleep(POLL_INTERVAL),
-            PlatformTree::RetryPending | PlatformTree::Successor | PlatformTree::Absent => {
+            PlatformTree::RetryPending | PlatformTree::Absent => {
                 return Err(
                     "the exact Retry platform node disappeared after runtime arming".to_owned(),
                 );
@@ -181,14 +177,13 @@ fn wait_for_successor_tree(
             continue;
         }
         match window.tree() {
-            Ok(PlatformTree::Successor) => {
+            Ok(PlatformTree::Absent) => {
                 evidence.observe_successor_tree(window.hwnd_identity())?;
                 return Ok(());
             }
             Ok(
                 PlatformTree::RetryReady(_)
                 | PlatformTree::RetryPending
-                | PlatformTree::Absent
                 | PlatformTree::Indeterminate,
             ) => {}
             Err(error) => last_error = Some(error),
@@ -220,7 +215,6 @@ fn ensure_running(
 enum PlatformTree {
     RetryReady(IUIAutomationElement),
     RetryPending,
-    Successor,
     Absent,
     Indeterminate,
 }
@@ -228,7 +222,8 @@ enum PlatformTree {
 struct PlatformWindow {
     automation: IUIAutomation,
     root: IUIAutomationElement,
-    condition: IUIAutomationCondition,
+    all_condition: IUIAutomationCondition,
+    button_condition: IUIAutomationCondition,
     hwnd: HWND,
     process_id: u32,
     window_title: String,
@@ -245,13 +240,19 @@ impl PlatformWindow {
         let root = unsafe { automation.ElementFromHandle(hwnd) }
             .map_err(|error| format!("failed to read the exact UI Automation root: {error}"))?;
         validate_root_handle(&root, hwnd)?;
-        let condition = unsafe { automation.CreateTrueCondition() }.map_err(|error| {
+        let all_condition = unsafe { automation.CreateTrueCondition() }.map_err(|error| {
             format!("failed to create the UI Automation tree condition: {error}")
         })?;
+        let button_control_type = VARIANT::from(UIA_ButtonControlTypeId.0);
+        let button_condition = unsafe {
+            automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &button_control_type)
+        }
+        .map_err(|error| format!("failed to create the UI Automation button condition: {error}"))?;
         Ok(Self {
             automation,
             root,
-            condition,
+            all_condition,
+            button_condition,
             hwnd,
             process_id,
             window_title,
@@ -281,19 +282,22 @@ impl PlatformWindow {
 
     fn tree(&self) -> Result<PlatformTree, String> {
         let root = self.current_root()?;
-        let descendants = unsafe { root.FindAll(TreeScope_Descendants, &self.condition) }
+        let descendants = unsafe { root.FindAll(TreeScope_Descendants, &self.all_condition) }
             .map_err(|error| format!("failed to query the UI Automation tree: {error}"))?;
         let length = unsafe { descendants.Length() }
             .map_err(|error| format!("failed to read the UI Automation tree length: {error}"))?;
         if length <= 0 {
             return Ok(PlatformTree::Indeterminate);
         }
+        let buttons = unsafe { root.FindAll(TreeScope_Descendants, &self.button_condition) }
+            .map_err(|error| format!("failed to query UI Automation buttons: {error}"))?;
+        let button_count = unsafe { buttons.Length() }
+            .map_err(|error| format!("failed to read the UI Automation button count: {error}"))?;
         let mut retry = None;
         let mut pending = false;
-        let mut successor = false;
         let mut indeterminate = false;
-        for index in 0..length {
-            let Ok(element) = (unsafe { descendants.GetElement(index) }) else {
+        for index in 0..button_count {
+            let Ok(element) = (unsafe { buttons.GetElement(index) }) else {
                 indeterminate = true;
                 continue;
             };
@@ -302,18 +306,7 @@ impl PlatformWindow {
                 continue;
             };
             let name = name.to_string();
-            if name == SUCCESSOR_HEALTH_LABEL {
-                successor = true;
-            }
             if name != "Retry" && name != "Retrying..." {
-                continue;
-            }
-            let Ok(control_type) = (unsafe { element.CurrentControlType() }) else {
-                indeterminate = true;
-                continue;
-            };
-            if control_type != UIA_ButtonControlTypeId {
-                indeterminate = true;
                 continue;
             }
             if name == "Retry" {
@@ -332,8 +325,6 @@ impl PlatformWindow {
             PlatformTree::RetryReady(retry)
         } else if pending {
             PlatformTree::RetryPending
-        } else if successor {
-            PlatformTree::Successor
         } else {
             PlatformTree::Absent
         })
@@ -351,23 +342,23 @@ fn validate_root_handle(root: &IUIAutomationElement, hwnd: HWND) -> Result<(), S
 
 fn runtime_id(element: &IUIAutomationElement) -> Result<Vec<i32>, String> {
     let array = unsafe { element.GetRuntimeId() }
-        .map_err(|error| format!("failed to read Retry UI Automation runtime ID: {error}"))?;
+        .map_err(|error| format!("failed to read UI Automation runtime ID: {error}"))?;
     let array = OwnedSafeArray::new(array)?;
     if unsafe { SafeArrayGetDim(array.as_ptr()) } != 1
         || unsafe { SafeArrayGetElemsize(array.as_ptr()) } as usize != size_of::<i32>()
     {
-        return Err("Retry UI Automation runtime ID has an unsupported shape".to_owned());
+        return Err("UI Automation runtime ID has an unsupported shape".to_owned());
     }
     let lower = unsafe { SafeArrayGetLBound(array.as_ptr(), 1) }
-        .map_err(|error| format!("failed to read Retry runtime-ID lower bound: {error}"))?;
+        .map_err(|error| format!("failed to read runtime-ID lower bound: {error}"))?;
     let upper = unsafe { SafeArrayGetUBound(array.as_ptr(), 1) }
-        .map_err(|error| format!("failed to read Retry runtime-ID upper bound: {error}"))?;
+        .map_err(|error| format!("failed to read runtime-ID upper bound: {error}"))?;
     let length = upper
         .checked_sub(lower)
         .and_then(|span| span.checked_add(1))
         .and_then(|length| usize::try_from(length).ok())
         .filter(|length| (1..=MAX_RUNTIME_ID_ELEMENTS).contains(length))
-        .ok_or_else(|| "Retry UI Automation runtime ID is empty or unbounded".to_owned())?;
+        .ok_or_else(|| "UI Automation runtime ID is empty or unbounded".to_owned())?;
     let mut runtime_id = Vec::with_capacity(length);
     for index in lower..=upper {
         let mut value = 0_i32;
@@ -378,7 +369,7 @@ fn runtime_id(element: &IUIAutomationElement) -> Result<Vec<i32>, String> {
                 (&raw mut value).cast::<core::ffi::c_void>(),
             )
         }
-        .map_err(|error| format!("failed to read Retry runtime-ID element: {error}"))?;
+        .map_err(|error| format!("failed to read runtime-ID element: {error}"))?;
         runtime_id.push(value);
     }
     Ok(runtime_id)
@@ -389,7 +380,7 @@ struct OwnedSafeArray(*mut SAFEARRAY);
 impl OwnedSafeArray {
     fn new(array: *mut SAFEARRAY) -> Result<Self, String> {
         if array.is_null() {
-            Err("Retry UI Automation runtime ID was null".to_owned())
+            Err("UI Automation runtime ID was null".to_owned())
         } else {
             Ok(Self(array))
         }

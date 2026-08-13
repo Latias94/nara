@@ -39,10 +39,13 @@ pub(crate) struct ProbeTrace {
     pub(crate) retry_runtime_id: Option<Vec<i32>>,
     pub(crate) before_wgpu_frame: Option<u64>,
     pub(crate) journal_floor: Option<u64>,
+    pub(crate) armed_presentation_epoch: Option<u64>,
     pub(crate) armed_frame_revision: Option<u64>,
     pub(crate) armed_target: Option<UiKey>,
     pub(crate) action: Option<ProbeActionEvidence>,
     pub(crate) run_generation: Option<u64>,
+    pub(crate) after_presentation_epoch: Option<u64>,
+    pub(crate) after_frame_revision: Option<u64>,
     pub(crate) after_wgpu_frame: Option<u64>,
     pub(crate) journal_barrier: Option<u64>,
     pub(crate) failure: Option<String>,
@@ -145,6 +148,7 @@ impl ProbeEvidence {
     pub(crate) fn arm_runtime(
         &self,
         journal_floor: u64,
+        presentation_epoch: u64,
         frame_revision: u64,
         target: UiKey,
     ) -> Result<(), String> {
@@ -156,13 +160,14 @@ impl ProbeEvidence {
                 format!("runtime armed Retry from invalid phase {phase:?}"),
             );
         }
-        if frame_revision == 0 {
+        if presentation_epoch == 0 || frame_revision == 0 {
             return fail_result(
                 &mut trace,
-                "runtime Retry arming lacked an exact frame revision or target",
+                "runtime Retry arming lacked an exact presentation receipt or target",
             );
         }
         trace.journal_floor = Some(journal_floor);
+        trace.armed_presentation_epoch = Some(presentation_epoch);
         trace.armed_frame_revision = Some(frame_revision);
         trace.armed_target = Some(target);
         trace.phase = ProbePhase::Armed;
@@ -233,6 +238,9 @@ impl ProbeEvidence {
             || action.presentation_epoch == 0
             || action.frame_revision == 0
             || trace
+                .armed_presentation_epoch
+                .is_none_or(|armed| action.presentation_epoch < armed)
+            || trace
                 .armed_frame_revision
                 .is_none_or(|armed| action.frame_revision < armed)
             || trace.armed_target.as_ref() != Some(&action.target)
@@ -294,29 +302,42 @@ impl ProbeEvidence {
         Ok(())
     }
 
-    pub(crate) fn observe_successor_frame(&self, frame_index: u64) -> Result<(), String> {
+    pub(crate) fn observe_successor_presentation(
+        &self,
+        presentation_epoch: u64,
+        frame_revision: u64,
+        wgpu_frame_index: u64,
+    ) -> Result<bool, String> {
         let mut trace = self.lock();
         match trace.phase {
             ProbePhase::SuccessorPresented
             | ProbePhase::PlatformVerified
-            | ProbePhase::Complete => return Ok(()),
+            | ProbePhase::Complete => return Ok(true),
             ProbePhase::InvokeReserved | ProbePhase::RetryApplied
                 if trace.run_generation.is_some() => {}
-            _ => return Ok(()),
+            _ => return Ok(false),
         }
         let Some(before) = trace.before_wgpu_frame else {
             let message = "successor presentation lost its WGPU baseline".to_owned();
             fail_locked(&mut trace, message.clone());
             return Err(message);
         };
-        if frame_index <= before {
-            return Ok(());
+        let Some(action) = trace.action.as_ref() else {
+            return Ok(false);
+        };
+        if presentation_epoch <= action.presentation_epoch
+            || frame_revision <= action.frame_revision
+            || wgpu_frame_index <= before
+        {
+            return Ok(false);
         }
-        trace.after_wgpu_frame = Some(frame_index);
+        trace.after_presentation_epoch = Some(presentation_epoch);
+        trace.after_frame_revision = Some(frame_revision);
+        trace.after_wgpu_frame = Some(wgpu_frame_index);
         if trace.phase != ProbePhase::InvokeReserved {
             trace.phase = ProbePhase::SuccessorPresented;
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(crate) fn successor_is_presented(&self) -> bool {
