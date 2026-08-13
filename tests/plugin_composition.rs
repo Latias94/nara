@@ -62,6 +62,9 @@ const TEST_MISSING_ALL_WITH_MATCHING_ANY_PRODUCT_PLUGIN_ID: PluginId =
     PluginId::new("test.missing-all-with-matching-any-product-capability");
 const TEST_UNKNOWN_ANY_PRODUCT_PLUGIN_ID: PluginId =
     PluginId::new("test.unknown-any-product-capability");
+const WGPU_SPRITE_SUBMITTER_PLUGIN_ID: PluginId =
+    PluginId::new("nara.render-wgpu.sprite-submitter");
+const WGPU_UI_SUBMITTER_PLUGIN_ID: PluginId = PluginId::new("nara.render-wgpu.ui-submitter");
 #[cfg(all(
     feature = "runtime-2d",
     feature = "runtime-ui",
@@ -2616,8 +2619,7 @@ requested = ["render-wgpu"]
     assert!(entries.iter().all(|entry| {
         !matches!(
             entry.plugin_id(),
-            nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID
-                | nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID
+            WGPU_SPRITE_SUBMITTER_PLUGIN_ID | WGPU_UI_SUBMITTER_PLUGIN_ID
         )
     }));
 }

@@ -840,6 +840,121 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn blocked_ui_collection_keeps_the_existing_transaction_and_next_frame_available() {
+        use nara_ui_kernel::UiSurfaceId;
+        use nara_ui_render::__private::{
+            UiPresentationRoute, replace_ui_backend_frame, replace_ui_presentation_routes,
+            snapshot_ui_paint_packets,
+        };
+
+        let mut app = App::new();
+        install_render_foundation(&mut app, false);
+        app.add_plugins((
+            nara_image::ImagePreparePlugin,
+            nara_ui_render::UiRenderPlugin,
+        ))
+        .unwrap();
+        app.add_plugins(WgpuRenderPlugin).unwrap();
+
+        let world = app.world_mut().unwrap();
+        let surface_id = UiSurfaceId::new(1).unwrap();
+        replace_ui_presentation_routes(
+            world,
+            [UiPresentationRoute::new(surface_id, WindowId::PRIMARY).unwrap()],
+        )
+        .unwrap();
+        nara_ui_render::compile_ui_paint_packets(world, &[ui_outcome_frame()]).unwrap();
+        let (mut planned, _) = snapshot_ui_paint_packets(world).unwrap().into_parts();
+        let packet = planned.pop().unwrap();
+        replace_ui_backend_frame(
+            world,
+            vec![Arc::clone(&packet)],
+            vec![prepared_ui_attempt(packet, 71, 51)],
+        )
+        .unwrap();
+        let existing_submission = {
+            let mut outcomes = world.resource_mut::<UiPresentationOutcomes>();
+            admit_ui_attempt(
+                &mut outcomes,
+                prepared_ui_attempt(ui_outcome_packet(), 70, 50),
+            )
+        };
+        world
+            .resource_mut::<WgpuFramePacketSlot>()
+            .collect_ui(Vec::new(), vec![existing_submission]);
+
+        let mut collect = IntoSystem::into_system(collect_wgpu_ui_payload);
+        collect.initialize(world);
+        collect.run((), world).unwrap();
+        assert_eq!(
+            nara_ui_render::drain_ui_presentation_outcomes(world).unwrap_err(),
+            nara_ui_render::UiPresentationIntegrationError::OutstandingBackendOutcomeReservations {
+                count: 1,
+            },
+            "blocked collection must preserve the existing outcome reservation",
+        );
+
+        let existing = world
+            .resource_mut::<WgpuFramePacketSlot>()
+            .take_ui_submissions()
+            .unwrap();
+        let WgpuUiSubmissionState::Prepared(existing) = existing else {
+            panic!("the blocked transaction must retain its prepared state");
+        };
+        {
+            let mut outcomes = world.resource_mut::<UiPresentationOutcomes>();
+            for submission in existing {
+                outcomes.commit_backend(
+                    submission.content_rejected("test transaction retired".to_owned()),
+                );
+            }
+        }
+        let retired = nara_ui_render::drain_ui_presentation_outcomes(world).unwrap();
+        assert!(matches!(
+            retired.as_slice(),
+            [UiPresentationOutcome::ContentRejected { attempt, .. }]
+                if attempt.admission_id().is_some_and(|id| id.get() == 70)
+        ));
+
+        fn take_backend_frame(
+            mut reader: UiBackendSubmissionReader,
+        ) -> Result<
+            nara_ui_render::__private::UiBackendPresentationFrame,
+            nara_ui_render::UiPresentationIntegrationError,
+        > {
+            reader.take()
+        }
+
+        let mut take = IntoSystem::into_system(take_backend_frame);
+        take.initialize(world);
+        let next = take
+            .run((), world)
+            .unwrap()
+            .expect("blocked collection must leave the next backend frame available");
+        let (packets, submissions) = next.into_parts();
+        assert_eq!(packets.len(), 1);
+        assert!(matches!(
+            submissions.as_slice(),
+            [submission]
+                if submission.submission().identity().admission_id().get() == 71
+        ));
+        {
+            let mut outcomes = world.resource_mut::<UiPresentationOutcomes>();
+            for submission in submissions {
+                outcomes
+                    .commit_backend(submission.content_rejected("test frame retired".to_owned()));
+            }
+        }
+        let retired = nara_ui_render::drain_ui_presentation_outcomes(world).unwrap();
+        assert!(matches!(
+            retired.as_slice(),
+            [UiPresentationOutcome::ContentRejected { attempt, .. }]
+                if attempt.admission_id().is_some_and(|id| id.get() == 71)
+        ));
+    }
+
     #[test]
     fn plugin_installation_reconstructs_the_backend_instance_for_each_app() {
         fn backend_instance_id() -> u64 {

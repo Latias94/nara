@@ -12,9 +12,12 @@ use nara_app::{
     PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginId, PluginSchemaProviderId,
     PluginSlot, PluginSlotId,
 };
-use nara_project::{EffectiveProjectSettings, ProductCapabilitySet, RuntimePreset};
 use nara_reflect::ComponentSchemaProviderDefinition;
 use thiserror::Error;
+
+mod profile;
+
+pub(crate) use profile::ProjectProfilePlugins;
 
 const PRODUCT_RECIPE_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.product-recipe");
 const PRODUCT_RECIPE_CONFIGURATION_PREFIX: &[u8] = b"nara.product-recipe.config.v1\0";
@@ -619,21 +622,10 @@ const SLOT_UI_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.ui-ren
 #[cfg(feature = "presentation-ui")]
 const SLOT_UI_PRESENTATION_BRIDGE: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.ui-presentation-bridge");
-#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-const SLOT_UI_WINIT_ACCESSIBILITY: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.ui-winit-accessibility");
 #[cfg(feature = "desktop-winit")]
 const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 #[cfg(feature = "render-wgpu")]
 const SLOT_WGPU_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.render-wgpu");
-#[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
-const SLOT_WGPU_SPRITE_SUBMITTER: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.render-wgpu.sprite-submitter");
-#[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
-const SLOT_WGPU_UI_SUBMITTER: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.render-wgpu.ui-submitter");
-const SLOT_STARTUP_SCENE_ACTIVATION: PluginSlotId =
-    PluginSlotId::new("nara.plugins.slot.startup-scene-activation");
 
 /// Minimal runtime defaults for headless examples and code-first games.
 #[derive(Debug, Default, Clone, Copy)]
@@ -933,182 +925,5 @@ impl PluginGroup for WgpuBackendPlugins {
                 PluginSlot::required(SLOT_WGPU_RENDER, nara_render_wgpu::WGPU_RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_render_wgpu::WgpuRenderPlugin>(),
             )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ProjectProfilePlugins {
-    preset: RuntimePreset,
-    capabilities: ProductCapabilitySet,
-    task_config: nara_tasks::TaskPoolConfig,
-    primary_window: Option<nara_window::Window>,
-}
-
-impl ProjectProfilePlugins {
-    pub(crate) fn new(
-        settings: &EffectiveProjectSettings,
-        capabilities: ProductCapabilitySet,
-    ) -> Self {
-        Self {
-            preset: settings.runtime_preset,
-            capabilities,
-            task_config: settings.tasks.pool_config,
-            primary_window: settings.window.to_window(),
-        }
-    }
-}
-
-impl PluginGroup for ProjectProfilePlugins {
-    const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime");
-
-    fn build(self) -> PluginGroupBuilder {
-        let _ = &self.primary_window;
-        let task_plugin = nara_tasks::plugin(self.task_config);
-        let product_group_includes_minimal = self
-            .capabilities
-            .contains(nara_project::ProductCapability::Runtime2d)
-            || self
-                .capabilities
-                .contains(nara_project::ProductCapability::RuntimeUi);
-        let builder = match self.preset {
-            RuntimePreset::Minimal if product_group_includes_minimal => PluginGroupBuilder::new(),
-            RuntimePreset::Minimal => PluginGroupBuilder::new()
-                .add_edited_group(MinimalPlugins.edit().configure(task_plugin.clone())),
-            RuntimePreset::LocalHeadless => PluginGroupBuilder::new()
-                .add_edited_group(HeadlessRuntimePlugins.edit().configure(task_plugin.clone())),
-            RuntimePreset::Server => PluginGroupBuilder::new()
-                .add_edited_group(ServerPlugins.edit().configure(task_plugin.clone())),
-        };
-
-        #[cfg(feature = "runtime-2d")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::Runtime2d)
-        {
-            builder.add_edited_group(Runtime2dPlugins.edit().configure(task_plugin.clone()))
-        } else {
-            builder
-        };
-
-        #[cfg(feature = "runtime-ui")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::RuntimeUi)
-        {
-            builder.add_edited_group(RuntimeUiPlugins.edit().configure(task_plugin.clone()))
-        } else {
-            builder
-        };
-
-        #[cfg(feature = "presentation-2d")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::Presentation2d)
-        {
-            builder.add_group(Presentation2dPlugins)
-        } else {
-            builder
-        };
-
-        #[cfg(feature = "presentation-ui")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::PresentationUi)
-        {
-            builder.add_group(PresentationUiPlugins)
-        } else {
-            builder
-        };
-
-        #[cfg(feature = "desktop-winit")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::DesktopWinit)
-        {
-            builder.add_edited_group(
-                DesktopWinitPlugins
-                    .edit()
-                    .configure(nara_window::plugin(self.primary_window)),
-            )
-        } else {
-            builder
-        };
-
-        #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::DesktopWinit)
-            && self
-                .capabilities
-                .contains(nara_project::ProductCapability::PresentationUi)
-        {
-            builder.add_slot(
-                PluginSlot::required(
-                    SLOT_UI_WINIT_ACCESSIBILITY,
-                    crate::ui_presentation::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
-                ),
-                PluginDefinition::for_default::<
-                    crate::ui_presentation::WinitUiAccessibilityContributionPlugin,
-                >(),
-            )
-        } else {
-            builder
-        };
-
-        #[cfg(feature = "render-wgpu")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::RenderWgpu)
-        {
-            builder.add_group(WgpuBackendPlugins)
-        } else {
-            builder
-        };
-
-        #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::Presentation2d)
-            && self
-                .capabilities
-                .contains(nara_project::ProductCapability::RenderWgpu)
-        {
-            builder.add_slot(
-                PluginSlot::required(
-                    SLOT_WGPU_SPRITE_SUBMITTER,
-                    nara_render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
-                ),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuSpriteSubmitterPlugin>(),
-            )
-        } else {
-            builder
-        };
-
-        #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::PresentationUi)
-            && self
-                .capabilities
-                .contains(nara_project::ProductCapability::RenderWgpu)
-        {
-            builder.add_slot(
-                PluginSlot::required(
-                    SLOT_WGPU_UI_SUBMITTER,
-                    nara_render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
-                ),
-                PluginDefinition::for_default::<nara_render_wgpu::WgpuUiSubmitterPlugin>(),
-            )
-        } else {
-            builder
-        };
-
-        builder.add_slot(
-            PluginSlot::required(
-                SLOT_STARTUP_SCENE_ACTIVATION,
-                crate::startup_scene::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,
-            ),
-            PluginDefinition::for_default::<crate::startup_scene::StartupSceneActivationPlugin>(),
-        )
     }
 }
