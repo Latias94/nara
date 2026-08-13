@@ -7,7 +7,8 @@ amended: 2026-08-13
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+paused_by: docs/plans/2026-08-13-001-refactor-presented-ui-evidence-correlation-correction-plan.md
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md
@@ -69,7 +70,19 @@ product behavior without the `presentation-ui + desktop-winit` request pair. The
 completed the backend/platform contribution split and ordinary `ProductRecipe` authority
 correction. Reviewed Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`
 is pinned independently as `composition_baseline_record`; the existing UI Foundation
-`baseline_record` remains unchanged. RUP-U3 is now active against both records.
+`baseline_record` remains unchanged. RUP-U3 was then reactivated against both records before the
+presented-evidence correction below paused it again.
+
+### Active presented-evidence correction lineage
+
+RUP-U3 is paused after an owner-local WGPU reproduction proved that completion samples expose the
+App-frame identity while the product probe compares them with a distinct Render-transaction
+identity. The same audit proved that the product probe reads the latest compiled candidate rather
+than one owner-produced fact binding the accepted packet, backend transaction and committed
+receipt. The focused [Presented UI Evidence Correlation
+Correction](2026-08-13-001-refactor-presented-ui-evidence-correlation-correction-plan.md) owns this
+shared evidence-contract repair. The UI Foundation and Product Composition baselines remain
+unchanged. RUP-U3 resumes only after the correction publishes its own conformance record.
 
 ## Product Contract
 
@@ -340,8 +353,8 @@ target has structured evidence rather than a digest-only pass.
 
 **Depends on:** RUP-U2.
 
-**Status:** Active after Reviewed Product Composition Conformance Baseline
-`56264181873249c18d5477ce2170c8b1`.
+**Status:** Paused by the registered Presented UI Evidence Correlation Correction after Reviewed
+Product Composition Conformance Baseline `56264181873249c18d5477ce2170c8b1`.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 
