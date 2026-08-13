@@ -47,6 +47,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
 | RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
 | RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
+| PCC-U3-1 | PCC-U3 | `864c151` | `rust-api/behavior` | Ordinary file-backed Host composition authority | Remove raw configure/disable/order/provider methods from ordinary Headless, Desktop, and Editor intents; put replayable plugins and schema contributions in one `ProductRecipe`, and use one `project_host::advanced::RuntimeProbe` only for non-replayable Host probes. |
 | RGS-U2-1 | RGS-U2 | `51b3fe4` | `rust-api/behavior` | Runtime hierarchy ownership, scene component composition, and parented spatial content admission | Import runtime relationships from `nara_hierarchy`, install `HierarchyPlugin` and `SceneComponentsPlugin` separately, and keep parented transform/visibility content fail-closed until RGS-U3. |
 | RGS-U3-1 | RGS-U3 | `fb4fdc7` | `rust-api/behavior` | Completed global 2D projection and world-space camera/sprite/tilemap extraction | Treat `GlobalTransform2d` as an opaque immutable derived component, give every world-space renderable an explicit `Transform2d`, and pass completed globals to extraction helpers without local/identity fallback. |
 | SRT-U2-1 | SRT-U2 | `0b5beba` | `rust-api/behavior/safety` | Image construction, render prepare snapshot identity, and prepare invalidation | Handle fallible `ImageAsset` construction, capture `AssetSlotRevision` in each prepare snapshot, borrow non-`Copy` snapshots, and remove the unconsumed invalidation event log. |
@@ -1979,8 +1980,8 @@ let snapshot = ProjectContentLoader::new(project_root)?.load(&candidate, &plan)?
 **After**:
 
 ```rust
-let intent = HeadlessRunIntent::<GameSnapshot>::new(fixed_ticks)
-    .insert_after::<TransformPlugin>(game_plugin_definition());
+let recipe = ProductRecipe::new().add_plugin::<GamePlugin>()?;
+let intent = HeadlessRunIntent::<GameSnapshot>::new(fixed_ticks).with_recipe(recipe);
 let mut run = HeadlessRun::new(project_root, intent, commands);
 
 match run.execute_bounded().outcome() {
@@ -1997,11 +1998,12 @@ Its frozen counterfactual remains in Git history and
 `docs/benchmarks/runtime-ownership-baseline.md`, not as a current application template.
 
 **User action**: file-backed headless callers should move manifest/content/runtime lifecycle code
-behind `HeadlessRun`. Keep game configuration in Rust plugin definitions and schema providers,
-submit semantic gameplay commands, retain the action while cleanup is incomplete, and emit only
-the returned structured diagnostics. Code-first embedding may continue to use `App`; platform or
-Editor Host maintainers may use the advanced runtime module but must not expose its choreography to
-ordinary game code.
+behind `HeadlessRun`. Put replayable runtime plugins in one `ProductRecipe`; bind every
+schema-owning plugin and its providers through one `SchemaContribution`. Submit semantic gameplay
+commands, retain the action while cleanup is incomplete, and emit only the returned structured
+diagnostics. Code-first embedding may continue to use `App`; non-replayable test or fault probes
+use the narrow `project_host::advanced::RuntimeProbe` path and must not become ordinary game
+configuration.
 
 **Source action**: `none`; this migration changes Rust ownership/API usage, not project files.
 
@@ -2305,13 +2307,74 @@ is compiled Rust data, not a new `nara.toml` extension or package wire format.
 
 **Cache action**: keep; rebuild Rust artifacts after changing recipe code.
 
-**Compatibility window**: none for the new ordinary API. Existing advanced Host composition remains
-temporarily available only while RPR-U4 migrates real consumers; it is not the normal author path.
+**Compatibility window**: none for the ordinary API. Raw project-plan inspection and profile-owned
+slot edits remain available only under `project_host::advanced`; they are not accepted by ordinary
+Headless, Desktop, or Editor intents.
 
 **Verification anchors**: `tests/plugin_composition.rs`, `tests/project_runtime_boot.rs`,
 `tests/workspace_play_runtime.rs`, and the public-prelude fixture prove pure replacement,
 direct/file-backed schema parity, headless and Editor execution, and the ordinary public compile
 surface.
+
+## PCC-U3: ProductRecipe-Only Ordinary Host Composition
+
+Ordinary `HeadlessRunIntent`, `DesktopRunIntent`, and `EditorProjectIntent` no longer expose
+`configure`, `disable`, `insert_before`, `insert_after`, or `with_schema_provider`. Those methods
+formed a second composition authority beside `ProductRecipe` and allowed plugin selection to drift
+from schema authority.
+
+**Canonical replacement or deletion rationale**:
+
+- Add replayable runtime-only plugins with `ProductRecipe::add_plugin` or
+  `ProductRecipe::add_configured_plugin`.
+- Add schema-owning plugins only through `SchemaContribution` and
+  `ProductRecipe::add_contribution`; there is no parallel provider vector.
+- Keep Image, Tilemap, window, WGPU, and other profile-owned built-ins in project/profile
+  configuration. A recipe cannot disable, reorder, or replace entries it does not own.
+- Use `project_host::advanced::{RuntimeProbe, headless_run_with_probe,
+  desktop_run_with_probe, open_editor_with_probe}` only for one non-replayable probe definition.
+  The probe cannot attach schema providers, and schema-owning definitions reject before an `App`
+  exists.
+- Keep raw one-shot plugins on direct `App::add_plugins`; the direct-App path does not acquire the
+  file-backed Host lifecycle or publication guarantees.
+
+**Before**:
+
+```rust
+let intent = HeadlessRunIntent::<GameSnapshot>::new(fixed_ticks)
+    .configure(game_plugin_definition())
+    .insert_after::<GameplayCommandPlugin>(fault_probe_definition())
+    .with_schema_provider(game_schema_provider());
+```
+
+**After, ordinary replayable product**:
+
+```rust
+let contribution = SchemaContribution::<GamePlugin>::for_default([game_schema_provider()])?;
+let recipe = ProductRecipe::new().add_contribution(contribution)?;
+let mut run = HeadlessRun::from_recipe(project_root, recipe, fixed_ticks, commands);
+```
+
+**After, explicit non-replayable Host probe**:
+
+```rust
+let intent = HeadlessRunIntent::<GameSnapshot>::new(fixed_ticks).with_recipe(recipe);
+let probe = RuntimeProbe::new(fault_probe_definition());
+let mut run = headless_run_with_probe(project_root, intent, probe, commands);
+```
+
+**Source action**: none. This is a Rust composition API correction; project, Scene, Prefab, asset,
+and save formats are unchanged.
+
+**Cache action**: keep content caches; rebuild Rust artifacts and plugin-plan fingerprints.
+
+**Compatibility window**: none (pre-1.0 fearless replacement). No deprecated ordinary intent
+methods or provider-list wrappers remain.
+
+**Verification anchors**: `tests/project_host_boundary.rs`, `tests/plugin_composition.rs`,
+`tests/project_runtime_boot.rs`, `tests/workspace_play_runtime.rs`,
+`tests/runtime_runner_contract.rs`, `reference-game/tests/plugin_composition.rs`, and
+`reference-game/tests/host_parity.rs`.
 
 ## RGS-U2-1: Runtime Hierarchy Ownership and Scene Component Separation
 

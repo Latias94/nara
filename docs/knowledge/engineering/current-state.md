@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "94ab1aca55f7b88e4b112ec50de174ad9c71cba8c35accd923bfa91c0a3d28db"
+source_fingerprint: "5b7f8062f6f7099fe1bfd653fff580754681024edfca6931271a7c921e0fd3b8"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "94ab1aca55f7b88e4b112ec50de174ad9c71cba8c35accd923bfa91c0a3
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `94ab1aca55f7b88e4b112ec50de174ad9c71cba8c35accd923bfa91c0a3d28db`
-- Immutable records: 421
+- Source fingerprint: `5b7f8062f6f7099fe1bfd653fff580754681024edfca6931271a7c921e0fd3b8`
+- Immutable records: 423
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Product composition contribution correction: PCC-U2 complete, PCC-U3 active](registry/2026-08/2026-08-13T020623Z-engine-foundation-contract-completion-codex-root-cbb7db6fba494fd9b1ee15ec4818ed82.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Product composition contribution correction: PCC-U3 complete, PCC-U4 active](registry/2026-08/2026-08-13T045033Z-engine-foundation-contract-completion-codex-root-25e1b788e8864b51a53108ed4b185e64.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [PCC-U3 ProductRecipe ordinary Host authority verification](verification/2026-08/2026-08-13T045032Z-pcc-u3-productrecipe-ordinary-host-authority-verification-02de9ad341db4dcbb1519e0f5e8843f1.md) - Verifies one ProductRecipe ordinary Host composition input, explicit one-definition advanced probes, schema-authority closure, and Headless/Desktop/Editor parity.
 - **Verification Evidence**: [PCC-U2 explicit Winit accessibility contribution verification](verification/2026-08/2026-08-13T020518Z-pcc-u2-explicit-winit-accessibility-contribution-verification-c7031e35724f4c55928c2dd77dc0b63d.md) - Serial verification of explicit Winit accessibility contribution, disabled/partial runner modes, and exact receipt-stamped platform publication.
 - **Verification Evidence**: [PCC-U1 concrete WGPU contribution split](verification/2026-08/2026-08-12T120000Z-pcc-u1-concrete-wgpu-contributions-55abac61d345418ca2dc60328bee6111.md) - Verifies that the base WGPU backend is feature-invariant and Sprite/UI submission is installed only as an explicit requested contribution.
 - **Verification Evidence**: [Product composition requested-subset reproduction](verification/2026-08/2026-08-12T110921Z-product-composition-requested-subset-reproduction-4f2f32ff95af4504a2e224d0868ec7a0.md) - Reproduces the all-features compile-ceiling leak that changes a render-wgpu-only requested plugin closure.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [UIFM-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md) - Publishes the modal-entry-focus correction as the successor shared UI baseline and permits an explicit RUP-U1 rebase.
 - **Verification Evidence**: [UIFM-U1 Modal Entry Focus Correction](verification/2026-08/2026-08-10T155955Z-uifm-u1-modal-entry-focus-correction-04e51278170c4a839dbeb0c9658741d8.md) - Proves that the Surface Slot owner seat participates in candidate reconciliation and that initial modal focus is committed before final paint and semantic publication.
 - **Verification Evidence**: [RUP-U1 neutral modal-entry focus reproduction](verification/2026-08/2026-08-10T155945Z-rup-u1-neutral-modal-focus-reproduction-cc8d66c49d134e9f9d18d680afe19f7a.md) - Records the renderer-neutral product-triggered failure that pauses RUP-U1 and admits one focused UI Foundation correction.
-- **Verification Evidence**: [RUP-U0 product authority and fixture reconciliation](verification/2026-08/2026-08-10T155800Z-rup-u0-product-authority-and-fixture-reconciliation-c067431accb242a7b69b839b5dd481d4.md) - Closes the focused Reference Game Runtime UI component fixture without Cartesian smoke, opaque hashes, or false desktop/backend claims.
 
 # Integration Notes
 
