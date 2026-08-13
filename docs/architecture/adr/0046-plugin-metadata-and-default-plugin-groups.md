@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-08-01
+**Last Revised**: 2026-08-13
 **Refines**: ADR 0003, ADR 0010, ADR 0035, ADR 0040, ADR 0044
 **Refined By**: ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0079: Root Product
 Capabilities and Placeholder Domain Retirement; ADR 0095: Plugin-Owned Specialized Domains and
@@ -19,8 +19,9 @@ Stable slots edit known bundle entries; they are not universal provider roles. A
 plugin must be appendable through plugin/group/tuple composition without constructing definition
 IDs, fingerprints, or slot anchors. Declaration dimensions beyond stable identity are optional
 composition facts and require a real consumer; empty capability/service/conflict fields must not
-create ecosystem ceremony. Official defaults remain ordinary entries that users can omit or
-disable before adding another plugin.
+create ecosystem ceremony. Official defaults remain ordinary entries that direct `App` or explicit
+advanced group builders can omit or disable before adding another plugin. A file-backed product
+Host does not gain a second raw edit authority over profile-owned entries.
 
 `PluginServiceId` closes a declared presence requirement only. It does not choose an owner, imply
 exclusivity, or dispatch calls. A shared domain service ID is valid only after an Accepted protocol
@@ -44,6 +45,20 @@ lifecycle assembly. Raw one-shot plugin values remain valid for direct `App` com
 explicit engine-owned probes, not ordinary product recipes. This evidence accepts the bounded
 compiled-Rust contribution path. It does not admit a package manager, generic package definition,
 provider registry, file-backed plugin settings, or missing-package workflow; those remain OQ-045.
+
+## 2026-08-13 PCC ProductRecipe Authority Refinement
+
+Ordinary file-backed `HeadlessRunIntent`, `DesktopRunIntent`, and `EditorProjectIntent` accept one
+`ProductRecipe` plus execution policy. They do not expose raw configure, disable, relative-order or
+parallel schema-provider channels. A recipe may add or configure only entries it owns;
+profile-owned Image, Tilemap, window, presentation and backend choices remain project/profile
+facts.
+
+A schema-owning replayable entry uses `SchemaContribution`. One non-replayable definition may enter
+through the explicitly named `project_host::advanced::RuntimeProbe`, which carries no independent
+provider list or profile edit vocabulary. Engine-owned Editor bridge installation remains private
+Host lowering. Direct `App` composition continues to accept raw plugins and groups and is not
+reimplemented as a Host overlay.
 
 ## Context
 

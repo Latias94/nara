@@ -3,17 +3,17 @@ title: Runtime UI Product Slice - Plan
 type: feat
 date: 2026-08-08
 deepened: 2026-08-10
-amended: 2026-08-12
+amended: 2026-08-13
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: inactive
-paused_by: docs/plans/2026-08-12-002-refactor-product-composition-contribution-correction-plan.md
+execution_state: active
 product_contract_source: docs/architecture/reference-game-ui-product-slice.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md
 supersedes: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 baseline_record: a628828a8ff941239d79a0b8b3d60316
+composition_baseline_record: 180d0dfe0a41417a9633c11cccb91eab
 plan_id: runtime-ui-product-slice-2026-08
 unit_namespace: RUP
 operator_execution_authority: external-control-plane
@@ -59,17 +59,17 @@ owned that shared value-contract defect. UIFD-U1 corrected it at `ba918db`; UIFD
 successor baseline `a628828a8ff941239d79a0b8b3d60316`, which this plan now pins before resuming
 RUP-U2.
 
-### Active product-composition correction lineage
+### Completed product-composition correction lineage
 
-RUP-U3 is paused after the all-features requested-subset reproduction proved that compiled
+RUP-U3 was paused after the all-features requested-subset reproduction proved that compiled
 `ui-submitter` code changes the base `WgpuRenderPlugin` dependency closure for a product requesting
 only `render-wgpu`. The same ownership defect lets compiled Winit accessibility code create native
 product behavior without the `presentation-ui + desktop-winit` request pair. The focused
 [Product Composition Contribution Correction](2026-08-12-002-refactor-product-composition-contribution-correction-plan.md)
-owns the backend/platform contribution split and ordinary `ProductRecipe` authority correction.
-This plan resumes only after that correction publishes a Product Composition Conformance Baseline
-and this frontmatter pins it independently as `composition_baseline_record`; the existing UI
-Foundation `baseline_record` remains unchanged.
+completed the backend/platform contribution split and ordinary `ProductRecipe` authority
+correction. Product Composition Conformance Baseline `180d0dfe0a41417a9633c11cccb91eab`
+is pinned independently as `composition_baseline_record`; the existing UI Foundation
+`baseline_record` remains unchanged. RUP-U3 is now active against both records.
 
 ## Product Contract
 
@@ -340,7 +340,8 @@ target has structured evidence rather than a digest-only pass.
 
 **Depends on:** RUP-U2.
 
-**Status:** Paused by the registered Product Composition Contribution Correction.
+**Status:** Active after Product Composition Conformance Baseline
+`180d0dfe0a41417a9633c11cccb91eab`.
 
 **Goal:** Publish immutable Runtime UI product evidence and close the preserved NUI-U15B obligation.
 

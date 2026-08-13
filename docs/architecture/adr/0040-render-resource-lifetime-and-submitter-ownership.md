@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-08-12
+**Last Revised**: 2026-08-13
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -25,7 +25,8 @@ transaction. Concrete `WgpuSpriteSubmitterPlugin` and `WgpuUiSubmitterPlugin` ma
 first-party systems that contribute already-owned domain packets to that private transaction, but
 they expose no submitter trait, registry, dynamic phase or backend-replacement contract. Their
 installation is selected by the requested product closure, never by whether their Cargo code was
-compiled.
+compiled. A compiled but uninstalled contribution cannot drain, clear, bind or complete its domain
+queue; direct Rust products select the same concrete contribution explicitly.
 
 ## ADR 0096 Refinement
 

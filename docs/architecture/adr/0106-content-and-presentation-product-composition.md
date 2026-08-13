@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
-**Last Revised**: 2026-08-12
+**Last Revised**: 2026-08-13
 **Owner**: Root product features, project capability normalization, Host recipes, and plugin groups
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
@@ -13,6 +13,8 @@
 [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md), and
 [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md)
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U5 and NUI-U15; [Product Composition Contribution Correction](../../plans/2026-08-12-002-refactor-product-composition-contribution-correction-plan.md)
+
+**Composition Baseline**: [PCC-U4 Product Composition Conformance Baseline](../../knowledge/engineering/verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md)
 
 ## 2026-08-12 Product-Contribution Amendment
 

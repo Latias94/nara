@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-08-12
+**Last Revised**: 2026-08-13
 **Refines**: ADR 0001, ADR 0030, ADR 0035, ADR 0044, ADR 0046, ADR 0055, ADR 0056,
 ADR 0070
 **Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md);
@@ -18,6 +18,11 @@ compiled Cargo ceiling. It does not install that implementation, change a base p
 register systems or create platform behavior. The normalized requested product and resolved plugin
 closure install concrete WGPU Sprite/UI and Winit accessibility contribution plugins only for their
 explicit capability intersections.
+
+Ordinary file-backed Hosts inspect one `ProductRecipe` plus execution policy. Profile-owned plugin
+selection remains a project/profile fact, schema-owning recipe entries use `SchemaContribution`,
+and one explicitly advanced non-replayable probe cannot attach a separate provider list. Direct
+`App` composition remains the raw code-first path.
 
 ## ADR 0104 Refinement
 
