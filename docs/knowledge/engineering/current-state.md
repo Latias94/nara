@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "bb039fa14503e1e7e8755f9a47b212b62b4c887343e8f902d8244541bb59e543"
+source_fingerprint: "e94ff0b02f4eb96c37a36f53b856c4aceb75b082ce9de5a2c0a57e8a115f1474"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "bb039fa14503e1e7e8755f9a47b212b62b4c887343e8f902d8244541bb5
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `bb039fa14503e1e7e8755f9a47b212b62b4c887343e8f902d8244541bb59e543`
-- Immutable records: 429
+- Source fingerprint: `e94ff0b02f4eb96c37a36f53b856c4aceb75b082ce9de5a2c0a57e8a115f1474`
+- Immutable records: 431
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Presented UI evidence correction active; RUP-U3 paused](registry/2026-08/2026-08-13T085410Z-engine-foundation-contract-completion-codex-root-4b3770a6c8614a42a91f13e2c5dc9e96.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Presented UI evidence correction: PUEC-U2 active](registry/2026-08/2026-08-13T090735Z-engine-foundation-contract-completion-codex-root-3b54121221f24d2280c683d38ce79a76.md): `active` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [PUEC-U1 exact WGPU frame identity](verification/2026-08/2026-08-13T090735Z-puec-u1-exact-wgpu-frame-identity-5207658a400a48c99783ed034b5b5125.md) - Proves that WGPU transaction and completion evidence retains distinct App-frame and Render-transaction identities.
 - **Verification Evidence**: [RUP-U3 presented evidence identity reproduction](verification/2026-08/2026-08-13T085318Z-rup-u3-presented-evidence-identity-reproduction-05669e8601e647e396ccf92bb372235c.md) - Static owner-local reproduction proves App-frame/Render-transaction conflation, latest-candidate substitution, and pre-readiness telemetry admission.
 - **Verification Evidence**: [PCC-U4 Reviewed Product Composition Conformance Baseline](verification/2026-08/2026-08-13T073115Z-pcc-u4-reviewed-product-composition-conformance-baseline-56264181873249c18d5477ce2170c8b1.md) - Supersedes the initial PCC-U4 evidence with the reviewed narrow-feature, backpressure, and product-profile module proof.
 - **Verification Evidence**: [PCC-U4 Product Composition Conformance Baseline](verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md) - Publishes the independent product-composition baseline for explicit WGPU, Winit accessibility and ProductRecipe Host authority.
@@ -41,7 +42,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [UIFD-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-12T051123Z-uifd-u2-successor-foundation-conformance-baseline-a628828a8ff941239d79a0b8b3d60316.md) - Publishes immutable dynamic text content replacement as the successor shared UI baseline and permits an explicit RUP-U2 rebase.
 - **Verification Evidence**: [UIFD-U1 immutable dynamic text content correction](verification/2026-08/2026-08-12T050655Z-uifd-u1-immutable-dynamic-text-content-correction-ecea4e791ef449afb0b57fece9f8ecda.md) - Proves that dynamic display content can replace one immutable text value without changing authored presentation or semantic policy.
 - **Verification Evidence**: [RUP-U2 neutral dynamic text content reproduction](verification/2026-08/2026-08-12T045955Z-rup-u2-neutral-dynamic-text-content-reproduction-05a05e7d4cad4668aab8fa5026263b12.md) - Records the renderer-neutral public-value failure that pauses RUP-U2 and admits one focused UI Foundation correction.
-- **Verification Evidence**: [RUP-U1 exact gameplay-to-Retry trajectory](verification/2026-08/2026-08-11T074247Z-rup-u1-exact-gameplay-to-retry-trajectory-882397b5b744448cbd5cb8d5c3d0568a.md) - Closes the exact Runtime UI behavior trajectory with typed input evidence, native Windows UI Automation ingress, backend-submitted successor presentation, and causal Retry replacement.
 
 # Integration Notes
 
