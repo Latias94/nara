@@ -12,6 +12,8 @@ use nara_ui::{
 
 use super::*;
 use crate::{PresentationUiPlugins, RuntimeUiPlugins};
+#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+use std::time::Duration;
 
 #[derive(Debug, Default, Resource)]
 struct FakeBackendFrame(Option<nara_ui_render::__private::UiBackendPresentationFrame>);
@@ -244,6 +246,11 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     let mut app = App::new();
     app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
         .expect("runtime and presentation UI products should install");
+    assert!(
+        !app.world()
+            .contains_resource::<NativeAccessibilityPresentationPort>(),
+        "a compiled desktop adapter must not install native accessibility without the explicit contribution",
+    );
     install_fake_backend(&mut app, FakeBackendMode::Present);
     let surface_id = UiSurfaceId::new(7).expect("test surface should be non-zero");
     let root = install_test_surface_and_root(&mut app, surface_id.get(), 1);
@@ -275,6 +282,141 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     .expect("the UI packet compiler should remain available");
     assert_eq!(compile.admitted_packets, 0);
     assert_eq!(compile.rejected_packets, 1);
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+#[test]
+fn explicit_winit_accessibility_contribution_installs_the_private_presentation_port() {
+    let mut app = App::new();
+    app.add_plugins((
+        RuntimeUiPlugins,
+        PresentationUiPlugins,
+        crate::DesktopWinitPlugins,
+        WinitUiAccessibilityContributionPlugin,
+    ))
+    .expect("the explicit native accessibility contribution should install");
+
+    assert!(
+        app.world()
+            .contains_resource::<NativeAccessibilityPresentationPort>()
+    );
+    assert!(
+        nara_winit::__private::capture_winit_accessibility_activation(app.world()).is_enabled()
+    );
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+#[test]
+fn explicit_winit_accessibility_publication_uses_the_exact_presented_receipt() {
+    let mut app = App::new();
+    app.add_plugins((
+        RuntimeUiPlugins,
+        PresentationUiPlugins,
+        crate::DesktopWinitPlugins,
+        WinitUiAccessibilityContributionPlugin,
+    ))
+    .expect("the explicit native accessibility contribution should install");
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+    install_test_surface_and_root(&mut app, 71, nara_window::WindowId::PRIMARY.get());
+
+    let candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
+        .expect("the focused test should acquire one runtime route")
+        .admit(
+            app.seal().expect("the focused test app should seal"),
+            nara_app::RuntimeObligationLedger::new(),
+            nara_app::RuntimeClosePolicy::default(),
+        )
+        .expect("the focused test runtime should be admitted");
+    let mut runtime = candidate
+        .complete_startup()
+        .expect("the focused test runtime should start")
+        .promote();
+
+    runtime
+        .drive(Duration::ZERO)
+        .expect("the explicit contribution should publish one presented UI frame");
+    let receipt = runtime
+        .world()
+        .resource::<UiPresentationBridgeStats>()
+        .last_presented_receipt
+        .expect("the fake backend should commit one exact presentation receipt");
+    let updates = runtime
+        .with_driver_scope(nara_winit::__private::take_winit_accessibility_updates)
+        .expect("the managed runtime should grant its platform driver scope")
+        .expect("the explicit contribution should install the platform update port");
+    let mut presentations = updates.into_iter().filter_map(|update| match update {
+        nara_winit::__private::WinitAccessibilityPlatformUpdate::Present {
+            window_id,
+            snapshot,
+        } => Some((window_id, snapshot)),
+        _ => None,
+    });
+    let (window_id, snapshot) = presentations
+        .next()
+        .expect("the platform adapter should receive one presented semantic snapshot");
+    assert!(
+        presentations.next().is_none(),
+        "one committed UI packet must publish exactly one platform presentation"
+    );
+    assert_eq!(window_id, nara_window::WindowId::PRIMARY);
+    assert_eq!(snapshot.surface_id(), receipt.surface_id());
+    assert_eq!(snapshot.frame_revision(), receipt.frame_revision());
+    assert_eq!(
+        snapshot.route().slot_generation(),
+        receipt.slot_generation()
+    );
+    assert_eq!(snapshot.route().route_revision(), receipt.route_revision());
+    assert_eq!(
+        snapshot.route().geometry_generation(),
+        receipt.geometry_generation()
+    );
+    assert_eq!(snapshot.presentation_epoch(), receipt.presentation_epoch());
+
+    assert!(matches!(
+        runtime.request_control(nara_app::RuntimeControl::Stop),
+        nara_app::RuntimeControlRequestResult::Accepted(_)
+    ));
+    for _ in 0..4 {
+        if runtime.state() == nara_app::RuntimeState::Stopped {
+            break;
+        }
+        runtime
+            .drive(Duration::ZERO)
+            .expect("the focused test runtime should close cleanly");
+    }
+    assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+}
+
+#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+#[test]
+fn compiled_desktop_ui_without_contribution_drives_without_platform_state() {
+    let mut app = App::new();
+    app.add_plugins((
+        RuntimeUiPlugins,
+        PresentationUiPlugins,
+        crate::DesktopWinitPlugins,
+    ))
+    .expect("desktop UI product layers should install without native accessibility");
+    install_fake_backend(&mut app, FakeBackendMode::Present);
+    install_test_surface_and_root(&mut app, 70, 1);
+
+    app.update()
+        .expect("a compiled but unrequested accessibility adapter must not affect the UI frame");
+
+    assert!(
+        !app.world()
+            .contains_resource::<NativeAccessibilityPresentationPort>()
+    );
+    assert_eq!(
+        nara_winit::__private::capture_winit_accessibility_activation(app.world()),
+        nara_winit::__private::WinitAccessibilityActivation::Disabled
+    );
+    assert_eq!(
+        app.world()
+            .resource::<UiPresentationBridgeStats>()
+            .presented_packets,
+        1
+    );
 }
 
 #[test]

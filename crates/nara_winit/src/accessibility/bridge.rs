@@ -10,6 +10,56 @@ use nara_ui_kernel::{
 use nara_window::WindowId;
 use thiserror::Error;
 
+/// Marker installed only by the explicit root product contribution.
+///
+/// The runner treats the absence of this marker as a valid disabled mode. It never infers native
+/// accessibility activation from Cargo feature availability alone.
+#[derive(Debug, Default, Resource)]
+pub(super) struct WinitAccessibilityContribution;
+
+/// The runner-facing activation state captured before native window startup.
+///
+/// `Disabled` is deliberately valid when the platform-accessibility code is compiled but the
+/// product did not install the explicit contribution. `Partial` is a pre-run failure and must
+/// never be interpreted as a disabled product.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WinitAccessibilityAccess(());
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WinitAccessibilityActivation {
+    Disabled,
+    Enabled(WinitAccessibilityAccess),
+    Partial(WinitAccessibilityActivationError),
+}
+
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+pub enum WinitAccessibilityActivationError {
+    #[error("the explicit Winit accessibility contribution is missing bridge resources")]
+    MissingBridgeResources,
+}
+
+impl WinitAccessibilityActivation {
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        matches!(self, Self::Enabled(_))
+    }
+}
+
+pub fn capture_winit_accessibility_activation(world: &World) -> WinitAccessibilityActivation {
+    if !world.contains_resource::<WinitAccessibilityContribution>() {
+        return WinitAccessibilityActivation::Disabled;
+    }
+    if world.contains_resource::<WinitAccessibilityPlatformUpdates>()
+        && world.contains_resource::<WinitAccessibilityInputs>()
+    {
+        WinitAccessibilityActivation::Enabled(WinitAccessibilityAccess(()))
+    } else {
+        WinitAccessibilityActivation::Partial(
+            WinitAccessibilityActivationError::MissingBridgeResources,
+        )
+    }
+}
+
 // Two lifecycle synchronizations plus one presentation per active surface fit below this bound.
 const MAX_PENDING_ACCESSIBILITY_UPDATES: usize = 64;
 pub(super) const MAX_PENDING_ACCESSIBILITY_INPUTS: usize = 64;
@@ -116,9 +166,23 @@ pub enum WinitAccessibilityBridgeError {
     UpdateLimitExceeded { maximum: usize },
 }
 
-pub fn install_winit_accessibility_bridge(app: &mut App) -> Result<(), PluginError> {
+fn install_winit_accessibility_bridge(app: &mut App) -> Result<(), PluginError> {
     app.init_resource::<WinitAccessibilityPlatformUpdates>()?
         .init_resource::<WinitAccessibilityInputs>()?;
+    Ok(())
+}
+
+pub fn install_winit_accessibility_contribution(app: &mut App) -> Result<(), PluginError> {
+    install_winit_accessibility_bridge(app)?;
+    app.init_resource::<WinitAccessibilityContribution>()?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn install_partial_winit_accessibility_contribution(
+    app: &mut App,
+) -> Result<(), PluginError> {
+    app.init_resource::<WinitAccessibilityContribution>()?;
     Ok(())
 }
 
@@ -175,6 +239,26 @@ mod tests {
 
     use super::super::{WinitAccessibilityError, WinitAccessibilityPublisher};
     use super::*;
+
+    #[test]
+    fn platform_accessibility_activation_is_explicit_and_three_state() {
+        let app = App::new();
+        assert_eq!(
+            capture_winit_accessibility_activation(app.world()),
+            WinitAccessibilityActivation::Disabled
+        );
+
+        let mut partial = World::new();
+        partial.insert_resource(WinitAccessibilityContribution);
+        assert!(matches!(
+            capture_winit_accessibility_activation(&partial),
+            WinitAccessibilityActivation::Partial(_)
+        ));
+
+        let mut enabled = App::new();
+        install_winit_accessibility_contribution(&mut enabled).unwrap();
+        assert!(capture_winit_accessibility_activation(enabled.world()).is_enabled());
+    }
 
     #[test]
     fn platform_updates_preserve_lifecycle_order_per_window() {

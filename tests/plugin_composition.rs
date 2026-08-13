@@ -2145,6 +2145,12 @@ fn desktop_project_configures_the_existing_window_plugin_slot() {
     assert_eq!(windows[0].title, "Configured Nara Window");
     assert_eq!(windows[0].resolution.physical_width, 1024);
     assert_eq!(windows[0].resolution.physical_height, 576);
+    #[cfg(feature = "presentation-ui")]
+    assert!(
+        !plan.plugin_plan().entries().iter().any(|entry| {
+            entry.plugin_id() == nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID
+        })
+    );
 }
 
 #[cfg(all(
@@ -2193,6 +2199,7 @@ fn requested_product_profile_selects_ui_window_and_wgpu_without_runtime_tooling(
         WINDOW_PLUGIN_ID,
         WGPU_RENDER_PLUGIN_ID,
         nara::render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+        nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
     ] {
         assert_eq!(
             entries
@@ -2339,6 +2346,53 @@ requested = ["runtime-ui", "presentation-ui"]
                 .any(|entry| entry.plugin_id() == plugin)
         );
     }
+    #[cfg(feature = "desktop-winit")]
+    assert!(
+        plan.plugin_plan().entries().iter().all(|entry| {
+            entry.plugin_id() != nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID
+        })
+    );
+}
+
+#[cfg(all(
+    feature = "runtime-ui",
+    feature = "presentation-ui",
+    feature = "desktop-winit"
+))]
+#[test]
+fn desktop_presentation_ui_profile_installs_winit_accessibility_once() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Desktop Presentation UI Composition"
+
+[runtime]
+preset = "minimal"
+
+[capabilities]
+requested = ["runtime-ui", "presentation-ui", "desktop-winit"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.plugin_plan()
+            .entries()
+            .iter()
+            .filter(|entry| {
+                entry.plugin_id() == nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID
+            })
+            .count(),
+        1
+    );
 }
 
 #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
@@ -2481,6 +2535,31 @@ fn direct_app_selects_the_ui_wgpu_contribution_explicitly() {
     assert!(
         app.installed_plugins()
             .all(|plugin| { plugin.id != nara::render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID })
+    );
+    app.seal().unwrap();
+}
+
+#[cfg(all(
+    feature = "runtime-ui",
+    feature = "presentation-ui",
+    feature = "desktop-winit"
+))]
+#[test]
+fn direct_app_selects_the_winit_accessibility_contribution_explicitly() {
+    let mut app = nara::app::App::new();
+    app.add_plugins((
+        nara::RuntimeUiPlugins,
+        nara::PresentationUiPlugins,
+        nara::DesktopWinitPlugins,
+        nara::WinitUiAccessibilityContributionPlugin,
+    ))
+    .unwrap();
+
+    assert_eq!(
+        app.installed_plugins()
+            .filter(|plugin| { plugin.id == nara::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID })
+            .count(),
+        1
     );
     app.seal().unwrap();
 }

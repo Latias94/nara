@@ -136,6 +136,11 @@ pub use product::{
     ProductRecipeEntry, ProductRecipeEntryKind, ProductRecipeError, SchemaContribution,
     ServerPlugins,
 };
+#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+pub use ui_presentation::{
+    WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION,
+    WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID, WinitUiAccessibilityContributionPlugin,
+};
 
 #[cfg(feature = "runtime-core")]
 pub mod prelude {
@@ -403,6 +408,11 @@ pub mod backend_prelude {
     pub use crate::DesktopWinitPlugins;
     #[cfg(feature = "render-wgpu")]
     pub use crate::WgpuBackendPlugins;
+    #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+    pub use crate::{
+        WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_DECLARATION,
+        WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID, WinitUiAccessibilityContributionPlugin,
+    };
     #[cfg(all(feature = "presentation-2d", feature = "render-wgpu"))]
     pub use nara_render_wgpu::WgpuSpriteSubmitterPlugin;
     #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]

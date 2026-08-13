@@ -22,11 +22,16 @@ pub(crate) use platform::WinitPlatformAccessibilitySession;
 #[doc(hidden)]
 pub mod __private {
     pub use super::bridge::{
+        WinitAccessibilityAccess, WinitAccessibilityActivation, WinitAccessibilityActivationError,
         WinitAccessibilityBridgeError, WinitAccessibilityInputBatch,
-        WinitAccessibilityPlatformUpdate, drain_winit_accessibility_inputs,
-        install_winit_accessibility_bridge, publish_winit_accessibility_update,
-        queue_winit_accessibility_inputs, take_winit_accessibility_updates,
+        WinitAccessibilityPlatformUpdate, capture_winit_accessibility_activation,
+        drain_winit_accessibility_inputs, install_winit_accessibility_contribution,
+        publish_winit_accessibility_update, queue_winit_accessibility_inputs,
+        take_winit_accessibility_updates,
     };
+
+    #[cfg(test)]
+    pub(crate) use super::bridge::install_partial_winit_accessibility_contribution;
 }
 
 const ROOT_NODE_ID: NodeId = NodeId(1);

@@ -173,6 +173,8 @@ struct WinitApp<'runtime> {
     input_window_id: WindowId,
     event_proxy: Option<EventLoopProxy<WinitUserEvent>>,
     #[cfg(feature = "platform-accessibility")]
+    accessibility_activation: accessibility::__private::WinitAccessibilityActivation,
+    #[cfg(feature = "platform-accessibility")]
     accessibility_sessions: HashMap<WindowId, WinitPlatformAccessibilitySession>,
 }
 
@@ -266,6 +268,17 @@ impl<'runtime> WinitApp<'runtime> {
     }
 
     fn with_session(runtime: &'runtime mut RuntimeInstance) -> Result<Self, AppRunError> {
+        #[cfg(feature = "platform-accessibility")]
+        let accessibility_activation =
+            match accessibility::__private::capture_winit_accessibility_activation(runtime.world())
+            {
+                accessibility::__private::WinitAccessibilityActivation::Partial(error) => {
+                    return Err(AppRunError::runner(format!(
+                        "Winit accessibility contribution is partial: {error}"
+                    )));
+                }
+                activation => activation,
+            };
         let backend_windows = runtime
             .world()
             .get_resource::<BackendWindowHandles>()
@@ -287,6 +300,8 @@ impl<'runtime> WinitApp<'runtime> {
             input_gate: WinitInputGate::default(),
             input_window_id: WindowId::PRIMARY,
             event_proxy: None,
+            #[cfg(feature = "platform-accessibility")]
+            accessibility_activation,
             #[cfg(feature = "platform-accessibility")]
             accessibility_sessions: HashMap::new(),
         })
@@ -328,14 +343,18 @@ impl<'runtime> WinitApp<'runtime> {
             ))
             .with_resizable(window.resizable);
         #[cfg(feature = "platform-accessibility")]
-        let attributes = attributes.with_visible(false);
+        let attributes = if self.accessibility_activation.is_enabled() {
+            attributes.with_visible(false)
+        } else {
+            attributes
+        };
 
         let platform_window = event_loop.create_window(attributes).map_err(|error| {
             AppRunError::runner(format!("failed to create native window: {error}"))
         })?;
         let platform_window = Arc::new(platform_window);
         #[cfg(feature = "platform-accessibility")]
-        {
+        if self.accessibility_activation.is_enabled() {
             let event_proxy = self
                 .event_proxy
                 .as_ref()
@@ -406,6 +425,9 @@ impl<'runtime> WinitApp<'runtime> {
 
     #[cfg(feature = "platform-accessibility")]
     fn synchronize_platform_accessibility(&mut self) -> Result<(), AppRunError> {
+        if !self.accessibility_activation.is_enabled() {
+            return Ok(());
+        }
         let updates =
             self.with_driver_scope(accessibility::__private::take_winit_accessibility_updates)?;
         for update in updates {
@@ -434,6 +456,9 @@ impl<'runtime> WinitApp<'runtime> {
         winit_window_id: WinitWindowId,
         event: &WinitWindowEvent,
     ) {
+        if !self.accessibility_activation.is_enabled() {
+            return;
+        }
         let Some(window_id) = self.nara_windows_by_winit.get(&winit_window_id).copied() else {
             return;
         };
@@ -448,6 +473,9 @@ impl<'runtime> WinitApp<'runtime> {
 
     #[cfg(feature = "platform-accessibility")]
     fn handle_accessibility_wake(&mut self, window_id: WindowId) -> Result<(), AppRunError> {
+        if !self.accessibility_activation.is_enabled() {
+            return Ok(());
+        }
         let Some(session) = self.accessibility_sessions.get(&window_id) else {
             return Ok(());
         };

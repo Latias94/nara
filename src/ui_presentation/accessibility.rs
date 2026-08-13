@@ -7,11 +7,11 @@ use nara_ui::{
 };
 use nara_winit::__private::{
     WinitAccessibilityPlatformUpdate, drain_winit_accessibility_inputs,
-    install_winit_accessibility_bridge, publish_winit_accessibility_update,
+    install_winit_accessibility_contribution, publish_winit_accessibility_update,
 };
 
 pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
-    install_winit_accessibility_bridge(app)?;
+    install_winit_accessibility_contribution(app)?;
     app.init_resource::<PlatformSurfaceMirror>()?;
     app.add_systems(
         CoreStage::First,
@@ -24,6 +24,10 @@ pub(super) fn install(app: &mut App) -> Result<(), PluginError> {
         dispatch_platform_accessibility_inputs
             .after(synchronize_platform_surface_lifetimes)
             .before(nara_input::__private::InputSet::RouteUi),
+    )?;
+    app.add_systems(
+        CoreStage::Cleanup,
+        synchronize_platform_surface_lifetimes.before(super::commit_runtime_ui_presentations),
     )?;
     Ok(())
 }

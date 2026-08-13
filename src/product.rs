@@ -619,6 +619,9 @@ const SLOT_UI_RENDER: PluginSlotId = PluginSlotId::new("nara.plugins.slot.ui-ren
 #[cfg(feature = "presentation-ui")]
 const SLOT_UI_PRESENTATION_BRIDGE: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.ui-presentation-bridge");
+#[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+const SLOT_UI_WINIT_ACCESSIBILITY: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.ui-winit-accessibility");
 #[cfg(feature = "desktop-winit")]
 const SLOT_WINDOW: PluginSlotId = PluginSlotId::new("nara.plugins.slot.window");
 #[cfg(feature = "render-wgpu")]
@@ -1026,6 +1029,27 @@ impl PluginGroup for ProjectProfilePlugins {
                 DesktopWinitPlugins
                     .edit()
                     .configure(nara_window::plugin(self.primary_window)),
+            )
+        } else {
+            builder
+        };
+
+        #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
+        let builder = if self
+            .capabilities
+            .contains(nara_project::ProductCapability::DesktopWinit)
+            && self
+                .capabilities
+                .contains(nara_project::ProductCapability::PresentationUi)
+        {
+            builder.add_slot(
+                PluginSlot::required(
+                    SLOT_UI_WINIT_ACCESSIBILITY,
+                    crate::ui_presentation::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<
+                    crate::ui_presentation::WinitUiAccessibilityContributionPlugin,
+                >(),
             )
         } else {
             builder

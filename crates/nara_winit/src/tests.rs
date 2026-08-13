@@ -669,6 +669,58 @@ fn runner_configuration_does_not_install_runtime_prerequisites() {
     assert!(!app.world().contains_resource::<PointerState>());
 }
 
+#[cfg(feature = "platform-accessibility")]
+#[test]
+fn compiled_platform_accessibility_without_contribution_stays_disabled() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    let mut runtime = start_runtime(app);
+    {
+        let state = WinitApp::new(&mut runtime).unwrap();
+        assert_eq!(
+            state.accessibility_activation,
+            accessibility::__private::WinitAccessibilityActivation::Disabled
+        );
+        assert!(state.accessibility_sessions.is_empty());
+    }
+    stop_runtime(&mut runtime);
+}
+
+#[cfg(feature = "platform-accessibility")]
+#[test]
+fn installed_platform_accessibility_contribution_is_captured_as_enabled() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    accessibility::__private::install_winit_accessibility_contribution(&mut app).unwrap();
+    let mut runtime = start_runtime(app);
+    {
+        let state = WinitApp::new(&mut runtime).unwrap();
+        assert!(state.accessibility_activation.is_enabled());
+        assert!(state.accessibility_sessions.is_empty());
+    }
+    stop_runtime(&mut runtime);
+}
+
+#[cfg(feature = "platform-accessibility")]
+#[test]
+fn partial_platform_accessibility_contribution_rejects_before_window_startup() {
+    let mut app = App::new();
+    app.add_plugin(WindowPlugin::default()).unwrap();
+    accessibility::__private::install_partial_winit_accessibility_contribution(&mut app).unwrap();
+    let mut runtime = start_runtime(app);
+
+    let error = match WinitApp::new(&mut runtime) {
+        Ok(_) => panic!("partial accessibility contribution must reject runner startup"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("Winit accessibility contribution is partial")
+    );
+    stop_runtime(&mut runtime);
+}
+
 #[test]
 fn configured_window_requires_exactly_one_runtime_target() {
     let mut missing = start_runtime(App::new());
