@@ -10,9 +10,8 @@ use nara_ecs::{Entity, Mut, Resource, World};
 use nara_fs::{DirectoryCapability, RelativePath};
 use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandPlugin};
 use nara_reflect::{
-    ComponentCapability, ComponentFieldId, ComponentRegistry, ComponentSchemaProviderDefinition,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, component_registry,
-    report_component_registry_authority_fault,
+    ComponentCapability, ComponentFieldId, ComponentRegistry, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, component_registry, report_component_registry_authority_fault,
 };
 use nara_scene::{SceneEntityId, SceneEntitySource};
 use nara_tooling::{
@@ -31,22 +30,19 @@ use nara_tooling::{
 use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
 use crate::ProductRecipe;
-use crate::project_host::{
-    ProjectContentLoader, ProjectRuntimePlugins, built_in_schema_providers,
-    ingest_project_manifest, project_runtime_plugins_with_recipe, resolve_runtime_plan,
+use crate::project_host::composition::{
+    project_runtime_plugins_with_recipe, resolve_project_runtime_request,
 };
+use crate::project_host::{ProjectContentLoader, ingest_project_manifest};
 
 use super::{
-    PROJECT_MANIFEST, ProjectHost, RuntimePlan, runtime_plan_failure_report,
+    PROJECT_MANIFEST, ProjectHost, RuntimePlan, RuntimePluginOverlay, runtime_plan_failure_report,
     runtime_plan_selected_report, single_error,
 };
 use crate::project_host::persistence::{
     EditorPersistenceReceipt, OpenedSceneReopen, ScenePersistenceHost, SceneReopenOutcome,
     SceneSaveCandidate, SceneSaveOutcome,
 };
-
-type EditorPluginEdit =
-    Box<dyn FnOnce(ProjectRuntimePlugins) -> ProjectRuntimePlugins + Send + 'static>;
 
 const EDITOR_RUNTIME_BRIDGE_PLUGIN_ID: PluginId = PluginId::new("nara.editor-runtime-bridge");
 const EDITOR_RUNTIME_BRIDGE_DEFINITION_ID: PluginDefinitionId =
@@ -288,8 +284,6 @@ pub struct EditorProjectIntent {
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
-    plugin_edits: Vec<EditorPluginEdit>,
-    schema_providers: Vec<ComponentSchemaProviderDefinition>,
 }
 
 impl fmt::Debug for EditorProjectIntent {
@@ -299,8 +293,6 @@ impl fmt::Debug for EditorProjectIntent {
             .field("profile_present", &self.profile.is_some())
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
-            .field("plugin_edit_count", &self.plugin_edits.len())
-            .field("schema_provider_count", &self.schema_providers.len())
             .finish_non_exhaustive()
     }
 }
@@ -318,8 +310,6 @@ impl EditorProjectIntent {
             profile: None,
             cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
-            plugin_edits: Vec::new(),
-            schema_providers: Vec::new(),
         }
     }
 
@@ -339,42 +329,6 @@ impl EditorProjectIntent {
     #[must_use]
     pub fn with_recipe(mut self, recipe: ProductRecipe) -> Self {
         self.recipe = recipe;
-        self
-    }
-
-    #[must_use]
-    pub fn configure(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits
-            .push(Box::new(move |request| request.configure(definition)));
-        self
-    }
-
-    #[must_use]
-    pub fn disable<P: Plugin>(mut self) -> Self {
-        self.plugin_edits
-            .push(Box::new(|request| request.disable::<P>()));
-        self
-    }
-
-    #[must_use]
-    pub fn insert_after<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits.push(Box::new(move |request| {
-            request.insert_after::<P>(definition)
-        }));
-        self
-    }
-
-    #[must_use]
-    pub fn insert_before<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits.push(Box::new(move |request| {
-            request.insert_before::<P>(definition)
-        }));
-        self
-    }
-
-    #[must_use]
-    pub fn with_schema_provider(mut self, provider: ComponentSchemaProviderDefinition) -> Self {
-        self.schema_providers.push(provider);
         self
     }
 }
@@ -497,12 +451,26 @@ impl EditorProjectSession {
         project_root: DirectoryCapability,
         intent: EditorProjectIntent,
     ) -> Result<Self, EditorProjectOpenError> {
+        Self::open_impl(project_root, intent, None)
+    }
+
+    pub(crate) fn open_with_overlay(
+        project_root: DirectoryCapability,
+        intent: EditorProjectIntent,
+        overlay: RuntimePluginOverlay,
+    ) -> Result<Self, EditorProjectOpenError> {
+        Self::open_impl(project_root, intent, Some(overlay))
+    }
+
+    fn open_impl(
+        project_root: DirectoryCapability,
+        intent: EditorProjectIntent,
+        overlay: Option<RuntimePluginOverlay>,
+    ) -> Result<Self, EditorProjectOpenError> {
         let EditorProjectIntent {
             profile,
             cleanup_policy,
             recipe,
-            plugin_edits,
-            schema_providers,
         } = intent;
         let manifest_path = RelativePath::new(PROJECT_MANIFEST)
             .expect("the engine-owned manifest name is a valid relative path");
@@ -517,14 +485,9 @@ impl EditorProjectSession {
             })?;
         drop(manifest);
 
-        let mut request = project_runtime_plugins_with_recipe(&candidate, recipe);
-        for edit in plugin_edits {
-            request = edit(request);
-        }
+        let mut request = project_runtime_plugins_with_recipe(&candidate, recipe, overlay);
         request = request.insert_after::<GameplayCommandPlugin>(editor_runtime_bridge_definition());
-        let mut providers = built_in_schema_providers();
-        providers.extend(schema_providers);
-        let plan = resolve_runtime_plan(&candidate, request, providers).map_err(|error| {
+        let plan = resolve_project_runtime_request(&candidate, request).map_err(|error| {
             EditorProjectOpenError {
                 diagnostics: runtime_plan_failure_report(&error),
             }

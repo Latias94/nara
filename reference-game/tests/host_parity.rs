@@ -44,9 +44,13 @@ fn host_parity_probe_stays_on_the_public_bounded_product_surface() {
     let project = include_str!("../nara.toml");
 
     for required in [
-        "HeadlessRun::new",
-        "DesktopRun::new",
-        "EditorProjectSession::open",
+        "headless_run_with_probe",
+        "desktop_run_with_probe",
+        "open_editor_with_probe",
+        "RuntimeProbe::new",
+        "wave_headless_intent",
+        "wave_desktop_intent",
+        "wave_editor_intent",
         "sync_channel(1)",
         "MAX_PARITY_ENVELOPE_BYTES",
         "GameplayCommandSet::Capture",
@@ -65,6 +69,9 @@ fn host_parity_probe_stays_on_the_public_bounded_product_surface() {
         "WorldSnapshot",
         "ScenePatch",
         "EditorWorkspaceCommand",
+        "ProjectRuntimePlugins",
+        "resolve_runtime_plan",
+        "with_schema_provider",
         "EventBus",
         "serde_json",
     ] {

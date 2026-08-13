@@ -154,25 +154,61 @@ impl fmt::Debug for ProjectSettingsCandidate {
     }
 }
 
-/// A lineage-bound, editable request for one file-backed project runtime plan.
+/// A lineage-bound request for explicit advanced runtime-plan inspection.
+///
+/// Ordinary file-backed product actions do not expose this type. They accept one
+/// [`crate::ProductRecipe`] and lower it privately. The type remains available from
+/// [`crate::project_host::advanced`] for engine integration tests and advanced embedders that need
+/// to inspect profile-owned slot edits before any `App` exists.
 pub struct ProjectRuntimePlugins {
     lineage: ProjectSettingsLineage,
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
+}
+
+pub(crate) struct RuntimePluginOverlay {
+    definition: PluginDefinition,
+}
+
+pub(crate) fn runtime_plugin_overlay(definition: PluginDefinition) -> RuntimePluginOverlay {
+    RuntimePluginOverlay { definition }
+}
+
+const PROJECT_RUNTIME_OVERLAY_GROUP_ID: PluginGroupId =
+    PluginGroupId::new("nara.plugins.project-runtime-overlay");
+
+struct RuntimeOverlayPlugins {
+    definition: PluginDefinition,
+}
+
+impl PluginGroup for RuntimeOverlayPlugins {
+    const ID: PluginGroupId = PROJECT_RUNTIME_OVERLAY_GROUP_ID;
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new().add_definition(self.definition)
+    }
 }
 
 struct ProjectRuntimeAppPlugins {
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
 }
 
 impl PluginGroup for ProjectRuntimeAppPlugins {
     const ID: PluginGroupId = PluginGroupId::new("nara.plugins.project-runtime-app");
 
     fn build(self) -> PluginGroupBuilder {
-        PluginGroupBuilder::new()
+        let builder = PluginGroupBuilder::new()
             .add_edited_group(self.plugins)
-            .add_group(self.recipe)
+            .add_group(self.recipe);
+        match self.overlay {
+            Some(overlay) => builder.add_group(RuntimeOverlayPlugins {
+                definition: overlay.definition,
+            }),
+            None => builder,
+        }
     }
 }
 
@@ -182,45 +218,34 @@ impl fmt::Debug for ProjectRuntimePlugins {
             .debug_struct("ProjectRuntimePlugins")
             .field("lineage", &self.lineage)
             .field("recipe", &self.recipe)
+            .field("has_advanced_overlay", &self.overlay.is_some())
             .finish_non_exhaustive()
     }
 }
 
 impl ProjectRuntimePlugins {
     #[must_use]
-    pub fn disable<P: Plugin>(self) -> Self {
-        Self {
-            lineage: self.lineage,
-            plugins: self.plugins.disable::<P>(),
-            recipe: self.recipe,
-        }
+    pub fn disable<P: Plugin>(mut self) -> Self {
+        self.plugins = self.plugins.disable::<P>();
+        self
     }
 
     #[must_use]
-    pub fn configure(self, definition: PluginDefinition) -> Self {
-        Self {
-            lineage: self.lineage,
-            plugins: self.plugins.configure(definition),
-            recipe: self.recipe,
-        }
+    pub fn configure(mut self, definition: PluginDefinition) -> Self {
+        self.plugins = self.plugins.configure(definition);
+        self
     }
 
     #[must_use]
-    pub fn insert_after<P: Plugin>(self, definition: PluginDefinition) -> Self {
-        Self {
-            lineage: self.lineage,
-            plugins: self.plugins.insert_after::<P>(definition),
-            recipe: self.recipe,
-        }
+    pub fn insert_after<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
+        self.plugins = self.plugins.insert_after::<P>(definition);
+        self
     }
 
     #[must_use]
-    pub fn insert_before<P: Plugin>(self, definition: PluginDefinition) -> Self {
-        Self {
-            lineage: self.lineage,
-            plugins: self.plugins.insert_before::<P>(definition),
-            recipe: self.recipe,
-        }
+    pub fn insert_before<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
+        self.plugins = self.plugins.insert_before::<P>(definition);
+        self
     }
 
     /// Attaches the ordinary-author product recipe to this advanced project request.
@@ -230,18 +255,9 @@ impl ProjectRuntimePlugins {
         self
     }
 
-    /// Returns this project recipe as ordinary `App::add_plugins` input.
-    ///
-    /// This lower-level embedding path does not perform project capability, schema-provider,
-    /// snapshot, or lineage admission. A file-backed [`RuntimePlan`] deliberately configures a
-    /// plan-local frozen registry definition, so callers must not compare this raw recipe's
-    /// configuration fingerprint with an admitted plan and treat them as interchangeable.
-    #[must_use]
-    pub fn into_app_plugins(self) -> impl PluginGroup {
-        ProjectRuntimeAppPlugins {
-            plugins: self.plugins,
-            recipe: self.recipe,
-        }
+    pub(crate) fn with_overlay(mut self, overlay: RuntimePluginOverlay) -> Self {
+        self.overlay = Some(overlay);
+        self
     }
 }
 
@@ -395,6 +411,9 @@ impl RuntimePlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompositionError {
     ProjectLineageMismatch,
+    AdvancedProbeProvidesSchema {
+        plugin: PluginId,
+    },
     UnknownProductCapability {
         plugin: PluginId,
         capability: PluginProductCapability,
@@ -443,6 +462,9 @@ impl fmt::Display for CompositionError {
         formatter.write_str(match self {
             Self::ProjectLineageMismatch => {
                 "project runtime request lineage does not match candidate"
+            }
+            Self::AdvancedProbeProvidesSchema { .. } => {
+                "advanced Host probes cannot declare schema authority"
             }
             Self::UnknownProductCapability { .. } => {
                 "plugin requires an unknown product capability"
@@ -526,6 +548,10 @@ impl From<PluginPlanError> for RuntimePlanError {
 }
 
 /// Returns every trusted schema-provider binding compiled into this root package.
+///
+/// This is an advanced plan-inspection input, not a schema-provider channel on
+/// [`crate::project_host::advanced::RuntimeProbe`]. Ordinary file-backed products bind schema
+/// authority through [`crate::SchemaContribution`].
 #[must_use]
 pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
     #[allow(unused_mut)]
@@ -549,7 +575,7 @@ pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
     providers
 }
 
-/// Builds the editable, lineage-bound plugin request for one project settings candidate.
+/// Builds an explicit advanced, lineage-bound plugin request for one project settings candidate.
 #[must_use]
 pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectRuntimePlugins {
     ProjectRuntimePlugins {
@@ -560,16 +586,40 @@ pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectR
         )
         .edit(),
         recipe: crate::ProductRecipe::new(),
+        overlay: None,
     }
 }
 
 /// Builds the file-backed project request for one ordinary product recipe.
 #[must_use]
-pub fn project_runtime_plugins_with_recipe(
+pub(crate) fn project_runtime_plugins_with_recipe(
     candidate: &ProjectSettingsCandidate,
     recipe: crate::ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
 ) -> ProjectRuntimePlugins {
-    project_runtime_plugins(candidate).with_recipe(recipe)
+    let request = project_runtime_plugins(candidate).with_recipe(recipe);
+    match overlay {
+        Some(overlay) => request.with_overlay(overlay),
+        None => request,
+    }
+}
+
+pub(crate) fn resolve_project_runtime_request(
+    candidate: &ProjectSettingsCandidate,
+    request: ProjectRuntimePlugins,
+) -> Result<RuntimePlan, RuntimePlanError> {
+    resolve_runtime_plan(candidate, request, built_in_schema_providers())
+}
+
+pub(crate) fn resolve_product_recipe_with_overlay(
+    candidate: &ProjectSettingsCandidate,
+    recipe: crate::ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
+) -> Result<RuntimePlan, RuntimePlanError> {
+    resolve_project_runtime_request(
+        candidate,
+        project_runtime_plugins_with_recipe(candidate, recipe, overlay),
+    )
 }
 
 /// Resolves one ordinary product recipe before creating an `App` or acquiring runtime authority.
@@ -577,14 +627,11 @@ pub fn resolve_product_recipe(
     candidate: &ProjectSettingsCandidate,
     recipe: crate::ProductRecipe,
 ) -> Result<RuntimePlan, RuntimePlanError> {
-    resolve_runtime_plan(
-        candidate,
-        project_runtime_plugins_with_recipe(candidate, recipe),
-        built_in_schema_providers(),
-    )
+    resolve_product_recipe_with_overlay(candidate, recipe, None)
 }
 
-/// Resolves one project request without creating an `App` or acquiring runtime authority.
+/// Resolves one explicit advanced project request without creating an `App` or acquiring runtime
+/// authority.
 ///
 /// `known_providers` must contain the complete trusted provider set compiled for this product,
 /// including definitions that the selected plugin recipe does not activate. Resolution executes
@@ -604,7 +651,23 @@ pub fn resolve_runtime_plan(
     let request = request.configure(preloaded_component_registry_plugin(Arc::clone(
         &snapshot_cell,
     )));
-    let plugin_plan = PluginPlan::resolve((request.plugins, request.recipe))?;
+    let plugin_plan = PluginPlan::resolve(ProjectRuntimeAppPlugins {
+        plugins: request.plugins,
+        recipe: request.recipe,
+        overlay: request.overlay,
+    })?;
+    if let Some(overlay) = plugin_plan.entries().iter().find(|entry| {
+        entry
+            .group_provenance()
+            .contains(&PROJECT_RUNTIME_OVERLAY_GROUP_ID)
+    }) {
+        if !overlay.declaration().provides_schema.is_empty() {
+            return Err(CompositionError::AdvancedProbeProvidesSchema {
+                plugin: overlay.plugin_id(),
+            }
+            .into());
+        }
+    }
     let required = resolve_product_requirements(candidate, &plugin_plan)?;
     let schema_validation = resolve_schema_validation(
         &plugin_plan,

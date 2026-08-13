@@ -13,8 +13,7 @@ use nara::{
     asset::{AssetMeta, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     project_host::{
-        ProjectSettingsCandidate, RuntimePlan, built_in_schema_providers, ingest_project_manifest,
-        project_runtime_plugins, resolve_runtime_plan,
+        ProjectSettingsCandidate, RuntimePlan, ingest_project_manifest, resolve_product_recipe,
     },
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
@@ -122,12 +121,7 @@ requested = ["runtime-2d"]
             .open_file(&RelativePath::new("nara.toml").unwrap())
             .unwrap();
         let candidate = ingest_project_manifest(&manifest, None).unwrap();
-        let plan = resolve_runtime_plan(
-            &candidate,
-            project_runtime_plugins(&candidate),
-            built_in_schema_providers(),
-        )
-        .unwrap();
+        let plan = resolve_product_recipe(&candidate, nara::ProductRecipe::new()).unwrap();
         (candidate, plan, root)
     }
 

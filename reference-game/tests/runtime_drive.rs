@@ -25,15 +25,33 @@ use nara::{
         world::DeferredWorld,
     },
     prelude::Vec2,
-    project_host::{HeadlessRun, HeadlessRunOutcome},
+    project_host::{
+        HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome,
+        advanced::{RuntimeProbe, headless_run_with_probe},
+    },
     sprite::Sprite,
     tasks::{TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest},
 };
 use nara_reference_game::{
     REFERENCE_FIRST_TICK_COMMAND_SOURCE, REFERENCE_FIRST_TICK_COMMAND_TYPE,
-    REFERENCE_GAME_PLUGIN_ID, ReferenceGamePlugin, advanced_project_headless_intent_after,
-    project_first_tick_command, project_headless_run,
+    REFERENCE_GAME_PLUGIN_ID, ReferenceProjectSnapshot, project_first_tick_command,
+    project_headless_run, project_recipe,
 };
+
+fn project_run_with_plugin<P>() -> HeadlessRun<ReferenceProjectSnapshot>
+where
+    P: Plugin + Default,
+{
+    let recipe = project_recipe()
+        .and_then(|recipe| recipe.add_plugin::<P>())
+        .expect("the test project recipe is statically valid");
+    HeadlessRun::from_recipe(
+        project_root_capability(),
+        recipe,
+        NonZeroU32::new(1).unwrap(),
+        Vec::new(),
+    )
+}
 use project_content_fixture::{project_root_capability, try_project_root_capability_at};
 
 const LATE_HOOK_PLUGIN_ID: PluginId = PluginId::new("reference-game.test.late-hook");
@@ -257,11 +275,7 @@ fn missing_manifest_fails_before_product_runtime_startup() {
 #[test]
 fn late_persistent_hook_rejects_before_scene_publication() {
     LATE_HOOK_CALLS.store(0, Ordering::SeqCst);
-    let intent = advanced_project_headless_intent_after::<ReferenceGamePlugin>(
-        NonZeroU32::new(1).unwrap(),
-        PluginDefinition::for_default::<LateHookPlugin>(),
-    );
-    let mut product = HeadlessRun::new(project_root_capability(), intent, Vec::new());
+    let mut product = project_run_with_plugin::<LateHookPlugin>();
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let report = loop {
@@ -284,16 +298,15 @@ fn late_persistent_hook_rejects_before_scene_publication() {
 
 #[test]
 fn deferred_global_observers_reject_project_scene_before_publication() {
-    assert_global_observer_rejected(PluginDefinition::for_default::<LateEventObserverPlugin>());
-    assert_global_observer_rejected(PluginDefinition::for_default::<LateComponentObserverPlugin>());
+    assert_global_observer_rejected::<LateEventObserverPlugin>();
+    assert_global_observer_rejected::<LateComponentObserverPlugin>();
 }
 
-fn assert_global_observer_rejected(definition: PluginDefinition) {
-    let intent = advanced_project_headless_intent_after::<ReferenceGamePlugin>(
-        NonZeroU32::new(1).unwrap(),
-        definition,
-    );
-    let mut product = HeadlessRun::new(project_root_capability(), intent, Vec::new());
+fn assert_global_observer_rejected<P>()
+where
+    P: Plugin + Default,
+{
+    let mut product = project_run_with_plugin::<P>();
     let deadline = Instant::now() + Duration::from_secs(5);
     let report = loop {
         let report = product.execute_bounded();
@@ -324,14 +337,14 @@ fn incomplete_retirement_stays_with_the_product_action_until_retry() {
             control: Arc::clone(&definition_control),
         },
     );
-    let intent = advanced_project_headless_intent_after::<ReferenceGamePlugin>(
-        NonZeroU32::new(1).unwrap(),
-        blocking_task,
-    )
-    .with_cleanup_timeout(Duration::ZERO);
-    let mut product = HeadlessRun::new(
+    let intent: HeadlessRunIntent<ReferenceProjectSnapshot> =
+        HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
+            .with_recipe(project_recipe().expect("the project recipe is statically valid"))
+            .with_cleanup_timeout(Duration::ZERO);
+    let mut product = headless_run_with_probe(
         project_root_capability(),
         intent,
+        RuntimeProbe::new(blocking_task),
         vec![project_first_tick_command()],
     );
 

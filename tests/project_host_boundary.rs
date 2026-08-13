@@ -21,15 +21,11 @@ const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
     "HeadlessRunReport",
 ];
 
-const ALLOWED_PUBLIC_METHODS: [&str; 17] = [
-    "configure",
+const ALLOWED_PUBLIC_METHODS: [&str; 12] = [
     "diagnostics",
-    "disable",
     "execute",
     "execute_bounded",
     "from_recipe",
-    "insert_after",
-    "insert_before",
     "into_outcome",
     "new",
     "outcome",
@@ -38,7 +34,6 @@ const ALLOWED_PUBLIC_METHODS: [&str; 17] = [
     "with_control_flow",
     "with_profile",
     "with_recipe",
-    "with_schema_provider",
 ];
 
 const FORBIDDEN_CALLER_CONCEPTS: [&str; 19] = [
@@ -102,6 +97,112 @@ fn concrete_product_action_exposes_only_the_reviewed_carriers() {
 
     assert_eq!(public_types, ALLOWED_RUNTIME_EXPORTS.into_iter().collect());
     assert_eq!(public_methods, ALLOWED_PUBLIC_METHODS.into_iter().collect());
+}
+
+#[test]
+fn advanced_runtime_probe_is_single_definition_and_has_no_provider_or_edit_channel() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = read(root.join("src/project_host/advanced.rs"));
+    let syntax = syn::parse_file(&source).expect("advanced project Host source must parse");
+    let mut fields = BTreeSet::new();
+    let mut methods = BTreeSet::new();
+
+    for item in syntax.items {
+        match item {
+            syn::Item::Struct(item) if item.ident == "RuntimeProbe" => {
+                for field in item.fields {
+                    fields.insert(
+                        field
+                            .ident
+                            .expect("RuntimeProbe fields are named")
+                            .to_string(),
+                    );
+                }
+            }
+            syn::Item::Impl(item_impl) => {
+                if item_impl.trait_.is_some() {
+                    continue;
+                }
+                let syn::Type::Path(self_ty) = item_impl.self_ty.as_ref() else {
+                    continue;
+                };
+                if !self_ty
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "RuntimeProbe")
+                {
+                    continue;
+                }
+                for item in item_impl.items {
+                    if let syn::ImplItem::Fn(method) = item {
+                        methods.insert(method.sig.ident.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(fields, BTreeSet::from(["definition".to_owned()]));
+    assert_eq!(
+        methods,
+        BTreeSet::from(["into_overlay".to_owned(), "new".to_owned()])
+    );
+    for forbidden in [
+        "configure",
+        "disable",
+        "insert_after",
+        "insert_before",
+        "provider",
+        "with_schema_provider",
+    ] {
+        assert!(
+            !methods.contains(forbidden),
+            "RuntimeProbe exposes forbidden authority {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn ordinary_product_intents_have_one_recipe_composition_authority() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert_intent_surface(
+        &read(root.join("src/project_host/runtime/action.rs")),
+        "HeadlessRunIntent",
+        &[
+            "cleanup_policy",
+            "fixed_ticks",
+            "profile",
+            "recipe",
+            "terminal_predicate",
+        ],
+        &[
+            "new",
+            "stop_when",
+            "with_cleanup_timeout",
+            "with_profile",
+            "with_recipe",
+        ],
+    );
+    assert_intent_surface(
+        &read(root.join("src/project_host/runtime/action.rs")),
+        "DesktopRunIntent",
+        &["cleanup_policy", "profile", "recipe", "runner"],
+        &[
+            "new",
+            "with_cleanup_timeout",
+            "with_control_flow",
+            "with_profile",
+            "with_recipe",
+        ],
+    );
+    assert_intent_surface(
+        &read(root.join("src/project_host/runtime/editor.rs")),
+        "EditorProjectIntent",
+        &["cleanup_policy", "profile", "recipe"],
+        &["new", "with_cleanup_timeout", "with_profile", "with_recipe"],
+    );
 }
 
 #[test]
@@ -240,6 +341,57 @@ fn assert_vec_of_gameplay_submissions(ty: &syn::Type) {
     assert_eq!(
         item.path.segments.last().unwrap().ident,
         "GameplayCommandSubmission"
+    );
+}
+
+fn assert_intent_surface(
+    source: &str,
+    target: &str,
+    expected_fields: &[&str],
+    expected_methods: &[&str],
+) {
+    let syntax = syn::parse_file(source).expect("project Host intent source must parse");
+    let mut fields = BTreeSet::new();
+    let mut methods = BTreeSet::new();
+
+    for item in syntax.items {
+        match item {
+            syn::Item::Struct(item) if item.ident == target => {
+                for field in item.fields {
+                    fields.insert(field.ident.expect("intent fields are named").to_string());
+                }
+            }
+            syn::Item::Impl(item_impl) => {
+                let syn::Type::Path(self_ty) = item_impl.self_ty.as_ref() else {
+                    continue;
+                };
+                if !self_ty
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == target)
+                {
+                    continue;
+                }
+                for item in item_impl.items {
+                    if let syn::ImplItem::Fn(method) = item
+                        && matches!(method.vis, syn::Visibility::Public(_))
+                    {
+                        methods.insert(method.sig.ident.to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        fields,
+        expected_fields.iter().map(ToString::to_string).collect()
+    );
+    assert_eq!(
+        methods,
+        expected_methods.iter().map(ToString::to_string).collect()
     );
 }
 

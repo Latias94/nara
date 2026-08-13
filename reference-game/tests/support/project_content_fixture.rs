@@ -12,49 +12,29 @@ use nara::{
     app::PluginDefinition,
     asset::{AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
-    image::ImageImportLimits,
     prelude::{Component, ComponentRegistry, Transform2d, Vec2, World},
+    project_host::advanced::{RuntimeProbe, resolve_product_recipe_with_probe},
     project_host::{
         ProjectContentLoader, ProjectContentSnapshot, ProjectSettingsCandidate, RuntimePlan,
-        built_in_schema_providers, ingest_project_manifest, resolve_runtime_plan,
+        ingest_project_manifest, resolve_product_recipe,
     },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
         ScenePatchDocument, ScenePatchOperation,
     },
-    tilemap::TilemapPlugin,
 };
-use nara::{gameplay::GameplayCommandPlugin, project_host::project_runtime_plugins};
 use nara_reference_game::{
-    EnemyRole, InitialHealth, InitialVelocity2d, PlayerRole, REFERENCE_GAME_SCHEMA_PROVIDER,
-    ReferenceGamePlugin, ReferenceRuntimeUiPlugin, ReferenceWavePlugin, WaveSpawn, Weapon,
-    advanced_project_outcome_plugin_definition,
+    EnemyRole, InitialHealth, InitialVelocity2d, PlayerRole, WaveSpawn, Weapon, project_recipe,
+    wave_recipe,
 };
 
 #[cfg(feature = "desktop")]
 use nara::app::{RuntimeControl, RuntimeControlRequestResult, RuntimeInstance, RuntimeState};
 #[cfg(feature = "desktop")]
-use nara_reference_game::ReferenceDesktopPlugin;
+use nara_reference_game::desktop_wave_recipe;
 
 pub const TEXTURE_ID: &str = "f840a555-9fca-4ceb-ac1b-e03b55d2f492";
-
-fn game_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<ReferenceGamePlugin>()
-}
-
-fn wave_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<ReferenceWavePlugin>()
-}
-
-fn runtime_ui_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<ReferenceRuntimeUiPlugin>()
-}
-
-#[cfg(feature = "desktop")]
-fn desktop_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<ReferenceDesktopPlugin>()
-}
 
 #[cfg(feature = "desktop")]
 pub fn stop_runtime(mut runtime: RuntimeInstance) {
@@ -130,8 +110,7 @@ pub fn try_load_project_content_from_path(
     path: &Path,
 ) -> Result<LoadedProjectContent, ProjectContentFixtureError> {
     let root = try_project_root_capability_at(path)?;
-    let (candidate, plan, root) =
-        try_candidate_plan_and_root_with(root, ImageImportLimits::default(), false)?;
+    let (candidate, plan, root) = try_candidate_plan_and_root_with(root)?;
     let loader = ProjectContentLoader::new(root)
         .map_err(|_| ProjectContentFixtureError::CreateContentLoader)?;
     let snapshot = loader
@@ -145,12 +124,8 @@ pub fn try_load_project_content_from_path(
     })
 }
 
-pub fn candidate_plan_and_root(
-    image_limits: ImageImportLimits,
-    include_tilemap: bool,
-) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
-    try_candidate_plan_and_root(image_limits, include_tilemap)
-        .expect("reference project plan should resolve")
+pub fn candidate_plan_and_root() -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
+    try_candidate_plan_and_root().expect("reference project plan should resolve")
 }
 
 #[cfg(feature = "desktop")]
@@ -162,16 +137,11 @@ pub fn desktop_candidate_plan_and_root()
     let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
     drop(manifest);
 
-    let request = project_runtime_plugins(&candidate)
-        .configure(nara::image::plugin(ImageImportLimits::default()))
-        .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(game_plugin())
-        .insert_after::<ReferenceGamePlugin>(wave_plugin())
-        .insert_after::<ReferenceWavePlugin>(runtime_ui_plugin())
-        .insert_after::<ReferenceRuntimeUiPlugin>(desktop_plugin());
-    let mut providers = built_in_schema_providers();
-    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
-    let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+    let plan = resolve_product_recipe(
+        &candidate,
+        desktop_wave_recipe().expect("the desktop wave recipe is statically valid"),
+    )
+    .unwrap();
     (candidate, plan, root)
 }
 
@@ -196,26 +166,21 @@ fn headless_wave_candidate_plan_and_root_with_test_plugin(
     path: &Path,
     test_plugin: Option<PluginDefinition>,
 ) -> (ProjectSettingsCandidate, RuntimePlan, DirectoryCapability) {
-    let root = try_project_root_capability_at(path)
-        .expect("reference project root should be authorized");
+    let root =
+        try_project_root_capability_at(path).expect("reference project root should be authorized");
     let manifest_path = RelativePath::new("nara.toml").unwrap();
     let manifest = root.open_file(&manifest_path).unwrap();
     let candidate = ingest_project_manifest(&manifest, None).unwrap();
     drop(manifest);
 
-    let request = project_runtime_plugins(&candidate)
-        .configure(nara::image::plugin(ImageImportLimits::default()))
-        .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(game_plugin())
-        .insert_after::<ReferenceGamePlugin>(wave_plugin())
-        .insert_after::<ReferenceWavePlugin>(runtime_ui_plugin());
-    let request = match test_plugin {
-        Some(definition) => request.insert_after::<ReferenceRuntimeUiPlugin>(definition),
-        None => request,
-    };
-    let mut providers = built_in_schema_providers();
-    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
-    let plan = resolve_runtime_plan(&candidate, request, providers).unwrap();
+    let recipe = wave_recipe().expect("the wave recipe is statically valid");
+    let plan = match test_plugin {
+        Some(definition) => {
+            resolve_product_recipe_with_probe(&candidate, recipe, RuntimeProbe::new(definition))
+        }
+        None => resolve_product_recipe(&candidate, recipe),
+    }
+    .unwrap();
     (candidate, plan, root)
 }
 
@@ -226,19 +191,15 @@ pub fn headless_wave_candidate_plan_and_root_with_at(
     headless_wave_candidate_plan_and_root_with_test_plugin(path, Some(test_plugin))
 }
 
-pub fn try_candidate_plan_and_root(
-    image_limits: ImageImportLimits,
-    include_tilemap: bool,
-) -> Result<(ProjectSettingsCandidate, RuntimePlan, DirectoryCapability), ProjectContentFixtureError>
+pub fn try_candidate_plan_and_root()
+-> Result<(ProjectSettingsCandidate, RuntimePlan, DirectoryCapability), ProjectContentFixtureError>
 {
     let root = try_project_root_capability()?;
-    try_candidate_plan_and_root_with(root, image_limits, include_tilemap)
+    try_candidate_plan_and_root_with(root)
 }
 
 fn try_candidate_plan_and_root_with(
     root: DirectoryCapability,
-    image_limits: ImageImportLimits,
-    include_tilemap: bool,
 ) -> Result<(ProjectSettingsCandidate, RuntimePlan, DirectoryCapability), ProjectContentFixtureError>
 {
     let manifest_path = RelativePath::new("nara.toml")
@@ -248,46 +209,21 @@ fn try_candidate_plan_and_root_with(
         .map_err(|_| ProjectContentFixtureError::OpenManifest)?;
     let candidate = ingest_project_manifest(&manifest, None)
         .map_err(|_| ProjectContentFixtureError::IngestManifest)?;
-    let plan = try_resolve_reference_plan(&candidate, image_limits, include_tilemap)?;
+    let plan = resolve_product_recipe(
+        &candidate,
+        project_recipe().expect("the project recipe is statically valid"),
+    )
+    .map_err(|_| ProjectContentFixtureError::ResolveRuntimePlan)?;
     drop(manifest);
     Ok((candidate, plan, root))
 }
 
-pub fn resolve_reference_plan(
-    candidate: &ProjectSettingsCandidate,
-    image_limits: ImageImportLimits,
-    include_tilemap: bool,
-) -> RuntimePlan {
-    try_resolve_reference_plan(candidate, image_limits, include_tilemap)
-        .expect("reference runtime plan should resolve")
-}
-
-pub fn try_resolve_reference_plan(
-    candidate: &ProjectSettingsCandidate,
-    image_limits: ImageImportLimits,
-    include_tilemap: bool,
-) -> Result<RuntimePlan, ProjectContentFixtureError> {
-    let request = reference_runtime_plugins(candidate, image_limits, include_tilemap);
-    let mut providers = built_in_schema_providers();
-    providers.push(REFERENCE_GAME_SCHEMA_PROVIDER);
-    resolve_runtime_plan(candidate, request, providers)
-        .map_err(|_| ProjectContentFixtureError::ResolveRuntimePlan)
-}
-
-pub fn reference_runtime_plugins(
-    candidate: &ProjectSettingsCandidate,
-    image_limits: ImageImportLimits,
-    include_tilemap: bool,
-) -> nara::project_host::ProjectRuntimePlugins {
-    let request = project_runtime_plugins(candidate)
-        .insert_after::<GameplayCommandPlugin>(game_plugin())
-        .insert_after::<ReferenceGamePlugin>(advanced_project_outcome_plugin_definition())
-        .configure(nara::image::plugin(image_limits));
-    if include_tilemap {
-        request
-    } else {
-        request.disable::<TilemapPlugin>()
-    }
+pub fn resolve_reference_plan(candidate: &ProjectSettingsCandidate) -> RuntimePlan {
+    resolve_product_recipe(
+        candidate,
+        wave_recipe().expect("the wave recipe is statically valid"),
+    )
+    .expect("reference runtime plan should resolve")
 }
 
 pub fn expected_startup_scene(plan: &RuntimePlan) -> SceneDocument {

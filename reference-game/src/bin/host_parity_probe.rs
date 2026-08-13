@@ -26,14 +26,16 @@ use nara::{
     },
     prelude::{App, CoreStage, FixedTime, FixedUpdateSet, Plugin, Res, ResMut, Resource},
     project_host::{
-        DesktopRun, DesktopRunOutcome, EditorProjectSession, HeadlessRun, HeadlessRunOutcome,
+        DesktopRunOutcome, HeadlessRunOutcome,
+        advanced::{
+            RuntimeProbe, desktop_run_with_probe, headless_run_with_probe, open_editor_with_probe,
+        },
     },
     tooling::{EditorPlayCommand, EditorPlayRequestResult, EditorPlayState},
 };
 use nara_reference_game::{
-    MovementDirection, REFERENCE_WAVE_PLUGIN_ID, ReferenceWavePlugin, WaveSnapshot,
-    advanced_wave_desktop_intent_after, advanced_wave_editor_intent_after,
-    advanced_wave_headless_intent_after, movement_command,
+    MovementDirection, REFERENCE_WAVE_PLUGIN_ID, WaveSnapshot, movement_command,
+    wave_desktop_intent, wave_editor_intent, wave_headless_intent,
 };
 
 mod support;
@@ -126,8 +128,12 @@ fn run_headless(
 ) -> Result<RuntimeFaultEvidence, &'static str> {
     let maximum_ticks =
         NonZeroU32::new(PARITY_FAULT_TICK as u32).expect("the parity tick limit is non-zero");
-    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(maximum_ticks, probe);
-    let mut run = HeadlessRun::new(root, intent, Vec::new());
+    let mut run = headless_run_with_probe(
+        root,
+        wave_headless_intent(maximum_ticks),
+        RuntimeProbe::new(probe),
+        Vec::new(),
+    );
     let deadline = Instant::now() + HOST_TIMEOUT;
     let report = loop {
         let report = run.execute_bounded();
@@ -154,8 +160,7 @@ fn run_desktop(
     root: nara::fs::DirectoryCapability,
     probe: PluginDefinition,
 ) -> Result<RuntimeFaultEvidence, &'static str> {
-    let intent = advanced_wave_desktop_intent_after::<ReferenceWavePlugin>(probe);
-    let mut run = DesktopRun::new(root, intent);
+    let mut run = desktop_run_with_probe(root, wave_desktop_intent(), RuntimeProbe::new(probe));
     let cleanup_deadline = Instant::now() + HOST_TIMEOUT;
     let report = loop {
         let report = run.execute();
@@ -182,9 +187,8 @@ fn run_editor(
     root: nara::fs::DirectoryCapability,
     probe: PluginDefinition,
 ) -> Result<RuntimeFaultEvidence, &'static str> {
-    let intent = advanced_wave_editor_intent_after::<ReferenceWavePlugin>(probe);
-    let mut session =
-        EditorProjectSession::open(root, intent).map_err(|_| "host_parity_probe.editor-open")?;
+    let mut session = open_editor_with_probe(root, wave_editor_intent(), RuntimeProbe::new(probe))
+        .map_err(|_| "host_parity_probe.editor-open")?;
     if !matches!(
         session.request_play(EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted

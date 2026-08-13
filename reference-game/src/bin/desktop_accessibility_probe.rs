@@ -8,10 +8,13 @@ use std::{
 #[cfg(windows)]
 use nara::{
     app::AppExit,
-    project_host::{DesktopRun, DesktopRunOutcome},
+    project_host::{
+        DesktopRun, DesktopRunOutcome,
+        advanced::{RuntimeProbe, desktop_run_with_probe},
+    },
 };
 #[cfg(windows)]
-use nara_reference_game::{ReferenceDesktopPlugin, advanced_wave_desktop_intent_after};
+use nara_reference_game::wave_desktop_intent;
 
 #[cfg(windows)]
 mod desktop_support;
@@ -48,8 +51,8 @@ fn main() -> ExitCode {
     };
     let evidence = Arc::new(ProbeEvidence::default());
     let definition = runtime::definition(Arc::clone(&evidence), PROBE_DEADLINE);
-    let intent = advanced_wave_desktop_intent_after::<ReferenceDesktopPlugin>(definition);
-    let mut run = DesktopRun::new(root, intent);
+    let mut run =
+        desktop_run_with_probe(root, wave_desktop_intent(), RuntimeProbe::new(definition));
     let automation = platform::spawn(Arc::clone(&evidence), PROBE_DEADLINE);
 
     let report = match drive_to_terminal(&mut run) {

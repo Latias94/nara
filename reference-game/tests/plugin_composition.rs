@@ -1,12 +1,11 @@
 use nara::{
     app::PluginGroupId,
-    core::ByteLimit,
     gameplay::GAMEPLAY_COMMAND_PLUGIN_ID,
-    image::{IMAGE_PLUGIN_ID, ImageImportLimits},
+    image::IMAGE_PLUGIN_ID,
     project::ProductCapability,
     project_host::resolve_product_recipe,
     sprite::SPRITE_SCHEMA_PROVIDER_ID,
-    tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_OWNER_ID, TILEMAP_SCHEMA_PROVIDER_ID},
+    tilemap::{TILEMAP_PLUGIN_ID, TILEMAP_SCHEMA_PROVIDER_ID},
 };
 use nara_reference_game::{
     REFERENCE_GAME_PLUGIN_ID, REFERENCE_GAME_SCHEMA_PROVIDER_ID,
@@ -33,10 +32,7 @@ use project_content_fixture::{
 
 #[test]
 fn ordinary_recipes_bind_reference_schema_once_without_parallel_provider_lists() {
-    let limits = ImageImportLimits::default().with_max_encoded_bytes(
-        ByteLimit::new(8 * 1024 * 1024).expect("test image limit is non-zero"),
-    );
-    let (candidate, _baseline, _root) = candidate_plan_and_root(limits, false);
+    let (candidate, _baseline, _root) = candidate_plan_and_root();
 
     let wave = resolve_product_recipe(&candidate, wave_recipe().unwrap()).unwrap();
     let project = resolve_product_recipe(&candidate, project_recipe().unwrap()).unwrap();
@@ -67,14 +63,10 @@ fn ordinary_recipes_bind_reference_schema_once_without_parallel_provider_lists()
 
 #[test]
 fn reference_game_configures_a_repeatable_headless_product_plan() {
-    let limits = ImageImportLimits::default().with_max_encoded_bytes(
-        ByteLimit::new(8 * 1024 * 1024).expect("test image limit is non-zero"),
-    );
-    let (candidate, _baseline, _root) = candidate_plan_and_root(limits, false);
+    let (candidate, _baseline, _root) = candidate_plan_and_root();
 
-    let first = resolve_reference_plan(&candidate, limits, false);
-    let repeated = resolve_reference_plan(&candidate, limits, false);
-    let with_tilemap = resolve_reference_plan(&candidate, limits, true);
+    let first = resolve_reference_plan(&candidate);
+    let repeated = resolve_reference_plan(&candidate);
 
     assert_eq!(first.lineage(), candidate.lineage());
     assert_eq!(
@@ -90,9 +82,11 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
             .required_capabilities()
             .contains(ProductCapability::Runtime2d)
     );
-    assert!(!first
-        .required_capabilities()
-        .contains(ProductCapability::PresentationUi));
+    assert!(
+        !first
+            .required_capabilities()
+            .contains(ProductCapability::PresentationUi)
+    );
 
     let entries = first.plugin_plan().entries();
     for absent in [
@@ -126,7 +120,7 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         );
     }
     assert!(
-        !entries
+        entries
             .iter()
             .any(|entry| entry.plugin_id() == TILEMAP_PLUGIN_ID)
     );
@@ -144,29 +138,17 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
         .iter()
         .find(|entry| entry.plugin_id() == IMAGE_PLUGIN_ID)
         .unwrap();
-    assert_eq!(
-        configured_image.definition_key(),
-        nara::image::plugin(limits).key()
-    );
+    let image_definition = configured_image
+        .definition_key()
+        .expect("profile-owned image plugin has a repeatable definition")
+        .definition();
+    assert_eq!(image_definition.as_str(), IMAGE_PLUGIN_ID.as_str());
+    assert_eq!(image_definition.version(), 1);
 
     let providers = first.schema_validation().provider_ids();
     assert!(providers.contains(&SPRITE_SCHEMA_PROVIDER_ID));
     assert!(providers.contains(&REFERENCE_GAME_SCHEMA_PROVIDER_ID));
-    assert!(!providers.contains(&TILEMAP_SCHEMA_PROVIDER_ID));
-    assert!(
-        with_tilemap
-            .schema_validation()
-            .provider_ids()
-            .contains(&TILEMAP_SCHEMA_PROVIDER_ID)
-    );
-    assert_ne!(
-        first.plugin_plan().fingerprint(),
-        with_tilemap.plugin_plan().fingerprint()
-    );
-    assert_ne!(
-        first.schema_validation().composition_fingerprint(),
-        with_tilemap.schema_validation().composition_fingerprint()
-    );
+    assert!(providers.contains(&TILEMAP_SCHEMA_PROVIDER_ID));
 
     let first_app = first.plugin_plan().instantiate().unwrap();
     let second_app = first.plugin_plan().instantiate().unwrap();
@@ -191,46 +173,29 @@ fn reference_game_configures_a_repeatable_headless_product_plan() {
 }
 
 #[test]
-fn optional_schema_owner_can_be_disabled_and_reactivated_without_deletion() {
-    let limits = ImageImportLimits::default().with_max_encoded_bytes(
-        ByteLimit::new(8 * 1024 * 1024).expect("test image limit is non-zero"),
-    );
-    let (candidate, _baseline, _root) = candidate_plan_and_root(limits, false);
+fn profile_owned_image_and_tilemap_are_stable_across_recipe_resolution() {
+    let (candidate, _baseline, _root) = candidate_plan_and_root();
+    let first = resolve_reference_plan(&candidate);
+    let repeated = resolve_reference_plan(&candidate);
 
-    let enabled_before = resolve_reference_plan(&candidate, limits, true);
-    let disabled = resolve_reference_plan(&candidate, limits, false);
-    let enabled_after = resolve_reference_plan(&candidate, limits, true);
-
-    assert_eq!(
-        enabled_before.schema_validation().composition_fingerprint(),
-        enabled_after.schema_validation().composition_fingerprint(),
-    );
-    assert_eq!(
-        enabled_before
-            .schema_validation()
-            .contribution_receipts()
-            .collect::<Vec<_>>(),
-        enabled_after
-            .schema_validation()
-            .contribution_receipts()
-            .collect::<Vec<_>>(),
-    );
-    assert_ne!(
-        enabled_before.schema_validation().composition_fingerprint(),
-        disabled.schema_validation().composition_fingerprint(),
-    );
-    assert!(
-        enabled_before
-            .schema_validation()
-            .owner_receipts()
-            .any(|receipt| receipt.owner() == TILEMAP_SCHEMA_OWNER_ID)
-    );
-    assert!(
-        disabled
-            .schema_validation()
-            .owner_receipts()
-            .all(|receipt| receipt.owner() != TILEMAP_SCHEMA_OWNER_ID)
-    );
+    for plugin in [IMAGE_PLUGIN_ID, TILEMAP_PLUGIN_ID] {
+        let first_entry = first
+            .plugin_plan()
+            .entries()
+            .iter()
+            .find(|entry| entry.plugin_id() == plugin)
+            .unwrap();
+        let repeated_entry = repeated
+            .plugin_plan()
+            .entries()
+            .iter()
+            .find(|entry| entry.plugin_id() == plugin)
+            .unwrap();
+        assert_eq!(
+            first_entry.definition_key(),
+            repeated_entry.definition_key()
+        );
+    }
 }
 
 #[cfg(feature = "desktop")]

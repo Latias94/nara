@@ -33,16 +33,18 @@ use nara::{
         App, Commands, ComponentTypeId, ComponentValue, FixedTime, Parent, Plugin, PluginError,
         Query, Res, ResMut, Sprite, Transform2d, Vec2, World,
     },
-    project_host::{HeadlessRun, HeadlessRunOutcome, HeadlessRunReport, ProjectContentLoader},
+    project_host::{
+        HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport, ProjectContentLoader,
+    },
     scene::SceneEntitySource,
 };
 use nara_reference_game::{
     EnemyRole, Health, InitialHealth, InitialVelocity2d, MovementCommandError, MovementDirection,
     PlayerRole, ProjectileDamage, ProjectileId, ProjectileLifetime, ProjectileRole,
-    REFERENCE_WAVE_PLUGIN_ID, ReferenceWavePlugin, Velocity2d, WaveOutcome, WaveRetryPhase,
-    WaveRetryRejection, WaveRetryStatus, WaveRunGeneration, WaveSnapshot, WaveSpawn, Weapon,
-    WeaponCooldown, advanced_wave_headless_intent_after, bundled_wave_commands, bundled_wave_run,
-    movement_command, retry_command, wave_headless_run,
+    REFERENCE_WAVE_PLUGIN_ID, Velocity2d, WaveOutcome, WaveRetryPhase, WaveRetryRejection,
+    WaveRetryStatus, WaveRunGeneration, WaveSnapshot, WaveSpawn, Weapon, WeaponCooldown,
+    bundled_wave_commands, bundled_wave_run, movement_command, retry_command, wave_headless_run,
+    wave_recipe,
 };
 use project_content_fixture::{
     headless_wave_candidate_plan_and_root, headless_wave_candidate_plan_and_root_with,
@@ -861,28 +863,23 @@ fn assert_completed_wave_retired_scene_identities(world: &mut World) {
     assert!(stats.recent_tombstones >= 3);
 }
 
-fn tie_setup_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<TieSetupPlugin>()
-}
-
-fn invalid_topology_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<InvalidTopologyPlugin>()
-}
-
-fn consume_fault_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<ConsumeFaultPlugin>()
-}
-
-fn capture_fault_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<CaptureFaultPlugin>()
-}
-
-fn late_simulation_fault_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<LateSimulationFaultPlugin>()
-}
-
-fn terminal_identity_audit_plugin() -> PluginDefinition {
-    PluginDefinition::for_default::<TerminalIdentityAuditPlugin>()
+fn wave_run_with_plugin<P>(
+    maximum_fixed_ticks: NonZeroU32,
+    commands: Vec<nara::gameplay::GameplayCommandSubmission>,
+) -> HeadlessRun<WaveSnapshot>
+where
+    P: Plugin + Default,
+{
+    let recipe = wave_recipe()
+        .and_then(|recipe| recipe.add_plugin::<P>())
+        .expect("the test wave recipe is statically valid");
+    HeadlessRun::new(
+        project_root_capability(),
+        HeadlessRunIntent::new(maximum_fixed_ticks)
+            .with_recipe(recipe)
+            .stop_when(WaveSnapshot::is_terminal),
+        commands,
+    )
 }
 
 fn retry_identity_corruption_plugin() -> PluginDefinition {
@@ -965,11 +962,7 @@ fn bundled_wave_completes_at_a_stable_tick() {
 #[test]
 fn completed_wave_retires_scene_identities_before_runtime_despawn() {
     let maximum = NonZeroU32::new(96).unwrap();
-    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
-        maximum,
-        terminal_identity_audit_plugin(),
-    );
-    let run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
+    let run = wave_run_with_plugin::<TerminalIdentityAuditPlugin>(maximum, bundled_wave_commands());
 
     let snapshot = complete(run);
 
@@ -1014,9 +1007,7 @@ fn movement_command_rejects_zero_ordering_values_without_panicking() {
 #[test]
 fn same_tick_player_and_final_enemy_death_resolves_to_defeat() {
     let maximum = NonZeroU32::new(4).unwrap();
-    let intent =
-        advanced_wave_headless_intent_after::<ReferenceWavePlugin>(maximum, tie_setup_plugin());
-    let run = HeadlessRun::new(project_root_capability(), intent, Vec::new());
+    let run = wave_run_with_plugin::<TieSetupPlugin>(maximum, Vec::new());
 
     let snapshot = complete(run);
 
@@ -1031,11 +1022,8 @@ fn same_tick_player_and_final_enemy_death_resolves_to_defeat() {
 
 #[test]
 fn missing_wave_spawn_faults_on_the_first_tick_instead_of_timing_out() {
-    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
-        NonZeroU32::new(4).unwrap(),
-        invalid_topology_plugin(),
-    );
-    let mut run = HeadlessRun::new(project_root_capability(), intent, Vec::new());
+    let mut run =
+        wave_run_with_plugin::<InvalidTopologyPlugin>(NonZeroU32::new(4).unwrap(), Vec::new());
 
     let report = execute_to_terminal(&mut run);
     assert_runtime_fault_without_tick_limit(&report);
@@ -1043,11 +1031,10 @@ fn missing_wave_spawn_faults_on_the_first_tick_instead_of_timing_out() {
 
 #[test]
 fn consume_runtime_fault_skips_the_wave_simulation_tick() {
-    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+    let mut run = wave_run_with_plugin::<ConsumeFaultPlugin>(
         NonZeroU32::new(4).unwrap(),
-        consume_fault_plugin(),
+        bundled_wave_commands(),
     );
-    let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let report = execute_to_terminal(&mut run);
     assert_runtime_fault_without_tick_limit(&report);
@@ -1055,11 +1042,10 @@ fn consume_runtime_fault_skips_the_wave_simulation_tick() {
 
 #[test]
 fn capture_runtime_fault_prevents_wave_success() {
-    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+    let mut run = wave_run_with_plugin::<CaptureFaultPlugin>(
         NonZeroU32::new(4).unwrap(),
-        capture_fault_plugin(),
+        bundled_wave_commands(),
     );
-    let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let report = execute_to_terminal(&mut run);
     assert_runtime_fault_without_tick_limit(&report);
@@ -1067,11 +1053,10 @@ fn capture_runtime_fault_prevents_wave_success() {
 
 #[test]
 fn late_simulation_fault_keeps_the_last_good_snapshot() {
-    let intent = advanced_wave_headless_intent_after::<ReferenceWavePlugin>(
+    let mut run = wave_run_with_plugin::<LateSimulationFaultPlugin>(
         NonZeroU32::new(4).unwrap(),
-        late_simulation_fault_plugin(),
+        bundled_wave_commands(),
     );
-    let mut run = HeadlessRun::new(project_root_capability(), intent, bundled_wave_commands());
 
     let report = execute_to_terminal(&mut run);
     assert_runtime_fault_without_tick_limit(&report);
@@ -1234,10 +1219,7 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
     assert_startup_rejected(plan, source);
 }
 
-fn assert_startup_rejected(
-    plan: nara::project_host::RuntimePlan,
-    source: StartupSceneSource,
-) {
+fn assert_startup_rejected(plan: nara::project_host::RuntimePlan, source: StartupSceneSource) {
     let candidate = admit_adapter_candidate(plan, source);
     let mut failure = match candidate.complete_startup() {
         Err(failure) => failure,

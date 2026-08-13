@@ -17,7 +17,10 @@ use nara::{
     gameplay::{GameplayCommandQueue, GameplayCommandSet},
     image::PreparedImageResource,
     prelude::{App, CoreStage, FixedTime, Plugin, Res, ResMut, Resource},
-    project_host::{DesktopRun, DesktopRunOutcome},
+    project_host::{
+        DesktopRunOutcome,
+        advanced::{RuntimeProbe, desktop_run_with_probe},
+    },
     render::{PreparedRenderResources, RenderFrame},
     render_wgpu::WgpuRenderBackend,
     sprite_render::SpriteBatches,
@@ -27,8 +30,8 @@ use nara::{
     },
 };
 use nara_reference_game::{
-    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin, WaveRunGeneration,
-    WaveSnapshot, advanced_wave_desktop_intent_after, movement_command, retry_command,
+    MovementDirection, REFERENCE_DESKTOP_PLUGIN_ID, WaveRunGeneration, WaveSnapshot,
+    movement_command, retry_command, wave_desktop_intent,
 };
 
 mod desktop_support;
@@ -69,8 +72,7 @@ fn main() -> ExitCode {
             marker: Arc::clone(&plugin_marker),
         },
     );
-    let intent = advanced_wave_desktop_intent_after::<ReferenceDesktopPlugin>(probe);
-    let mut run = DesktopRun::new(root, intent);
+    let mut run = desktop_run_with_probe(root, wave_desktop_intent(), RuntimeProbe::new(probe));
     let mut cleanup_deadline = None;
 
     let report = loop {

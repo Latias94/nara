@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+pub(crate) use super::composition::RuntimePluginOverlay;
 use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
@@ -1110,6 +1111,7 @@ fn runtime_plan_failure_report(error: &RuntimePlanError) -> DiagnosticReport {
 fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
     let reason = match error {
         CompositionError::ProjectLineageMismatch => "project-lineage-mismatch",
+        CompositionError::AdvancedProbeProvidesSchema { .. } => "advanced-probe-provides-schema",
         CompositionError::UnknownProductCapability { .. } => "unknown-product-capability",
         CompositionError::UncompiledProductCapability { .. } => "uncompiled-product-capability",
         CompositionError::UnrequestedProductCapability { .. } => "unrequested-product-capability",
@@ -1131,6 +1133,9 @@ fn composition_failure_report(error: &CompositionError) -> DiagnosticReport {
         reason,
     );
     match error {
+        CompositionError::AdvancedProbeProvidesSchema { plugin } => {
+            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
+        }
         CompositionError::UnknownProductCapability { plugin, capability } => {
             diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
             diagnostic = attach_identifier(diagnostic, "capability", capability.as_str());

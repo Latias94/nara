@@ -7,9 +7,9 @@ mod resources;
 mod runtime_ui;
 mod snapshot;
 mod systems;
-mod ui_observation;
 #[cfg(feature = "desktop")]
 mod ui;
+mod ui_observation;
 
 use std::num::NonZeroU32;
 
@@ -17,18 +17,17 @@ use nara::{
     ProductRecipe, ProductRecipeError, SchemaContribution,
     advanced_prelude::add_startup_scene_activation_systems,
     app::{
-        PluginCategory, PluginDeclaration, PluginDefinition, PluginError, PluginId,
-        PluginPreflightContext, PluginSchemaProviderId,
+        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginPreflightContext,
+        PluginSchemaProviderId,
     },
     ecs::{SystemSet, schedule::IntoScheduleConfigs},
     fs::DirectoryCapability,
     gameplay::{
         GameplayCommandDraft, GameplayCommandIngressSource, GameplayCommandKey,
-        GameplayCommandPayload, GameplayCommandPlugin, GameplayCommandSet,
-        GameplayCommandSourceSequence, GameplayCommandSubmission, GameplayCommandTick,
-        GameplayCommandTypeId, GameplayCommandValue,
+        GameplayCommandPayload, GameplayCommandSet, GameplayCommandSourceSequence,
+        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
+        GameplayCommandValue,
     },
-    image::ImageImportLimits,
     prelude::{
         App, ComponentRegistry, CoreStage, FixedUpdateSet, PersistentComponentProvider, Plugin,
         Resource, Vec2, add_fixed_transform_projection_systems,
@@ -40,7 +39,6 @@ use nara::{
         ComponentSchemaProviderDefinition, ComponentSchemaProviderSourceError,
         ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     },
-    tilemap::TilemapPlugin,
 };
 
 #[cfg(feature = "editor")]
@@ -61,13 +59,13 @@ pub use runtime_ui::{
     REFERENCE_RETRY_ACTION, REFERENCE_RUNTIME_UI_PLUGIN_ID, REFERENCE_UI_SURFACE_ID,
     ReferenceHudProjection, ReferenceRuntimeUiPlugin,
 };
+pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
+#[cfg(feature = "desktop")]
+pub use ui::{REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin};
 pub use ui_observation::{
     ReferenceProductObservation, ReferenceUiObservation, ReferenceUiPhysicalRect,
     ReferenceUiPresentationObservation, ReferenceUiRect,
 };
-pub use snapshot::{EnemySnapshot, PlayerSnapshot, ProjectileSnapshot, WaveOutcome, WaveSnapshot};
-#[cfg(feature = "desktop")]
-pub use ui::{REFERENCE_DESKTOP_PLUGIN_ID, ReferenceDesktopPlugin};
 
 pub const REFERENCE_GAME_PLUGIN_ID: PluginId = PluginId::new("reference-game.gameplay");
 pub const REFERENCE_WAVE_PLUGIN_ID: PluginId = PluginId::new("reference-game.wave");
@@ -283,15 +281,6 @@ impl Plugin for ReferenceProjectOutcomePlugin {
     }
 }
 
-/// Returns the raw project-outcome definition used by engine-owned plan fixtures.
-///
-/// Ordinary product code must use [`project_recipe`] instead.
-#[doc(hidden)]
-#[must_use]
-pub fn advanced_project_outcome_plugin_definition() -> PluginDefinition {
-    PluginDefinition::for_default::<ReferenceProjectOutcomePlugin>()
-}
-
 fn reference_game_contribution()
 -> Result<SchemaContribution<ReferenceGamePlugin>, ProductRecipeError> {
     SchemaContribution::<ReferenceGamePlugin>::for_default([REFERENCE_GAME_SCHEMA_PROVIDER])
@@ -442,33 +431,6 @@ pub fn wave_desktop_intent() -> DesktopRunIntent {
         .with_recipe(desktop_wave_recipe_or_panic())
 }
 
-/// Builds an explicit raw extension path for Nara-owned desktop probes and regression tests.
-///
-/// Normal product entry points must use [`desktop_wave_recipe`] through [`wave_desktop_intent`].
-/// This helper intentionally keeps one-shot plugin definitions out of that ordinary path.
-#[cfg(feature = "desktop")]
-#[doc(hidden)]
-pub fn advanced_wave_desktop_intent_after<P: Plugin>(
-    definition: PluginDefinition,
-) -> DesktopRunIntent {
-    DesktopRunIntent::new()
-        .with_profile("desktop")
-        .configure(nara::image::plugin(ImageImportLimits::default()))
-        .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(
-            PluginDefinition::for_default::<ReferenceGamePlugin>(),
-        )
-        .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
-        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<
-            ReferenceRuntimeUiPlugin,
-        >())
-        .insert_after::<ReferenceRuntimeUiPlugin>(PluginDefinition::for_default::<
-            ReferenceDesktopPlugin,
-        >())
-        .insert_after::<P>(definition)
-        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
-}
-
 /// Creates the Editor Play intent over the same committed wave content closure.
 #[cfg(feature = "editor")]
 #[must_use]
@@ -476,56 +438,10 @@ pub fn wave_editor_intent() -> EditorProjectIntent {
     EditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
 }
 
-/// Builds an explicit raw extension path for Nara-owned Editor probes and regression tests.
-///
-/// Normal Editor sessions must use [`wave_editor_intent`], which carries the ordinary wave recipe.
-#[cfg(feature = "editor")]
-#[doc(hidden)]
-pub fn advanced_wave_editor_intent_after<P: Plugin>(
-    definition: PluginDefinition,
-) -> EditorProjectIntent {
-    EditorProjectIntent::new()
-        .configure(nara::image::plugin(ImageImportLimits::default()))
-        .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(
-            PluginDefinition::for_default::<ReferenceGamePlugin>(),
-        )
-        .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
-        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<
-            ReferenceRuntimeUiPlugin,
-        >())
-        .insert_after::<P>(definition)
-        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
-}
-
 /// Creates the complete wave run intent over the committed project content.
 #[must_use]
 pub fn wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {
     base_wave_headless_intent(maximum_fixed_ticks).stop_when(WaveSnapshot::is_terminal)
-}
-
-/// Builds an explicit raw extension path for Nara-owned headless probes and regression tests.
-///
-/// Normal product actions must use [`wave_headless_intent`], which carries the ordinary wave
-/// recipe and does not expose raw plugin definitions.
-#[doc(hidden)]
-pub fn advanced_wave_headless_intent_after<P: Plugin>(
-    maximum_fixed_ticks: NonZeroU32,
-    definition: PluginDefinition,
-) -> HeadlessRunIntent<WaveSnapshot> {
-    HeadlessRunIntent::new(maximum_fixed_ticks)
-        .configure(nara::image::plugin(ImageImportLimits::default()))
-        .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(
-            PluginDefinition::for_default::<ReferenceGamePlugin>(),
-        )
-        .insert_after::<ReferenceGamePlugin>(PluginDefinition::for_default::<ReferenceWavePlugin>())
-        .insert_after::<ReferenceWavePlugin>(PluginDefinition::for_default::<
-            ReferenceRuntimeUiPlugin,
-        >())
-        .insert_after::<P>(definition)
-        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
-        .stop_when(WaveSnapshot::is_terminal)
 }
 
 fn wave_headless_intent_with_completed_tick_observer(
@@ -641,25 +557,6 @@ pub fn project_headless_intent(
     fixed_ticks: NonZeroU32,
 ) -> HeadlessRunIntent<ReferenceProjectSnapshot> {
     HeadlessRunIntent::new(fixed_ticks).with_recipe(project_recipe_or_panic())
-}
-
-/// Builds an explicit raw extension path for Nara-owned headless probes and regression tests.
-///
-/// Normal project actions must use [`project_headless_intent`] or [`project_headless_run`].
-#[doc(hidden)]
-pub fn advanced_project_headless_intent_after<P: Plugin>(
-    fixed_ticks: NonZeroU32,
-    definition: PluginDefinition,
-) -> HeadlessRunIntent<ReferenceProjectSnapshot> {
-    HeadlessRunIntent::new(fixed_ticks)
-        .configure(nara::image::plugin(ImageImportLimits::default()))
-        .disable::<TilemapPlugin>()
-        .insert_after::<GameplayCommandPlugin>(
-            PluginDefinition::for_default::<ReferenceGamePlugin>(),
-        )
-        .insert_after::<ReferenceGamePlugin>(advanced_project_outcome_plugin_definition())
-        .insert_after::<P>(definition)
-        .with_schema_provider(REFERENCE_GAME_SCHEMA_PROVIDER)
 }
 
 /// Returns the first semantic input used by the committed reference task.

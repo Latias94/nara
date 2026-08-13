@@ -19,8 +19,10 @@ const REQUIRED_PRODUCT_SURFACE: [&str; 6] = [
     "add_contribution",
     "HeadlessRun::from_recipe",
 ];
-const FORBIDDEN_PRODUCT_SURFACE: [&str; 15] = [
+const FORBIDDEN_PRODUCT_SURFACE: [&str; 17] = [
     "PluginDefinition",
+    "ProjectRuntimePlugins",
+    "resolve_runtime_plan",
     "with_schema_provider",
     "RuntimeAdmissionReservation",
     "RuntimeCandidate",

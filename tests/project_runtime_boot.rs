@@ -24,24 +24,23 @@ use nara::{
     ecs::{Query, Res, ResMut, Resource, schedule::IntoScheduleConfigs},
     gameplay::{
         GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandDraft, GameplayCommandIngressSource,
-        GameplayCommandPlugin, GameplayCommandSet, GameplayCommandSourceSequence,
-        GameplayCommandSubmission, GameplayCommandTick, GameplayCommandTypeId,
+        GameplayCommandSet, GameplayCommandSourceSequence, GameplayCommandSubmission,
+        GameplayCommandTick, GameplayCommandTypeId,
     },
-    project_host::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport},
+    project_host::{
+        HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport,
+        advanced::{RuntimeProbe, headless_run_with_probe},
+    },
     scene::SceneEntitySource,
 };
 use project_content_fixture::TestProject;
 
 const BOOT_OUTCOME_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-boot-outcome");
-const BOOT_OUTCOME_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.test.project-boot-outcome", 1);
 const BOOT_OUTCOME_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
 const BOOT_OUTCOME_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(BOOT_OUTCOME_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(BOOT_OUTCOME_REQUIREMENTS);
 const EXIT_AFTER_TICK_PLUGIN_ID: PluginId = PluginId::new("nara.test.exit-after-tick");
-const EXIT_AFTER_TICK_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.test.exit-after-tick", 1);
 const EXIT_AFTER_TICK_REQUIREMENTS: &[PluginId] = &[BOOT_OUTCOME_PLUGIN_ID];
 const EXIT_AFTER_TICK_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(EXIT_AFTER_TICK_PLUGIN_ID, PluginCategory::Runtime)
@@ -170,22 +169,6 @@ fn request_exit_after_tick(mut exit: ResMut<AppExitRequests>) {
     exit.request_exit();
 }
 
-fn boot_outcome_plugin() -> PluginDefinition {
-    PluginDefinition::infallible::<BootOutcomePlugin, _>(
-        BOOT_OUTCOME_DEFINITION_ID,
-        b"project-boot-outcome-v1",
-        BootOutcomePlugin::default,
-    )
-}
-
-fn exit_after_tick_plugin() -> PluginDefinition {
-    PluginDefinition::infallible::<ExitAfterTickPlugin, _>(
-        EXIT_AFTER_TICK_DEFINITION_ID,
-        b"project-exit-after-tick-v1",
-        ExitAfterTickPlugin::default,
-    )
-}
-
 fn stalled_close_plugin(
     released: &Arc<AtomicBool>,
     instances: &Arc<AtomicUsize>,
@@ -205,9 +188,18 @@ fn stalled_close_plugin(
 }
 
 fn project_run(project: &TestProject) -> HeadlessRun<BootOutcome> {
-    let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
-        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
-    HeadlessRun::new(project.root_capability(), intent, Vec::new())
+    HeadlessRun::from_recipe(
+        project.root_capability(),
+        boot_recipe(),
+        NonZeroU32::new(1).unwrap(),
+        Vec::new(),
+    )
+}
+
+fn boot_recipe() -> ProductRecipe {
+    ProductRecipe::new()
+        .add_plugin::<BootOutcomePlugin>()
+        .expect("the boot recipe is statically valid")
 }
 
 fn execute_to_terminal(run: &mut HeadlessRun<BootOutcome>) -> HeadlessRunReport<BootOutcome> {
@@ -226,9 +218,7 @@ fn execute_to_terminal(run: &mut HeadlessRun<BootOutcome>) -> HeadlessRunReport<
 fn ordinary_recipe_headless_facade_owns_project_start_and_close() {
     let project = TestProject::with_prefab_startup();
     select_local_headless_profile(&project);
-    let recipe = ProductRecipe::new()
-        .add_plugin::<BootOutcomePlugin>()
-        .unwrap();
+    let recipe = boot_recipe();
     let mut run = HeadlessRun::from_recipe(
         project.root_capability(),
         recipe,
@@ -315,9 +305,13 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
     let instances = Arc::new(AtomicUsize::new(0));
     let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
         .with_cleanup_timeout(Duration::ZERO)
-        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin())
-        .insert_after::<BootOutcomePlugin>(stalled_close_plugin(&released, &instances));
-    let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
+        .with_recipe(boot_recipe());
+    let mut run = headless_run_with_probe(
+        project.root_capability(),
+        intent,
+        RuntimeProbe::new(stalled_close_plugin(&released, &instances)),
+        Vec::new(),
+    );
 
     let incomplete = run.execute_bounded();
     assert_eq!(incomplete.outcome(), &HeadlessRunOutcome::CleanupIncomplete);
@@ -341,7 +335,7 @@ fn product_action_stops_on_the_first_terminal_snapshot() {
     select_local_headless_profile(&project);
     let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
         .stop_when(|outcome: &BootOutcome| outcome.tick >= 2)
-        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
+        .with_recipe(boot_recipe());
     let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
 
     let report = execute_to_terminal(&mut run);
@@ -357,10 +351,12 @@ fn product_action_stops_on_the_first_terminal_snapshot() {
 fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
     let project = TestProject::with_prefab_startup();
     select_local_headless_profile(&project);
+    let recipe = boot_recipe()
+        .add_plugin::<ExitAfterTickPlugin>()
+        .expect("the exit recipe is statically valid");
     let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
         .stop_when(|_: &BootOutcome| false)
-        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin())
-        .insert_after::<BootOutcomePlugin>(exit_after_tick_plugin());
+        .with_recipe(recipe);
     let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
 
     let report = execute_to_terminal(&mut run);
@@ -382,7 +378,7 @@ fn product_action_reports_a_tick_limit_before_publishing_success() {
     select_local_headless_profile(&project);
     let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap())
         .stop_when(|_: &BootOutcome| false)
-        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
+        .with_recipe(boot_recipe());
     let mut run = HeadlessRun::new(project.root_capability(), intent, Vec::new());
 
     let report = execute_to_terminal(&mut run);
@@ -398,8 +394,6 @@ fn product_action_reports_a_tick_limit_before_publishing_success() {
 fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
     let project = TestProject::with_prefab_startup();
     select_local_headless_profile(&project);
-    let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
-        .insert_after::<GameplayCommandPlugin>(boot_outcome_plugin());
     let commands = (1..=4_097)
         .map(|sequence| {
             GameplayCommandSubmission::new(
@@ -412,7 +406,12 @@ fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
             )
         })
         .collect::<Vec<_>>();
-    let mut run = HeadlessRun::new(project.root_capability(), intent, commands);
+    let mut run = HeadlessRun::from_recipe(
+        project.root_capability(),
+        boot_recipe(),
+        NonZeroU32::new(1).unwrap(),
+        commands,
+    );
 
     let report = execute_to_terminal(&mut run);
 

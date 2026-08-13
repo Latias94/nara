@@ -6,6 +6,10 @@ use std::{
     },
 };
 
+use nara::project_host::advanced::{
+    RuntimeProbe, built_in_schema_providers, project_runtime_plugins,
+    resolve_product_recipe_with_probe, resolve_runtime_plan,
+};
 use nara::{
     MinimalPlugins, ProductConfiguration, ProductRecipe, ProductRecipeEntryKind,
     ProductRecipeError, SchemaContribution,
@@ -19,9 +23,7 @@ use nara::{
     hierarchy::HIERARCHY_PLUGIN_ID,
     project::{ProductCapability, ProductCapabilitySet},
     project_host::{
-        CompositionError, ProjectRuntimePlugins, RuntimePlanError, built_in_schema_providers,
-        ingest_project_manifest, project_runtime_plugins, resolve_product_recipe,
-        resolve_runtime_plan,
+        CompositionError, RuntimePlanError, ingest_project_manifest, resolve_product_recipe,
     },
     reflect::{
         ComponentRegistry, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
@@ -127,8 +129,8 @@ const TEST_AFTER_ORDERING_PLUGIN_DECLARATION: PluginDeclaration =
 
 const TEST_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.schema-provider");
 const TEST_SECOND_SCHEMA_PLUGIN_ID: PluginId = PluginId::new("test.second-schema-provider");
-const TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID: PluginId =
-    PluginId::new("test.reentrant-project-request");
+const TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_ID: PluginId =
+    PluginId::new("test.reentrant-product-recipe");
 const TEST_SCHEMA_PROVIDER_ID: PluginSchemaProviderId =
     PluginSchemaProviderId::new("test.schema-provider.components");
 const TEST_SCHEMA_OWNER_ID: ComponentSchemaOwnerId =
@@ -270,8 +272,8 @@ const TEST_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
 const TEST_SECOND_SCHEMA_PLUGIN_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(TEST_SECOND_SCHEMA_PLUGIN_ID, PluginCategory::Runtime)
         .provides_schema(&[TEST_SCHEMA_PROVIDER_ID]);
-const TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_DECLARATION: PluginDeclaration = PluginDeclaration::new(
-    TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID,
+const TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_DECLARATION: PluginDeclaration = PluginDeclaration::new(
+    TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_ID,
     PluginCategory::Runtime,
 );
 
@@ -587,27 +589,27 @@ impl Plugin for ReceiptValidatingSchemaProviderPlugin {
     }
 }
 
-struct ReentrantProjectRequestPlugin(Mutex<Option<ProjectRuntimePlugins>>);
+struct ReentrantProductRecipePlugin(Mutex<Option<ProductRecipe>>);
 
-impl Plugin for ReentrantProjectRequestPlugin {
+impl Plugin for ReentrantProductRecipePlugin {
     fn declaration() -> &'static PluginDeclaration {
-        &TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_DECLARATION
+        &TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_DECLARATION
     }
 
     fn build(&self, app: &mut nara::app::App) -> Result<(), PluginError> {
-        let request = self
+        let recipe = self
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take()
-            .expect("the project request is consumed once");
-        let Err(error) = app.add_plugins(request.into_app_plugins()) else {
-            panic!("hook-time project composition must reject");
+            .expect("the product recipe is consumed once");
+        let Err(error) = app.add_plugins(recipe) else {
+            panic!("hook-time product composition must reject");
         };
         assert!(matches!(
             error,
             AddPluginsError::Plugin(PluginError::HookMutationForbidden {
-                plugin: TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID,
+                plugin: TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_ID,
                 hook: PluginHook::Build,
                 mutation: PluginHookMutation::PluginMembership,
             })
@@ -702,6 +704,20 @@ fn product_recipe_configuration_replaces_typed_entry_and_reconstructs_fresh_plug
             value: 11,
             instance: 1,
         }
+    );
+}
+
+#[test]
+fn advanced_runtime_probe_cannot_attach_schema_authority() {
+    let manifest = TestManifest::new(MINIMAL_MANIFEST);
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let probe = RuntimeProbe::new(PluginDefinition::for_default::<SchemaProviderPlugin>());
+
+    assert_eq!(
+        resolve_product_recipe_with_probe(&candidate, ProductRecipe::new(), probe).unwrap_err(),
+        RuntimePlanError::Composition(CompositionError::AdvancedProbeProvidesSchema {
+            plugin: TEST_SCHEMA_PLUGIN_ID,
+        })
     );
 }
 
@@ -998,17 +1014,15 @@ fn project_runtime_plan_is_pure_repeatable_and_schema_bound() {
         "the plan and instantiated World must share one executable behavior snapshot"
     );
 
-    let mut raw_app = nara::app::App::new();
-    raw_app
-        .add_plugins(project_runtime_plugins(&candidate).into_app_plugins())
-        .unwrap();
+    let mut direct_app = nara::app::App::new();
+    direct_app.add_plugins(MinimalPlugins).unwrap();
     assert_ne!(
-        raw_app.configuration_fingerprint(),
+        direct_app.configuration_fingerprint(),
         first.plugin_plan().fingerprint(),
         "the code-first registry recipe must not impersonate a snapshot-bound runtime plan"
     );
-    let raw_app = raw_app.seal().unwrap();
-    let raw_snapshot = nara::reflect::component_registry(raw_app.world())
+    let direct_app = direct_app.seal().unwrap();
+    let raw_snapshot = nara::reflect::component_registry(direct_app.world())
         .unwrap()
         .snapshot()
         .unwrap();
@@ -1399,21 +1413,20 @@ fn file_backed_candidate_rejects_divergent_binding_codec_and_migration_receipts(
 }
 
 #[test]
-fn project_request_app_input_preserves_hook_time_sticky_poison() {
-    let manifest = TestManifest::new(MINIMAL_MANIFEST);
-    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+fn product_recipe_app_input_preserves_hook_time_sticky_poison() {
     let mut app = nara::app::App::new();
 
-    let Err(error) = app.add_plugins(ReentrantProjectRequestPlugin(Mutex::new(Some(
-        project_runtime_plugins(&candidate),
-    )))) else {
-        panic!("the hook-time request must poison the App");
+    let recipe = ProductRecipe::new()
+        .add_plugin::<DefaultRecipePlugin>()
+        .expect("the reentrant recipe is statically valid");
+    let Err(error) = app.add_plugins(ReentrantProductRecipePlugin(Mutex::new(Some(recipe)))) else {
+        panic!("the hook-time recipe must poison the App");
     };
 
     assert!(matches!(
         error,
         AddPluginsError::Plugin(PluginError::HookMutationForbidden {
-            plugin: TEST_REENTRANT_PROJECT_REQUEST_PLUGIN_ID,
+            plugin: TEST_REENTRANT_PRODUCT_RECIPE_PLUGIN_ID,
             hook: PluginHook::Build,
             mutation: PluginHookMutation::PluginMembership,
         })

@@ -1,6 +1,8 @@
 mod composition;
 mod ingest;
 
+pub mod advanced;
+
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 mod runtime;
 
@@ -18,10 +20,9 @@ pub use crate::project_content::{
     ProjectImageContent, ProjectPrefabContent,
 };
 pub use composition::{
-    CompiledProductCapabilities, CompositionError, ProjectRuntimePlugins, ProjectSettingsCandidate,
+    CompiledProductCapabilities, CompositionError, ProjectSettingsCandidate,
     ProjectSettingsLineage, RuntimePlan, RuntimePlanError, SchemaValidationInput,
-    built_in_schema_providers, compiled_product_capabilities, project_runtime_plugins,
-    project_runtime_plugins_with_recipe, resolve_product_recipe, resolve_runtime_plan,
+    compiled_product_capabilities, resolve_product_recipe,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
 #[cfg(all(

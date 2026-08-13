@@ -1,25 +1,22 @@
 use std::{fmt, num::NonZeroU32, time::Duration};
 
+use nara_app::RuntimeClosePolicy;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{
     AppExit, AppRunError, RuntimeCloseCause, RuntimeCloseEvidence, RuntimeFaultKind, RuntimeState,
 };
-use nara_app::{Plugin, PluginDefinition, RuntimeClosePolicy};
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
 use nara_fs::{DirectoryCapability, RelativePath};
 use nara_gameplay::GameplayCommandSubmission;
-use nara_reflect::ComponentSchemaProviderDefinition;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_winit::{WinitControlFlow, WinitRunner};
 
-use super::super::{
-    ProjectCandidateError, ProjectContentLoader, ProjectRuntimePlugins, built_in_schema_providers,
-    ingest_project_manifest, project_runtime_plugins_with_recipe, resolve_runtime_plan,
-};
+use super::super::composition::resolve_product_recipe_with_overlay;
+use super::super::{ProjectCandidateError, ProjectContentLoader, ingest_project_manifest};
 use super::{
-    CleanupDriveOutcome, HostFault, PROJECT_MANIFEST, ProjectHost, RuntimeStartAttempt,
-    runtime_plan_failure_report, runtime_plan_selected_report, single_error,
+    CleanupDriveOutcome, HostFault, PROJECT_MANIFEST, ProjectHost, RuntimePluginOverlay,
+    RuntimeStartAttempt, runtime_plan_failure_report, runtime_plan_selected_report, single_error,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::{
@@ -27,21 +24,17 @@ use super::{
 };
 use crate::ProductRecipe;
 
-type RuntimePluginEdit =
-    Box<dyn FnOnce(ProjectRuntimePlugins) -> ProjectRuntimePlugins + Send + 'static>;
 type TerminalPredicate<O> = Box<dyn Fn(&O) -> bool + Send + 'static>;
 
 /// File-backed headless run intent for one concrete product action.
 ///
-/// Plugin edits and schema providers are Rust authoring configuration. Candidate, publication, and
-/// cleanup choreography remain private to the root Host.
+/// The recipe is the complete Rust product-composition input. Candidate, publication, and cleanup
+/// choreography remain private to the root Host.
 pub struct HeadlessRunIntent<O> {
     profile: Option<String>,
     fixed_ticks: NonZeroU32,
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
-    plugin_edits: Vec<RuntimePluginEdit>,
-    schema_providers: Vec<ComponentSchemaProviderDefinition>,
     terminal_predicate: Option<TerminalPredicate<O>>,
 }
 
@@ -53,8 +46,6 @@ impl<O> fmt::Debug for HeadlessRunIntent<O> {
             .field("fixed_ticks", &self.fixed_ticks)
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
-            .field("plugin_edit_count", &self.plugin_edits.len())
-            .field("schema_provider_count", &self.schema_providers.len())
             .field(
                 "stops_on_terminal_outcome",
                 &self.terminal_predicate.is_some(),
@@ -71,8 +62,6 @@ impl<O> HeadlessRunIntent<O> {
             fixed_ticks,
             cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
-            plugin_edits: Vec::new(),
-            schema_providers: Vec::new(),
             terminal_predicate: None,
         }
     }
@@ -93,42 +82,6 @@ impl<O> HeadlessRunIntent<O> {
     #[must_use]
     pub fn with_recipe(mut self, recipe: ProductRecipe) -> Self {
         self.recipe = recipe;
-        self
-    }
-
-    #[must_use]
-    pub fn configure(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits
-            .push(Box::new(move |request| request.configure(definition)));
-        self
-    }
-
-    #[must_use]
-    pub fn disable<P: Plugin>(mut self) -> Self {
-        self.plugin_edits
-            .push(Box::new(|request| request.disable::<P>()));
-        self
-    }
-
-    #[must_use]
-    pub fn insert_after<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits.push(Box::new(move |request| {
-            request.insert_after::<P>(definition)
-        }));
-        self
-    }
-
-    #[must_use]
-    pub fn insert_before<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits.push(Box::new(move |request| {
-            request.insert_before::<P>(definition)
-        }));
-        self
-    }
-
-    #[must_use]
-    pub fn with_schema_provider(mut self, provider: ComponentSchemaProviderDefinition) -> Self {
-        self.schema_providers.push(provider);
         self
     }
 
@@ -182,8 +135,6 @@ pub struct DesktopRunIntent {
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
-    plugin_edits: Vec<RuntimePluginEdit>,
-    schema_providers: Vec<ComponentSchemaProviderDefinition>,
     runner: WinitRunner,
 }
 
@@ -195,8 +146,6 @@ impl fmt::Debug for DesktopRunIntent {
             .field("profile_present", &self.profile.is_some())
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
-            .field("plugin_edit_count", &self.plugin_edits.len())
-            .field("schema_provider_count", &self.schema_providers.len())
             .field("runner", &self.runner)
             .finish_non_exhaustive()
     }
@@ -217,8 +166,6 @@ impl DesktopRunIntent {
             profile: None,
             cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
-            plugin_edits: Vec::new(),
-            schema_providers: Vec::new(),
             runner: WinitRunner::default(),
         }
     }
@@ -245,42 +192,6 @@ impl DesktopRunIntent {
     #[must_use]
     pub fn with_control_flow(mut self, control_flow: WinitControlFlow) -> Self {
         self.runner = WinitRunner::new(control_flow);
-        self
-    }
-
-    #[must_use]
-    pub fn configure(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits
-            .push(Box::new(move |request| request.configure(definition)));
-        self
-    }
-
-    #[must_use]
-    pub fn disable<P: Plugin>(mut self) -> Self {
-        self.plugin_edits
-            .push(Box::new(|request| request.disable::<P>()));
-        self
-    }
-
-    #[must_use]
-    pub fn insert_after<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits.push(Box::new(move |request| {
-            request.insert_after::<P>(definition)
-        }));
-        self
-    }
-
-    #[must_use]
-    pub fn insert_before<P: Plugin>(mut self, definition: PluginDefinition) -> Self {
-        self.plugin_edits.push(Box::new(move |request| {
-            request.insert_before::<P>(definition)
-        }));
-        self
-    }
-
-    #[must_use]
-    pub fn with_schema_provider(mut self, provider: ComponentSchemaProviderDefinition) -> Self {
-        self.schema_providers.push(provider);
         self
     }
 }
@@ -340,13 +251,30 @@ impl DesktopRun {
 
     #[must_use]
     pub fn new(project_root: DirectoryCapability, intent: DesktopRunIntent) -> Self {
+        Self::new_inner(project_root, intent, None)
+    }
+
+    fn new_inner(
+        project_root: DirectoryCapability,
+        intent: DesktopRunIntent,
+        overlay: Option<RuntimePluginOverlay>,
+    ) -> Self {
         Self {
             state: DesktopRunState::Fresh(DesktopRunInputs {
                 project_root,
                 intent,
+                overlay,
             }),
             diagnostics: DiagnosticReport::default(),
         }
+    }
+
+    pub(crate) fn new_with_overlay(
+        project_root: DirectoryCapability,
+        intent: DesktopRunIntent,
+        overlay: RuntimePluginOverlay,
+    ) -> Self {
+        Self::new_inner(project_root, intent, Some(overlay))
     }
 
     /// Runs the event loop once, or advances only retained cleanup after an incomplete close.
@@ -405,13 +333,12 @@ impl DesktopRun {
         let DesktopRunInputs {
             project_root,
             intent,
+            overlay,
         } = inputs;
         let DesktopRunIntent {
             profile,
             cleanup_policy,
             recipe,
-            plugin_edits,
-            schema_providers,
             runner,
         } = intent;
         let PreparedProjectStart {
@@ -423,8 +350,7 @@ impl DesktopRun {
             profile,
             cleanup_policy,
             recipe,
-            plugin_edits,
-            schema_providers,
+            overlay,
             Vec::new(),
         ) {
             Ok(prepared) => prepared,
@@ -496,6 +422,7 @@ impl DesktopRun {
 struct DesktopRunInputs {
     project_root: DirectoryCapability,
     intent: DesktopRunIntent,
+    overlay: Option<RuntimePluginOverlay>,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -981,14 +908,33 @@ where
         intent: HeadlessRunIntent<O>,
         commands: Vec<GameplayCommandSubmission>,
     ) -> Self {
+        Self::new_inner(project_root, intent, None, commands)
+    }
+
+    fn new_inner(
+        project_root: DirectoryCapability,
+        intent: HeadlessRunIntent<O>,
+        overlay: Option<RuntimePluginOverlay>,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Self {
         Self {
             state: HeadlessRunState::Fresh(HeadlessRunInputs {
                 project_root,
                 intent,
+                overlay,
                 commands,
             }),
             diagnostics: DiagnosticReport::default(),
         }
+    }
+
+    pub(crate) fn new_with_overlay(
+        project_root: DirectoryCapability,
+        intent: HeadlessRunIntent<O>,
+        overlay: RuntimePluginOverlay,
+        commands: Vec<GameplayCommandSubmission>,
+    ) -> Self {
+        Self::new_inner(project_root, intent, Some(overlay), commands)
     }
 
     pub fn execute_bounded(&mut self) -> HeadlessRunReport<O> {
@@ -1145,6 +1091,7 @@ where
 struct HeadlessRunInputs<O> {
     project_root: DirectoryCapability,
     intent: HeadlessRunIntent<O>,
+    overlay: Option<RuntimePluginOverlay>,
     commands: Vec<GameplayCommandSubmission>,
 }
 
@@ -1214,6 +1161,7 @@ fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, Ho
     let HeadlessRunInputs {
         project_root,
         intent,
+        overlay,
         commands,
     } = inputs;
     let HeadlessRunIntent {
@@ -1221,8 +1169,6 @@ fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, Ho
         fixed_ticks,
         cleanup_policy,
         recipe,
-        plugin_edits,
-        schema_providers,
         terminal_predicate,
     } = intent;
     let prepared = prepare_project_start(
@@ -1230,8 +1176,7 @@ fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, Ho
         profile,
         cleanup_policy,
         recipe,
-        plugin_edits,
-        schema_providers,
+        overlay,
         commands,
     )?;
     Ok(PreparedStart {
@@ -1248,8 +1193,7 @@ fn prepare_project_start(
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
-    plugin_edits: Vec<RuntimePluginEdit>,
-    schema_providers: Vec<ComponentSchemaProviderDefinition>,
+    overlay: Option<RuntimePluginOverlay>,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<PreparedProjectStart, HostFault> {
     let manifest_path = RelativePath::new(PROJECT_MANIFEST)
@@ -1261,13 +1205,7 @@ fn prepare_project_start(
         .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
     drop(manifest);
 
-    let mut request = project_runtime_plugins_with_recipe(&candidate, recipe);
-    for edit in plugin_edits {
-        request = edit(request);
-    }
-    let mut providers = built_in_schema_providers();
-    providers.extend(schema_providers);
-    let plan = resolve_runtime_plan(&candidate, request, providers)
+    let plan = resolve_product_recipe_with_overlay(&candidate, recipe, overlay)
         .map_err(|error| HostFault::new(runtime_plan_failure_report(&error)))?;
     let plan_diagnostics = runtime_plan_selected_report(&plan);
     let loader = ProjectContentLoader::new(project_root)

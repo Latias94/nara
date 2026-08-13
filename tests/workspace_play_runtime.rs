@@ -22,8 +22,10 @@ use nara::{
         StartupStage,
     },
     ecs::{Query, Res, Resource, schedule::IntoScheduleConfigs},
-    gameplay::GameplayCommandPlugin,
-    project_host::{EditorProjectIntent, EditorProjectSession},
+    project_host::{
+        EditorProjectIntent, EditorProjectSession,
+        advanced::{RuntimeProbe, open_editor_with_probe},
+    },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
@@ -49,20 +51,14 @@ const DELAYED_CLOSE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(DELAYED_CLOSE_PLUGIN_ID, PluginCategory::Service)
         .shutdown_obligations(&[DELAYED_CLOSE_OBLIGATION]);
 const BUILD_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.editor-build-failure");
-const BUILD_FAILURE_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.test.editor-build-failure", 1);
 const BUILD_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(BUILD_FAILURE_PLUGIN_ID, PluginCategory::Runtime)
         .requires_plugins(&[DELAYED_CLOSE_PLUGIN_ID]);
 const SHUTDOWN_FAILURE_PLUGIN_ID: PluginId = PluginId::new("nara.test.editor-shutdown-failure");
-const SHUTDOWN_FAILURE_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.test.editor-shutdown-failure", 1);
 const SHUTDOWN_FAILURE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(SHUTDOWN_FAILURE_PLUGIN_ID, PluginCategory::Runtime);
 const RUNTIME_SERVICE_SESSION_PLUGIN_ID: PluginId =
     PluginId::new("nara.test.editor-runtime-service-session");
-const RUNTIME_SERVICE_SESSION_DEFINITION_ID: PluginDefinitionId =
-    PluginDefinitionId::new("nara.test.editor-runtime-service-session", 1);
 const RUNTIME_SERVICE_SESSION_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(RUNTIME_SERVICE_SESSION_PLUGIN_ID, PluginCategory::Service);
 const SPATIAL_OBSERVATION_PLUGIN_ID: PluginId =
@@ -121,16 +117,6 @@ fn publish_runtime_service_session_id(world: &mut nara::ecs::World) {
         .try_send(id)
         .expect("the bounded test service-session observer remains available and within budget");
     world.insert_resource(RuntimeServiceSessionId { _id: id });
-}
-
-fn runtime_service_session_definition(observations: mpsc::SyncSender<u64>) -> PluginDefinition {
-    PluginDefinition::infallible::<RuntimeServiceSessionPlugin, _>(
-        RUNTIME_SERVICE_SESSION_DEFINITION_ID,
-        b"editor-runtime-service-session-v1",
-        move || RuntimeServiceSessionPlugin {
-            observations: observations.clone(),
-        },
-    )
 }
 
 fn runtime_service_session_recipe(observations: mpsc::SyncSender<u64>) -> ProductRecipe {
@@ -300,30 +286,13 @@ fn delayed_close_definition(release: Arc<AtomicBool>) -> PluginDefinition {
     )
 }
 
-fn build_failure_definition() -> PluginDefinition {
-    PluginDefinition::infallible::<BuildFailurePlugin, _>(
-        BUILD_FAILURE_DEFINITION_ID,
-        b"editor-build-failure-v1",
-        BuildFailurePlugin::default,
-    )
-}
-
-fn shutdown_failure_definition() -> PluginDefinition {
-    PluginDefinition::infallible::<ShutdownFailurePlugin, _>(
-        SHUTDOWN_FAILURE_DEFINITION_ID,
-        b"editor-shutdown-failure-v1",
-        ShutdownFailurePlugin::default,
-    )
-}
-
 #[test]
 fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let (service_sessions, service_session_observations) = mpsc::sync_channel(2);
-    let intent = EditorProjectIntent::new().insert_after::<GameplayCommandPlugin>(
-        runtime_service_session_definition(service_sessions),
-    );
+    let intent =
+        EditorProjectIntent::new().with_recipe(runtime_service_session_recipe(service_sessions));
     let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
 
     assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
@@ -607,10 +576,12 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
         ],
     ));
     let (observations, receiver) = mpsc::sync_channel(128);
-    let intent = EditorProjectIntent::new().insert_after::<GameplayCommandPlugin>(
-        spatial_observation_definition(child_id, observations),
-    );
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let mut editor = open_editor_with_probe(
+        project.root_capability(),
+        EditorProjectIntent::new(),
+        RuntimeProbe::new(spatial_observation_definition(child_id, observations)),
+    )
+    .unwrap();
 
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -875,10 +846,13 @@ fn workspace_close_retains_document_through_close_incomplete_and_retry() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let release = Arc::new(AtomicBool::new(false));
-    let intent = EditorProjectIntent::new()
-        .with_cleanup_timeout(Duration::ZERO)
-        .insert_after::<GameplayCommandPlugin>(delayed_close_definition(Arc::clone(&release)));
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let intent = EditorProjectIntent::new().with_cleanup_timeout(Duration::ZERO);
+    let mut editor = open_editor_with_probe(
+        project.root_capability(),
+        intent,
+        RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
+    )
+    .unwrap();
     let document = editor.workspace().active_document().unwrap();
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -909,10 +883,13 @@ fn direct_stop_retains_close_incomplete_until_retry() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let release = Arc::new(AtomicBool::new(false));
-    let intent = EditorProjectIntent::new()
-        .with_cleanup_timeout(Duration::ZERO)
-        .insert_after::<GameplayCommandPlugin>(delayed_close_definition(Arc::clone(&release)));
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let intent = EditorProjectIntent::new().with_cleanup_timeout(Duration::ZERO);
+    let mut editor = open_editor_with_probe(
+        project.root_capability(),
+        intent,
+        RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
+    )
+    .unwrap();
     let document = editor.workspace().active_document().unwrap();
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -949,8 +926,10 @@ fn direct_stop_retains_close_incomplete_until_retry() {
 fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let intent = EditorProjectIntent::new()
-        .insert_after::<GameplayCommandPlugin>(shutdown_failure_definition());
+    let recipe = ProductRecipe::new()
+        .add_plugin::<ShutdownFailurePlugin>()
+        .expect("the shutdown-failure recipe is statically valid");
+    let intent = EditorProjectIntent::new().with_recipe(recipe);
     let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -1048,11 +1027,18 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let release = Arc::new(AtomicBool::new(false));
+    let recipe = ProductRecipe::new()
+        .add_plugin::<BuildFailurePlugin>()
+        .expect("the build-failure recipe is statically valid");
     let intent = EditorProjectIntent::new()
         .with_cleanup_timeout(Duration::ZERO)
-        .insert_after::<GameplayCommandPlugin>(delayed_close_definition(Arc::clone(&release)))
-        .insert_after::<DelayedClosePlugin>(build_failure_definition());
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+        .with_recipe(recipe);
+    let mut editor = open_editor_with_probe(
+        project.root_capability(),
+        intent,
+        RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
+    )
+    .unwrap();
     let document = editor.workspace().active_document().unwrap();
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
@@ -1091,10 +1077,16 @@ fn failed_start_remains_retiring_while_cleanup_is_still_pending() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let release = Arc::new(AtomicBool::new(false));
-    let intent = EditorProjectIntent::new()
-        .insert_after::<GameplayCommandPlugin>(delayed_close_definition(Arc::clone(&release)))
-        .insert_after::<DelayedClosePlugin>(build_failure_definition());
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let recipe = ProductRecipe::new()
+        .add_plugin::<BuildFailurePlugin>()
+        .expect("the build-failure recipe is statically valid");
+    let intent = EditorProjectIntent::new().with_recipe(recipe);
+    let mut editor = open_editor_with_probe(
+        project.root_capability(),
+        intent,
+        RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
+    )
+    .unwrap();
     assert_eq!(
         editor.request_play(EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
