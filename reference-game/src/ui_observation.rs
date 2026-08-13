@@ -1,10 +1,13 @@
 use nara::{
     prelude::{Resource, World},
     scene::SceneEntitySource,
-    ui::{
-        UiButton, UiDimension, UiNode, UiSurfaceId, active_ui_surface_slots,
-        advanced::UiFrame, latest_ui_frame,
-    },
+    ui::{UiButton, UiDimension, UiNode, UiSurfaceId, active_ui_surface_slots},
+};
+
+#[cfg(feature = "desktop")]
+use nara::{
+    ui::advanced::{UiFrame, UiKey},
+    ui_render::advanced::PresentedUiObservation,
 };
 
 use crate::{REFERENCE_UI_SURFACE_ID, WaveSnapshot, resources::WaveRunOwner};
@@ -30,8 +33,15 @@ pub struct ReferenceUiObservation {
 }
 
 /// Immutable compiled and physically mapped facts available only to presented products.
+#[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReferenceUiPresentationObservation {
+    pub backend_instance_id: u64,
+    pub device_epoch: u64,
+    pub app_frame_index: u64,
+    pub render_transaction_frame_index: u64,
+    pub ui_admission_id: u64,
+    pub presentation_epoch: u64,
     pub frame_revision: u64,
     pub source_revision: u64,
     pub slot_generation: u64,
@@ -106,26 +116,21 @@ impl ReferenceUiObservation {
         let transform = slot.transform();
         let owner = world.get_resource::<WaveRunOwner>()?;
         let retry = world.iter_entities().find(|entity| {
-            entity
-                .get::<SceneEntitySource>()
-                .is_some_and(|source| {
-                    reference_ui_source_entity(source) == Some("retry-button")
-                        && owner.owns_scene_entity(entity.id(), source)
-                })
-                && entity.contains::<UiNode>()
+            entity.get::<SceneEntitySource>().is_some_and(|source| {
+                reference_ui_source_entity(source) == Some("retry-button")
+                    && owner.owns_scene_entity(entity.id(), source)
+            }) && entity.contains::<UiNode>()
                 && entity.contains::<UiButton>()
         })?;
         let source = retry.get::<SceneEntitySource>()?;
         let source_step = source.projection_path.as_ref()?.source_chain().last()?;
         let node = retry.get::<UiNode>()?;
         let button = retry.get::<UiButton>()?;
-        let (retry_authored_width, retry_authored_height) = match (
-            node.style().width(),
-            node.style().height(),
-        ) {
-            (UiDimension::Px(width), UiDimension::Px(height)) => (width, height),
-            _ => return None,
-        };
+        let (retry_authored_width, retry_authored_height) =
+            match (node.style().width(), node.style().height()) {
+                (UiDimension::Px(width), UiDimension::Px(height)) => (width, height),
+                _ => return None,
+            };
         let authored = transform.authored_logical_size();
 
         Some(Self {
@@ -144,17 +149,52 @@ impl ReferenceUiObservation {
         })
     }
 
-    /// Adds immutable presentation facts from the latest frame for the same authored action.
+    /// Projects product facts from one exact owner-produced presented frame.
     #[must_use]
-    pub fn from_world(world: &World) -> Option<Self> {
-        let mut observation = Self::from_authoring_world(world)?;
-        let surface = UiSurfaceId::new(observation.surface_id)?;
-        let frame = latest_ui_frame(world, surface).ok()??;
-        observation.presentation = ReferenceUiPresentationObservation::from_frame(
+    #[cfg(feature = "desktop")]
+    pub fn from_presented_observation(presented: &PresentedUiObservation) -> Option<Self> {
+        let frame = presented.frame();
+        if frame.environment().surface_id().get() != REFERENCE_UI_SURFACE_ID {
+            return None;
+        }
+        let (retry, (root_anchor, source_document, source_entity)) =
+            frame.semantics().iter().find_map(|node| {
+                reference_retry_identity(node.key()).map(|identity| (node, identity))
+            })?;
+        let [action] = retry.actions() else {
+            return None;
+        };
+        let transform = frame.environment().content_transform();
+        let authored = transform.authored_logical_size();
+        let retry_rect = retry.rect();
+        let retry_origin = retry_rect.origin();
+        let retry_size = retry_rect.size();
+        let presentation = ReferenceUiPresentationObservation::from_frame(
             &frame,
-            &observation.retry_action,
-        );
-        Some(observation)
+            retry.key(),
+            ReferenceUiRect {
+                x: retry_origin.x(),
+                y: retry_origin.y(),
+                width: retry_size.width(),
+                height: retry_size.height(),
+            },
+            presented,
+        )?;
+
+        Some(Self {
+            surface_id: frame.environment().surface_id().get(),
+            authored_width: authored.width(),
+            authored_height: authored.height(),
+            retry_entity_id: format!("{root_anchor}/{source_entity}"),
+            retry_source_document: source_document.to_owned(),
+            retry_source_entity: source_entity.to_owned(),
+            retry_action: action.as_str().to_owned(),
+            retry_name: retry.name().to_owned(),
+            retry_enabled: retry.enabled(),
+            retry_authored_width: retry_size.width(),
+            retry_authored_height: retry_size.height(),
+            presentation: Some(presentation),
+        })
     }
 
     #[must_use]
@@ -171,7 +211,7 @@ impl ReferenceUiObservation {
         );
         format!(
             concat!(
-                "{{\"schema\":\"nara-reference-game.ui-observation-v1\",",
+                "{{\"schema\":\"nara-reference-game.ui-observation-v2\",",
                 "\"surface_id\":{},\"authored_size\":[{},{}],\"retry\":{{",
                 "\"entity_id\":\"{}\",\"source_document\":\"{}\",",
                 "\"source_entity\":\"{}\",\"action\":\"{}\",\"name\":\"{}\",",
@@ -198,31 +238,39 @@ pub(crate) fn reference_ui_source_entity(source: &SceneEntitySource) -> Option<&
     let projection = source.projection_path.as_ref()?;
     let source_step = projection.source_chain().last()?;
     (projection.root_anchor().as_str() == "reference-ui"
-        && source_step.source_document().as_path().is_some_and(|path| {
-            path.as_str() == "reference-ui.prefab.json"
-        })
+        && source_step
+            .source_document()
+            .as_path()
+            .is_some_and(|path| path.as_str() == "reference-ui.prefab.json")
         && source_step.source_entity() == &source.source_entity_id)
         .then_some(source.source_entity_id.as_str())
 }
 
 impl ReferenceUiPresentationObservation {
-    fn from_frame(frame: &UiFrame, retry_action: &str) -> Option<Self> {
-        let retry = frame.semantics().iter().find(|node| {
-            node.actions()
-                .iter()
-                .any(|action| action.as_str() == retry_action)
-        })?;
+    #[cfg(feature = "desktop")]
+    fn from_frame(
+        frame: &UiFrame,
+        retry_key: &UiKey,
+        retry_rect: ReferenceUiRect,
+        presented: &PresentedUiObservation,
+    ) -> Option<Self> {
         let layout = frame
             .layouts()
             .iter()
-            .find(|layout| layout.key() == Some(retry.key()))?;
+            .find(|layout| layout.key() == Some(retry_key))?;
         let transform = frame.environment().content_transform();
-        let logical_rect = retry.rect();
         let physical_rect = layout.physical_rect();
-        let logical_origin = logical_rect.origin();
-        let logical_size = logical_rect.size();
+        let receipt = presented.receipt();
+        let submission = presented.submission();
+        let backend_generation = presented.backend_generation();
 
         Some(Self {
+            backend_instance_id: backend_generation.backend_instance_id(),
+            device_epoch: backend_generation.device_epoch(),
+            app_frame_index: presented.wgpu()?.app_frame_index(),
+            render_transaction_frame_index: presented.wgpu()?.render_transaction_frame_index(),
+            ui_admission_id: submission.admission_id().get(),
+            presentation_epoch: receipt.presentation_epoch(),
             frame_revision: frame.revision().get(),
             source_revision: frame.source_revision().get(),
             slot_generation: frame.environment().slot_generation().get(),
@@ -239,12 +287,7 @@ impl ReferenceUiPresentationObservation {
             content_height: transform.physical_content_size().height(),
             platform_scale_factor: transform.platform_scale_factor(),
             content_scale_factor: transform.content_scale_factor(),
-            retry_rect: ReferenceUiRect {
-                x: logical_origin.x(),
-                y: logical_origin.y(),
-                width: logical_size.width(),
-                height: logical_size.height(),
-            },
+            retry_rect,
             retry_physical_rect: ReferenceUiPhysicalRect {
                 min_x: physical_rect.min_x(),
                 min_y: physical_rect.min_y(),
@@ -259,7 +302,10 @@ impl ReferenceUiPresentationObservation {
     fn to_json(&self) -> String {
         format!(
             concat!(
-                "{{\"frame_revision\":{},\"source_revision\":{},",
+                "{{\"backend_instance_id\":{},\"device_epoch\":{},",
+                "\"app_frame_index\":{},\"render_transaction_frame_index\":{},",
+                "\"ui_admission_id\":{},\"presentation_epoch\":{},",
+                "\"frame_revision\":{},\"source_revision\":{},",
                 "\"slot_generation\":{},\"route_revision\":{},",
                 "\"geometry_generation\":{},\"presentation_revision\":{},",
                 "\"theme_revision\":{},\"font_revision\":{},",
@@ -269,6 +315,12 @@ impl ReferenceUiPresentationObservation {
                 "\"retry_physical_rect\":[{},{},{},{}],",
                 "\"semantic_nodes\":{},\"paint_primitives\":{}}}"
             ),
+            self.backend_instance_id,
+            self.device_epoch,
+            self.app_frame_index,
+            self.render_transaction_frame_index,
+            self.ui_admission_id,
+            self.presentation_epoch,
             self.frame_revision,
             self.source_revision,
             self.slot_generation,
@@ -297,6 +349,21 @@ impl ReferenceUiPresentationObservation {
             self.paint_primitives,
         )
     }
+}
+
+#[cfg(feature = "desktop")]
+fn reference_retry_identity(key: &UiKey) -> Option<(&str, &str, &str)> {
+    let identity = key.persistent_identity()?;
+    let projection = identity.projection()?;
+    let step = projection.source_chain().last()?;
+    let root_anchor = projection.root_anchor().as_str();
+    let source_document = step.source_document().as_str();
+    let source_entity = identity.source_entity().as_str();
+    (root_anchor == "reference-ui"
+        && source_document == "reference-ui.prefab.json"
+        && step.source_entity().as_str() == source_entity
+        && source_entity == "retry-button")
+        .then_some((root_anchor, source_document, source_entity))
 }
 
 pub(crate) fn capture_reference_product_observation(world: &mut World) {

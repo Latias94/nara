@@ -587,6 +587,172 @@ with tempfile.TemporaryDirectory(prefix="nara-smoke-root-policy-") as temporary:
 }
 
 #[test]
+fn ui_performance_consumer_rejects_identity_and_integer_type_drift() {
+    let script = r#"
+import copy
+import sys
+
+sys.path.insert(0, sys.argv[1])
+import smoke_artifact as smoke
+
+presentation = {
+    "backend_instance_id": 7,
+    "device_epoch": 1,
+    "app_frame_index": 13,
+    "render_transaction_frame_index": 12,
+    "ui_admission_id": 5,
+    "presentation_epoch": 6,
+    "frame_revision": 1,
+    "source_revision": 1,
+    "slot_generation": 1,
+    "route_revision": 1,
+    "geometry_generation": 1,
+    "presentation_revision": 1,
+    "theme_revision": 1,
+    "font_revision": 1,
+    "physical_size": [1280.0, 720.0],
+    "content_origin": [0.0, 0.0],
+    "content_size": [1280.0, 720.0],
+    "platform_scale_factor": 1.0,
+    "content_scale_factor": 4.0 / 3.0,
+    "retry_rect": [396.0, 280.0, 176.0, 48.0],
+    "retry_physical_rect": [528, 373, 763, 437],
+    "semantic_nodes": 15,
+    "paint_primitives": 32,
+}
+ui = {"surface_id": 1, "presentation": presentation}
+performance = {
+    "schema": smoke.UI_PERFORMANCE_SCHEMA,
+    "backend_instance_id": 7,
+    "device_epoch": 1,
+    "app_frame_index": 13,
+    "render_transaction_frame_index": 12,
+    "ui_admission_id": 5,
+    "presentation_epoch": 6,
+    "surface_id": 1,
+    "ui_frame_revision": 1,
+    "source_revision": 1,
+    "slot_generation": 1,
+    "route_revision": 1,
+    "geometry_generation": 1,
+    "presentation_revision": 1,
+    "theme_revision": 1,
+    "font_revision": 1,
+    "warmup_samples": 4,
+    "measurement_samples": 16,
+    "completion_sample_loss": 0,
+    "presented_completion": {
+        "device_epoch": 1,
+        "app_frame_index": 13,
+        "render_transaction_frame_index": 12,
+        "duration_ns": 100,
+    },
+    "completion_samples": [
+        {
+            "device_epoch": 1,
+            "app_frame_index": 14 + index,
+            "render_transaction_frame_index": 13 + index,
+            "duration_ns": 200 + index,
+        }
+        for index in range(16)
+    ],
+    "ui_primitives": 32,
+    "ui_images": 0,
+    "ui_glyph_primitives": 20,
+    "ui_glyph_pages": 1,
+    "submitted_ui_quads": 32,
+    "submitted_glyph_quads": 20,
+    "referenced_texture_bindings": 1,
+    "frame_submitted_sprites": 4,
+    "frame_submitted_image_sprites": 3,
+    "presented_texture_bytes": 4096,
+    "presented_instance_buffer_bytes": 2048,
+    "presented_total_bytes": 6144,
+    "candidate_run_peak_texture_bytes": 4096,
+    "candidate_run_peak_instance_buffer_bytes": 2048,
+    "candidate_run_peak_total_bytes": 6144,
+}
+
+smoke.validate_ui_performance(copy.deepcopy(performance), "valid")
+smoke.validate_ui_performance_correlation(ui, performance, "valid")
+
+correlation_fields = {
+    "surface_id": (None, "surface_id"),
+    "backend_instance_id": ("backend_instance_id", "backend_instance_id"),
+    "device_epoch": ("device_epoch", "device_epoch"),
+    "app_frame_index": ("app_frame_index", "app_frame_index"),
+    "render_transaction_frame_index": (
+        "render_transaction_frame_index",
+        "render_transaction_frame_index",
+    ),
+    "ui_admission_id": ("ui_admission_id", "ui_admission_id"),
+    "presentation_epoch": ("presentation_epoch", "presentation_epoch"),
+    "frame_revision": ("frame_revision", "ui_frame_revision"),
+    "source_revision": ("source_revision", "source_revision"),
+    "slot_generation": ("slot_generation", "slot_generation"),
+    "route_revision": ("route_revision", "route_revision"),
+    "geometry_generation": ("geometry_generation", "geometry_generation"),
+    "presentation_revision": ("presentation_revision", "presentation_revision"),
+    "theme_revision": ("theme_revision", "theme_revision"),
+    "font_revision": ("font_revision", "font_revision"),
+}
+for name, (presentation_field, performance_field) in correlation_fields.items():
+    mutated = copy.deepcopy(performance)
+    mutated[performance_field] += 1
+    try:
+        smoke.validate_ui_performance_correlation(ui, mutated, name)
+    except smoke.ArtifactError:
+        pass
+    else:
+        raise AssertionError(f"correlation drift was accepted: {name}")
+
+integer_mutations = [
+    ("backend_instance_id", True),
+    ("warmup_samples", 4.0),
+    ("measurement_samples", True),
+    ("completion_sample_loss", 0.0),
+]
+for field, replacement in integer_mutations:
+    mutated = copy.deepcopy(performance)
+    mutated[field] = replacement
+    try:
+        smoke.validate_ui_performance(mutated, field)
+    except smoke.ArtifactError:
+        pass
+    else:
+        raise AssertionError(f"non-integer field was accepted: {field}")
+
+sample_mutations = [
+    ("presented_completion", "duration_ns", True),
+    ("presented_completion", "app_frame_index", 13.0),
+    ("completion_samples", "device_epoch", True),
+    ("completion_samples", "device_epoch", 1.0),
+    ("completion_samples", "render_transaction_frame_index", True),
+    ("completion_samples", "duration_ns", 200.0),
+]
+for collection, field, replacement in sample_mutations:
+    mutated = copy.deepcopy(performance)
+    target = mutated[collection]
+    if isinstance(target, list):
+        target = target[0]
+    target[field] = replacement
+    try:
+        smoke.validate_ui_performance(mutated, f"{collection}.{field}")
+    except smoke.ArtifactError:
+        pass
+    else:
+        raise AssertionError(f"non-integer sample field was accepted: {collection}.{field}")
+"#;
+    let result = run_smoke_inline(script);
+
+    assert!(
+        result.status.success(),
+        "UI performance consumer accepted identity/type drift: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+#[test]
 fn smoke_runner_uses_the_formal_desktop_and_retires_unique_work_roots() {
     let script = r#"
 import json
@@ -616,6 +782,12 @@ def ui_observation(presented):
     }
     if presented:
         observation["presentation"] = {
+            "backend_instance_id": 7,
+            "device_epoch": 1,
+            "app_frame_index": 13,
+            "render_transaction_frame_index": 12,
+            "ui_admission_id": 5,
+            "presentation_epoch": 6,
             "frame_revision": 1,
             "source_revision": 1,
             "slot_generation": 1,
@@ -646,24 +818,54 @@ def headless_output():
 def desktop_output():
     performance = {
         "schema": smoke.UI_PERFORMANCE_SCHEMA,
-        "frame_index": 12,
+        "backend_instance_id": 7,
         "device_epoch": 1,
+        "app_frame_index": 13,
+        "render_transaction_frame_index": 12,
+        "ui_admission_id": 5,
+        "presentation_epoch": 6,
+        "surface_id": 1,
+        "ui_frame_revision": 1,
+        "source_revision": 1,
+        "slot_generation": 1,
+        "route_revision": 1,
+        "geometry_generation": 1,
+        "presentation_revision": 1,
+        "theme_revision": 1,
+        "font_revision": 1,
         "warmup_samples": 4,
+        "measurement_samples": 16,
         "completion_sample_loss": 0,
+        "presented_completion": {
+            "device_epoch": 1,
+            "app_frame_index": 13,
+            "render_transaction_frame_index": 12,
+            "duration_ns": 1100000,
+        },
         "completion_samples": [
-            {"frame_index": 11, "duration_ns": 1000000},
-            {"frame_index": 12, "duration_ns": 1100000},
+            {
+                "device_epoch": 1,
+                "app_frame_index": 14 + index,
+                "render_transaction_frame_index": 13 + index,
+                "duration_ns": 1200000 + index,
+            }
+            for index in range(16)
         ],
-        "ui_packet_count": 1,
         "ui_primitives": 32,
+        "ui_images": 0,
         "ui_glyph_primitives": 20,
         "ui_glyph_pages": 1,
-        "uploaded_glyph_pages": 1,
-        "reused_glyph_pages": 0,
-        "current_texture_bytes": 4096,
-        "peak_texture_bytes": 4096,
-        "peak_instance_buffer_bytes": 2048,
-        "peak_total_bytes": 6144,
+        "submitted_ui_quads": 32,
+        "submitted_glyph_quads": 20,
+        "referenced_texture_bindings": 1,
+        "frame_submitted_sprites": 4,
+        "frame_submitted_image_sprites": 3,
+        "presented_texture_bytes": 4096,
+        "presented_instance_buffer_bytes": 2048,
+        "presented_total_bytes": 6144,
+        "candidate_run_peak_texture_bytes": 4096,
+        "candidate_run_peak_instance_buffer_bytes": 2048,
+        "candidate_run_peak_total_bytes": 6144,
     }
     return (
         json.dumps(ui_observation(True)).encode("ascii")

@@ -66,6 +66,7 @@ pub(crate) struct WgpuUiLowering {
 #[derive(Debug)]
 pub(crate) struct WgpuLoweredUiPacketFacts {
     pub(crate) packet: UiPaintPacketIdentity,
+    pub(crate) target: RenderTarget,
     pub(crate) primitive_count: u64,
     pub(crate) image_count: u64,
     pub(crate) glyph_primitive_count: u64,
@@ -79,6 +80,7 @@ impl WgpuLoweredUiPacketFacts {
     fn new(packet: &UiPaintPacket) -> Self {
         Self {
             packet: packet.identity(),
+            target: packet.target(),
             primitive_count: crate::saturating_u64(packet.primitives().len()),
             image_count: crate::saturating_u64(packet.images().len()),
             glyph_primitive_count: crate::saturating_u64(

@@ -25,8 +25,8 @@ import package
 
 
 HEADLESS_SUMMARY_SCHEMA = "nara-reference-game.wave-summary-v1"
-UI_OBSERVATION_SCHEMA = "nara-reference-game.ui-observation-v1"
-UI_PERFORMANCE_SCHEMA = "nara-reference-game.ui-performance-v1"
+UI_OBSERVATION_SCHEMA = "nara-reference-game.ui-observation-v2"
+UI_PERFORMANCE_SCHEMA = "nara-reference-game.ui-performance-v2"
 UI_OBSERVATION_ENV = "NARA_REFERENCE_UI_OBSERVATION"
 DESKTOP_SMOKE_SUCCESS = b"desktop_candidate_smoke: ok\n"
 MAX_PROCESS_OUTPUT_BYTES = 64 * 1024
@@ -791,6 +791,12 @@ def validate_ui_observation(
             not isinstance(presentation, dict)
             or set(presentation)
             != {
+                "backend_instance_id",
+                "device_epoch",
+                "app_frame_index",
+                "render_transaction_frame_index",
+                "ui_admission_id",
+                "presentation_epoch",
                 "frame_revision",
                 "source_revision",
                 "slot_generation",
@@ -812,6 +818,12 @@ def validate_ui_observation(
             or not all(
                 is_positive_integer(presentation.get(field))
                 for field in {
+                    "backend_instance_id",
+                    "device_epoch",
+                    "app_frame_index",
+                    "render_transaction_frame_index",
+                    "ui_admission_id",
+                    "presentation_epoch",
                     "frame_revision",
                     "source_revision",
                     "slot_generation",
@@ -851,12 +863,14 @@ def validate_ui_observation(
     elif presentation is not None:
         raise ArtifactError(f"{subject} unexpectedly claimed presentation facts")
     return {
+        "surface_id": value["surface_id"],
         "authored_size": value["authored_size"],
         "retry_entity_id": retry["entity_id"],
         "retry_source_document": retry["source_document"],
         "retry_source_entity": retry["source_entity"],
         "retry_action": retry["action"],
         "retry_name": retry["name"],
+        "retry_enabled": retry["enabled"],
         "retry_authored_size": retry["authored_size"],
     }
 
@@ -864,65 +878,179 @@ def validate_ui_observation(
 def validate_ui_performance(value: dict[str, Any], subject: str) -> dict[str, object]:
     expected_keys = {
         "schema",
-        "frame_index",
+        "backend_instance_id",
         "device_epoch",
+        "app_frame_index",
+        "render_transaction_frame_index",
+        "ui_admission_id",
+        "presentation_epoch",
+        "surface_id",
+        "ui_frame_revision",
+        "source_revision",
+        "slot_generation",
+        "route_revision",
+        "geometry_generation",
+        "presentation_revision",
+        "theme_revision",
+        "font_revision",
         "warmup_samples",
+        "measurement_samples",
         "completion_sample_loss",
+        "presented_completion",
         "completion_samples",
-        "ui_packet_count",
         "ui_primitives",
+        "ui_images",
         "ui_glyph_primitives",
         "ui_glyph_pages",
-        "uploaded_glyph_pages",
-        "reused_glyph_pages",
-        "current_texture_bytes",
-        "peak_texture_bytes",
-        "peak_instance_buffer_bytes",
-        "peak_total_bytes",
+        "submitted_ui_quads",
+        "submitted_glyph_quads",
+        "referenced_texture_bindings",
+        "frame_submitted_sprites",
+        "frame_submitted_image_sprites",
+        "presented_texture_bytes",
+        "presented_instance_buffer_bytes",
+        "presented_total_bytes",
+        "candidate_run_peak_texture_bytes",
+        "candidate_run_peak_instance_buffer_bytes",
+        "candidate_run_peak_total_bytes",
     }
+    presented = value.get("presented_completion")
     samples = value.get("completion_samples")
     nonnegative_fields = {
         "completion_sample_loss",
-        "uploaded_glyph_pages",
-        "reused_glyph_pages",
+        "ui_images",
     }
     positive_fields = {
-        "frame_index",
+        "backend_instance_id",
         "device_epoch",
+        "app_frame_index",
+        "render_transaction_frame_index",
+        "ui_admission_id",
+        "presentation_epoch",
+        "surface_id",
+        "ui_frame_revision",
+        "source_revision",
+        "slot_generation",
+        "route_revision",
+        "geometry_generation",
+        "presentation_revision",
+        "theme_revision",
+        "font_revision",
         "ui_primitives",
         "ui_glyph_primitives",
         "ui_glyph_pages",
-        "current_texture_bytes",
-        "peak_texture_bytes",
-        "peak_instance_buffer_bytes",
-        "peak_total_bytes",
+        "submitted_ui_quads",
+        "submitted_glyph_quads",
+        "referenced_texture_bindings",
+        "frame_submitted_sprites",
+        "frame_submitted_image_sprites",
+        "presented_texture_bytes",
+        "presented_instance_buffer_bytes",
+        "presented_total_bytes",
+        "candidate_run_peak_texture_bytes",
+        "candidate_run_peak_instance_buffer_bytes",
+        "candidate_run_peak_total_bytes",
     }
     if (
         set(value) != expected_keys
         or value.get("schema") != UI_PERFORMANCE_SCHEMA
-        or value.get("warmup_samples") != 4
-        or value.get("completion_sample_loss") != 0
-        or value.get("ui_packet_count") != 1
+        or type(value.get("warmup_samples")) is not int
+        or value["warmup_samples"] != 4
+        or type(value.get("measurement_samples")) is not int
+        or value["measurement_samples"] != 16
+        or type(value.get("completion_sample_loss")) is not int
+        or value["completion_sample_loss"] != 0
+        or not isinstance(presented, dict)
+        or set(presented)
+        != {
+            "device_epoch",
+            "app_frame_index",
+            "render_transaction_frame_index",
+            "duration_ns",
+        }
+        or not all(is_positive_integer(presented.get(field)) for field in presented)
+        or presented.get("device_epoch") != value.get("device_epoch")
+        or presented.get("app_frame_index") != value.get("app_frame_index")
+        or presented.get("render_transaction_frame_index")
+        != value.get("render_transaction_frame_index")
         or not isinstance(samples, list)
-        or not samples
+        or len(samples) != value.get("measurement_samples")
         or not all(
             isinstance(sample, dict)
-            and set(sample) == {"frame_index", "duration_ns"}
-            and is_positive_integer(sample.get("frame_index"))
+            and set(sample)
+            == {
+                "device_epoch",
+                "app_frame_index",
+                "render_transaction_frame_index",
+                "duration_ns",
+            }
+            and is_positive_integer(sample.get("device_epoch"))
+            and sample.get("device_epoch") == value.get("device_epoch")
+            and is_positive_integer(sample.get("app_frame_index"))
+            and is_positive_integer(sample.get("render_transaction_frame_index"))
             and is_positive_integer(sample.get("duration_ns"))
+            and sample["app_frame_index"] > value.get("app_frame_index", 0)
+            and sample["render_transaction_frame_index"]
+            > value.get("render_transaction_frame_index", 0)
             for sample in samples
         )
-        or not any(sample["frame_index"] == value.get("frame_index") for sample in samples)
+        or len(
+            {
+                (sample["app_frame_index"], sample["render_transaction_frame_index"])
+                for sample in samples
+            }
+        )
+        != len(samples)
         or not all(is_positive_integer(value.get(field)) for field in positive_fields)
         or not all(type(value.get(field)) is int and value[field] >= 0 for field in nonnegative_fields)
         or value["ui_glyph_primitives"] > value["ui_primitives"]
-        or value["uploaded_glyph_pages"] + value["reused_glyph_pages"] <= 0
-        or value["peak_texture_bytes"] < value["current_texture_bytes"]
-        or value["peak_total_bytes"] < value["peak_texture_bytes"]
-        or value["peak_total_bytes"] < value["peak_instance_buffer_bytes"]
+        or value["submitted_glyph_quads"] > value["submitted_ui_quads"]
+        or value["submitted_glyph_quads"] > value["ui_glyph_primitives"]
+        or value["frame_submitted_image_sprites"] > value["frame_submitted_sprites"]
+        or value["presented_total_bytes"]
+        != value["presented_texture_bytes"] + value["presented_instance_buffer_bytes"]
+        or value["candidate_run_peak_texture_bytes"]
+        < value["presented_texture_bytes"]
+        or value["candidate_run_peak_instance_buffer_bytes"]
+        < value["presented_instance_buffer_bytes"]
+        or value["candidate_run_peak_total_bytes"]
+        < value["presented_total_bytes"]
+        or value["candidate_run_peak_total_bytes"]
+        < value["candidate_run_peak_texture_bytes"]
+        or value["candidate_run_peak_total_bytes"]
+        < value["candidate_run_peak_instance_buffer_bytes"]
     ):
         raise ArtifactError(f"{subject} emitted invalid UI performance facts")
     return value
+
+
+def validate_ui_performance_correlation(
+    ui_observation: dict[str, Any],
+    performance: dict[str, Any],
+    subject: str,
+) -> None:
+    presentation = ui_observation["presentation"]
+    correlation_fields = {
+        "backend_instance_id": "backend_instance_id",
+        "device_epoch": "device_epoch",
+        "app_frame_index": "app_frame_index",
+        "render_transaction_frame_index": "render_transaction_frame_index",
+        "ui_admission_id": "ui_admission_id",
+        "presentation_epoch": "presentation_epoch",
+        "frame_revision": "ui_frame_revision",
+        "source_revision": "source_revision",
+        "slot_generation": "slot_generation",
+        "route_revision": "route_revision",
+        "geometry_generation": "geometry_generation",
+        "presentation_revision": "presentation_revision",
+        "theme_revision": "theme_revision",
+        "font_revision": "font_revision",
+    }
+    if ui_observation["surface_id"] != performance["surface_id"] or any(
+        presentation[presentation_field] != performance[performance_field]
+        for presentation_field, performance_field in correlation_fields.items()
+    ):
+        raise ArtifactError(f"{subject} did not describe the exact presented UI frame")
 
 
 def smoke_candidate(
@@ -1007,6 +1135,9 @@ def smoke_candidate_in_root(
     )
     desktop_performance = validate_ui_performance(
         desktop_performance, "desktop candidate"
+    )
+    validate_ui_performance_correlation(
+        desktop_ui, desktop_performance, "desktop UI performance"
     )
     if desktop_authoring != headless_authoring:
         raise ArtifactError("desktop and headless consumed different authored UI facts")

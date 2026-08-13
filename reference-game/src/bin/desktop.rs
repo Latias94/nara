@@ -14,7 +14,6 @@ use nara::{
 use nara_reference_game::bundled_desktop_run;
 
 mod desktop_candidate_smoke;
-mod desktop_support;
 mod support;
 use desktop_candidate_smoke::{CandidateSmokeEvidenceSink, candidate_smoke_run};
 use support::project_root::open_project_root;

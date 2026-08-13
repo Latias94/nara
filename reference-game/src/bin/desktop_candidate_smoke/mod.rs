@@ -10,21 +10,21 @@ use nara::{
     app::{AppExitRequests, PluginCategory, PluginDeclaration, PluginError, PluginId},
     ecs::error::BevyError,
     fs::DirectoryCapability,
-    image::PreparedImageResource,
     prelude::{App, CoreStage, Plugin, Resource, World},
     project_host::{DesktopRun, DesktopRunIntent},
-    render::{PreparedRenderResources, RenderFrame},
     render_wgpu::{WgpuBackendTelemetryConfig, WgpuRenderBackend},
-    sprite_render::SpriteBatches,
+    ui_render::advanced::latest_presented_ui_observation,
 };
-use nara_reference_game::{
-    REFERENCE_DESKTOP_PLUGIN_ID, ReferenceUiObservation, desktop_wave_recipe,
-};
+use nara_reference_game::{REFERENCE_DESKTOP_PLUGIN_ID, desktop_wave_recipe};
 
-use crate::desktop_support::{resident_product_glyphs, submitted_product_frame};
+mod evidence;
+mod measurement;
+
+use evidence::ArmedCandidate;
+pub(crate) use evidence::CandidateSmokeEvidence;
+use measurement::{CandidateCompletionSample, CandidateMeasurement};
 
 const CANDIDATE_SMOKE_DEADLINE: Duration = Duration::from_secs(30);
-const CANDIDATE_SMOKE_WARMUP_SAMPLES: usize = 4;
 const CANDIDATE_SMOKE_PLUGIN_ID: PluginId = PluginId::new("reference-game.desktop-candidate-smoke");
 const CANDIDATE_SMOKE_REQUIREMENTS: &[PluginId] = &[REFERENCE_DESKTOP_PLUGIN_ID];
 const CANDIDATE_SMOKE_DECLARATION: PluginDeclaration =
@@ -32,194 +32,6 @@ const CANDIDATE_SMOKE_DECLARATION: PluginDeclaration =
         .requires_plugins(CANDIDATE_SMOKE_REQUIREMENTS);
 
 pub(crate) type CandidateSmokeEvidenceSink = Arc<Mutex<Option<CandidateSmokeEvidence>>>;
-
-#[derive(Clone, Debug)]
-pub(crate) struct CandidateSmokeEvidence {
-    ui: ReferenceUiObservation,
-    backend: CandidateBackendObservation,
-}
-
-impl CandidateSmokeEvidence {
-    pub(crate) const fn ui(&self) -> &ReferenceUiObservation {
-        &self.ui
-    }
-
-    pub(crate) fn backend_json_line(&self) -> String {
-        self.backend.to_json_line()
-    }
-}
-
-#[derive(Clone, Debug)]
-struct CandidateBackendObservation {
-    frame_index: u64,
-    device_epoch: u64,
-    completion_sample_loss: u64,
-    completion_samples: Vec<CandidateCompletionSample>,
-    ui_packet_count: u64,
-    ui_primitives: u64,
-    ui_glyph_primitives: u64,
-    ui_glyph_pages: u64,
-    uploaded_glyph_pages: u32,
-    reused_glyph_pages: u32,
-    current_texture_bytes: u64,
-    peak_texture_bytes: u64,
-    peak_instance_buffer_bytes: u64,
-    peak_total_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct CandidateCompletionSample {
-    frame_index: u64,
-    duration_ns: u64,
-}
-
-impl CandidateBackendObservation {
-    fn capture(world: &mut World) -> Result<Self, BevyError> {
-        world
-            .resource::<WgpuRenderBackend>()
-            .wait_for_telemetry_completions()
-            .map_err(BevyError::error)?;
-        let mut backend = world.resource_mut::<WgpuRenderBackend>();
-        let samples = backend.drain_frame_completion_samples();
-        let completion = backend.frame_completion_stats();
-        let resources = backend.gpu_resource_stats();
-        let transaction = backend.frame_transaction_stats();
-        let textures = backend.texture_stats();
-        if samples.len() <= CANDIDATE_SMOKE_WARMUP_SAMPLES {
-            return Err(BevyError::error(CandidateSmokeMeasurementIncomplete(
-                "desktop candidate did not retain enough warmed completion samples",
-            )));
-        }
-        if completion.lost_samples() != 0 {
-            return Err(BevyError::error(CandidateSmokeMeasurementIncomplete(
-                "desktop candidate lost GPU completion samples",
-            )));
-        }
-        if !resources.tracking_enabled()
-            || resources.pending_retirements() != 0
-            || resources.lost_retirements() != 0
-        {
-            return Err(BevyError::error(CandidateSmokeMeasurementIncomplete(
-                "desktop candidate GPU resource retirement was incomplete",
-            )));
-        }
-        let frame_index = transaction
-            .render_transaction_frame_index()
-            .ok_or_else(|| {
-            BevyError::error(CandidateSmokeMeasurementIncomplete(
-                "desktop candidate transaction had no frame identity",
-            ))
-        })?;
-        let device_epoch = backend.device_epoch();
-        let completion_samples = samples
-            .into_iter()
-            .skip(CANDIDATE_SMOKE_WARMUP_SAMPLES)
-            .map(|sample| {
-                if sample.device_epoch() != device_epoch {
-                    return Err(BevyError::error(CandidateSmokeMeasurementIncomplete(
-                        "desktop candidate retained a stale completion sample",
-                    )));
-                }
-                Ok(CandidateCompletionSample {
-                    frame_index: sample.render_transaction_frame_index(),
-                    duration_ns: sample.duration_ns(),
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if !completion_samples
-            .iter()
-            .any(|sample| sample.frame_index == frame_index)
-        {
-            return Err(BevyError::error(CandidateSmokeMeasurementIncomplete(
-                "desktop candidate did not complete the exact observed UI packet frame",
-            )));
-        }
-
-        Ok(Self {
-            frame_index,
-            device_epoch,
-            completion_sample_loss: completion.lost_samples(),
-            completion_samples,
-            ui_packet_count: transaction.ui_packet_count(),
-            ui_primitives: transaction.ui_primitives(),
-            ui_glyph_primitives: transaction.ui_glyph_primitives(),
-            ui_glyph_pages: transaction.ui_glyph_pages(),
-            uploaded_glyph_pages: textures.uploaded_glyph_pages,
-            reused_glyph_pages: textures.reused_glyph_pages,
-            current_texture_bytes: resources.current_texture_bytes(),
-            peak_texture_bytes: resources.peak_texture_bytes(),
-            peak_instance_buffer_bytes: resources.peak_instance_buffer_bytes(),
-            peak_total_bytes: resources.peak_total_bytes(),
-        })
-    }
-
-    fn to_json_line(&self) -> String {
-        let samples = self
-            .completion_samples
-            .iter()
-            .map(|sample| {
-                format!(
-                    "{{\"frame_index\":{},\"duration_ns\":{}}}",
-                    sample.frame_index, sample.duration_ns
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            concat!(
-                "{{\"schema\":\"nara-reference-game.ui-performance-v1\",",
-                "\"frame_index\":{},\"device_epoch\":{},",
-                "\"warmup_samples\":{},\"completion_sample_loss\":{},",
-                "\"completion_samples\":[{}],\"ui_packet_count\":{},",
-                "\"ui_primitives\":{},\"ui_glyph_primitives\":{},",
-                "\"ui_glyph_pages\":{},\"uploaded_glyph_pages\":{},",
-                "\"reused_glyph_pages\":{},\"current_texture_bytes\":{},",
-                "\"peak_texture_bytes\":{},\"peak_instance_buffer_bytes\":{},",
-                "\"peak_total_bytes\":{}}}\n"
-            ),
-            self.frame_index,
-            self.device_epoch,
-            CANDIDATE_SMOKE_WARMUP_SAMPLES,
-            self.completion_sample_loss,
-            samples,
-            self.ui_packet_count,
-            self.ui_primitives,
-            self.ui_glyph_primitives,
-            self.ui_glyph_pages,
-            self.uploaded_glyph_pages,
-            self.reused_glyph_pages,
-            self.current_texture_bytes,
-            self.peak_texture_bytes,
-            self.peak_instance_buffer_bytes,
-            self.peak_total_bytes,
-        )
-    }
-}
-
-fn submitted_observed_product_ui_frame(
-    frame: &RenderFrame,
-    backend: &WgpuRenderBackend,
-    observation: &ReferenceUiObservation,
-) -> bool {
-    let transaction = backend.frame_transaction_stats();
-    let Some(identity) = transaction.ui_packet_identity() else {
-        return false;
-    };
-    let Some(presentation) = observation.presentation() else {
-        return false;
-    };
-    submitted_product_frame(frame, backend)
-        && resident_product_glyphs(backend)
-        && identity.surface_id().get() == observation.surface_id
-        && identity.frame_revision().get() == presentation.frame_revision
-        && identity.source_revision().get() == presentation.source_revision
-        && identity.slot_generation().get() == presentation.slot_generation
-        && identity.route_revision().get() == presentation.route_revision
-        && identity.geometry_generation().get() == presentation.geometry_generation
-        && identity.presentation_revision().get() == presentation.presentation_revision
-        && identity.theme_revision().get() == presentation.theme_revision
-        && identity.font_revision().get() == presentation.font_revision
-}
 
 pub(crate) fn candidate_smoke_run(
     project_root: DirectoryCapability,
@@ -267,8 +79,9 @@ impl Plugin for CandidateSmokePlugin {
         app.insert_resource(CandidateSmokeState {
             deadline: Instant::now() + CANDIDATE_SMOKE_DEADLINE,
             evidence: Arc::clone(&self.evidence),
+            phase: CandidateSmokePhase::AwaitPresentedReady,
         })?
-        .add_systems(CoreStage::Cleanup, observe_candidate_frame)?;
+        .add_systems(CoreStage::Last, observe_candidate_frame)?;
         Ok(())
     }
 }
@@ -277,43 +90,203 @@ impl Plugin for CandidateSmokePlugin {
 struct CandidateSmokeState {
     deadline: Instant,
     evidence: CandidateSmokeEvidenceSink,
+    phase: CandidateSmokePhase,
+}
+
+#[derive(Debug)]
+enum CandidateSmokePhase {
+    AwaitPresentedReady,
+    Measuring {
+        armed: Box<ArmedCandidate>,
+        measurement: CandidateMeasurement,
+    },
 }
 
 fn observe_candidate_frame(world: &mut World) -> Result<(), BevyError> {
-    let observation = ReferenceUiObservation::from_world(world);
-    let product_frame_ready = !world
-        .resource::<PreparedRenderResources<PreparedImageResource>>()
-        .is_empty()
-        && world.get_resource::<SpriteBatches>().is_some_and(|batches| {
-            batches
-                .as_slice()
-                .iter()
-                .any(|batch| batch.image.is_some())
-        })
-        && observation.as_ref().is_some_and(|observation| {
-            submitted_observed_product_ui_frame(
-                world.resource::<RenderFrame>(),
-                world.resource::<WgpuRenderBackend>(),
-                observation,
-            )
-        });
-    let state = world.resource::<CandidateSmokeState>();
-    let deadline = state.deadline;
-    let sink = Arc::clone(&state.evidence);
-    if product_frame_ready && let Some(observation) = observation {
-        let backend = CandidateBackendObservation::capture(world)?;
-        *sink
-            .lock()
-            .map_err(|_| BevyError::error(CandidateSmokeEvidenceSinkPoisoned))? =
-            Some(CandidateSmokeEvidence {
-                ui: observation,
-                backend,
-            });
-        world.resource_mut::<AppExitRequests>().request_success();
-    } else if Instant::now() >= deadline {
+    if Instant::now() >= world.resource::<CandidateSmokeState>().deadline {
         return Err(BevyError::error(CandidateSmokeDeadlineExceeded));
     }
+    world
+        .resource::<WgpuRenderBackend>()
+        .poll_telemetry_completions()
+        .map_err(BevyError::error)?;
+    let samples = drain_completion_samples(world)?;
+    let newly_armed = register_latest_product_presentation(world)?;
+    collect_completion_samples(world, samples, newly_armed)?;
+    if seal_candidate_evidence(world)? {
+        return Ok(());
+    }
     Ok(())
+}
+
+fn register_latest_product_presentation(world: &mut World) -> Result<bool, BevyError> {
+    let Some(presented) = latest_presented_ui_observation(world) else {
+        return Ok(false);
+    };
+    let Some(candidate) = ArmedCandidate::capture(world, presented).map_err(measurement_error)?
+    else {
+        return Ok(false);
+    };
+    let identity = candidate.identity;
+    let awaiting_ready = matches!(
+        world.resource::<CandidateSmokeState>().phase,
+        CandidateSmokePhase::AwaitPresentedReady
+    );
+    if awaiting_ready {
+        let measurement = CandidateMeasurement::arm(identity);
+        let state = &mut *world.resource_mut::<CandidateSmokeState>();
+        state.phase = CandidateSmokePhase::Measuring {
+            armed: Box::new(candidate),
+            measurement,
+        };
+        return Ok(true);
+    } else {
+        let state = &mut *world.resource_mut::<CandidateSmokeState>();
+        let CandidateSmokePhase::Measuring { measurement, .. } = &mut state.phase else {
+            unreachable!("a candidate that is not awaiting readiness must be measuring");
+        };
+        measurement
+            .admit_product_frame(identity)
+            .map_err(measurement_error)?;
+    }
+    Ok(false)
+}
+
+fn drain_completion_samples(
+    world: &mut World,
+) -> Result<Vec<CandidateCompletionSample>, BevyError> {
+    let (lost_samples, samples) = {
+        let mut backend = world.resource_mut::<WgpuRenderBackend>();
+        let lost_samples = backend.frame_completion_stats().lost_samples();
+        let samples = backend
+            .drain_frame_completion_samples()
+            .into_iter()
+            .map(|sample| {
+                CandidateCompletionSample::new(
+                    sample.device_epoch(),
+                    sample.app_frame_index(),
+                    sample.render_transaction_frame_index(),
+                    sample.duration_ns(),
+                )
+            })
+            .collect();
+        (lost_samples, samples)
+    };
+    if lost_samples != 0 {
+        return Err(measurement_error(
+            "desktop candidate lost a GPU completion during product measurement",
+        ));
+    }
+    Ok(samples)
+}
+
+fn collect_completion_samples(
+    world: &mut World,
+    samples: Vec<CandidateCompletionSample>,
+    newly_armed: bool,
+) -> Result<(), BevyError> {
+    if matches!(
+        world.resource::<CandidateSmokeState>().phase,
+        CandidateSmokePhase::AwaitPresentedReady
+    ) {
+        return Ok(());
+    }
+
+    let (backend_instance_id, device_epoch) = {
+        let backend = world.resource::<WgpuRenderBackend>();
+        (backend.instance_id(), backend.device_epoch())
+    };
+    let state = &mut *world.resource_mut::<CandidateSmokeState>();
+    let CandidateSmokePhase::Measuring { measurement, .. } = &mut state.phase else {
+        unreachable!("the candidate phase was checked above");
+    };
+    let identity = measurement.identity();
+    if backend_instance_id != identity.backend_instance_id()
+        || device_epoch != identity.device_epoch()
+    {
+        return Err(measurement_error(
+            "desktop candidate WGPU generation changed after measurement armed",
+        ));
+    }
+    if newly_armed {
+        measurement
+            .observe_arm_boundary(samples)
+            .map_err(measurement_error)?;
+        return Ok(());
+    }
+    for sample in samples {
+        measurement.observe(sample).map_err(measurement_error)?;
+    }
+    Ok(())
+}
+
+fn seal_candidate_evidence(world: &mut World) -> Result<bool, BevyError> {
+    let seal_ready = {
+        let state = world.resource::<CandidateSmokeState>();
+        matches!(
+            &state.phase,
+            CandidateSmokePhase::Measuring { measurement, .. }
+                if measurement.seal_input().is_some()
+        )
+    };
+    if !seal_ready {
+        return Ok(false);
+    }
+    let remaining = remaining_candidate_time(
+        world.resource::<CandidateSmokeState>().deadline,
+        Instant::now(),
+    )
+    .map_err(BevyError::error)?;
+    world
+        .resource::<WgpuRenderBackend>()
+        .wait_for_telemetry_completions(remaining)
+        .map_err(BevyError::error)?;
+    if Instant::now() >= world.resource::<CandidateSmokeState>().deadline {
+        return Err(BevyError::error(CandidateSmokeDeadlineExceeded));
+    }
+    drain_completion_samples(world)?;
+
+    let (armed, presented_completion, samples, sink) = {
+        let state = world.resource::<CandidateSmokeState>();
+        let CandidateSmokePhase::Measuring { armed, measurement } = &state.phase else {
+            unreachable!("a seal-ready candidate must be measuring");
+        };
+        let (completion, samples) = measurement
+            .seal_input()
+            .expect("seal readiness was checked above");
+        (
+            armed.as_ref().clone(),
+            completion,
+            samples.to_vec(),
+            Arc::clone(&state.evidence),
+        )
+    };
+    let evidence = CandidateSmokeEvidence::capture(
+        world.resource::<WgpuRenderBackend>(),
+        armed,
+        presented_completion,
+        &samples,
+    )
+    .map_err(measurement_error)?;
+    *sink
+        .lock()
+        .map_err(|_| BevyError::error(CandidateSmokeEvidenceSinkPoisoned))? = Some(evidence);
+    world.resource_mut::<AppExitRequests>().request_success();
+    Ok(true)
+}
+
+fn remaining_candidate_time(
+    deadline: Instant,
+    now: Instant,
+) -> Result<Duration, CandidateSmokeDeadlineExceeded> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or(CandidateSmokeDeadlineExceeded)
+}
+
+fn measurement_error(message: &'static str) -> BevyError {
+    BevyError::error(CandidateSmokeMeasurementIncomplete(message))
 }
 
 #[derive(Debug)]
@@ -379,12 +352,11 @@ mod tests {
     #[test]
     fn expired_candidate_frame_fails_without_requesting_exit() {
         let mut world = World::new();
-        world.insert_resource(PreparedRenderResources::<PreparedImageResource>::default());
-        world.insert_resource(RenderFrame::default());
         world.insert_resource(WgpuRenderBackend::default());
         world.insert_resource(CandidateSmokeState {
             deadline: Instant::now() - Duration::from_millis(1),
             evidence: Arc::new(Mutex::new(None)),
+            phase: CandidateSmokePhase::AwaitPresentedReady,
         });
         world.insert_resource(AppExitRequests::default());
 
@@ -392,5 +364,17 @@ mod tests {
 
         assert!(matches!(result, Err(RunSystemError::Failed(_))));
         assert_eq!(world.resource::<AppExitRequests>().requested(), None);
+    }
+
+    #[test]
+    fn completion_wait_uses_only_the_remaining_candidate_budget() {
+        let now = Instant::now();
+
+        assert_eq!(
+            remaining_candidate_time(now + Duration::from_millis(7), now).unwrap(),
+            Duration::from_millis(7)
+        );
+        assert!(remaining_candidate_time(now, now).is_err());
+        assert!(remaining_candidate_time(now, now + Duration::from_nanos(1)).is_err());
     }
 }

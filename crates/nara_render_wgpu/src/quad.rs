@@ -135,6 +135,7 @@ impl WgpuQuadBatchBuffer {
 pub(crate) struct WgpuQuadDrawStats {
     pub(crate) draw_calls: u32,
     pub(crate) sprites: u32,
+    pub(crate) image_sprites: u32,
 }
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
@@ -292,6 +293,9 @@ pub(crate) fn quad_batch_draw_stats(batches: &[WgpuQuadBatch]) -> WgpuQuadDrawSt
         stats.draw_calls = stats.draw_calls.saturating_add(1);
         if batch.counts_as_sprites {
             stats.sprites = stats.sprites.saturating_add(instances);
+            if matches!(batch.material.texture, WgpuQuadTextureKey::Image(_)) {
+                stats.image_sprites = stats.image_sprites.saturating_add(instances);
+            }
         }
     }
     stats
@@ -396,5 +400,41 @@ mod tests {
                 maximum: MAX_QUAD_INSTANCE_BUFFER_BYTES_PER_FRAME,
             })
         );
+    }
+
+    #[test]
+    fn draw_stats_distinguish_image_sprites_from_fallback_quads() {
+        let fallback = WgpuQuadBatch {
+            material: WgpuQuadMaterialKey {
+                texture: WgpuQuadTextureKey::Fallback,
+                sampler: SamplerDescriptor::default(),
+                alpha_mode: AlphaMode2d::Blend,
+            },
+            texture: WgpuQuadTexture::Fallback,
+            scissor: None,
+            instances: vec![WgpuQuadInstance::zeroed(); 2],
+            counts_as_sprites: true,
+        };
+        let image = WgpuQuadBatch {
+            material: WgpuQuadMaterialKey {
+                texture: WgpuQuadTextureKey::Image(RenderResourceKey::new(
+                    nara_asset::AssetId::from_raw(7),
+                    nara_render::RenderResourceKind::IMAGE_2D,
+                )),
+                ..fallback.material
+            },
+            instances: vec![WgpuQuadInstance::zeroed(); 3],
+            ..fallback.clone()
+        };
+        let ui = WgpuQuadBatch {
+            counts_as_sprites: false,
+            ..image.clone()
+        };
+
+        let stats = quad_batch_draw_stats(&[fallback, image, ui]);
+
+        assert_eq!(stats.draw_calls, 3);
+        assert_eq!(stats.sprites, 5);
+        assert_eq!(stats.image_sprites, 3);
     }
 }

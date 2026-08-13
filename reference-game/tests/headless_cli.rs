@@ -67,7 +67,7 @@ fn opt_in_ui_observation_reports_authored_retry_facts_after_the_wave_summary() {
     let lines = stdout.lines().collect::<Vec<_>>();
     assert_eq!(lines.len(), 2);
     assert!(lines[0].contains("\"schema\":\"nara-reference-game.wave-summary-v1\""));
-    assert!(lines[1].contains("\"schema\":\"nara-reference-game.ui-observation-v1\""));
+    assert!(lines[1].contains("\"schema\":\"nara-reference-game.ui-observation-v2\""));
     assert!(lines[1].contains("\"authored_size\":[960,540]"));
     assert!(lines[1].contains("\"action\":\"reference-game.retry\""));
     assert!(lines[1].contains("\"name\":\"Retry\""));

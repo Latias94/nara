@@ -93,16 +93,16 @@ pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 #[doc(hidden)]
 pub mod __private {
     #[cfg(feature = "ui-submitter")]
-    pub use crate::backend::WgpuSubmittedUiPacketFacts;
+    pub use crate::backend::WgpuSubmittedUiFacts;
 
     #[cfg(feature = "ui-submitter")]
     #[must_use]
-    pub fn submitted_ui_packet_facts(
+    pub fn submitted_ui_facts(
         backend: &crate::WgpuRenderBackend,
         submission: nara_ui_render::UiBackendSubmissionIdentity,
         backend_generation: nara_ui_render::UiPresentationBackendGeneration,
-    ) -> Option<WgpuSubmittedUiPacketFacts> {
-        backend.submitted_ui_packet_facts(submission, backend_generation)
+    ) -> Option<WgpuSubmittedUiFacts> {
+        backend.submitted_ui_facts(submission, backend_generation)
     }
 }
 
@@ -324,6 +324,8 @@ struct PreparedSubmitterDraw {
     ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
     draw_calls: u32,
     sprites: u32,
+    #[cfg(feature = "ui-submitter")]
+    image_sprites: u32,
 }
 
 fn render_wgpu_surfaces(
@@ -1814,9 +1816,15 @@ mod tests {
             .first()
             .expect("one submitted attempt should remain available");
         let mut backend = WgpuRenderBackend::default();
-        backend.record_submitted_ui_packets(state.bound_submissions(), &prepared, 10, 9);
+        let facts = WgpuRenderBackend::prepare_submitted_ui_facts(
+            state.bound_submissions(),
+            &prepared,
+            backend::WgpuSubmittedFrameFacts::new(10, 9, 4, 3, 4096, 2048),
+        )
+        .unwrap();
+        backend.publish_submitted_ui_facts(facts);
         let facts = backend
-            .submitted_ui_packet_facts(bound.submission().identity(), backend_generation)
+            .submitted_ui_facts(bound.submission().identity(), backend_generation)
             .expect("the exact submitted packet should retain its first-pass lowering facts");
 
         assert_eq!(facts.submission(), bound.submission().identity());
@@ -1828,7 +1836,170 @@ mod tests {
         assert!(facts.glyph_page_count() > 0);
         assert!(facts.submitted_quad_count() > 0);
         assert!(facts.submitted_glyph_quad_count() > 0);
-        assert!(facts.resident_texture_binding_count() > 0);
+        assert!(facts.referenced_texture_binding_count() > 0);
+        assert_eq!(facts.frame_submitted_sprite_count(), 4);
+        assert_eq!(facts.frame_submitted_image_sprite_count(), 3);
+        assert_eq!(facts.submitted_texture_bytes(), 4096);
+        assert_eq!(facts.submitted_instance_buffer_bytes(), 2048);
+        assert_eq!(facts.submitted_total_bytes(), 6144);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn submitted_facts_remain_bound_to_each_exact_submission() {
+        let packet = ui_outcome_packet();
+        let lowering = crate::ui::lower_ui_packets(
+            std::slice::from_ref(&packet),
+            RenderTarget::Window(WindowId::PRIMARY),
+            Some(WindowId::PRIMARY),
+            ViewportRect::new(0, 0, 16, 16).unwrap(),
+        )
+        .unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let backend_generation = UiPresentationBackendGeneration::new(77, 3).unwrap();
+        let prepared = vec![
+            prepared_ui_attempt(Arc::clone(&packet), 81, 91),
+            prepared_ui_attempt(Arc::clone(&packet), 82, 92),
+        ];
+        let mut permits = outcomes.reserve_backend(&prepared).unwrap();
+        let admitted = prepared
+            .into_iter()
+            .zip(permits.drain(..))
+            .map(|(submission, permit)| UiBackendSubmission::pair(submission, permit).unwrap())
+            .collect::<Vec<_>>();
+        let submitted =
+            nara_ui_render::__private::bind_backend_submission_batch(admitted, backend_generation)
+                .unwrap();
+        let first_identity = submitted[0].submission().identity();
+        let second_identity = submitted[1].submission().identity();
+        let mut backend = WgpuRenderBackend::default();
+        backend.begin_frame_transaction(9, Some(10));
+        let facts = WgpuRenderBackend::prepare_submitted_ui_facts(
+            &submitted,
+            &lowering.packet_facts,
+            backend::WgpuSubmittedFrameFacts::new(10, 9, 4, 3, 4096, 2048),
+        )
+        .unwrap();
+        backend.publish_submitted_ui_facts(facts);
+
+        let first = backend
+            .submitted_ui_facts(first_identity, backend_generation)
+            .expect("the earlier exact submission should remain queryable");
+        let second = backend
+            .submitted_ui_facts(second_identity, backend_generation)
+            .expect("the later exact submission should remain queryable");
+
+        assert_eq!(first.submission(), first_identity);
+        assert_eq!(first.app_frame_index(), 10);
+        assert_eq!(first.render_transaction_frame_index(), 9);
+        assert_eq!(first.frame_submitted_sprite_count(), 4);
+        assert_eq!(first.frame_submitted_image_sprite_count(), 3);
+        assert_eq!(second.submission(), second_identity);
+        assert_eq!(second.app_frame_index(), 10);
+        assert_eq!(second.render_transaction_frame_index(), 9);
+        assert_eq!(second.frame_submitted_sprite_count(), 4);
+        assert_eq!(second.frame_submitted_image_sprite_count(), 3);
+
+        let foreign_generation = UiPresentationBackendGeneration::new(77, 4).unwrap();
+        assert!(
+            backend
+                .submitted_ui_facts(first_identity, foreign_generation)
+                .is_none()
+        );
+        assert!(
+            backend
+                .submitted_ui_facts(second_identity, foreign_generation)
+                .is_none()
+        );
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn ui_submission_lowering_mismatch_is_rejected_before_submission() {
+        let packet = ui_outcome_packet();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let backend_generation = UiPresentationBackendGeneration::new(77, 3).unwrap();
+        let submitted = submitted_ui_attempt(
+            &mut outcomes,
+            Arc::clone(&packet),
+            81,
+            91,
+            backend_generation,
+        );
+        let submissions = vec![submitted];
+
+        let error = WgpuRenderBackend::prepare_submitted_ui_facts(
+            &submissions,
+            &[],
+            backend::WgpuSubmittedFrameFacts::new(10, 9, 4, 3, 4096, 2048),
+        )
+        .expect_err("a bound submission without an exact lowered packet must fail closed");
+
+        assert!(matches!(
+            error,
+            WgpuRenderError::UiSubmissionRejected { .. }
+        ));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn duplicate_lowered_packet_facts_are_rejected_before_submission() {
+        let packet = ui_outcome_packet();
+        let lowering = crate::ui::lower_ui_packets(
+            &[Arc::clone(&packet), Arc::clone(&packet)],
+            RenderTarget::Window(WindowId::PRIMARY),
+            Some(WindowId::PRIMARY),
+            ViewportRect::new(0, 0, 16, 16).unwrap(),
+        )
+        .unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let backend_generation = UiPresentationBackendGeneration::new(77, 3).unwrap();
+        let submitted = submitted_ui_attempt(&mut outcomes, packet, 81, 91, backend_generation);
+        let submissions = vec![submitted];
+
+        let error = WgpuRenderBackend::prepare_submitted_ui_facts(
+            &submissions,
+            &lowering.packet_facts,
+            backend::WgpuSubmittedFrameFacts::new(10, 9, 4, 3, 4096, 2048),
+        )
+        .expect_err("duplicate lowered packet facts must fail closed");
+
+        assert!(matches!(
+            error,
+            WgpuRenderError::UiSubmissionRejected { .. }
+        ));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn lowered_packet_for_a_foreign_target_is_rejected_before_submission() {
+        let submitted_target = RenderTarget::Window(WindowId::new(101));
+        let foreign_target = RenderTarget::Window(WindowId::new(102));
+        let packet = ui_outcome_packet_for(submitted_target);
+        let foreign_packet = ui_outcome_packet_for(foreign_target);
+        let lowering = crate::ui::lower_ui_packets(
+            std::slice::from_ref(&foreign_packet),
+            foreign_target,
+            Some(WindowId::PRIMARY),
+            ViewportRect::new(0, 0, 16, 16).unwrap(),
+        )
+        .unwrap();
+        let mut outcomes = UiPresentationOutcomes::default();
+        let backend_generation = UiPresentationBackendGeneration::new(77, 3).unwrap();
+        let submitted = submitted_ui_attempt(&mut outcomes, packet, 81, 91, backend_generation);
+        let submissions = vec![submitted];
+
+        let error = WgpuRenderBackend::prepare_submitted_ui_facts(
+            &submissions,
+            &lowering.packet_facts,
+            backend::WgpuSubmittedFrameFacts::new(10, 9, 4, 3, 4096, 2048),
+        )
+        .expect_err("a lowered packet for another target must fail closed");
+
+        assert!(matches!(
+            error,
+            WgpuRenderError::UiSubmissionRejected { .. }
+        ));
     }
 
     #[cfg(feature = "ui-submitter")]
