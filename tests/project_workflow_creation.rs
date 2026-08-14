@@ -153,6 +153,17 @@ fn immutable_git_source_rejects_mutable_or_unsafe_coordinates() {
         )
         .is_err()
     );
+    for repository in [
+        "https://user@example.com/nara.git",
+        "https://user:password@example.com/nara.git",
+        "https://example.com:443/nara.git?token=secret",
+        "https://example.com:+443/nara.git",
+    ] {
+        assert!(
+            NaraDependencySource::immutable_git(repository, GIT_REVISION).is_err(),
+            "accepted unsafe Git repository {repository:?}"
+        );
+    }
 }
 
 #[test]

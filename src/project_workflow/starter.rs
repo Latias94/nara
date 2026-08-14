@@ -1,14 +1,15 @@
 use std::fmt::{self, Debug, Formatter};
 
 use nara_fs::{ContentDigest, PathValidationError, RelativeComponent};
-use nara_project::{
-    CURRENT_PROJECT_SCHEMA_VERSION, ProductCapability, ProductCapabilitySet, ProjectManifest,
-    RuntimePreset,
-};
-use nara_scene::SceneDocumentCandidate;
+use nara_project::CURRENT_PROJECT_SCHEMA_VERSION;
 use thiserror::Error;
 
 use super::dependency::NaraDependencyReceipt;
+
+mod product_contract;
+
+pub(crate) use product_contract::product_recipe as desktop_2d_v1_product_recipe;
+use product_contract::{ProductContractSources, render_cargo_manifest, render_project_manifest};
 
 const MAX_PROJECT_SLUG_BYTES: usize = 64;
 const MAX_STARTER_MEMBER_BYTES: usize = 256 * 1024;
@@ -327,7 +328,18 @@ pub(crate) fn build_desktop_2d_v1_plan(
 ) -> Result<ProjectCreationPlan, &'static str> {
     let cargo_manifest = render_cargo_manifest(&slug, dependency_manifest_fragment);
     let project_manifest = render_project_manifest(&slug);
-    validate_product_contract(project_manifest.as_bytes(), STARTUP_SCENE)?;
+    product_contract::validate(
+        &slug,
+        &dependency_receipt,
+        ProductContractSources {
+            cargo_manifest: cargo_manifest.as_bytes(),
+            project_manifest: project_manifest.as_bytes(),
+            library: LIBRARY_SOURCE,
+            headless: HEADLESS_SOURCE,
+            desktop: DESKTOP_SOURCE,
+            startup_scene: STARTUP_SCENE,
+        },
+    )?;
 
     let members = [
         member(ProjectMember::CargoManifest, cargo_manifest.as_bytes())?,
@@ -364,129 +376,6 @@ fn member(member: ProjectMember, bytes: &[u8]) -> Result<ProjectMemberPlan, &'st
         bytes: bytes.into(),
         digest: ContentDigest::of_bytes(bytes),
     })
-}
-
-fn render_cargo_manifest(slug: &ProjectSlug, dependency: &str) -> String {
-    format!(
-        r#"[package]
-name = "{}"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.95"
-publish = false
-
-[workspace]
-resolver = "3"
-
-[dependencies]
-nara = {{ {}, default-features = false, features = ["runtime-2d", "serde"] }}
-
-[features]
-default = []
-desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu"]
-
-[lib]
-name = "nara_game"
-path = "src/lib.rs"
-
-[[bin]]
-name = "headless"
-path = "src/bin/headless.rs"
-
-[[bin]]
-name = "desktop"
-path = "src/bin/desktop.rs"
-required-features = ["desktop"]
-"#,
-        slug.as_str(),
-        dependency
-    )
-}
-
-fn render_project_manifest(slug: &ProjectSlug) -> String {
-    format!(
-        r#"schema_version = 1
-
-[project]
-name = "{}"
-stable_id = "{}"
-version = "0.1.0"
-
-[paths]
-assets = "assets"
-scenes = "scenes"
-prefabs = "prefabs"
-
-[startup]
-default_scene = "startup.scene.json"
-
-[runtime]
-preset = "local-headless"
-fixed_timestep_seconds = 0.02
-
-[capabilities]
-requested = ["runtime-2d"]
-
-[profiles.desktop.capabilities]
-requested = ["runtime-2d", "presentation-2d", "desktop-winit", "render-wgpu"]
-
-[profiles.desktop.runtime]
-preset = "local-headless"
-fixed_timestep_seconds = 0.02
-
-[profiles.desktop.window]
-enabled = true
-title = "{}"
-width = 1280
-height = 720
-present_mode = "fifo"
-resizable = true
-"#,
-        slug.as_str(),
-        slug.as_str(),
-        slug.as_str()
-    )
-}
-
-fn validate_product_contract(
-    project_manifest: &[u8],
-    startup_scene: &[u8],
-) -> Result<(), &'static str> {
-    let load = ProjectManifest::parse_toml_bytes(project_manifest);
-    if load.has_errors() {
-        return Err("generated project manifest is invalid");
-    }
-    let Some(manifest) = load.manifest else {
-        return Err("generated project manifest is absent");
-    };
-    let headless = manifest
-        .resolve_profile(None)
-        .map_err(|_| "generated headless settings are invalid")?;
-    let desktop = manifest
-        .resolve_profile(Some("desktop"))
-        .map_err(|_| "generated desktop settings are invalid")?;
-    let expected_headless = ProductCapabilitySet::singleton(ProductCapability::Runtime2d);
-    let expected_desktop = ProductCapabilitySet::from_capabilities([
-        ProductCapability::Runtime2d,
-        ProductCapability::Presentation2d,
-        ProductCapability::DesktopWinit,
-        ProductCapability::RenderWgpu,
-    ]);
-    if headless.requested_capabilities != expected_headless
-        || headless.runtime_preset != RuntimePreset::LocalHeadless
-        || headless.startup.default_scene.is_none()
-    {
-        return Err("generated headless product contract disagrees with the starter");
-    }
-    if desktop.requested_capabilities != expected_desktop
-        || desktop.runtime_preset != RuntimePreset::LocalHeadless
-        || !desktop.window.enabled
-    {
-        return Err("generated desktop product contract disagrees with the starter");
-    }
-    SceneDocumentCandidate::decode_json_bytes(startup_scene)
-        .map_err(|_| "generated startup scene is invalid")?;
-    Ok(())
 }
 
 fn validate_project_slug(value: &str) -> Result<(), ProjectSlugError> {

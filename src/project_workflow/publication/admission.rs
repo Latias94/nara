@@ -7,14 +7,13 @@ use super::{
     stage::{directory_path, member_path},
 };
 use crate::{
-    ProductRecipe,
     project_host::{
         ProjectContentLoader, ProjectContentRevision, ProjectSettingsLineage,
         ingest_project_manifest_with_expected_digest, resolve_product_recipe,
     },
     project_workflow::{
         dependency::PreparedDependencyRevalidation,
-        starter::{ProjectCreationPlanReceipt, ProjectMember},
+        starter::{ProjectCreationPlanReceipt, ProjectMember, desktop_2d_v1_product_recipe},
     },
 };
 
@@ -122,7 +121,7 @@ fn admit_project(
                 inner: ProjectCreationAdmissionErrorInner::Manifest(Box::new(error)),
             })?;
     let runtime_plan =
-        resolve_product_recipe(&candidate, ProductRecipe::new()).map_err(|error| {
+        resolve_product_recipe(&candidate, desktop_2d_v1_product_recipe()).map_err(|error| {
             ProjectCreationAdmissionError {
                 inner: ProjectCreationAdmissionErrorInner::ProductRecipe(Box::new(error)),
             }

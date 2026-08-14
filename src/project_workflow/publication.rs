@@ -203,11 +203,18 @@ impl Debug for ProjectCreationRejection {
 
 impl Display for ProjectCreationRejection {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "project creation was rejected: {:?}",
-            self.kind()
-        )
+        match &self.inner {
+            ProjectCreationRejectionInner::BeforeStaging(error) => write!(
+                formatter,
+                "project creation was rejected: {:?} ({error})",
+                self.kind()
+            ),
+            _ => write!(
+                formatter,
+                "project creation was rejected: {:?}",
+                self.kind()
+            ),
+        }
     }
 }
 

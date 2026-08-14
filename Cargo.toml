@@ -159,6 +159,7 @@ nara_ui = { workspace = true, optional = true }
 nara_ui_render = { workspace = true, optional = true }
 nara_window = { workspace = true, optional = true }
 nara_winit = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -248,7 +249,7 @@ serde = [
     "nara_ui?/serde",
     "nara_window?/serde",
 ]
-project-workflow = ["runtime-2d", "serde", "dep:getrandom"]
+project-workflow = ["runtime-2d", "serde", "dep:getrandom", "dep:toml"]
 
 [[bin]]
 name = "nara"

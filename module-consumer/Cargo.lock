@@ -915,6 +915,7 @@ dependencies = [
  "nara_ui",
  "nara_window",
  "thiserror",
+ "toml",
 ]
 
 [[package]]

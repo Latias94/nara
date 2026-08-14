@@ -304,14 +304,21 @@ pub(crate) fn prepare_dependency(
     }
 }
 
-fn validate_git_repository(repository: &str) -> Result<(), NaraDependencySourceError> {
+pub(super) fn validate_git_repository(repository: &str) -> Result<(), NaraDependencySourceError> {
     const MAX_GIT_REPOSITORY_BYTES: usize = 2_048;
     let valid = repository.len() <= MAX_GIT_REPOSITORY_BYTES
-        && repository.starts_with("https://")
-        && repository.len() > "https://".len()
-        && repository.bytes().all(|byte| {
-            byte.is_ascii_graphic() && !matches!(byte, b'"' | b'\'' | b'\\' | b'#' | b'?' | b'&')
-        });
+        && repository
+            .strip_prefix("https://")
+            .and_then(|authority_and_path| authority_and_path.split_once('/'))
+            .is_some_and(|(authority, path)| {
+                valid_git_authority(authority)
+                    && !path.is_empty()
+                    && path.split('/').all(|component| {
+                        !component.is_empty()
+                            && !matches!(component, "." | "..")
+                            && component.bytes().all(valid_git_path_byte)
+                    })
+            });
     if valid {
         Ok(())
     } else {
@@ -319,6 +326,40 @@ fn validate_git_repository(repository: &str) -> Result<(), NaraDependencySourceE
             kind: NaraDependencySourceErrorKind::UnsupportedGitRepository,
         })
     }
+}
+
+fn valid_git_authority(authority: &str) -> bool {
+    if authority.is_empty() || authority.contains('@') {
+        return false;
+    }
+    let (host, port) = authority
+        .rsplit_once(':')
+        .map_or((authority, None), |(host, port)| (host, Some(port)));
+    if !host.split('.').all(|label| {
+        !label.is_empty()
+            && label
+                .as_bytes()
+                .first()
+                .is_some_and(u8::is_ascii_alphanumeric)
+            && label
+                .as_bytes()
+                .last()
+                .is_some_and(u8::is_ascii_alphanumeric)
+            && label
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    }) {
+        return false;
+    }
+    port.is_none_or(|port| {
+        !port.is_empty()
+            && port.bytes().all(|byte| byte.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|port| port != 0)
+    })
+}
+
+fn valid_git_path_byte(byte: u8) -> bool {
+    byte.is_ascii_graphic() && !matches!(byte, b'"' | b'\'' | b'\\' | b'#' | b'?' | b'&' | b'@')
 }
 
 fn validate_git_revision(revision: &str) -> Result<(), NaraDependencySourceError> {
