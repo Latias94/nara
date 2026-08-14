@@ -29,8 +29,9 @@ operator_execution_authority: external-control-plane
   transactions. `nara_project` remains the pure manifest-semantics owner, `nara_fs` remains the
   native filesystem substrate, and Runtime `ProjectHost` remains a consumer of authorized content.
 - **Activation gate:** Directory Publication conformance record
-  `1c01523e7462406dabf4a177cf64285c` is pinned and reviewed registration
-  `6e932c817c8c46598a9dcb3b82b41d46` activates FPER-U0 as the sole active unit. FPER-U1 through
+  `1c01523e7462406dabf4a177cf64285c` is pinned. FPER-U0 closes at `0b99ad4` with conformance
+  record `6717111091f5451fa4708a04b79e1c35`; reviewed registration
+  `3227ab58386f457496c02fb0cfc04771` activates FPER-U1 as the sole active unit. FPER-U2 and
   FPER-U3 require their own successor registrations.
 - **Scope guard:** Reference Game and its Python package tools remain fixed historical product
   fixtures. They are not mandatory consumers and are not modified or generalized by this plan.
