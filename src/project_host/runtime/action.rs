@@ -14,11 +14,20 @@ use nara_winit::{WinitControlFlow, WinitRunner};
 
 use super::super::{
     StartupContentClosureReceipt,
-    check::{ProjectSourceCheckError, check_project_source_with_overlay},
+    check::{
+        ProjectSourceCheckError, check_project_source_with_host_policy,
+        check_project_source_with_overlay,
+    },
+};
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+use super::desktop_verification::{
+    DesktopFirstPresentOutcome, DesktopFirstPresentVerification,
+    DesktopPresentationVerificationReceipt,
 };
 use super::{
-    CleanupDriveOutcome, HostFault, ProjectHost, RuntimePluginOverlay, RuntimeStartAttempt,
-    runtime_plan_failure_report, runtime_plan_selected_report, single_error,
+    CleanupDriveOutcome, HostFault, ProjectHost, RuntimeHostPolicyContribution,
+    RuntimePluginOverlay, RuntimeStartAttempt, runtime_plan_failure_report,
+    runtime_plan_selected_report, single_error,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::{
@@ -148,6 +157,7 @@ pub struct DesktopRunIntent {
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
     runner: WinitRunner,
+    verify_first_present: bool,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -159,6 +169,7 @@ impl fmt::Debug for DesktopRunIntent {
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
             .field("runner", &self.runner)
+            .field("verifies_first_present", &self.verify_first_present)
             .finish_non_exhaustive()
     }
 }
@@ -179,6 +190,7 @@ impl DesktopRunIntent {
             cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
             runner: WinitRunner::default(),
+            verify_first_present: false,
         }
     }
 
@@ -206,6 +218,17 @@ impl DesktopRunIntent {
         self.runner = WinitRunner::new(control_flow);
         self
     }
+
+    /// Requires one exact WGPU surface presentation before the desktop run can succeed.
+    ///
+    /// The fixed product timeout drives normal App and Host shutdown when presentation never
+    /// arrives. The generated starter uses this mode for bounded verification; interactive runs
+    /// remain unchanged.
+    #[must_use]
+    pub fn with_first_present_verification(mut self) -> Self {
+        self.verify_first_present = true;
+        self
+    }
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -222,6 +245,7 @@ pub struct DesktopRunReport {
     outcome: DesktopRunOutcome,
     diagnostics: DiagnosticReport,
     startup_content_closure: Option<StartupContentClosureReceipt>,
+    presentation_verification: Option<DesktopPresentationVerificationReceipt>,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -244,6 +268,15 @@ impl DesktopRunReport {
     pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
         self.startup_content_closure.as_ref()
     }
+
+    /// Returns the first-party desktop presentation proof when verification was requested and
+    /// accepted before shutdown.
+    #[must_use]
+    pub const fn presentation_verification(
+        &self,
+    ) -> Option<&DesktopPresentationVerificationReceipt> {
+        self.presentation_verification.as_ref()
+    }
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -251,6 +284,7 @@ pub struct DesktopRun {
     state: DesktopRunState,
     diagnostics: DiagnosticReport,
     startup_content_closure: Option<StartupContentClosureReceipt>,
+    presentation_verification: Option<DesktopPresentationVerificationReceipt>,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -263,6 +297,10 @@ impl fmt::Debug for DesktopRun {
             .field(
                 "startup_content_closure_present",
                 &self.startup_content_closure.is_some(),
+            )
+            .field(
+                "presentation_verification_present",
+                &self.presentation_verification.is_some(),
             )
             .finish_non_exhaustive()
     }
@@ -294,6 +332,7 @@ impl DesktopRun {
             }),
             diagnostics: DiagnosticReport::default(),
             startup_content_closure: None,
+            presentation_verification: None,
         }
     }
 
@@ -368,7 +407,12 @@ impl DesktopRun {
             cleanup_policy,
             recipe,
             runner,
+            verify_first_present,
         } = intent;
+        let verification = verify_first_present.then(DesktopFirstPresentVerification::new);
+        let host_policy = verification
+            .as_ref()
+            .map(DesktopFirstPresentVerification::host_policy);
         let PreparedProjectStart {
             mut host,
             mut attempt,
@@ -380,6 +424,7 @@ impl DesktopRun {
             cleanup_policy,
             recipe,
             overlay,
+            host_policy,
             Vec::new(),
         ) {
             Ok(prepared) => prepared,
@@ -400,6 +445,9 @@ impl DesktopRun {
                 return desktop_state_after_failure(host);
             }
         }
+        if let Some(verification) = verification.as_ref() {
+            verification.arm();
+        }
 
         let run_result = {
             let runtime = host
@@ -413,12 +461,48 @@ impl DesktopRun {
         let close_evidence = host
             .running_runtime_close_evidence()
             .expect("the desktop Host retains close evidence until terminal lowering");
-        let terminal = desktop_terminal_after_runner(
+        let mut terminal = desktop_terminal_after_runner(
             run_result,
             runtime_state,
             &close_evidence,
             &mut self.diagnostics,
         );
+        if let Some(verification) = verification {
+            match verification.outcome() {
+                DesktopFirstPresentOutcome::Accepted(presented_frame) => {
+                    let startup_content_closure = self
+                        .startup_content_closure
+                        .clone()
+                        .expect("desktop verification starts only after project checking succeeds");
+                    self.presentation_verification =
+                        Some(DesktopPresentationVerificationReceipt::new(
+                            startup_content_closure,
+                            presented_frame,
+                        ));
+                }
+                DesktopFirstPresentOutcome::TimedOut => {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.presentation-timeout",
+                        "Desktop first presentation exceeded its bounded deadline",
+                    ));
+                    terminal = PendingDesktopTerminal::Failed;
+                }
+                DesktopFirstPresentOutcome::Awaiting => {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.presentation-missing",
+                        "Desktop runner exited before the first presentation was verified",
+                    ));
+                    terminal = PendingDesktopTerminal::Failed;
+                }
+                DesktopFirstPresentOutcome::Unarmed => {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.presentation-unarmed",
+                        "Desktop first-presentation verification was not armed",
+                    ));
+                    terminal = PendingDesktopTerminal::Failed;
+                }
+            }
+        }
         host.retire_running();
         let mut cleanup_hosts = Vec::with_capacity(1);
         if host.has_cleanup_owner() {
@@ -446,6 +530,7 @@ impl DesktopRun {
             outcome,
             diagnostics: self.diagnostics.clone(),
             startup_content_closure: self.startup_content_closure.clone(),
+            presentation_verification: self.presentation_verification.clone(),
         }
     }
 }
@@ -779,6 +864,7 @@ mod desktop_terminal_tests {
             },
             diagnostics,
             startup_content_closure: None,
+            presentation_verification: None,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
@@ -813,6 +899,7 @@ mod desktop_terminal_tests {
             state: terminal.finish(),
             diagnostics,
             startup_content_closure: None,
+            presentation_verification: None,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::Failed);
@@ -1230,6 +1317,7 @@ fn prepare_start<O>(
         cleanup_policy,
         recipe,
         overlay,
+        None,
         commands,
     )?;
     Ok(PreparedStart {
@@ -1248,14 +1336,25 @@ fn prepare_project_start(
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
+    host_policy: Option<RuntimeHostPolicyContribution>,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<PreparedProjectStart, PreparedProjectStartError> {
-    let checked =
-        check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
-            .map_err(|error| PreparedProjectStartError {
-                fault: project_source_check_fault(error),
-                startup_content_closure: None,
-            })?;
+    let checked = match host_policy {
+        Some(host_policy) => check_project_source_with_host_policy(
+            project_root,
+            profile.as_deref(),
+            recipe,
+            overlay,
+            host_policy,
+        ),
+        None => {
+            check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
+        }
+    }
+    .map_err(|error| PreparedProjectStartError {
+        fault: project_source_check_fault(error),
+        startup_content_closure: None,
+    })?;
     let (plan, snapshot) = checked.into_parts();
     let plan_diagnostics = runtime_plan_selected_report(&plan);
     let startup_content_closure = snapshot.startup_content_closure();

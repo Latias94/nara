@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-pub(crate) use super::composition::RuntimePluginOverlay;
+pub(crate) use super::composition::{RuntimeHostPolicyContribution, RuntimePluginOverlay};
 use super::{
     CompositionError, ProjectContentRevision, ProjectContentSnapshot, ProjectSettingsLineage,
     RuntimePlan, RuntimePlanError,
@@ -42,12 +42,17 @@ const PROJECT_MANIFEST: &str = "nara.toml";
 
 mod action;
 
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+mod desktop_verification;
+
 #[cfg(feature = "tooling")]
 mod editor;
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport};
 pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+pub use desktop_verification::DesktopPresentationVerificationReceipt;
 #[cfg(feature = "tooling")]
 pub use editor::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
 

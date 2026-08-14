@@ -172,6 +172,7 @@ pub struct ProjectRuntimePlugins {
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
+    host_policy: Option<RuntimeHostPolicyContribution>,
 }
 
 pub(crate) struct RuntimePluginOverlay {
@@ -182,11 +183,36 @@ pub(crate) fn runtime_plugin_overlay(definition: PluginDefinition) -> RuntimePlu
     RuntimePluginOverlay { definition }
 }
 
+pub(crate) struct RuntimeHostPolicyContribution {
+    definition: PluginDefinition,
+}
+
+pub(crate) fn runtime_host_policy_contribution(
+    definition: PluginDefinition,
+) -> RuntimeHostPolicyContribution {
+    RuntimeHostPolicyContribution { definition }
+}
+
 const PROJECT_RUNTIME_OVERLAY_GROUP_ID: PluginGroupId =
     PluginGroupId::new("nara.plugins.project-runtime-overlay");
 
 struct RuntimeOverlayPlugins {
     definition: PluginDefinition,
+}
+
+const PROJECT_RUNTIME_HOST_POLICY_GROUP_ID: PluginGroupId =
+    PluginGroupId::new("nara.plugins.project-runtime-host-policy");
+
+struct RuntimeHostPolicyPlugins {
+    definition: PluginDefinition,
+}
+
+impl PluginGroup for RuntimeHostPolicyPlugins {
+    const ID: PluginGroupId = PROJECT_RUNTIME_HOST_POLICY_GROUP_ID;
+
+    fn build(self) -> PluginGroupBuilder {
+        PluginGroupBuilder::new().add_definition(self.definition)
+    }
 }
 
 impl PluginGroup for RuntimeOverlayPlugins {
@@ -201,6 +227,7 @@ struct ProjectRuntimeAppPlugins {
     plugins: EditedPluginGroup<crate::product::ProjectProfilePlugins>,
     recipe: crate::ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
+    host_policy: Option<RuntimeHostPolicyContribution>,
 }
 
 impl PluginGroup for ProjectRuntimeAppPlugins {
@@ -210,9 +237,15 @@ impl PluginGroup for ProjectRuntimeAppPlugins {
         let builder = PluginGroupBuilder::new()
             .add_edited_group(self.plugins)
             .add_group(self.recipe);
-        match self.overlay {
+        let builder = match self.overlay {
             Some(overlay) => builder.add_group(RuntimeOverlayPlugins {
                 definition: overlay.definition,
+            }),
+            None => builder,
+        };
+        match self.host_policy {
+            Some(host_policy) => builder.add_group(RuntimeHostPolicyPlugins {
+                definition: host_policy.definition,
             }),
             None => builder,
         }
@@ -226,6 +259,7 @@ impl fmt::Debug for ProjectRuntimePlugins {
             .field("lineage", &self.lineage)
             .field("recipe", &self.recipe)
             .field("has_advanced_overlay", &self.overlay.is_some())
+            .field("has_host_policy", &self.host_policy.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -264,6 +298,11 @@ impl ProjectRuntimePlugins {
 
     pub(crate) fn with_overlay(mut self, overlay: RuntimePluginOverlay) -> Self {
         self.overlay = Some(overlay);
+        self
+    }
+
+    pub(crate) fn with_host_policy(mut self, host_policy: RuntimeHostPolicyContribution) -> Self {
+        self.host_policy = Some(host_policy);
         self
     }
 }
@@ -594,6 +633,7 @@ pub fn project_runtime_plugins(candidate: &ProjectSettingsCandidate) -> ProjectR
         .edit(),
         recipe: crate::ProductRecipe::new(),
         overlay: None,
+        host_policy: None,
     }
 }
 
@@ -604,7 +644,20 @@ pub(crate) fn project_runtime_plugins_with_recipe(
     recipe: crate::ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
 ) -> ProjectRuntimePlugins {
+    project_runtime_plugins_with_recipe_and_host_policy(candidate, recipe, overlay, None)
+}
+
+fn project_runtime_plugins_with_recipe_and_host_policy(
+    candidate: &ProjectSettingsCandidate,
+    recipe: crate::ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
+    host_policy: Option<RuntimeHostPolicyContribution>,
+) -> ProjectRuntimePlugins {
     let request = project_runtime_plugins(candidate).with_recipe(recipe);
+    let request = match host_policy {
+        Some(host_policy) => request.with_host_policy(host_policy),
+        None => request,
+    };
     match overlay {
         Some(overlay) => request.with_overlay(overlay),
         None => request,
@@ -626,6 +679,23 @@ pub(crate) fn resolve_product_recipe_with_overlay(
     resolve_project_runtime_request(
         candidate,
         project_runtime_plugins_with_recipe(candidate, recipe, overlay),
+    )
+}
+
+pub(crate) fn resolve_product_recipe_with_host_policy(
+    candidate: &ProjectSettingsCandidate,
+    recipe: crate::ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
+    host_policy: RuntimeHostPolicyContribution,
+) -> Result<RuntimePlan, RuntimePlanError> {
+    resolve_project_runtime_request(
+        candidate,
+        project_runtime_plugins_with_recipe_and_host_policy(
+            candidate,
+            recipe,
+            overlay,
+            Some(host_policy),
+        ),
     )
 }
 
@@ -662,6 +732,7 @@ pub fn resolve_runtime_plan(
         plugins: request.plugins,
         recipe: request.recipe,
         overlay: request.overlay,
+        host_policy: request.host_policy,
     })?;
     if let Some(overlay) = plugin_plan.entries().iter().find(|entry| {
         entry

@@ -10,7 +10,8 @@ use nara::{
 #[derive(Clone, Resource)]
 struct ProductOutcome;
 
-const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
+const ALLOWED_RUNTIME_EXPORTS: [&str; 9] = [
+    "DesktopPresentationVerificationReceipt",
     "DesktopRun",
     "DesktopRunIntent",
     "DesktopRunOutcome",
@@ -21,7 +22,7 @@ const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
     "HeadlessRunReport",
 ];
 
-const ALLOWED_PUBLIC_METHODS: [&str; 13] = [
+const ALLOWED_PUBLIC_METHODS: [&str; 15] = [
     "diagnostics",
     "execute",
     "execute_bounded",
@@ -29,10 +30,12 @@ const ALLOWED_PUBLIC_METHODS: [&str; 13] = [
     "into_outcome",
     "new",
     "outcome",
+    "presentation_verification",
     "startup_content_closure",
     "stop_when",
     "with_cleanup_timeout",
     "with_control_flow",
+    "with_first_present_verification",
     "with_profile",
     "with_recipe",
 ];
@@ -68,10 +71,14 @@ fn concrete_product_action_exposes_only_the_reviewed_carriers() {
         "pubuseruntime::{HeadlessRun,HeadlessRunIntent,HeadlessRunOutcome,HeadlessRunReport};"
     ));
     assert!(compact_host.contains(
-        "pubuseruntime::{DesktopRun,DesktopRunIntent,DesktopRunOutcome,DesktopRunReport};"
+        "pubuseruntime::{DesktopPresentationVerificationReceipt,DesktopRun,DesktopRunIntent,DesktopRunOutcome,DesktopRunReport,};"
     ));
 
-    let runtime_source = read(root.join("src/project_host/runtime/action.rs"));
+    let runtime_source = format!(
+        "{}\n{}",
+        read(root.join("src/project_host/runtime/action.rs")),
+        read(root.join("src/project_host/runtime/desktop_verification.rs"))
+    );
     let mut public_types = BTreeSet::new();
     let mut public_methods = BTreeSet::new();
     for line in runtime_source.lines() {
@@ -189,11 +196,18 @@ fn ordinary_product_intents_have_one_recipe_composition_authority() {
     assert_intent_surface(
         &read(root.join("src/project_host/runtime/action.rs")),
         "DesktopRunIntent",
-        &["cleanup_policy", "profile", "recipe", "runner"],
+        &[
+            "cleanup_policy",
+            "profile",
+            "recipe",
+            "runner",
+            "verify_first_present",
+        ],
         &[
             "new",
             "with_cleanup_timeout",
             "with_control_flow",
+            "with_first_present_verification",
             "with_profile",
             "with_recipe",
         ],

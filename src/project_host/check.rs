@@ -5,12 +5,23 @@ use nara_fs::{ContentDigest, DirectoryCapability, RelativePath};
 use super::{
     ProjectCandidateError, ProjectContentError, ProjectContentLoader, ProjectContentSnapshot,
     RuntimePlan, RuntimePlanError,
-    composition::{RuntimePluginOverlay, resolve_product_recipe_with_overlay},
+    composition::{
+        RuntimeHostPolicyContribution, RuntimePluginOverlay,
+        resolve_product_recipe_with_host_policy, resolve_product_recipe_with_overlay,
+    },
     ingest_project_manifest, ingest_project_manifest_with_expected_digest,
 };
 use crate::ProductRecipe;
 
 const PROJECT_MANIFEST: &str = "nara.toml";
+
+#[derive(Default)]
+struct ProjectSourceCheckOptions {
+    overlay: Option<RuntimePluginOverlay>,
+    host_policy: Option<RuntimeHostPolicyContribution>,
+    manifest_digest: Option<ContentDigest>,
+    startup_scene_digest: Option<ContentDigest>,
+}
 
 pub(crate) struct CheckedProjectSource {
     plan: RuntimePlan,
@@ -70,7 +81,12 @@ pub(crate) fn check_project_source(
     profile: Option<&str>,
     recipe: ProductRecipe,
 ) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
-    check_project_source_inner(project_root, profile, recipe, None, None, None)
+    check_project_source_inner(
+        project_root,
+        profile,
+        recipe,
+        ProjectSourceCheckOptions::default(),
+    )
 }
 
 pub(crate) fn check_project_source_with_overlay(
@@ -79,7 +95,34 @@ pub(crate) fn check_project_source_with_overlay(
     recipe: ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
 ) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
-    check_project_source_inner(project_root, profile, recipe, overlay, None, None)
+    check_project_source_inner(
+        project_root,
+        profile,
+        recipe,
+        ProjectSourceCheckOptions {
+            overlay,
+            ..ProjectSourceCheckOptions::default()
+        },
+    )
+}
+
+pub(crate) fn check_project_source_with_host_policy(
+    project_root: DirectoryCapability,
+    profile: Option<&str>,
+    recipe: ProductRecipe,
+    overlay: Option<RuntimePluginOverlay>,
+    host_policy: RuntimeHostPolicyContribution,
+) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
+    check_project_source_inner(
+        project_root,
+        profile,
+        recipe,
+        ProjectSourceCheckOptions {
+            overlay,
+            host_policy: Some(host_policy),
+            ..ProjectSourceCheckOptions::default()
+        },
+    )
 }
 
 pub(crate) fn check_project_source_with_expected_digests(
@@ -93,9 +136,11 @@ pub(crate) fn check_project_source_with_expected_digests(
         project_root,
         profile,
         recipe,
-        None,
-        Some(manifest_digest),
-        Some(startup_scene_digest),
+        ProjectSourceCheckOptions {
+            manifest_digest: Some(manifest_digest),
+            startup_scene_digest: Some(startup_scene_digest),
+            ..ProjectSourceCheckOptions::default()
+        },
     )
 }
 
@@ -103,16 +148,14 @@ fn check_project_source_inner(
     project_root: DirectoryCapability,
     profile: Option<&str>,
     recipe: ProductRecipe,
-    overlay: Option<RuntimePluginOverlay>,
-    manifest_digest: Option<ContentDigest>,
-    startup_scene_digest: Option<ContentDigest>,
+    options: ProjectSourceCheckOptions,
 ) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
     let manifest_path = RelativePath::new(PROJECT_MANIFEST)
         .expect("the engine-owned manifest name is a valid relative path");
     let manifest = project_root.open_file(&manifest_path).map_err(|error| {
         ProjectSourceCheckError::Manifest(ProjectCandidateError::from_manifest_authority(error))
     })?;
-    let candidate = match manifest_digest {
+    let candidate = match options.manifest_digest {
         Some(expected) => {
             ingest_project_manifest_with_expected_digest(&manifest, profile, expected)
         }
@@ -121,11 +164,19 @@ fn check_project_source_inner(
     .map_err(ProjectSourceCheckError::Manifest)?;
     drop(manifest);
 
-    let plan = resolve_product_recipe_with_overlay(&candidate, recipe, overlay)
-        .map_err(ProjectSourceCheckError::ProductComposition)?;
+    let plan = match options.host_policy {
+        Some(host_policy) => resolve_product_recipe_with_host_policy(
+            &candidate,
+            recipe,
+            options.overlay,
+            host_policy,
+        ),
+        None => resolve_product_recipe_with_overlay(&candidate, recipe, options.overlay),
+    }
+    .map_err(ProjectSourceCheckError::ProductComposition)?;
     let loader =
         ProjectContentLoader::new(project_root).map_err(ProjectSourceCheckError::StartupContent)?;
-    let snapshot = match startup_scene_digest {
+    let snapshot = match options.startup_scene_digest {
         Some(expected) => {
             loader.load_with_expected_startup_scene_digest(&candidate, &plan, expected)
         }

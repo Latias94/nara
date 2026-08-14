@@ -37,7 +37,10 @@ pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_projec
     feature = "desktop-winit",
     feature = "render-wgpu"
 ))]
-pub use runtime::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunReport};
+pub use runtime::{
+    DesktopPresentationVerificationReceipt, DesktopRun, DesktopRunIntent, DesktopRunOutcome,
+    DesktopRunReport,
+};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 pub use runtime::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
