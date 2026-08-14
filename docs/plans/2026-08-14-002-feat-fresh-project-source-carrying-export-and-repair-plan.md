@@ -18,10 +18,11 @@ operator_execution_authority: external-control-plane
 
 ## Goal Capsule
 
-- **Objective:** Deliver one complete first-party workflow from an authorized parent with an absent
-  destination child to a versioned desktop-2D project, normal desktop and presentation-free
-  headless execution, a checkout-free source-carrying startup-closure export, an actionable
-  missing-startup-Scene failure, and an explicit repair followed by successful rerun and re-export.
+- **Objective:** Deliver one complete bounded Rust-author startup-closure workflow from an authorized
+  parent with an absent destination child to a versioned desktop-2D project, normal desktop and
+  presentation-free headless execution, a checkout-free source-carrying startup-closure export, an
+  actionable missing-startup-Scene failure, and an explicit repair followed by successful rerun and
+  re-export. This is not a complete Editor or release-content workflow.
 - **Product outcome:** A Rust author chooses one starter and one supported Nara dependency source;
   the tool owns agreement among Cargo, `nara.toml`, ProductRecipe, schema and initial content.
 - **Architecture outcome:** One root project-workflow Module owns creation, check, export and repair
@@ -60,11 +61,14 @@ flowchart LR
   built-in schema closure and initial content. Existing direct-App and advanced composition
   Interfaces remain outside this plan and are neither removed nor narrowed.
 - **R2 — Dependency distribution is explicit and separate.** Creation accepts one typed
-  `NaraDependencySource`: an authorized local checkout represented by a relative Cargo path when the
-  destination relation permits it, or an immutable Git URL plus exact revision. The starter selects
-  compatibility; the request selects distribution. Starter version, manifest schema, Scene envelope
-  and dependency identity remain distinct receipt facts. Absolute checkout paths, branch heads and
-  implicit network fallback are forbidden. A local-path project is location-bound by contract.
+  `NaraDependencySource`: an authorized local checkout whose destination parent is proven as a
+  descendant of that checkout capability, or an immutable Git URL plus exact revision. The workflow
+  Module derives the Cargo path from the descendant relation and future child name; callers cannot
+  submit a native or Cargo path as proof. The starter selects compatibility; the request selects
+  distribution. Starter version, manifest schema, Scene envelope and dependency identity remain
+  distinct receipt facts. Absolute checkout paths, branch heads and implicit network fallback are
+  forbidden. A local-path project is location-bound by contract, and generated guidance states that
+  upgrades are explicit future migrations rather than automatic starter updates.
 - **R3 — Directory publication uses the predecessor baseline.** Creation publishes a known finite
   tree through the exact Directory Publication Foundation receipt. The destination must not exist;
   no check-then-rename or overwrite fallback is allowed.
@@ -77,10 +81,12 @@ flowchart LR
 ### Runtime products
 
 - **R6 — Two normal products.** The generated project owns explicit `desktop` and `headless`
-  binaries over one source authority and ordinary ProductRecipe. The desktop binary provides a
-  documented bounded verification mode that uses its real Winit/WGPU path and exits through normal
-  App/Host shutdown after a precise startup/presentation condition; test-private plugins cannot
-  satisfy this proof.
+  binaries over one manifest byte digest, ordinary ProductRecipe, schema composition and
+  startup-source content digest. Desktop and headless retain distinct profile-bound
+  `ProjectSettingsLineage` values and neither is used as the other's identity. The desktop binary
+  provides a documented bounded verification mode that uses its real Winit/WGPU path and exits
+  through normal App/Host shutdown after a precise startup/presentation condition; test-private
+  plugins cannot satisfy this proof.
 
 ### Source-carrying startup-closure export
 
@@ -93,10 +99,11 @@ flowchart LR
   artifact is neither a complete source-project backup nor a cooked/source-free catalog.
 - **R9 — Runtime source remains source.** The candidate may contain `nara.toml`, Scene/Prefab
   documents, images, `.meta` files and schema facts. ADR 0088 remains Proposed.
-- **R10 — Cargo artifacts are selected structurally.** A private build Adapter accepts one Cargo
-  JSON stream and matches exact invocation identity, manifest/workspace, package ID, binary target
-  kind/name, target triple, named profile and normalized features. A unique executable and its byte
-  digest enter the build receipt; target-directory scans and timestamp guesses are forbidden.
+- **R10 — Cargo artifacts are selected structurally.** A private Cargo JSON Adapter accepts one
+  Cargo JSON stream and matches exact invocation identity, manifest/workspace, package ID, binary
+  target kind/name, target triple, named profile and normalized features. Each selected binary target
+  must produce exactly one executable entry with its byte digest; the build receipt carries the
+  desktop and headless entries together. Target-directory scans and timestamp guesses are forbidden.
 - **R11 — Publication and acceptance are distinct.** All member, digest, source-change and layout
   validation completes before directory publication. Publication then yields a non-forgeable
   receipt. Post-publication process acceptance may return `PublishedButUnaccepted`; the candidate is
@@ -106,7 +113,11 @@ flowchart LR
 
 - **R12 — Typed issue, no policy callback.** Check reports a privacy-safe missing-startup-Scene
   issue bound to project capability identity, manifest digest and validated settings lineage.
-  Diagnostics are observational and cannot mutate the project.
+  Diagnostics are observational and cannot mutate the project. That issue is session-scoped evidence,
+  not a portable repair authorization: a separate repair command reruns the authoritative check under
+  its current capability session before it prepares any mutation. The cross-process trajectory links
+  the persistent manifest/content digests and predecessor identity, never a serialized capability or
+  settings-lineage value.
 - **R13 — Explicit selection, not rename inference.** The author supplies a logical Scene path
   relative to the effective `paths.scenes` authority. Repair does not infer a rename, preserve asset
   stable identity, search candidates, rewrite arbitrary references or perform Fix All.
@@ -120,30 +131,40 @@ flowchart LR
 
 ### Evidence discipline
 
-- **R15 — One linked trajectory.** One machine-readable record links exact create, manifest,
-  content-closure, desktop, headless, build, export, issue, repair and re-export receipts under one
-  project capability lineage. A step must consume its precise predecessor; colocated but unrelated
-  fixture results cannot be spliced into the record.
+- **R15 — One linked trajectory.** One parent-owned machine-readable record links exact create,
+  manifest, content-closure, desktop, headless, build, export, issue, repair and re-export receipts.
+  The parent assigns each child process a predecessor-bound attempt identity and accepts its
+  observation only when executable digest, manifest digest, product profile and startup-content
+  digest match the prepared facts. Session-scoped filesystem identity is local evidence, not
+  cross-process lineage. A step must consume its precise predecessor; colocated but unrelated fixture
+  results cannot be spliced into the record.
 - **R16 — Moderate proof.** Owner-local tests cover state machines and failure algebra; one bounded
   real process trajectory proves the product. No platform-by-state Cartesian matrix, opaque image
   hash or duplicate smoke implementation is admitted.
 - **R17 — Author usability is observed.** The starter includes a minimal generated guide with the
-  real create/check/run/edit/export/repair commands and one observable data edit. A clean-terminal
-  rehearsal follows only public instructions and records command count plus first-run, first-export
-  and repair completion time as observations, not frozen SLAs.
+  real create/check/run/edit/export/repair commands and one observable data edit. The guide identifies
+  the artifact as a startup-closure development/verification candidate, records the exact starter and
+  Nara dependency identities, and states that full content inventory, Editor workflow, formal release
+  delivery and automatic starter upgrades remain outside version one. A clean-terminal rehearsal
+  follows only public instructions and records command count plus first-run, first-export and repair
+  completion time as observations, not frozen SLAs.
 
 ### Key Technical Decisions
 
 - **KTD1 — Root deep Module, thin Adapters.** Reusable transactions live in one root
-  project-workflow Module. CLI/Cargo/process code is a thin Adapter. A compile-only consumer with the
-  smallest product features calls creation planning, check and repair without depending on the CLI,
-  Cargo process Adapter or desktop presentation; failure moves the seam before it becomes public.
+  project-workflow Module. The CLI and the private Cargo/process integration are separate thin
+  Adapters. A compile-only consumer with the smallest product features calls the workflow surface
+  without depending on either Adapter or desktop presentation; failure moves the seam before it
+  becomes public.
 - **KTD2 — Dependency source is not starter policy.** `NaraDependencySource` is a closed v1 value,
-  not a registry/provider. Local-relative and immutable-Git sources share compatibility validation
-  and privacy-safe receipts; they do not create a package manager.
+  not a registry/provider. A local source is derived only from a capability-proven checkout-to-parent
+  descendant relation; an immutable-Git source carries an exact revision. They share compatibility
+  validation and privacy-safe receipts without creating a package manager or accepting a naked path.
 - **KTD3 — One immutable starter.** `starters/desktop-2d/v1/` is source-controlled input. Generated
   files become project-owned copies. There is no template registry, download, update, inheritance,
-  merge, placeholder language or marketplace lifecycle.
+  merge, placeholder language or marketplace lifecycle. The generated project remains pinned to its
+  recorded starter and dependency identities; later compatibility or migration guidance does not
+  turn version one into an automatic updater.
 - **KTD4 — Export reuses a validated startup closure.** The first export serves the runtime shape
   Nara actually owns today. Complete project inventory, dynamic asset requests, cook catalogs and
   archive transport require their own concrete successors.
@@ -189,6 +210,27 @@ The root Module exposes concrete request/outcome families for one starter creati
 check, one startup-closure export and one startup-selection repair. It does not expose a mutable
 service, native path authority, Cargo message types, toolkit IDs or Reference Game identities.
 
+### Unit outputs and mandatory reuse
+
+| Unit | Owned output | Existing owners that must be reused | New abstraction budget |
+|---|---|---|---|
+| FPER-U0 | `src/project_workflow/` creation/dependency/starter Modules, `starters/desktop-2d/v1/`, thin `src/bin/nara/` command Adapter and one `module-consumer` crate | `nara_project` parse/effective settings, `nara_fs` capabilities and directory publication, `ProductRecipe`/profile lowering, ordinary project ingest/content load | One public project-workflow Module and one closed dependency-source family; no new crate in the engine workspace |
+| FPER-U1 | project check Module plus generated desktop/headless binary sources and bounded desktop mode | `ProjectContentLoader`, `HeadlessRun`, `DesktopRun`, `ProjectHost`, existing startup activation and run reports | No second Host, runner lifecycle, schema owner or content loader; generated binaries are thin Adapters |
+| FPER-U2 | private Cargo JSON Adapter and startup-closure export transaction inside `src/project_workflow/` | validated `ProjectContentSnapshot` facts, `DirectoryPublicationTransaction`, existing digest and process outcomes | One private Cargo-artifact selector and one public export request/outcome family; no build trait, exporter SPI or process framework |
+| FPER-U3 | `nara_project` typed mutation/canonical writer plus project-workflow repair and evidence Modules | cooperative manifest lock, `nara_fs` file replacement, ordinary check, existing desktop/headless run reports | One public typed issue/repair family; trajectory/child-observation machinery remains private evidence infrastructure |
+
+### Receipt inventory
+
+| Stage | Reused authority | New workflow fact | Visibility and consumers |
+|---|---|---|---|
+| Creation | directory-publication receipt, ordinary manifest candidate and project-content digest | starter/dependency plan and creation receipt referencing those owners rather than copying their fields | public; CLI and compile-only consumer |
+| Check | profile-bound `ProjectSettingsLineage`, `SchemaCompositionFingerprint`, `ProjectContentRevision` and `ContentDigest` | one check receipt that identifies the common manifest/content facts and the selected profile lineage | public; compile-only consumer, run and export preparation |
+| Runtime | existing `HeadlessRunReport` and `DesktopRunReport` | private child observation bound to attempt, executable, manifest, profile and content identities | private Adapter/evidence only |
+| Cargo build | Cargo JSON artifact messages and executable byte digest | one private build receipt containing exactly one desktop and one headless artifact entry | private Cargo Adapter and export transaction |
+| Export | startup closure facts and directory-publication receipt | export receipt referencing member-plan and publication identities | public; CLI and trajectory owner |
+| Issue/repair | manifest identity/digest, Scene/content digests, file replacement receipt and fresh check | typed missing-startup-Scene issue plus truthful repair outcome | public; CLI and compile-only consumer |
+| Trajectory | identities and digests from the preceding rows | parent-owned predecessor chain; no duplicate domain fields | private evidence record consumed by V5 |
+
 ### Failure algebra
 
 | Owner | Representative outcomes | Publication rule |
@@ -214,12 +256,12 @@ all bytes and product-layer agreement before staging, publish through the pinned
 Publication baseline, then reopen through ordinary capabilities.
 
 **Test scenarios:** exact inventory; unsafe name; destination collision; invalid dependency source;
-cross-volume local source rejection; immutable Git formatting; feature/manifest/recipe mismatch;
-unrelated CWD; ordinary manifest/content load; two binary targets; no absolute checkout path,
-placeholder or fixture identity.
+local parent outside the authorized checkout relation; immutable Git formatting;
+feature/manifest/recipe mismatch; unrelated CWD; ordinary manifest/content load; two binary targets;
+no absolute checkout path, caller-authored Cargo path, placeholder or fixture identity.
 
-**Exit:** One public command creates and admits the project, and the root Module is independently
-consumable without CLI/Cargo/desktop coupling.
+**Exit:** One public command creates and admits the project, and the root Module's creation planning
+surface is independently consumable without CLI/Cargo/desktop coupling.
 
 ### FPER-U1 — Shared check and two normal run products
 
@@ -228,14 +270,20 @@ consumable without CLI/Cargo/desktop coupling.
 **Goal:** Make one project source authoritative for check, headless and desktop.
 
 **Approach:** Return the smallest validated startup-closure receipt needed by export. Generated
-products share project root, manifest lineage, recipe, schema and startup content. Add the bounded
-real desktop verification mode and normal shutdown contract.
+products share the manifest byte digest, recipe, schema composition and startup-source content
+digest while retaining distinct desktop and headless profile-bound settings lineages. Add the bounded
+real desktop verification mode and normal shutdown contract. Extend the compile-only consumer from
+FPER-U0 to call the ordinary check surface, still without the CLI, Cargo process Adapter or desktop
+presentation.
 
-**Test scenarios:** ordinary Scene edit changes both products; missing startup Scene and unavailable
-schema fail before runtime publication; unrelated process CWD cannot change source authority;
-desktop verification presents then exits through App/Host cleanup; headless remains presentation-free.
+**Test scenarios:** ordinary Scene edit changes both products; both profile-bound runs report the
+same manifest/content digests and schema composition without claiming equal settings lineage; missing
+startup Scene and unavailable schema fail before runtime publication; unrelated process CWD cannot
+change source authority; desktop verification presents then exits through App/Host cleanup; headless
+remains presentation-free.
 
-**Exit:** Both normal products consume one source authority and export can reuse a validated closure.
+**Exit:** Both normal products consume one source authority, the independent consumer proves the
+check seam, and export can reuse a validated closure.
 
 ### FPER-U2 — Rust-owned startup-closure standalone export
 
@@ -264,15 +312,18 @@ about unreferenced/dynamic content.
 **Approach:** Move the selected startup Scene, return a typed issue, accept one scenes-root-relative
 replacement, take the cooperative manifest lock, validate manifest/Scene/closure identities,
 canonically publish modeled manifest fields, then run a fresh authoritative check. Rerun both
-products and publish a new destination. Emit the linked trajectory record and author rehearsal.
+products and publish a new destination. Extend the same compile-only consumer to call the repair
+surface without importing the CLI, Cargo process Adapter or desktop presentation. Emit the linked
+trajectory record and author rehearsal.
 
 **Test scenarios:** missing Scene; valid replacement; traversal/outside authority; malformed or
 wrong-kind Scene; stale issue; lock conflict; publication failure; unknown manifest field; semantic
 preservation of every modeled field; post-publication mismatch; prior export unchanged; new export
 succeeds; every trajectory link matches its predecessor.
 
-**Exit:** R1-R17 have clean, linked evidence; the ADR ledger and engineering memory agree; this plan
-becomes inactive without activating Editor work.
+**Exit:** R1-R17 have clean, linked evidence; the independent consumer proves creation, check and
+repair; the ADR ledger and engineering memory agree; this plan becomes inactive without activating
+Editor work.
 
 ## Verification Contract
 
@@ -280,13 +331,18 @@ becomes inactive without activating Editor work.
 - **V1:** starter/root Module tests prove closed product planning, typed dependency sources, ordinary
   project admission and the independent compile consumer.
 - **V2:** check/run tests prove one source authority, a presentation-free headless product and a
-  bounded real desktop product with normal shutdown.
+  bounded real desktop product with normal shutdown; the independent consumer compiles against the
+  ordinary check surface without the CLI, Cargo process Adapter or desktop presentation.
 - **V3:** export tests prove the full Cargo artifact key, exact startup closure, pre-publication
   validation, no-overwrite publication and receipt privacy.
 - **V4:** manifest tests prove semantic canonical rewrite, scenes-root-relative path semantics,
-  cooperative-lock/stale rejection and truthful post-publication outcomes.
-- **V5:** one real linked trajectory creates, edits, runs, exports, breaks, repairs, reruns and
-  re-exports from public instructions and unrelated process CWDs.
+  cooperative-lock/stale rejection and truthful post-publication outcomes; the independent
+  consumer compiles against the ordinary repair surface without the CLI, Cargo process Adapter or
+  desktop presentation.
+- **V5:** one parent-owned linked trajectory creates, edits, runs, exports, breaks, repairs, reruns
+  and re-exports from public instructions and unrelated process CWDs; each child observation consumes
+  one predecessor-bound attempt and matches the prepared executable, manifest, profile and content
+  facts.
 - **V6:** public/dependency inventory rejects a template registry, exporter SPI, generic importer,
   build framework, diagnostic callback bus or Reference Game identity.
 - **V7:** `cargo fmt --all -- --check`, scoped strict Clippy, `git diff --check`, engineering-memory
@@ -319,7 +375,8 @@ becomes inactive without activating Editor work.
 
 - R1-R17 and KTD1-KTD8 have executable evidence bound to reviewable commits.
 - `desktop-2d/v1` is created through one deep Module and ordinary Nara project authority.
-- Desktop and presentation-free headless consume one source lineage without Reference Game glue.
+- Desktop and presentation-free headless consume one manifest/content source revision through their
+  own profile-bound settings lineages without Reference Game glue.
 - A source-carrying startup-closure candidate runs from arbitrary CWD without checkout or toolchain.
 - A moved startup Scene produces a typed issue and an explicit, stale-safe, truthfully qualified
   repair restores run/export without claiming automatic asset rebind or strong non-cooperative CAS.

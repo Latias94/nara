@@ -2,6 +2,8 @@
 
 **Status**: Accepted
 **Date**: 2026-08-14
+**Amended**: 2026-08-14 by the FPER implementation-readiness review for profile-bound runtime
+lineages, capability-derived local dependency relations and parent-owned cross-process evidence
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -37,9 +39,9 @@ schema editing.
 
 Nara adopts one first-party `desktop-2d/v1` starter and one root project-workflow Module. The Module
 owns concrete creation, check, source-carrying startup-closure export and startup-selection repair
-transactions. A thin CLI owns argument parsing, Cargo process invocation and terminal rendering.
-Future Editor UI may call the same Module, but no Editor dependency or contribution seam is added by
-this decision.
+transactions. A thin CLI owns argument parsing and terminal rendering; a separate private
+Cargo/process Adapter owns invocation and JSON artifact selection. Future Editor UI may call the
+same Module, but no Editor dependency or contribution seam is added by this decision.
 
 ```mermaid
 flowchart LR
@@ -48,7 +50,9 @@ flowchart LR
   Workflow --> Files[nara_fs capability transactions]
   Workflow --> Content[Project content startup closure]
   Workflow --> Host[Desktop and headless ProjectHost]
-  CLI[Thin CLI and Cargo Adapter] --> Workflow
+  CLI[Thin CLI Adapter] --> Workflow
+  CLI --> Cargo[Private Cargo and process Adapter]
+  Cargo --> Workflow
   Workflow --> Receipt[Linked typed receipts]
 ```
 
@@ -60,9 +64,11 @@ flowchart LR
 - Existing direct-App and advanced product-composition Interfaces remain independent code-first
   authorities and are not narrowed by project creation.
 - Dependency distribution is a separate typed fact. Version one accepts either an authorized local
-  Nara checkout represented by a Cargo path relative to the generated project when that relation is
-  possible, or an immutable Git URL plus exact revision. Absolute checkout paths, branch heads and
-  implicit network fallback are forbidden. A local-path project is explicitly location-bound.
+  Nara checkout whose destination parent is proven as a descendant of that checkout capability, or
+  an immutable Git URL plus exact revision. The workflow Module derives the Cargo path from the
+  capability-relative descendant relation and future child name; it never accepts a caller-supplied
+  native or Cargo path as proof. Absolute checkout paths, branch heads and implicit network fallback
+  are forbidden. A local-path project is explicitly location-bound.
 - Starter version, manifest schema version, Scene envelope version and Nara dependency identity are
   distinct receipt facts.
 
@@ -89,10 +95,11 @@ flowchart LR
   no starter-only loader or hidden provider list.
 - Version one is complete-schema-only. Missing providers or unknown manifest/schema fields fail
   closed for check, repair and export.
-- Desktop and presentation-free headless binaries consume the same project root, settings lineage,
-  ProductRecipe, schema composition and startup source. A bounded desktop verification mode uses the
-  real Winit/WGPU product path and exits through normal App/Host shutdown; a test-private presenter
-  cannot satisfy product evidence.
+- Desktop and presentation-free headless binaries consume the same manifest byte digest,
+  ProductRecipe, schema composition and startup-source content digest. Each product retains its own
+  profile-bound `ProjectSettingsLineage`; neither lineage is presented as the other's identity. A
+  bounded desktop verification mode uses the real Winit/WGPU product path and exits through normal
+  App/Host shutdown; a test-private presenter cannot satisfy product evidence.
 - Export consumes the exact bounded startup-content closure produced by existing content owners and
   exact Cargo artifacts selected from one JSON stream by invocation, workspace/manifest, package,
   binary target, triple, named profile and normalized features.
@@ -110,6 +117,10 @@ flowchart LR
 - The first repair operation handles only a stale `startup.default_scene` selection after the
   selected Scene is moved. The replacement is an author-supplied logical path relative to the
   effective `paths.scenes` directory.
+- A diagnostic issue is session-scoped evidence, not portable mutation authority. A separate repair
+  command reruns the authoritative check under its current project capability before preparing the
+  manifest mutation; cross-process evidence links persistent manifest/content digests and the parent
+  attempt identity instead of serializing capability or settings-lineage identities.
 - Repair does not infer a rename, preserve an asset stable ID, search candidates, move metadata,
   rewrite arbitrary references or perform Fix All.
 - `nara_project` owns pure typed manifest mutation and deterministic serialization of every modeled
@@ -124,11 +135,15 @@ flowchart LR
 
 ### Evidence authority
 
-Product validation uses one machine-readable trajectory rooted in one project capability lineage.
-Create, manifest, closure, desktop, headless, Cargo artifact, export, issue, repair and re-export
-receipts must consume their exact predecessors. Independent fixtures or hashes cannot be combined
-to manufacture a complete workflow. The generated project includes a minimal public author guide;
-command count and completion time are observed without becoming frozen SLAs.
+Product validation uses one parent-owned machine-readable trajectory. The parent workflow issues
+one trajectory identity and predecessor-bound attempt identity for each child process, then accepts
+an observation only when it matches the exact executable digest, manifest digest, product profile
+and startup-content digest that the parent validated. Session-scoped filesystem identities remain
+local evidence and are never presented as cross-process identity. Create, manifest, closure,
+desktop, headless, Cargo artifact, export, issue, repair and re-export receipts must consume their
+exact predecessors. Independent fixtures or hashes cannot be combined to manufacture a complete
+workflow. The generated project includes a minimal public author guide; command count and completion
+time are observed without becoming frozen SLAs.
 
 ## Alternatives Considered
 
@@ -175,8 +190,9 @@ Registries, erased providers and callbacks would freeze speculation instead of h
   Runtime Host, ECS, Scene/Prefab or UI ownership.
 - The root facade gains one cohesive project-workflow Module. CLI, Cargo and process details remain
   private Adapters; `nara_project` and `nara_fs` stay lower-level owners.
-- Local-path starters are useful for source-checkout development but intentionally location-bound.
-  Immutable Git sources cover portable creation without inventing a package registry.
+- Local-path starters are useful for descendant source-checkout development but intentionally
+  location-bound. Immutable Git sources cover portable creation without inventing a package
+  registry.
 - Version-one export is intentionally narrower than complete project packaging. Dynamic content or
   full project inventory must create new evidence before broadening the claim.
 - Manifest repair may canonically reformat modeled TOML and rejects unknown fields. Lossless opaque
@@ -200,8 +216,9 @@ Registries, erased providers and callbacks would freeze speculation instead of h
 - **Risk: the root workflow becomes a shallow coordinator.** Keep concrete transaction state and
   typed outcomes in one deep Module; prove a minimal non-CLI consumer and keep process/toolkit types
   private.
-- **Risk: dependency selection becomes a package manager.** Admit only local-relative and immutable
-  Git sources with one closed value type; add no resolver/provider registry.
+- **Risk: dependency selection becomes a package manager or trusts an ambient path.** Admit only a
+  capability-proven descendant local relation or immutable Git source with one closed value type;
+  add no resolver/provider registry and accept no caller-authored local Cargo path.
 - **Risk: startup closure is mistaken for full export.** Use the precise product name, member receipt
   and negative dynamic/unreferenced-content tests; ADR 0088 remains Proposed.
 - **Risk: Linux proof is overstated.** Bind receipt facts to the runtime parent/mount and preserve
