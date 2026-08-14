@@ -47,6 +47,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
 | RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
 | CDPF-U1-1 | CDPF-U1 | `e345687` | `rust-api/behavior` | Filesystem publication source binding, explicit file write authority, and same-parent directory staging | Rename `ReplaceSourceBinding` to `PublicationSourceBinding`; create writable files only through a read-write directory capability, borrow writes through `CapabilityWriter`, and retain directory staging in a move-only `DirectoryPublicationTransaction`. |
+| CDPF-U2-1 | CDPF-U2 | `e3a5e7b` | `rust-api/behavior` | Exact directory publication and truthful begin/publish terminality | Handle `DirectoryPublicationBeginError` separately from `FsError`; consume staging through `publish` or `abort`; and preserve `Published`, `RejectedClean`, or `Orphaned` evidence without assuming every failed begin was pre-mutation. |
 | RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
 | PCC-U1-1 | PCC-U1 | `742c1e8` | `cargo-feature/rust-api/behavior` | WGPU base and concrete Sprite/UI submission ownership | Keep `WgpuRenderPlugin` base-only; direct Rust products explicitly add `WgpuSpriteSubmitterPlugin` or `WgpuUiSubmitterPlugin`, while file-backed products request the corresponding presentation capability intersection. |
 | PCC-U2-1 | PCC-U2 | `18ec878` | `cargo-feature/rust-api/behavior` | Native Winit accessibility activation | Compile support independently from activation; direct Rust products explicitly add `WinitUiAccessibilityContributionPlugin`, while file-backed desktop UI products receive it from the `desktop-winit + presentation-ui` request intersection. |
@@ -4025,6 +4026,75 @@ Do not restore implicit writable file handles or native-path directory staging i
 `crates/nara_fs/tests/filesystem_contract.rs`, owner-local move-only and failure-injection tests,
 and the CDPF-U1 verification record prove exclusive child creation, capability lineage, explicit
 write authority, supported-tier admission and fail-closed rejection before staging.
+
+## CDPF-U2-1: Exact Directory Publication And Truthful Begin Terminality
+
+**Removed contract**: `DirectoryCapability::begin_directory_publication` no longer returns a plain
+`FsError` whose failure could be interpreted as proof that no staging object was created. A live
+transaction is no longer an indefinitely retained staging holder without a consuming terminal
+operation. Callers may not infer that every rejection removed the candidate or recover staging
+authority from a diagnostic name.
+
+**Canonical replacement**: `begin_directory_publication` returns
+`DirectoryPublicationBeginError`. `BeforeStaging` alone proves that no staging name was created;
+post-create validation failures return either `RejectedClean` with exact empty-directory cleanup
+evidence or `Orphaned` with every authority and identity fact that the adapter could truthfully
+retain. A successful move-only transaction is consumed through `publish` or `abort`, returning
+`DirectoryPublicationOutcome::{Published, RejectedClean, Orphaned}`. A publication receipt keeps
+parent, candidate, published identity, source binding, topology, conflict protection, atomicity and
+durability as independent facts.
+
+**Before**:
+
+```rust
+let transaction = parent.begin_directory_publication(&destination, &staging)?;
+// The prototype exposed no consuming publication outcome, and every error looked pre-mutation.
+```
+
+**After**:
+
+```rust
+let transaction = match parent.begin_directory_publication(&destination, &staging) {
+    Ok(transaction) => transaction,
+    Err(error) => {
+        if let Some(orphan) = error.orphan() {
+            report_recoverable_staging(orphan.staging_name());
+        }
+        return Err(error.into());
+    }
+};
+
+match transaction.publish() {
+    DirectoryPublicationOutcome::Published(receipt) => accept(receipt),
+    DirectoryPublicationOutcome::RejectedClean(rejection) => reject_cleanly(rejection),
+    DirectoryPublicationOutcome::Orphaned(orphan) => report_orphan(orphan),
+}
+```
+
+**User action**: update error handling at every begin call. Only `BeforeStaging` permits the caller
+to assert that the namespace was unchanged. Quiesce staging writers before `publish`; an outstanding
+shared staging capability intentionally prevents exact cleanup and produces `Orphaned`. Consume the
+transaction exactly once and persist or surface orphan diagnostics instead of attempting recursive
+name-based deletion.
+
+**Source action**: `none`; this migration changes Rust authority, failure and receipt semantics,
+not project source or persistent formats.
+
+**Cache action**: `keep`; no serialized cache format changes. Callers must discard any prototype
+in-memory assumption that a failed begin or publish implies an absent staging name.
+
+**Compatibility window**: none (unreleased canonical replacement). No `FsError` wrapper, implicit
+drop cleanup, overwrite fallback or name-based reclamation compatibility path is retained.
+
+**Rollback**: revert implementation commits `eede23a` and `e3a5e7b` together with their migration,
+ledger and verification successor. Do not restore a plain begin error independently of the exact
+post-create terminal outcomes.
+
+**Verification anchors**: `crates/nara_fs/src/directory_publication.rs`,
+`crates/nara_fs/src/platform/{windows,unix}.rs`, `crates/nara_fs/tests/filesystem_contract.rs`, and
+verification record `b27082ccee9b484bb298d4d00901400c` prove no-replace publication, collision,
+identity/topology drift, exact cleanup, created-but-unopened staging, orphan authority and the
+absence of a destructive fallback.
 
 ## Persistent Format Matrix
 

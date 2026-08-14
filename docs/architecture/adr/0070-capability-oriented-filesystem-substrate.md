@@ -124,8 +124,8 @@ physical media has persisted data the operating system reported as synced.
   Strict live identity is currently limited to local ext, XFS, Btrfs, tmpfs, OverlayFS, and NTFS3
   filesystem types. Other, remote, or custom filesystem types fail closed. `st_dev` is only a
   cross-check and never substitutes for `openat2` mount evidence. The currently implemented generic
-  Unix replacement remains `NameBound`, so strict replacement is rejected until CDPF-U2 adds and
-  proves its narrower dedicated no-replace primitive; that primitive does not upgrade the generic
+  Unix replacement remains `NameBound`, so strict replacement remains rejected. CDPF-U2 implements
+  a narrower dedicated no-replace directory-publication primitive; it does not upgrade the generic
   replacement tier.
 - **CDPF directory-publication contract:** The first publicly supported same-capability directory
   no-replace implementation is narrower than the general reference matrices above. x86-64 Windows
@@ -143,6 +143,12 @@ physical media has persisted data the operating system reported as synced.
   tier is documented as available. ReFS, XFS, Btrfs, tmpfs, OverlayFS, NTFS3, macOS, and other
   combinations remain `Unsupported` or `Unproven` until dedicated live evidence exists; injected
   platform-seam tests alone do not broaden public support.
+- **CDPF implementation status:** CDPF-U1 and CDPF-U2 implement capability-owned staging, exact
+  consuming publication, and truthful begin/publish terminal outcomes. The current Windows checkout
+  has live local-NTFS evidence for handle-bound no-replace naming, collision and exact empty-staging
+  cleanup. The Linux `renameat2(RENAME_NOREPLACE)` implementation and tests compile for
+  x86-64 Linux, but ext4 remains unverified until CDPF-U3 runs on its hosted filesystem. A compile
+  target or injected platform seam is not a hosted support claim.
 - **macOS and other Unix contract:** no current adapter proves absence of same-device mount
   traversal. Strict untrusted/recovery directory capabilities therefore return `Unproven`.
   Host-selected trusted mode may use no-follow `openat` and name-bound `renameat`, but receipts keep
@@ -155,30 +161,30 @@ physical media has persisted data the operating system reported as synced.
 
 ### Implemented foundation and downstream ownership
 
-The implemented foundation supplies the shared authority substrate required to start downstream work: host-handle import,
-validated relative components, capability-specific resolution evidence, live identity, exclusive
-same-directory temporary creation, truthful replacement tiers, file/directory sync reporting,
-locking, positional reads, and bounded digest verification. Windows handle-bound temporary discard
-is included; Unix discard deliberately leaves a recoverable orphan rather than risking deletion of
-the wrong name.
+The implemented foundation supplies the shared authority substrate required to start downstream
+work: host-handle import, validated relative components, capability-specific resolution evidence,
+live identity, exclusive same-directory temporary creation, truthful replacement tiers,
+capability-owned finite-directory staging, exact no-replace directory publication, typed terminal
+cleanup/orphan outcomes, file/directory sync reporting, locking, positional reads, and bounded
+digest verification. Windows handle-bound temporary discard is included; Unix discard deliberately
+leaves a recoverable orphan rather than risking deletion of the wrong name.
 
-Three reserved public operations remain explicitly `Unsupported` and are not counted as implemented
+Two reserved public operations remain explicitly `Unsupported` and are not counted as implemented
 foundation capability:
 
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
 | Handle-bound directory enumeration | A concrete asset/indexing host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset` must not enumerate ambient paths. |
-| Same-capability non-overwrite directory publication | CDPF-U1/CDPF-U2 | Add the Windows/Linux platform primitives and a typed source/parent/conflict publication receipt in `nara_fs`; product workflows own finite member plans and validation policy. |
 | Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
 
 This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
 first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 now reuses
 the same root/open/identity boundary for the path-addressed startup content closure without ambient
-path reopen or directory enumeration. CDPF-U1/CDPF-U2 own the first bounded
-same-capability no-replace directory-publication implementation and must extend this shared
-primitive before a generated project destination is accepted. Future indexing, asset rename, and ADR 0091
-persistence/recovery work reuse or extend the primitives here; downstream domain crates are
-prohibited from copying those platform algorithms.
+path reopen or directory enumeration. CDPF-U1/CDPF-U2 now own the first bounded same-capability
+no-replace directory-publication implementation. CDPF-U3 must independently prove the public
+Interface and exact hosted support tiers before a generated project destination is accepted. Future
+indexing, asset rename, and ADR 0091 persistence/recovery work reuse or extend the primitives here;
+downstream domain crates are prohibited from copying those platform algorithms.
 
 ## Alternatives Considered
 

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "41532c1c7924065039cb27a87426f6ac06ae051935c114c77a3c46741c71f68f"
+source_fingerprint: "bac3f6654e4ea81ffc5b1be191a84fedb21a4a9d1c1063204f308b2e4c2f56ba"
 ---
 
 # Current State
@@ -12,15 +12,15 @@ source_fingerprint: "41532c1c7924065039cb27a87426f6ac06ae051935c114c77a3c46741c7
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `41532c1c7924065039cb27a87426f6ac06ae051935c114c77a3c46741c71f68f`
-- Immutable records: 440
+- Source fingerprint: `bac3f6654e4ea81ffc5b1be191a84fedb21a4a9d1c1063204f308b2e4c2f56ba`
+- Immutable records: 442
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
-- [Capability Directory Publication Foundation - CDPF-U2 active](registry/2026-08/2026-08-14T024337Z-fresh-project-export-repair-codex-root-61f5f8687540452dad45ad301f43fd1d.md): `active` (fresh-project-export-repair-codex-root; producer `codex-root`)
+- [Capability Directory Publication Foundation - CDPF-U3 active](registry/2026-08/2026-08-14T043921Z-fresh-project-export-repair-codex-root-a9c753055e124344a93fafa152c3fbd7.md): `active` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -31,6 +31,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [CDPF-U2 exact directory publication and terminal outcomes](verification/2026-08/2026-08-14T043354Z-cdpf-u2-exact-directory-publication-and-terminal-outcomes-b27082ccee9b484bb298d4d00901400c.md) - Verifies exact Windows no-replace publication, Linux cooperative no-replace compilation, truthful begin/publish failure terminality, and bounded public filesystem authority.
 - **Verification Evidence**: [CDPF-U1 capability-owned directory staging](verification/2026-08/2026-08-14T024337Z-cdpf-u1-capability-owned-directory-staging-44a2fdb822d94c268972bf50f7fa7168.md) - Verifies move-only same-parent staging, explicit file write authority, runtime filesystem-tier admission, and fail-closed pre-publication behavior.
 - **Verification Evidence**: [RUP-U3 Runtime UI Product-Validated Baseline](verification/2026-08/2026-08-13T155950Z-rup-u3-runtime-ui-product-validated-baseline-a203485f0c8e478eb3ec1e03426aca67.md) - Closes the data-authored Runtime UI product slice with exact desktop, headless, accessibility, package and performance evidence.
 - **Verification Evidence**: [PUEC-U3 Presented UI Evidence Correlation Conformance](verification/2026-08/2026-08-13T155000Z-puec-u3-presented-evidence-correlation-conformance-a87355beec2241669936985528c9c172.md) - Closes the focused correction with exact backend-to-receipt correlation and bounded post-readiness product measurement.
@@ -42,7 +43,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [PCC-U3 ProductRecipe ordinary Host authority verification](verification/2026-08/2026-08-13T045032Z-pcc-u3-productrecipe-ordinary-host-authority-verification-02de9ad341db4dcbb1519e0f5e8843f1.md) - Verifies one ProductRecipe ordinary Host composition input, explicit one-definition advanced probes, schema-authority closure, and Headless/Desktop/Editor parity.
 - **Verification Evidence**: [PCC-U2 explicit Winit accessibility contribution verification](verification/2026-08/2026-08-13T020518Z-pcc-u2-explicit-winit-accessibility-contribution-verification-c7031e35724f4c55928c2dd77dc0b63d.md) - Serial verification of explicit Winit accessibility contribution, disabled/partial runner modes, and exact receipt-stamped platform publication.
 - **Verification Evidence**: [PCC-U1 concrete WGPU contribution split](verification/2026-08/2026-08-12T120000Z-pcc-u1-concrete-wgpu-contributions-55abac61d345418ca2dc60328bee6111.md) - Verifies that the base WGPU backend is feature-invariant and Sprite/UI submission is installed only as an explicit requested contribution.
-- **Verification Evidence**: [Product composition requested-subset reproduction](verification/2026-08/2026-08-12T110921Z-product-composition-requested-subset-reproduction-4f2f32ff95af4504a2e224d0868ec7a0.md) - Reproduces the all-features compile-ceiling leak that changes a render-wgpu-only requested plugin closure.
 
 # Integration Notes
 
