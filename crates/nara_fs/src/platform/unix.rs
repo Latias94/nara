@@ -4,7 +4,7 @@ use std::{io::Read, os::fd::AsRawFd};
 
 use rustix::fs::{FileType, FlockOperation, Mode, OFlags, fstat, fsync, mkdirat, openat, renameat};
 #[cfg(target_os = "linux")]
-use rustix::fs::{ResolveFlags, openat2};
+use rustix::fs::{RenameFlags, ResolveFlags, openat2, renameat_with};
 
 use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
@@ -70,10 +70,10 @@ pub(crate) fn directory_publication_support(file: &File) -> DirectoryPublication
         return DirectoryPublicationSupport::Unsupported;
     }
     match exact_mount_filesystem(file) {
-        LinuxMountFilesystem::Ext4 => {
+        LinuxMountFilesystem::Ext4 { .. } => {
             DirectoryPublicationSupport::Proven(PublicationSourceBinding::NameBound)
         }
-        LinuxMountFilesystem::Other => DirectoryPublicationSupport::Unsupported,
+        LinuxMountFilesystem::Other { .. } => DirectoryPublicationSupport::Unsupported,
         LinuxMountFilesystem::Unproven => DirectoryPublicationSupport::Unproven,
     }
 }
@@ -81,6 +81,31 @@ pub(crate) fn directory_publication_support(file: &File) -> DirectoryPublication
 #[cfg(not(target_os = "linux"))]
 pub(crate) const fn directory_publication_support(_file: &File) -> DirectoryPublicationSupport {
     DirectoryPublicationSupport::Unsupported
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn directory_publication_platform_identity(
+    file: &File,
+    operation: FsOperation,
+) -> Result<u64, FsError> {
+    match exact_mount_filesystem(file) {
+        LinuxMountFilesystem::Ext4 { mount_id } | LinuxMountFilesystem::Other { mount_id } => {
+            Ok(mount_id)
+        }
+        LinuxMountFilesystem::Unproven => Err(FsError::Unproven {
+            operation,
+            proof: "the live directory handle mount identity is unavailable",
+        }),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn directory_publication_platform_identity(
+    file: &File,
+    _operation: FsOperation,
+) -> Result<u64, FsError> {
+    let NativeFileIdentity::Unix { device, .. } = facts(file)?.identity;
+    Ok(device)
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -157,7 +182,11 @@ pub(crate) fn open_file(
     )
 }
 
-pub(crate) fn open_child(parent: &File, component: &RelativeComponent) -> Result<File, FsError> {
+pub(crate) fn open_child(
+    parent: &File,
+    component: &RelativeComponent,
+    operation: FsOperation,
+) -> Result<File, FsError> {
     #[cfg(target_os = "linux")]
     let flags = OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC;
     #[cfg(not(target_os = "linux"))]
@@ -165,7 +194,7 @@ pub(crate) fn open_child(parent: &File, component: &RelativeComponent) -> Result
 
     openat(parent, component.as_os_str(), flags, Mode::empty())
         .map(File::from)
-        .map_err(|error| super::rustix_io(FsOperation::BeginDirectoryPublication, error))
+        .map_err(|error| super::rustix_io(operation, error))
 }
 
 pub(crate) fn create_directory_exclusive(
@@ -214,6 +243,43 @@ pub(crate) fn create_file_exclusive(
         }
         Err(error) => Err(super::rustix_io(operation, error)),
     }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn publish_directory_no_replace(
+    parent: &File,
+    _source: &File,
+    source_name: &RelativeComponent,
+    destination: &RelativeComponent,
+) -> Result<(), FsError> {
+    renameat_with(
+        parent,
+        source_name.as_os_str(),
+        parent,
+        destination.as_os_str(),
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(classify_directory_publication_error)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn publish_directory_no_replace(
+    _parent: &File,
+    _source: &File,
+    _source_name: &RelativeComponent,
+    _destination: &RelativeComponent,
+) -> Result<(), FsError> {
+    Err(FsError::Unsupported {
+        operation: FsOperation::PublishDirectory,
+        capability: "same-parent no-replace directory publication",
+    })
+}
+
+pub(crate) fn discard_directory_exact(_directory: &File) -> Result<(), FsError> {
+    Err(FsError::Unsupported {
+        operation: FsOperation::RemoveDirectory,
+        capability: "identity-bound empty-directory removal",
+    })
 }
 
 pub(crate) fn discard_temporary(
@@ -360,10 +426,38 @@ fn strict_open_error(operation: FsOperation, error: rustix::io::Errno) -> FsErro
 }
 
 #[cfg(target_os = "linux")]
+fn classify_directory_publication_error(error: rustix::io::Errno) -> FsError {
+    match error {
+        rustix::io::Errno::EXIST | rustix::io::Errno::NOTEMPTY => FsError::AlreadyExists {
+            operation: FsOperation::PublishDirectory,
+        },
+        rustix::io::Errno::XDEV => FsError::CrossVolume,
+        rustix::io::Errno::NOSYS | rustix::io::Errno::OPNOTSUPP | rustix::io::Errno::INVAL => {
+            FsError::Unsupported {
+                operation: FsOperation::PublishDirectory,
+                capability: "renameat2 RENAME_NOREPLACE directory publication",
+            }
+        }
+        rustix::io::Errno::PERM => FsError::Unproven {
+            operation: FsOperation::PublishDirectory,
+            proof: "the runtime policy rejected RENAME_NOREPLACE",
+        },
+        rustix::io::Errno::NOENT => FsError::CapabilityIdentityDrift {
+            operation: FsOperation::PublishDirectory,
+        },
+        rustix::io::Errno::BUSY => FsError::Unproven {
+            operation: FsOperation::PublishDirectory,
+            proof: "the live source or mount topology became busy during publication",
+        },
+        error => super::rustix_io(FsOperation::PublishDirectory, error),
+    }
+}
+
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum LinuxMountFilesystem {
-    Ext4,
-    Other,
+    Ext4 { mount_id: u64 },
+    Other { mount_id: u64 },
     Unproven,
 }
 
@@ -380,8 +474,8 @@ fn exact_mount_filesystem(file: &File) -> LinuxMountFilesystem {
         return LinuxMountFilesystem::Unproven;
     };
     match parse_mount_filesystem(&mountinfo, mount_id) {
-        Some("ext4") => LinuxMountFilesystem::Ext4,
-        Some(_) => LinuxMountFilesystem::Other,
+        Some("ext4") => LinuxMountFilesystem::Ext4 { mount_id },
+        Some(_) => LinuxMountFilesystem::Other { mount_id },
         None => LinuxMountFilesystem::Unproven,
     }
 }
@@ -423,6 +517,53 @@ fn parse_mount_filesystem(mountinfo: &[u8], expected_mount_id: u64) -> Option<&s
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_publication_native_failures_keep_collision_and_proof_distinct() {
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::EXIST),
+            FsError::AlreadyExists {
+                operation: FsOperation::PublishDirectory
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::NOTEMPTY),
+            FsError::AlreadyExists {
+                operation: FsOperation::PublishDirectory
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::XDEV),
+            FsError::CrossVolume
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::OPNOTSUPP),
+            FsError::Unsupported {
+                operation: FsOperation::PublishDirectory,
+                ..
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::INVAL),
+            FsError::Unsupported {
+                operation: FsOperation::PublishDirectory,
+                ..
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::PERM),
+            FsError::Unproven {
+                operation: FsOperation::PublishDirectory,
+                ..
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(rustix::io::Errno::NOENT),
+            FsError::CapabilityIdentityDrift {
+                operation: FsOperation::PublishDirectory
+            }
+        ));
+    }
 
     #[test]
     fn unavailable_openat2_evidence_never_reports_handle_bound() {

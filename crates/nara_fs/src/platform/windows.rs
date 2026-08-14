@@ -20,13 +20,19 @@ use windows_sys::Wdk::{
     System::SystemServices::RtlGetVersion,
 };
 use windows_sys::Win32::{
-    Foundation::{RtlNtStatusToDosError, UNICODE_STRING},
+    Foundation::{
+        ERROR_ALREADY_EXISTS, ERROR_CALL_NOT_IMPLEMENTED, ERROR_FILE_EXISTS,
+        ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SAME_DEVICE,
+        ERROR_NOT_SUPPORTED, RtlNtStatusToDosError, UNICODE_STRING,
+    },
     Storage::FileSystem::{
         DELETE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_ID_INFO, FILE_LIST_DIRECTORY,
-        FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_RENAME_INFO, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FILE_TRAVERSE,
-        FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, FileIdInfo,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_FLAG_DELETE,
+        FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+        FILE_DISPOSITION_INFO_EX, FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+        FILE_READ_DATA, FILE_READ_EA, FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, FILE_STANDARD_INFO, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES,
+        FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, FileDispositionInfoEx, FileIdInfo,
         FileStandardInfo, FlushFileBuffers, GetFileInformationByHandleEx,
         GetVolumeInformationByHandleW, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
         LockFileEx, SYNCHRONIZE, SetFileInformationByHandle, UnlockFileEx,
@@ -97,6 +103,18 @@ pub(crate) fn directory_publication_support(file: &File) -> DirectoryPublication
     }
 }
 
+pub(crate) fn directory_publication_platform_identity(
+    file: &File,
+    operation: FsOperation,
+) -> Result<u64, FsError> {
+    let facts = facts(file).map_err(|_| FsError::Unproven {
+        operation,
+        proof: "the live directory handle volume identity is unavailable",
+    })?;
+    let NativeFileIdentity::Windows { volume_serial, .. } = facts.identity;
+    Ok(volume_serial)
+}
+
 pub(crate) fn facts(file: &File) -> Result<FileFacts, FsError> {
     let id: FILE_ID_INFO = query_info(file, FileIdInfo, IdentityQuery::FileId)?;
     let standard: FILE_STANDARD_INFO =
@@ -161,14 +179,18 @@ pub(crate) fn open_file(
     )
 }
 
-pub(crate) fn open_child(parent: &File, component: &RelativeComponent) -> Result<File, FsError> {
+pub(crate) fn open_child(
+    parent: &File,
+    component: &RelativeComponent,
+    operation: FsOperation,
+) -> Result<File, FsError> {
     nt_open(
         parent,
         component,
         FILE_READ_ATTRIBUTES | SYNCHRONIZE,
         FILE_OPEN,
         0,
-        FsOperation::BeginDirectoryPublication,
+        operation,
     )
 }
 
@@ -249,7 +271,82 @@ pub(crate) fn replace_temporary(
     _source_name: &RelativeComponent,
     target_name: &RelativeComponent,
 ) -> Result<(), FsError> {
-    let target = wide_component(target_name.as_os_str());
+    rename_open_handle(
+        parent,
+        temporary,
+        target_name,
+        FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS,
+    )
+    .map_err(|code| {
+        FsError::io(
+            FsOperation::Replace,
+            io::Error::from_raw_os_error(code as i32),
+        )
+    })
+}
+
+pub(crate) fn publish_directory_no_replace(
+    parent: &File,
+    source: &File,
+    _source_name: &RelativeComponent,
+    destination: &RelativeComponent,
+) -> Result<(), FsError> {
+    rename_open_handle(
+        parent,
+        source,
+        destination,
+        DIRECTORY_PUBLICATION_RENAME_FLAGS,
+    )
+    .map_err(classify_directory_publication_error)
+}
+
+// Absence of `FILE_RENAME_REPLACE_IF_EXISTS` is the no-replace contract. POSIX semantics are
+// intentionally not requested: that flag only changes replacement behavior and is irrelevant to
+// an absent-to-present publication.
+const DIRECTORY_PUBLICATION_RENAME_FLAGS: u32 = 0;
+
+pub(crate) fn discard_directory_exact(directory: &File) -> Result<(), FsError> {
+    let disposition = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE
+            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    // SAFETY: `directory` owns a live handle with delete authority and `disposition` has the exact
+    // layout required by `FileDispositionInfoEx` for the duration of this call.
+    let succeeded = unsafe {
+        SetFileInformationByHandle(
+            raw_handle(directory),
+            FileDispositionInfoEx,
+            ptr::addr_of!(disposition).cast(),
+            size_of_val(&disposition) as u32,
+        )
+    };
+    if succeeded != 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    match error.raw_os_error().map(|code| code as u32) {
+        Some(ERROR_NOT_SUPPORTED | ERROR_CALL_NOT_IMPLEMENTED | ERROR_INVALID_FUNCTION) => {
+            Err(FsError::Unsupported {
+                operation: FsOperation::RemoveDirectory,
+                capability: "handle-bound empty-directory removal with POSIX disposition semantics",
+            })
+        }
+        Some(ERROR_INVALID_PARAMETER) => Err(FsError::Unproven {
+            operation: FsOperation::RemoveDirectory,
+            proof: "the live filesystem rejected the required POSIX directory disposition flags",
+        }),
+        _ => Err(FsError::io(FsOperation::RemoveDirectory, error)),
+    }
+}
+
+fn rename_open_handle(
+    parent: &File,
+    source: &File,
+    destination: &RelativeComponent,
+    flags: u32,
+) -> Result<(), u32> {
+    let target = wide_component(destination.as_os_str());
     let bytes = size_of::<FILE_RENAME_INFO>() + target.len() * size_of::<u16>();
     let words = bytes.div_ceil(size_of::<usize>());
     let mut storage = vec![0_usize; words];
@@ -258,7 +355,7 @@ pub(crate) fn replace_temporary(
     // SAFETY: `storage` is aligned for `FILE_RENAME_INFO` and sized for the
     // trailing UTF-16 name. Every field is initialized before the syscall.
     unsafe {
-        (*info).Anonymous.Flags = FILE_RENAME_REPLACE_IF_EXISTS | FILE_RENAME_POSIX_SEMANTICS;
+        (*info).Anonymous.Flags = flags;
         (*info).RootDirectory = raw_handle(parent);
         (*info).FileNameLength = (target.len() * size_of::<u16>()) as u32;
         ptr::copy_nonoverlapping(
@@ -273,7 +370,7 @@ pub(crate) fn replace_temporary(
     // initialized buffer described above for the duration of this call.
     let status = unsafe {
         NtSetInformationFile(
-            raw_handle(temporary),
+            raw_handle(source),
             &mut status_block,
             info.cast(),
             bytes as u32,
@@ -283,12 +380,32 @@ pub(crate) fn replace_temporary(
     if status < 0 {
         // SAFETY: conversion accepts the returned NTSTATUS value.
         let code = unsafe { RtlNtStatusToDosError(status) };
-        Err(FsError::io(
-            FsOperation::Replace,
-            io::Error::from_raw_os_error(code as i32),
-        ))
+        Err(code)
     } else {
         Ok(())
+    }
+}
+
+fn classify_directory_publication_error(code: u32) -> FsError {
+    match code {
+        ERROR_ALREADY_EXISTS | ERROR_FILE_EXISTS => FsError::AlreadyExists {
+            operation: FsOperation::PublishDirectory,
+        },
+        ERROR_NOT_SAME_DEVICE => FsError::CrossVolume,
+        ERROR_NOT_SUPPORTED | ERROR_CALL_NOT_IMPLEMENTED | ERROR_INVALID_FUNCTION => {
+            FsError::Unsupported {
+                operation: FsOperation::PublishDirectory,
+                capability: "handle-bound no-replace directory publication",
+            }
+        }
+        ERROR_INVALID_PARAMETER => FsError::Unproven {
+            operation: FsOperation::PublishDirectory,
+            proof: "the live filesystem rejected the required no-replace rename flags",
+        },
+        _ => FsError::io(
+            FsOperation::PublishDirectory,
+            io::Error::from_raw_os_error(code as i32),
+        ),
     }
 }
 
@@ -577,6 +694,50 @@ fn raw_handle(file: &File) -> *mut core::ffi::c_void {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn directory_publication_never_requests_replacement() {
+        assert_eq!(DIRECTORY_PUBLICATION_RENAME_FLAGS, 0);
+        assert_eq!(
+            DIRECTORY_PUBLICATION_RENAME_FLAGS & FILE_RENAME_REPLACE_IF_EXISTS,
+            0
+        );
+    }
+
+    #[test]
+    fn directory_publication_native_failures_keep_collision_and_proof_distinct() {
+        assert!(matches!(
+            classify_directory_publication_error(ERROR_ALREADY_EXISTS),
+            FsError::AlreadyExists {
+                operation: FsOperation::PublishDirectory
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(ERROR_NOT_SAME_DEVICE),
+            FsError::CrossVolume
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(ERROR_NOT_SUPPORTED),
+            FsError::Unsupported {
+                operation: FsOperation::PublishDirectory,
+                ..
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(ERROR_INVALID_FUNCTION),
+            FsError::Unsupported {
+                operation: FsOperation::PublishDirectory,
+                ..
+            }
+        ));
+        assert!(matches!(
+            classify_directory_publication_error(ERROR_INVALID_PARAMETER),
+            FsError::Unproven {
+                operation: FsOperation::PublishDirectory,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn strict_identity_accepts_only_known_local_filesystems() {

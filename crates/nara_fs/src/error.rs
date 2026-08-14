@@ -13,6 +13,8 @@ pub enum FsOperation {
     BeginDirectoryPublication,
     CreateDirectory,
     CreateFile,
+    PublishDirectory,
+    RemoveDirectory,
     CreateTemporary,
     RemoveTemporary,
     Rename,
@@ -37,6 +39,8 @@ impl FsOperation {
             Self::BeginDirectoryPublication => "begin directory publication",
             Self::CreateDirectory => "create directory",
             Self::CreateFile => "create file",
+            Self::PublishDirectory => "publish directory",
+            Self::RemoveDirectory => "remove directory",
             Self::CreateTemporary => "create temporary file",
             Self::RemoveTemporary => "remove temporary file",
             Self::Rename => "rename file",
@@ -134,6 +138,10 @@ pub enum FsError {
     AlreadyExists { operation: FsOperation },
     #[error("directory publication staging and destination names must differ")]
     PublicationNamesConflict,
+    #[error("live capability identity changed during {operation}")]
+    CapabilityIdentityDrift { operation: FsOperation },
+    #[error("outstanding shared directory authority prevents {operation}")]
+    OutstandingDirectoryAuthority { operation: FsOperation },
     #[error(
         "{operation} created an exclusive child but validation failed; the child may remain as a recoverable orphan"
     )]

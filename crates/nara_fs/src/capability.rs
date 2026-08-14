@@ -590,7 +590,10 @@ fn allocate_session(counter: &AtomicU64) -> Result<CapabilitySessionId, FsError>
     }
 }
 
-fn validate_directory_facts(root: &DirectoryInner, facts: FileFacts) -> Result<(), FsError> {
+pub(crate) fn validate_directory_facts(
+    root: &DirectoryInner,
+    facts: FileFacts,
+) -> Result<(), FsError> {
     if facts.kind != FileKind::Directory {
         return Err(FsError::NotDirectory);
     }

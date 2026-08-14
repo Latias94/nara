@@ -21,7 +21,11 @@ pub use capability::{
     TrustMode,
 };
 pub use digest::{ContentDigest, DigestLimit};
-pub use directory_publication::DirectoryPublicationTransaction;
+pub use directory_publication::{
+    DirectoryCleanupEvidence, DirectoryPublicationCause, DirectoryPublicationOrphan,
+    DirectoryPublicationOutcome, DirectoryPublicationReceipt, DirectoryPublicationRejection,
+    DirectoryPublicationTransaction,
+};
 pub use error::{FsError, FsOperation, PathValidationError};
 pub use file::{CapabilityReader, CapabilityWriter, FileCapability};
 pub use identity::{CapabilityGeneration, CapabilitySessionId, FileIdentity, FileKind};
@@ -30,7 +34,8 @@ pub use path::{RelativeComponent, RelativePath, RelativePathPreflight};
 pub use proof::{
     ConflictProtection, DirectorySyncTier, DurabilityProgress, FileSyncTier,
     ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus, PublicationAtomicity,
-    PublicationIdentityEvidence, PublicationSourceBinding, ResolutionTier, StageStatus,
+    PublicationIdentityEvidence, PublicationSourceBinding, PublicationTopologyEvidence,
+    ResolutionTier, StageStatus,
 };
 pub use replace::{ExpectedTarget, ReplaceReceipt, TemporaryFile};
 pub use sync::{DirectorySyncReceipt, FileSyncReceipt};

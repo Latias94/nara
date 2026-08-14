@@ -6,7 +6,8 @@ use std::io;
 
 use crate::{
     DirectorySyncTier, FileFacts, FileSyncTier, FsError, LockMode, PlatformCapabilityMatrix,
-    PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
+    PublicationSourceBinding, PublicationTopologyEvidence, RelativeComponent, ResolutionTier,
+    TrustMode,
 };
 
 #[cfg(windows)]
@@ -28,6 +29,7 @@ use unsupported as imp;
 thread_local! {
     static TEST_FACTS_OVERRIDE: RefCell<Option<FileFacts>> = const { RefCell::new(None) };
     static TEST_DIRECTORY_PUBLICATION_SUPPORT_OVERRIDE: RefCell<Option<DirectoryPublicationSupport>> = const { RefCell::new(None) };
+    static TEST_DIRECTORY_PUBLICATION_PLATFORM_IDENTITY_OVERRIDE: RefCell<Option<u64>> = const { RefCell::new(None) };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +37,36 @@ pub(crate) enum DirectoryPublicationSupport {
     Proven(PublicationSourceBinding),
     Unsupported,
     Unproven,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DirectoryPublicationBinding {
+    HandleBound,
+    NameBound,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DirectoryPublicationProof {
+    source_binding: DirectoryPublicationBinding,
+    topology: PublicationTopologyEvidence,
+    platform_identity: u64,
+}
+
+impl DirectoryPublicationProof {
+    pub(crate) const fn source_binding(self) -> PublicationSourceBinding {
+        match self.source_binding {
+            DirectoryPublicationBinding::HandleBound => PublicationSourceBinding::HandleBound,
+            DirectoryPublicationBinding::NameBound => PublicationSourceBinding::NameBound,
+        }
+    }
+
+    pub(crate) const fn binding(self) -> DirectoryPublicationBinding {
+        self.source_binding
+    }
+
+    pub(crate) const fn topology(self) -> PublicationTopologyEvidence {
+        self.topology
+    }
 }
 
 pub(crate) fn capability_matrix() -> PlatformCapabilityMatrix {
@@ -102,8 +134,12 @@ pub(crate) fn open_file(
     imp::open_file(parent, component, strict)
 }
 
-pub(crate) fn child_exists(parent: &File, component: &RelativeComponent) -> Result<bool, FsError> {
-    match imp::open_child(parent, component) {
+pub(crate) fn child_exists(
+    parent: &File,
+    component: &RelativeComponent,
+    operation: crate::FsOperation,
+) -> Result<bool, FsError> {
+    match imp::open_child(parent, component, operation) {
         Ok(_) => Ok(true),
         Err(FsError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
             Ok(false)
@@ -112,10 +148,11 @@ pub(crate) fn child_exists(parent: &File, component: &RelativeComponent) -> Resu
     }
 }
 
-pub(crate) fn directory_publication_source_binding(
+pub(crate) fn directory_publication_proof(
     parent: &File,
     trust: TrustMode,
-) -> Result<PublicationSourceBinding, FsError> {
+    operation: crate::FsOperation,
+) -> Result<DirectoryPublicationProof, FsError> {
     #[cfg(test)]
     let support = TEST_DIRECTORY_PUBLICATION_SUPPORT_OVERRIDE
         .with(|slot| slot.borrow_mut().take())
@@ -123,36 +160,76 @@ pub(crate) fn directory_publication_source_binding(
     #[cfg(not(test))]
     let support = imp::directory_publication_support(parent);
 
-    match support {
+    let source_binding = match support {
         DirectoryPublicationSupport::Proven(PublicationSourceBinding::HandleBound) => {
-            Ok(PublicationSourceBinding::HandleBound)
+            DirectoryPublicationBinding::HandleBound
         }
         DirectoryPublicationSupport::Proven(PublicationSourceBinding::NameBound)
             if trust == TrustMode::TrustedLocal =>
         {
-            Ok(PublicationSourceBinding::NameBound)
+            DirectoryPublicationBinding::NameBound
         }
         DirectoryPublicationSupport::Proven(PublicationSourceBinding::NameBound) => {
-            Err(FsError::Unproven {
-                operation: crate::FsOperation::BeginDirectoryPublication,
+            return Err(FsError::Unproven {
+                operation,
                 proof: "name-bound directory publication is admitted only for trusted cooperative local writers",
-            })
+            });
         }
         DirectoryPublicationSupport::Proven(PublicationSourceBinding::Unsupported) => {
-            Err(FsError::Unproven {
-                operation: crate::FsOperation::BeginDirectoryPublication,
+            return Err(FsError::Unproven {
+                operation,
                 proof: "the platform adapter reported an unsupported source binding as proven",
-            })
+            });
         }
-        DirectoryPublicationSupport::Unsupported => Err(FsError::Unsupported {
-            operation: crate::FsOperation::BeginDirectoryPublication,
-            capability: "same-parent directory publication on the exact supported filesystem tier",
-        }),
-        DirectoryPublicationSupport::Unproven => Err(FsError::Unproven {
-            operation: crate::FsOperation::BeginDirectoryPublication,
-            proof: "the parent handle cannot prove the required runtime filesystem and publication tier",
-        }),
+        DirectoryPublicationSupport::Unsupported => {
+            return Err(FsError::Unsupported {
+                operation,
+                capability: "same-parent directory publication on the exact supported filesystem tier",
+            });
+        }
+        DirectoryPublicationSupport::Unproven => {
+            return Err(FsError::Unproven {
+                operation,
+                proof: "the parent handle cannot prove the required runtime filesystem and publication tier",
+            });
+        }
+    };
+
+    #[cfg(test)]
+    let platform_identity = TEST_DIRECTORY_PUBLICATION_PLATFORM_IDENTITY_OVERRIDE
+        .with(|slot| slot.borrow_mut().take())
+        .map_or_else(
+            || imp::directory_publication_platform_identity(parent, operation),
+            Ok,
+        )?;
+    #[cfg(not(test))]
+    let platform_identity = imp::directory_publication_platform_identity(parent, operation)?;
+
+    let topology = if cfg!(windows) {
+        PublicationTopologyEvidence::SameVolume
+    } else {
+        PublicationTopologyEvidence::SameMount
+    };
+    Ok(DirectoryPublicationProof {
+        source_binding,
+        topology,
+        platform_identity,
+    })
+}
+
+pub(crate) fn validate_directory_publication_topology(
+    file: &File,
+    proof: DirectoryPublicationProof,
+    operation: crate::FsOperation,
+) -> Result<(), FsError> {
+    let current = imp::directory_publication_platform_identity(file, operation)?;
+    if current != proof.platform_identity {
+        return Err(FsError::Unproven {
+            operation,
+            proof: "the live directory-publication volume or mount identity changed",
+        });
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -183,7 +260,42 @@ pub(crate) fn with_test_directory_publication_support_override<T>(
     TEST_DIRECTORY_PUBLICATION_SUPPORT_OVERRIDE.with(|slot| {
         assert!(
             slot.borrow().is_none(),
-            "the public begin operation did not consume the directory-publication support override"
+            "the public directory-publication operation did not consume the support override"
+        );
+    });
+    drop(guard);
+    result
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_directory_publication_platform_identity_override<T>(
+    identity: u64,
+    operation: impl FnOnce() -> T,
+) -> T {
+    struct OverrideGuard;
+
+    impl Drop for OverrideGuard {
+        fn drop(&mut self) {
+            TEST_DIRECTORY_PUBLICATION_PLATFORM_IDENTITY_OVERRIDE.with(|slot| {
+                slot.borrow_mut().take();
+            });
+        }
+    }
+
+    TEST_DIRECTORY_PUBLICATION_PLATFORM_IDENTITY_OVERRIDE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        assert!(
+            slot.is_none(),
+            "nested directory-publication platform-identity overrides are forbidden"
+        );
+        *slot = Some(identity);
+    });
+    let guard = OverrideGuard;
+    let result = operation();
+    TEST_DIRECTORY_PUBLICATION_PLATFORM_IDENTITY_OVERRIDE.with(|slot| {
+        assert!(
+            slot.borrow().is_none(),
+            "the public directory-publication operation did not consume the platform-identity override"
         );
     });
     drop(guard);
@@ -204,6 +316,19 @@ pub(crate) fn create_file_exclusive(
     operation: crate::FsOperation,
 ) -> Result<File, FsError> {
     imp::create_file_exclusive(parent, component, operation)
+}
+
+pub(crate) fn publish_directory_no_replace(
+    parent: &File,
+    source: &File,
+    source_name: &RelativeComponent,
+    destination: &RelativeComponent,
+) -> Result<(), FsError> {
+    imp::publish_directory_no_replace(parent, source, source_name, destination)
+}
+
+pub(crate) fn discard_directory_exact(directory: &File) -> Result<(), FsError> {
+    imp::discard_directory_exact(directory)
 }
 
 pub(crate) fn discard_temporary(

@@ -43,6 +43,16 @@ pub(crate) const fn directory_publication_support(_file: &File) -> DirectoryPubl
     DirectoryPublicationSupport::Unsupported
 }
 
+pub(crate) fn directory_publication_platform_identity(
+    _file: &File,
+    operation: FsOperation,
+) -> Result<u64, FsError> {
+    Err(FsError::Unsupported {
+        operation,
+        capability: "same-parent directory publication platform identity",
+    })
+}
+
 pub(crate) fn open_directory(
     _parent: &File,
     _component: &RelativeComponent,
@@ -59,8 +69,12 @@ pub(crate) fn open_file(
     unsupported(FsOperation::OpenFile)
 }
 
-pub(crate) fn open_child(_parent: &File, _component: &RelativeComponent) -> Result<File, FsError> {
-    unsupported(FsOperation::BeginDirectoryPublication)
+pub(crate) fn open_child(
+    _parent: &File,
+    _component: &RelativeComponent,
+    operation: FsOperation,
+) -> Result<File, FsError> {
+    unsupported(operation)
 }
 
 pub(crate) fn create_directory_exclusive(
@@ -77,6 +91,19 @@ pub(crate) fn create_file_exclusive(
     operation: FsOperation,
 ) -> Result<File, FsError> {
     unsupported(operation)
+}
+
+pub(crate) fn publish_directory_no_replace(
+    _parent: &File,
+    _source: &File,
+    _source_name: &RelativeComponent,
+    _destination: &RelativeComponent,
+) -> Result<(), FsError> {
+    unsupported(FsOperation::PublishDirectory)
+}
+
+pub(crate) fn discard_directory_exact(_directory: &File) -> Result<(), FsError> {
+    unsupported(FsOperation::RemoveDirectory)
 }
 
 pub(crate) fn discard_temporary(

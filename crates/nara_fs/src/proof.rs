@@ -62,9 +62,21 @@ pub enum PublicationSourceBinding {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PublicationIdentityEvidence {
+    /// The native publication operation was bound to the live candidate handle.
     HandleBoundCandidate,
+    /// The candidate was revalidated at its source name immediately before a cooperative atomic
+    /// publication operation.
+    NameBoundCandidate,
+    /// The destination was reopened and matched after publication.
     PostPublishObserved,
+    /// No exact candidate-to-destination identity proof was retained.
     Unverified,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublicationTopologyEvidence {
+    SameVolume,
+    SameMount,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
