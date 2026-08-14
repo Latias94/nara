@@ -22,9 +22,9 @@ pub use capability::{
 };
 pub use digest::{ContentDigest, DigestLimit};
 pub use directory_publication::{
-    DirectoryCleanupEvidence, DirectoryPublicationCause, DirectoryPublicationOrphan,
-    DirectoryPublicationOutcome, DirectoryPublicationReceipt, DirectoryPublicationRejection,
-    DirectoryPublicationTransaction,
+    DirectoryCleanupEvidence, DirectoryPublicationBeginError, DirectoryPublicationCause,
+    DirectoryPublicationOrphan, DirectoryPublicationOutcome, DirectoryPublicationReceipt,
+    DirectoryPublicationRejection, DirectoryPublicationTransaction,
 };
 pub use error::{FsError, FsOperation, PathValidationError};
 pub use file::{CapabilityReader, CapabilityWriter, FileCapability};

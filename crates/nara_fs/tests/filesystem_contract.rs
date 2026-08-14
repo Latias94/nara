@@ -10,11 +10,11 @@ use std::{
 use std::fs::OpenOptions;
 
 use nara_fs::{
-    CapabilityRights, ConflictProtection, ContentDigest, DirectoryCapability, DirectorySyncTier,
-    ExpectedTarget, FileCapability, FsError, HostCapabilityOptions, LockMode,
-    ParentAuthorizationTier, ProofStatus, PublicationAtomicity, PublicationIdentityEvidence,
-    PublicationSourceBinding, RelativeComponent, RelativePath, ResolutionTier, StageStatus,
-    TrustMode, platform_capability_matrix,
+    CapabilityRights, ConflictProtection, ContentDigest, DirectoryCapability,
+    DirectoryPublicationBeginError, DirectorySyncTier, ExpectedTarget, FileCapability, FsError,
+    HostCapabilityOptions, LockMode, ParentAuthorizationTier, ProofStatus, PublicationAtomicity,
+    PublicationIdentityEvidence, PublicationSourceBinding, RelativeComponent, RelativePath,
+    ResolutionTier, StageStatus, TrustMode, platform_capability_matrix,
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -411,7 +411,9 @@ fn directory_publication_begin_uses_a_live_parent_proof_or_fails_closed() {
                 );
             }
         }
-        Err(FsError::Unsupported { .. } | FsError::Unproven { .. }) => {
+        Err(DirectoryPublicationBeginError::BeforeStaging(
+            FsError::Unsupported { .. } | FsError::Unproven { .. },
+        )) => {
             assert!(!root.path().join(".published-staging-53c1").exists());
         }
         Err(error) => panic!("unexpected directory-publication begin failure: {error}"),

@@ -1,14 +1,18 @@
 use std::{
     fmt::{self, Debug, Formatter},
+    fs::File,
     sync::Arc,
 };
+
+use thiserror::Error;
 
 use crate::{
     CapabilityRights, ConflictProtection, DirectoryCapability, DirectorySyncTier,
     DurabilityProgress, FileFacts, FileIdentity, FsError, FsOperation, ParentAuthorizationTier,
     PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding,
     PublicationTopologyEvidence, RelativeComponent, StageStatus,
-    capability::validate_directory_facts, platform,
+    capability::{CreatedDirectoryChild, validate_directory_facts},
+    platform,
 };
 
 #[derive(Debug)]
@@ -35,7 +39,7 @@ pub enum DirectoryCleanupEvidence {
 pub struct DirectoryPublicationRejection {
     cause: DirectoryPublicationCause,
     parent: FileIdentity,
-    candidate: FileIdentity,
+    candidate: Option<FileIdentity>,
     destination: RelativeComponent,
     cleanup: DirectoryCleanupEvidence,
 }
@@ -52,7 +56,12 @@ impl DirectoryPublicationRejection {
     }
 
     #[must_use]
-    pub const fn candidate_identity(&self) -> FileIdentity {
+    /// Returns the staging identity when live-object facts were established before cleanup.
+    ///
+    /// A created-but-unopened staging directory can be removed exactly on a future platform tier
+    /// without ever yielding a trustworthy identity, so callers must not require this value for a
+    /// clean terminal result.
+    pub const fn candidate_identity(&self) -> Option<FileIdentity> {
         self.candidate
     }
 
@@ -64,6 +73,47 @@ impl DirectoryPublicationRejection {
     #[must_use]
     pub const fn cleanup_evidence(&self) -> DirectoryCleanupEvidence {
         self.cleanup
+    }
+}
+
+/// A failure returned while creating a directory-publication transaction.
+///
+/// `BeforeStaging` guarantees that no staging name was created. The other variants are terminal
+/// outcomes for a staging name that was created before validation failed.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum DirectoryPublicationBeginError {
+    #[error("directory publication was rejected before staging: {0}")]
+    BeforeStaging(#[source] FsError),
+    #[error("directory publication staging was rejected and removed")]
+    RejectedClean(Box<DirectoryPublicationRejection>),
+    #[error("directory publication staging remains as a recoverable orphan")]
+    Orphaned(Box<DirectoryPublicationOrphan>),
+}
+
+impl DirectoryPublicationBeginError {
+    #[must_use]
+    pub const fn before_staging_error(&self) -> Option<&FsError> {
+        match self {
+            Self::BeforeStaging(error) => Some(error),
+            Self::RejectedClean(_) | Self::Orphaned(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn clean_rejection(&self) -> Option<&DirectoryPublicationRejection> {
+        match self {
+            Self::RejectedClean(rejection) => Some(rejection),
+            Self::BeforeStaging(_) | Self::Orphaned(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn orphan(&self) -> Option<&DirectoryPublicationOrphan> {
+        match self {
+            Self::Orphaned(orphan) => Some(orphan),
+            Self::BeforeStaging(_) | Self::RejectedClean(_) => None,
+        }
     }
 }
 
@@ -172,9 +222,39 @@ pub struct DirectoryPublicationOrphan {
     cause: DirectoryPublicationCause,
     cleanup_error: FsError,
     parent: FileIdentity,
-    staging: DirectoryCapability,
+    staging: DirectoryPublicationOrphanAuthority,
     staging_name: RelativeComponent,
     destination: RelativeComponent,
+}
+
+enum DirectoryPublicationOrphanAuthority {
+    Verified(DirectoryCapability),
+    Unverified {
+        _file: File,
+        identity: Option<FileIdentity>,
+    },
+    Unopened,
+}
+
+impl DirectoryPublicationOrphanAuthority {
+    fn directory(&self) -> Option<DirectoryCapability> {
+        match self {
+            Self::Verified(directory) => Some(directory.share()),
+            Self::Unverified { .. } | Self::Unopened => None,
+        }
+    }
+
+    fn identity(&self) -> Option<FileIdentity> {
+        match self {
+            Self::Verified(directory) => Some(directory.identity()),
+            Self::Unverified { identity, .. } => *identity,
+            Self::Unopened => None,
+        }
+    }
+
+    fn is_handle_retained(&self) -> bool {
+        !matches!(self, Self::Unopened)
+    }
 }
 
 impl DirectoryPublicationOrphan {
@@ -194,13 +274,24 @@ impl DirectoryPublicationOrphan {
     }
 
     #[must_use]
-    pub fn staging_directory(&self) -> DirectoryCapability {
-        self.staging.share()
+    /// Returns a verified staging capability when validation completed far enough to issue one.
+    ///
+    /// An opaque retained handle or a created-but-unopened name deliberately returns `None` rather
+    /// than upgrading incomplete facts into a capability.
+    pub fn staging_directory(&self) -> Option<DirectoryCapability> {
+        self.staging.directory()
     }
 
     #[must_use]
-    pub fn staging_identity(&self) -> FileIdentity {
+    /// Returns the observed staging identity when the platform established one.
+    pub fn staging_identity(&self) -> Option<FileIdentity> {
         self.staging.identity()
+    }
+
+    #[must_use]
+    /// Reports whether the orphan still owns an open handle to the created staging object.
+    pub fn staging_handle_retained(&self) -> bool {
+        self.staging.is_handle_retained()
     }
 
     /// Returns the originally allocated sibling name.
@@ -226,6 +317,7 @@ impl Debug for DirectoryPublicationOrphan {
             .field("cleanup_error", &self.cleanup_error)
             .field("parent", &self.parent)
             .field("staging_identity", &self.staging.identity())
+            .field("staging_handle_retained", &self.staging_handle_retained())
             .finish_non_exhaustive()
     }
 }
@@ -236,6 +328,31 @@ pub enum DirectoryPublicationOutcome {
     Published(DirectoryPublicationReceipt),
     RejectedClean(DirectoryPublicationRejection),
     Orphaned(DirectoryPublicationOrphan),
+}
+
+enum DirectoryPublicationFailure {
+    RejectedClean(DirectoryPublicationRejection),
+    Orphaned(DirectoryPublicationOrphan),
+}
+
+impl From<DirectoryPublicationFailure> for DirectoryPublicationOutcome {
+    fn from(failure: DirectoryPublicationFailure) -> Self {
+        match failure {
+            DirectoryPublicationFailure::RejectedClean(rejection) => Self::RejectedClean(rejection),
+            DirectoryPublicationFailure::Orphaned(orphan) => Self::Orphaned(orphan),
+        }
+    }
+}
+
+impl From<DirectoryPublicationFailure> for DirectoryPublicationBeginError {
+    fn from(failure: DirectoryPublicationFailure) -> Self {
+        match failure {
+            DirectoryPublicationFailure::RejectedClean(rejection) => {
+                Self::RejectedClean(Box::new(rejection))
+            }
+            DirectoryPublicationFailure::Orphaned(orphan) => Self::Orphaned(Box::new(orphan)),
+        }
+    }
 }
 
 /// Owns one unpublished same-parent directory candidate.
@@ -312,7 +429,9 @@ impl DirectoryPublicationTransaction {
     /// never claims a clean rejection when the platform cannot prove that cleanup.
     pub fn publish(self) -> DirectoryPublicationOutcome {
         if let Err(error) = self.revalidate_for_publication() {
-            return self.reject(DirectoryPublicationCause::Filesystem(error));
+            return self
+                .reject(DirectoryPublicationCause::Filesystem(error))
+                .into();
         }
         if let Err(error) = platform::publish_directory_no_replace(
             &self.parent.inner.file,
@@ -320,7 +439,9 @@ impl DirectoryPublicationTransaction {
             &self.staging_name,
             &self.destination,
         ) {
-            return self.reject(DirectoryPublicationCause::Filesystem(error));
+            return self
+                .reject(DirectoryPublicationCause::Filesystem(error))
+                .into();
         }
         self.published()
     }
@@ -330,7 +451,7 @@ impl DirectoryPublicationTransaction {
     /// A non-empty tree or a platform without exact object-bound cleanup returns `Orphaned`; this
     /// method never falls back to a name-based recursive deletion.
     pub fn abort(self) -> DirectoryPublicationOutcome {
-        self.reject(DirectoryPublicationCause::Aborted)
+        self.reject(DirectoryPublicationCause::Aborted).into()
     }
 
     fn revalidate_for_publication(&self) -> Result<(), FsError> {
@@ -412,7 +533,7 @@ impl DirectoryPublicationTransaction {
         })
     }
 
-    fn reject(self, cause: DirectoryPublicationCause) -> DirectoryPublicationOutcome {
+    fn reject(self, cause: DirectoryPublicationCause) -> DirectoryPublicationFailure {
         if Arc::strong_count(&self.staging.inner) != 1 {
             return self.orphan(
                 cause,
@@ -427,10 +548,10 @@ impl DirectoryPublicationTransaction {
                 let candidate = self.staging.identity();
                 let destination = self.destination;
                 drop(self.staging);
-                DirectoryPublicationOutcome::RejectedClean(DirectoryPublicationRejection {
+                DirectoryPublicationFailure::RejectedClean(DirectoryPublicationRejection {
                     cause,
                     parent,
-                    candidate,
+                    candidate: Some(candidate),
                     destination,
                     cleanup: DirectoryCleanupEvidence::HandleBoundEmptyDirectoryRemoved,
                 })
@@ -443,12 +564,12 @@ impl DirectoryPublicationTransaction {
         self,
         cause: DirectoryPublicationCause,
         cleanup_error: FsError,
-    ) -> DirectoryPublicationOutcome {
-        DirectoryPublicationOutcome::Orphaned(DirectoryPublicationOrphan {
+    ) -> DirectoryPublicationFailure {
+        DirectoryPublicationFailure::Orphaned(DirectoryPublicationOrphan {
             cause,
             cleanup_error,
             parent: self.parent.identity(),
-            staging: self.staging,
+            staging: DirectoryPublicationOrphanAuthority::Verified(self.staging),
             staging_name: self.staging_name,
             destination: self.destination,
         })
@@ -465,45 +586,146 @@ impl DirectoryCapability {
         &self,
         destination: &RelativeComponent,
         staging_name: &RelativeComponent,
-    ) -> Result<DirectoryPublicationTransaction, FsError> {
+    ) -> Result<DirectoryPublicationTransaction, DirectoryPublicationBeginError> {
         if self.options().rights() == CapabilityRights::ReadOnly {
-            return Err(FsError::ReadOnlyCapability {
-                operation: FsOperation::BeginDirectoryPublication,
-            });
+            return Err(DirectoryPublicationBeginError::BeforeStaging(
+                FsError::ReadOnlyCapability {
+                    operation: FsOperation::BeginDirectoryPublication,
+                },
+            ));
         }
         if destination == staging_name {
-            return Err(FsError::PublicationNamesConflict);
+            return Err(DirectoryPublicationBeginError::BeforeStaging(
+                FsError::PublicationNamesConflict,
+            ));
         }
 
         let proof = platform::directory_publication_proof(
             &self.inner.file,
             self.options().trust(),
             FsOperation::BeginDirectoryPublication,
-        )?;
+        )
+        .map_err(DirectoryPublicationBeginError::BeforeStaging)?;
         if platform::child_exists(
             &self.inner.file,
             destination,
             FsOperation::BeginDirectoryPublication,
-        )? {
-            return Err(FsError::TargetStateMismatch);
+        )
+        .map_err(DirectoryPublicationBeginError::BeforeStaging)?
+        {
+            return Err(DirectoryPublicationBeginError::BeforeStaging(
+                FsError::TargetStateMismatch,
+            ));
         }
 
-        let staging = self.create_child_directory(staging_name)?;
-        platform::validate_directory_publication_topology(
-            &staging.inner.file,
-            proof,
-            FsOperation::BeginDirectoryPublication,
-        )
-        .map_err(|error| {
-            FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error)
-        })?;
-        Ok(DirectoryPublicationTransaction {
+        let staging = match self
+            .create_child_directory_retaining_unverified(staging_name)
+            .map_err(DirectoryPublicationBeginError::BeforeStaging)?
+        {
+            CreatedDirectoryChild::Verified(staging) => staging,
+            CreatedDirectoryChild::CreatedButUnopened { error } => {
+                return Err(orphan_unopened_staging(
+                    self,
+                    staging_name.clone(),
+                    destination.clone(),
+                    error,
+                ));
+            }
+            CreatedDirectoryChild::Unverified {
+                file,
+                identity,
+                error,
+            } => {
+                return Err(reject_unverified_staging(
+                    self,
+                    file,
+                    identity,
+                    staging_name.clone(),
+                    destination.clone(),
+                    error,
+                ));
+            }
+        };
+        let transaction = DirectoryPublicationTransaction {
             parent: self.share(),
             staging,
             staging_name: staging_name.clone(),
             destination: destination.clone(),
             proof,
-        })
+        };
+        if let Err(error) = platform::validate_directory_publication_topology(
+            &transaction.staging.inner.file,
+            proof,
+            FsOperation::BeginDirectoryPublication,
+        ) {
+            return Err(transaction
+                .reject(DirectoryPublicationCause::Filesystem(
+                    FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error),
+                ))
+                .into());
+        }
+        Ok(transaction)
+    }
+}
+
+fn orphan_unopened_staging(
+    parent: &DirectoryCapability,
+    staging_name: RelativeComponent,
+    destination: RelativeComponent,
+    open_error: FsError,
+) -> DirectoryPublicationBeginError {
+    DirectoryPublicationBeginError::Orphaned(Box::new(DirectoryPublicationOrphan {
+        cause: DirectoryPublicationCause::Filesystem(FsError::exclusive_child_unverified(
+            FsOperation::CreateDirectory,
+            open_error,
+        )),
+        cleanup_error: FsError::Unproven {
+            operation: FsOperation::RemoveDirectory,
+            proof: "the created staging directory could not be reopened for exact cleanup",
+        },
+        parent: parent.identity(),
+        staging: DirectoryPublicationOrphanAuthority::Unopened,
+        staging_name,
+        destination,
+    }))
+}
+
+fn reject_unverified_staging(
+    parent: &DirectoryCapability,
+    file: File,
+    identity: Option<FileIdentity>,
+    staging_name: RelativeComponent,
+    destination: RelativeComponent,
+    validation_error: FsError,
+) -> DirectoryPublicationBeginError {
+    let cause = DirectoryPublicationCause::Filesystem(FsError::exclusive_child_unverified(
+        FsOperation::CreateDirectory,
+        validation_error,
+    ));
+    match platform::discard_directory_exact(&file) {
+        Ok(()) => {
+            drop(file);
+            DirectoryPublicationBeginError::RejectedClean(Box::new(DirectoryPublicationRejection {
+                cause,
+                parent: parent.identity(),
+                candidate: identity,
+                destination,
+                cleanup: DirectoryCleanupEvidence::HandleBoundEmptyDirectoryRemoved,
+            }))
+        }
+        Err(cleanup_error) => {
+            DirectoryPublicationBeginError::Orphaned(Box::new(DirectoryPublicationOrphan {
+                cause,
+                cleanup_error,
+                parent: parent.identity(),
+                staging: DirectoryPublicationOrphanAuthority::Unverified {
+                    _file: file,
+                    identity,
+                },
+                staging_name,
+                destination,
+            }))
+        }
     }
 }
 
@@ -642,9 +864,11 @@ mod tests {
                 &component("published"),
                 &component(".published-staging")
             ),
-            Err(FsError::ReadOnlyCapability {
-                operation: FsOperation::BeginDirectoryPublication
-            })
+            Err(DirectoryPublicationBeginError::BeforeStaging(
+                FsError::ReadOnlyCapability {
+                    operation: FsOperation::BeginDirectoryPublication
+                }
+            ))
         ));
         assert!(!root.path().join(".published-staging").exists());
     }
@@ -656,7 +880,9 @@ mod tests {
 
         assert!(matches!(
             parent.begin_directory_publication(&component("same"), &component("same")),
-            Err(FsError::PublicationNamesConflict)
+            Err(DirectoryPublicationBeginError::BeforeStaging(
+                FsError::PublicationNamesConflict
+            ))
         ));
         std::fs::write(root.path().join("published"), b"existing").unwrap();
         let error = with_support(supported_test_tier(), || {
@@ -667,7 +893,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(matches!(error, FsError::TargetStateMismatch));
+        assert!(matches!(
+            before_staging_error(&error),
+            FsError::TargetStateMismatch
+        ));
         assert!(!root.path().join(".published-staging").exists());
     }
 
@@ -683,7 +912,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(matches!(error, FsError::Unsupported { .. }));
+        assert!(matches!(
+            before_staging_error(&error),
+            FsError::Unsupported { .. }
+        ));
         assert!(!root.path().join(".published-staging").exists());
     }
 
@@ -699,7 +931,10 @@ mod tests {
         })
         .unwrap_err();
 
-        assert!(matches!(error, FsError::Unproven { .. }));
+        assert!(matches!(
+            before_staging_error(&error),
+            FsError::Unproven { .. }
+        ));
         assert!(!root.path().join(".published-staging").exists());
     }
 
@@ -743,7 +978,7 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(
-            error,
+            before_staging_error(&error),
             FsError::AlreadyExists {
                 operation: FsOperation::CreateDirectory
             }
@@ -751,8 +986,9 @@ mod tests {
         drop(first);
     }
 
+    #[cfg(any(windows, target_os = "linux"))]
     #[test]
-    fn invalid_created_directory_facts_report_a_recoverable_orphan() {
+    fn invalid_created_directory_facts_return_a_terminal_staging_outcome() {
         let root = TestRoot::new();
         let parent = read_write_parent(&root);
         for facts in [
@@ -772,17 +1008,124 @@ mod tests {
             .unwrap_err();
 
             assert!(matches!(
-                error,
-                FsError::ExclusiveChildUnverified {
+                begin_terminal_cause(&error),
+                DirectoryPublicationCause::Filesystem(FsError::ExclusiveChildUnverified {
                     operation: FsOperation::CreateDirectory,
                     ..
-                }
+                })
             ));
-            assert!(
-                root.path()
-                    .join(staging_component_for_test(&staging_name))
-                    .exists()
-            );
+            let staging_path = root.path().join(staging_component_for_test(&staging_name));
+            #[cfg(windows)]
+            {
+                let DirectoryPublicationBeginError::RejectedClean(rejection) = error else {
+                    panic!("Windows must remove invalid empty staging exactly")
+                };
+                assert_eq!(rejection.parent_identity(), parent.identity());
+                assert!(rejection.candidate_identity().is_some());
+                assert!(!staging_path.exists());
+            }
+            #[cfg(target_os = "linux")]
+            {
+                let DirectoryPublicationBeginError::Orphaned(orphan) = error else {
+                    panic!("Linux must retain invalid staging as an opaque orphan")
+                };
+                assert!(orphan.staging_directory().is_none());
+                assert!(orphan.staging_identity().is_some());
+                assert!(orphan.staging_handle_retained());
+                assert!(staging_path.exists());
+                drop(orphan);
+                assert!(staging_path.exists());
+            }
+        }
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn created_but_unopened_staging_is_never_reported_as_before_staging() {
+        let root = TestRoot::new();
+        let parent = read_write_parent(&root);
+        let staging_name = component(".published-staging-unopened");
+        let error = with_support(supported_test_tier(), || {
+            platform::with_test_directory_creation_post_mutation_error(
+                FsError::Unproven {
+                    operation: FsOperation::OpenDirectory,
+                    proof: "injected post-mkdir open failure",
+                },
+                || parent.begin_directory_publication(&component("published"), &staging_name),
+            )
+        })
+        .unwrap_err();
+
+        let DirectoryPublicationBeginError::Orphaned(orphan) = error else {
+            panic!("created but unopened staging must remain an explicit orphan")
+        };
+        assert!(matches!(
+            orphan.cause(),
+            DirectoryPublicationCause::Filesystem(FsError::ExclusiveChildUnverified {
+                operation: FsOperation::CreateDirectory,
+                ..
+            })
+        ));
+        assert!(matches!(
+            orphan.cleanup_error(),
+            FsError::Unproven {
+                operation: FsOperation::RemoveDirectory,
+                ..
+            }
+        ));
+        assert!(orphan.staging_directory().is_none());
+        assert_eq!(orphan.staging_identity(), None);
+        assert!(!orphan.staging_handle_retained());
+        assert!(!root.path().join("published").exists());
+        assert!(
+            root.path()
+                .join(staging_component_for_test(&staging_name))
+                .exists()
+        );
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn topology_failure_after_creation_returns_a_terminal_staging_outcome() {
+        let root = TestRoot::new();
+        let parent = read_write_parent(&root);
+        let staging_name = component(".published-staging-topology-rejection");
+        let error = with_support(supported_test_tier(), || {
+            platform::with_test_directory_publication_topology_error(
+                FsError::Unproven {
+                    operation: FsOperation::BeginDirectoryPublication,
+                    proof: "injected post-create topology failure",
+                },
+                || parent.begin_directory_publication(&component("published"), &staging_name),
+            )
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            begin_terminal_cause(&error),
+            DirectoryPublicationCause::Filesystem(FsError::ExclusiveChildUnverified {
+                operation: FsOperation::CreateDirectory,
+                ..
+            })
+        ));
+        let staging_path = root.path().join(staging_component_for_test(&staging_name));
+        #[cfg(windows)]
+        {
+            let DirectoryPublicationBeginError::RejectedClean(rejection) = error else {
+                panic!("Windows must remove rejected empty staging exactly")
+            };
+            assert!(rejection.candidate_identity().is_some());
+            assert!(!staging_path.exists());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let DirectoryPublicationBeginError::Orphaned(orphan) = error else {
+                panic!("Linux must retain rejected staging as a verified orphan")
+            };
+            assert!(orphan.staging_directory().is_some());
+            assert!(orphan.staging_identity().is_some());
+            assert!(orphan.staging_handle_retained());
+            assert!(staging_path.exists());
         }
     }
 
@@ -959,6 +1302,7 @@ mod tests {
                 panic!("Windows empty-directory cleanup should be exact");
             };
             assert_eq!(rejection.parent_identity(), parent.identity());
+            assert!(rejection.candidate_identity().is_some());
             assert_eq!(
                 rejection.cleanup_evidence(),
                 DirectoryCleanupEvidence::HandleBoundEmptyDirectoryRemoved
@@ -1036,6 +1380,7 @@ mod tests {
         assert_eq!(
             orphan
                 .staging_directory()
+                .expect("validated orphan must retain a directory capability")
                 .open_child_file(&component("member.bin"))
                 .unwrap()
                 .read_to_end_bounded(64)
@@ -1293,6 +1638,22 @@ mod tests {
                 panic!("expected rejection, got publication receipt {receipt:?}")
             }
         }
+    }
+
+    fn begin_terminal_cause(error: &DirectoryPublicationBeginError) -> &DirectoryPublicationCause {
+        match error {
+            DirectoryPublicationBeginError::RejectedClean(rejection) => rejection.cause(),
+            DirectoryPublicationBeginError::Orphaned(orphan) => orphan.cause(),
+            DirectoryPublicationBeginError::BeforeStaging(error) => {
+                panic!("expected a post-mutation terminal failure, got {error}")
+            }
+        }
+    }
+
+    fn before_staging_error(error: &DirectoryPublicationBeginError) -> &FsError {
+        error
+            .before_staging_error()
+            .unwrap_or_else(|| panic!("expected a pre-mutation failure, got {error:?}"))
     }
 
     fn assert_terminal_filesystem_error(

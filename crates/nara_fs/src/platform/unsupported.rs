@@ -81,7 +81,7 @@ pub(crate) fn create_directory_exclusive(
     _parent: &File,
     _component: &RelativeComponent,
     _trust: TrustMode,
-) -> Result<File, FsError> {
+) -> Result<super::DirectoryCreation, FsError> {
     unsupported(FsOperation::CreateDirectory)
 }
 

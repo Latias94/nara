@@ -86,6 +86,18 @@ pub struct DirectoryCapability {
     pub(crate) inner: Arc<DirectoryInner>,
 }
 
+pub(crate) enum CreatedDirectoryChild {
+    Verified(DirectoryCapability),
+    CreatedButUnopened {
+        error: FsError,
+    },
+    Unverified {
+        file: File,
+        identity: Option<FileIdentity>,
+        error: FsError,
+    },
+}
+
 impl DirectoryCapability {
     /// Imports a directory handle issued by trusted host code.
     ///
@@ -261,18 +273,57 @@ impl DirectoryCapability {
     /// before mutation. The directory-publication transaction admits that weaker operation only in
     /// its cooperative local-writer tier.
     pub fn create_child_directory(&self, name: &RelativeComponent) -> Result<Self, FsError> {
+        match self.create_child_directory_retaining_unverified(name)? {
+            CreatedDirectoryChild::Verified(directory) => Ok(directory),
+            CreatedDirectoryChild::CreatedButUnopened { error }
+            | CreatedDirectoryChild::Unverified { error, .. } => Err(
+                FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error),
+            ),
+        }
+    }
+
+    pub(crate) fn create_child_directory_retaining_unverified(
+        &self,
+        name: &RelativeComponent,
+    ) -> Result<CreatedDirectoryChild, FsError> {
         self.ensure_write(FsOperation::CreateDirectory)?;
-        let file =
-            platform::create_directory_exclusive(&self.inner.file, name, self.inner.options.trust)?;
-        let facts = platform::facts(&file).map_err(|error| {
-            FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error)
-        })?;
-        validate_directory_facts(&self.inner, facts).map_err(|error| {
-            FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error)
-        })?;
-        Ok(Self {
+        let file = match platform::create_directory_exclusive(
+            &self.inner.file,
+            name,
+            self.inner.options.trust,
+        )? {
+            platform::DirectoryCreation::Opened(file) => file,
+            platform::DirectoryCreation::CreatedButUnopened(error) => {
+                return Ok(CreatedDirectoryChild::CreatedButUnopened { error });
+            }
+        };
+        let facts = match platform::facts(&file) {
+            Ok(facts) => facts,
+            Err(error) => {
+                return Ok(CreatedDirectoryChild::Unverified {
+                    file,
+                    identity: None,
+                    error,
+                });
+            }
+        };
+        let identity = facts.identity_proven.then(|| {
+            FileIdentity::new(
+                self.inner.identity.session(),
+                self.inner.options.generation,
+                facts.identity,
+            )
+        });
+        if let Err(error) = validate_directory_facts(&self.inner, facts) {
+            return Ok(CreatedDirectoryChild::Unverified {
+                file,
+                identity,
+                error,
+            });
+        }
+        Ok(CreatedDirectoryChild::Verified(Self {
             inner: self.opened_directory_inner(file, facts),
-        })
+        }))
     }
 
     /// Creates one direct child regular file without overwrite.

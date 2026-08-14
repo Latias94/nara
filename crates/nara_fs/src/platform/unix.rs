@@ -201,7 +201,7 @@ pub(crate) fn create_directory_exclusive(
     parent: &File,
     component: &RelativeComponent,
     trust: TrustMode,
-) -> Result<File, FsError> {
+) -> Result<super::DirectoryCreation, FsError> {
     if trust.is_strict() {
         return Err(FsError::Unproven {
             operation: FsOperation::CreateDirectory,
@@ -221,8 +221,10 @@ pub(crate) fn create_directory_exclusive(
         }
         Err(error) => return Err(super::rustix_io(FsOperation::CreateDirectory, error)),
     }
-    open_directory(parent, component, false)
-        .map_err(|error| FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error))
+    Ok(match open_directory(parent, component, false) {
+        Ok(file) => super::DirectoryCreation::Opened(file),
+        Err(error) => super::DirectoryCreation::CreatedButUnopened(error),
+    })
 }
 
 pub(crate) fn create_file_exclusive(

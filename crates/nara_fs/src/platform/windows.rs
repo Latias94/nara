@@ -198,7 +198,7 @@ pub(crate) fn create_directory_exclusive(
     parent: &File,
     component: &RelativeComponent,
     _trust: TrustMode,
-) -> Result<File, FsError> {
+) -> Result<super::DirectoryCreation, FsError> {
     nt_open(
         parent,
         component,
@@ -212,6 +212,7 @@ pub(crate) fn create_directory_exclusive(
         FILE_DIRECTORY_FILE,
         FsOperation::CreateDirectory,
     )
+    .map(super::DirectoryCreation::Opened)
 }
 
 pub(crate) fn create_file_exclusive(

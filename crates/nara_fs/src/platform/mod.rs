@@ -30,6 +30,14 @@ thread_local! {
     static TEST_FACTS_OVERRIDE: RefCell<Option<FileFacts>> = const { RefCell::new(None) };
     static TEST_DIRECTORY_PUBLICATION_SUPPORT_OVERRIDE: RefCell<Option<DirectoryPublicationSupport>> = const { RefCell::new(None) };
     static TEST_DIRECTORY_PUBLICATION_PLATFORM_IDENTITY_OVERRIDE: RefCell<Option<u64>> = const { RefCell::new(None) };
+    static TEST_DIRECTORY_PUBLICATION_TOPOLOGY_ERROR_OVERRIDE: RefCell<Option<FsError>> = const { RefCell::new(None) };
+    static TEST_DIRECTORY_CREATION_POST_MUTATION_ERROR_OVERRIDE: RefCell<Option<FsError>> = const { RefCell::new(None) };
+}
+
+pub(crate) enum DirectoryCreation {
+    Opened(File),
+    #[cfg_attr(not(unix), allow(dead_code))]
+    CreatedButUnopened(FsError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,6 +230,13 @@ pub(crate) fn validate_directory_publication_topology(
     proof: DirectoryPublicationProof,
     operation: crate::FsOperation,
 ) -> Result<(), FsError> {
+    #[cfg(test)]
+    if let Some(error) =
+        TEST_DIRECTORY_PUBLICATION_TOPOLOGY_ERROR_OVERRIDE.with(|slot| slot.borrow_mut().take())
+    {
+        return Err(error);
+    }
+
     let current = imp::directory_publication_platform_identity(file, operation)?;
     if current != proof.platform_identity {
         return Err(FsError::Unproven {
@@ -230,6 +245,41 @@ pub(crate) fn validate_directory_publication_topology(
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_directory_publication_topology_error<T>(
+    error: FsError,
+    operation: impl FnOnce() -> T,
+) -> T {
+    struct OverrideGuard;
+
+    impl Drop for OverrideGuard {
+        fn drop(&mut self) {
+            TEST_DIRECTORY_PUBLICATION_TOPOLOGY_ERROR_OVERRIDE.with(|slot| {
+                slot.borrow_mut().take();
+            });
+        }
+    }
+
+    TEST_DIRECTORY_PUBLICATION_TOPOLOGY_ERROR_OVERRIDE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        assert!(
+            slot.is_none(),
+            "nested directory-publication topology-error overrides are forbidden"
+        );
+        *slot = Some(error);
+    });
+    let guard = OverrideGuard;
+    let result = operation();
+    TEST_DIRECTORY_PUBLICATION_TOPOLOGY_ERROR_OVERRIDE.with(|slot| {
+        assert!(
+            slot.borrow().is_none(),
+            "the public directory-publication operation did not consume the topology-error override"
+        );
+    });
+    drop(guard);
+    result
 }
 
 #[cfg(test)]
@@ -306,8 +356,50 @@ pub(crate) fn create_directory_exclusive(
     parent: &File,
     component: &RelativeComponent,
     trust: TrustMode,
-) -> Result<File, FsError> {
-    imp::create_directory_exclusive(parent, component, trust)
+) -> Result<DirectoryCreation, FsError> {
+    let creation = imp::create_directory_exclusive(parent, component, trust)?;
+    #[cfg(test)]
+    if let Some(error) =
+        TEST_DIRECTORY_CREATION_POST_MUTATION_ERROR_OVERRIDE.with(|slot| slot.borrow_mut().take())
+    {
+        return Ok(DirectoryCreation::CreatedButUnopened(error));
+    }
+    Ok(creation)
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_directory_creation_post_mutation_error<T>(
+    error: FsError,
+    operation: impl FnOnce() -> T,
+) -> T {
+    struct OverrideGuard;
+
+    impl Drop for OverrideGuard {
+        fn drop(&mut self) {
+            TEST_DIRECTORY_CREATION_POST_MUTATION_ERROR_OVERRIDE.with(|slot| {
+                slot.borrow_mut().take();
+            });
+        }
+    }
+
+    TEST_DIRECTORY_CREATION_POST_MUTATION_ERROR_OVERRIDE.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        assert!(
+            slot.is_none(),
+            "nested post-mutation directory-creation overrides are forbidden"
+        );
+        *slot = Some(error);
+    });
+    let guard = OverrideGuard;
+    let result = operation();
+    TEST_DIRECTORY_CREATION_POST_MUTATION_ERROR_OVERRIDE.with(|slot| {
+        assert!(
+            slot.borrow().is_none(),
+            "the directory-creation operation did not consume the post-mutation override"
+        );
+    });
+    drop(guard);
+    result
 }
 
 pub(crate) fn create_file_exclusive(
