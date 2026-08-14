@@ -14,6 +14,18 @@ fn accepts_only_canonical_relative_components() {
 }
 
 #[test]
+fn assembles_prevalidated_components_without_reinterpreting_separators() {
+    let path = RelativePath::from_components([
+        RelativeComponent::new("target").unwrap(),
+        RelativeComponent::new("generated-project").unwrap(),
+    ])
+    .unwrap();
+
+    assert_eq!(path.len(), 2);
+    assert!(RelativePath::from_components([]).is_err());
+}
+
+#[test]
 fn rejects_lexical_traversal_and_ambiguous_segments() {
     for invalid in [
         "",

@@ -78,6 +78,36 @@ impl RelativePath {
         Ok(Self { components })
     }
 
+    /// Builds one logical path from already separated, validated components.
+    ///
+    /// Host adapters use this constructor after native path APIs have established component
+    /// boundaries. It never reinterprets platform separators inside a component.
+    pub fn from_components(
+        components: impl IntoIterator<Item = RelativeComponent>,
+    ) -> Result<Self, PathValidationError> {
+        let mut validated = Vec::new();
+        let mut path_units = 0_usize;
+        for component in components {
+            if validated.len() >= MAX_COMPONENTS {
+                return Err(PathValidationError::PathTooLong);
+            }
+            path_units = path_units
+                .checked_add(usize::from(!validated.is_empty()))
+                .and_then(|total| total.checked_add(unit_len(component.as_os_str())))
+                .ok_or(PathValidationError::PathTooLong)?;
+            if path_units > MAX_PATH_UNITS {
+                return Err(PathValidationError::PathTooLong);
+            }
+            validated.push(component);
+        }
+        if validated.is_empty() {
+            return Err(PathValidationError::Empty);
+        }
+        Ok(Self {
+            components: validated,
+        })
+    }
+
     #[must_use]
     pub fn len(&self) -> usize {
         self.components.len()

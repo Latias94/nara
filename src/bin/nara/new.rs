@@ -1,7 +1,10 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs, io,
+    path::{Component, Path, PathBuf},
+};
 
 use nara::{
-    fs::{DirectoryCapability, PathValidationError, RelativePath},
+    fs::{DirectoryCapability, PathValidationError, RelativeComponent, RelativePath},
     project_workflow::{
         LocalDependencyParent, NaraDependencySource, NaraDependencySourceError,
         ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest, ProjectSlug,
@@ -70,8 +73,8 @@ fn prepare_local_dependency(
     let (publication_parent, relation) = if relative_parent.as_os_str().is_empty() {
         (checkout.share(), LocalDependencyParent::CheckoutRoot)
     } else {
-        let relative_parent =
-            RelativePath::new(relative_parent).map_err(NewCommandError::InvalidParentRelation)?;
+        let relative_parent = logical_relative_path(relative_parent)
+            .map_err(NewCommandError::InvalidParentRelation)?;
         let publication_parent = checkout
             .open_directory(&relative_parent)
             .map_err(HostDirectoryError::Capability)?;
@@ -82,6 +85,21 @@ fn prepare_local_dependency(
     };
     let dependency = NaraDependencySource::local(checkout, relation);
     Ok((publication_parent, dependency))
+}
+
+fn logical_relative_path(path: &Path) -> Result<RelativePath, PathValidationError> {
+    let components = path
+        .components()
+        .map(|component| match component {
+            Component::Normal(value) => RelativeComponent::new(value),
+            Component::CurDir => Err(PathValidationError::CurrentDirectory),
+            Component::ParentDir => Err(PathValidationError::ParentTraversal),
+            Component::RootDir | Component::Prefix(_) => {
+                Err(PathValidationError::AbsoluteOrPrefixed)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    RelativePath::from_components(components)
 }
 
 fn resolve_parent(parent: PathBuf) -> Result<DirectoryCapability, NewCommandError> {
