@@ -10,8 +10,8 @@ an index, not another source of architecture decisions.
    gaps.
 3. The [Fresh Project, Source-Carrying Export, and Explicit Repair
    plan](../plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md) is the
-   only active implementation plan, with FPER-U0 as its sole active unit under reviewed registration
-   `6e932c817c8c46598a9dcb3b82b41d46`. The completed [Capability Directory Publication Foundation
+   only active implementation plan, with FPER-U1 as its sole active unit under reviewed registration
+   `3227ab58386f457496c02fb0cfc04771`. The completed [Capability Directory Publication Foundation
    plan](../plans/2026-08-14-001-refactor-capability-directory-publication-foundation-plan.md)
    remains immutable predecessor evidence. Completed Runtime UI and focused correction plans remain
    immutable lineage evidence; the [UI program roadmap](../plans/ui-program-roadmap.md) is navigation
