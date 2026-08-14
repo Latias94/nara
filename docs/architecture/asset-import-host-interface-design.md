@@ -623,7 +623,7 @@ The composite publication proof preserves every independent ADR 0070 axis:
 |---|---|---|
 | `ResolutionTier` | Exact admitted tier; `CooperativeTrusted` may be policy-accepted | `HandleBound` or another explicitly proven strict tier |
 | Parent authorization | Exact `ParentAuthorizationTier` from the replace receipt | `HandleBound` or equivalent strict proof |
-| Replace source binding | Exact `ReplaceSourceBinding`, including `NameBound` when that is all the platform proves | `HandleBound` or a separately admitted equivalent |
+| Replace source binding | Exact `PublicationSourceBinding`, including `NameBound` when that is all the platform proves | `HandleBound` or a separately admitted equivalent |
 | Publication identity | Exact `PublicationIdentityEvidence` from the replace receipt | Handle-bound candidate identity or an admitted equivalent |
 | Publication atomicity | `AtomicNameSwitch` | `AtomicNameSwitch` |
 | Filesystem conflict protection | Preserve the exact value, including current `DetectOnly` | `StrongCompareAndSwap`, unless separate root-exclusion evidence supplies the strict conflict guarantee |

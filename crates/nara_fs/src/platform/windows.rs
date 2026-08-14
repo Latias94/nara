@@ -17,6 +17,7 @@ use windows_sys::Wdk::{
         FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation,
         FileRenameInformationEx, NtCreateFile, NtQueryVolumeInformationFile, NtSetInformationFile,
     },
+    System::SystemServices::RtlGetVersion,
 };
 use windows_sys::Win32::{
     Foundation::{RtlNtStatusToDosError, UNICODE_STRING},
@@ -31,12 +32,14 @@ use windows_sys::Win32::{
         LockFileEx, SYNCHRONIZE, SetFileInformationByHandle, UnlockFileEx,
     },
     System::IO::{IO_STATUS_BLOCK, OVERLAPPED},
+    System::SystemInformation::OSVERSIONINFOW,
 };
 
 use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
     LockMode, NativeFileIdentity, ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus,
-    PublicationAtomicity, RelativeComponent, ReplaceSourceBinding, ResolutionTier,
+    PublicationAtomicity, PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
+    platform::DirectoryPublicationSupport,
 };
 
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
@@ -58,7 +61,7 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         replace_parent: ParentAuthorizationTier::HandleBound,
         publication: PublicationAtomicity::AtomicNameSwitch,
         conflict: ConflictProtection::DetectOnly,
-        replace_source: ReplaceSourceBinding::HandleBound,
+        replace_source: PublicationSourceBinding::HandleBound,
         file_sync: FileSyncTier::DataAndMetadata,
         directory_sync: DirectorySyncTier::Unsupported,
         advisory_lock: ProofStatus::Proven,
@@ -70,6 +73,28 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
 
 pub(crate) const fn resolution_tier(_file: &File) -> ResolutionTier {
     ResolutionTier::HandleBound
+}
+
+pub(crate) fn directory_publication_support(file: &File) -> DirectoryPublicationSupport {
+    if !cfg!(target_arch = "x86_64") {
+        return DirectoryPublicationSupport::Unsupported;
+    }
+    match windows_1809_or_later() {
+        Some(true) => {}
+        Some(false) => return DirectoryPublicationSupport::Unsupported,
+        None => return DirectoryPublicationSupport::Unproven,
+    }
+    match volume_semantics(file) {
+        WindowsVolumeSemantics::LocalNtfs => {
+            DirectoryPublicationSupport::Proven(PublicationSourceBinding::HandleBound)
+        }
+        WindowsVolumeSemantics::LocalRefs | WindowsVolumeSemantics::OtherLocal => {
+            DirectoryPublicationSupport::Unsupported
+        }
+        WindowsVolumeSemantics::Remote | WindowsVolumeSemantics::Unproven => {
+            DirectoryPublicationSupport::Unproven
+        }
+    }
 }
 
 pub(crate) fn facts(file: &File) -> Result<FileFacts, FsError> {
@@ -99,7 +124,10 @@ pub(crate) fn facts(file: &File) -> Result<FileFacts, FsError> {
         kind,
         link_count: u64::from(standard.NumberOfLinks),
         reparse_tag,
-        identity_proven: local_volume_is_proven(file)?,
+        identity_proven: matches!(
+            volume_semantics(file),
+            WindowsVolumeSemantics::LocalNtfs | WindowsVolumeSemantics::LocalRefs
+        ),
     })
 }
 
@@ -133,9 +161,41 @@ pub(crate) fn open_file(
     )
 }
 
+pub(crate) fn open_child(parent: &File, component: &RelativeComponent) -> Result<File, FsError> {
+    nt_open(
+        parent,
+        component,
+        FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_OPEN,
+        0,
+        FsOperation::BeginDirectoryPublication,
+    )
+}
+
+pub(crate) fn create_directory_exclusive(
+    parent: &File,
+    component: &RelativeComponent,
+    _trust: TrustMode,
+) -> Result<File, FsError> {
+    nt_open(
+        parent,
+        component,
+        FILE_LIST_DIRECTORY
+            | FILE_TRAVERSE
+            | FILE_READ_ATTRIBUTES
+            | FILE_WRITE_ATTRIBUTES
+            | DELETE
+            | SYNCHRONIZE,
+        FILE_CREATE,
+        FILE_DIRECTORY_FILE,
+        FsOperation::CreateDirectory,
+    )
+}
+
 pub(crate) fn create_file_exclusive(
     parent: &File,
     component: &RelativeComponent,
+    operation: FsOperation,
 ) -> Result<File, FsError> {
     nt_open(
         parent,
@@ -150,7 +210,7 @@ pub(crate) fn create_file_exclusive(
             | SYNCHRONIZE,
         FILE_CREATE,
         FILE_NON_DIRECTORY_FILE,
-        FsOperation::CreateTemporary,
+        operation,
     )
 }
 
@@ -403,7 +463,16 @@ fn classify_identity_query_failure(query: IdentityQuery) -> FsError {
     }
 }
 
-fn local_volume_is_proven(file: &File) -> Result<bool, FsError> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WindowsVolumeSemantics {
+    LocalNtfs,
+    LocalRefs,
+    OtherLocal,
+    Remote,
+    Unproven,
+}
+
+fn volume_semantics(file: &File) -> WindowsVolumeSemantics {
     let mut status_block = IO_STATUS_BLOCK::default();
     let mut info = FileFsDeviceInformation::default();
     // SAFETY: `file` is live and `info` is a writable buffer matching
@@ -418,7 +487,7 @@ fn local_volume_is_proven(file: &File) -> Result<bool, FsError> {
         )
     };
     if status < 0 {
-        return Ok(false);
+        return WindowsVolumeSemantics::Unproven;
     }
     let mut filesystem_name = [0_u16; 32];
     // SAFETY: `file` is live, optional output pointers are null, and
@@ -436,21 +505,53 @@ fn local_volume_is_proven(file: &File) -> Result<bool, FsError> {
         )
     };
     if succeeded == 0 {
-        return Ok(false);
+        return WindowsVolumeSemantics::Unproven;
     }
     let length = filesystem_name
         .iter()
         .position(|unit| *unit == 0)
         .unwrap_or(filesystem_name.len());
-    Ok(volume_identity_is_proven(
-        info.characteristics,
-        &filesystem_name[..length],
-    ))
+    classify_volume_semantics(info.characteristics, &filesystem_name[..length])
 }
 
+#[cfg(test)]
 fn volume_identity_is_proven(characteristics: u32, filesystem_name: &[u16]) -> bool {
-    characteristics & FILE_REMOTE_DEVICE == 0
-        && (ascii_name_eq(filesystem_name, b"NTFS") || ascii_name_eq(filesystem_name, b"REFS"))
+    matches!(
+        classify_volume_semantics(characteristics, filesystem_name),
+        WindowsVolumeSemantics::LocalNtfs | WindowsVolumeSemantics::LocalRefs
+    )
+}
+
+fn classify_volume_semantics(
+    characteristics: u32,
+    filesystem_name: &[u16],
+) -> WindowsVolumeSemantics {
+    if characteristics & FILE_REMOTE_DEVICE != 0 {
+        return WindowsVolumeSemantics::Remote;
+    }
+    if ascii_name_eq(filesystem_name, b"NTFS") {
+        WindowsVolumeSemantics::LocalNtfs
+    } else if ascii_name_eq(filesystem_name, b"REFS") {
+        WindowsVolumeSemantics::LocalRefs
+    } else {
+        WindowsVolumeSemantics::OtherLocal
+    }
+}
+
+fn windows_1809_or_later() -> Option<bool> {
+    let mut version = OSVERSIONINFOW {
+        dwOSVersionInfoSize: size_of::<OSVERSIONINFOW>() as u32,
+        ..OSVERSIONINFOW::default()
+    };
+    // SAFETY: `version` has the required size field and remains writable for the call.
+    let status = unsafe { RtlGetVersion(&mut version) };
+    if status < 0 {
+        return None;
+    }
+    Some(
+        version.dwMajorVersion > 10
+            || (version.dwMajorVersion == 10 && version.dwBuildNumber >= 17_763),
+    )
 }
 
 fn ascii_name_eq(actual: &[u16], expected: &[u8]) -> bool {
@@ -487,6 +588,18 @@ mod tests {
         assert!(volume_identity_is_proven(0, &refs));
         assert!(!volume_identity_is_proven(FILE_REMOTE_DEVICE, &ntfs));
         assert!(!volume_identity_is_proven(0, &custom));
+        assert_eq!(
+            classify_volume_semantics(0, &ntfs),
+            WindowsVolumeSemantics::LocalNtfs
+        );
+        assert_eq!(
+            classify_volume_semantics(0, &refs),
+            WindowsVolumeSemantics::LocalRefs
+        );
+        assert_eq!(
+            classify_volume_semantics(FILE_REMOTE_DEVICE, &ntfs),
+            WindowsVolumeSemantics::Remote
+        );
     }
 
     #[test]

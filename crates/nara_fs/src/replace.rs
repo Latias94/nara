@@ -6,8 +6,8 @@ use std::{
 
 use crate::{
     ConflictProtection, ContentDigest, DurabilityProgress, FileCapability, FileIdentity, FsError,
-    ParentAuthorizationTier, PublicationAtomicity, PublicationIdentityEvidence, RelativeComponent,
-    ReplaceSourceBinding, capability::DirectoryInner, platform,
+    ParentAuthorizationTier, PublicationAtomicity, PublicationIdentityEvidence,
+    PublicationSourceBinding, RelativeComponent, capability::DirectoryInner, platform,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,7 +145,7 @@ pub struct ReplaceReceipt {
     parent_authorization: ParentAuthorizationTier,
     publication: PublicationAtomicity,
     conflict: ConflictProtection,
-    source_binding: ReplaceSourceBinding,
+    source_binding: PublicationSourceBinding,
     durability: DurabilityProgress,
     written_content_digest: ContentDigest,
     published_content_digest: Option<ContentDigest>,
@@ -161,7 +161,7 @@ impl ReplaceReceipt {
         parent_authorization: ParentAuthorizationTier,
         publication: PublicationAtomicity,
         conflict: ConflictProtection,
-        source_binding: ReplaceSourceBinding,
+        source_binding: PublicationSourceBinding,
         durability: DurabilityProgress,
         written_content_digest: ContentDigest,
         published_content_digest: Option<ContentDigest>,
@@ -217,7 +217,7 @@ impl ReplaceReceipt {
     }
 
     #[must_use]
-    pub const fn source_binding(&self) -> ReplaceSourceBinding {
+    pub const fn source_binding(&self) -> PublicationSourceBinding {
         self.source_binding
     }
 

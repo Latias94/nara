@@ -3,7 +3,8 @@ use std::fs::File;
 use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileSyncTier, FsError, FsOperation, LockMode,
     ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus, PublicationAtomicity,
-    RelativeComponent, ReplaceSourceBinding, ResolutionTier,
+    PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
+    platform::DirectoryPublicationSupport,
 };
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
@@ -13,7 +14,7 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         replace_parent: ParentAuthorizationTier::Unsupported,
         publication: PublicationAtomicity::Unsupported,
         conflict: ConflictProtection::Unsupported,
-        replace_source: ReplaceSourceBinding::Unsupported,
+        replace_source: PublicationSourceBinding::Unsupported,
         file_sync: FileSyncTier::Unsupported,
         directory_sync: DirectorySyncTier::Unsupported,
         advisory_lock: ProofStatus::Unsupported,
@@ -38,6 +39,10 @@ pub(crate) const fn resolution_tier(_file: &File) -> ResolutionTier {
     ResolutionTier::Unsupported
 }
 
+pub(crate) const fn directory_publication_support(_file: &File) -> DirectoryPublicationSupport {
+    DirectoryPublicationSupport::Unsupported
+}
+
 pub(crate) fn open_directory(
     _parent: &File,
     _component: &RelativeComponent,
@@ -54,11 +59,24 @@ pub(crate) fn open_file(
     unsupported(FsOperation::OpenFile)
 }
 
+pub(crate) fn open_child(_parent: &File, _component: &RelativeComponent) -> Result<File, FsError> {
+    unsupported(FsOperation::BeginDirectoryPublication)
+}
+
+pub(crate) fn create_directory_exclusive(
+    _parent: &File,
+    _component: &RelativeComponent,
+    _trust: TrustMode,
+) -> Result<File, FsError> {
+    unsupported(FsOperation::CreateDirectory)
+}
+
 pub(crate) fn create_file_exclusive(
     _parent: &File,
     _component: &RelativeComponent,
+    operation: FsOperation,
 ) -> Result<File, FsError> {
-    unsupported(FsOperation::CreateTemporary)
+    unsupported(operation)
 }
 
 pub(crate) fn discard_temporary(

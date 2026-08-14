@@ -157,18 +157,7 @@ impl DirectoryCapability {
             )?;
             let facts = platform::facts(&file)?;
             validate_directory_facts(&self.inner, facts)?;
-            let identity = FileIdentity::new(
-                self.inner.identity.session(),
-                self.inner.options.generation,
-                facts.identity,
-            );
-            current = Arc::new(DirectoryInner {
-                file,
-                identity,
-                root_native: self.inner.root_native,
-                options: self.inner.options,
-                resolution: self.inner.resolution,
-            });
+            current = self.opened_directory_inner(file, facts);
         }
         Ok(Self { inner: current })
     }
@@ -195,17 +184,7 @@ impl DirectoryCapability {
             )?;
             let facts = platform::facts(&file)?;
             validate_directory_facts(&self.inner, facts)?;
-            current = Arc::new(DirectoryInner {
-                file,
-                identity: FileIdentity::new(
-                    self.inner.identity.session(),
-                    self.inner.options.generation,
-                    facts.identity,
-                ),
-                root_native: self.inner.root_native,
-                options: self.inner.options,
-                resolution: self.inner.resolution,
-            });
+            current = self.opened_directory_inner(file, facts);
         }
         Ok((Self { inner: current }, leaf.clone()))
     }
@@ -229,6 +208,7 @@ impl DirectoryCapability {
             ),
             Some(self.inner.identity),
             facts.link_count,
+            CapabilityRights::ReadOnly,
             self.inner.options.trust,
             self.inner.resolution,
         ))
@@ -252,17 +232,7 @@ impl DirectoryCapability {
             )?;
             let facts = platform::facts(&file)?;
             validate_directory_facts(&self.inner, facts)?;
-            parent = Arc::new(DirectoryInner {
-                file,
-                identity: FileIdentity::new(
-                    self.inner.identity.session(),
-                    self.inner.options.generation,
-                    facts.identity,
-                ),
-                root_native: self.inner.root_native,
-                options: self.inner.options,
-                resolution: self.inner.resolution,
-            });
+            parent = self.opened_directory_inner(file, facts);
             after_parent_open(index, component);
         }
 
@@ -278,6 +248,52 @@ impl DirectoryCapability {
             ),
             Some(parent.identity),
             facts.link_count,
+            CapabilityRights::ReadOnly,
+            self.inner.options.trust,
+            self.inner.resolution,
+        ))
+    }
+
+    /// Creates one direct child directory without overwrite and returns authority to the opened
+    /// child object.
+    ///
+    /// Unix creation is name-bound between `mkdirat` and opening the child, so strict trust rejects
+    /// before mutation. The directory-publication transaction admits that weaker operation only in
+    /// its cooperative local-writer tier.
+    pub fn create_child_directory(&self, name: &RelativeComponent) -> Result<Self, FsError> {
+        self.ensure_write(FsOperation::CreateDirectory)?;
+        let file =
+            platform::create_directory_exclusive(&self.inner.file, name, self.inner.options.trust)?;
+        let facts = platform::facts(&file).map_err(|error| {
+            FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error)
+        })?;
+        validate_directory_facts(&self.inner, facts).map_err(|error| {
+            FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error)
+        })?;
+        Ok(Self {
+            inner: self.opened_directory_inner(file, facts),
+        })
+    }
+
+    /// Creates one direct child regular file without overwrite.
+    pub fn create_child_file(&self, name: &RelativeComponent) -> Result<FileCapability, FsError> {
+        self.ensure_write(FsOperation::CreateFile)?;
+        let file =
+            platform::create_file_exclusive(&self.inner.file, name, FsOperation::CreateFile)?;
+        let facts = platform::facts(&file)
+            .map_err(|error| FsError::exclusive_child_unverified(FsOperation::CreateFile, error))?;
+        validate_file_facts(&self.inner, facts)
+            .map_err(|error| FsError::exclusive_child_unverified(FsOperation::CreateFile, error))?;
+        Ok(FileCapability::from_opened(
+            file,
+            FileIdentity::new(
+                self.inner.identity.session(),
+                self.inner.options.generation,
+                facts.identity,
+            ),
+            Some(self.inner.identity),
+            facts.link_count,
+            CapabilityRights::ReadWrite,
             self.inner.options.trust,
             self.inner.resolution,
         ))
@@ -285,7 +301,8 @@ impl DirectoryCapability {
 
     pub fn create_temp(&self, name: &RelativeComponent) -> Result<TemporaryFile, FsError> {
         self.ensure_write(FsOperation::CreateTemporary)?;
-        let file = platform::create_file_exclusive(&self.inner.file, name)?;
+        let file =
+            platform::create_file_exclusive(&self.inner.file, name, FsOperation::CreateTemporary)?;
         let facts = platform::facts(&file)?;
         validate_file_facts(&self.inner, facts)?;
         let file = FileCapability::from_opened(
@@ -297,6 +314,7 @@ impl DirectoryCapability {
             ),
             Some(self.inner.identity),
             facts.link_count,
+            CapabilityRights::ReadWrite,
             self.inner.options.trust,
             self.inner.resolution,
         );
@@ -319,7 +337,7 @@ impl DirectoryCapability {
         }
         let matrix = platform::capability_matrix();
         if self.inner.options.trust.is_strict()
-            && matrix.replace_source_binding() != crate::ReplaceSourceBinding::HandleBound
+            && matrix.replace_source_binding() != crate::PublicationSourceBinding::HandleBound
         {
             return Err(FsError::Unproven {
                 operation: FsOperation::Replace,
@@ -348,11 +366,11 @@ impl DirectoryCapability {
         )?;
         temporary.mark_published();
         let (observed_published, identity_evidence) = match matrix.replace_source_binding() {
-            crate::ReplaceSourceBinding::HandleBound => (
+            crate::PublicationSourceBinding::HandleBound => (
                 Some(temporary.identity()),
                 crate::PublicationIdentityEvidence::HandleBoundCandidate,
             ),
-            crate::ReplaceSourceBinding::NameBound => {
+            crate::PublicationSourceBinding::NameBound => {
                 let observed = self.inspect_optional_file(target).ok().flatten();
                 let evidence = if observed.is_some() {
                     crate::PublicationIdentityEvidence::PostPublishObserved
@@ -361,7 +379,7 @@ impl DirectoryCapability {
                 };
                 (observed, evidence)
             }
-            crate::ReplaceSourceBinding::Unsupported => {
+            crate::PublicationSourceBinding::Unsupported => {
                 (None, crate::PublicationIdentityEvidence::Unverified)
             }
         };
@@ -474,6 +492,20 @@ impl DirectoryCapability {
             return Ok(());
         }
         require_strict_resolution(self.inner.resolution, operation)
+    }
+
+    fn opened_directory_inner(&self, file: File, facts: FileFacts) -> Arc<DirectoryInner> {
+        Arc::new(DirectoryInner {
+            file,
+            identity: FileIdentity::new(
+                self.inner.identity.session(),
+                self.inner.options.generation,
+                facts.identity,
+            ),
+            root_native: self.inner.root_native,
+            options: self.inner.options,
+            resolution: self.inner.resolution,
+        })
     }
 }
 

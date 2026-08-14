@@ -54,7 +54,7 @@ pub enum ConflictProtection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ReplaceSourceBinding {
+pub enum PublicationSourceBinding {
     HandleBound,
     NameBound,
     Unsupported,
@@ -155,7 +155,7 @@ pub struct PlatformCapabilityMatrix {
     pub(crate) replace_parent: ParentAuthorizationTier,
     pub(crate) publication: PublicationAtomicity,
     pub(crate) conflict: ConflictProtection,
-    pub(crate) replace_source: ReplaceSourceBinding,
+    pub(crate) replace_source: PublicationSourceBinding,
     pub(crate) file_sync: FileSyncTier,
     pub(crate) directory_sync: DirectorySyncTier,
     pub(crate) advisory_lock: ProofStatus,
@@ -196,7 +196,7 @@ impl PlatformCapabilityMatrix {
     }
 
     #[must_use]
-    pub const fn replace_source_binding(self) -> ReplaceSourceBinding {
+    pub const fn replace_source_binding(self) -> PublicationSourceBinding {
         self.replace_source
     }
 

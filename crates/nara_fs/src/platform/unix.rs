@@ -1,13 +1,16 @@
 use std::fs::File;
+#[cfg(target_os = "linux")]
+use std::{io::Read, os::fd::AsRawFd};
 
-use rustix::fs::{FileType, FlockOperation, Mode, OFlags, fstat, fsync, openat, renameat};
+use rustix::fs::{FileType, FlockOperation, Mode, OFlags, fstat, fsync, mkdirat, openat, renameat};
 #[cfg(target_os = "linux")]
 use rustix::fs::{ResolveFlags, openat2};
 
 use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
     LockMode, NativeFileIdentity, ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus,
-    PublicationAtomicity, RelativeComponent, ReplaceSourceBinding, ResolutionTier,
+    PublicationAtomicity, PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
+    platform::DirectoryPublicationSupport,
 };
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
@@ -24,7 +27,7 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         replace_parent: ParentAuthorizationTier::HandleBound,
         publication: PublicationAtomicity::AtomicNameSwitch,
         conflict: ConflictProtection::DetectOnly,
-        replace_source: ReplaceSourceBinding::NameBound,
+        replace_source: PublicationSourceBinding::NameBound,
         file_sync: FileSyncTier::DataAndMetadata,
         directory_sync,
         advisory_lock: ProofStatus::Proven,
@@ -46,6 +49,38 @@ pub(crate) fn resolution_tier(file: &File) -> ResolutionTier {
         Ok(_) => ResolutionTier::HandleBound,
         Err(error) => resolution_error_tier(error),
     }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn directory_publication_support(file: &File) -> DirectoryPublicationSupport {
+    const EXT_MAGIC: u64 = 0x0000_EF53;
+
+    if !cfg!(target_arch = "x86_64") {
+        return DirectoryPublicationSupport::Unsupported;
+    }
+    match resolution_tier(file) {
+        ResolutionTier::HandleBound => {}
+        ResolutionTier::Unsupported => return DirectoryPublicationSupport::Unsupported,
+        _ => return DirectoryPublicationSupport::Unproven,
+    }
+    let Ok(stat) = rustix::fs::fstatfs(file) else {
+        return DirectoryPublicationSupport::Unproven;
+    };
+    if stat.f_type as u64 != EXT_MAGIC {
+        return DirectoryPublicationSupport::Unsupported;
+    }
+    match exact_mount_filesystem(file) {
+        LinuxMountFilesystem::Ext4 => {
+            DirectoryPublicationSupport::Proven(PublicationSourceBinding::NameBound)
+        }
+        LinuxMountFilesystem::Other => DirectoryPublicationSupport::Unsupported,
+        LinuxMountFilesystem::Unproven => DirectoryPublicationSupport::Unproven,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) const fn directory_publication_support(_file: &File) -> DirectoryPublicationSupport {
+    DirectoryPublicationSupport::Unsupported
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -122,9 +157,49 @@ pub(crate) fn open_file(
     )
 }
 
+pub(crate) fn open_child(parent: &File, component: &RelativeComponent) -> Result<File, FsError> {
+    #[cfg(target_os = "linux")]
+    let flags = OFlags::PATH | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    #[cfg(not(target_os = "linux"))]
+    let flags = OFlags::RDONLY | OFlags::NONBLOCK | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+
+    openat(parent, component.as_os_str(), flags, Mode::empty())
+        .map(File::from)
+        .map_err(|error| super::rustix_io(FsOperation::BeginDirectoryPublication, error))
+}
+
+pub(crate) fn create_directory_exclusive(
+    parent: &File,
+    component: &RelativeComponent,
+    trust: TrustMode,
+) -> Result<File, FsError> {
+    if trust.is_strict() {
+        return Err(FsError::Unproven {
+            operation: FsOperation::CreateDirectory,
+            proof: "Unix directory creation cannot bind mkdirat to the subsequently opened child handle under strict trust",
+        });
+    }
+    match mkdirat(
+        parent,
+        component.as_os_str(),
+        Mode::RUSR | Mode::WUSR | Mode::XUSR,
+    ) {
+        Ok(()) => {}
+        Err(error) if error == rustix::io::Errno::EXIST => {
+            return Err(FsError::AlreadyExists {
+                operation: FsOperation::CreateDirectory,
+            });
+        }
+        Err(error) => return Err(super::rustix_io(FsOperation::CreateDirectory, error)),
+    }
+    open_directory(parent, component, false)
+        .map_err(|error| FsError::exclusive_child_unverified(FsOperation::CreateDirectory, error))
+}
+
 pub(crate) fn create_file_exclusive(
     parent: &File,
     component: &RelativeComponent,
+    operation: FsOperation,
 ) -> Result<File, FsError> {
     let result = openat(
         parent,
@@ -134,10 +209,10 @@ pub(crate) fn create_file_exclusive(
     );
     match result {
         Ok(file) => Ok(File::from(file)),
-        Err(error) if error == rustix::io::Errno::EXIST => Err(FsError::AlreadyExists {
-            operation: FsOperation::CreateTemporary,
-        }),
-        Err(error) => Err(super::rustix_io(FsOperation::CreateTemporary, error)),
+        Err(error) if error == rustix::io::Errno::EXIST => {
+            Err(FsError::AlreadyExists { operation })
+        }
+        Err(error) => Err(super::rustix_io(operation, error)),
     }
 }
 
@@ -284,6 +359,67 @@ fn strict_open_error(operation: FsOperation, error: rustix::io::Errno) -> FsErro
     }
 }
 
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinuxMountFilesystem {
+    Ext4,
+    Other,
+    Unproven,
+}
+
+#[cfg(target_os = "linux")]
+fn exact_mount_filesystem(file: &File) -> LinuxMountFilesystem {
+    let fdinfo_path = format!("/proc/self/fdinfo/{}", file.as_raw_fd());
+    let Some(fdinfo) = read_proc_file_bounded(&fdinfo_path, 16 * 1024) else {
+        return LinuxMountFilesystem::Unproven;
+    };
+    let Some(mount_id) = parse_mount_id(&fdinfo) else {
+        return LinuxMountFilesystem::Unproven;
+    };
+    let Some(mountinfo) = read_proc_file_bounded("/proc/self/mountinfo", 4 * 1024 * 1024) else {
+        return LinuxMountFilesystem::Unproven;
+    };
+    match parse_mount_filesystem(&mountinfo, mount_id) {
+        Some("ext4") => LinuxMountFilesystem::Ext4,
+        Some(_) => LinuxMountFilesystem::Other,
+        None => LinuxMountFilesystem::Unproven,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_file_bounded(path: &str, limit: u64) -> Option<Vec<u8>> {
+    let file = File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= limit).then_some(bytes)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_mount_id(fdinfo: &[u8]) -> Option<u64> {
+    std::str::from_utf8(fdinfo).ok()?.lines().find_map(|line| {
+        line.strip_prefix("mnt_id:")
+            .and_then(|value| value.trim().parse().ok())
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn parse_mount_filesystem(mountinfo: &[u8], expected_mount_id: u64) -> Option<&str> {
+    std::str::from_utf8(mountinfo)
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let mut fields = line.split_whitespace();
+            let mount_id = fields.next()?.parse::<u64>().ok()?;
+            if mount_id != expected_mount_id {
+                return None;
+            }
+            let (_, filesystem_and_source) = line.split_once(" - ")?;
+            filesystem_and_source.split_whitespace().next()
+        })
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
@@ -313,5 +449,17 @@ mod tests {
             strict_open_error(FsOperation::OpenFile, rustix::io::Errno::XDEV),
             FsError::CrossVolume
         ));
+    }
+
+    #[test]
+    fn mountinfo_parser_binds_the_exact_mount_and_filesystem() {
+        let fdinfo = b"pos:\t0\nflags:\t0100000\nmnt_id:\t42\n";
+        let mountinfo =
+            b"41 1 8:1 / / rw - xfs /dev/sda1 rw\n42 1 8:2 / /work rw - ext4 /dev/sda2 rw\n";
+
+        assert_eq!(parse_mount_id(fdinfo), Some(42));
+        assert_eq!(parse_mount_filesystem(mountinfo, 42), Some("ext4"));
+        assert_eq!(parse_mount_filesystem(mountinfo, 41), Some("xfs"));
+        assert_eq!(parse_mount_filesystem(mountinfo, 99), None);
     }
 }

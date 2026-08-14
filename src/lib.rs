@@ -278,8 +278,8 @@ pub mod advanced_prelude {
         ExpectedTarget, FileCapability, FileIdentity, FileKind, FileLock, FileSyncReceipt,
         FileSyncTier, FsError, FsOperation, HostCapabilityOptions, LockGuarantee, LockMode,
         LockScope, ParentAuthorizationTier, PathValidationError, PlatformCapabilityMatrix,
-        ProofStatus, PublicationAtomicity, PublicationIdentityEvidence, RelativeComponent,
-        RelativePath, ReplaceReceipt, ReplaceSourceBinding, ResolutionTier, StageStatus,
+        ProofStatus, PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding,
+        RelativeComponent, RelativePath, ReplaceReceipt, ResolutionTier, StageStatus,
         TemporaryFile, TrustMode, platform_capability_matrix,
     };
     pub use nara_gameplay::{

@@ -5,8 +5,8 @@ use std::{
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, DurabilityProgress, ExpectedTarget, FileIdentity, FsError,
-    LockMode, PublicationAtomicity, PublicationIdentityEvidence, RelativeComponent, RelativePath,
-    ReplaceSourceBinding, StageStatus,
+    LockMode, PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding,
+    RelativeComponent, RelativePath, StageStatus,
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
@@ -208,7 +208,7 @@ impl ScenePersistenceHost {
         }
         let matrix = nara_fs::platform_capability_matrix();
         if matrix.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
-            || matrix.replace_source_binding() == ReplaceSourceBinding::Unsupported
+            || matrix.replace_source_binding() == PublicationSourceBinding::Unsupported
         {
             return SceneSaveOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee);
         }

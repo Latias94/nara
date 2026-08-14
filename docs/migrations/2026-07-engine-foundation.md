@@ -46,6 +46,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | RGF-U13-1 | RGF-U13 | `198a680` | `rust-api/behavior` | Managed runtime driver access, physical button transitions, App-exit propagation, and desktop frame/shutdown semantics | Replace generic driver World/resource access with typed resource-local ports, propagate fallible button-edge admission, and handle the one-target desktop result/close contract. |
 | RGF-U8-1 | RGF-U8 | `60292e7` | `rust-api/behavior` | Task-update set ownership, ordered task result polling, and filesystem watcher admission/observability | Import asset phases from `nara_asset`, capture a task-pool completion cutoff before consuming ordered results, and send watcher batches through the bounded non-blocking sender while handling sticky `RescanRequired`. |
 | RGD-U8-2 | RGD-U8 refresh | `be9b264` | `rust-api/behavior` | `FsError` forward compatibility and strict Unix traversal rejection classification | Add a wildcard arm to external `FsError` matches. Treat exact platform rejection variants as diagnostic detail: all strict Unix adapters reject a symlink leaf, while Linux currently reports `SymbolicLinkTraversal`. |
+| CDPF-U1-1 | CDPF-U1 | `CDPF-U1` | `rust-api/behavior` | Filesystem publication source binding, explicit file write authority, and same-parent directory staging | Rename `ReplaceSourceBinding` to `PublicationSourceBinding`; create writable files only through a read-write directory capability, borrow writes through `CapabilityWriter`, and retain directory staging in a move-only `DirectoryPublicationTransaction`. |
 | RPR-U3-1 | RPR-U3 | `676d030` | `rust-api` | Ordinary product composition and file-backed run setup | Replace normal caller use of definition IDs, slot edits, and parallel provider lists with `ProductRecipe` and `SchemaContribution`; keep raw one-shot plugins on direct `App` composition. |
 | PCC-U1-1 | PCC-U1 | `742c1e8` | `cargo-feature/rust-api/behavior` | WGPU base and concrete Sprite/UI submission ownership | Keep `WgpuRenderPlugin` base-only; direct Rust products explicitly add `WgpuSpriteSubmitterPlugin` or `WgpuUiSubmitterPlugin`, while file-backed products request the corresponding presentation capability intersection. |
 | PCC-U2-1 | PCC-U2 | `18ec878` | `cargo-feature/rust-api/behavior` | Native Winit accessibility activation | Compile support independently from activation; direct Rust products explicitly add `WinitUiAccessibilityContributionPlugin`, while file-backed desktop UI products receive it from the `desktop-winit + presentation-ui` request intersection. |
@@ -3951,6 +3952,79 @@ unavailable-target branches, or stale backend acceptance after suspension.
 the UIF-U4C verification record prove target-conflict atomicity, direct suspended retirement,
 outstanding-attempt cancellation, strict accessibility generations, stale/foreign action rejection,
 missing-window recovery and non-16:9 letterbox mapping.
+
+## CDPF-U1-1: Explicit Directory Staging And File Write Authority
+
+**Removed contract**: `ReplaceSourceBinding` no longer names the source-binding proof shared by
+file replacement and directory publication. Existing `FileCapability` values no longer imply
+writable authority merely because their underlying host handle might be writable. No caller may
+construct a same-parent directory candidate through native paths and later present it as a
+capability-owned publication transaction.
+
+**Canonical replacement**: use `PublicationSourceBinding` for the exact handle-bound,
+cooperative name-bound or unsupported source proof. A read-write `DirectoryCapability` may create
+one direct child directory or regular file without overwrite. Newly created files expose their
+write authority only through `FileCapability::writer`, which returns a borrowed
+`CapabilityWriter`; files opened from existing project content remain read-only. Use
+`DirectoryCapability::begin_directory_publication` to retain an exclusive staging directory,
+destination component, parent lineage and exact source-binding proof in a move-only
+`DirectoryPublicationTransaction`. CDPF-U1 intentionally exposes no publish, rename, removal or
+recursive product operation.
+
+**Before**:
+
+```rust
+use nara_fs::ReplaceSourceBinding;
+
+let source_binding = matrix.replace_source_binding();
+assert_eq!(source_binding, ReplaceSourceBinding::HandleBound);
+```
+
+**After**:
+
+```rust
+use std::io::Write;
+
+use nara_fs::{PublicationSourceBinding, RelativeComponent};
+
+let transaction = parent.begin_directory_publication(
+    &RelativeComponent::new("project").unwrap(),
+    &RelativeComponent::new(".project-staging-7f4a").unwrap(),
+)?;
+assert!(matches!(
+    transaction.source_binding(),
+    PublicationSourceBinding::HandleBound | PublicationSourceBinding::NameBound
+));
+
+let staging = transaction.staging_directory();
+let mut manifest = staging.create_child_file(
+    &RelativeComponent::new("nara.toml").unwrap(),
+)?;
+manifest.writer()?.write_all(b"format_version = 1\n")?;
+manifest.sync()?;
+```
+
+**User action**: rename imports and matches to `PublicationSourceBinding`. Treat
+`FileCapability::rights` as the write-authority fact and request a `CapabilityWriter` before
+writing. Product code that stages a finite directory tree must keep the transaction alive and use
+only the returned child capabilities; CDPF-U2 will add the consuming terminal operations.
+
+**Source action**: `none`; this migration changes Rust authority and ownership, not project source
+or persistent formats.
+
+**Cache action**: `keep`; no cache identity or serialized artifact changes in CDPF-U1.
+
+**Compatibility window**: none (unreleased canonical replacement). No deprecated
+`ReplaceSourceBinding` alias is retained.
+
+**Rollback**: revert the complete CDPF-U1 implementation, migration, ledger and evidence together.
+Do not restore implicit writable file handles or native-path directory staging independently.
+
+**Verification anchors**: `crates/nara_fs/src/{capability,directory_publication,file,proof}.rs`,
+`crates/nara_fs/src/platform/{mod,windows,unix}.rs`,
+`crates/nara_fs/tests/filesystem_contract.rs`, owner-local move-only and failure-injection tests,
+and the CDPF-U1 verification record prove exclusive child creation, capability lineage, explicit
+write authority, supported-tier admission and fail-closed rejection before staging.
 
 ## Persistent Format Matrix
 

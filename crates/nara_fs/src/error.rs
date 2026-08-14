@@ -10,6 +10,9 @@ pub enum FsOperation {
     OpenDirectory,
     OpenFile,
     ReadDirectory,
+    BeginDirectoryPublication,
+    CreateDirectory,
+    CreateFile,
     CreateTemporary,
     RemoveTemporary,
     Rename,
@@ -21,6 +24,7 @@ pub enum FsOperation {
     Unlock,
     CloneHandle,
     Read,
+    Write,
 }
 
 impl FsOperation {
@@ -30,6 +34,9 @@ impl FsOperation {
             Self::OpenDirectory => "open directory",
             Self::OpenFile => "open file",
             Self::ReadDirectory => "read directory",
+            Self::BeginDirectoryPublication => "begin directory publication",
+            Self::CreateDirectory => "create directory",
+            Self::CreateFile => "create file",
             Self::CreateTemporary => "create temporary file",
             Self::RemoveTemporary => "remove temporary file",
             Self::Rename => "rename file",
@@ -41,6 +48,7 @@ impl FsOperation {
             Self::Unlock => "unlock file",
             Self::CloneHandle => "clone file handle",
             Self::Read => "read file",
+            Self::Write => "write file",
         }
     }
 }
@@ -122,8 +130,18 @@ pub enum FsError {
     },
     #[error("temporary file belongs to a different directory capability")]
     TemporaryParentMismatch,
-    #[error("exclusive temporary name already exists")]
+    #[error("exclusive child name already exists during {operation}")]
     AlreadyExists { operation: FsOperation },
+    #[error("directory publication staging and destination names must differ")]
+    PublicationNamesConflict,
+    #[error(
+        "{operation} created an exclusive child but validation failed; the child may remain as a recoverable orphan"
+    )]
+    ExclusiveChildUnverified {
+        operation: FsOperation,
+        #[source]
+        source: Box<FsError>,
+    },
     #[error("replacement target does not match the requested state")]
     TargetStateMismatch,
     #[error("file lock is already held")]
@@ -140,5 +158,12 @@ pub enum FsError {
 impl FsError {
     pub(crate) fn io(operation: FsOperation, source: io::Error) -> Self {
         Self::Io { operation, source }
+    }
+
+    pub(crate) fn exclusive_child_unverified(operation: FsOperation, source: Self) -> Self {
+        Self::ExclusiveChildUnverified {
+            operation,
+            source: Box::new(source),
+        }
     }
 }

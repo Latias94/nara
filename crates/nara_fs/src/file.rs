@@ -1,13 +1,13 @@
 use std::{
     fmt::{self, Debug, Formatter},
     fs::File,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
 };
 
 use crate::{
-    ContentDigest, DurabilityProgress, FileIdentity, FileKind, FileLock, FileSyncReceipt,
-    FileSyncTier, FsError, FsOperation, LockMode, ResolutionTier, StageStatus, TrustMode,
-    capability::new_host_session, platform,
+    CapabilityRights, ContentDigest, DurabilityProgress, FileIdentity, FileKind, FileLock,
+    FileSyncReceipt, FileSyncTier, FsError, FsOperation, LockMode, ResolutionTier, StageStatus,
+    TrustMode, capability::new_host_session, platform,
 };
 
 pub struct FileCapability {
@@ -15,6 +15,7 @@ pub struct FileCapability {
     identity: FileIdentity,
     parent_identity: Option<FileIdentity>,
     link_count: u64,
+    rights: CapabilityRights,
     trust: TrustMode,
     resolution: ResolutionTier,
 }
@@ -54,6 +55,7 @@ impl FileCapability {
             ),
             None,
             facts.link_count,
+            CapabilityRights::ReadOnly,
             trust,
             ResolutionTier::OpenedHandleOnly,
         ))
@@ -64,6 +66,7 @@ impl FileCapability {
         identity: FileIdentity,
         parent_identity: Option<FileIdentity>,
         link_count: u64,
+        rights: CapabilityRights,
         trust: TrustMode,
         resolution: ResolutionTier,
     ) -> Self {
@@ -72,6 +75,7 @@ impl FileCapability {
             identity,
             parent_identity,
             link_count,
+            rights,
             trust,
             resolution,
         }
@@ -93,6 +97,11 @@ impl FileCapability {
     }
 
     #[must_use]
+    pub const fn rights(&self) -> CapabilityRights {
+        self.rights
+    }
+
+    #[must_use]
     pub const fn trust(&self) -> TrustMode {
         self.trust
     }
@@ -107,6 +116,21 @@ impl FileCapability {
         Ok(CapabilityReader {
             file: platform::clone_file(&self.file)?,
             offset: 0,
+        })
+    }
+
+    /// Borrows the already-authorized writable handle.
+    ///
+    /// Opening an existing file through a directory capability remains read-only. Only files
+    /// created by a read-write capability currently carry write authority.
+    pub fn writer(&mut self) -> Result<CapabilityWriter<'_>, FsError> {
+        if self.rights == CapabilityRights::ReadOnly {
+            return Err(FsError::ReadOnlyCapability {
+                operation: FsOperation::Write,
+            });
+        }
+        Ok(CapabilityWriter {
+            file: &mut self.file,
         })
     }
 
@@ -259,6 +283,7 @@ impl Debug for FileCapability {
             .field("identity", &self.identity)
             .field("parent_identity", &self.parent_identity)
             .field("link_count", &self.link_count)
+            .field("rights", &self.rights)
             .field("trust", &self.trust)
             .field("resolution", &self.resolution)
             .finish_non_exhaustive()
@@ -268,6 +293,28 @@ impl Debug for FileCapability {
 pub struct CapabilityReader {
     file: File,
     offset: u64,
+}
+
+pub struct CapabilityWriter<'file> {
+    file: &'file mut File,
+}
+
+impl Write for CapabilityWriter<'_> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.file.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Debug for CapabilityWriter<'_> {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CapabilityWriter")
+            .finish_non_exhaustive()
+    }
 }
 
 impl Read for CapabilityReader {

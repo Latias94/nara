@@ -6,6 +6,9 @@ pub(crate) const fn fs_operation_id(operation: FsOperation) -> &'static str {
         FsOperation::OpenDirectory => "open-directory",
         FsOperation::OpenFile => "open-file",
         FsOperation::ReadDirectory => "read-directory",
+        FsOperation::BeginDirectoryPublication => "begin-directory-publication",
+        FsOperation::CreateDirectory => "create-directory",
+        FsOperation::CreateFile => "create-file",
         FsOperation::CreateTemporary => "create-temporary",
         FsOperation::RemoveTemporary => "remove-temporary",
         FsOperation::Rename => "rename",
@@ -17,6 +20,7 @@ pub(crate) const fn fs_operation_id(operation: FsOperation) -> &'static str {
         FsOperation::Unlock => "unlock",
         FsOperation::CloneHandle => "clone-handle",
         FsOperation::Read => "read",
+        FsOperation::Write => "write",
     }
 }
 
@@ -46,6 +50,12 @@ mod tests {
             (FsOperation::OpenDirectory, "open-directory"),
             (FsOperation::OpenFile, "open-file"),
             (FsOperation::ReadDirectory, "read-directory"),
+            (
+                FsOperation::BeginDirectoryPublication,
+                "begin-directory-publication",
+            ),
+            (FsOperation::CreateDirectory, "create-directory"),
+            (FsOperation::CreateFile, "create-file"),
             (FsOperation::CreateTemporary, "create-temporary"),
             (FsOperation::RemoveTemporary, "remove-temporary"),
             (FsOperation::Rename, "rename"),
@@ -57,6 +67,7 @@ mod tests {
             (FsOperation::Unlock, "unlock"),
             (FsOperation::CloneHandle, "clone-handle"),
             (FsOperation::Read, "read"),
+            (FsOperation::Write, "write"),
         ];
 
         for (operation, id) in expected {

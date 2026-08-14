@@ -13,8 +13,8 @@ use nara_fs::{
     CapabilityRights, ConflictProtection, ContentDigest, DirectoryCapability, DirectorySyncTier,
     ExpectedTarget, FileCapability, FsError, HostCapabilityOptions, LockMode,
     ParentAuthorizationTier, ProofStatus, PublicationAtomicity, PublicationIdentityEvidence,
-    RelativeComponent, RelativePath, ResolutionTier, StageStatus, TrustMode,
-    platform_capability_matrix,
+    PublicationSourceBinding, RelativeComponent, RelativePath, ResolutionTier, StageStatus,
+    TrustMode, platform_capability_matrix,
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -355,6 +355,70 @@ fn exclusive_temp_collision_is_reported_without_truncation() {
 }
 
 #[test]
+fn direct_child_creation_keeps_write_authority_explicit() {
+    let root = TestRoot::new();
+    let capability = trusted_read_write(&root);
+    let directory = capability
+        .create_child_directory(&component("candidate"))
+        .unwrap();
+    let mut created = directory
+        .create_child_file(&component("member.bin"))
+        .unwrap();
+
+    assert_eq!(created.rights(), CapabilityRights::ReadWrite);
+    created.writer().unwrap().write_all(b"member").unwrap();
+    created.sync().unwrap();
+    drop(created);
+
+    let mut reopened = directory.open_child_file(&component("member.bin")).unwrap();
+    assert_eq!(reopened.rights(), CapabilityRights::ReadOnly);
+    assert!(matches!(
+        reopened.writer(),
+        Err(FsError::ReadOnlyCapability {
+            operation: nara_fs::FsOperation::Write
+        })
+    ));
+    assert_eq!(
+        reopened.read_to_end_bounded(64).unwrap(),
+        b"member".to_vec()
+    );
+}
+
+#[test]
+fn directory_publication_begin_uses_a_live_parent_proof_or_fails_closed() {
+    let root = TestRoot::new();
+    let capability = trusted_read_write(&root);
+    let result = capability.begin_directory_publication(
+        &component("published"),
+        &component(".published-staging-53c1"),
+    );
+
+    match result {
+        Ok(transaction) => {
+            assert_eq!(
+                transaction.parent_identity().session(),
+                transaction.staging_identity().session()
+            );
+            if cfg!(windows) {
+                assert_eq!(
+                    transaction.source_binding(),
+                    PublicationSourceBinding::HandleBound
+                );
+            } else {
+                assert_eq!(
+                    transaction.source_binding(),
+                    PublicationSourceBinding::NameBound
+                );
+            }
+        }
+        Err(FsError::Unsupported { .. } | FsError::Unproven { .. }) => {
+            assert!(!root.path().join(".published-staging-53c1").exists());
+        }
+        Err(error) => panic!("unexpected directory-publication begin failure: {error}"),
+    }
+}
+
+#[test]
 fn same_directory_replace_is_atomic_but_does_not_claim_strong_cas() {
     let root = TestRoot::new();
     fs::write(root.path().join("document.scene"), b"old").unwrap();
@@ -568,6 +632,18 @@ fn read_only_capability_refuses_write_primitives() {
     let root = TestRoot::new();
     let capability = portable_read_only(&root);
 
+    assert!(matches!(
+        capability.create_child_directory(&component("candidate")),
+        Err(FsError::ReadOnlyCapability {
+            operation: nara_fs::FsOperation::CreateDirectory
+        })
+    ));
+    assert!(matches!(
+        capability.create_child_file(&component("candidate.bin")),
+        Err(FsError::ReadOnlyCapability {
+            operation: nara_fs::FsOperation::CreateFile
+        })
+    ));
     assert!(matches!(
         capability.create_temp(&component("candidate.tmp")),
         Err(FsError::ReadOnlyCapability { .. })
