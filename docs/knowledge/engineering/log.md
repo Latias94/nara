@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-14
+* **Work Registration**: [Capability Directory Publication Foundation - CDPF-U2 active](registry/2026-08/2026-08-14T024337Z-fresh-project-export-repair-codex-root-61f5f8687540452dad45ad301f43fd1d.md) - Closes capability-owned directory staging and activates exact no-replace publication with truthful terminal outcomes.
+* **Verification Evidence**: [CDPF-U1 capability-owned directory staging](verification/2026-08/2026-08-14T024337Z-cdpf-u1-capability-owned-directory-staging-44a2fdb822d94c268972bf50f7fa7168.md) - Verifies move-only same-parent staging, explicit file write authority, runtime filesystem-tier admission, and fail-closed pre-publication behavior.
 * **Work Registration**: [Capability Directory Publication Foundation - CDPF-U1](registry/2026-08/2026-08-14T012244Z-fresh-project-export-repair-codex-root-de57fd940b3b4c889202e219f154cc55.md) - Active predecessor lane for the Fresh Project, source-carrying export, and explicit repair product workflow.
 
 ## 2026-08-13
@@ -147,7 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [SRT-U1 focused startup and Retry Trial activation](verification/2026-08/2026-08-02T120006Z-srt-u1-focused-startup-retry-trial-activation-17ad79c7bdfd417d90ee3d524909b120.md) - Verifies the RGS stop condition, the narrow ADR 0089 Trial boundary, reviewed successor execution order, and truthful active authority.
 * **Memory Event**: [Verification: RGS-U3 completed and verified at fb4fdc7; RGS-U4 is now the sole active implemen](logs/2026-08/2026-08-02T091933Z-verification-rgs-u3-completed-and-verified-at-fb4fdc7-rgs-u4-is-now-the-sole-active-implemen-06e8903eeeed4badb27f557a676f9393.md) - RGS-U3 completed and verified at fb4fdc7; RGS-U4 is now the sole active implementation unit.
 * **Work Registration**: [Reference-game spatial authority: RGS-U4 active](registry/2026-08/2026-08-02T091443Z-engine-foundation-contract-completion-codex-root-aea0cd34d1954b3bb9b0b1346e5f678b.md) - Closes RGS-U3 at the verified completed-global boundary and activates the reference game's one-spatial-authority refactor.
-* **Verification Evidence**: [RGS-U3 completed 2D global transform projection](verification/2026-08/2026-08-02T084559Z-rgs-u3-completed-2d-global-transform-projection-1fa10428b5e240acbade0440cc25ae75.md) - Verifies bounded global 2D propagation, completion freshness, parented render extraction, and parented Transform content admission.
-
-## 2026-08-01
-* **Memory Event**: [Verification: Completed RGS-U2 at 51b3fe4 with the Nara-owned non-linked runtime hierarchy, fa](logs/2026-08/2026-08-01T190651Z-verification-completed-rgs-u2-at-51b3fe4-with-the-nara-owned-non-linked-runtime-hierarchy-fa-d037b2f4a2c24c94b07e113b55f12d17.md) - Completed RGS-U2 at 51b3fe4 with the Nara-owned non-linked runtime hierarchy, failure-atomic Scene replacement, API migration, focused seria
