@@ -97,6 +97,9 @@ pub use nara_winit as winit;
 #[cfg(feature = "runtime-core")]
 pub mod project_host;
 
+#[cfg(feature = "project-workflow")]
+pub mod project_workflow;
+
 #[cfg(feature = "runtime-core")]
 mod project_diagnostic_ids;
 

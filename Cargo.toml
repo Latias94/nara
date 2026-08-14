@@ -246,6 +246,7 @@ serde = [
     "nara_ui?/serde",
     "nara_window?/serde",
 ]
+project-workflow = ["runtime-2d", "serde"]
 
 [[example]]
 name = "windowed_clear"
