@@ -250,6 +250,11 @@ serde = [
 ]
 project-workflow = ["runtime-2d", "serde", "dep:getrandom"]
 
+[[bin]]
+name = "nara"
+path = "src/bin/nara/main.rs"
+required-features = ["project-workflow"]
+
 [[example]]
 name = "windowed_clear"
 path = "examples/windowed_clear.rs"
