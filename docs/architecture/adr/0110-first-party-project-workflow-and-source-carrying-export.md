@@ -3,7 +3,8 @@
 **Status**: Accepted
 **Date**: 2026-08-14
 **Amended**: 2026-08-14 by the FPER implementation-readiness review for profile-bound runtime
-lineages, capability-derived local dependency relations and parent-owned cross-process evidence
+lineages, capability-derived local dependency relations, parent-owned cross-process evidence,
+creation terminality, build-input freshness and startup-closure ownership
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -60,7 +61,10 @@ flowchart LR
 
 - `desktop-2d/v1` is a closed, source-controlled starter. One creation request produces matching
   generated binaries, Cargo features, `nara.toml` capabilities, ProductRecipe, built-in schema and
-  initial content. The starter CLI exposes no per-layer override surface.
+  initial content. Starter member bytes are compiled into the workflow Module rather than discovered
+  through a runtime checkout-relative path. The generated Cargo manifest declares its own
+  `[workspace]` with resolver `3`, preventing accidental membership in an ancestor checkout workspace.
+  The starter CLI exposes no per-layer override surface.
 - Existing direct-App and advanced product-composition Interfaces remain independent code-first
   authorities and are not narrowed by project creation.
 - Dependency distribution is a separate typed fact. Version one accepts either an authorized local
@@ -87,6 +91,9 @@ flowchart LR
 - Publication receipts separate source binding, parent authorization, conflict protection,
   atomicity, identity evidence and durability progress. They prove externally atomic visibility,
   not universal crash durability.
+- Creation success is distinct from directory publication. The workflow reopens the published tree
+  through ordinary project authority; failure retains the directory and publication receipt as
+  published-but-unadmitted, and only successful admission creates a creation success receipt.
 
 ### Check, runtime and export authority
 
@@ -98,11 +105,17 @@ flowchart LR
 - Desktop and presentation-free headless binaries consume the same manifest byte digest,
   ProductRecipe, schema composition and startup-source content digest. Each product retains its own
   profile-bound `ProjectSettingsLineage`; neither lineage is presented as the other's identity. A
-  bounded desktop verification mode uses the real Winit/WGPU product path and exits through normal
-  App/Host shutdown; a test-private presenter cannot satisfy product evidence.
-- Export consumes the exact bounded startup-content closure produced by existing content owners and
-  exact Cargo artifacts selected from one JSON stream by invocation, workspace/manifest, package,
-  binary target, triple, named profile and normalized features.
+  bounded desktop verification mode requires an exact first-party presented receipt matching the
+  admitted startup content and live backend generation within a product-owned timeout, uses the real
+  Winit/WGPU path and exits through normal App/Host shutdown; initialization alone or a test-private
+  presenter cannot satisfy product evidence.
+- The project-content owner produces the exact bounded `StartupContentClosureReceipt`: ordered logical
+  paths, member kinds, byte lengths, digests, source/content revision and manifest/schema facts. Export
+  consumes that receipt and reopens bytes through `nara_fs`; it does not rediscover dependencies.
+- Exact Cargo artifacts are selected from one `cargo build --locked` JSON stream by invocation,
+  workspace/manifest, package, binary target, triple, named profile and normalized features. A private
+  build-input revision binds the application Cargo manifest, `Cargo.lock` and generated Rust sources;
+  stale inputs reject export before publication.
 - The artifact is a **source-carrying startup-closure export**: selected executables plus an
   executable-relative `project/` tree sufficient for the admitted startup path. It may contain
   source manifests, Scene/Prefab documents, images, metadata and schema facts. It does not claim to
@@ -110,7 +123,7 @@ flowchart LR
   project backup nor a cooked/source-free catalog. ADR 0088 remains Proposed.
 - All member and source-change validation precedes directory publication. Process acceptance occurs
   afterward. A published candidate that fails acceptance remains present and is reported as
-  published-but-unaccepted; no rollback is claimed.
+  published-but-unaccepted; no rollback or in-place acceptance retry is claimed.
 
 ### Explicit repair authority
 
