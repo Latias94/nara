@@ -9,7 +9,9 @@ ADR 0070
 [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
 Installation;
 [ADR 0106](0106-content-and-presentation-product-composition.md): Content and Presentation Product
-Composition
+Composition;
+[ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md): First-Party Project
+Workflow and Source-Carrying Export
 
 ## ADR 0106 Product-Contribution Refinement
 

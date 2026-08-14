@@ -8,15 +8,13 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. No implementation plan is active after the completed [Runtime UI Product Slice
-   plan](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md) published Product-Validated
-   record `a203485f0c8e478eb3ec1e03426aca67`. The completed [Presented UI Evidence Correlation
-   Correction plan](../plans/2026-08-13-001-refactor-presented-ui-evidence-correlation-correction-plan.md),
-   [Product Composition Contribution Correction
-   plan](../plans/2026-08-12-002-refactor-product-composition-contribution-correction-plan.md) and
-   other completed focused correction plans remain immutable lineage evidence. A successor needs a
-   new active registration before implementation begins; the [UI program
-   roadmap](../plans/ui-program-roadmap.md) is navigation only.
+3. The [Capability Directory Publication Foundation
+   plan](../plans/2026-08-14-001-refactor-capability-directory-publication-foundation-plan.md) is the
+   only active implementation plan. The [Fresh Project, Source-Carrying Export, and Explicit Repair
+   plan](../plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md) is an
+   inactive successor and requires the predecessor conformance baseline plus a new active
+   registration. Completed Runtime UI and focused correction plans remain immutable lineage
+   evidence; the [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and
    must not authorize implementation by themselves.

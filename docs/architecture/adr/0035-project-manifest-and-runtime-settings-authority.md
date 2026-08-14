@@ -8,7 +8,9 @@
 Actions, Text Input, UI Focus, and Accessibility; ADR 0046: Plugin Metadata and Default Plugin
 Groups; ADR 0056: Headless Runtime and Dedicated Server Readiness; ADR 0070: Capability-Oriented
 Filesystem Substrate; ADR 0079: Root Product Capabilities and Placeholder Domain Retirement; ADR
-0095: Plugin-Owned Specialized Domains and Project Configuration
+0095: Plugin-Owned Specialized Domains and Project Configuration;
+[ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md): First-Party Project
+Workflow and Source-Carrying Export
 
 ## ADR 0095 Refinement
 

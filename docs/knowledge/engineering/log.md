@@ -4,6 +4,9 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-14
+* **Work Registration**: [Capability Directory Publication Foundation - CDPF-U1](registry/2026-08/2026-08-14T012244Z-fresh-project-export-repair-codex-root-de57fd940b3b4c889202e219f154cc55.md) - Active predecessor lane for the Fresh Project, source-carrying export, and explicit repair product workflow.
+
 ## 2026-08-13
 * **Work Registration**: [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md) - Closes RUP-U3 at the Product-Validated baseline while preserving shared UI and product-composition records.
 * **Verification Evidence**: [RUP-U3 Runtime UI Product-Validated Baseline](verification/2026-08/2026-08-13T155950Z-rup-u3-runtime-ui-product-validated-baseline-a203485f0c8e478eb3ec1e03426aca67.md) - Closes the data-authored Runtime UI product slice with exact desktop, headless, accessibility, package and performance evidence.
@@ -148,4 +151,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-08-01
 * **Memory Event**: [Verification: Completed RGS-U2 at 51b3fe4 with the Nara-owned non-linked runtime hierarchy, fa](logs/2026-08/2026-08-01T190651Z-verification-completed-rgs-u2-at-51b3fe4-with-the-nara-owned-non-linked-runtime-hierarchy-fa-d037b2f4a2c24c94b07e113b55f12d17.md) - Completed RGS-U2 at 51b3fe4 with the Nara-owned non-linked runtime hierarchy, failure-atomic Scene replacement, API migration, focused seria
-* **Work Registration**: [Reference-game spatial authority: RGS-U3 active](registry/2026-08/2026-08-01T190634Z-engine-foundation-contract-completion-codex-root-fe6954ce5c5649ab83f1960498d73a71.md) - Closes RGS-U2 at the reviewed runtime hierarchy boundary and activates completed 2D transform projection.

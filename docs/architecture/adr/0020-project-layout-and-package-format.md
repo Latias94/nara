@@ -2,7 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Refined By**: ADR 0035: Project Manifest and Runtime Settings Authority
+**Refined By**: ADR 0035: Project Manifest and Runtime Settings Authority;
+[ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md): First-Party Project
+Workflow and Source-Carrying Export
 
 ## Context
 

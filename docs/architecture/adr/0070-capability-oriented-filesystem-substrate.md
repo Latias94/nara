@@ -2,11 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-08-14
 **Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
 [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
-**Refined By**: ADR 0079: Root Product Capabilities and Placeholder Domain Retirement
+**Refined By**: ADR 0079: Root Product Capabilities and Placeholder Domain Retirement;
+[ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md): First-Party Project
+Workflow and Source-Carrying Export
 
 ## Context
 
@@ -122,24 +124,25 @@ physical media has persisted data the operating system reported as synced.
   Strict live identity is currently limited to local ext, XFS, Btrfs, tmpfs, OverlayFS, and NTFS3
   filesystem types. Other, remote, or custom filesystem types fail closed. `st_dev` is only a
   cross-check and never substitutes for `openat2` mount evidence. The currently implemented generic
-  Unix replacement remains `NameBound`, so strict replacement is rejected until RGF-U27 adds and
+  Unix replacement remains `NameBound`, so strict replacement is rejected until CDPF-U2 adds and
   proves its narrower dedicated no-replace primitive; that primitive does not upgrade the generic
   replacement tier.
-- **RGF-U27 project-creation publication contract:** The first publicly supported
-  same-capability directory no-replace implementation is narrower than the general reference
-  matrices above: x86-64 Windows on a probed local NTFS workspace and x86-64 Linux 5.6 or later on a
-  probed local ext4 workspace. Windows
-  uses the handle-bound `FileRenameInformationEx` no-replace form against the live parent handle;
-  Linux uses `renameat2` with `RENAME_NOREPLACE` against the same live parent directory descriptor.
-  Both bind the unpredictable sibling staging directory, validated absent child name, parent
-  capability generation/identity, and same-volume or same-mount proof into a typed publication
-  receipt. Collision, identity drift, unsupported filesystem behavior, or any native result that
-  cannot prove atomic no-replace publication returns `Unsupported` or `Unproven`; neither adapter
-  falls back to a destination precheck followed by ordinary rename. Hosted Windows and Linux jobs
-  must prove those two exact combinations before the project-creation candidate is documented as
-  available. ReFS, XFS, Btrfs, tmpfs, OverlayFS, NTFS3, macOS, and other combinations remain
-  `Unsupported` or `Unproven` for project creation until a dedicated live job supplies equivalent
-  evidence; injected platform-seam tests alone do not broaden public support.
+- **CDPF directory-publication contract:** The first publicly supported same-capability directory
+  no-replace implementation is narrower than the general reference matrices above. x86-64 Windows
+  on a probed local NTFS workspace uses the handle-bound `FileRenameInformationEx` no-replace form
+  against the live source and parent handles. x86-64 Linux 5.6 or later on a probed local ext4
+  workspace uses `renameat2` with `RENAME_NOREPLACE` against the same live parent directory
+  descriptor under the `TrustedLocal` cooperative-writer tier. Linux proves parent/mount authority,
+  destination no-overwrite and atomic naming, but its source binding remains explicitly
+  `NameBound`; it is not reported as handle-bound strict source publication. Receipts bind the
+  unpredictable sibling staging observation, validated absent child name, parent capability
+  generation/identity, same-volume or same-mount proof, and exact source-binding tier. Collision,
+  identity drift, unsupported filesystem behavior, or any native result that cannot prove the
+  claimed tier returns `Unsupported` or `Unproven`; neither adapter falls back to a destination
+  precheck followed by ordinary rename. Hosted jobs must prove each exact combination before that
+  tier is documented as available. ReFS, XFS, Btrfs, tmpfs, OverlayFS, NTFS3, macOS, and other
+  combinations remain `Unsupported` or `Unproven` until dedicated live evidence exists; injected
+  platform-seam tests alone do not broaden public support.
 - **macOS and other Unix contract:** no current adapter proves absence of same-device mount
   traversal. Strict untrusted/recovery directory capabilities therefore return `Unproven`.
   Host-selected trusted mode may use no-follow `openat` and name-bound `renameat`, but receipts keep
@@ -165,15 +168,15 @@ foundation capability:
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
 | Handle-bound directory enumeration | A concrete asset/indexing host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset` must not enumerate ambient paths. |
-| Same-capability non-overwrite rename | RGF-U27 first-party project creation | Add the Windows/Linux platform primitives and a typed source/parent/conflict publication receipt in `nara_fs`; project creation owns staging and validation policy, while later asset rename workflows reuse the primitive. |
+| Same-capability non-overwrite directory publication | CDPF-U1/CDPF-U2 | Add the Windows/Linux platform primitives and a typed source/parent/conflict publication receipt in `nara_fs`; product workflows own finite member plans and validation policy. |
 | Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
 
 This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
 first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 now reuses
 the same root/open/identity boundary for the path-addressed startup content closure without ambient
-path reopen or directory enumeration. RGF-U27 owns the first bounded
-same-capability no-replace directory-publication consumer and must extend this shared primitive
-before accepting a generated project destination. Future indexing, asset rename, and ADR 0091
+path reopen or directory enumeration. CDPF-U1/CDPF-U2 own the first bounded
+same-capability no-replace directory-publication implementation and must extend this shared
+primitive before a generated project destination is accepted. Future indexing, asset rename, and ADR 0091
 persistence/recovery work reuse or extend the primitives here; downstream domain crates are
 prohibited from copying those platform algorithms.
 
