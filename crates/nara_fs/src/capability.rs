@@ -174,6 +174,21 @@ impl DirectoryCapability {
         Ok(Self { inner: current })
     }
 
+    /// Opens one direct child directory through this directory authority.
+    pub fn open_child_directory(&self, child: &RelativeComponent) -> Result<Self, FsError> {
+        self.ensure_strict_resolution(FsOperation::OpenDirectory)?;
+        let file = platform::open_directory(
+            &self.inner.file,
+            child,
+            self.inner.options.trust.is_strict(),
+        )?;
+        let facts = platform::facts(&file)?;
+        validate_directory_facts(&self.inner, facts)?;
+        Ok(Self {
+            inner: self.opened_directory_inner(file, facts),
+        })
+    }
+
     pub fn open_file(&self, path: &RelativePath) -> Result<FileCapability, FsError> {
         self.open_file_with_observer(path, |_, _| {})
     }

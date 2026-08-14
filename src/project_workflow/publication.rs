@@ -522,7 +522,6 @@ fn publish_prepared_with(
     prepared: PreparedProjectCreation,
     admit: impl FnOnce(
         &DirectoryCapability,
-        &RelativeComponent,
         DirectoryPublicationReceipt,
         ProjectCreationPlanReceipt,
         PreparedDependencyRevalidation,
@@ -536,7 +535,6 @@ fn publish_prepared_with_staging_name(
     staging_name: impl FnOnce() -> Result<RelativeComponent, getrandom::Error>,
     admit: impl FnOnce(
         &DirectoryCapability,
-        &RelativeComponent,
         DirectoryPublicationReceipt,
         ProjectCreationPlanReceipt,
         PreparedDependencyRevalidation,
@@ -619,7 +617,6 @@ fn publish_prepared_with_staging_name(
     match transaction.publish() {
         DirectoryPublicationOutcome::Published(publication) => admit(
             &publication_parent,
-            &destination,
             publication,
             plan_receipt,
             dependency_revalidation,
@@ -745,33 +742,26 @@ mod tests {
         ))
         .unwrap();
 
-        let outcome = publish_prepared_with(
-            prepared,
-            |parent, destination, publication, plan, _dependency| {
-                let project_root = parent
-                    .open_directory(
-                        &RelativePath::new(plan.slug().as_str())
-                            .expect("the test slug is a valid relative path"),
-                    )
-                    .unwrap();
-                assert_eq!(destination, publication.destination());
-                assert_eq!(project_root.identity(), publication.published_identity());
-                ProjectCreationOutcome::PublishedButUnadmitted(PublishedButUnadmitted {
-                    plan,
-                    publication,
-                    published_root: Some(project_root),
-                    error: ProjectCreationAdmissionError {
-                        inner: ProjectCreationAdmissionErrorInner::PublishedMember {
-                            member: ProjectMember::ProjectManifest,
-                            source: FsError::Unsupported {
-                                operation: FsOperation::OpenFile,
-                                capability: "forced admission failure",
-                            },
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, _dependency| {
+            let project_root = parent
+                .open_child_directory(publication.destination())
+                .unwrap();
+            assert_eq!(project_root.identity(), publication.published_identity());
+            ProjectCreationOutcome::PublishedButUnadmitted(PublishedButUnadmitted {
+                plan,
+                publication,
+                published_root: Some(project_root),
+                error: ProjectCreationAdmissionError {
+                    inner: ProjectCreationAdmissionErrorInner::PublishedMember {
+                        member: ProjectMember::ProjectManifest,
+                        source: FsError::Unsupported {
+                            operation: FsOperation::OpenFile,
+                            capability: "forced admission failure",
                         },
                     },
-                })
-            },
-        );
+                },
+            })
+        });
         if publication_is_unavailable_and_clean(&outcome, &root.path, "unadmitted-game") {
             return;
         }
@@ -808,13 +798,10 @@ mod tests {
         .unwrap();
         let published_readme = root.path.join("changed-after-publication/README.md");
 
-        let outcome = publish_prepared_with(
-            prepared,
-            |parent, destination, publication, plan, dependency| {
-                fs::write(&published_readme, b"changed after publication").unwrap();
-                admit_published(parent, destination, publication, plan, dependency)
-            },
-        );
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            fs::write(&published_readme, b"changed after publication").unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
         if publication_is_unavailable_and_clean(&outcome, &root.path, "changed-after-publication") {
             return;
         }
@@ -847,18 +834,15 @@ mod tests {
             .path
             .join("changed-manifest-after-publication/nara.toml");
 
-        let outcome = publish_prepared_with(
-            prepared,
-            |parent, destination, publication, plan, dependency| {
-                let mut bytes = fs::read_to_string(&manifest).unwrap();
-                bytes = bytes.replace(
-                    "name = \"changed-manifest-after-publication\"",
-                    "name = \"mutated-but-valid\"",
-                );
-                fs::write(&manifest, bytes).unwrap();
-                admit_published(parent, destination, publication, plan, dependency)
-            },
-        );
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            let mut bytes = fs::read_to_string(&manifest).unwrap();
+            bytes = bytes.replace(
+                "name = \"changed-manifest-after-publication\"",
+                "name = \"mutated-but-valid\"",
+            );
+            fs::write(&manifest, bytes).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
         if publication_is_unavailable_and_clean(
             &outcome,
             &root.path,
@@ -901,14 +885,11 @@ mod tests {
             .path
             .join("changed-scene-after-publication/scenes/startup.scene.json");
 
-        let outcome = publish_prepared_with(
-            prepared,
-            |parent, destination, publication, plan, dependency| {
-                let bytes = fs::read_to_string(&scene).unwrap();
-                fs::write(&scene, format!("{bytes}\n")).unwrap();
-                admit_published(parent, destination, publication, plan, dependency)
-            },
-        );
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            let bytes = fs::read_to_string(&scene).unwrap();
+            fs::write(&scene, format!("{bytes}\n")).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
         if publication_is_unavailable_and_clean(
             &outcome,
             &root.path,
@@ -954,13 +935,10 @@ mod tests {
         let outside = TestRoot::new();
         let moved_parent = outside.path.join("moved-projects");
 
-        let outcome = publish_prepared_with(
-            prepared,
-            |parent, destination, publication, plan, dependency| {
-                fs::rename(checkout.path.join("projects"), &moved_parent).unwrap();
-                admit_published(parent, destination, publication, plan, dependency)
-            },
-        );
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            fs::rename(checkout.path.join("projects"), &moved_parent).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
         if publication_is_unavailable_and_clean(
             &outcome,
             &checkout.path.join("projects"),
@@ -994,13 +972,10 @@ mod tests {
         .unwrap();
         let published_assets = root.path.join("missing-directory-after-publication/assets");
 
-        let outcome = publish_prepared_with(
-            prepared,
-            |parent, destination, publication, plan, dependency| {
-                fs::remove_dir(&published_assets).unwrap();
-                admit_published(parent, destination, publication, plan, dependency)
-            },
-        );
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            fs::remove_dir(&published_assets).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
         if publication_is_unavailable_and_clean(
             &outcome,
             &root.path,

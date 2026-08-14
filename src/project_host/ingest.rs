@@ -130,7 +130,8 @@ fn ingest_project_manifest_inner(
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
     let project_root_identity = manifest.parent_identity();
     let bytes = read_manifest_bytes(manifest)?;
-    if expected_digest.is_some_and(|expected| ContentDigest::of_bytes(&bytes) != expected) {
+    let manifest_digest = ContentDigest::of_bytes(&bytes);
+    if expected_digest.is_some_and(|expected| manifest_digest != expected) {
         return Err(ProjectCandidateError::single(
             ProjectCandidateErrorKind::HostAuthorityRejected,
             diagnostic(
@@ -154,7 +155,7 @@ fn ingest_project_manifest_inner(
         .resolve_profile(profile)
         .map_err(project_profile_error)?;
     let lineage = project_settings_lineage(
-        &bytes,
+        manifest_digest,
         settings.profile_name.as_deref(),
         project_root_identity,
     );
@@ -255,11 +256,10 @@ fn validate_product_request(
 }
 
 fn project_settings_lineage(
-    bytes: &[u8],
+    manifest: ContentDigest,
     profile: Option<&str>,
     project_root_identity: Option<nara_fs::FileIdentity>,
 ) -> ProjectSettingsLineage {
-    let manifest = ContentDigest::of_bytes(bytes);
     let profile = profile.map(|profile| ContentDigest::of_bytes(profile.as_bytes()));
     let mut framed = Vec::with_capacity(96);
     framed.extend_from_slice(b"nara.project-settings-lineage.v1\0");

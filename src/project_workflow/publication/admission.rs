@@ -1,7 +1,4 @@
-use nara_fs::{
-    ContentDigest, DirectoryCapability, DirectoryPublicationReceipt, FileCapability,
-    RelativeComponent, RelativePath,
-};
+use nara_fs::{ContentDigest, DirectoryCapability, DirectoryPublicationReceipt, FileCapability};
 use nara_reflect::SchemaCompositionFingerprint;
 
 use super::{
@@ -23,15 +20,11 @@ use crate::{
 
 pub(super) fn admit_published(
     publication_parent: &DirectoryCapability,
-    destination: &RelativeComponent,
     publication: DirectoryPublicationReceipt,
     plan: ProjectCreationPlanReceipt,
     dependency_revalidation: PreparedDependencyRevalidation,
 ) -> ProjectCreationOutcome {
-    let destination_path = RelativePath::new(plan.slug().as_str())
-        .expect("a validated project slug is a valid relative path");
-    debug_assert_eq!(destination, publication.destination());
-    let project_root = match publication_parent.open_directory(&destination_path) {
+    let project_root = match publication_parent.open_child_directory(publication.destination()) {
         Ok(project_root) => project_root,
         Err(error) => {
             return ProjectCreationOutcome::PublishedButUnadmitted(PublishedButUnadmitted {

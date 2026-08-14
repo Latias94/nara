@@ -361,6 +361,10 @@ fn direct_child_creation_keeps_write_authority_explicit() {
     let directory = capability
         .create_child_directory(&component("candidate"))
         .unwrap();
+    let reopened_directory = capability
+        .open_child_directory(&component("candidate"))
+        .unwrap();
+    assert_eq!(reopened_directory.identity(), directory.identity());
     let mut created = directory
         .create_child_file(&component("member.bin"))
         .unwrap();

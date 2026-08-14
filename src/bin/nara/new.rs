@@ -4,8 +4,8 @@ use nara::{
     fs::{DirectoryCapability, PathValidationError, RelativePath},
     project_workflow::{
         LocalDependencyParent, NaraDependencySource, NaraDependencySourceError,
-        PreparedProjectCreation, ProjectCreationOutcome, ProjectCreationPlanError,
-        ProjectCreationRequest, ProjectSlug, ProjectSlugError, prepare_desktop_2d_project,
+        ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest, ProjectSlug,
+        ProjectSlugError, prepare_desktop_2d_project,
     },
 };
 use thiserror::Error;
@@ -54,7 +54,7 @@ pub(crate) fn execute(arguments: NewArguments) -> Result<ProjectCreationOutcome,
         slug,
         dependency,
     ))?;
-    Ok(publish(prepared))
+    Ok(prepared.publish())
 }
 
 fn prepare_local_dependency(
@@ -87,8 +87,4 @@ fn prepare_local_dependency(
 fn resolve_parent(parent: PathBuf) -> Result<DirectoryCapability, NewCommandError> {
     let parent = fs::canonicalize(parent).map_err(NewCommandError::ResolveParent)?;
     host_fs::writable_directory(&parent).map_err(NewCommandError::from)
-}
-
-fn publish(prepared: PreparedProjectCreation) -> ProjectCreationOutcome {
-    prepared.publish()
 }
