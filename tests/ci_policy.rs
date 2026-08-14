@@ -344,6 +344,27 @@ fn assert_external_manifest_boundaries() {
         "filesystem module consumer must depend only on the public nara_fs crate"
     );
     assert_no_workspace_dependencies(&filesystem, "filesystem module consumer");
+
+    let project_workflow = parse_manifest("module-consumer/project-workflow-consumer/Cargo.toml");
+    assert!(
+        project_workflow.get("patch").is_none(),
+        "project-workflow consumer must not patch dependencies"
+    );
+    assert_eq!(
+        dependency_keys(&project_workflow),
+        owned_string_set(["dependencies.nara"]),
+        "project-workflow consumer must use only the public root facade"
+    );
+    assert_no_workspace_dependencies(&project_workflow, "project-workflow consumer");
+    let nara = &project_workflow["dependencies"]["nara"];
+    assert_eq!(
+        nara.get("default-features").and_then(TomlValue::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        nara.get("features").and_then(TomlValue::as_array),
+        Some(&vec![TomlValue::String("project-workflow".to_owned())])
+    );
 }
 
 fn parse_manifest(path: &str) -> TomlValue {

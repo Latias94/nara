@@ -27,9 +27,11 @@ const ALLOWED_SOURCE_ROOTS: [&str; 7] = [
     "std",
 ];
 const FS_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara_fs"];
+const PROJECT_WORKFLOW_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara"];
+const PROJECT_WORKFLOW_ALLOWED_SOURCE_ROOTS: [&str; 1] = ["nara"];
 
 #[test]
-fn module_consumer_is_an_isolated_direct_scene_consumer() {
+fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() {
     let repository = repository_root();
     let consumer = module_consumer_root();
     let source = fs::read_to_string(consumer.join("Cargo.toml"))
@@ -50,7 +52,10 @@ fn module_consumer_is_an_isolated_direct_scene_consumer() {
     );
     assert_eq!(
         workspace.get("members").and_then(TomlValue::as_array),
-        Some(&vec![TomlValue::String("fs-consumer".to_owned())])
+        Some(&vec![
+            TomlValue::String("fs-consumer".to_owned()),
+            TomlValue::String("project-workflow-consumer".to_owned()),
+        ])
     );
     assert_eq!(
         workspace
@@ -59,6 +64,7 @@ fn module_consumer_is_an_isolated_direct_scene_consumer() {
         Some(&vec![
             TomlValue::String(".".to_owned()),
             TomlValue::String("fs-consumer".to_owned()),
+            TomlValue::String("project-workflow-consumer".to_owned()),
         ])
     );
 
@@ -96,10 +102,18 @@ fn module_consumer_is_an_isolated_direct_scene_consumer() {
         .expect("filesystem consumer manifest must be valid TOML");
     assert_filesystem_manifest_boundary(&filesystem).unwrap();
     assert_path_dependency(&filesystem, "nara_fs", "../../crates/nara_fs");
+
+    let project_workflow_source =
+        fs::read_to_string(consumer.join("project-workflow-consumer/Cargo.toml"))
+            .expect("FPER-U0 requires the non-CLI project-workflow consumer manifest");
+    let project_workflow = toml::from_str::<TomlValue>(&project_workflow_source)
+        .expect("project-workflow consumer manifest must be valid TOML");
+    assert_project_workflow_manifest_boundary(&project_workflow).unwrap();
+    assert_path_dependency(&project_workflow, "nara", "../..");
 }
 
 #[test]
-fn locked_metadata_has_no_root_facade_or_root_workspace_unification() {
+fn locked_metadata_keeps_direct_modules_separate_from_the_project_workflow_facade() {
     let repository = repository_root();
     let manifest = module_consumer_root().join("Cargo.toml");
     let output = Command::new(cargo_executable())
@@ -128,24 +142,25 @@ fn locked_metadata_has_no_root_facade_or_root_workspace_unification() {
             .iter()
             .any(|package| package["name"] == "nara_scene")
     );
-    assert!(
-        !packages.iter().any(|package| package["name"] == "nara"),
-        "the root facade must not enter the direct-module graph"
-    );
+    assert!(packages.iter().any(|package| package["name"] == "nara"));
 
     let members = metadata["workspace_members"]
         .as_array()
         .expect("workspace_members must be an array");
     assert_eq!(
         members.len(),
-        2,
-        "both direct module consumers must be members"
+        3,
+        "the two direct module consumers and one workflow consumer must be members"
     );
     let member_ids = members
         .iter()
         .map(|member| member.as_str().unwrap())
         .collect::<BTreeSet<_>>();
-    for package_name in ["nara-scene-module-consumer", "nara-fs-module-consumer"] {
+    for package_name in [
+        "nara-scene-module-consumer",
+        "nara-fs-module-consumer",
+        "nara-project-workflow-consumer",
+    ] {
         let package = packages
             .iter()
             .find(|package| package["name"] == package_name)
@@ -181,6 +196,25 @@ fn source_imports_are_declared_and_stay_on_the_supported_surface() {
         "macro_rules! hidden { () => { use nara_ecs::World; } }",
     ] {
         assert!(assert_source_boundary(forbidden, &ALLOWED_SOURCE_ROOTS).is_err());
+    }
+}
+
+#[test]
+fn project_workflow_consumer_uses_only_the_public_root_module() {
+    let root = module_consumer_root().join("project-workflow-consumer/src");
+    for path in rust_sources(&root) {
+        let source = fs::read_to_string(&path).unwrap();
+        assert_source_boundary(&source, &PROJECT_WORKFLOW_ALLOWED_SOURCE_ROOTS)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    }
+
+    for forbidden in [
+        "use nara_project::ProjectManifest;",
+        "use nara_fs::DirectoryCapability;",
+        "use nara_winit::WinitPlugin;",
+        "include!(\"../hidden.rs\");",
+    ] {
+        assert!(assert_source_boundary(forbidden, &PROJECT_WORKFLOW_ALLOWED_SOURCE_ROOTS).is_err());
     }
 }
 
@@ -258,6 +292,39 @@ fn filesystem_manifest_boundary_rejects_facade_workspace_and_private_shortcuts()
             )]),
         );
     assert!(assert_filesystem_manifest_boundary(&private_crate).is_err());
+}
+
+#[test]
+fn project_workflow_manifest_boundary_rejects_extra_features_and_private_shortcuts() {
+    let source =
+        fs::read_to_string(module_consumer_root().join("project-workflow-consumer/Cargo.toml"))
+            .unwrap();
+    let manifest = toml::from_str::<TomlValue>(&source).unwrap();
+    assert_project_workflow_manifest_boundary(&manifest).unwrap();
+
+    let mut inherited = manifest.clone();
+    inherited["dependencies"]["nara"] = dependency_table([("workspace", TomlValue::Boolean(true))]);
+    assert!(assert_project_workflow_manifest_boundary(&inherited).is_err());
+
+    let mut desktop = manifest.clone();
+    desktop["dependencies"]["nara"]["features"] = TomlValue::Array(vec![
+        TomlValue::String("project-workflow".to_owned()),
+        TomlValue::String("desktop-winit".to_owned()),
+    ]);
+    assert!(assert_project_workflow_manifest_boundary(&desktop).is_err());
+
+    let mut private_crate = manifest;
+    private_crate["dependencies"]
+        .as_table_mut()
+        .unwrap()
+        .insert(
+            "nara_project".to_owned(),
+            dependency_table([(
+                "path",
+                TomlValue::String("../../crates/nara_project".to_owned()),
+            )]),
+        );
+    assert!(assert_project_workflow_manifest_boundary(&private_crate).is_err());
 }
 
 #[test]
@@ -402,6 +469,43 @@ fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
 
 fn assert_filesystem_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
     assert_direct_manifest_boundary(manifest, &FS_EXPECTED_DEPENDENCIES, &["nara_fs"])
+}
+
+fn assert_project_workflow_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
+    if manifest.get("patch").is_some() {
+        return Err("[patch] is forbidden".to_owned());
+    }
+    let mut dependencies = Vec::new();
+    collect_dependency_entries(manifest, &mut Vec::new(), &mut dependencies)?;
+    dependencies.sort_by(|left, right| left.0.cmp(&right.0));
+    let observed = dependencies
+        .iter()
+        .map(|(path, _, _)| path.as_str())
+        .collect::<Vec<_>>();
+    if observed != PROJECT_WORKFLOW_EXPECTED_DEPENDENCIES {
+        return Err(format!("unexpected direct dependencies: {observed:?}"));
+    }
+
+    let dependency = dependencies[0]
+        .2
+        .as_table()
+        .ok_or_else(|| "dependencies.nara must use an explicit dependency table".to_owned())?;
+    if dependency.get("workspace").is_some() {
+        return Err("the root facade dependency cannot inherit from a workspace".to_owned());
+    }
+    if dependency
+        .get("default-features")
+        .and_then(TomlValue::as_bool)
+        != Some(false)
+    {
+        return Err("default root features must remain disabled".to_owned());
+    }
+    if dependency.get("features").and_then(TomlValue::as_array)
+        != Some(&vec![TomlValue::String("project-workflow".to_owned())])
+    {
+        return Err("only the project-workflow feature is allowed".to_owned());
+    }
+    Ok(())
 }
 
 fn assert_direct_manifest_boundary(
