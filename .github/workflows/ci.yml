@@ -158,14 +158,24 @@ jobs:
       - name: Install Rust
         shell: bash
         run: |
-          rustup toolchain install 1.95.0 --profile minimal
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
           rustup default 1.95.0
       - name: Install nextest
         uses: taiki-e/install-action@43aecc8d72668fbcfe75c31400bc4f890f1c5853 # v2.83.2
         with:
           tool: nextest@0.9.138
           fallback: none
+      - name: Check module consumer formatting
+        run: cargo fmt --manifest-path module-consumer/Cargo.toml --all -- --check
       - name: Check module consumer
-        run: cargo check --manifest-path module-consumer/Cargo.toml --locked --all-targets
-      - name: Test direct scene-module surface
-        run: cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --test-threads=1
+        run: cargo check --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets
+      - name: Lint module consumer
+        run: cargo clippy --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings
+      - name: Test direct module surfaces
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1
+          else
+            cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer --test-threads=1
+          fi

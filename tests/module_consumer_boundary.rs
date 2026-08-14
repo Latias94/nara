@@ -26,6 +26,8 @@ const ALLOWED_SOURCE_ROOTS: [&str; 7] = [
     "nara_scene_module_consumer",
     "std",
 ];
+const FS_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara_fs"];
+
 #[test]
 fn module_consumer_is_an_isolated_direct_scene_consumer() {
     let repository = repository_root();
@@ -45,6 +47,19 @@ fn module_consumer_is_an_isolated_direct_scene_consumer() {
     assert_eq!(
         workspace.get("resolver").and_then(TomlValue::as_str),
         Some("3")
+    );
+    assert_eq!(
+        workspace.get("members").and_then(TomlValue::as_array),
+        Some(&vec![TomlValue::String("fs-consumer".to_owned())])
+    );
+    assert_eq!(
+        workspace
+            .get("default-members")
+            .and_then(TomlValue::as_array),
+        Some(&vec![
+            TomlValue::String(".".to_owned()),
+            TomlValue::String("fs-consumer".to_owned()),
+        ])
     );
 
     let root_manifest = fs::read_to_string(repository.join("Cargo.toml")).unwrap();
@@ -74,6 +89,13 @@ fn module_consumer_is_an_isolated_direct_scene_consumer() {
         manifest["dev-dependencies"]["bevy_ecs"].as_str(),
         Some("0.19")
     );
+
+    let filesystem_source = fs::read_to_string(consumer.join("fs-consumer/Cargo.toml"))
+        .expect("CDPF-U3 requires the direct filesystem consumer manifest");
+    let filesystem = toml::from_str::<TomlValue>(&filesystem_source)
+        .expect("filesystem consumer manifest must be valid TOML");
+    assert_filesystem_manifest_boundary(&filesystem).unwrap();
+    assert_path_dependency(&filesystem, "nara_fs", "../../crates/nara_fs");
 }
 
 #[test]
@@ -114,12 +136,25 @@ fn locked_metadata_has_no_root_facade_or_root_workspace_unification() {
     let members = metadata["workspace_members"]
         .as_array()
         .expect("workspace_members must be an array");
-    assert_eq!(members.len(), 1, "only the module consumer is a member");
-    let package = packages
+    assert_eq!(
+        members.len(),
+        2,
+        "both direct module consumers must be members"
+    );
+    let member_ids = members
         .iter()
-        .find(|package| package["name"] == "nara-scene-module-consumer")
-        .expect("module consumer package must be present");
-    assert_eq!(members[0], package["id"]);
+        .map(|member| member.as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    for package_name in ["nara-scene-module-consumer", "nara-fs-module-consumer"] {
+        let package = packages
+            .iter()
+            .find(|package| package["name"] == package_name)
+            .unwrap_or_else(|| panic!("{package_name} must be present"));
+        assert!(
+            member_ids.contains(package["id"].as_str().unwrap()),
+            "{package_name} must be a workspace member"
+        );
+    }
     assert_eq!(
         Path::new(metadata["workspace_root"].as_str().unwrap())
             .canonicalize()
@@ -130,12 +165,14 @@ fn locked_metadata_has_no_root_facade_or_root_workspace_unification() {
 
 #[test]
 fn source_imports_are_declared_and_stay_on_the_supported_surface() {
-    for path in rust_sources(&module_consumer_root()) {
-        let source = fs::read_to_string(&path).unwrap();
-        assert_source_boundary(&source)
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let consumer = module_consumer_root();
+    for root in [consumer.join("src"), consumer.join("tests")] {
+        for path in rust_sources(&root) {
+            let source = fs::read_to_string(&path).unwrap();
+            assert_source_boundary(&source, &ALLOWED_SOURCE_ROOTS)
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
     }
-
     for forbidden in [
         "use nara::scene::SceneDocument;",
         "const _: Option<nara_app::PrivateType> = None;",
@@ -143,7 +180,7 @@ fn source_imports_are_declared_and_stay_on_the_supported_surface() {
         "include!(\"../hidden.rs\");",
         "macro_rules! hidden { () => { use nara_ecs::World; } }",
     ] {
-        assert!(assert_source_boundary(forbidden).is_err());
+        assert!(assert_source_boundary(forbidden, &ALLOWED_SOURCE_ROOTS).is_err());
     }
 }
 
@@ -189,6 +226,41 @@ fn manifest_boundary_rejects_product_and_workspace_shortcuts() {
 }
 
 #[test]
+fn filesystem_manifest_boundary_rejects_facade_workspace_and_private_shortcuts() {
+    let source = fs::read_to_string(module_consumer_root().join("fs-consumer/Cargo.toml")).unwrap();
+    let manifest = toml::from_str::<TomlValue>(&source).unwrap();
+    assert_filesystem_manifest_boundary(&manifest).unwrap();
+
+    let mut root_facade = manifest.clone();
+    root_facade["dependencies"].as_table_mut().unwrap().insert(
+        "engine".to_owned(),
+        dependency_table([
+            ("package", TomlValue::String("nara".to_owned())),
+            ("path", TomlValue::String("../..".to_owned())),
+        ]),
+    );
+    assert!(assert_filesystem_manifest_boundary(&root_facade).is_err());
+
+    let mut inherited = manifest.clone();
+    inherited["dependencies"]["nara_fs"] =
+        dependency_table([("workspace", TomlValue::Boolean(true))]);
+    assert!(assert_filesystem_manifest_boundary(&inherited).is_err());
+
+    let mut private_crate = manifest;
+    private_crate["dependencies"]
+        .as_table_mut()
+        .unwrap()
+        .insert(
+            "nara_project".to_owned(),
+            dependency_table([(
+                "path",
+                TomlValue::String("../../crates/nara_project".to_owned()),
+            )]),
+        );
+    assert!(assert_filesystem_manifest_boundary(&private_crate).is_err());
+}
+
+#[test]
 fn removing_documented_registry_prerequisite_fails_at_the_import() {
     let repository = repository_root();
     let consumer = module_consumer_root();
@@ -200,6 +272,11 @@ fn removing_documented_registry_prerequisite_fails_at_the_import() {
 
     let manifest_source = fs::read_to_string(consumer.join("Cargo.toml")).unwrap();
     let mut manifest = toml::from_str::<TomlValue>(&manifest_source).unwrap();
+    let workspace = manifest["workspace"]
+        .as_table_mut()
+        .expect("module-consumer must own its isolated workspace");
+    workspace.remove("members");
+    workspace.remove("default-members");
     manifest["dependencies"]
         .as_table_mut()
         .unwrap()
@@ -266,7 +343,72 @@ fn scene_module_documentation_names_the_exact_supported_prerequisites() {
     assert!(!readme.contains("[patch"));
 }
 
+#[test]
+fn filesystem_module_documentation_names_the_bounded_public_contract() {
+    let readme = fs::read_to_string(repository_root().join("crates/nara_fs/README.md"))
+        .expect("nara_fs must document its direct-consumer surface");
+
+    for required in [
+        "Host-issued handles",
+        "RelativeComponent",
+        "production Host",
+        "high-entropy name",
+        "fixed names are suitable only for fixtures",
+        "DirectoryPublicationTransaction::publish",
+        "recoverable orphan",
+        "module-consumer/fs-consumer",
+    ] {
+        assert!(readme.contains(required), "README is missing {required:?}");
+    }
+    for forbidden in ["nara =", "workspace = true", "[patch"] {
+        assert!(
+            !readme.contains(forbidden),
+            "README contains the forbidden shortcut {forbidden:?}"
+        );
+    }
+}
+
+#[test]
+fn filesystem_consumer_production_has_no_ambient_path_authority() {
+    let source = fs::read_to_string(module_consumer_root().join("fs-consumer/src/lib.rs"))
+        .expect("filesystem consumer production source must exist");
+    let production = source
+        .split_once("#[cfg(all(test,")
+        .map_or(source.as_str(), |(production, _)| production);
+
+    for forbidden in [
+        "std::fs",
+        "std::path",
+        "File::open",
+        "OpenOptions",
+        "current_dir",
+        "current_exe",
+        "CARGO_MANIFEST_DIR",
+    ] {
+        assert!(
+            !production.contains(forbidden),
+            "filesystem consumer production code contains ambient authority {forbidden:?}"
+        );
+    }
+}
+
 fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
+    assert_direct_manifest_boundary(
+        manifest,
+        &EXPECTED_DEPENDENCIES,
+        &["nara_scene", "nara_reflect"],
+    )
+}
+
+fn assert_filesystem_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
+    assert_direct_manifest_boundary(manifest, &FS_EXPECTED_DEPENDENCIES, &["nara_fs"])
+}
+
+fn assert_direct_manifest_boundary(
+    manifest: &TomlValue,
+    expected_dependencies: &[&str],
+    allowed_nara_packages: &[&str],
+) -> Result<(), String> {
     if manifest.get("patch").is_some() {
         return Err("[patch] is forbidden".to_owned());
     }
@@ -277,7 +419,7 @@ fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
         .iter()
         .map(|(path, _, _)| path.as_str())
         .collect::<Vec<_>>();
-    if observed != EXPECTED_DEPENDENCIES {
+    if observed != expected_dependencies {
         return Err(format!("unexpected direct dependencies: {observed:?}"));
     }
 
@@ -297,9 +439,7 @@ fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
         if package_name == "nara" {
             return Err("the root facade is forbidden".to_owned());
         }
-        if package_name.starts_with("nara_")
-            && !matches!(package_name, "nara_scene" | "nara_reflect")
-        {
+        if package_name.starts_with("nara_") && !allowed_nara_packages.contains(&package_name) {
             return Err(format!(
                 "private Nara dependency is forbidden: {package_name}"
             ));
@@ -340,11 +480,11 @@ fn collect_dependency_entries<'a>(
     Ok(())
 }
 
-fn assert_source_boundary(source: &str) -> Result<(), String> {
+fn assert_source_boundary(source: &str, allowed_roots: &[&str]) -> Result<(), String> {
     let syntax = syn::parse_file(source).map_err(|error| error.to_string())?;
     let mut visitor = ImportRootVisitor::default();
     visitor.visit_file(&syntax);
-    let allowed = ALLOWED_SOURCE_ROOTS.into_iter().collect::<BTreeSet<_>>();
+    let allowed = allowed_roots.iter().copied().collect::<BTreeSet<_>>();
     let undeclared = visitor
         .roots
         .iter()
