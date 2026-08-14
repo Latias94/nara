@@ -24,6 +24,7 @@ pub use composition::{
     ProjectSettingsLineage, RuntimePlan, RuntimePlanError, SchemaValidationInput,
     compiled_product_capabilities, resolve_product_recipe,
 };
+pub(crate) use ingest::ingest_project_manifest_with_expected_digest;
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
 #[cfg(all(
     feature = "runtime-2d",

@@ -98,6 +98,7 @@ blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
 egui = "0.35.0"
 glam = { version = "0.30", features = ["serde"] }
+getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 notify = "8.2.0"
@@ -128,6 +129,7 @@ rustix = "1.1.4"
 windows-sys = "0.61.2"
 
 [dependencies]
+getrandom = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_asset = { workspace = true, optional = true }
 nara_asset_watch = { workspace = true, optional = true }
@@ -246,7 +248,7 @@ serde = [
     "nara_ui?/serde",
     "nara_window?/serde",
 ]
-project-workflow = ["runtime-2d", "serde"]
+project-workflow = ["runtime-2d", "serde", "dep:getrandom"]
 
 [[example]]
 name = "windowed_clear"

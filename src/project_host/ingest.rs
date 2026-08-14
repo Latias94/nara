@@ -112,8 +112,33 @@ pub fn ingest_project_manifest(
     manifest: &FileCapability,
     profile: Option<&str>,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
+    ingest_project_manifest_inner(manifest, profile, None)
+}
+
+pub(crate) fn ingest_project_manifest_with_expected_digest(
+    manifest: &FileCapability,
+    profile: Option<&str>,
+    expected_digest: ContentDigest,
+) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
+    ingest_project_manifest_inner(manifest, profile, Some(expected_digest))
+}
+
+fn ingest_project_manifest_inner(
+    manifest: &FileCapability,
+    profile: Option<&str>,
+    expected_digest: Option<ContentDigest>,
+) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
     let project_root_identity = manifest.parent_identity();
     let bytes = read_manifest_bytes(manifest)?;
+    if expected_digest.is_some_and(|expected| ContentDigest::of_bytes(&bytes) != expected) {
+        return Err(ProjectCandidateError::single(
+            ProjectCandidateErrorKind::HostAuthorityRejected,
+            diagnostic(
+                "project.manifest.source-changed",
+                "Project manifest bytes do not match the prepared source digest",
+            ),
+        ));
+    }
     let load = ProjectManifest::parse_toml_bytes(&bytes);
     if load.has_errors() || load.manifest.is_none() {
         return Err(ProjectCandidateError::new(

@@ -565,9 +565,27 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.load_inner(candidate, plan, None)
+    }
+
+    pub(crate) fn load_with_expected_startup_scene_digest(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        expected_startup_scene_digest: ContentDigest,
+    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.load_inner(candidate, plan, Some(expected_startup_scene_digest))
+    }
+
+    fn load_inner(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        expected_startup_scene_digest: Option<ContentDigest>,
+    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
         let validation = plan.schema_validation();
-        let mut context = LoadContext::new(self, validation);
+        let mut context = LoadContext::new(self, validation, expected_startup_scene_digest);
         context.load(candidate)
     }
 
@@ -640,6 +658,7 @@ struct LoadContext<'a> {
     digest: ContentDigestBuilder,
     digest_work_bytes: usize,
     source_upgrade_required: bool,
+    expected_startup_scene_digest: Option<ContentDigest>,
     asset_database: ProjectAssetDatabase,
 }
 
@@ -650,7 +669,11 @@ struct WorkReservation {
 }
 
 impl<'a> LoadContext<'a> {
-    fn new(loader: &'a ProjectContentLoader, validation: &'a SchemaValidationInput) -> Self {
+    fn new(
+        loader: &'a ProjectContentLoader,
+        validation: &'a SchemaValidationInput,
+        expected_startup_scene_digest: Option<ContentDigest>,
+    ) -> Self {
         Self {
             loader,
             validation,
@@ -658,6 +681,7 @@ impl<'a> LoadContext<'a> {
             digest: ContentDigestBuilder::default(),
             digest_work_bytes: 0,
             source_upgrade_required: false,
+            expected_startup_scene_digest,
             asset_database: ProjectAssetDatabase::default(),
         }
     }
@@ -684,6 +708,16 @@ impl<'a> LoadContext<'a> {
             startup.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
         )?;
+        if self
+            .expected_startup_scene_digest
+            .is_some_and(|expected| scene_digest != expected)
+        {
+            return Err(ProjectContentError::single(
+                ProjectContentErrorKind::HostAuthorityRejected,
+                "project.content.startup-scene-source-changed",
+                "Project startup Scene bytes do not match the prepared source digest",
+            ));
+        }
         self.record_digest("scene", startup.as_str(), scene_digest)?;
         let startup_scene = self.decode_scene(startup.as_str(), &scene_bytes)?;
 

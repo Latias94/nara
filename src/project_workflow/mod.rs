@@ -5,6 +5,7 @@
 
 mod creation;
 mod dependency;
+mod publication;
 mod starter;
 
 pub use creation::{
@@ -15,7 +16,14 @@ pub use dependency::{
     LocalDependencyParent, NaraDependencyReceipt, NaraDependencySource, NaraDependencySourceError,
     NaraDependencySourceErrorKind, NaraDependencySourceKind,
 };
+pub use publication::{
+    ProjectCreationAdmissionError, ProjectCreationAdmissionErrorKind, ProjectCreationOrphan,
+    ProjectCreationOutcome, ProjectCreationReceipt, ProjectCreationRejection,
+    ProjectCreationRejectionKind, ProjectCreationUnresolved, ProjectTreeStageError,
+    PublishedButUnadmitted,
+};
 pub use starter::{
-    ProjectCreationPlan, ProjectDirectory, ProjectMember, ProjectMemberPlan, ProjectSlug,
-    ProjectSlugError, ProjectSlugErrorKind, ProjectStarter,
+    ProjectCreationPlan, ProjectCreationPlanReceipt, ProjectDirectory, ProjectMember,
+    ProjectMemberPlan, ProjectMemberReceipt, ProjectSlug, ProjectSlugError, ProjectSlugErrorKind,
+    ProjectStarter,
 };

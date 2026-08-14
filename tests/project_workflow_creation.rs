@@ -7,11 +7,15 @@ use std::{
 };
 
 use nara::{
-    fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
+    fs::{
+        CapabilityRights, ContentDigest, DirectoryCapability, FsError, HostCapabilityOptions,
+        PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding, RelativePath,
+        TrustMode,
+    },
     project_workflow::{
-        LocalDependencyParent, NaraDependencySource, ProjectCreationPlanErrorKind,
-        ProjectCreationRequest, ProjectDirectory, ProjectMember, ProjectSlug,
-        prepare_desktop_2d_project,
+        LocalDependencyParent, NaraDependencySource, ProjectCreationOutcome,
+        ProjectCreationPlanErrorKind, ProjectCreationRejectionKind, ProjectCreationRequest,
+        ProjectDirectory, ProjectMember, ProjectSlug, prepare_desktop_2d_project,
     },
 };
 
@@ -78,6 +82,16 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     );
     assert!(!cargo.contains("{{"));
     assert!(!cargo.contains("reference-game"));
+    assert_eq!(
+        plan.dependency().immutable_git_repository_digest(),
+        Some(ContentDigest::of_bytes(
+            b"https://github.com/nara-engine/nara.git"
+        ))
+    );
+    assert_eq!(
+        plan.dependency().immutable_git_revision(),
+        Some(GIT_REVISION)
+    );
 
     let manifest = plan.member(ProjectMember::ProjectManifest).unwrap();
     let load = nara::project::ProjectManifest::parse_toml_bytes(manifest.bytes());
@@ -146,9 +160,11 @@ fn local_source_derives_the_cargo_path_from_the_authorized_parent_relation() {
     let checkout = TestRoot::new("local-checkout");
     fs::create_dir(checkout.path().join("projects")).unwrap();
     let checkout_capability = checkout.writable_capability();
+    let checkout_identity = checkout_capability.identity();
     let parent = checkout_capability
         .open_directory(&RelativePath::new("projects").unwrap())
         .unwrap();
+    let parent_identity = parent.identity();
     let source = NaraDependencySource::local(
         checkout_capability,
         LocalDependencyParent::Descendant(RelativePath::new("projects").unwrap()),
@@ -168,6 +184,21 @@ fn local_source_derives_the_cargo_path_from_the_authorized_parent_relation() {
         Some("../..")
     );
     assert!(!cargo.contains(checkout.path().to_string_lossy().as_ref()));
+    assert_eq!(
+        prepared.plan().dependency().local_checkout_identity(),
+        Some(checkout_identity)
+    );
+    assert_eq!(
+        prepared
+            .plan()
+            .dependency()
+            .local_destination_parent_identity(),
+        Some(parent_identity)
+    );
+    assert_eq!(
+        prepared.plan().dependency().local_descendant_depth(),
+        Some(1)
+    );
 }
 
 #[test]
@@ -190,6 +221,223 @@ fn local_source_rejects_a_parent_outside_the_checkout_relation() {
         ProjectCreationPlanErrorKind::LocalParentMismatch
     );
     assert!(!destination.path().join("outside-game").exists());
+}
+
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn local_source_revalidates_the_checkout_relation_before_staging() {
+    let checkout = TestRoot::new("relation-drift-checkout");
+    fs::create_dir(checkout.path().join("projects")).unwrap();
+    let checkout_capability = checkout.writable_capability();
+    let publication_parent = checkout_capability
+        .open_directory(&RelativePath::new("projects").unwrap())
+        .unwrap();
+    let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        publication_parent,
+        ProjectSlug::new("drifted-game").unwrap(),
+        NaraDependencySource::local(
+            checkout_capability,
+            LocalDependencyParent::Descendant(RelativePath::new("projects").unwrap()),
+        ),
+    ))
+    .unwrap();
+    let outside = TestRoot::new("relation-drift-outside");
+    let moved_parent = outside.path().join("moved-projects");
+    fs::rename(checkout.path().join("projects"), &moved_parent).unwrap();
+
+    let outcome = prepared.publish();
+    let ProjectCreationOutcome::Rejected(rejection) = outcome else {
+        panic!("expected dependency-relation rejection: {outcome:?}");
+    };
+
+    assert_eq!(
+        rejection.kind(),
+        ProjectCreationRejectionKind::DependencyRelation
+    );
+    assert!(!moved_parent.join("drifted-game").exists());
+    assert!(fs::read_dir(&moved_parent).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".nara-stage-")
+    }));
+}
+
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
+    let root = TestRoot::new("published-and-admitted");
+    let source = NaraDependencySource::immutable_git(
+        "https://github.com/nara-engine/nara.git",
+        GIT_REVISION,
+    )
+    .unwrap();
+    let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        root.writable_capability(),
+        ProjectSlug::new("published-game").unwrap(),
+        source,
+    ))
+    .unwrap();
+
+    let outcome = prepared.publish();
+    if publication_is_unavailable_and_clean(&outcome, root.path(), "published-game") {
+        return;
+    }
+    let ProjectCreationOutcome::Created(receipt) = outcome else {
+        panic!("expected an admitted creation receipt: {outcome:?}");
+    };
+
+    assert_eq!(
+        receipt.publication().published_identity(),
+        receipt.project_root_identity()
+    );
+    assert_eq!(
+        receipt.publication().publication_atomicity(),
+        PublicationAtomicity::AtomicNameSwitch
+    );
+    #[cfg(windows)]
+    {
+        assert_eq!(
+            receipt.publication().source_binding(),
+            PublicationSourceBinding::HandleBound
+        );
+        assert_eq!(
+            receipt.publication().publication_identity_evidence(),
+            PublicationIdentityEvidence::HandleBoundCandidate
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(
+            receipt.publication().source_binding(),
+            PublicationSourceBinding::NameBound
+        );
+        assert_eq!(
+            receipt.publication().publication_identity_evidence(),
+            PublicationIdentityEvidence::NameBoundCandidate
+        );
+    }
+    assert_eq!(receipt.plan().starter().id(), "desktop-2d/v1");
+    assert_eq!(receipt.plan().manifest_schema_version(), 1);
+    assert_eq!(receipt.plan().scene_format_version(), 1);
+    assert_eq!(
+        receipt.plan().directories(),
+        &[
+            ProjectDirectory::Assets,
+            ProjectDirectory::Prefabs,
+            ProjectDirectory::Scenes,
+            ProjectDirectory::Source,
+            ProjectDirectory::SourceBinaries,
+        ]
+    );
+    assert_eq!(receipt.plan().members().len(), 7);
+
+    let project_root = receipt.project_root();
+    let manifest = project_root
+        .open_file(&RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let manifest_receipt = receipt
+        .plan()
+        .member(ProjectMember::ProjectManifest)
+        .unwrap();
+    manifest
+        .verify_digest(
+            manifest_receipt.digest(),
+            manifest_receipt.digest().length(),
+        )
+        .unwrap();
+
+    for path in [
+        "Cargo.toml",
+        "nara.toml",
+        "README.md",
+        "src/lib.rs",
+        "src/bin/headless.rs",
+        "src/bin/desktop.rs",
+        "scenes/startup.scene.json",
+    ] {
+        assert!(root.path().join("published-game").join(path).is_file());
+    }
+}
+
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn destination_collision_rejects_without_overwrite_or_staging_residue() {
+    let root = TestRoot::new("destination-collision");
+    let destination = root.path().join("existing-game");
+    fs::create_dir(&destination).unwrap();
+    fs::write(destination.join("keep.txt"), b"existing").unwrap();
+    let source = NaraDependencySource::immutable_git(
+        "https://github.com/nara-engine/nara.git",
+        GIT_REVISION,
+    )
+    .unwrap();
+    let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        root.writable_capability(),
+        ProjectSlug::new("existing-game").unwrap(),
+        source,
+    ))
+    .unwrap();
+
+    let outcome = prepared.publish();
+    let ProjectCreationOutcome::Rejected(rejection) = outcome else {
+        panic!("expected a clean rejection: {outcome:?}");
+    };
+
+    assert_eq!(
+        rejection.kind(),
+        ProjectCreationRejectionKind::BeforeStaging
+    );
+    assert!(matches!(
+        rejection.before_staging_error(),
+        Some(FsError::TargetStateMismatch)
+            | Some(FsError::Unsupported { .. })
+            | Some(FsError::Unproven { .. })
+    ));
+    assert_eq!(rejection.plan().starter().id(), "desktop-2d/v1");
+    assert_eq!(fs::read(destination.join("keep.txt")).unwrap(), b"existing");
+    assert!(fs::read_dir(root.path()).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".nara-stage-")
+    }));
+}
+
+fn publication_is_unavailable_and_clean(
+    outcome: &ProjectCreationOutcome,
+    parent: &Path,
+    destination: &str,
+) -> bool {
+    let ProjectCreationOutcome::Rejected(rejection) = outcome else {
+        return false;
+    };
+    if !matches!(
+        rejection.before_staging_error(),
+        Some(FsError::Unsupported { .. }) | Some(FsError::Unproven { .. })
+    ) {
+        return false;
+    }
+    assert!(!parent.join(destination).exists());
+    assert!(fs::read_dir(parent).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".nara-stage-")
+    }));
+    true
 }
 
 struct TestRoot {

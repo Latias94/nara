@@ -126,6 +126,47 @@ impl NaraDependencyReceipt {
             NaraDependencyReceiptInner::LocalCheckout { .. } => None,
         }
     }
+
+    #[must_use]
+    pub const fn local_checkout_identity(&self) -> Option<FileIdentity> {
+        match &self.inner {
+            NaraDependencyReceiptInner::LocalCheckout {
+                checkout_identity, ..
+            } => Some(*checkout_identity),
+            NaraDependencyReceiptInner::ImmutableGit { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn local_destination_parent_identity(&self) -> Option<FileIdentity> {
+        match &self.inner {
+            NaraDependencyReceiptInner::LocalCheckout {
+                destination_parent_identity,
+                ..
+            } => Some(*destination_parent_identity),
+            NaraDependencyReceiptInner::ImmutableGit { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn local_descendant_depth(&self) -> Option<usize> {
+        match &self.inner {
+            NaraDependencyReceiptInner::LocalCheckout {
+                descendant_depth, ..
+            } => Some(*descendant_depth),
+            NaraDependencyReceiptInner::ImmutableGit { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn immutable_git_repository_digest(&self) -> Option<ContentDigest> {
+        match &self.inner {
+            NaraDependencyReceiptInner::ImmutableGit {
+                repository_digest, ..
+            } => Some(*repository_digest),
+            NaraDependencyReceiptInner::LocalCheckout { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,6 +191,44 @@ impl NaraDependencySourceError {
 pub(crate) struct PreparedDependency {
     pub(crate) manifest_fragment: String,
     pub(crate) receipt: NaraDependencyReceipt,
+    pub(crate) revalidation: PreparedDependencyRevalidation,
+}
+
+pub(crate) enum PreparedDependencyRevalidation {
+    LocalCheckout {
+        checkout: DirectoryCapability,
+        destination_parent: LocalDependencyParent,
+        destination_parent_identity: FileIdentity,
+    },
+    ImmutableGit,
+}
+
+impl PreparedDependencyRevalidation {
+    pub(crate) fn revalidate(
+        &self,
+        publication_parent: &DirectoryCapability,
+    ) -> Result<(), DependencyRevalidationError> {
+        let Self::LocalCheckout {
+            checkout,
+            destination_parent,
+            destination_parent_identity,
+        } = self
+        else {
+            return Ok(());
+        };
+        let authorized_parent = match destination_parent {
+            LocalDependencyParent::CheckoutRoot => checkout.share(),
+            LocalDependencyParent::Descendant(path) => checkout
+                .open_directory(path)
+                .map_err(DependencyRevalidationError::LocalParentUnavailable)?,
+        };
+        if authorized_parent.identity() != *destination_parent_identity
+            || publication_parent.identity() != *destination_parent_identity
+        {
+            return Err(DependencyRevalidationError::LocalParentMismatch);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -157,6 +236,16 @@ pub(crate) enum DependencyPreparationError {
     #[error("local dependency destination parent could not be resolved")]
     LocalParentUnavailable(#[source] FsError),
     #[error("local dependency destination parent is outside the authorized checkout relation")]
+    LocalParentMismatch,
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum DependencyRevalidationError {
+    #[error("local dependency destination parent could not be reopened")]
+    LocalParentUnavailable(#[source] FsError),
+    #[error(
+        "local dependency destination parent no longer matches the authorized checkout relation"
+    )]
     LocalParentMismatch,
 }
 
@@ -192,6 +281,11 @@ pub(crate) fn prepare_dependency(
                         descendant_depth: destination_parent.depth(),
                     },
                 },
+                revalidation: PreparedDependencyRevalidation::LocalCheckout {
+                    destination_parent_identity: publication_parent.identity(),
+                    checkout,
+                    destination_parent,
+                },
             })
         }
         NaraDependencySourceInner::ImmutableGit {
@@ -205,6 +299,7 @@ pub(crate) fn prepare_dependency(
                     revision,
                 },
             },
+            revalidation: PreparedDependencyRevalidation::ImmutableGit,
         }),
     }
 }

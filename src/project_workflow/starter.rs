@@ -1,14 +1,18 @@
 use std::fmt::{self, Debug, Formatter};
 
 use nara_fs::{ContentDigest, PathValidationError, RelativeComponent};
-use nara_project::{ProductCapability, ProductCapabilitySet, ProjectManifest, RuntimePreset};
+use nara_project::{
+    CURRENT_PROJECT_SCHEMA_VERSION, ProductCapability, ProductCapabilitySet, ProjectManifest,
+    RuntimePreset,
+};
 use nara_scene::SceneDocumentCandidate;
 use thiserror::Error;
 
-use super::dependency::PreparedDependency;
+use super::dependency::NaraDependencyReceipt;
 
 const MAX_PROJECT_SLUG_BYTES: usize = 64;
 const MAX_STARTER_MEMBER_BYTES: usize = 256 * 1024;
+const DESKTOP_2D_V1_SCENE_FORMAT_VERSION: u32 = 1;
 
 const AUTHOR_GUIDE: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -41,6 +45,20 @@ impl ProjectStarter {
     pub const fn id(self) -> &'static str {
         match self {
             Self::Desktop2dV1 => "desktop-2d/v1",
+        }
+    }
+
+    #[must_use]
+    pub const fn manifest_schema_version(self) -> u32 {
+        match self {
+            Self::Desktop2dV1 => CURRENT_PROJECT_SCHEMA_VERSION,
+        }
+    }
+
+    #[must_use]
+    pub const fn scene_format_version(self) -> u32 {
+        match self {
+            Self::Desktop2dV1 => DESKTOP_2D_V1_SCENE_FORMAT_VERSION,
         }
     }
 }
@@ -155,6 +173,80 @@ pub struct ProjectCreationPlan {
     members: Box<[ProjectMemberPlan]>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectCreationPlanReceipt {
+    starter: ProjectStarter,
+    slug: ProjectSlug,
+    dependency: super::dependency::NaraDependencyReceipt,
+    manifest_schema_version: u32,
+    scene_format_version: u32,
+    directories: Box<[ProjectDirectory]>,
+    members: Box<[ProjectMemberReceipt]>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProjectMemberReceipt {
+    member: ProjectMember,
+    digest: ContentDigest,
+}
+
+impl ProjectMemberReceipt {
+    #[must_use]
+    pub const fn member(self) -> ProjectMember {
+        self.member
+    }
+
+    #[must_use]
+    pub const fn digest(self) -> ContentDigest {
+        self.digest
+    }
+}
+
+impl ProjectCreationPlanReceipt {
+    #[must_use]
+    pub const fn starter(&self) -> ProjectStarter {
+        self.starter
+    }
+
+    #[must_use]
+    pub const fn slug(&self) -> &ProjectSlug {
+        &self.slug
+    }
+
+    #[must_use]
+    pub const fn dependency(&self) -> &super::dependency::NaraDependencyReceipt {
+        &self.dependency
+    }
+
+    #[must_use]
+    pub const fn manifest_schema_version(&self) -> u32 {
+        self.manifest_schema_version
+    }
+
+    #[must_use]
+    pub const fn scene_format_version(&self) -> u32 {
+        self.scene_format_version
+    }
+
+    #[must_use]
+    pub fn directories(&self) -> &[ProjectDirectory] {
+        &self.directories
+    }
+
+    #[must_use]
+    pub fn members(&self) -> &[ProjectMemberReceipt] {
+        &self.members
+    }
+
+    #[must_use]
+    pub fn member(&self, member: ProjectMember) -> Option<ProjectMemberReceipt> {
+        self.members
+            .iter()
+            .copied()
+            .find(|receipt| receipt.member == member)
+    }
+}
+
 impl ProjectCreationPlan {
     #[must_use]
     pub const fn starter(&self) -> ProjectStarter {
@@ -185,6 +277,27 @@ impl ProjectCreationPlan {
     pub fn member(&self, member: ProjectMember) -> Option<&ProjectMemberPlan> {
         self.members.iter().find(|plan| plan.member == member)
     }
+
+    #[must_use]
+    pub(crate) fn receipt(&self) -> ProjectCreationPlanReceipt {
+        let starter = self.starter();
+        ProjectCreationPlanReceipt {
+            starter,
+            slug: self.slug.clone(),
+            dependency: self.dependency.clone(),
+            manifest_schema_version: starter.manifest_schema_version(),
+            scene_format_version: starter.scene_format_version(),
+            directories: self.directories().to_vec().into_boxed_slice(),
+            members: self
+                .members
+                .iter()
+                .map(|member| ProjectMemberReceipt {
+                    member: member.member(),
+                    digest: member.digest(),
+                })
+                .collect(),
+        }
+    }
 }
 
 impl Debug for ProjectCreationPlan {
@@ -209,9 +322,10 @@ const PROJECT_DIRECTORIES: [ProjectDirectory; 5] = [
 
 pub(crate) fn build_desktop_2d_v1_plan(
     slug: ProjectSlug,
-    dependency: PreparedDependency,
+    dependency_manifest_fragment: &str,
+    dependency_receipt: NaraDependencyReceipt,
 ) -> Result<ProjectCreationPlan, &'static str> {
-    let cargo_manifest = render_cargo_manifest(&slug, &dependency.manifest_fragment);
+    let cargo_manifest = render_cargo_manifest(&slug, dependency_manifest_fragment);
     let project_manifest = render_project_manifest(&slug);
     validate_product_contract(project_manifest.as_bytes(), STARTUP_SCENE)?;
 
@@ -236,7 +350,7 @@ pub(crate) fn build_desktop_2d_v1_plan(
 
     Ok(ProjectCreationPlan {
         slug,
-        dependency: dependency.receipt,
+        dependency: dependency_receipt,
         members: Box::new(members),
     })
 }

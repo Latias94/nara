@@ -2,7 +2,10 @@ use nara_fs::{DirectoryCapability, RelativeComponent};
 use thiserror::Error;
 
 use super::{
-    dependency::{DependencyPreparationError, NaraDependencySource, prepare_dependency},
+    dependency::{
+        DependencyPreparationError, NaraDependencySource, PreparedDependency,
+        PreparedDependencyRevalidation, prepare_dependency,
+    },
     starter::{ProjectCreationPlan, ProjectSlug, build_desktop_2d_v1_plan},
 };
 
@@ -30,13 +33,19 @@ impl ProjectCreationRequest {
 pub struct PreparedProjectCreation {
     pub(crate) publication_parent: DirectoryCapability,
     pub(crate) destination: RelativeComponent,
-    plan: ProjectCreationPlan,
+    pub(crate) plan: ProjectCreationPlan,
+    pub(crate) dependency_revalidation: PreparedDependencyRevalidation,
 }
 
 impl PreparedProjectCreation {
     #[must_use]
     pub const fn plan(&self) -> &ProjectCreationPlan {
         &self.plan
+    }
+
+    #[must_use = "the project-creation terminal outcome must be handled"]
+    pub fn publish(self) -> super::publication::ProjectCreationOutcome {
+        super::publication::publish_prepared(self)
     }
 }
 
@@ -97,11 +106,17 @@ pub fn prepare_desktop_2d_project(
                 ProjectCreationPlanError::LocalParentMismatch
             }
         })?;
-    let plan = build_desktop_2d_v1_plan(slug, dependency)
+    let PreparedDependency {
+        manifest_fragment,
+        receipt,
+        revalidation: dependency_revalidation,
+    } = dependency;
+    let plan = build_desktop_2d_v1_plan(slug, &manifest_fragment, receipt)
         .map_err(ProjectCreationPlanError::StarterContract)?;
     Ok(PreparedProjectCreation {
         publication_parent,
         destination,
         plan,
+        dependency_revalidation,
     })
 }
