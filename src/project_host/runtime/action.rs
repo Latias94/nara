@@ -7,16 +7,15 @@ use nara_app::{
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::Resource;
-use nara_fs::{DirectoryCapability, RelativePath};
+use nara_fs::DirectoryCapability;
 use nara_gameplay::GameplayCommandSubmission;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_winit::{WinitControlFlow, WinitRunner};
 
-use super::super::composition::resolve_product_recipe_with_overlay;
-use super::super::{ProjectCandidateError, ProjectContentLoader, ingest_project_manifest};
+use super::super::check::{ProjectSourceCheckError, check_project_source_with_overlay};
 use super::{
-    CleanupDriveOutcome, HostFault, PROJECT_MANIFEST, ProjectHost, RuntimePluginOverlay,
-    RuntimeStartAttempt, runtime_plan_failure_report, runtime_plan_selected_report, single_error,
+    CleanupDriveOutcome, HostFault, ProjectHost, RuntimePluginOverlay, RuntimeStartAttempt,
+    runtime_plan_failure_report, runtime_plan_selected_report, single_error,
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::{
@@ -1196,23 +1195,11 @@ fn prepare_project_start(
     overlay: Option<RuntimePluginOverlay>,
     commands: Vec<GameplayCommandSubmission>,
 ) -> Result<PreparedProjectStart, HostFault> {
-    let manifest_path = RelativePath::new(PROJECT_MANIFEST)
-        .expect("the engine-owned manifest name is a valid relative path");
-    let manifest = project_root
-        .open_file(&manifest_path)
-        .map_err(|error| HostFault::new(nara_project_failure(error).diagnostics().clone()))?;
-    let candidate = ingest_project_manifest(&manifest, profile.as_deref())
-        .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-    drop(manifest);
-
-    let plan = resolve_product_recipe_with_overlay(&candidate, recipe, overlay)
-        .map_err(|error| HostFault::new(runtime_plan_failure_report(&error)))?;
+    let checked =
+        check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
+            .map_err(project_source_check_fault)?;
+    let (plan, snapshot) = checked.into_parts();
     let plan_diagnostics = runtime_plan_selected_report(&plan);
-    let loader = ProjectContentLoader::new(project_root)
-        .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
-    let snapshot = loader
-        .load(&candidate, &plan)
-        .map_err(|error| HostFault::new(error.diagnostics().clone()))?;
 
     let mut host = ProjectHost::new(cleanup_policy);
     let attempt = host.begin_start(snapshot, plan, commands)?;
@@ -1223,6 +1210,11 @@ fn prepare_project_start(
     })
 }
 
-fn nara_project_failure(error: nara_fs::FsError) -> ProjectCandidateError {
-    ProjectCandidateError::from_manifest_authority(error)
+fn project_source_check_fault(error: ProjectSourceCheckError) -> HostFault {
+    let diagnostics = match error {
+        ProjectSourceCheckError::Manifest(error) => error.diagnostics().clone(),
+        ProjectSourceCheckError::ProductComposition(error) => runtime_plan_failure_report(&error),
+        ProjectSourceCheckError::StartupContent(error) => error.diagnostics().clone(),
+    };
+    HostFault::new(diagnostics)
 }

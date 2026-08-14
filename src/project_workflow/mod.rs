@@ -3,11 +3,16 @@
 //! The initial public surface owns only the immutable `desktop-2d/v1` creation plan. Native paths,
 //! Cargo process messages, CLI parsing, and desktop presentation remain Adapter concerns.
 
+mod check;
 mod creation;
 mod dependency;
 mod publication;
 mod starter;
 
+pub use crate::project_host::{
+    StartupContentClosureReceipt, StartupContentMemberKind, StartupContentMemberReceipt,
+};
+pub use check::{ProjectCheckError, ProjectCheckErrorKind, ProjectCheckRequest, check_project};
 pub use creation::{
     PreparedProjectCreation, ProjectCreationPlanError, ProjectCreationPlanErrorKind,
     ProjectCreationRequest, prepare_desktop_2d_project,

@@ -5,7 +5,9 @@ mod project_content_fixture;
 
 use std::sync::Arc;
 
-use nara::project_host::{ProjectContentBudgetKind, ProjectContentLoader};
+use nara::project_host::{
+    ProjectContentBudgetKind, ProjectContentLoader, StartupContentMemberKind,
+};
 use nara::scene::{PrefabDocument, SceneEntityRecord};
 use project_content_fixture::{TestProject, scene_id};
 
@@ -19,11 +21,56 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
 
     let snapshot = loader.load(&candidate, &plan).unwrap();
     let cloned = snapshot.clone();
+    let closure = snapshot.startup_content_closure();
 
     assert_eq!(snapshot.lineage(), candidate.lineage());
     assert_eq!(
         snapshot.schema_fingerprint(),
         plan.schema_validation().composition_fingerprint()
+    );
+    assert_eq!(closure.settings_lineage(), snapshot.lineage());
+    assert_eq!(closure.manifest_digest(), candidate.manifest_digest());
+    assert_eq!(closure.schema_fingerprint(), snapshot.schema_fingerprint());
+    assert_eq!(closure.content_revision(), snapshot.revision());
+    assert_eq!(closure.content_digest(), snapshot.content_digest());
+    let members = closure
+        .members()
+        .iter()
+        .map(|member| {
+            (
+                member.path().as_str(),
+                member.kind(),
+                member.byte_len(),
+                member.digest(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        members
+            .iter()
+            .map(|(path, kind, _, _)| (*path, *kind))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "assets/textures/player.png",
+                StartupContentMemberKind::AssetSource,
+            ),
+            (
+                "assets/textures/player.png.meta",
+                StartupContentMemberKind::AssetMetadata,
+            ),
+            ("nara.toml", StartupContentMemberKind::ProjectManifest),
+            (
+                "prefabs/enemy.prefab.json",
+                StartupContentMemberKind::Prefab,
+            ),
+            ("scenes/startup.scene.json", StartupContentMemberKind::Scene,),
+        ]
+    );
+    assert!(
+        members
+            .iter()
+            .all(|(_, _, byte_len, digest)| { *byte_len > 0 && *byte_len == digest.length() })
     );
     assert_eq!(snapshot.prefabs().len(), 1);
     assert_eq!(snapshot.images().len(), 1);
@@ -48,13 +95,21 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     let leased = loader.budget_snapshot();
     assert!(leased.active(ProjectContentBudgetKind::ArtifactBytes) > 0);
     assert!(leased.active(ProjectContentBudgetKind::RetainedBytes) > 0);
-    assert_eq!(leased.active_reservations(), 1);
+    assert_eq!(leased.active_reservations(), 2);
 
     drop(snapshot);
     assert_eq!(loader.budget_snapshot(), leased);
     drop(cloned);
     assert_eq!(loader.budget_snapshot(), leased);
     drop(escaped);
+    let closure_only = loader.budget_snapshot();
+    assert_eq!(
+        closure_only.active(ProjectContentBudgetKind::ArtifactBytes),
+        0
+    );
+    assert!(closure_only.active(ProjectContentBudgetKind::RetainedBytes) > 0);
+    assert_eq!(closure_only.active_reservations(), 1);
+    drop(closure);
     let released = loader.budget_snapshot();
     assert_eq!(released.active(ProjectContentBudgetKind::ArtifactBytes), 0);
     assert_eq!(released.active(ProjectContentBudgetKind::RetainedBytes), 0);
@@ -74,7 +129,7 @@ fn source_changes_publish_a_distinct_revision_without_mutating_old_consumers() {
     let first_pixels = first.images()[0].image().pixels().to_vec();
     let first_pixel_ptr = first.images()[0].image().pixels().as_ptr();
     let first_charge = loader.budget_snapshot();
-    assert_eq!(first_charge.active_reservations(), 1);
+    assert_eq!(first_charge.active_reservations(), 2);
 
     let mut changed_entities = first_prefab.entities.clone();
     changed_entities.push(SceneEntityRecord::new(scene_id("variant")));
@@ -95,7 +150,7 @@ fn source_changes_publish_a_distinct_revision_without_mutating_old_consumers() {
     assert_eq!(first.content_digest(), first_digest);
 
     let overlapped = loader.budget_snapshot();
-    assert_eq!(overlapped.active_reservations(), 2);
+    assert_eq!(overlapped.active_reservations(), 4);
     assert_eq!(
         overlapped.active(ProjectContentBudgetKind::ArtifactBytes),
         first_charge
@@ -105,7 +160,7 @@ fn source_changes_publish_a_distinct_revision_without_mutating_old_consumers() {
     );
 
     drop(first);
-    assert_eq!(loader.budget_snapshot().active_reservations(), 1);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 2);
     drop(second);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }

@@ -9,7 +9,7 @@ use nara_app::{
     EditedPluginGroup, Plugin, PluginDefinition, PluginGroup, PluginGroupBuilder, PluginGroupId,
     PluginId, PluginPlan, PluginPlanError, PluginProductCapability, PluginSchemaProviderId,
 };
-use nara_fs::FileIdentity;
+use nara_fs::{ContentDigest, FileIdentity};
 use nara_project::{EffectiveProjectSettings, ProductCapability, ProductCapabilitySet};
 use nara_reflect::__private::{
     ResolvedComponentSchemaProvider, register_or_validate_resolved_schema_provider,
@@ -93,6 +93,7 @@ impl ProjectSettingsLineage {
 #[derive(Clone, PartialEq)]
 pub struct ProjectSettingsCandidate {
     pub(super) lineage: ProjectSettingsLineage,
+    pub(super) manifest_digest: ContentDigest,
     pub(super) settings: EffectiveProjectSettings,
     pub(super) explicit: ProductCapabilitySet,
     pub(super) implied: ProductCapabilitySet,
@@ -105,6 +106,11 @@ impl ProjectSettingsCandidate {
     #[must_use]
     pub const fn lineage(&self) -> ProjectSettingsLineage {
         self.lineage
+    }
+
+    #[must_use]
+    pub const fn manifest_digest(&self) -> ContentDigest {
+        self.manifest_digest
     }
 
     #[must_use]
@@ -143,6 +149,7 @@ impl fmt::Debug for ProjectSettingsCandidate {
         formatter
             .debug_struct("ProjectSettingsCandidate")
             .field("lineage", &self.lineage)
+            .field("manifest_digest", &self.manifest_digest)
             .field("runtime_preset", &self.settings.runtime_preset)
             .field("profile_present", &self.settings.profile_name.is_some())
             .field("explicit", &self.explicit)

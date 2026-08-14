@@ -1,6 +1,7 @@
 //! Authorized, World-independent startup content loading.
 
 mod budget;
+mod closure;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -52,6 +53,10 @@ pub(crate) use budget::ProjectContentLease;
 pub use budget::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentLimits,
+};
+use closure::{StartupContentClosureBuilder, StartupContentClosureDraft};
+pub use closure::{
+    StartupContentClosureReceipt, StartupContentMemberKind, StartupContentMemberReceipt,
 };
 
 // nara_fs relative traversal retains at most one intermediate handle while opening the next, and
@@ -125,29 +130,26 @@ pub struct ProjectContentSnapshot {
 }
 
 struct ProjectContentSnapshotInner {
-    lineage: ProjectSettingsLineage,
-    schema_fingerprint: SchemaCompositionFingerprint,
     schema_authority: ComponentRegistrySnapshotWitness,
-    revision: ProjectContentRevision,
-    content_digest: ContentDigest,
+    startup_closure: StartupContentClosureReceipt,
     source_upgrade_required: bool,
     startup_scene: Arc<SceneDocument>,
     expanded_startup_scene: Arc<SceneDocument>,
     expanded_startup_scene_provenance: Arc<SceneEntityProvenanceMap>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
-    _lease: ProjectContentLease,
+    _runtime_lease: ProjectContentLease,
 }
 
 impl ProjectContentSnapshot {
     #[must_use]
     pub fn lineage(&self) -> ProjectSettingsLineage {
-        self.inner.lineage
+        self.inner.startup_closure.settings_lineage()
     }
 
     #[must_use]
     pub fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
-        self.inner.schema_fingerprint
+        self.inner.startup_closure.schema_fingerprint()
     }
 
     #[must_use]
@@ -157,12 +159,17 @@ impl ProjectContentSnapshot {
 
     #[must_use]
     pub fn revision(&self) -> ProjectContentRevision {
-        self.inner.revision
+        self.inner.startup_closure.content_revision()
     }
 
     #[must_use]
     pub fn content_digest(&self) -> ContentDigest {
-        self.inner.content_digest
+        self.inner.startup_closure.content_digest()
+    }
+
+    #[must_use]
+    pub fn startup_content_closure(&self) -> StartupContentClosureReceipt {
+        self.inner.startup_closure.clone()
     }
 
     #[must_use]
@@ -209,7 +216,7 @@ impl ProjectContentSnapshot {
         StartupSceneSource::from_project_content(
             Arc::clone(&self.inner.expanded_startup_scene),
             Arc::clone(&self.inner.expanded_startup_scene_provenance),
-            self.inner._lease.clone(),
+            self.inner._runtime_lease.clone(),
             startup_scene_retained_bytes(
                 &self.inner.expanded_startup_scene,
                 &self.inner.expanded_startup_scene_provenance,
@@ -249,7 +256,7 @@ impl ProjectContentSnapshot {
         let retained_bytes = editor_startup_scene_retained_bytes(&expanded, &provenance)?;
         let lease = self
             .inner
-            ._lease
+            ._runtime_lease
             .reserve_retained(retained_bytes)
             .map_err(ProjectContentError::budget)?;
         Ok(StartupSceneSource::from_project_content(
@@ -281,10 +288,10 @@ impl fmt::Debug for ProjectContentSnapshot {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ProjectContentSnapshot")
-            .field("lineage", &self.inner.lineage)
-            .field("schema_fingerprint", &self.inner.schema_fingerprint)
-            .field("revision", &self.inner.revision)
-            .field("content_digest", &self.inner.content_digest)
+            .field("lineage", &self.lineage())
+            .field("schema_fingerprint", &self.schema_fingerprint())
+            .field("revision", &self.revision())
+            .field("content_digest", &self.content_digest())
             .field("prefab_count", &self.inner.prefabs.len())
             .field("image_count", &self.inner.images.len())
             .finish_non_exhaustive()
@@ -299,6 +306,7 @@ pub enum ProjectContentErrorKind {
     ProjectRootMismatch,
     MissingStartupScene,
     InvalidLogicalPath,
+    ClosurePathCollision,
     HostIo,
     HostAuthorityUnsupported,
     HostAuthorityUnproven,
@@ -463,6 +471,9 @@ impl Display for ProjectContentError {
             ProjectContentErrorKind::InvalidLogicalPath => {
                 "project content contains an invalid logical path"
             }
+            ProjectContentErrorKind::ClosurePathCollision => {
+                "project startup closure contains conflicting logical path facts"
+            }
             ProjectContentErrorKind::HostIo => "project content host I/O failed",
             ProjectContentErrorKind::HostAuthorityUnsupported => {
                 "project content host authority is unsupported"
@@ -585,7 +596,12 @@ impl ProjectContentLoader {
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
         let validation = plan.schema_validation();
-        let mut context = LoadContext::new(self, validation, expected_startup_scene_digest);
+        let mut context = LoadContext::new(
+            self,
+            validation,
+            expected_startup_scene_digest,
+            candidate.manifest_digest(),
+        )?;
         context.load(candidate)
     }
 
@@ -655,10 +671,10 @@ struct LoadContext<'a> {
     loader: &'a ProjectContentLoader,
     validation: &'a SchemaValidationInput,
     budget: Option<BudgetTicket>,
-    digest: ContentDigestBuilder,
-    digest_work_bytes: usize,
     source_upgrade_required: bool,
     expected_startup_scene_digest: Option<ContentDigest>,
+    startup_closure: Option<StartupContentClosureBuilder>,
+    startup_closure_work_bytes: usize,
     asset_database: ProjectAssetDatabase,
 }
 
@@ -673,17 +689,26 @@ impl<'a> LoadContext<'a> {
         loader: &'a ProjectContentLoader,
         validation: &'a SchemaValidationInput,
         expected_startup_scene_digest: Option<ContentDigest>,
-    ) -> Self {
-        Self {
+        manifest_digest: ContentDigest,
+    ) -> Result<Self, ProjectContentError> {
+        let startup_closure_work_bytes = startup_closure_entry_work_bytes("nara.toml".len())?;
+        let mut budget = loader.budget_host.reserve();
+        budget
+            .add(
+                ProjectContentBudgetKind::WorkBytes,
+                startup_closure_work_bytes,
+            )
+            .map_err(ProjectContentError::budget)?;
+        Ok(Self {
             loader,
             validation,
-            budget: Some(loader.budget_host.reserve()),
-            digest: ContentDigestBuilder::default(),
-            digest_work_bytes: 0,
+            budget: Some(budget),
             source_upgrade_required: false,
             expected_startup_scene_digest,
+            startup_closure: Some(StartupContentClosureBuilder::new(manifest_digest)?),
+            startup_closure_work_bytes,
             asset_database: ProjectAssetDatabase::default(),
-        }
+        })
     }
 
     fn load(
@@ -718,10 +743,16 @@ impl<'a> LoadContext<'a> {
                 "Project startup Scene bytes do not match the prepared source digest",
             ));
         }
-        self.record_digest("scene", startup.as_str(), scene_digest)?;
+        self.record_member(
+            StartupContentMemberKind::Scene,
+            &settings.paths.scenes,
+            startup.as_str(),
+            scene_digest,
+        )?;
         let startup_scene = self.decode_scene(startup.as_str(), &scene_bytes)?;
 
-        let loaded_prefabs = self.load_prefab_closure(&prefabs, &startup_scene)?;
+        let loaded_prefabs =
+            self.load_prefab_closure(&prefabs, &settings.paths.prefabs, &startup_scene)?;
         let resolver = LoadedPrefabResolver::new(&loaded_prefabs);
         let expansion_work = prefab_expansion_work_plan(self.loader.limits.prefab_expansion())?;
         let work_before = self.reserve_work(expansion_work)?;
@@ -743,7 +774,7 @@ impl<'a> LoadContext<'a> {
         self.commit_work_as_retained(work_before, expanded_retained)?;
 
         let asset_refs = self.collect_image_candidates(&expanded)?;
-        let images = self.load_images(&assets, asset_refs)?;
+        let images = self.load_images(&assets, &settings.paths.assets, asset_refs)?;
         drop((scenes, prefabs, assets));
         let open_handles = self.budget_value(ProjectContentBudgetKind::OpenHandles);
         self.subtract_budget(ProjectContentBudgetKind::OpenHandles, open_handles);
@@ -754,8 +785,19 @@ impl<'a> LoadContext<'a> {
             self.validation.composition_fingerprint(),
             content_digest,
         )?;
+        let startup_closure = self
+            .startup_closure
+            .take()
+            .expect("load context owns one startup closure builder until publication")
+            .finish(
+                candidate.lineage(),
+                self.validation.composition_fingerprint(),
+                revision,
+                content_digest,
+            );
 
         let snapshot_overhead = snapshot_retained_overhead(&loaded_prefabs, images.as_slice())?;
+        let startup_closure_retained = startup_closure_retained_bytes(&startup_closure)?;
         let retained_bytes = self
             .budget_value(ProjectContentBudgetKind::RetainedBytes)
             .checked_add(snapshot_overhead)
@@ -777,13 +819,28 @@ impl<'a> LoadContext<'a> {
         let prefabs = prefab_values.into_boxed_slice();
         let mut images = images.into_boxed_slice();
 
+        let mut startup_closure_budget = self.loader.budget_host.reserve();
+        startup_closure_budget
+            .set(
+                ProjectContentBudgetKind::RetainedBytes,
+                startup_closure_retained,
+            )
+            .map_err(ProjectContentError::budget)?;
+        let startup_closure_lease = startup_closure_budget
+            .into_lease()
+            .map_err(ProjectContentError::budget)?;
+        self.subtract_budget(
+            ProjectContentBudgetKind::WorkBytes,
+            self.startup_closure_work_bytes,
+        );
+        self.startup_closure_work_bytes = 0;
         let budget = self
             .budget
             .take()
             .expect("load context owns one budget ticket until publication");
-        let lease = budget.into_lease().map_err(ProjectContentError::budget)?;
+        let runtime_lease = budget.into_lease().map_err(ProjectContentError::budget)?;
         if !images.is_empty() {
-            let image_retention = Arc::new(lease.clone());
+            let image_retention = Arc::new(runtime_lease.clone());
             for content in &mut images {
                 if !content
                     .image
@@ -797,21 +854,20 @@ impl<'a> LoadContext<'a> {
                 }
             }
         }
+        let startup_closure =
+            startup_closure.publish(self.loader.root.share(), startup_closure_lease);
 
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
-                lineage: candidate.lineage(),
-                schema_fingerprint: self.validation.composition_fingerprint(),
                 schema_authority: component_registry_snapshot_witness(self.validation.snapshot()),
-                revision,
-                content_digest,
+                startup_closure,
                 source_upgrade_required: self.source_upgrade_required,
                 startup_scene,
                 expanded_startup_scene,
                 expanded_startup_scene_provenance,
                 prefabs,
                 images,
-                _lease: lease,
+                _runtime_lease: runtime_lease,
             }),
         })
     }
@@ -900,6 +956,7 @@ impl<'a> LoadContext<'a> {
     fn load_prefab_closure(
         &mut self,
         prefabs: &DirectoryCapability,
+        prefab_root: &nara_project::ProjectPath,
         scene: &SceneDocument,
     ) -> Result<BTreeMap<AssetPath, Arc<PrefabDocument>>, ProjectContentError> {
         let mut queue = VecDeque::new();
@@ -911,7 +968,7 @@ impl<'a> LoadContext<'a> {
         while let Some((path, depth)) = queue.pop_front() {
             self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
             self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
-            let loaded_result = self.load_prefab(prefabs, &path);
+            let loaded_result = self.load_prefab(prefabs, prefab_root, &path);
             self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
             let document = loaded_result?;
             for entity in &document.entities {
@@ -932,6 +989,7 @@ impl<'a> LoadContext<'a> {
     fn load_prefab(
         &mut self,
         prefabs: &DirectoryCapability,
+        prefab_root: &nara_project::ProjectPath,
         path: &AssetPath,
     ) -> Result<PrefabDocument, ProjectContentError> {
         let (bytes, digest) = self.read_file(
@@ -939,7 +997,12 @@ impl<'a> LoadContext<'a> {
             path.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
         )?;
-        self.record_digest("prefab", path.as_str(), digest)?;
+        self.record_member(
+            StartupContentMemberKind::Prefab,
+            prefab_root,
+            path.as_str(),
+            digest,
+        )?;
         self.decode_prefab(path.as_str(), &bytes)
     }
 
@@ -1119,6 +1182,7 @@ impl<'a> LoadContext<'a> {
     fn load_images(
         &mut self,
         assets: &DirectoryCapability,
+        asset_root: &nara_project::ProjectPath,
         paths: BTreeSet<AssetPath>,
     ) -> Result<Vec<ProjectImageContent>, ProjectContentError> {
         let result_bytes = checked_plan_product(
@@ -1134,7 +1198,7 @@ impl<'a> LoadContext<'a> {
         for path in paths {
             self.subtract_budget(ProjectContentBudgetKind::QueuedJobs, 1);
             self.add_budget(ProjectContentBudgetKind::InFlightJobs, 1)?;
-            let result = self.load_image(assets, &path);
+            let result = self.load_image(assets, asset_root, &path);
             self.subtract_budget(ProjectContentBudgetKind::InFlightJobs, 1);
             images.push(result?);
         }
@@ -1145,6 +1209,7 @@ impl<'a> LoadContext<'a> {
     fn load_image(
         &mut self,
         assets: &DirectoryCapability,
+        asset_root: &nara_project::ProjectPath,
         path: &AssetPath,
     ) -> Result<ProjectImageContent, ProjectContentError> {
         let meta_path = path.meta_path();
@@ -1155,7 +1220,12 @@ impl<'a> LoadContext<'a> {
                 .encoded_bytes()
                 .get(),
         )?;
-        self.record_digest("asset-meta", &meta_path, meta_digest)?;
+        self.record_member(
+            StartupContentMemberKind::AssetMetadata,
+            asset_root,
+            &meta_path,
+            meta_digest,
+        )?;
         let meta = AssetMetaCandidate::decode_json_bytes(&meta_bytes)
             .map_err(|_| {
                 ProjectContentError::with_identifier(
@@ -1217,7 +1287,12 @@ impl<'a> LoadContext<'a> {
         let work_before = self.reserve_image_memory(path, memory)?;
         let image = import.import().map_err(map_image_import_error)?;
         self.set_budget(ProjectContentBudgetKind::WorkBytes, work_before)?;
-        self.record_digest("asset", path.as_str(), source_digest)?;
+        self.record_member(
+            StartupContentMemberKind::AssetSource,
+            asset_root,
+            path.as_str(),
+            source_digest,
+        )?;
         Ok(ProjectImageContent { image })
     }
 
@@ -1317,32 +1392,45 @@ impl<'a> LoadContext<'a> {
         Ok(())
     }
 
-    fn record_digest(
+    fn record_member(
         &mut self,
-        role: &str,
+        kind: StartupContentMemberKind,
+        directory: &nara_project::ProjectPath,
         path: &str,
         digest: ContentDigest,
     ) -> Result<(), ProjectContentError> {
-        let work = digest_entry_work_bytes(role, path)?;
+        let logical_path_bytes = directory
+            .as_str()
+            .len()
+            .checked_add(1)
+            .and_then(|length| length.checked_add(path.len()))
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::PathBytes))?;
+        let work = startup_closure_entry_work_bytes(logical_path_bytes)?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
-        self.digest.insert(role, path, digest)?;
-        self.digest_work_bytes = self
-            .digest_work_bytes
+        self.startup_closure
+            .as_mut()
+            .expect("load context owns one startup closure builder until publication")
+            .insert(kind, directory, path, digest)?;
+        self.startup_closure_work_bytes = self
+            .startup_closure_work_bytes
             .checked_add(work)
             .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
         Ok(())
     }
 
     fn finish_content_digest(&mut self) -> Result<ContentDigest, ProjectContentError> {
-        let frame_work = self.digest.framed_bytes()?;
+        let startup_closure = self
+            .startup_closure
+            .as_ref()
+            .expect("load context owns one startup closure builder until publication");
+        let frame_work = startup_closure.content_digest_framed_bytes()?;
         self.add_budget(ProjectContentBudgetKind::WorkBytes, frame_work)?;
-        let release = self
-            .digest_work_bytes
-            .checked_add(frame_work)
-            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
-        let digest = std::mem::take(&mut self.digest).finish(frame_work)?;
-        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, release);
-        self.digest_work_bytes = 0;
+        let digest = self
+            .startup_closure
+            .as_ref()
+            .expect("load context owns one startup closure builder until publication")
+            .content_digest(frame_work)?;
+        self.subtract_budget(ProjectContentBudgetKind::WorkBytes, frame_work);
         Ok(digest)
     }
 
@@ -1511,81 +1599,6 @@ impl PrefabSourceResolver for LoadedPrefabResolver<'_> {
     }
 }
 
-#[derive(Default)]
-struct ContentDigestBuilder {
-    entries: BTreeMap<(String, String), (usize, [u8; 32])>,
-}
-
-impl ContentDigestBuilder {
-    fn insert(
-        &mut self,
-        role: &str,
-        path: &str,
-        digest: ContentDigest,
-    ) -> Result<(), ProjectContentError> {
-        let length = usize::try_from(digest.length())
-            .map_err(|_| overflow_budget(ProjectContentBudgetKind::EncodedBytes))?;
-        self.insert_hash(role, path, length, *digest.as_bytes())
-    }
-
-    fn insert_hash(
-        &mut self,
-        role: &str,
-        path: &str,
-        length: usize,
-        hash: [u8; 32],
-    ) -> Result<(), ProjectContentError> {
-        let key = (role.to_owned(), path.to_owned());
-        match self.entries.insert(key, (length, hash)) {
-            None => Ok(()),
-            Some(previous) if previous == (length, hash) => Ok(()),
-            Some(_) => Err(ProjectContentError::single(
-                ProjectContentErrorKind::HostIo,
-                "project.content.source-changed",
-                "Project content source changed during snapshot construction",
-            )),
-        }
-    }
-
-    fn framed_bytes(&self) -> Result<usize, ProjectContentError> {
-        let mut total = b"nara.project-content-digest.v1\0".len();
-        for (role, path) in self.entries.keys() {
-            total = checked_plan_sum(
-                ProjectContentBudgetKind::WorkBytes,
-                [total, 8, role.len(), 8, path.len(), 8, 32],
-            )?;
-        }
-        Ok(total)
-    }
-
-    fn finish(self, framed_bytes: usize) -> Result<ContentDigest, ProjectContentError> {
-        let mut framed = Vec::new();
-        framed.try_reserve_exact(framed_bytes).map_err(|_| {
-            ProjectContentError::single(
-                ProjectContentErrorKind::AllocationFailed,
-                "project.content.digest-allocation-failed",
-                "Project content digest allocation failed",
-            )
-        })?;
-        let mut encoded_length = 0_u64;
-        framed.extend_from_slice(b"nara.project-content-digest.v1\0");
-        for ((role, path), (length, hash)) in self.entries {
-            append_frame(&mut framed, role.as_bytes())?;
-            append_frame(&mut framed, path.as_bytes())?;
-            let length = u64::try_from(length)
-                .map_err(|_| overflow_budget(ProjectContentBudgetKind::EncodedBytes))?;
-            framed.extend_from_slice(&length.to_le_bytes());
-            framed.extend_from_slice(&hash);
-            encoded_length = encoded_length
-                .checked_add(length)
-                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::EncodedBytes))?;
-        }
-        debug_assert_eq!(framed.len(), framed_bytes);
-        let hash = ContentDigest::of_bytes(&framed);
-        Ok(ContentDigest::from_parts(encoded_length, *hash.as_bytes()))
-    }
-}
-
 fn content_revision(
     lineage: ProjectSettingsLineage,
     schema: SchemaCompositionFingerprint,
@@ -1614,23 +1627,17 @@ fn append_frame(output: &mut Vec<u8>, value: &[u8]) -> Result<(), ProjectContent
     Ok(())
 }
 
-fn digest_entry_work_bytes(role: &str, path: &str) -> Result<usize, ProjectContentError> {
+fn startup_closure_entry_work_bytes(path_bytes: usize) -> Result<usize, ProjectContentError> {
     checked_plan_sum(
         ProjectContentBudgetKind::WorkBytes,
         [
-            size_of::<((String, String), (usize, [u8; 32]))>(),
+            size_of::<StartupContentMemberReceipt>(),
             BTREE_ENTRY_OVERHEAD,
-            string_work_bytes(role)?,
-            string_work_bytes(path)?,
+            path_bytes
+                .checked_add(STRING_ALLOCATION_OVERHEAD)
+                .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?,
         ],
     )
-}
-
-fn string_work_bytes(value: &str) -> Result<usize, ProjectContentError> {
-    value
-        .len()
-        .checked_add(STRING_ALLOCATION_OVERHEAD)
-        .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))
 }
 
 const SNAPSHOT_LEASE_OVERHEAD: usize = 128;
@@ -1852,6 +1859,31 @@ fn snapshot_retained_overhead(
         checked_add_to(
             &mut total,
             string_retained_bytes(path.as_str())?,
+            ProjectContentBudgetKind::RetainedBytes,
+        )?;
+    }
+    Ok(total)
+}
+
+fn startup_closure_retained_bytes(
+    startup_closure: &StartupContentClosureDraft,
+) -> Result<usize, ProjectContentError> {
+    let mut total = checked_plan_sum(
+        ProjectContentBudgetKind::RetainedBytes,
+        [
+            size_of::<closure::StartupContentClosureReceiptInner>(),
+            ARC_CONTROL_BLOCK_BYTES,
+            checked_plan_product(
+                ProjectContentBudgetKind::RetainedBytes,
+                startup_closure.members().len(),
+                size_of::<StartupContentMemberReceipt>(),
+            )?,
+        ],
+    )?;
+    for member in startup_closure.members() {
+        checked_add_to(
+            &mut total,
+            string_retained_bytes(member.path().as_str())?,
             ProjectContentBudgetKind::RetainedBytes,
         )?;
     }

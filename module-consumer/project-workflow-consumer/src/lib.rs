@@ -5,8 +5,9 @@
 //! terminal publication outcome unchanged.
 
 use nara::project_workflow::{
-    PreparedProjectCreation, ProjectCreationOutcome, ProjectCreationPlanError,
-    ProjectCreationRequest, prepare_desktop_2d_project,
+    PreparedProjectCreation, ProjectCheckError, ProjectCheckRequest, ProjectCreationOutcome,
+    ProjectCreationPlanError, ProjectCreationRequest, StartupContentClosureReceipt, check_project,
+    prepare_desktop_2d_project,
 };
 
 /// Prepares the immutable `desktop-2d/v1` creation plan through the public root Module.
@@ -20,4 +21,11 @@ pub fn prepare_creation(
 #[must_use = "the project-creation terminal outcome must be handled"]
 pub fn publish_creation(prepared: PreparedProjectCreation) -> ProjectCreationOutcome {
     prepared.publish()
+}
+
+/// Checks one authorized project without a CLI, Cargo process, or desktop presentation stack.
+pub fn check_startup_content(
+    request: ProjectCheckRequest,
+) -> Result<StartupContentClosureReceipt, ProjectCheckError> {
+    check_project(request)
 }

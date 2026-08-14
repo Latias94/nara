@@ -17,7 +17,7 @@ use super::{
 };
 use crate::project_host::{
     ProjectCandidateError, ProjectContentError, ProjectContentRevision, ProjectSettingsLineage,
-    RuntimePlanError,
+    RuntimePlanError, StartupContentClosureReceipt,
 };
 
 mod admission;
@@ -41,11 +41,7 @@ pub enum ProjectCreationOutcome {
 pub struct ProjectCreationReceipt {
     plan: ProjectCreationPlanReceipt,
     publication: DirectoryPublicationReceipt,
-    project_root: DirectoryCapability,
-    settings_lineage: ProjectSettingsLineage,
-    schema_fingerprint: SchemaCompositionFingerprint,
-    content_revision: ProjectContentRevision,
-    content_digest: ContentDigest,
+    startup_content_closure: StartupContentClosureReceipt,
 }
 
 impl ProjectCreationReceipt {
@@ -61,32 +57,37 @@ impl ProjectCreationReceipt {
 
     #[must_use]
     pub fn project_root(&self) -> DirectoryCapability {
-        self.project_root.share()
+        self.startup_content_closure.project_root()
     }
 
     #[must_use]
     pub fn project_root_identity(&self) -> FileIdentity {
-        self.project_root.identity()
+        self.startup_content_closure.project_root_identity()
     }
 
     #[must_use]
-    pub const fn settings_lineage(&self) -> ProjectSettingsLineage {
-        self.settings_lineage
+    pub fn settings_lineage(&self) -> ProjectSettingsLineage {
+        self.startup_content_closure.settings_lineage()
     }
 
     #[must_use]
-    pub const fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
-        self.schema_fingerprint
+    pub fn schema_fingerprint(&self) -> SchemaCompositionFingerprint {
+        self.startup_content_closure.schema_fingerprint()
     }
 
     #[must_use]
-    pub const fn content_revision(&self) -> ProjectContentRevision {
-        self.content_revision
+    pub fn content_revision(&self) -> ProjectContentRevision {
+        self.startup_content_closure.content_revision()
     }
 
     #[must_use]
-    pub const fn content_digest(&self) -> ContentDigest {
-        self.content_digest
+    pub fn content_digest(&self) -> ContentDigest {
+        self.startup_content_closure.content_digest()
+    }
+
+    #[must_use]
+    pub const fn startup_content_closure(&self) -> &StartupContentClosureReceipt {
+        &self.startup_content_closure
     }
 }
 
@@ -96,11 +97,11 @@ impl Debug for ProjectCreationReceipt {
             .debug_struct("ProjectCreationReceipt")
             .field("plan", &self.plan)
             .field("publication", &self.publication)
-            .field("project_root_identity", &self.project_root.identity())
-            .field("settings_lineage", &self.settings_lineage)
-            .field("schema_fingerprint", &self.schema_fingerprint)
-            .field("content_revision", &self.content_revision)
-            .field("content_digest", &self.content_digest)
+            .field(
+                "project_root_identity",
+                &self.startup_content_closure.project_root_identity(),
+            )
+            .field("startup_content_closure", &self.startup_content_closure)
             .finish()
     }
 }

@@ -159,7 +159,7 @@ fn ingest_project_manifest_inner(
         settings.profile_name.as_deref(),
         project_root_identity,
     );
-    validate_product_request(settings, lineage)
+    validate_product_request(settings, lineage, manifest_digest)
 }
 
 fn read_manifest_bytes(manifest: &FileCapability) -> Result<Vec<u8>, ProjectCandidateError> {
@@ -190,6 +190,7 @@ fn read_manifest_bytes(manifest: &FileCapability) -> Result<Vec<u8>, ProjectCand
 fn validate_product_request(
     settings: EffectiveProjectSettings,
     lineage: ProjectSettingsLineage,
+    manifest_digest: ContentDigest,
 ) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
     let explicit = settings.requested_capabilities;
     let required = ProductCapabilitySet::singleton(ProductCapability::RuntimeCore);
@@ -246,6 +247,7 @@ fn validate_product_request(
 
     Ok(ProjectSettingsCandidate {
         lineage,
+        manifest_digest,
         settings,
         explicit,
         implied,
