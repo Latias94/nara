@@ -135,7 +135,7 @@ physical media has persisted data the operating system reported as synced.
   descriptor under the `TrustedLocal` cooperative-writer tier. Linux proves parent/mount authority,
   destination no-overwrite and atomic naming, but its source binding remains explicitly
   `NameBound`; it is not reported as handle-bound strict source publication. Receipts bind the
-  unpredictable sibling staging observation, validated absent child name, parent capability
+  caller-supplied high-entropy sibling staging observation, validated absent child name, parent capability
   generation/identity, same-volume or same-mount proof, and exact source-binding tier. Collision,
   identity drift, unsupported filesystem behavior, or any native result that cannot prove the
   claimed tier returns `Unsupported` or `Unproven`; neither adapter falls back to a destination
@@ -143,12 +143,14 @@ physical media has persisted data the operating system reported as synced.
   tier is documented as available. ReFS, XFS, Btrfs, tmpfs, OverlayFS, NTFS3, macOS, and other
   combinations remain `Unsupported` or `Unproven` until dedicated live evidence exists; injected
   platform-seam tests alone do not broaden public support.
-- **CDPF implementation status:** CDPF-U1 and CDPF-U2 implement capability-owned staging, exact
-  consuming publication, and truthful begin/publish terminal outcomes. The current Windows checkout
-  has live local-NTFS evidence for handle-bound no-replace naming, collision and exact empty-staging
-  cleanup. The Linux `renameat2(RENAME_NOREPLACE)` implementation and tests compile for
-  x86-64 Linux, but ext4 remains unverified until CDPF-U3 runs on its hosted filesystem. A compile
-  target or injected platform seam is not a hosted support claim.
+- **CDPF implementation status:** CDPF-U1 through CDPF-U3 implement capability-owned staging, exact
+  consuming publication, truthful begin/publish terminal outcomes and an isolated external public
+  consumer. The Windows x86-64 consumer has live local-NTFS evidence for handle-bound no-replace
+  naming, collision, exact destination identity and complete reopen. The Linux
+  `renameat2(RENAME_NOREPLACE)` implementation and external tests compile for x86-64 Linux, but
+  ext4 remains unverified until a dedicated hosted filesystem job runs. A compile target, generic
+  Linux runner or injected platform seam is not a hosted support claim. Verification record
+  `1c01523e7462406dabf4a177cf64285c` owns the conformance baseline.
 - **macOS and other Unix contract:** no current adapter proves absence of same-device mount
   traversal. Strict untrusted/recovery directory capabilities therefore return `Unproven`.
   Host-selected trusted mode may use no-follow `openat` and name-bound `renameat`, but receipts keep
@@ -180,11 +182,12 @@ foundation capability:
 This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
 first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 now reuses
 the same root/open/identity boundary for the path-addressed startup content closure without ambient
-path reopen or directory enumeration. CDPF-U1/CDPF-U2 now own the first bounded same-capability
-no-replace directory-publication implementation. CDPF-U3 must independently prove the public
-Interface and exact hosted support tiers before a generated project destination is accepted. Future
-indexing, asset rename, and ADR 0091 persistence/recovery work reuse or extend the primitives here;
-downstream domain crates are prohibited from copying those platform algorithms.
+path reopen or directory enumeration. CDPF-U1 through CDPF-U3 now own the first bounded
+same-capability no-replace directory-publication implementation and its independent public consumer
+baseline. That baseline permits a later registration to activate Fresh Project work; it does not
+activate the successor automatically or claim hosted Linux/ext4 support. Future indexing, asset
+rename, and ADR 0091 persistence/recovery work reuse or extend the primitives here; downstream
+domain crates are prohibited from copying those platform algorithms.
 
 ## Alternatives Considered
 

@@ -2,10 +2,13 @@
 title: Capability Directory Publication Foundation - Plan
 type: refactor
 date: 2026-08-14
+amended: 2026-08-14
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+completion_evidence: docs/knowledge/engineering/verification/2026-08/2026-08-14T060149Z-cdpf-u3-external-directory-publication-conformance-baseline-1c01523e7462406dabf4a177cf64285c.md
+baseline_record: 1c01523e7462406dabf4a177cf64285c
 product_contract_source: docs/architecture/adr/0070-capability-oriented-filesystem-substrate.md
 origin: docs/architecture/adr/0070-capability-oriented-filesystem-substrate.md
 depends_on: docs/knowledge/engineering/verification/2026-08/2026-08-13T155950Z-rup-u3-runtime-ui-product-validated-baseline-a203485f0c8e478eb3ec1e03426aca67.md
@@ -30,13 +33,16 @@ operator_execution_authority: external-control-plane
   plans, content validation, policy and acceptance.
 - **Successor rule:** Completion publishes one Directory Publication Conformance Baseline. It does
   not activate the Fresh Project successor automatically.
+- **Completion:** CDPF-U1 through CDPF-U3 are complete at `e345687`, `e3a5e7b` and `e6f542f`.
+  The conformance baseline is record `1c01523e7462406dabf4a177cf64285c`; no successor plan is
+  active.
 
 ## Contract
 
 ```mermaid
 stateDiagram-v2
   [*] --> Planned
-  Planned --> Staging: create unpredictable sibling
+  Planned --> Staging: create caller-supplied high-entropy sibling
   Staging --> Validated: product validates finite tree
   Validated --> Published: exact no-replace rename
   Planned --> Rejected
@@ -111,8 +117,8 @@ stateDiagram-v2
 
 ### CDPF-U1 — Directory staging and capability ownership
 
-**Goal:** Create and retain one unpredictable same-parent staging directory as a move-only
-transaction.
+**Goal:** Exclusively create and retain one caller-named, same-parent staging directory as a
+move-only transaction; production callers supply a bounded high-entropy name.
 
 **Files:** `crates/nara_fs/src/{capability,error,proof}.rs`, a focused directory-publication Module,
 platform adapters and owner-local tests.
@@ -152,20 +158,26 @@ matrix, with every non-success path truthfully terminal.
 
 **Depends on:** CDPF-U2.
 
+**Status:** Complete at `e6f542f`; evidence record
+`1c01523e7462406dabf4a177cf64285c`.
+
 **Goal:** Prove the public Interface independently of Fresh Project and publish a clean baseline.
 
 **Approach:** Add a small external consumer fixture that stages a nested finite tree, validates it,
 publishes it and reopens it through ordinary capability APIs. Run hosted Windows/NTFS evidence in
 this checkout; Linux/ext4 remains unavailable until its dedicated hosted job runs, and must remain
-reported as unverified rather than inferred. Audit public API/dependencies, update ADR 0070/ledger,
-and publish immutable verification plus a completed registration.
+reported as unverified rather than inferred. The external fixture receives no proof-injection
+backdoor; owner-local injected unproven-parent tests remain V1 evidence. Audit public
+API/dependencies, run isolated formatting and strict Clippy for the consumer workspace, update ADR
+0070/ledger, and publish immutable verification plus a completed registration.
 
-**Test scenarios:** external consumer success; collision; injected unproven parent; bounded nested
-members; no product identity; Windows live local-volume case; Linux code/tests compile without a
-false hosted-proof claim.
+**Test scenarios:** external consumer success; collision; bounded nested members; read-only
+pre-staging rejection; owner-local injected unproven parent; no product identity; Windows live
+local-volume case; Linux code/tests compile without a false hosted-proof claim.
 
-**Exit:** The conformance record names the exact supported/proven combinations and proving commit;
-this plan becomes inactive. The Fresh Project plan may be activated only by a later registration.
+**Exit:** Satisfied by record `1c01523e7462406dabf4a177cf64285c`, which names Windows x86-64 on
+live local NTFS as the external runtime proof and keeps Linux/ext4 hosted-unverified. This plan is
+inactive. The Fresh Project plan may be activated only by a later registration.
 
 ## Verification Contract
 
@@ -180,8 +192,9 @@ this plan becomes inactive. The Fresh Project plan may be activated only by a la
   publishes/reopens one finite nested tree.
 - **V4:** public inventory contains no project/export/template/recovery vocabulary and no new
   general recursive filesystem API.
-- **V5:** `cargo fmt --all -- --check`, scoped strict Clippy, `git diff --check`, engineering-memory
-  validate/render and final Standards/Spec review pass on the proving commit.
+- **V5:** root formatting, isolated module-consumer formatting, scoped strict Clippy for both the
+  external workspace and root policy tests, `git diff --check`, engineering-memory validate/render
+  and final Standards/Spec review pass on the proving commit.
 
 ## Success Metrics
 
