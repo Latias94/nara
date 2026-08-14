@@ -84,6 +84,12 @@ impl WgpuSurfaceState {
             .is_some_and(|live| live.lease.can_acquire_frame())
     }
 
+    pub(crate) fn surface_generation(&self) -> Option<u64> {
+        self.live
+            .as_ref()
+            .map(|live| live.lease.surface_generation())
+    }
+
     pub(crate) fn retirement_requested(&self) -> Result<bool, WgpuRenderError> {
         self.live
             .as_ref()

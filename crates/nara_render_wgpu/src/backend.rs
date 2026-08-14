@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use nara_app::RuntimeGeneration;
 use nara_ecs::Resource;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_material::AlphaMode2d;
@@ -25,6 +26,7 @@ use nara_window::{
 };
 
 use crate::frame::{WgpuCapturedFrame, WgpuFramePayload};
+use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::{
     WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
@@ -382,6 +384,7 @@ pub struct WgpuRenderBackend {
     runtime_generation: Option<u64>,
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
+    presented_frame_this_transaction: Option<WgpuPresentedFrameReceipt>,
     #[cfg(feature = "ui-submitter")]
     submitted_ui_facts: Vec<WgpuSubmittedUiFacts>,
     telemetry: WgpuBackendTelemetry,
@@ -442,6 +445,12 @@ impl WgpuRenderBackend {
     #[must_use]
     pub const fn frame_transaction_stats(&self) -> WgpuFrameTransactionStats {
         self.frame_transaction_stats
+    }
+
+    pub(crate) const fn presented_frame_this_transaction(
+        &self,
+    ) -> Option<WgpuPresentedFrameReceipt> {
+        self.presented_frame_this_transaction
     }
 
     /// Returns the exact submitted facts for one presentation attempt in the latest transaction.
@@ -563,6 +572,7 @@ impl WgpuRenderBackend {
     ) {
         self.frame_transaction_stats =
             WgpuFrameTransactionStats::begin(render_transaction_frame_index, app_frame_index);
+        self.presented_frame_this_transaction = None;
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
     }
@@ -591,6 +601,7 @@ impl WgpuRenderBackend {
         }
         #[cfg(feature = "ui-submitter")]
         self.clear_submitted_ui_facts();
+        self.presented_frame_this_transaction = None;
         self.telemetry.retire_device_epoch();
         retirement_result
     }
@@ -629,6 +640,7 @@ impl WgpuRenderBackend {
             app_frame_index,
             work_started_at,
         } = captured;
+        let runtime_generation = packet.generation();
         stats.draw_calls = 0;
         stats.sprites = 0;
         self.begin_frame_transaction(packet.frame_index(), Some(app_frame_index));
@@ -769,19 +781,21 @@ impl WgpuRenderBackend {
             .transpose()?;
         self.telemetry
             .observe_gpu_resources(submitted_texture_bytes, submitted_instance_buffer_bytes);
-        let submitted = self.render_window(
+        let presented = self.render_window(
             window.id,
             packet.view().viewport,
             packet.view().clear_color,
             &draw,
+            runtime_generation,
             app_frame_index,
             packet.frame_index(),
             work_started_at,
         );
         self.telemetry.finish_prepared_gpu_resources();
-        let submitted = submitted?;
+        let presented = presented?;
 
-        if submitted {
+        if let Some(presented) = presented {
+            self.presented_frame_this_transaction = Some(presented);
             #[cfg(feature = "ui-submitter")]
             if let Some(facts) = submitted_ui_facts {
                 self.publish_submitted_ui_facts(facts);
@@ -985,6 +999,12 @@ impl WgpuRenderBackend {
         window_id: WindowId,
         reason: SurfaceDropReason,
     ) -> Result<(), WgpuRenderError> {
+        if self
+            .presented_frame_this_transaction
+            .is_some_and(|receipt| receipt.window_id() == window_id)
+        {
+            self.presented_frame_this_transaction = None;
+        }
         let Some(surface) = self.surfaces.remove(&window_id) else {
             return Ok(());
         };
@@ -997,10 +1017,13 @@ impl WgpuRenderBackend {
         viewport: nara_render::ViewportRect,
         clear_color: Color,
         draw: &PreparedSubmitterDraw,
+        runtime_generation: RuntimeGeneration,
         app_frame_index: u64,
         render_transaction_frame_index: u64,
         work_started_at: std::time::Instant,
-    ) -> Result<bool, WgpuRenderError> {
+    ) -> Result<Option<WgpuPresentedFrameReceipt>, WgpuRenderError> {
+        let backend_instance_id = self.instance_id();
+        let device_epoch = self.device_epoch;
         let device = self
             .device
             .as_ref()
@@ -1015,6 +1038,20 @@ impl WgpuRenderBackend {
             .surfaces
             .get_mut(&window_id)
             .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
+        let surface_generation = surface_state
+            .surface_generation()
+            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
+        let presented_receipt = || {
+            WgpuPresentedFrameReceipt::new(
+                runtime_generation,
+                window_id,
+                surface_generation,
+                backend_instance_id,
+                device_epoch,
+                app_frame_index,
+                render_transaction_frame_index,
+            )
+        };
 
         self.frame_transaction_stats.surface_acquire_attempts += 1;
         match surface_state.surface(window_id)?.get_current_texture() {
@@ -1040,7 +1077,7 @@ impl WgpuRenderBackend {
                 }
                 self.frame_transaction_stats.queue_submissions += 1;
                 self.frame_transaction_stats.presents += 1;
-                Ok(true)
+                Ok(Some(presented_receipt()))
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
                 self.frame_transaction_stats.surface_acquires += 1;
@@ -1065,18 +1102,18 @@ impl WgpuRenderBackend {
                 self.frame_transaction_stats.queue_submissions += 1;
                 self.frame_transaction_stats.presents += 1;
                 surface_state.dirty = true;
-                Ok(true)
+                Ok(Some(presented_receipt()))
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                Ok(false)
+                Ok(None)
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
                 surface_state.dirty = true;
-                Ok(false)
+                Ok(None)
             }
             wgpu::CurrentSurfaceTexture::Lost => {
                 self.retire_surface(window_id, SurfaceDropReason::SurfaceOrDeviceLost)?;
-                Ok(false)
+                Ok(None)
             }
             wgpu::CurrentSurfaceTexture::Validation => {
                 Err(WgpuRenderError::SurfaceValidation { window_id })
@@ -1442,6 +1479,101 @@ mod tests {
         let mut backend = WgpuRenderBackend::default();
         backend.surfaces.insert(window_id, surface);
         (backend, handles)
+    }
+
+    fn presented_receipt(
+        backend: &WgpuRenderBackend,
+        runtime_generation: RuntimeGeneration,
+        window_id: WindowId,
+        surface_generation: u64,
+    ) -> WgpuPresentedFrameReceipt {
+        WgpuPresentedFrameReceipt::new(
+            runtime_generation,
+            window_id,
+            surface_generation,
+            backend.instance_id(),
+            backend.device_epoch(),
+            10,
+            9,
+        )
+    }
+
+    #[test]
+    fn surface_generation_comes_from_the_retained_lease_authority() {
+        let window_id = WindowId::PRIMARY;
+        let handles = BackendWindowHandles::default();
+        handles
+            .insert(
+                window_id,
+                WindowHandleProvider::new(Arc::new(TestWindowSource)),
+            )
+            .unwrap();
+        let first = WgpuSurfaceState::lease_only(
+            handles.acquire_surface(window_id).unwrap(),
+            Extent2d::new(320, 180).unwrap(),
+        );
+        assert_eq!(first.surface_generation(), Some(1));
+        first
+            .retire(SurfaceDropReason::SurfaceOrDeviceLost)
+            .unwrap();
+
+        let retained = WgpuSurfaceState::lease_only(
+            handles.acquire_surface(window_id).unwrap(),
+            Extent2d::new(320, 180).unwrap(),
+        );
+        assert_eq!(retained.surface_generation(), Some(2));
+
+        let replacement_handles = BackendWindowHandles::default();
+        replacement_handles
+            .insert(
+                window_id,
+                WindowHandleProvider::new(Arc::new(TestWindowSource)),
+            )
+            .unwrap();
+        let (_replacement_source, replacement_lease) = replacement_handles
+            .acquire_surface(window_id)
+            .unwrap()
+            .into_parts();
+        assert_eq!(replacement_lease.surface_generation(), 1);
+        assert_eq!(retained.surface_generation(), Some(2));
+    }
+
+    #[test]
+    fn presented_receipt_is_current_transaction_and_target_scoped() {
+        let runtime_generation = test_runtime_generation();
+        let (mut backend, _handles) = backend_with_lease_only_surface(WindowId::PRIMARY);
+        backend.device_epoch = 7;
+        let surface_generation = backend
+            .surfaces
+            .get(&WindowId::PRIMARY)
+            .and_then(WgpuSurfaceState::surface_generation)
+            .unwrap();
+        let receipt = presented_receipt(
+            &backend,
+            runtime_generation,
+            WindowId::PRIMARY,
+            surface_generation,
+        );
+        backend.presented_frame_this_transaction = Some(receipt);
+        assert_eq!(backend.presented_frame_this_transaction(), Some(receipt));
+
+        backend.begin_frame_transaction(10, Some(11));
+        assert_eq!(backend.presented_frame_this_transaction(), None);
+
+        backend.presented_frame_this_transaction = Some(receipt);
+        backend
+            .retire_surface(WindowId::PRIMARY, SurfaceDropReason::SurfaceOrDeviceLost)
+            .unwrap();
+        assert_eq!(backend.presented_frame_this_transaction(), None);
+    }
+
+    #[test]
+    fn presentation_counters_cannot_forge_a_presented_receipt() {
+        let mut backend = WgpuRenderBackend::default();
+        backend.frame_transaction_stats.presents = 1;
+
+        assert_eq!(backend.frame_transaction_stats().presents(), 1);
+        assert_eq!(backend.presented_frame_this_transaction(), None);
     }
 
     #[test]

@@ -99,6 +99,17 @@ pub struct WindowSurfaceLease {
 }
 
 impl WindowSurfaceLease {
+    /// Returns the exact surface-owner generation captured by this lease.
+    ///
+    /// Backend integrations use this process-local fact to bind one presented frame to the
+    /// surface authority that actually produced it. It must not be persisted or reconstructed
+    /// from a later [`BackendWindowHandles`] snapshot.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn surface_generation(&self) -> u64 {
+        self.generation
+    }
+
     #[must_use]
     pub fn can_acquire_frame(&self) -> bool {
         self.authority

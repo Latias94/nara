@@ -7,6 +7,7 @@ mod backend;
 mod error;
 mod frame;
 mod plugin;
+mod presented;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod quad;
 #[cfg(feature = "sprite-submitter")]
@@ -92,6 +93,8 @@ pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::presented::WgpuPresentedFrameReceipt;
+
     #[cfg(feature = "ui-submitter")]
     pub use crate::backend::WgpuSubmittedUiFacts;
 
@@ -103,6 +106,14 @@ pub mod __private {
         backend_generation: nara_ui_render::UiPresentationBackendGeneration,
     ) -> Option<WgpuSubmittedUiFacts> {
         backend.submitted_ui_facts(submission, backend_generation)
+    }
+
+    /// Returns the exact surface presentation published by the current render transaction.
+    #[must_use]
+    pub fn presented_frame_this_transaction(
+        backend: &crate::WgpuRenderBackend,
+    ) -> Option<WgpuPresentedFrameReceipt> {
+        backend.presented_frame_this_transaction()
     }
 }
 
