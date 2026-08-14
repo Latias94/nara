@@ -5,7 +5,7 @@ date: 2026-08-14
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: inactive
+execution_state: active
 product_contract_source: docs/architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md
 origin: STRATEGY.md
 depends_on: docs/plans/2026-08-14-001-refactor-capability-directory-publication-foundation-plan.md
@@ -28,8 +28,10 @@ operator_execution_authority: external-control-plane
 - **Architecture outcome:** One root project-workflow Module owns creation, check, export and repair
   transactions. `nara_project` remains the pure manifest-semantics owner, `nara_fs` remains the
   native filesystem substrate, and Runtime `ProjectHost` remains a consumer of authorized content.
-- **Activation gate:** This plan remains inactive until the Directory Publication Foundation plan
-  publishes its conformance baseline and a new registration explicitly activates FPER-U0.
+- **Activation gate:** Directory Publication conformance record
+  `1c01523e7462406dabf4a177cf64285c` is pinned and reviewed registration
+  `6e932c817c8c46598a9dcb3b82b41d46` activates FPER-U0 as the sole active unit. FPER-U1 through
+  FPER-U3 require their own successor registrations.
 - **Scope guard:** Reference Game and its Python package tools remain fixed historical product
   fixtures. They are not mandatory consumers and are not modified or generalized by this plan.
 

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e1e90284ad2091c446378022d72e75bdbe3ca00d0309f15e991336a3201ec7f3"
+source_fingerprint: "c16d424f953507f5825a9703acb66b4cccbd458744e14616765261d8aa790d09"
 ---
 
 # Current State
@@ -12,15 +12,15 @@ source_fingerprint: "e1e90284ad2091c446378022d72e75bdbe3ca00d0309f15e991336a3201
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e1e90284ad2091c446378022d72e75bdbe3ca00d0309f15e991336a3201ec7f3`
-- Immutable records: 444
-- Active lane heads: 0
+- Source fingerprint: `c16d424f953507f5825a9703acb66b4cccbd458744e14616765261d8aa790d09`
+- Immutable records: 446
+- Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
-- [Capability Directory Publication Foundation complete; no successor active](registry/2026-08/2026-08-14T060300Z-fresh-project-export-repair-codex-root-b21d2b0798a749729417d26bd85daf5e.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
+- [Fresh Project workflow: reviewed FPER-U0 active](registry/2026-08/2026-08-14T080028Z-fresh-project-export-repair-codex-root-6e932c817c8c46598a9dcb3b82b41d46.md): `active` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
