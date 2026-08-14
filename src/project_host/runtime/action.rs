@@ -12,7 +12,10 @@ use nara_gameplay::GameplayCommandSubmission;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_winit::{WinitControlFlow, WinitRunner};
 
-use super::super::check::{ProjectSourceCheckError, check_project_source_with_overlay};
+use super::super::{
+    StartupContentClosureReceipt,
+    check::{ProjectSourceCheckError, check_project_source_with_overlay},
+};
 use super::{
     CleanupDriveOutcome, HostFault, ProjectHost, RuntimePluginOverlay, RuntimeStartAttempt,
     runtime_plan_failure_report, runtime_plan_selected_report, single_error,
@@ -105,10 +108,11 @@ pub enum HeadlessRunOutcome<O> {
 }
 
 /// One immutable observation of a bounded product action.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct HeadlessRunReport<O> {
     outcome: HeadlessRunOutcome<O>,
     diagnostics: DiagnosticReport,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 impl<O> HeadlessRunReport<O> {
@@ -120,6 +124,15 @@ impl<O> HeadlessRunReport<O> {
     #[must_use]
     pub const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
+    }
+
+    /// Returns the exact startup source closure once project checking succeeded.
+    ///
+    /// Runtime startup, execution, shutdown, or cleanup may still have failed. `None` means the
+    /// manifest, product composition, or startup content check itself did not publish a closure.
+    #[must_use]
+    pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
+        self.startup_content_closure.as_ref()
     }
 
     #[must_use]
@@ -204,10 +217,11 @@ pub enum DesktopRunOutcome {
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct DesktopRunReport {
     outcome: DesktopRunOutcome,
     diagnostics: DiagnosticReport,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -221,12 +235,22 @@ impl DesktopRunReport {
     pub const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
     }
+
+    /// Returns the exact startup source closure once project checking succeeded.
+    ///
+    /// Runtime startup, presentation, shutdown, or cleanup may still have failed. `None` means the
+    /// manifest, product composition, or startup content check itself did not publish a closure.
+    #[must_use]
+    pub const fn startup_content_closure(&self) -> Option<&StartupContentClosureReceipt> {
+        self.startup_content_closure.as_ref()
+    }
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub struct DesktopRun {
     state: DesktopRunState,
     diagnostics: DiagnosticReport,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -236,6 +260,10 @@ impl fmt::Debug for DesktopRun {
             .debug_struct("DesktopRun")
             .field("state", &self.state.label())
             .field("diagnostics", &self.diagnostics)
+            .field(
+                "startup_content_closure_present",
+                &self.startup_content_closure.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -265,6 +293,7 @@ impl DesktopRun {
                 overlay,
             }),
             diagnostics: DiagnosticReport::default(),
+            startup_content_closure: None,
         }
     }
 
@@ -344,6 +373,7 @@ impl DesktopRun {
             mut host,
             mut attempt,
             plan_diagnostics,
+            startup_content_closure,
         } = match prepare_project_start(
             project_root,
             profile,
@@ -353,11 +383,13 @@ impl DesktopRun {
             Vec::new(),
         ) {
             Ok(prepared) => prepared,
-            Err(fault) => {
-                self.diagnostics.extend(fault.diagnostics);
+            Err(error) => {
+                self.startup_content_closure = error.startup_content_closure;
+                self.diagnostics.extend(error.fault.diagnostics);
                 return DesktopRunState::Failed;
             }
         };
+        self.startup_content_closure = Some(startup_content_closure);
         self.diagnostics.extend(plan_diagnostics);
         match host.complete_start(&mut attempt) {
             Ok(diagnostics) => {
@@ -413,6 +445,7 @@ impl DesktopRun {
         DesktopRunReport {
             outcome,
             diagnostics: self.diagnostics.clone(),
+            startup_content_closure: self.startup_content_closure.clone(),
         }
     }
 }
@@ -745,6 +778,7 @@ mod desktop_terminal_tests {
                 terminal,
             },
             diagnostics,
+            startup_content_closure: None,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::CleanupIncomplete);
@@ -778,6 +812,7 @@ mod desktop_terminal_tests {
         let report = DesktopRun {
             state: terminal.finish(),
             diagnostics,
+            startup_content_closure: None,
         }
         .report();
         assert_eq!(report.outcome(), DesktopRunOutcome::Failed);
@@ -863,6 +898,7 @@ where
 {
     state: HeadlessRunState<O>,
     diagnostics: DiagnosticReport,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 impl<O> fmt::Debug for HeadlessRun<O>
@@ -874,6 +910,10 @@ where
             .debug_struct("HeadlessRun")
             .field("state", &self.state.label())
             .field("diagnostics", &self.diagnostics)
+            .field(
+                "startup_content_closure_present",
+                &self.startup_content_closure.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -924,6 +964,7 @@ where
                 commands,
             }),
             diagnostics: DiagnosticReport::default(),
+            startup_content_closure: None,
         }
     }
 
@@ -973,13 +1014,16 @@ where
             fixed_ticks,
             terminal_predicate,
             plan_diagnostics,
+            startup_content_closure,
         } = match prepare_start(inputs) {
             Ok(prepared) => prepared,
-            Err(fault) => {
-                self.diagnostics.extend(fault.diagnostics);
+            Err(error) => {
+                self.startup_content_closure = error.startup_content_closure;
+                self.diagnostics.extend(error.fault.diagnostics);
                 return HeadlessRunState::Failed;
             }
         };
+        self.startup_content_closure = Some(startup_content_closure);
         self.diagnostics.extend(plan_diagnostics);
 
         match host.complete_start(&mut attempt) {
@@ -1083,6 +1127,7 @@ where
         HeadlessRunReport {
             outcome,
             diagnostics: self.diagnostics.clone(),
+            startup_content_closure: self.startup_content_closure.clone(),
         }
     }
 }
@@ -1100,12 +1145,19 @@ struct PreparedStart<O> {
     fixed_ticks: NonZeroU32,
     terminal_predicate: Option<TerminalPredicate<O>>,
     plan_diagnostics: DiagnosticReport,
+    startup_content_closure: StartupContentClosureReceipt,
 }
 
 struct PreparedProjectStart {
     host: ProjectHost,
     attempt: RuntimeStartAttempt,
     plan_diagnostics: DiagnosticReport,
+    startup_content_closure: StartupContentClosureReceipt,
+}
+
+struct PreparedProjectStartError {
+    fault: HostFault,
+    startup_content_closure: Option<StartupContentClosureReceipt>,
 }
 
 enum HeadlessRunState<O> {
@@ -1156,7 +1208,9 @@ fn state_after_failure<O>(host: ProjectHost) -> HeadlessRunState<O> {
     }
 }
 
-fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, HostFault> {
+fn prepare_start<O>(
+    inputs: HeadlessRunInputs<O>,
+) -> Result<PreparedStart<O>, PreparedProjectStartError> {
     let HeadlessRunInputs {
         project_root,
         intent,
@@ -1184,6 +1238,7 @@ fn prepare_start<O>(inputs: HeadlessRunInputs<O>) -> Result<PreparedStart<O>, Ho
         fixed_ticks,
         terminal_predicate,
         plan_diagnostics: prepared.plan_diagnostics,
+        startup_content_closure: prepared.startup_content_closure,
     })
 }
 
@@ -1194,19 +1249,29 @@ fn prepare_project_start(
     recipe: ProductRecipe,
     overlay: Option<RuntimePluginOverlay>,
     commands: Vec<GameplayCommandSubmission>,
-) -> Result<PreparedProjectStart, HostFault> {
+) -> Result<PreparedProjectStart, PreparedProjectStartError> {
     let checked =
         check_project_source_with_overlay(project_root, profile.as_deref(), recipe, overlay)
-            .map_err(project_source_check_fault)?;
+            .map_err(|error| PreparedProjectStartError {
+                fault: project_source_check_fault(error),
+                startup_content_closure: None,
+            })?;
     let (plan, snapshot) = checked.into_parts();
     let plan_diagnostics = runtime_plan_selected_report(&plan);
+    let startup_content_closure = snapshot.startup_content_closure();
 
     let mut host = ProjectHost::new(cleanup_policy);
-    let attempt = host.begin_start(snapshot, plan, commands)?;
+    let attempt = host
+        .begin_start(snapshot, plan, commands)
+        .map_err(|fault| PreparedProjectStartError {
+            fault,
+            startup_content_closure: Some(startup_content_closure.clone()),
+        })?;
     Ok(PreparedProjectStart {
         host,
         attempt,
         plan_diagnostics,
+        startup_content_closure,
     })
 }
 

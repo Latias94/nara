@@ -279,9 +279,35 @@ fn product_action_boots_authorized_content_runs_one_tick_and_closes() {
         "{first:?}"
     );
     assert!(!first.diagnostics().has_errors());
+    let first_source = first
+        .startup_content_closure()
+        .expect("successful project check publishes startup content evidence");
+    assert!(
+        first_source
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == "nara.toml")
+    );
 
     let terminal_repeat = run.execute_bounded();
-    assert_eq!(terminal_repeat, first);
+    assert_eq!(terminal_repeat.outcome(), first.outcome());
+    assert_eq!(terminal_repeat.diagnostics(), first.diagnostics());
+    let repeated_source = terminal_repeat
+        .startup_content_closure()
+        .expect("terminal reports retain startup content evidence");
+    assert_eq!(
+        repeated_source.manifest_digest(),
+        first_source.manifest_digest()
+    );
+    assert_eq!(
+        repeated_source.content_digest(),
+        first_source.content_digest()
+    );
+    assert_eq!(
+        repeated_source.schema_fingerprint(),
+        first_source.schema_fingerprint()
+    );
+    assert_eq!(repeated_source.members(), first_source.members());
 }
 
 #[test]
@@ -295,6 +321,7 @@ fn project_content_failure_returns_without_a_runtime_outcome() {
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
     assert!(report.diagnostics().has_errors());
+    assert!(report.startup_content_closure().is_none());
 }
 
 #[test]
@@ -315,6 +342,9 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
 
     let incomplete = run.execute_bounded();
     assert_eq!(incomplete.outcome(), &HeadlessRunOutcome::CleanupIncomplete);
+    let incomplete_source = incomplete
+        .startup_content_closure()
+        .expect("cleanup retains the already-admitted startup closure");
     assert_eq!(instances.load(Ordering::SeqCst), 1);
 
     released.store(true, Ordering::SeqCst);
@@ -325,6 +355,13 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
             tick: 1,
             scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
         })
+    );
+    assert_eq!(
+        completed
+            .startup_content_closure()
+            .unwrap()
+            .content_digest(),
+        incomplete_source.content_digest()
     );
     assert_eq!(instances.load(Ordering::SeqCst), 1);
 }
@@ -384,6 +421,7 @@ fn product_action_reports_a_tick_limit_before_publishing_success() {
     let report = execute_to_terminal(&mut run);
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
+    assert!(report.startup_content_closure().is_some());
     assert!(report.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == "project.run.tick-limit"
             && diagnostic.summary().as_str() == "Headless project run reached its fixed-tick limit"
@@ -416,6 +454,7 @@ fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
     let report = execute_to_terminal(&mut run);
 
     assert_eq!(report.outcome(), &HeadlessRunOutcome::Failed);
+    assert!(report.startup_content_closure().is_some());
     assert!(
         report
             .diagnostics()

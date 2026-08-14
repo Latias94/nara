@@ -21,7 +21,7 @@ const ALLOWED_RUNTIME_EXPORTS: [&str; 8] = [
     "HeadlessRunReport",
 ];
 
-const ALLOWED_PUBLIC_METHODS: [&str; 12] = [
+const ALLOWED_PUBLIC_METHODS: [&str; 13] = [
     "diagnostics",
     "execute",
     "execute_bounded",
@@ -29,6 +29,7 @@ const ALLOWED_PUBLIC_METHODS: [&str; 12] = [
     "into_outcome",
     "new",
     "outcome",
+    "startup_content_closure",
     "stop_when",
     "with_cleanup_timeout",
     "with_control_flow",
