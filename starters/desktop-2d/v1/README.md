@@ -10,6 +10,14 @@ The project has two explicit product targets:
 - `desktop`, enabled with the Cargo `desktop` feature and using the matching desktop capabilities
   declared by the `desktop` project profile.
 
-Run `cargo check --all-targets --all-features` to verify the generated Rust and product manifests.
-Edit authored content under `scenes/`, `prefabs/`, and `assets/`; do not hand-maintain generated
-starter metadata as a second product configuration.
+Run the products from any process working directory:
+
+```text
+cargo run --bin headless
+cargo run --features desktop --bin desktop
+cargo run --features desktop --bin desktop -- --verify-first-present
+```
+
+The final command opens the real Winit/WGPU product, requires one exact presented frame, and exits
+through normal runtime cleanup. Edit authored content under `scenes/`, `prefabs/`, and `assets/`;
+do not hand-maintain generated starter metadata as a second product configuration.

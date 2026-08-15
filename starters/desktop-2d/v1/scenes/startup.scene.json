@@ -7,7 +7,87 @@
     "version": "0.1.0"
   },
   "payload": {
-    "roots": [],
-    "entities": []
+    "roots": [
+      "main-camera"
+    ],
+    "entities": [
+      {
+        "id": "main-camera",
+        "children": [],
+        "components": {
+          "nara.render.Camera2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "clear_color": {
+                  "type": "map",
+                  "value": {
+                    "a": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "b": {
+                      "type": "f64",
+                      "value": 0.18
+                    },
+                    "g": {
+                      "type": "f64",
+                      "value": 0.1
+                    },
+                    "r": {
+                      "type": "f64",
+                      "value": 0.06
+                    }
+                  }
+                },
+                "viewport_height": {
+                  "type": "f64",
+                  "value": 720.0
+                }
+              }
+            }
+          },
+          "nara.transform.Transform2d": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "rotation": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "scale": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 1.0
+                    }
+                  }
+                },
+                "translation": {
+                  "type": "map",
+                  "value": {
+                    "x": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "y": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
   }
 }
