@@ -30,9 +30,10 @@ operator_execution_authority: external-control-plane
   native filesystem substrate, and Runtime `ProjectHost` remains a consumer of authorized content.
 - **Activation gate:** Directory Publication conformance record
   `1c01523e7462406dabf4a177cf64285c` is pinned. FPER-U0 closes at `0b99ad4` with conformance
-  record `6717111091f5451fa4708a04b79e1c35`; reviewed registration
-  `3227ab58386f457496c02fb0cfc04771` activates FPER-U1 as the sole active unit. FPER-U2 and
-  FPER-U3 require their own successor registrations.
+  record `6717111091f5451fa4708a04b79e1c35`; FPER-U1 closes at `3beb153` with conformance record
+  `9c30143011a44596a7dd7e007adf1d01`. Successor registration
+  `f83e3eb5ed1b4067a3cbed9abb46e590` activates FPER-U2 as the sole active unit. FPER-U3 requires
+  its own successor registration.
 - **Scope guard:** Reference Game and its Python package tools remain fixed historical product
   fixtures. They are not mandatory consumers and are not modified or generalized by this plan.
 

@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-15
+* **Work Registration**: [Fresh Project workflow: FPER-U1 complete; FPER-U2 active](registry/2026-08/2026-08-15T035929Z-fresh-project-export-repair-codex-root-f83e3eb5ed1b4067a3cbed9abb46e590.md) - Publishes the shared check and generated product conformance record and activates the private startup-closure export unit.
+* **Verification Evidence**: [FPER-U1 shared check and generated product conformance](verification/2026-08/2026-08-15T035815Z-fper-u1-shared-check-and-generated-product-conformance-9c30143011a44596a7dd7e007adf1d01.md) - Verifies the shared project check facts, presentation-free headless product, generated desktop product adapter, and camera-content/presentation scheduling split.
+
 ## 2026-08-14
 * **Work Registration**: [Fresh Project workflow: FPER-U0 complete; FPER-U1 active](registry/2026-08/2026-08-14T140336Z-fresh-project-export-repair-codex-root-3227ab58386f457496c02fb0cfc04771.md) - Publishes the reviewed FPER-U0 creation conformance record and activates the shared check and two-product run unit.
 * **Verification Evidence**: [FPER-U0 versioned starter and creation conformance](verification/2026-08/2026-08-14T140058Z-fper-u0-versioned-starter-and-creation-conformance-6717111091f5451fa4708a04b79e1c35.md) - Verifies the closed desktop-2d/v1 starter, typed dependency authority, atomic publication, ordinary admission, thin CLI and independent public consumer.
@@ -145,5 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [SRT-U5 canonical runtime facts and atomic Retry](verification/2026-08/2026-08-03T182509Z-srt-u5-canonical-runtime-facts-and-atomic-retry-ec572bb0d29642e49731a254929e9809.md) - Verifies one authored spatial authority, exact receipt and projectile ownership, atomic Retry preparation, authored presentation preservation, schema generation 4, and checkout-free product smoke.
 * **Work Registration**: [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T064907Z-engine-foundation-contract-completion-codex-root-c3ce63c20e91470a8dfdd36a1ed1961e.md) - Records the reviewed U4 API correction and retains SRT-U5 as the sole active product slice.
 * **Verification Evidence**: [SRT-U4 read-only validation API correction](verification/2026-08/2026-08-03T064907Z-srt-u4-read-only-validation-api-correction-164eae47e7e54ba79fd905af197dd353.md) - Supersedes the first U4 verification after detailed API review found hierarchy validation could register missing component types and the provisional replacement result was hidden and discardable.
-* **Work Registration**: [Startup scene activation and atomic Retry: SRT-U5 active](registry/2026-08/2026-08-03T053651Z-engine-foundation-contract-completion-codex-root-f86b996f972f46ad9355d3e99810080b.md) - Closes the atomic scene replacement extension and activates the reference-game spatial authority slice.
-* **Verification Evidence**: [SRT-U4 atomic product scene replacement](verification/2026-08/2026-08-03T053651Z-srt-u4-atomic-product-scene-replacement-5175acec97f041c2af61585559c01e04.md) - Verifies bounded stable-ID candidate overlays, identity-bound exact retirement, a prepared failure-free scene commit tail, and hierarchy-only complete validation.
