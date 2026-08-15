@@ -8,14 +8,15 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The [Fresh Project, Source-Carrying Export, and Explicit Repair
-   plan](../plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md) is the
-   only active implementation plan, with FPER-U3 as its sole active unit under reviewed registration
-   `e3b1b5a00a574006bc8c0728f1b7e77c`. The completed [Capability Directory Publication Foundation
-   plan](../plans/2026-08-14-001-refactor-capability-directory-publication-foundation-plan.md)
-   remains immutable predecessor evidence. Completed Runtime UI and focused correction plans remain
-   immutable lineage evidence; the [UI program roadmap](../plans/ui-program-roadmap.md) is navigation
-   only.
+3. No implementation plan is active. The completed [Fresh Project, Source-Carrying Export, and
+   Explicit Repair
+   plan](../plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md)
+   closes at `e37eb0f` with conformance record `386a7ba1b9694f09b2e34795b3d3ddfe` and completed
+   registration `be2dd60d831d43a782707e8be9c1bc0c`. The completed [Capability Directory Publication
+   Foundation
+   plan](../plans/2026-08-14-001-refactor-capability-directory-publication-foundation-plan.md) and
+   completed Runtime UI and focused correction plans remain immutable lineage evidence; the
+   [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and
    must not authorize implementation by themselves.

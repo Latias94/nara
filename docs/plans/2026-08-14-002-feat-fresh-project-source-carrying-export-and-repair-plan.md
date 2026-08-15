@@ -2,10 +2,13 @@
 title: Fresh Project, Source-Carrying Export, and Explicit Repair - Plan
 type: feat
 date: 2026-08-14
+amended: 2026-08-15
 artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
-execution_state: active
+execution_state: inactive
+completion_evidence: docs/knowledge/engineering/verification/2026-08/2026-08-15T110328Z-fper-u3-linked-fresh-project-export-and-repair-conformance-386a7ba1b9694f09b2e34795b3d3ddfe.md
+baseline_record: 386a7ba1b9694f09b2e34795b3d3ddfe
 product_contract_source: docs/architecture/adr/0110-first-party-project-workflow-and-source-carrying-export.md
 origin: STRATEGY.md
 depends_on: docs/plans/2026-08-14-001-refactor-capability-directory-publication-foundation-plan.md
@@ -32,8 +35,10 @@ operator_execution_authority: external-control-plane
   `1c01523e7462406dabf4a177cf64285c` is pinned. FPER-U0 closes at `0b99ad4` with conformance
   record `6717111091f5451fa4708a04b79e1c35`; FPER-U1 closes at `3beb153` with conformance record
   `9c30143011a44596a7dd7e007adf1d01`; FPER-U2 closes at `0919c8b` with conformance record
-  `64c7375e92e64f958174aa1bc37b09ee`. Successor registration
-  `e3b1b5a00a574006bc8c0728f1b7e77c` activates FPER-U3 as the sole active unit.
+  `64c7375e92e64f958174aa1bc37b09ee`.
+- **Completion:** FPER-U3 closes at `e37eb0f` with conformance record
+  `386a7ba1b9694f09b2e34795b3d3ddfe`. Completed registration
+  `be2dd60d831d43a782707e8be9c1bc0c` leaves no successor implementation plan active.
 - **Scope guard:** Reference Game and its Python package tools remain fixed historical product
   fixtures. They are not mandatory consumers and are not modified or generalized by this plan.
 
