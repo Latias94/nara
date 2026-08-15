@@ -1,0 +1,419 @@
+//! Immutable Editor frames and the UI-neutral ordered action ingress.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use nara_diagnostic::DiagnosticReport;
+use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePatchDocument};
+
+use crate::{
+    EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentId,
+    EditorPersistenceRequestResult, EditorPlayRequestResult, EditorProjectView,
+    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorWorkspaceCommandReport,
+    EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult, EditorWorkspaceModel,
+    SceneApplyChangesRequest, SceneInspectorCommand,
+};
+
+static NEXT_EDITOR_FRAME_SOURCE: AtomicU64 = AtomicU64::new(0);
+
+/// Exact identity of one immutable Editor frame published by one Host session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EditorFrameRevision {
+    source_id: u64,
+    generation: u64,
+}
+
+/// Private publication clock used by the concrete Editor Host.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct EditorFrameClock {
+    source_id: u64,
+    generation: u64,
+}
+
+impl EditorFrameClock {
+    #[must_use]
+    pub fn new() -> Self {
+        let previous = NEXT_EDITOR_FRAME_SOURCE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .expect("editor frame source identity space is exhausted");
+        Self {
+            source_id: previous + 1,
+            generation: 0,
+        }
+    }
+
+    #[must_use]
+    pub fn publish(
+        &mut self,
+        workspace: EditorWorkspaceModel,
+        project: EditorProjectView,
+        diagnostics: DiagnosticReport,
+        reopen_target: EditorReopenTarget,
+    ) -> EditorFrameModel {
+        let revision = EditorFrameRevision {
+            source_id: self.source_id,
+            generation: self.generation,
+        };
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("editor frame generation space is exhausted");
+        EditorFrameModel {
+            revision,
+            workspace,
+            project,
+            diagnostics,
+            reopen_target,
+        }
+    }
+}
+
+impl Default for EditorFrameClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Exact source target exposed for the next Reopen action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorReopenTarget {
+    OpenDocument {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    },
+    ClosedSource {
+        document: EditorDocumentId,
+    },
+}
+
+/// One coherent, post-drive Editor snapshot consumed by every UI Adapter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorFrameModel {
+    revision: EditorFrameRevision,
+    workspace: EditorWorkspaceModel,
+    project: EditorProjectView,
+    diagnostics: DiagnosticReport,
+    reopen_target: EditorReopenTarget,
+}
+
+impl EditorFrameModel {
+    #[must_use]
+    pub const fn revision(&self) -> EditorFrameRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn workspace(&self) -> &EditorWorkspaceModel {
+        &self.workspace
+    }
+
+    #[must_use]
+    pub const fn project(&self) -> &EditorProjectView {
+        &self.project
+    }
+
+    #[must_use]
+    pub const fn diagnostics(&self) -> &DiagnosticReport {
+        &self.diagnostics
+    }
+
+    #[must_use]
+    pub const fn reopen_target(&self) -> EditorReopenTarget {
+        self.reopen_target
+    }
+
+    #[must_use]
+    pub const fn play(&self) -> crate::EditorPlayView {
+        self.project.play()
+    }
+
+    #[must_use]
+    pub const fn persistence(&self) -> crate::EditorPersistenceView {
+        self.project.persistence()
+    }
+
+    #[must_use]
+    pub const fn workspace_intent(&self) -> crate::EditorWorkspaceIntentView {
+        self.project.workspace_intent()
+    }
+
+    #[must_use]
+    pub const fn runtime_edit_result(&self) -> Option<&crate::EditorRuntimeEditResult> {
+        self.project.runtime_edit_result()
+    }
+
+    #[must_use]
+    pub const fn apply_changes_result(&self) -> Option<&crate::EditorApplyChangesResult> {
+        self.project.apply_changes_result()
+    }
+}
+
+/// Revision-free workspace navigation emitted from one exact Editor frame.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorNavigationAction {
+    SetActiveScene {
+        document: EditorDocumentId,
+    },
+    SelectEntity {
+        document: EditorDocumentId,
+        entity: Option<SceneEntityId>,
+    },
+    MarkExternalChanged {
+        document: EditorDocumentId,
+    },
+}
+
+impl EditorNavigationAction {
+    #[must_use]
+    pub const fn document(&self) -> EditorDocumentId {
+        match self {
+            Self::SetActiveScene { document }
+            | Self::SelectEntity { document, .. }
+            | Self::MarkExternalChanged { document } => *document,
+        }
+    }
+}
+
+/// One revision-bound document mutation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorDocumentMutation {
+    ApplyInspectorCommand {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: SceneInspectorCommand,
+    },
+    ApplyScenePatch {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        patch: ScenePatchDocument,
+    },
+    Undo {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    },
+    Redo {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    },
+}
+
+impl EditorDocumentMutation {
+    #[must_use]
+    pub const fn document(&self) -> EditorDocumentId {
+        match self {
+            Self::ApplyInspectorCommand { document, .. }
+            | Self::ApplyScenePatch { document, .. }
+            | Self::Undo { document, .. }
+            | Self::Redo { document, .. } => *document,
+        }
+    }
+
+    #[must_use]
+    pub const fn base_revision(&self) -> SceneAuthoringRevision {
+        match self {
+            Self::ApplyInspectorCommand { base_revision, .. }
+            | Self::ApplyScenePatch { base_revision, .. }
+            | Self::Undo { base_revision, .. }
+            | Self::Redo { base_revision, .. } => *base_revision,
+        }
+    }
+}
+
+/// Persistence actions emitted from one exact Editor frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPersistenceAction {
+    Save {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    },
+    Reopen {
+        target: EditorReopenTarget,
+    },
+    AcknowledgeResult,
+}
+
+/// Dirty-close and exit arbitration actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorWorkspaceIntentAction {
+    Request(EditorWorkspaceIntent),
+    Resolve(EditorCloseDecision),
+    AcknowledgeResult,
+}
+
+/// Play-owner actions emitted from one exact Editor frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPlayAction {
+    Play {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    },
+    Cancel,
+    Pause,
+    Resume,
+    StepFixedTick,
+    Stop,
+    Restart,
+    RetryRetirement,
+    RetryClose,
+    AcknowledgeResult,
+}
+
+/// UI-neutral action applied by the concrete Editor Host in list order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorAction {
+    Navigate(EditorNavigationAction),
+    Mutate(EditorDocumentMutation),
+    Persistence(EditorPersistenceAction),
+    WorkspaceIntent(EditorWorkspaceIntentAction),
+    Play(EditorPlayAction),
+    RuntimeEdit {
+        document: EditorDocumentId,
+        request: EditorRuntimeEditRequest,
+    },
+    ApplyChanges {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        generation: u64,
+        request: SceneApplyChangesRequest,
+    },
+    AcknowledgeRuntimeEditResult,
+    AcknowledgeApplyChangesResult,
+}
+
+impl EditorAction {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn revision_advancing_document(&self) -> Option<EditorDocumentId> {
+        match self {
+            Self::Mutate(mutation) => Some(mutation.document()),
+            Self::Persistence(EditorPersistenceAction::Reopen { target }) => Some(match target {
+                EditorReopenTarget::OpenDocument { document, .. }
+                | EditorReopenTarget::ClosedSource { document } => *document,
+            }),
+            Self::ApplyChanges { document, .. } => Some(*document),
+            _ => None,
+        }
+    }
+}
+
+/// One ordered Adapter submission bound to an immutable Editor frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorActionBatch {
+    frame_revision: EditorFrameRevision,
+    actions: Vec<EditorAction>,
+}
+
+impl EditorActionBatch {
+    #[must_use]
+    pub fn new(
+        frame_revision: EditorFrameRevision,
+        actions: impl IntoIterator<Item = EditorAction>,
+    ) -> Self {
+        Self {
+            frame_revision,
+            actions: actions.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
+    pub const fn frame_revision(&self) -> EditorFrameRevision {
+        self.frame_revision
+    }
+
+    #[doc(hidden)]
+    pub fn into_actions(self) -> Vec<EditorAction> {
+        self.actions
+    }
+}
+
+/// Host-level rejection that does not silently rebase an Editor action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorActionRejection {
+    NoPublishedFrame,
+    StaleFrame {
+        expected: EditorFrameRevision,
+        received: EditorFrameRevision,
+    },
+    FrameAlreadyDispatched {
+        revision: EditorFrameRevision,
+    },
+    DocumentNotInFrame {
+        document: EditorDocumentId,
+    },
+    StaleDocumentFact {
+        document: EditorDocumentId,
+        expected: SceneAuthoringRevision,
+        actual: Option<SceneAuthoringRevision>,
+    },
+    MutationAlreadySubmitted {
+        document: EditorDocumentId,
+    },
+    RuntimeGenerationChanged {
+        expected: u64,
+        actual: Option<u64>,
+    },
+    RuntimeDocumentChanged {
+        expected: EditorDocumentId,
+        actual: Option<EditorDocumentId>,
+    },
+    InvalidReopenTarget,
+}
+
+/// Typed outcome for one action in an ordered Editor batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorActionAcknowledgement {
+    WorkspaceIntent(bool),
+    RuntimeEdit(bool),
+    ApplyChanges(bool),
+}
+
+/// Typed outcome for one action in an ordered Editor batch.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditorActionOutcome {
+    Workspace(EditorWorkspaceCommandReport),
+    Persistence(EditorPersistenceRequestResult),
+    WorkspaceIntent(EditorWorkspaceIntentRequestResult),
+    Play(EditorPlayRequestResult),
+    RuntimeEdit(Result<(), EditorRuntimeEditRejection>),
+    ApplyChanges(Result<(), EditorApplyChangesRejection>),
+    Acknowledged(EditorActionAcknowledgement),
+    Rejected(EditorActionRejection),
+}
+
+/// Outcomes for one accepted frame-bound action batch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EditorActionBatchReport {
+    frame_revision: EditorFrameRevision,
+    outcomes: Vec<EditorActionOutcome>,
+}
+
+impl EditorActionBatchReport {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new(
+        frame_revision: EditorFrameRevision,
+        outcomes: impl IntoIterator<Item = EditorActionOutcome>,
+    ) -> Self {
+        Self {
+            frame_revision,
+            outcomes: outcomes.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
+    pub const fn frame_revision(&self) -> EditorFrameRevision {
+        self.frame_revision
+    }
+
+    #[must_use]
+    pub fn outcomes(&self) -> &[EditorActionOutcome] {
+        &self.outcomes
+    }
+
+    #[must_use]
+    pub fn into_outcomes(self) -> Vec<EditorActionOutcome> {
+        self.outcomes
+    }
+}

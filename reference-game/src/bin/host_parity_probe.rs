@@ -31,7 +31,10 @@ use nara::{
             RuntimeProbe, desktop_run_with_probe, headless_run_with_probe, open_editor_with_probe,
         },
     },
-    tooling::{EditorPlayCommand, EditorPlayRequestResult, EditorPlayState},
+    tooling::{
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorPlayAction,
+        EditorPlayRequestResult, EditorPlayState,
+    },
 };
 use nara_reference_game::{
     MovementDirection, REFERENCE_WAVE_PLUGIN_ID, WaveSnapshot, movement_command,
@@ -189,17 +192,27 @@ fn run_editor(
 ) -> Result<RuntimeFaultEvidence, &'static str> {
     let mut session = open_editor_with_probe(root, wave_editor_intent(), RuntimeProbe::new(probe))
         .map_err(|_| "host_parity_probe.editor-open")?;
-    if !matches!(
-        session.request_play(EditorPlayCommand::Play),
-        EditorPlayRequestResult::Accepted
+    let initial = session.current_frame();
+    let scene = initial
+        .workspace()
+        .active_scene
+        .as_ref()
+        .ok_or("host_parity_probe.editor-document-missing")?;
+    if !dispatch_editor_play(
+        &mut session,
+        &initial,
+        EditorPlayAction::Play {
+            document: scene.document,
+            base_revision: scene.revision,
+        },
     ) {
         return Err("host_parity_probe.editor-play-rejected");
     }
 
     let deadline = Instant::now() + HOST_TIMEOUT;
     loop {
-        session.drive_editor_frame(FixedTime::DEFAULT_TIMESTEP);
-        match session.play_view().state() {
+        let frame = session.drive_editor_frame(FixedTime::DEFAULT_TIMESTEP);
+        match frame.play().state() {
             EditorPlayState::Faulted => break,
             EditorPlayState::Empty | EditorPlayState::CloseIncomplete => {
                 return Err("host_parity_probe.editor-fault-mismatch");
@@ -211,26 +224,21 @@ fn run_editor(
         }
     }
     let fault = runtime_fault_evidence(
-        session.diagnostics(),
+        session.current_frame().diagnostics(),
         "project.run.runtime-faulted",
         None,
         false,
     )?;
-    if !matches!(
-        session.request_play(EditorPlayCommand::Stop),
-        EditorPlayRequestResult::Accepted
-    ) {
+    let faulted = session.current_frame();
+    if !dispatch_editor_play(&mut session, &faulted, EditorPlayAction::Stop) {
         return Err("host_parity_probe.editor-stop-rejected");
     }
     loop {
-        session.drive_editor_frame(Duration::ZERO);
-        match session.play_view().state() {
+        let frame = session.drive_editor_frame(Duration::ZERO);
+        match frame.play().state() {
             EditorPlayState::Empty => break,
             EditorPlayState::CloseIncomplete => {
-                if !matches!(
-                    session.request_play(EditorPlayCommand::RetryClose),
-                    EditorPlayRequestResult::Accepted
-                ) {
+                if !dispatch_editor_play(&mut session, &frame, EditorPlayAction::RetryClose) {
                     return Err("host_parity_probe.editor-close-retry-rejected");
                 }
             }
@@ -241,6 +249,23 @@ fn run_editor(
         }
     }
     Ok(fault)
+}
+
+fn dispatch_editor_play(
+    session: &mut nara::project_host::EditorProjectSession,
+    frame: &nara::tooling::EditorFrameModel,
+    action: EditorPlayAction,
+) -> bool {
+    let Ok(report) = session.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Play(action)],
+    )) else {
+        return false;
+    };
+    matches!(
+        report.outcomes(),
+        [EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)]
+    )
 }
 
 #[derive(Debug, Clone)]

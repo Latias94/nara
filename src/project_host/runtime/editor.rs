@@ -1,4 +1,9 @@
-use std::{fmt, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
+
+mod actions;
+mod model;
+mod persistence;
+mod play;
 
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
@@ -10,20 +15,20 @@ use nara_ecs::{Entity, Mut, Resource, World};
 use nara_fs::{DirectoryCapability, RelativePath};
 use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandPlugin};
 use nara_reflect::{
-    ComponentCapability, ComponentFieldId, ComponentRegistry, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, component_registry, report_component_registry_authority_fault,
+    ComponentCapability, ComponentRegistry, component_registry,
+    report_component_registry_authority_fault,
 };
-use nara_scene::{SceneEntityId, SceneEntitySource};
+use nara_scene::SceneEntitySource;
 use nara_tooling::{
-    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId,
-    EditorPersistenceAuthority, EditorPersistenceCommand, EditorPersistenceFailureStage,
-    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
-    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
-    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
-    EditorPlayState, EditorPlayView, EditorProjectView, EditorRuntimeEditRejection,
-    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorWorkspace, EditorWorkspaceCommand,
-    EditorWorkspaceCommandReport, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
-    EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorFrameClock,
+    EditorFrameModel, EditorPersistenceAuthority, EditorPersistenceCommand,
+    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
+    EditorPersistenceRequestResult, EditorPersistenceResult, EditorPersistenceView,
+    EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
+    EditorPlayRejection, EditorPlayRequestResult, EditorPlayState, EditorPlayView,
+    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorWorkspace,
+    EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
+    EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
     SceneApplyChangesRequest,
 };
@@ -412,7 +417,16 @@ struct PendingWorkspaceIntent {
     phase: EditorWorkspaceIntentPhase,
 }
 
+struct PublishedEditorFrame {
+    model: Arc<EditorFrameModel>,
+    dispatched: bool,
+}
+
 /// Concrete product Host for one Editor workspace and its future single Play owner.
+///
+/// Product Adapters consume [`Self::current_frame`], return one ordered action batch through
+/// [`Self::dispatch_editor_actions`], and publish the next frame through
+/// [`Self::drive_editor_frame`]. Crate-private helpers remain owner-conformance seams only.
 pub struct EditorProjectSession {
     workspace: EditorWorkspace,
     persistence_authority: EditorPersistenceAuthority,
@@ -435,6 +449,8 @@ pub struct EditorProjectSession {
     apply_changes_result: Option<EditorApplyChangesResult>,
     pending_workspace_intent: Option<PendingWorkspaceIntent>,
     workspace_intent_result: Option<EditorWorkspaceIntentResult>,
+    frame_clock: EditorFrameClock,
+    published_frame: Option<PublishedEditorFrame>,
 }
 
 impl fmt::Debug for EditorProjectSession {
@@ -546,7 +562,7 @@ impl EditorProjectSession {
 
         let mut diagnostics = runtime_plan_selected_report(&plan);
         let _ = diagnostics.extend(report.diagnostics);
-        Ok(Self {
+        let mut session = Self {
             workspace,
             persistence_authority,
             scene_title: startup.as_str().to_owned(),
@@ -568,16 +584,22 @@ impl EditorProjectSession {
             apply_changes_result: None,
             pending_workspace_intent: None,
             workspace_intent_result: None,
-        })
+            frame_clock: EditorFrameClock::new(),
+            published_frame: None,
+        };
+        session.publish_editor_frame();
+        Ok(session)
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn workspace(&self) -> &EditorWorkspace {
+    pub(super) const fn workspace(&self) -> &EditorWorkspace {
         &self.workspace
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub fn workspace_model(&mut self) -> nara_tooling::EditorWorkspaceModel {
+    pub(super) fn workspace_model(&self) -> nara_tooling::EditorWorkspaceModel {
         self.workspace
             .model(self.plan.schema_validation().registry(), None)
     }
@@ -601,23 +623,9 @@ impl EditorProjectSession {
             .flatten()
     }
 
-    #[cfg(test)]
-    pub(super) fn test_reject_next_valid_persistence_receipt(&mut self) {
-        self.persistence.test_reject_next_valid_receipt();
-    }
-
-    #[cfg(test)]
-    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
-        self.persistence.test_fail_next_save(stage);
-    }
-
     #[must_use]
-    pub const fn persistence_view(&self) -> EditorPersistenceView {
-        EditorPersistenceView::new(self.persistence_operation, self.persistence_result)
-    }
-
-    #[must_use]
-    pub const fn workspace_intent_view(&self) -> EditorWorkspaceIntentView {
+    #[doc(hidden)]
+    pub(crate) const fn workspace_intent_view(&self) -> EditorWorkspaceIntentView {
         let (intent, phase) = match self.pending_workspace_intent {
             Some(pending) => (Some(pending.intent), Some(pending.phase)),
             None => (None, None),
@@ -625,80 +633,13 @@ impl EditorProjectSession {
         EditorWorkspaceIntentView::new(intent, phase, self.workspace_intent_result)
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn last_persistence_receipt(&self) -> Option<EditorPersistenceReceipt> {
-        self.last_persistence_receipt
-    }
-
-    #[must_use]
-    pub const fn diagnostics(&self) -> &DiagnosticReport {
+    pub(super) const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
     }
 
-    #[must_use]
-    pub fn play_view(&self) -> EditorPlayView {
-        let current_revision = self
-            .workspace
-            .active_scene()
-            .map(nara_tooling::EditorSceneSlot::revision);
-        let (state, source_revision) = match &self.runtime_owner {
-            EditorRuntimeOwnerState::Empty => (EditorPlayState::Empty, None),
-            EditorRuntimeOwnerState::Preparing { revision, .. } => {
-                (EditorPlayState::PreparingPlay, Some(*revision))
-            }
-            EditorRuntimeOwnerState::Starting { revision, .. } => {
-                (EditorPlayState::Starting, Some(*revision))
-            }
-            EditorRuntimeOwnerState::CancellingStart { .. }
-            | EditorRuntimeOwnerState::RetiringPlay { .. } => (EditorPlayState::RetiringPlay, None),
-            EditorRuntimeOwnerState::RetirementIncomplete { .. } => {
-                (EditorPlayState::RetirementIncomplete, None)
-            }
-            EditorRuntimeOwnerState::Active {
-                source_revision, ..
-            } => {
-                let state = match self.runtime_host.running_runtime_state() {
-                    Some(RuntimeState::Running) => EditorPlayState::Running,
-                    Some(RuntimeState::Paused) => EditorPlayState::Paused,
-                    Some(RuntimeState::Stepping) => EditorPlayState::Stepping,
-                    Some(RuntimeState::Faulted) => EditorPlayState::Faulted,
-                    Some(RuntimeState::Stopping) => EditorPlayState::Stopping,
-                    Some(RuntimeState::CloseIncomplete) => EditorPlayState::CloseIncomplete,
-                    Some(RuntimeState::Stopped) | None => EditorPlayState::Empty,
-                };
-                let projected =
-                    self.pending_control
-                        .map_or(state, |pending| match pending.operation {
-                            EditorPlayOperation::StepFixedTick => EditorPlayState::Stepping,
-                            EditorPlayOperation::Stop
-                            | EditorPlayOperation::Restart
-                            | EditorPlayOperation::RetryClose => EditorPlayState::Stopping,
-                            EditorPlayOperation::Play
-                            | EditorPlayOperation::Cancel
-                            | EditorPlayOperation::Pause
-                            | EditorPlayOperation::Resume
-                            | EditorPlayOperation::RetryRetirement => state,
-                        });
-                (projected, Some(*source_revision))
-            }
-            EditorRuntimeOwnerState::Transitioning => {
-                unreachable!("editor runtime state is not observed during a transition")
-            }
-        };
-        let out_of_date = source_revision
-            .zip(current_revision)
-            .is_some_and(|(source, current)| source != current);
-        EditorPlayView::new(
-            state,
-            self.runtime_host.running_runtime_generation(),
-            source_revision,
-            current_revision,
-            out_of_date,
-            self.play_result,
-        )
-    }
-
-    pub fn apply_workspace_command(
+    pub(crate) fn apply_workspace_command(
         &mut self,
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
@@ -718,7 +659,7 @@ impl EditorProjectSession {
             .apply_command(self.plan.schema_validation().registry(), command)
     }
 
-    pub fn request_workspace_intent(
+    pub(crate) fn request_workspace_intent(
         &mut self,
         intent: EditorWorkspaceIntent,
     ) -> EditorWorkspaceIntentRequestResult {
@@ -770,7 +711,7 @@ impl EditorProjectSession {
         EditorWorkspaceIntentRequestResult::Accepted
     }
 
-    pub fn resolve_workspace_intent(
+    pub(crate) fn resolve_workspace_intent(
         &mut self,
         decision: EditorCloseDecision,
     ) -> EditorWorkspaceIntentRequestResult {
@@ -821,267 +762,11 @@ impl EditorProjectSession {
         EditorWorkspaceIntentRequestResult::Accepted
     }
 
-    pub fn acknowledge_workspace_intent_result(&mut self) -> bool {
+    pub(crate) fn acknowledge_workspace_intent_result(&mut self) -> bool {
         self.workspace_intent_result.take().is_some()
     }
 
-    pub fn request_persistence(
-        &mut self,
-        command: EditorPersistenceCommand,
-    ) -> EditorPersistenceRequestResult {
-        if command != EditorPersistenceCommand::AcknowledgeResult
-            && self.pending_workspace_intent.is_some()
-        {
-            return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
-        }
-        self.request_persistence_after_workspace_arbitration(command)
-    }
-
-    fn request_persistence_for_workspace_intent(
-        &mut self,
-        command: EditorPersistenceCommand,
-    ) -> EditorPersistenceRequestResult {
-        self.request_persistence_after_workspace_arbitration(command)
-    }
-
-    fn request_persistence_after_workspace_arbitration(
-        &mut self,
-        command: EditorPersistenceCommand,
-    ) -> EditorPersistenceRequestResult {
-        if command == EditorPersistenceCommand::AcknowledgeResult {
-            return if self.pending_persistence.is_some() {
-                EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy)
-            } else if self.persistence_result.take().is_some() {
-                EditorPersistenceRequestResult::Accepted
-            } else {
-                EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::ResultPending)
-            };
-        }
-        if self.pending_persistence.is_some() {
-            return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
-        }
-        if self.persistence_result.is_some()
-            && !matches!(
-                (self.persistence_result, command),
-                (
-                    Some(EditorPersistenceResult::PersistenceUncertain { .. }),
-                    EditorPersistenceCommand::Reopen { .. }
-                )
-            )
-        {
-            return EditorPersistenceRequestResult::Rejected(
-                EditorPersistenceRejection::ResultPending,
-            );
-        }
-
-        let requested_document = match command {
-            EditorPersistenceCommand::Save { document } => {
-                let Some(document) = document.or(self.workspace.active_document()) else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        document: None,
-                        reason: EditorPersistenceRejection::NoActiveDocument,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
-                        EditorPersistenceRejection::NoActiveDocument,
-                    );
-                };
-                document
-            }
-            EditorPersistenceCommand::Reopen { document } => document
-                .or(self.workspace.active_document())
-                .unwrap_or(self.source_document),
-            EditorPersistenceCommand::AcknowledgeResult => unreachable!(),
-        };
-
-        if matches!(command, EditorPersistenceCommand::Reopen { .. })
-            && (!matches!(self.runtime_owner, EditorRuntimeOwnerState::Empty)
-                || self.runtime_host.has_cleanup_owner())
-        {
-            self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                document: Some(requested_document),
-                reason: EditorPersistenceRejection::RuntimeActive,
-            });
-            return EditorPersistenceRequestResult::Rejected(
-                EditorPersistenceRejection::RuntimeActive,
-            );
-        }
-
-        match command {
-            EditorPersistenceCommand::Save { .. } => {
-                let Some(slot) = self.workspace.scene(requested_document) else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        document: Some(requested_document),
-                        reason: EditorPersistenceRejection::MissingDocument,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
-                        EditorPersistenceRejection::MissingDocument,
-                    );
-                };
-                if !slot.is_dirty() {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        document: Some(requested_document),
-                        reason: EditorPersistenceRejection::NotDirty,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
-                        EditorPersistenceRejection::NotDirty,
-                    );
-                }
-                let Some(checkpoint) = self
-                    .persistence_authority
-                    .capture(&self.workspace, requested_document)
-                else {
-                    self.persistence_result = Some(EditorPersistenceResult::Rejected {
-                        document: Some(requested_document),
-                        reason: EditorPersistenceRejection::StaleRevision,
-                    });
-                    return EditorPersistenceRequestResult::Rejected(
-                        EditorPersistenceRejection::StaleRevision,
-                    );
-                };
-                let revision = checkpoint.revision();
-                self.pending_persistence =
-                    Some(PendingPersistence::Save(SceneSaveCandidate { checkpoint }));
-                self.persistence_operation = EditorPersistenceOperation::Saving {
-                    document: requested_document,
-                    captured_revision: revision,
-                };
-            }
-            EditorPersistenceCommand::Reopen { .. } => {
-                self.persistence_result = None;
-                let base_revision = self
-                    .workspace
-                    .scene(requested_document)
-                    .map(|slot| slot.revision());
-                self.pending_persistence = Some(PendingPersistence::Reopen {
-                    document: requested_document,
-                    base_revision,
-                });
-                self.persistence_operation = EditorPersistenceOperation::Opening {
-                    document: requested_document,
-                };
-            }
-            EditorPersistenceCommand::AcknowledgeResult => unreachable!(),
-        }
-        EditorPersistenceRequestResult::Accepted
-    }
-
-    pub fn request_play(&mut self, command: EditorPlayCommand) -> EditorPlayRequestResult {
-        if command == EditorPlayCommand::AcknowledgeResult {
-            return if self.play_result.take().is_some() {
-                EditorPlayRequestResult::Accepted
-            } else {
-                EditorPlayRequestResult::Rejected(EditorPlayRejection::ResultPending)
-            };
-        }
-        if let Some(pending) = self.pending_workspace_intent {
-            let retry_matches_owner = matches!(
-                (pending.phase, command, self.play_view().state()),
-                (
-                    EditorWorkspaceIntentPhase::RetiringRuntime,
-                    EditorPlayCommand::RetryRetirement,
-                    EditorPlayState::RetirementIncomplete,
-                ) | (
-                    EditorWorkspaceIntentPhase::RetiringRuntime,
-                    EditorPlayCommand::RetryClose,
-                    EditorPlayState::CloseIncomplete,
-                )
-            );
-            if !retry_matches_owner {
-                return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
-            }
-        }
-
-        match command {
-            EditorPlayCommand::Play => self.request_start(EditorPlayOperation::Play),
-            EditorPlayCommand::Cancel => self.request_start_cancel(),
-            EditorPlayCommand::Pause => {
-                self.request_active_control(EditorPlayOperation::Pause, RuntimeControl::Pause)
-            }
-            EditorPlayCommand::Resume => {
-                self.request_active_control(EditorPlayOperation::Resume, RuntimeControl::Resume)
-            }
-            EditorPlayCommand::StepFixedTick => self.request_active_control(
-                EditorPlayOperation::StepFixedTick,
-                RuntimeControl::StepFixedTick,
-            ),
-            EditorPlayCommand::Stop => {
-                self.request_active_control(EditorPlayOperation::Stop, RuntimeControl::Stop)
-            }
-            EditorPlayCommand::Restart => {
-                self.request_active_control(EditorPlayOperation::Restart, RuntimeControl::Stop)
-            }
-            EditorPlayCommand::RetryClose => self.request_active_control(
-                EditorPlayOperation::RetryClose,
-                RuntimeControl::RetryClose,
-            ),
-            EditorPlayCommand::RetryRetirement => {
-                let state = std::mem::replace(
-                    &mut self.runtime_owner,
-                    EditorRuntimeOwnerState::Transitioning,
-                );
-                match state {
-                    EditorRuntimeOwnerState::RetirementIncomplete { terminal } => {
-                        self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay { terminal };
-                        self.play_result = Some(EditorPlayOperationResult::Pending {
-                            operation: EditorPlayOperation::RetryRetirement,
-                        });
-                        EditorPlayRequestResult::Accepted
-                    }
-                    other => {
-                        self.runtime_owner = other;
-                        EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState)
-                    }
-                }
-            }
-            EditorPlayCommand::AcknowledgeResult => unreachable!(),
-        }
-    }
-
-    pub fn request_runtime_edit(
-        &mut self,
-        entity: SceneEntityId,
-        component: ComponentTypeId,
-        component_version: ComponentSchemaVersion,
-        field: ComponentFieldId,
-        value: ComponentValue,
-    ) -> Result<(), EditorRuntimeEditRejection> {
-        if self.pending_workspace_intent.is_some() {
-            return Err(EditorRuntimeEditRejection::Busy);
-        }
-        if self.runtime_edit_result.is_some() {
-            return Err(EditorRuntimeEditRejection::Busy);
-        }
-        let EditorRuntimeOwnerState::Active { document, .. } = self.runtime_owner else {
-            return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
-        };
-        if !matches!(
-            self.runtime_host.running_runtime_state(),
-            Some(RuntimeState::Running | RuntimeState::Paused)
-        ) {
-            return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
-        }
-        let generation = self
-            .runtime_host
-            .running_runtime_generation()
-            .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
-        let revision = self
-            .workspace
-            .scene(document)
-            .ok_or(EditorRuntimeEditRejection::StaleDocument)?
-            .revision();
-        let request = EditorRuntimeEditRequest {
-            generation,
-            document_revision: revision,
-            entity,
-            component,
-            component_version,
-            field,
-            value,
-        };
-        self.request_runtime_edit_request(request)
-    }
-
-    pub fn request_runtime_edit_request(
+    pub(crate) fn request_runtime_edit_request(
         &mut self,
         request: EditorRuntimeEditRequest,
     ) -> Result<(), EditorRuntimeEditRejection> {
@@ -1139,12 +824,13 @@ impl EditorProjectSession {
         }
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn runtime_edit_result(&self) -> Option<&EditorRuntimeEditResult> {
+    pub(super) const fn runtime_edit_result(&self) -> Option<&EditorRuntimeEditResult> {
         self.runtime_edit_result.as_ref()
     }
 
-    pub fn acknowledge_runtime_edit_result(&mut self) -> bool {
+    pub(crate) fn acknowledge_runtime_edit_result(&mut self) -> bool {
         if matches!(
             self.runtime_edit_result,
             Some(EditorRuntimeEditResult::Pending(_))
@@ -1154,7 +840,7 @@ impl EditorProjectSession {
         self.runtime_edit_result.take().is_some()
     }
 
-    pub fn request_apply_changes(
+    pub(crate) fn request_apply_changes(
         &mut self,
         request: SceneApplyChangesRequest,
     ) -> Result<(), EditorApplyChangesRejection> {
@@ -1211,80 +897,17 @@ impl EditorProjectSession {
         Ok(())
     }
 
+    #[cfg(test)]
     #[must_use]
-    pub const fn apply_changes_result(&self) -> Option<&EditorApplyChangesResult> {
+    pub(super) const fn apply_changes_result(&self) -> Option<&EditorApplyChangesResult> {
         self.apply_changes_result.as_ref()
     }
 
-    pub fn acknowledge_apply_changes_result(&mut self) -> bool {
+    pub(crate) fn acknowledge_apply_changes_result(&mut self) -> bool {
         if self.pending_apply_changes.is_some() {
             return false;
         }
         self.apply_changes_result.take().is_some()
-    }
-
-    /// Drives one Editor frame across persistence and the single retained runtime owner.
-    pub fn drive_editor_frame(&mut self, real_delta: Duration) -> EditorProjectView {
-        if let Some(operation) = self.pending_persistence.take() {
-            self.persistence_result = Some(match operation {
-                PendingPersistence::Save(save) => self.complete_save(save),
-                PendingPersistence::Reopen {
-                    document,
-                    base_revision,
-                } => self.complete_reopen(document, base_revision),
-            });
-            self.persistence_operation = EditorPersistenceOperation::Idle;
-        }
-        self.advance_workspace_persistence();
-        self.advance_workspace_retirement();
-        self.drive_play_owner(real_delta);
-        self.advance_workspace_retirement();
-        EditorProjectView::new(
-            self.play_view(),
-            self.persistence_view(),
-            self.workspace_intent_view(),
-        )
-        .with_inspector_results(
-            self.runtime_edit_result.clone(),
-            self.apply_changes_result.clone(),
-        )
-    }
-
-    fn advance_workspace_persistence(&mut self) {
-        let Some(pending) = self.pending_workspace_intent else {
-            return;
-        };
-        if pending.phase != EditorWorkspaceIntentPhase::Saving {
-            return;
-        }
-        match self.persistence_result {
-            Some(EditorPersistenceResult::Saved { document, .. })
-                if document == pending.document =>
-            {
-                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-                    phase: EditorWorkspaceIntentPhase::RetiringRuntime,
-                    ..pending
-                });
-            }
-            Some(
-                EditorPersistenceResult::Rejected { .. }
-                | EditorPersistenceResult::Failed { .. }
-                | EditorPersistenceResult::PersistenceUncertain { .. },
-            ) => {
-                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-                    phase: EditorWorkspaceIntentPhase::AwaitingDecision,
-                    ..pending
-                });
-            }
-            Some(EditorPersistenceResult::Opened { .. })
-            | Some(EditorPersistenceResult::Saved { .. }) => {
-                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-                    phase: EditorWorkspaceIntentPhase::AwaitingDecision,
-                    ..pending
-                });
-            }
-            None => {}
-        }
     }
 
     fn advance_workspace_retirement(&mut self) {
@@ -1514,7 +1137,7 @@ impl EditorProjectSession {
             return EditorRuntimeOwnerState::Empty;
         };
         let revision = slot.revision();
-        if revision.source_id() != requested_revision.source_id() {
+        if revision != requested_revision {
             self.play_result = Some(EditorPlayOperationResult::Rejected {
                 operation,
                 reason: EditorPlayRejection::StaleDocument,
@@ -1911,136 +1534,6 @@ impl EditorProjectSession {
         };
         self.apply_changes_result = Some(EditorApplyChangesResult::Cancelled(pending.request));
     }
-
-    fn complete_save(&mut self, save: SceneSaveCandidate) -> EditorPersistenceResult {
-        let document = save.checkpoint.document();
-        match self.persistence.save(save) {
-            SceneSaveOutcome::Saved { commit, evidence } => {
-                let report = self
-                    .persistence_authority
-                    .commit(&mut self.workspace, commit);
-                if !report.applied {
-                    self.persistence.mark_uncertain();
-                    self.last_persistence_receipt = Some(evidence);
-                    return EditorPersistenceResult::PersistenceUncertain {
-                        document: evidence.document(),
-                        revision: evidence.revision(),
-                        digest: evidence.digest(),
-                    };
-                }
-                self.last_persistence_receipt = Some(evidence);
-                EditorPersistenceResult::Saved {
-                    document: evidence.document(),
-                    revision: evidence.revision(),
-                    digest: evidence.digest(),
-                }
-            }
-            SceneSaveOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
-                document: Some(document),
-                reason,
-            },
-            SceneSaveOutcome::Failed(stage) => EditorPersistenceResult::Failed {
-                document: Some(document),
-                stage,
-            },
-            SceneSaveOutcome::PersistenceUncertain { evidence } => {
-                self.last_persistence_receipt = Some(evidence);
-                EditorPersistenceResult::PersistenceUncertain {
-                    document: evidence.document(),
-                    revision: evidence.revision(),
-                    digest: evidence.digest(),
-                }
-            }
-        }
-    }
-
-    fn complete_reopen(
-        &mut self,
-        document: EditorDocumentId,
-        base_revision: Option<nara_scene::SceneAuthoringRevision>,
-    ) -> EditorPersistenceResult {
-        match self
-            .persistence
-            .reopen(self.plan.schema_validation().registry())
-        {
-            SceneReopenOutcome::Opened(opened) => {
-                let OpenedSceneReopen {
-                    session,
-                    digest,
-                    identity,
-                    content_digest,
-                } = *opened;
-                let replacing_existing = base_revision.is_some();
-                let report = if let Some(base_revision) = base_revision {
-                    match self.persistence_authority.publish_reopened_session(
-                        &mut self.workspace,
-                        document,
-                        base_revision,
-                        session,
-                        digest,
-                    ) {
-                        Ok(report) => report,
-                        Err(_) => {
-                            return EditorPersistenceResult::Rejected {
-                                document: Some(document),
-                                reason: EditorPersistenceRejection::StaleRevision,
-                            };
-                        }
-                    }
-                } else if self.workspace.is_empty() {
-                    match self
-                        .workspace
-                        .open_scene_session(self.scene_title.clone(), session)
-                    {
-                        Ok(report) => report,
-                        Err(_) => {
-                            return EditorPersistenceResult::Failed {
-                                document: Some(document),
-                                stage: EditorPersistenceFailureStage::Validate,
-                            };
-                        }
-                    }
-                } else {
-                    return EditorPersistenceResult::Rejected {
-                        document: Some(document),
-                        reason: EditorPersistenceRejection::MissingDocument,
-                    };
-                };
-                let opened_document = report.opened_document.unwrap_or(document);
-                let revision = report
-                    .revision
-                    .expect("a reopened document reports its authoring revision");
-                if !replacing_existing {
-                    let binding = self.persistence_authority.bind_opened_source_digest(
-                        &mut self.workspace,
-                        opened_document,
-                        digest,
-                    );
-                    if !binding.applied {
-                        return EditorPersistenceResult::Failed {
-                            document: Some(opened_document),
-                            stage: EditorPersistenceFailureStage::Validate,
-                        };
-                    }
-                }
-                self.persistence.commit_reopen(identity, content_digest);
-                self.source_document = opened_document;
-                EditorPersistenceResult::Opened {
-                    document: opened_document,
-                    revision,
-                    digest,
-                }
-            }
-            SceneReopenOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
-                document: Some(document),
-                reason,
-            },
-            SceneReopenOutcome::Failed(stage) => EditorPersistenceResult::Failed {
-                document: Some(document),
-                stage,
-            },
-        }
-    }
 }
 
 fn editor_open_error(code: &'static str) -> EditorProjectOpenError {
@@ -2086,8 +1579,10 @@ mod tests {
     use nara_ecs::Component;
     use nara_identity::SceneInstanceId;
     use nara_reflect::{
-        ComponentFieldPath, ComponentFieldSchema, ComponentSchema, ComponentValueKind,
+        ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentSchema,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
     };
+    use nara_scene::SceneEntityId;
 
     #[derive(Debug, Component)]
     struct ComponentReadOnlyProbe {

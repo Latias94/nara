@@ -369,6 +369,7 @@ impl EditorWorkspace {
                     document: *document,
                     title: slot.title.clone(),
                     dirty: slot.is_dirty(),
+                    revision: slot.revision(),
                     external_reload: slot.external_reload,
                     active: Some(*document) == self.active_document,
                 })
@@ -1054,11 +1055,20 @@ pub struct EditorWorkspaceModel {
     pub diagnostics: DiagnosticReport,
 }
 
+impl EditorWorkspaceModel {
+    /// Returns the exact tab facts for an open document in this model generation.
+    #[must_use]
+    pub fn scene(&self, document: EditorDocumentId) -> Option<&EditorSceneTabModel> {
+        self.scenes.iter().find(|scene| scene.document == document)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorSceneTabModel {
     pub document: EditorDocumentId,
     pub title: String,
     pub dirty: bool,
+    pub revision: SceneAuthoringRevision,
     pub external_reload: EditorExternalReloadState,
     pub active: bool,
 }

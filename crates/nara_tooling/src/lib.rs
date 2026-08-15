@@ -1,12 +1,21 @@
 //! UI-agnostic Editor domain models and command seams.
 
 mod diagnostic;
+mod frame;
 mod inspector;
 mod persistence;
 mod play;
 mod snapshot;
 mod workspace;
 
+#[doc(hidden)]
+pub use frame::EditorFrameClock;
+pub use frame::{
+    EditorAction, EditorActionAcknowledgement, EditorActionBatch, EditorActionBatchReport,
+    EditorActionOutcome, EditorActionRejection, EditorDocumentMutation, EditorFrameModel,
+    EditorFrameRevision, EditorNavigationAction, EditorPersistenceAction, EditorPlayAction,
+    EditorReopenTarget, EditorWorkspaceIntentAction,
+};
 pub use inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
     SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,

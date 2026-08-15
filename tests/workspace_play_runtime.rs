@@ -1,5 +1,7 @@
 #![cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 
+#[path = "support/editor_action_driver.rs"]
+mod editor_action_driver;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
 
@@ -12,6 +14,7 @@ use std::{
     time::Duration,
 };
 
+use editor_action_driver as editor_driver;
 use nara::{
     ProductConfiguration, ProductRecipe,
     app::{
@@ -32,8 +35,10 @@ use nara::{
         ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
-        EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
-        EditorPlayRejection, EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
+        EditorDocumentMutation, EditorNavigationAction, EditorPersistenceAction, EditorPlayCommand,
+        EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection,
+        EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
         EditorWorkspaceIntentRequestResult,
     },
     transform::GlobalTransform2d,
@@ -287,6 +292,281 @@ fn delayed_close_definition(release: Arc<AtomicBool>) -> PluginDefinition {
 }
 
 #[test]
+fn editor_frame_publishes_ordered_navigation_and_mutation_only_after_drive() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let mut editor =
+        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let revision = frame.workspace().scene(document).unwrap().revision;
+    let selected = SceneEntityId::new("enemy-anchor").unwrap();
+    let added = SceneEntityId::new("frame-edit").unwrap();
+
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document,
+                    entity: Some(SceneEntityId::new("missing-frame-entity").unwrap()),
+                }),
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document,
+                    entity: Some(selected.clone()),
+                }),
+                EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                    document,
+                    base_revision: revision,
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(added.clone()),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }]),
+                }),
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &report.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if !report.applied
+    ));
+    assert!(report.outcomes()[1..].iter().all(|outcome| {
+        matches!(
+            outcome,
+            EditorActionOutcome::Workspace(report) if report.applied
+        )
+    }));
+    assert!(Arc::ptr_eq(&frame, &editor.current_frame()));
+
+    let next = editor.drive_editor_frame(Duration::ZERO);
+    assert_ne!(next.revision(), frame.revision());
+    let scene = next.workspace().active_scene.as_ref().unwrap();
+    assert_eq!(scene.selection.top_entity(), Some(&selected));
+    assert!(
+        scene
+            .editor
+            .inspector
+            .entities
+            .iter()
+            .any(|row| row.id == added)
+    );
+}
+
+#[test]
+fn editor_frame_rejects_a_second_document_mutation_without_undoing_the_first() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let mut editor =
+        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let revision = frame.workspace().scene(document).unwrap().revision;
+
+    let patch = |id: &str| {
+        ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(SceneEntityId::new(id).unwrap()),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }])
+    };
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [
+                EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                    document,
+                    base_revision: revision,
+                    patch: patch("first-frame-edit"),
+                }),
+                EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                    document,
+                    base_revision: revision,
+                    patch: patch("second-frame-edit"),
+                }),
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &report.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    assert_eq!(
+        &report.outcomes()[1],
+        &EditorActionOutcome::Rejected(EditorActionRejection::MutationAlreadySubmitted {
+            document,
+        })
+    );
+    assert_eq!(
+        editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                std::iter::empty::<EditorAction>(),
+            ))
+            .unwrap_err(),
+        EditorActionRejection::FrameAlreadyDispatched {
+            revision: frame.revision(),
+        }
+    );
+
+    let next = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                std::iter::empty::<EditorAction>(),
+            ))
+            .unwrap_err(),
+        EditorActionRejection::StaleFrame {
+            expected: next.revision(),
+            received: frame.revision(),
+        }
+    );
+    let diagnosed = editor.drive_editor_frame(Duration::ZERO);
+    assert!(
+        diagnosed
+            .diagnostics()
+            .iter()
+            .any(|entry| entry.code().as_str() == "editor.action.stale-frame")
+    );
+    let rows = &next
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .editor
+        .inspector
+        .entities;
+    assert!(rows.iter().any(|row| row.id.as_str() == "first-frame-edit"));
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.id.as_str() == "second-frame-edit")
+    );
+}
+
+#[test]
+fn play_does_not_rebase_to_a_later_document_revision_from_the_same_frame() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let mut editor =
+        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let revision = frame.workspace().scene(document).unwrap().revision;
+
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::Play(nara::tooling::EditorPlayAction::Play {
+                document,
+                base_revision: revision,
+            }),
+            EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                document,
+                base_revision: revision,
+                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(
+                        SceneEntityId::new("post-play-frame-edit").unwrap(),
+                    ),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }]),
+            }),
+        ],
+    );
+    assert_eq!(
+        outcomes[0],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
+    );
+    assert!(matches!(
+        outcomes[1],
+        EditorActionOutcome::Workspace(ref report) if report.applied
+    ));
+
+    let next = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(next.play().state(), EditorPlayState::Empty);
+    assert!(matches!(
+        next.play().result(),
+        Some(EditorPlayOperationResult::Rejected {
+            operation: EditorPlayOperation::Play,
+            reason: EditorPlayRejection::StaleDocument,
+        })
+    ));
+    assert!(
+        next.workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .editor
+            .inspector
+            .entities
+            .iter()
+            .any(|row| row.id.as_str() == "post-play-frame-edit")
+    );
+}
+
+#[test]
+fn save_completion_becomes_visible_only_in_the_next_editor_frame() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let mut editor = EditorProjectSession::open(
+        project.writable_root_capability(),
+        EditorProjectIntent::new(),
+    )
+    .unwrap();
+    let initial = editor.current_frame();
+    let document = initial.workspace().active_document.unwrap();
+    let revision = initial.workspace().scene(document).unwrap().revision;
+    let mutation = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            initial.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyScenePatch {
+                    document,
+                    base_revision: revision,
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(
+                            SceneEntityId::new("saved-frame-edit").unwrap(),
+                        ),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }]),
+                },
+            )],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &mutation.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let dirty = editor.drive_editor_frame(Duration::ZERO);
+    let dirty_scene = dirty.workspace().scene(document).unwrap();
+    assert!(dirty_scene.dirty);
+
+    let save = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            dirty.revision(),
+            [EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: dirty_scene.revision,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &save.outcomes()[0],
+        EditorActionOutcome::Persistence(nara::tooling::EditorPersistenceRequestResult::Accepted)
+    ));
+    assert!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
+
+    let saved = editor.drive_editor_frame(Duration::ZERO);
+    assert!(!saved.workspace().scene(document).unwrap().dirty);
+}
+
+#[test]
 fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
@@ -295,23 +575,46 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
         EditorProjectIntent::new().with_recipe(runtime_service_session_recipe(service_sessions));
     let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
 
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
-        EditorPlayRequestResult::Accepted
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::PreparingPlay);
-    assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
-        EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy)
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let base_revision = frame.workspace().scene(document).unwrap().revision;
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::Play(nara::tooling::EditorPlayAction::Play {
+                document,
+                base_revision,
+            }),
+            EditorAction::Play(nara::tooling::EditorPlayAction::Play {
+                document,
+                base_revision,
+            }),
+            EditorAction::Play(nara::tooling::EditorPlayAction::Cancel),
+        ],
     );
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Cancel),
-        EditorPlayRequestResult::Accepted
+        outcomes[0],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
     assert_eq!(
-        editor.play_view().result(),
+        outcomes[1],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy))
+    );
+    assert_eq!(
+        outcomes[2],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
+    assert_eq!(
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Cancelled {
             operation: EditorPlayOperation::Play,
         })
@@ -322,26 +625,28 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.play_view().state(),
+        editor.current_frame().play().state(),
         EditorPlayState::Starting,
         "diagnostics: {:?}",
-        editor.diagnostics()
+        editor.current_frame().diagnostics()
     );
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Cancel),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Cancel),
         EditorPlayRequestResult::Accepted
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::RetiringPlay);
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
     assert_eq!(
-        editor.play_view().result(),
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
+    assert_eq!(
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Cancelled {
             operation: EditorPlayOperation::Play,
         })
@@ -352,11 +657,11 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
-    let first_generation = editor.play_view().generation().unwrap();
+    let first_generation = editor.current_frame().play().generation().unwrap();
     let first_service_session = service_session_observations
         .recv_timeout(Duration::from_secs(1))
         .expect("the first Editor runtime publishes one service session");
@@ -366,13 +671,16 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Pause),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Pause),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Applied {
             operation: EditorPlayOperation::Pause,
             generation: Some(generation),
@@ -380,14 +688,16 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::StepFixedTick),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::StepFixedTick),
         EditorPlayRequestResult::Accepted
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::Stepping);
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Applied {
             operation: EditorPlayOperation::StepFixedTick,
             generation: Some(generation),
@@ -395,12 +705,11 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Restart),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Restart),
         EditorPlayRequestResult::Accepted
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::Stopping);
     drive_until(&mut editor, EditorPlayState::Running, 32);
-    let second_generation = editor.play_view().generation().unwrap();
+    let second_generation = editor.current_frame().play().generation().unwrap();
     let second_service_session = service_session_observations
         .recv_timeout(Duration::from_secs(1))
         .expect("the restarted Editor runtime publishes one service session");
@@ -411,7 +720,7 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     assert_ne!(second_generation, first_generation);
     assert_ne!(second_service_session, first_service_session);
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Applied {
             operation: EditorPlayOperation::Restart,
             generation: Some(generation),
@@ -419,13 +728,13 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Empty, 32);
-    assert_eq!(editor.play_view().generation(), None);
+    assert_eq!(editor.current_frame().play().generation(), None);
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Applied {
             operation: EditorPlayOperation::Stop,
             ..
@@ -445,31 +754,37 @@ fn editor_product_recipe_runs_the_same_replayable_runtime_plugin() {
     .unwrap();
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     for _ in 0..32 {
-        if editor.play_view().state() == EditorPlayState::Running {
+        if editor.current_frame().play().state() == EditorPlayState::Running {
             break;
         }
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::yield_now();
     }
 
-    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Running
+    );
     assert!(receiver.recv_timeout(Duration::from_secs(1)).is_ok());
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     for _ in 0..32 {
-        if editor.play_view().state() == EditorPlayState::Empty {
+        if editor.current_frame().play().state() == EditorPlayState::Empty {
             break;
         }
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::yield_now();
     }
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
 }
 
 #[test]
@@ -478,18 +793,34 @@ fn play_without_an_active_document_rejects_without_creating_an_owner() {
     project.select_local_headless_profile();
     let mut editor =
         EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
-    let document = editor.workspace().active_document().unwrap();
-    assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
-        EditorWorkspaceIntentRequestResult::Accepted
+    let document = editor.current_frame().workspace().active_document.unwrap();
+    let frame = editor.current_frame();
+    let base_revision = frame.workspace().scene(document).unwrap().revision;
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::WorkspaceIntent(nara::tooling::EditorWorkspaceIntentAction::Request(
+                EditorWorkspaceIntent::CloseScene { document },
+            )),
+            EditorAction::Play(nara::tooling::EditorPlayAction::Play {
+                document,
+                base_revision,
+            }),
+        ],
     );
-
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
-        EditorPlayRequestResult::Rejected(EditorPlayRejection::NoActiveDocument)
+        outcomes[0],
+        EditorActionOutcome::WorkspaceIntent(EditorWorkspaceIntentRequestResult::Accepted)
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
-    assert_eq!(editor.play_view().generation(), None);
+    assert!(matches!(
+        outcomes[1],
+        EditorActionOutcome::Rejected(EditorActionRejection::StaleDocumentFact { .. })
+    ));
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
+    assert_eq!(editor.current_frame().play().generation(), None);
 }
 
 #[test]
@@ -499,63 +830,89 @@ fn runtime_edit_is_generation_and_safe_point_bound() {
     let mut editor =
         EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
 
-    let play = editor.play_view();
-    assert_eq!(
-        editor.request_runtime_edit_request(nara::tooling::EditorRuntimeEditRequest {
-            generation: play.generation().unwrap().saturating_add(1),
-            document_revision: play.current_revision().unwrap(),
-            entity: SceneEntityId::new("enemy-anchor/enemy").unwrap(),
-            component: ComponentTypeId::new("nara.sprite.Sprite"),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("layer"),
-            value: ComponentValue::I64(4),
-        }),
-        Err(nara::tooling::EditorRuntimeEditRejection::StaleGeneration)
+    let play = editor.current_frame().play();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let wrong = nara::tooling::EditorRuntimeEditRequest {
+        generation: play.generation().unwrap().saturating_add(1),
+        document_revision: play.current_revision().unwrap(),
+        entity: SceneEntityId::new("enemy-anchor/enemy").unwrap(),
+        component: ComponentTypeId::new("nara.sprite.Sprite"),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("layer"),
+        value: ComponentValue::I64(4),
+    };
+    let exact = nara::tooling::EditorRuntimeEditRequest {
+        generation: play.generation().unwrap(),
+        ..wrong.clone()
+    };
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::RuntimeEdit {
+                document,
+                request: wrong,
+            },
+            EditorAction::RuntimeEdit {
+                document,
+                request: exact,
+            },
+            EditorAction::AcknowledgeRuntimeEditResult,
+        ],
     );
-
-    editor
-        .request_runtime_edit(
-            SceneEntityId::new("enemy-anchor/enemy").unwrap(),
-            ComponentTypeId::new("nara.sprite.Sprite"),
-            ComponentSchemaVersion::ONE,
-            ComponentFieldId::new("layer"),
-            ComponentValue::I64(4),
-        )
-        .unwrap();
     assert!(matches!(
-        editor.runtime_edit_result(),
-        Some(nara::tooling::EditorRuntimeEditResult::Pending(_))
+        outcomes[0],
+        EditorActionOutcome::Rejected(EditorActionRejection::RuntimeGenerationChanged { .. })
     ));
-    assert!(!editor.acknowledge_runtime_edit_result());
+    assert_eq!(outcomes[1], EditorActionOutcome::RuntimeEdit(Ok(())));
+    assert_eq!(
+        outcomes[2],
+        EditorActionOutcome::Acknowledged(nara::tooling::EditorActionAcknowledgement::RuntimeEdit(
+            false
+        ))
+    );
     editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
-        editor.runtime_edit_result(),
+        editor.current_frame().runtime_edit_result(),
         Some(nara::tooling::EditorRuntimeEditResult::Applied(_))
     ));
-    assert!(editor.acknowledge_runtime_edit_result());
-    editor
-        .request_runtime_edit(
-            SceneEntityId::new("enemy-anchor/enemy").unwrap(),
-            ComponentTypeId::new("nara.sprite.Sprite"),
-            ComponentSchemaVersion::ONE,
-            ComponentFieldId::new("layer"),
-            ComponentValue::I64(5),
-        )
-        .unwrap();
-    assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
-        EditorPlayRequestResult::Accepted
+    assert!(editor_driver::acknowledge_runtime_edit_result(&mut editor));
+
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let second = nara::tooling::EditorRuntimeEditRequest {
+        generation: frame.play().generation().unwrap(),
+        document_revision: frame.play().current_revision().unwrap(),
+        entity: SceneEntityId::new("enemy-anchor/enemy").unwrap(),
+        component: ComponentTypeId::new("nara.sprite.Sprite"),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("layer"),
+        value: ComponentValue::I64(5),
+    };
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::RuntimeEdit {
+                document,
+                request: second,
+            },
+            EditorAction::Play(nara::tooling::EditorPlayAction::Stop),
+        ],
     );
+    assert_eq!(outcomes[0], EditorActionOutcome::RuntimeEdit(Ok(())));
+    assert_eq!(
+        outcomes[1],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
+    );
+    drive_until(&mut editor, EditorPlayState::Empty, 32);
     assert!(matches!(
-        editor.runtime_edit_result(),
+        editor.current_frame().runtime_edit_result(),
         Some(nara::tooling::EditorRuntimeEditResult::Cancelled(_))
     ));
-    drive_until(&mut editor, EditorPlayState::Empty, 32);
 }
 
 #[test]
@@ -584,7 +941,7 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
     .unwrap();
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
@@ -595,28 +952,31 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
     );
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Pause),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Pause),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
     assert_eq!(
         latest_spatial_observation(&receiver),
         nara::prelude::Vec2::new(13.0, 24.0)
     );
 
-    editor
-        .request_runtime_edit(
-            root_id,
-            transform_id,
-            ComponentSchemaVersion::ONE,
-            ComponentFieldId::new("translation.x"),
-            ComponentValue::f64(40.0).unwrap(),
-        )
-        .unwrap();
+    editor_driver::request_runtime_edit(
+        &mut editor,
+        root_id,
+        transform_id,
+        ComponentSchemaVersion::ONE,
+        ComponentFieldId::new("translation.x"),
+        ComponentValue::f64(40.0).unwrap(),
+    )
+    .unwrap();
     editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
-        editor.runtime_edit_result(),
+        editor.current_frame().runtime_edit_result(),
         Some(nara::tooling::EditorRuntimeEditResult::Applied(_))
     ));
     assert_eq!(
@@ -624,21 +984,27 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
         nara::prelude::Vec2::new(13.0, 24.0),
         "the Last-stage edit becomes visible at the next Extract boundary"
     );
-    assert!(editor.acknowledge_runtime_edit_result());
+    assert!(editor_driver::acknowledge_runtime_edit_result(&mut editor));
 
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
     assert_eq!(
         latest_spatial_observation(&receiver),
         nara::prelude::Vec2::new(43.0, 24.0)
     );
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Resume),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Resume),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Running
+    );
     assert_eq!(
         latest_spatial_observation(&receiver),
         nara::prelude::Vec2::new(43.0, 24.0),
@@ -646,7 +1012,7 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
     );
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Empty, 32);
@@ -686,124 +1052,213 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
     let mut editor =
         EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Pause),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Pause),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
 
     let request =
         nara::tooling::SceneApplyChangesRequest::new(entity_id.clone(), [transform_id.clone()]);
 
-    editor
-        .request_runtime_edit(
-            entity_id.clone(),
-            transform_id.clone(),
-            ComponentSchemaVersion::ONE,
-            ComponentFieldId::new("translation.x"),
-            ComponentValue::f64(42.0).unwrap(),
-        )
-        .unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let base_revision = frame.workspace().scene(document).unwrap().revision;
+    let generation = frame.play().generation().unwrap();
+    let runtime_edit = nara::tooling::EditorRuntimeEditRequest {
+        generation,
+        document_revision: base_revision,
+        entity: entity_id.clone(),
+        component: transform_id.clone(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("translation.x"),
+        value: ComponentValue::f64(42.0).unwrap(),
+    };
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::RuntimeEdit {
+                document,
+                request: runtime_edit,
+            },
+            EditorAction::ApplyChanges {
+                document,
+                base_revision,
+                generation,
+                request: request.clone(),
+            },
+        ],
+    );
+    assert_eq!(outcomes[0], EditorActionOutcome::RuntimeEdit(Ok(())));
     assert_eq!(
-        editor.request_apply_changes(request.clone()),
-        Err(nara::tooling::EditorApplyChangesRejection::Busy)
+        outcomes[1],
+        EditorActionOutcome::ApplyChanges(Err(nara::tooling::EditorApplyChangesRejection::Busy))
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
-    assert!(editor.acknowledge_runtime_edit_result());
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
+    assert!(editor_driver::acknowledge_runtime_edit_result(&mut editor));
+    editor.drive_editor_frame(Duration::ZERO);
 
-    editor.request_apply_changes(request.clone()).unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let base_revision = frame.workspace().scene(document).unwrap().revision;
+    let generation = frame.play().generation().unwrap();
+    let busy_edit = nara::tooling::EditorRuntimeEditRequest {
+        generation,
+        document_revision: base_revision,
+        entity: entity_id.clone(),
+        component: transform_id.clone(),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("translation.x"),
+        value: ComponentValue::f64(43.0).unwrap(),
+    };
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::ApplyChanges {
+                document,
+                base_revision,
+                generation,
+                request: request.clone(),
+            },
+            EditorAction::Play(nara::tooling::EditorPlayAction::Resume),
+            EditorAction::Play(nara::tooling::EditorPlayAction::StepFixedTick),
+            EditorAction::RuntimeEdit {
+                document,
+                request: busy_edit,
+            },
+        ],
+    );
+    assert_eq!(outcomes[0], EditorActionOutcome::ApplyChanges(Ok(())));
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Resume),
-        EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy)
+        outcomes[1],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy))
     );
     assert_eq!(
-        editor.request_play(EditorPlayCommand::StepFixedTick),
-        EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy)
+        outcomes[2],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy))
     );
     assert_eq!(
-        editor.request_runtime_edit(
-            entity_id.clone(),
-            transform_id.clone(),
-            ComponentSchemaVersion::ONE,
-            ComponentFieldId::new("translation.x"),
-            ComponentValue::f64(43.0).unwrap(),
-        ),
-        Err(nara::tooling::EditorRuntimeEditRejection::Busy)
+        outcomes[3],
+        EditorActionOutcome::RuntimeEdit(Err(nara::tooling::EditorRuntimeEditRejection::Busy))
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Paused);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
+    let applied_frame = editor.current_frame();
     let Some(nara::tooling::EditorApplyChangesResult::Applied(report)) =
-        editor.apply_changes_result()
+        applied_frame.apply_changes_result()
     else {
         panic!(
             "expected an applied change, got {:?}",
-            editor.apply_changes_result()
+            applied_frame.apply_changes_result()
         );
     };
     assert!(report.applied);
     assert_eq!(report.components.len(), 1);
-    assert!(editor.play_view().is_out_of_date());
-    let document = editor
-        .workspace()
-        .active_scene()
-        .unwrap()
-        .session()
-        .document();
-    let value = &document.entities[0].components[&transform_id].value;
-    assert_eq!(
-        value
-            .get_path(&nara::reflect::ComponentFieldPath::from_fields([
-                "translation",
-                "x",
-            ]))
-            .unwrap(),
-        &ComponentValue::f64(42.0).unwrap()
+    assert!(editor.current_frame().play().is_out_of_date());
+    let exported_value = report
+        .patch
+        .as_ref()
+        .and_then(|patch| patch.operations.first())
+        .and_then(|operation| match operation {
+            ScenePatchOperation::ReplaceComponent { value, .. } => value
+                .value
+                .get("translation")
+                .and_then(|translation| translation.get("x")),
+            _ => None,
+        })
+        .expect("Apply Changes should export the edited component value");
+    assert_eq!(exported_value, &ComponentValue::f64(42.0).unwrap());
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let base_revision = frame.workspace().scene(document).unwrap().revision;
+    let generation = frame.play().generation().unwrap();
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::ApplyChanges {
+                document,
+                base_revision,
+                generation,
+                request,
+            },
+            EditorAction::AcknowledgeApplyChangesResult,
+        ],
     );
     assert_eq!(
-        editor.request_apply_changes(request),
-        Err(nara::tooling::EditorApplyChangesRejection::Busy)
+        outcomes[0],
+        EditorActionOutcome::ApplyChanges(Err(nara::tooling::EditorApplyChangesRejection::Busy))
     );
-    assert!(editor.acknowledge_apply_changes_result());
     assert_eq!(
-        editor.request_apply_changes(nara::tooling::SceneApplyChangesRequest::new(
-            entity_id.clone(),
-            [transform_id.clone()],
-        )),
+        outcomes[1],
+        EditorActionOutcome::Acknowledged(
+            nara::tooling::EditorActionAcknowledgement::ApplyChanges(true)
+        )
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor_driver::request_apply_changes(
+            &mut editor,
+            nara::tooling::SceneApplyChangesRequest::new(entity_id.clone(), [transform_id.clone()],),
+        ),
         Err(nara::tooling::EditorApplyChangesRejection::RuntimeOutOfDate)
     );
+    editor.drive_editor_frame(Duration::ZERO);
 
-    let stale_generation = editor.play_view().generation().unwrap();
+    let stale_generation = editor.current_frame().play().generation().unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Restart),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Restart),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
-    assert!(!editor.play_view().is_out_of_date());
-    assert_ne!(editor.play_view().generation(), Some(stale_generation));
+    assert!(!editor.current_frame().play().is_out_of_date());
+    assert_ne!(
+        editor.current_frame().play().generation(),
+        Some(stale_generation)
+    );
 
     let cancelled_request = nara::tooling::SceneApplyChangesRequest::new(entity_id, [transform_id]);
-    editor
-        .request_apply_changes(cancelled_request.clone())
-        .unwrap();
-
-    assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
-        EditorPlayRequestResult::Accepted
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::ApplyChanges {
+                document,
+                base_revision: frame.workspace().scene(document).unwrap().revision,
+                generation: frame.play().generation().unwrap(),
+                request: cancelled_request.clone(),
+            },
+            EditorAction::Play(nara::tooling::EditorPlayAction::Stop),
+        ],
     );
+    assert_eq!(outcomes[0], EditorActionOutcome::ApplyChanges(Ok(())));
     assert_eq!(
-        editor.apply_changes_result(),
+        outcomes[1],
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
+    );
+    drive_until(&mut editor, EditorPlayState::Empty, 32);
+    assert_eq!(
+        editor.current_frame().apply_changes_result(),
         Some(&nara::tooling::EditorApplyChangesResult::Cancelled(
             cancelled_request
         ))
     );
-    drive_until(&mut editor, EditorPlayState::Empty, 32);
 }
 
 fn transform_record(x: f64, y: f64) -> SceneComponentRecord {
@@ -853,29 +1308,33 @@ fn workspace_close_retains_document_through_close_incomplete_and_retry() {
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
     )
     .unwrap();
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
+        editor_driver::request_workspace_intent(
+            &mut editor,
+            EditorWorkspaceIntent::CloseScene { document },
+        ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::CloseIncomplete, 32);
-    assert!(editor.workspace().scene(document).is_some());
-    assert!(editor.workspace_intent_view().intent().is_some());
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert!(editor.current_frame().workspace_intent().intent().is_some());
 
     release.store(true, Ordering::Release);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::RetryClose),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::RetryClose),
         EditorPlayRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     drive_retryable_close_until_empty(&mut editor, 32);
-    assert!(editor.workspace().is_empty());
-    assert!(editor.workspace_intent_view().intent().is_none());
+    assert!(editor.current_frame().workspace().scenes.is_empty());
+    assert!(editor.current_frame().workspace_intent().intent().is_none());
 }
 
 #[test]
@@ -890,22 +1349,22 @@ fn direct_stop_retains_close_incomplete_until_retry() {
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
     )
     .unwrap();
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::CloseIncomplete, 32);
-    assert!(editor.workspace().scene(document).is_some());
-    assert!(editor.play_view().generation().is_some());
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert!(editor.current_frame().play().generation().is_some());
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Failed {
             operation: EditorPlayOperation::Stop,
             failure: EditorPlayFailure::Close,
@@ -914,12 +1373,13 @@ fn direct_stop_retains_close_incomplete_until_retry() {
 
     release.store(true, Ordering::Release);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::RetryClose),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::RetryClose),
         EditorPlayRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     drive_retryable_close_until_empty(&mut editor, 32);
-    assert!(editor.workspace().scene(document).is_some());
-    assert_eq!(editor.play_view().generation(), None);
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert_eq!(editor.current_frame().play().generation(), None);
 }
 
 #[test]
@@ -932,21 +1392,21 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
     let intent = EditorProjectIntent::new().with_recipe(recipe);
     let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
-    let first_generation = editor.play_view().generation();
+    let first_generation = editor.current_frame().play().generation();
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Restart),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Restart),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Empty, 32);
-    assert_eq!(editor.play_view().generation(), None);
-    assert_ne!(first_generation, editor.play_view().generation());
+    assert_eq!(editor.current_frame().play().generation(), None);
+    assert_ne!(first_generation, editor.current_frame().play().generation());
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Failed {
             operation: EditorPlayOperation::Restart,
             failure: EditorPlayFailure::Close,
@@ -955,29 +1415,32 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
 }
 
 #[test]
-fn apply_changes_rejects_prefab_expansion_and_stale_document_without_mutation() {
+fn apply_changes_rejects_prefab_expansion_without_document_mutation() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let mut editor =
         EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
-    let original_revision = editor.workspace().scene(document).unwrap().revision();
+    let original_revision = editor
+        .current_frame()
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .revision;
 
     let expanded_request = nara::tooling::SceneApplyChangesRequest::new(
         SceneEntityId::new("enemy-anchor/enemy").unwrap(),
         [ComponentTypeId::new("nara.sprite.Sprite")],
     );
-    editor
-        .request_apply_changes(expanded_request.clone())
-        .unwrap();
+    editor_driver::request_apply_changes(&mut editor, expanded_request.clone()).unwrap();
     editor.drive_editor_frame(Duration::ZERO);
     assert!(matches!(
-        editor.apply_changes_result(),
+        editor.current_frame().apply_changes_result(),
         Some(nara::tooling::EditorApplyChangesResult::Rejected {
             request,
             reason: nara::tooling::EditorApplyChangesRejection::Unsupported,
@@ -985,40 +1448,19 @@ fn apply_changes_rejects_prefab_expansion_and_stale_document_without_mutation() 
         }) if request == &expanded_request
     ));
     assert_eq!(
-        editor.workspace().scene(document).unwrap().revision(),
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .revision,
         original_revision
     );
-    assert!(editor.acknowledge_apply_changes_result());
-
-    let stale_request = nara::tooling::SceneApplyChangesRequest::new(
-        SceneEntityId::new("player").unwrap(),
-        [ComponentTypeId::new("nara.sprite.Sprite")],
-    );
-    editor.request_apply_changes(stale_request).unwrap();
-    let base_revision = editor.workspace().scene(document).unwrap().revision();
-    assert!(
-        editor
-            .apply_workspace_command(nara::tooling::EditorWorkspaceCommand::ApplyScenePatch {
-                document,
-                base_revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-                    entity: SceneEntityRecord::new(SceneEntityId::new("later-edit").unwrap()),
-                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
-                }]),
-            })
-            .applied
-    );
+    assert!(editor_driver::acknowledge_apply_changes_result(&mut editor));
     editor.drive_editor_frame(Duration::ZERO);
-    assert!(matches!(
-        editor.apply_changes_result(),
-        Some(nara::tooling::EditorApplyChangesResult::Rejected {
-            reason: nara::tooling::EditorApplyChangesRejection::StaleDocument,
-            ..
-        })
-    ));
 
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_until(&mut editor, EditorPlayState::Empty, 32);
@@ -1041,32 +1483,39 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
     )
     .unwrap();
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Starting);
-    editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::RetiringPlay);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Starting
+    );
     editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.play_view().state(),
+        editor.current_frame().play().state(),
+        EditorPlayState::RetiringPlay
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor.current_frame().play().state(),
         EditorPlayState::RetirementIncomplete
     );
-    assert!(editor.workspace().scene(document).is_some());
-    assert_eq!(editor.play_view().generation(), None);
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert_eq!(editor.current_frame().play().generation(), None);
 
     release.store(true, Ordering::Release);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::RetryRetirement),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::RetryRetirement),
         EditorPlayRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     drive_retryable_close_until_empty(&mut editor, 32);
-    assert!(editor.workspace().scene(document).is_some());
+    assert!(editor.current_frame().workspace().scene(document).is_some());
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Failed {
             operation: EditorPlayOperation::Play,
             ..
@@ -1090,23 +1539,32 @@ fn failed_start_remains_retiring_while_cleanup_is_still_pending() {
     )
     .unwrap();
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Starting);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Starting
+    );
     editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(editor.play_view().state(), EditorPlayState::RetiringPlay);
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::RetiringPlay
+    );
 
     for _ in 0..2 {
         editor.drive_editor_frame(Duration::ZERO);
-        assert_eq!(editor.play_view().state(), EditorPlayState::RetiringPlay);
+        assert_eq!(
+            editor.current_frame().play().state(),
+            EditorPlayState::RetiringPlay
+        );
     }
 
     release.store(true, Ordering::Release);
     drive_until(&mut editor, EditorPlayState::Empty, 32);
     assert!(matches!(
-        editor.play_view().result(),
+        editor.current_frame().play().result(),
         Some(EditorPlayOperationResult::Failed {
             operation: EditorPlayOperation::Play,
             ..
@@ -1120,30 +1578,30 @@ fn drive_until(
     maximum_frames: usize,
 ) {
     for _ in 0..maximum_frames {
-        if editor.play_view().state() == expected {
+        if editor.current_frame().play().state() == expected {
             return;
         }
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
-        editor.play_view().state(),
+        editor.current_frame().play().state(),
         expected,
         "diagnostics: {:?}",
-        editor.diagnostics()
+        editor.current_frame().diagnostics()
     );
 }
 
 fn drive_retryable_close_until_empty(editor: &mut EditorProjectSession, maximum_attempts: usize) {
     for _ in 0..maximum_attempts {
-        match editor.play_view().state() {
+        match editor.current_frame().play().state() {
             EditorPlayState::Empty => return,
             EditorPlayState::RetirementIncomplete => assert_eq!(
-                editor.request_play(EditorPlayCommand::RetryRetirement),
+                editor_driver::request_play(editor, EditorPlayCommand::RetryRetirement),
                 EditorPlayRequestResult::Accepted
             ),
             EditorPlayState::CloseIncomplete => assert_eq!(
-                editor.request_play(EditorPlayCommand::RetryClose),
+                editor_driver::request_play(editor, EditorPlayCommand::RetryClose),
                 EditorPlayRequestResult::Accepted
             ),
             _ => {}
@@ -1152,9 +1610,9 @@ fn drive_retryable_close_until_empty(editor: &mut EditorProjectSession, maximum_
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
-        editor.play_view().state(),
+        editor.current_frame().play().state(),
         EditorPlayState::Empty,
         "diagnostics: {:?}",
-        editor.diagnostics()
+        editor.current_frame().diagnostics()
     );
 }

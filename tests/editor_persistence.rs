@@ -1,5 +1,8 @@
 #![cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 
+#[path = "support/editor_action_driver.rs"]
+mod editor_action_driver;
+
 use std::{
     fs::{self, File},
     io::Write,
@@ -12,10 +15,11 @@ use std::{
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
+use editor_action_driver as editor_driver;
 use nara::{
     fs::{
         CapabilityRights, DirectoryCapability, ExpectedTarget, HostCapabilityOptions,
-        PublicationAtomicity, RelativeComponent, TrustMode,
+        RelativeComponent, TrustMode,
     },
     project_host::{EditorProjectIntent, EditorProjectSession},
     scene::{
@@ -23,10 +27,11 @@ use nara::{
         ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
     tooling::{
-        EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceCommit,
-        EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
-        EditorPersistenceResult, EditorPlayCommand, EditorPlayRequestResult, EditorPlayState,
-        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+        EditorAction, EditorActionOutcome, EditorCloseDecision, EditorDocumentMutation,
+        EditorPersistenceAction, EditorPersistenceCommand, EditorPersistenceCommit,
+        EditorPersistenceRejection, EditorPersistenceRequestResult, EditorPersistenceResult,
+        EditorPlayCommand, EditorPlayRequestResult, EditorPlayState, EditorWorkspace,
+        EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
         EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
 };
@@ -92,38 +97,52 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
     let project = TestProject::new("save-reopen");
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
 
     assert!(apply_scene_patch(
         &mut editor,
         document,
         add_entity_patch("captured")
     ));
-    let captured_revision = editor.workspace().scene(document).unwrap().revision();
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Save {
-            document: Some(document),
-        }),
-        EditorPersistenceRequestResult::Accepted
-    );
-    assert_eq!(
-        editor.persistence_view().operation(),
-        EditorPersistenceOperation::Saving {
-            document,
-            captured_revision,
-        }
-    );
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Save {
-            document: Some(document),
-        }),
-        EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy)
-    );
-
-    assert!(apply_scene_patch(
+    let captured_revision = editor
+        .current_frame()
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .revision;
+    let later_patch =
+        add_entity_patch_at("later", ScenePlacement::first(ScenePlacementOwner::Root));
+    let outcomes = editor_driver::dispatch(
         &mut editor,
-        document,
-        add_entity_patch_at("later", ScenePlacement::first(ScenePlacementOwner::Root),),
+        [
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: captured_revision,
+            }),
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: captured_revision,
+            }),
+            EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                document,
+                base_revision: captured_revision,
+                patch: later_patch,
+            }),
+        ],
+    );
+    assert_eq!(
+        outcomes[0],
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+    );
+    assert_eq!(
+        outcomes[1],
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Rejected(
+            EditorPersistenceRejection::Busy,
+        ))
+    );
+    assert!(matches!(
+        &outcomes[2],
+        EditorActionOutcome::Workspace(report) if report.applied
     ));
     let first = editor
         .drive_editor_frame(std::time::Duration::ZERO)
@@ -132,50 +151,82 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
         first.result(),
         Some(EditorPersistenceResult::Saved { revision, .. }) if revision == captured_revision
     ));
-    let slot = editor.workspace().scene(document).unwrap();
-    assert_eq!(slot.saved_revision(), captured_revision);
-    assert!(slot.is_dirty());
-    let receipt = editor.last_persistence_receipt().unwrap();
-    assert_eq!(
-        receipt.publication_atomicity(),
-        PublicationAtomicity::AtomicNameSwitch
-    );
-    assert_eq!(
-        receipt.published_identity(),
-        Some(receipt.candidate_identity())
-    );
-    assert_eq!(receipt.published_digest(), Some(receipt.digest()));
+    let scene = current_scene_model(&editor, document);
+    assert_eq!(scene.saved_revision, captured_revision);
+    assert!(scene.dirty);
 
-    let undo_revision = editor.workspace().scene(document).unwrap().revision();
+    let undo_revision = editor
+        .current_frame()
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .revision;
     assert!(
-        editor
-            .apply_workspace_command(EditorWorkspaceCommand::Undo {
+        editor_driver::apply_workspace_command(
+            &mut editor,
+            EditorWorkspaceCommand::Undo {
                 document,
                 base_revision: undo_revision,
-            })
-            .applied
+            },
+        )
+        .applied
     );
-    assert!(!editor.workspace().scene(document).unwrap().is_dirty());
-    let redo_revision = editor.workspace().scene(document).unwrap().revision();
+    editor.drive_editor_frame(Duration::ZERO);
     assert!(
-        editor
-            .apply_workspace_command(EditorWorkspaceCommand::Redo {
+        !editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
+    let redo_revision = editor
+        .current_frame()
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .revision;
+    assert!(
+        editor_driver::apply_workspace_command(
+            &mut editor,
+            EditorWorkspaceCommand::Redo {
                 document,
                 base_revision: redo_revision,
-            })
-            .applied
+            },
+        )
+        .applied
     );
-    assert!(editor.workspace().scene(document).unwrap().is_dirty());
-
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
+    let save_revision = editor
+        .current_frame()
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .revision;
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: save_revision,
+            }),
+        ],
     );
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Save {
-            document: Some(document),
-        }),
-        EditorPersistenceRequestResult::Accepted
+        outcomes,
+        [
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted),
+            EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted),
+        ]
     );
     assert!(matches!(
         editor
@@ -184,20 +235,38 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
             .result(),
         Some(EditorPersistenceResult::Saved { .. })
     ));
-    assert!(!editor.workspace().scene(document).unwrap().is_dirty());
+    assert!(
+        !editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::AcknowledgeResult,
+        ),
         EditorPersistenceRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
+        editor_driver::request_workspace_intent(
+            &mut editor,
+            EditorWorkspaceIntent::CloseScene { document },
+        ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
-    assert!(editor.workspace().is_empty());
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(editor.current_frame().workspace().scenes.is_empty());
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen { document: None }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen { document: None },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     let reopened = editor
@@ -207,26 +276,15 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
         Some(EditorPersistenceResult::Opened { document, .. }) => document,
         other => panic!("expected reopened document, got {other:?}"),
     };
-    let reopened = editor
-        .workspace()
-        .scene(reopened_document)
-        .unwrap()
-        .session()
-        .document();
+    let reopened = current_scene_model(&editor, reopened_document);
     let ids = reopened
+        .editor
+        .inspector
         .entities
         .iter()
         .map(|entity| entity.id.as_str())
         .collect::<Vec<_>>();
-    assert_eq!(ids, ["captured", "later"]);
-    assert_eq!(
-        reopened
-            .roots
-            .iter()
-            .map(SceneEntityId::as_str)
-            .collect::<Vec<_>>(),
-        ["later", "captured"]
-    );
+    assert_eq!(ids, ["later", "captured"]);
 }
 
 #[test]
@@ -234,9 +292,8 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     let project = TestProject::new("external-write");
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
-    let saved_revision = editor.workspace().scene(document).unwrap().saved_revision();
-    let saved_digest = editor.workspace().scene(document).unwrap().saved_digest();
+    let document = editor.current_frame().workspace().active_document.unwrap();
+    let saved_revision = current_scene_model(&editor, document).saved_revision;
     assert!(apply_scene_patch(
         &mut editor,
         document,
@@ -251,9 +308,12 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     .unwrap();
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Save {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Save {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
@@ -266,10 +326,9 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
             reason: EditorPersistenceRejection::TargetChanged,
         })
     );
-    let slot = editor.workspace().scene(document).unwrap();
-    assert_eq!(slot.saved_revision(), saved_revision);
-    assert_eq!(slot.saved_digest(), saved_digest);
-    assert!(slot.is_dirty());
+    let scene = current_scene_model(&editor, document);
+    assert_eq!(scene.saved_revision, saved_revision);
+    assert!(scene.dirty);
     let disk = fs::read_to_string(project.scene_path()).unwrap();
     assert!(disk.contains("external"));
     assert!(!disk.contains("local"));
@@ -280,18 +339,28 @@ fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
     let project = TestProject::new("dirty-reopen");
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
         document,
         add_entity_patch("local-only")
     ));
-    assert!(editor.workspace().scene(document).unwrap().is_dirty());
+    assert!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     let reopened = editor
@@ -304,51 +373,9 @@ fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
             ..
         }) if reopened_document == document
     ));
-    let slot = editor.workspace().scene(document).unwrap();
-    assert!(slot.session().document().entities.is_empty());
-    assert!(!slot.is_dirty());
-    assert!(slot.saved_digest().is_some());
-}
-
-#[test]
-fn reopen_rejects_when_the_document_advances_after_the_request() {
-    let project = TestProject::new("stale-reopen");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
-
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
-        EditorPersistenceRequestResult::Accepted
-    );
-    assert!(apply_scene_patch(
-        &mut editor,
-        document,
-        add_entity_patch("accepted-after-reopen-request")
-    ));
-    let edited_revision = editor.workspace().scene(document).unwrap().revision();
-
-    let reopened = editor.drive_editor_frame(Duration::ZERO).persistence();
-
-    assert!(matches!(
-        reopened.result(),
-        Some(EditorPersistenceResult::Rejected {
-            document: Some(rejected_document),
-            reason: EditorPersistenceRejection::StaleRevision,
-        }) if rejected_document == document
-    ));
-    let slot = editor.workspace().scene(document).unwrap();
-    assert_eq!(slot.revision(), edited_revision);
-    assert!(slot.is_dirty());
-    assert!(
-        slot.session()
-            .document()
-            .entities
-            .iter()
-            .any(|entity| entity.id.as_str() == "accepted-after-reopen-request")
-    );
+    let scene = current_scene_model(&editor, document);
+    assert!(scene.editor.inspector.entities.is_empty());
+    assert!(!scene.dirty);
 }
 
 #[test]
@@ -357,7 +384,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     let original_bytes = fs::read(project.scene_path()).unwrap();
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     let local = scene_id("local");
     assert!(apply_scene_patch(
         &mut editor,
@@ -365,33 +392,31 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
         add_entity_patch(local.as_str())
     ));
     assert!(
-        editor
-            .apply_workspace_command(EditorWorkspaceCommand::SelectEntity {
+        editor_driver::apply_workspace_command(
+            &mut editor,
+            EditorWorkspaceCommand::SelectEntity {
                 document,
                 entity: Some(local.clone()),
-            })
-            .applied
+            },
+        )
+        .applied
     );
-    let before = editor.workspace().scene(document).unwrap();
-    let before_document = before.session().document().clone();
-    let before_revision = before.revision();
-    let before_saved_revision = before.saved_revision();
-    let before_saved_digest = before.saved_digest();
+    editor.drive_editor_frame(Duration::ZERO);
+    let before = current_scene_model(&editor, document);
     let assert_preserved = |editor: &EditorProjectSession| {
-        let slot = editor.workspace().scene(document).unwrap();
-        assert_eq!(slot.session().document(), &before_document);
-        assert_eq!(slot.revision(), before_revision);
-        assert_eq!(slot.saved_revision(), before_saved_revision);
-        assert_eq!(slot.saved_digest(), before_saved_digest);
-        assert_eq!(slot.selection().top_entity(), Some(&local));
-        assert!(slot.is_dirty());
+        assert_eq!(current_scene_model(editor, document), before);
+        assert_eq!(before.selection.top_entity(), Some(&local));
+        assert!(before.dirty);
     };
 
     fs::write(project.scene_path(), b"{ malformed").unwrap();
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
@@ -407,9 +432,13 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     assert_preserved(&editor);
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::AcknowledgeResult,
+        ),
         EditorPersistenceRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     let duplicate = scene_id("duplicate");
     fs::write(
         project.scene_path(),
@@ -422,9 +451,12 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     )
     .unwrap();
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
@@ -440,14 +472,21 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     assert_preserved(&editor);
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::AcknowledgeResult,
+        ),
         EditorPersistenceRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     fs::remove_file(project.scene_path()).unwrap();
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     assert_eq!(
@@ -463,14 +502,21 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     assert_preserved(&editor);
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::AcknowledgeResult,
+        ),
         EditorPersistenceRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     fs::create_dir(project.scene_path()).unwrap();
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     assert!(matches!(
@@ -487,15 +533,22 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     assert_preserved(&editor);
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::AcknowledgeResult,
+        ),
         EditorPersistenceRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     fs::remove_dir(project.scene_path()).unwrap();
     fs::write(project.scene_path(), original_bytes).unwrap();
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen {
-            document: Some(document),
-        }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen {
+                document: Some(document),
+            },
+        ),
         EditorPersistenceRequestResult::Accepted
     );
     assert!(matches!(
@@ -515,45 +568,59 @@ fn dirty_close_cancel_preserves_the_running_owner_and_document() {
     let project = TestProject::new("dirty-close-cancel");
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
         document,
         add_entity_patch("local")
     ));
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Running);
-    let generation = editor.play_view().generation().unwrap();
+    let generation = editor.current_frame().play().generation().unwrap();
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
+        editor_driver::request_workspace_intent(
+            &mut editor,
+            EditorWorkspaceIntent::CloseScene { document },
+        ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.workspace_intent_view().phase(),
+        editor.current_frame().workspace_intent().phase(),
         Some(EditorWorkspaceIntentPhase::AwaitingDecision)
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Cancel),
+        editor.current_frame().play().state(),
+        EditorPlayState::Running
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Cancel),
         EditorWorkspaceIntentRequestResult::Accepted
     );
-    assert_eq!(editor.play_view().generation(), Some(generation));
-    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
-    assert!(editor.workspace().scene(document).is_some());
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(editor.current_frame().play().generation(), Some(generation));
     assert_eq!(
-        editor.workspace_intent_view().result(),
+        editor.current_frame().play().state(),
+        EditorPlayState::Running
+    );
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert_eq!(
+        editor.current_frame().workspace_intent().result(),
         Some(EditorWorkspaceIntentResult::Cancelled {
             intent: EditorWorkspaceIntent::CloseScene { document },
         })
     );
-
-    assert!(editor.acknowledge_workspace_intent_result());
+    assert!(editor_driver::acknowledge_workspace_intent_result(
+        &mut editor
+    ));
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Empty);
@@ -565,33 +632,40 @@ fn dirty_close_discard_stops_play_before_removal_without_writing_disk() {
     let original_bytes = fs::read(project.scene_path()).unwrap();
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
         document,
         add_entity_patch("discarded")
     ));
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Running);
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
+        editor_driver::request_workspace_intent(
+            &mut editor,
+            EditorWorkspaceIntent::CloseScene { document },
+        ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Discard),
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Discard),
         EditorWorkspaceIntentRequestResult::Accepted
     );
     drive_workspace_intent_until_idle(&mut editor);
 
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
-    assert!(editor.workspace().is_empty());
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
+    assert!(editor.current_frame().workspace().scenes.is_empty());
     assert_eq!(fs::read(project.scene_path()).unwrap(), original_bytes);
     assert_eq!(
-        editor.workspace_intent_view().result(),
+        editor.current_frame().workspace_intent().result(),
         Some(EditorWorkspaceIntentResult::Applied {
             intent: EditorWorkspaceIntent::CloseScene { document },
         })
@@ -603,18 +677,18 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     let project = TestProject::new("dirty-close-save-conflict");
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
         document,
         add_entity_patch("local")
     ));
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Running);
-    let generation = editor.play_view().generation();
+    let generation = editor.current_frame().play().generation();
     fs::write(
         project.scene_path(),
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("external"))])
@@ -624,24 +698,38 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     .unwrap();
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
+        editor_driver::request_workspace_intent(
+            &mut editor,
+            EditorWorkspaceIntent::CloseScene { document },
+        ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Save),
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Save),
         EditorWorkspaceIntentRequestResult::Accepted
     );
     editor.drive_editor_frame(std::time::Duration::ZERO);
 
-    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
-    assert_eq!(editor.play_view().generation(), generation);
-    assert!(editor.workspace().scene(document).unwrap().is_dirty());
     assert_eq!(
-        editor.workspace_intent_view().phase(),
+        editor.current_frame().play().state(),
+        EditorPlayState::Running
+    );
+    assert_eq!(editor.current_frame().play().generation(), generation);
+    assert!(
+        editor
+            .current_frame()
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
+    assert_eq!(
+        editor.current_frame().workspace_intent().phase(),
         Some(EditorWorkspaceIntentPhase::AwaitingDecision)
     );
     assert_eq!(
-        editor.persistence_view().result(),
+        editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Rejected {
             document: Some(document),
             reason: EditorPersistenceRejection::TargetChanged,
@@ -649,11 +737,12 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     );
 
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Cancel),
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Cancel),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Empty);
@@ -665,29 +754,36 @@ fn reopen_rejects_while_a_runtime_owner_is_live() {
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Running);
 
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen { document: None }),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Reopen { document: None },
+        ),
         EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::RuntimeActive)
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.persistence_view().result(),
+        editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Rejected {
-            document: editor.workspace().active_document(),
+            document: editor.current_frame().workspace().active_document,
             reason: EditorPersistenceRejection::RuntimeActive,
         })
     );
-
     assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::AcknowledgeResult,
+        ),
         EditorPersistenceRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Empty);
@@ -699,38 +795,48 @@ fn dirty_close_save_publishes_bytes_before_retiring_play() {
     let original_bytes = fs::read(project.scene_path()).unwrap();
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
         document,
         add_entity_patch("saved-before-stop")
     ));
     assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
+        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
     );
     drive_play_until(&mut editor, EditorPlayState::Running);
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
+        editor_driver::request_workspace_intent(
+            &mut editor,
+            EditorWorkspaceIntent::CloseScene { document },
+        ),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Save),
         EditorWorkspaceIntentRequestResult::Accepted
     );
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Save),
-        EditorWorkspaceIntentRequestResult::Accepted
+        editor.current_frame().play().state(),
+        EditorPlayState::Running
     );
-    assert_eq!(editor.play_view().state(), EditorPlayState::Running);
     assert_eq!(fs::read(project.scene_path()).unwrap(), original_bytes);
 
     editor.drive_editor_frame(std::time::Duration::ZERO);
     assert!(matches!(
-        editor.persistence_view().result(),
+        editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Saved { document: saved, .. }) if saved == document
     ));
     assert_ne!(fs::read(project.scene_path()).unwrap(), original_bytes);
     drive_workspace_intent_until_idle(&mut editor);
-    assert_eq!(editor.play_view().state(), EditorPlayState::Empty);
-    assert!(editor.workspace().is_empty());
+    assert_eq!(
+        editor.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
+    assert!(editor.current_frame().workspace().scenes.is_empty());
 }
 
 #[test]
@@ -739,7 +845,7 @@ fn dirty_exit_uses_the_same_explicit_decision_before_closing() {
     let original_bytes = fs::read(project.scene_path()).unwrap();
     let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
         .expect("the editor project should open");
-    let document = editor.workspace().active_document().unwrap();
+    let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
         document,
@@ -747,43 +853,49 @@ fn dirty_exit_uses_the_same_explicit_decision_before_closing() {
     ));
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::Exit),
+        editor_driver::request_workspace_intent(&mut editor, EditorWorkspaceIntent::Exit),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.workspace_intent_view().phase(),
+        editor.current_frame().workspace_intent().phase(),
         Some(EditorWorkspaceIntentPhase::AwaitingDecision)
     );
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Cancel),
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Cancel),
         EditorWorkspaceIntentRequestResult::Accepted
     );
-    assert!(editor.workspace().scene(document).is_some());
-    assert!(editor.acknowledge_workspace_intent_result());
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert!(editor_driver::acknowledge_workspace_intent_result(
+        &mut editor
+    ));
+    editor.drive_editor_frame(Duration::ZERO);
 
     assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::Exit),
+        editor_driver::request_workspace_intent(&mut editor, EditorWorkspaceIntent::Exit),
         EditorWorkspaceIntentRequestResult::Accepted
     );
+    editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
-        editor.resolve_workspace_intent(EditorCloseDecision::Discard),
+        editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Discard),
         EditorWorkspaceIntentRequestResult::Accepted
     );
     drive_workspace_intent_until_idle(&mut editor);
-    assert!(editor.workspace().is_empty());
+    assert!(editor.current_frame().workspace().scenes.is_empty());
     assert_eq!(fs::read(project.scene_path()).unwrap(), original_bytes);
 }
 
 fn drive_play_until(editor: &mut EditorProjectSession, expected: EditorPlayState) {
     let deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
     loop {
-        if editor.play_view().state() == expected {
+        if editor.current_frame().play().state() == expected {
             return;
         }
         if Instant::now() >= deadline {
             panic!(
                 "editor Play state did not reach {expected:?}; observed {:?}",
-                editor.play_view().state()
+                editor.current_frame().play().state()
             );
         }
         editor.drive_editor_frame(Duration::ZERO);
@@ -794,13 +906,13 @@ fn drive_play_until(editor: &mut EditorProjectSession, expected: EditorPlayState
 fn drive_workspace_intent_until_idle(editor: &mut EditorProjectSession) {
     let deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
     loop {
-        if editor.workspace_intent_view().phase().is_none() {
+        if editor.current_frame().workspace_intent().phase().is_none() {
             return;
         }
         if Instant::now() >= deadline {
             panic!(
                 "workspace intent did not complete; observed {:?}",
-                editor.workspace_intent_view().phase()
+                editor.current_frame().workspace_intent().phase()
             );
         }
         editor.drive_editor_frame(Duration::ZERO);
@@ -813,14 +925,37 @@ fn apply_scene_patch(
     document: nara::tooling::EditorDocumentId,
     patch: ScenePatchDocument,
 ) -> bool {
-    let base_revision = editor.workspace().scene(document).unwrap().revision();
-    editor
-        .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+    let base_revision = editor
+        .current_frame()
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .revision;
+    let applied = editor_driver::apply_workspace_command(
+        editor,
+        EditorWorkspaceCommand::ApplyScenePatch {
             document,
             base_revision,
             patch,
-        })
-        .applied
+        },
+    )
+    .applied;
+    editor.drive_editor_frame(Duration::ZERO);
+    applied
+}
+
+fn current_scene_model(
+    editor: &EditorProjectSession,
+    document: nara::tooling::EditorDocumentId,
+) -> nara::tooling::EditorSceneModel {
+    let frame = editor.current_frame();
+    let scene = frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .expect("the persistence tests keep one active Scene document");
+    assert_eq!(scene.document, document);
+    scene.clone()
 }
 
 fn add_entity_patch(id: &str) -> ScenePatchDocument {

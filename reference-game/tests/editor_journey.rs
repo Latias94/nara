@@ -4,7 +4,7 @@ use std::{
     fs::{self, File},
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, SyncSender},
     },
@@ -20,9 +20,11 @@ use nara::{
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{SceneEntitySource, ScenePatchDocument, ScenePatchOperation},
     tooling::{
-        EditorPersistenceCommand, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPlayCommand, EditorPlayRequestResult, EditorPlayState, EditorWorkspaceCommand,
-        EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult,
+        EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
+        EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
+        EditorPersistenceRequestResult, EditorPersistenceResult, EditorPlayAction,
+        EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
+        EditorWorkspaceIntentAction, EditorWorkspaceIntentRequestResult,
     },
     transform::Transform2d,
 };
@@ -59,41 +61,56 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
     let intent = EditorProjectIntent::new().with_recipe(recipe);
     let mut editor = EditorProjectSession::open(project.capability(), intent)
         .expect("the writable reference project should open in the Editor Host");
-    let document = editor
+    let initial_frame = editor.current_frame();
+    let document = initial_frame
         .workspace()
-        .active_document()
+        .active_document
         .expect("the reference project should open its startup scene");
-    let saved_revision = editor
+    let saved_revision = initial_frame
         .workspace()
         .scene(document)
         .expect("the startup scene should be active")
-        .saved_revision();
-    let base_revision = editor.workspace().scene(document).unwrap().revision();
+        .revision;
 
-    let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
-        document,
-        base_revision,
-        patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
-            entity: nara::identity::SceneEntityId::new("player-weapon").unwrap(),
-            component: ComponentTypeId::new("nara.transform.Transform2d"),
-            component_version: ComponentSchemaVersion::ONE,
-            field: ComponentFieldId::new("translation.x"),
-            value: ComponentValue::f64(EDITED_WEAPON_X).unwrap(),
-        }]),
-    });
-    assert!(report.applied, "{:#?}", report.diagnostics);
-    let edited_revision = editor.workspace().scene(document).unwrap().revision();
+    let outcome = dispatch_editor_action(
+        &mut editor,
+        &initial_frame,
+        EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+            document,
+            base_revision: saved_revision,
+            patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
+                entity: nara::identity::SceneEntityId::new("player-weapon").unwrap(),
+                component: ComponentTypeId::new("nara.transform.Transform2d"),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("translation.x"),
+                value: ComponentValue::f64(EDITED_WEAPON_X).unwrap(),
+            }]),
+        }),
+    );
+    assert!(matches!(
+        outcome,
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let edited_frame = editor.drive_editor_frame(Duration::ZERO);
+    let edited_revision = edited_frame.workspace().scene(document).unwrap().revision;
     assert_ne!(edited_revision, saved_revision);
-    assert!(editor.workspace().scene(document).unwrap().is_dirty());
+    assert!(edited_frame.workspace().scene(document).unwrap().dirty);
     assert_eq!(project.scene_bytes(), source_bytes);
 
-    assert_eq!(
-        editor.request_play(EditorPlayCommand::Play),
-        EditorPlayRequestResult::Accepted
-    );
-    drive_until(&mut editor, EditorPlayState::Running);
-    let runtime_generation = editor
-        .play_view()
+    assert!(matches!(
+        dispatch_editor_action(
+            &mut editor,
+            &edited_frame,
+            EditorAction::Play(EditorPlayAction::Play {
+                document,
+                base_revision: edited_revision,
+            }),
+        ),
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
+    ));
+    let running_frame = drive_until(&mut editor, EditorPlayState::Running);
+    let runtime_generation = running_frame
+        .play()
         .generation()
         .expect("Editor Play should publish one runtime generation");
 
@@ -128,66 +145,126 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
     assert_eq!(retried_run.weapon_x, EDITED_WEAPON_X as f32);
     assert_ne!(retried_run.instance_id, initial_run.instance_id);
     assert_eq!(retried_run.prior_instance_members, 0);
-    assert_eq!(editor.play_view().generation(), Some(runtime_generation));
-    let slot = editor.workspace().scene(document).unwrap();
-    assert_eq!(slot.revision(), edited_revision);
-    assert_eq!(slot.saved_revision(), saved_revision);
-    assert!(slot.is_dirty());
+    let retried_frame = editor.current_frame();
+    assert_eq!(retried_frame.play().generation(), Some(runtime_generation));
+    let slot = retried_frame.workspace().scene(document).unwrap();
+    assert_eq!(slot.revision, edited_revision);
+    assert!(slot.dirty);
     assert_eq!(project.scene_bytes(), source_bytes);
 
-    assert_eq!(
-        editor.request_play(EditorPlayCommand::Stop),
-        EditorPlayRequestResult::Accepted
-    );
-    drive_until(&mut editor, EditorPlayState::Empty);
-    let slot = editor.workspace().scene(document).unwrap();
-    assert_eq!(slot.revision(), edited_revision);
-    assert!(slot.is_dirty());
-
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Save {
-            document: Some(document),
-        }),
-        EditorPersistenceRequestResult::Accepted
-    );
     assert!(matches!(
-        editor
-            .drive_editor_frame(Duration::ZERO)
-            .persistence()
-            .result(),
+        dispatch_editor_action(
+            &mut editor,
+            &retried_frame,
+            EditorAction::Play(EditorPlayAction::Stop),
+        ),
+        EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
+    ));
+    let stopped_frame = drive_until(&mut editor, EditorPlayState::Empty);
+    let slot = stopped_frame.workspace().scene(document).unwrap();
+    assert_eq!(slot.revision, edited_revision);
+    assert!(slot.dirty);
+
+    assert!(matches!(
+        dispatch_editor_action(
+            &mut editor,
+            &stopped_frame,
+            EditorAction::Persistence(EditorPersistenceAction::Save {
+                document,
+                base_revision: edited_revision,
+            }),
+        ),
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+    ));
+    let saved_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        saved_frame.persistence().result(),
         Some(EditorPersistenceResult::Saved {
             document: saved_document,
             revision,
             ..
         }) if saved_document == document && revision == edited_revision
     ));
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
-        EditorPersistenceRequestResult::Accepted
-    );
-    assert!(!editor.workspace().scene(document).unwrap().is_dirty());
+    assert!(matches!(
+        dispatch_editor_action(
+            &mut editor,
+            &saved_frame,
+            EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+        ),
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+    ));
     assert_ne!(project.scene_bytes(), source_bytes);
 
-    assert_eq!(
-        editor.request_workspace_intent(EditorWorkspaceIntent::CloseScene { document }),
-        EditorWorkspaceIntentRequestResult::Accepted
-    );
-    assert!(editor.workspace().is_empty());
-    assert_eq!(
-        editor.request_persistence(EditorPersistenceCommand::Reopen { document: None }),
-        EditorPersistenceRequestResult::Accepted
-    );
-    let reopened = editor.drive_editor_frame(Duration::ZERO).persistence();
-    let reopened_document = match reopened.result() {
+    let acknowledged_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(!acknowledged_frame.workspace().scene(document).unwrap().dirty);
+    assert!(matches!(
+        dispatch_editor_action(
+            &mut editor,
+            &acknowledged_frame,
+            EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
+                EditorWorkspaceIntent::CloseScene { document },
+            )),
+        ),
+        EditorActionOutcome::WorkspaceIntent(EditorWorkspaceIntentRequestResult::Accepted)
+    ));
+    let closed_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(closed_frame.workspace().scenes.is_empty());
+    assert!(matches!(
+        dispatch_editor_action(
+            &mut editor,
+            &closed_frame,
+            EditorAction::Persistence(EditorPersistenceAction::Reopen {
+                target: closed_frame.reopen_target(),
+            }),
+        ),
+        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
+    ));
+    let reopened_frame = editor.drive_editor_frame(Duration::ZERO);
+    let reopened_document_id = match reopened_frame.persistence().result() {
         Some(EditorPersistenceResult::Opened { document, .. }) => document,
         other => panic!("expected the saved reference scene to reopen, got {other:?}"),
     };
-    let reopened_slot = editor.workspace().scene(reopened_document).unwrap();
-    assert!(!reopened_slot.is_dirty());
-    assert_eq!(
-        weapon_translation_x(reopened_slot.session().document()),
-        EDITED_WEAPON_X
+    assert!(
+        !reopened_frame
+            .workspace()
+            .scene(reopened_document_id)
+            .unwrap()
+            .dirty
     );
+    let weapon = nara::identity::SceneEntityId::new("player-weapon").unwrap();
+    assert!(matches!(
+        dispatch_editor_action(
+            &mut editor,
+            &reopened_frame,
+            EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                document: reopened_document_id,
+                entity: Some(weapon.clone()),
+            }),
+        ),
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let inspected_frame = editor.drive_editor_frame(Duration::ZERO);
+    let field = inspected_frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .and_then(|scene| scene.editor.inspector.selected_entity_view.as_ref())
+        .filter(|entity| entity.id == weapon)
+        .and_then(|entity| {
+            entity.components.iter().find(|component| {
+                component.component == ComponentTypeId::new("nara.transform.Transform2d")
+            })
+        })
+        .and_then(|component| {
+            component
+                .fields
+                .iter()
+                .find(|field| field.id == ComponentFieldId::new("translation.x"))
+        })
+        .and_then(|field| field.value.as_ref())
+        .and_then(ComponentValue::as_f64)
+        .expect("the reopened Inspector should expose the saved weapon translation");
+    assert_eq!(field, EDITED_WEAPON_X);
 }
 
 #[derive(Debug, Default)]
@@ -327,36 +404,40 @@ fn observe_editor_journey(
     }
 }
 
-fn drive_until(editor: &mut EditorProjectSession, expected: EditorPlayState) {
+fn dispatch_editor_action(
+    editor: &mut EditorProjectSession,
+    frame: &EditorFrameModel,
+    action: EditorAction,
+) -> EditorActionOutcome {
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(frame.revision(), [action]))
+        .expect("the Editor journey always dispatches from its current frame");
+    let mut outcomes = report.into_outcomes();
+    assert_eq!(outcomes.len(), 1);
+    outcomes.pop().unwrap()
+}
+
+fn drive_until(
+    editor: &mut EditorProjectSession,
+    expected: EditorPlayState,
+) -> Arc<EditorFrameModel> {
     let deadline = Instant::now() + EDITOR_JOURNEY_DEADLINE;
     while Instant::now() < deadline {
-        if editor.play_view().state() == expected {
-            return;
+        let frame = editor.current_frame();
+        if frame.play().state() == expected {
+            return frame;
         }
         editor.drive_editor_frame(Duration::ZERO);
         std::thread::sleep(Duration::from_millis(1));
     }
+    let frame = editor.current_frame();
     assert_eq!(
-        editor.play_view().state(),
+        frame.play().state(),
         expected,
         "diagnostics: {:?}",
-        editor.diagnostics()
+        frame.diagnostics()
     );
-}
-
-fn weapon_translation_x(document: &nara::scene::SceneDocument) -> f64 {
-    document
-        .entities
-        .iter()
-        .find(|entity| entity.id.as_str() == "player-weapon")
-        .and_then(|entity| {
-            entity
-                .components
-                .get(&ComponentTypeId::new("nara.transform.Transform2d"))
-        })
-        .and_then(|record| record.value.field("translation").ok())
-        .and_then(|translation| translation.field_f64("x").ok())
-        .expect("the reference weapon should retain its authored translation")
+    frame
 }
 
 struct WritableReferenceProject {
