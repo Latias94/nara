@@ -202,12 +202,12 @@ runtime-2d = [
     "runtime-core",
     "dep:nara_image",
     "dep:nara_material",
+    "dep:nara_render",
     "dep:nara_sprite",
     "dep:nara_tilemap",
 ]
 presentation-2d = [
     "runtime-2d",
-    "dep:nara_render",
     "dep:nara_sprite_render",
     "nara_image/render-prepare",
     "nara_render_wgpu?/sprite-submitter",

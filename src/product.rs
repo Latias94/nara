@@ -604,6 +604,14 @@ const SLOT_SPRITE: PluginSlotId = PluginSlotId::new("nara.plugins.slot.sprite");
 #[cfg(feature = "runtime-2d")]
 const SLOT_TILEMAP: PluginSlotId = PluginSlotId::new("nara.plugins.slot.tilemap");
 #[cfg(any(
+    feature = "runtime-2d",
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "render-wgpu"
+))]
+const SLOT_RENDER_COMPONENTS: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.render-components");
+#[cfg(any(
     feature = "presentation-2d",
     feature = "presentation-ui",
     feature = "render-wgpu"
@@ -792,6 +800,13 @@ impl PluginGroup for Runtime2dPlugins {
         PluginGroupBuilder::new()
             .add_group(MinimalPlugins)
             .add_slot(
+                PluginSlot::required(
+                    SLOT_RENDER_COMPONENTS,
+                    nara_render::RENDER_COMPONENTS_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::RenderComponentsPlugin>(),
+            )
+            .add_slot(
                 PluginSlot::required(SLOT_SPRITE, nara_sprite::SPRITE_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_sprite::SpritePlugin>(),
             )
@@ -836,6 +851,13 @@ impl PluginGroup for PresentationUiPlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::new()
             .add_slot(
+                PluginSlot::required(
+                    SLOT_RENDER_COMPONENTS,
+                    nara_render::RENDER_COMPONENTS_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::RenderComponentsPlugin>(),
+            )
+            .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_render::RenderPlugin>(),
             )
@@ -873,6 +895,13 @@ impl PluginGroup for Presentation2dPlugins {
 
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::new()
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_RENDER_COMPONENTS,
+                    nara_render::RENDER_COMPONENTS_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::RenderComponentsPlugin>(),
+            )
             .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_render::RenderPlugin>(),
@@ -917,6 +946,13 @@ impl PluginGroup for WgpuBackendPlugins {
 
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::new()
+            .add_slot(
+                PluginSlot::required(
+                    SLOT_RENDER_COMPONENTS,
+                    nara_render::RENDER_COMPONENTS_PLUGIN_ID,
+                ),
+                PluginDefinition::for_default::<nara_render::RenderComponentsPlugin>(),
+            )
             .add_slot(
                 PluginSlot::required(SLOT_RENDER, nara_render::RENDER_PLUGIN_ID),
                 PluginDefinition::for_default::<nara_render::RenderPlugin>(),

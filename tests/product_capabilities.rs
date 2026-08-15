@@ -89,6 +89,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "runtime-core",
             "dep:nara_image",
             "dep:nara_material",
+            "dep:nara_render",
             "dep:nara_sprite",
             "dep:nara_tilemap",
         ]
@@ -97,7 +98,6 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         feature_members(features, "presentation-2d"),
         [
             "runtime-2d",
-            "dep:nara_render",
             "dep:nara_sprite_render",
             "nara_image/render-prepare",
             "nara_render_wgpu?/sprite-submitter",

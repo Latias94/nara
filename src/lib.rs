@@ -50,6 +50,7 @@ pub use nara_reflect as reflect;
 #[cfg(feature = "runtime-core")]
 pub use nara_reflect::PersistentComponent;
 #[cfg(any(
+    feature = "runtime-2d",
     feature = "presentation-2d",
     feature = "presentation-ui",
     feature = "render-wgpu"
@@ -214,11 +215,18 @@ pub mod prelude {
         AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, SamplerDescriptor,
     };
     #[cfg(any(
+        feature = "runtime-2d",
         feature = "presentation-2d",
         feature = "presentation-ui",
         feature = "render-wgpu"
     ))]
-    pub use nara_render::{Camera2d, ClearColor, RenderImage2d, RenderPlugin, RenderTarget};
+    pub use nara_render::{Camera2d, RenderComponentsPlugin, RenderImage2d, RenderTarget};
+    #[cfg(any(
+        feature = "presentation-2d",
+        feature = "presentation-ui",
+        feature = "render-wgpu"
+    ))]
+    pub use nara_render::{ClearColor, RenderPlugin};
     #[cfg(feature = "runtime-2d")]
     pub use nara_sprite::{Sprite, SpriteAnchor, SpriteMaterial, SpritePlugin, TextureRegion};
     #[cfg(feature = "runtime-2d")]

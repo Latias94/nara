@@ -37,6 +37,7 @@ fn run_headless_conformance() -> Result<(), Box<dyn Error>> {
     let mut app = App::new();
     app.add_plugins((
         RuntimeUiPlugins,
+        nara::render::RenderComponentsPlugin,
         RenderPlugin,
         ImagePlugin::default(),
         ImagePreparePlugin,

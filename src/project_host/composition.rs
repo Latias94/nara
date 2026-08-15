@@ -611,6 +611,7 @@ pub fn built_in_schema_providers() -> Vec<ComponentSchemaProviderDefinition> {
         providers.push(nara_tilemap::TILEMAP_SCHEMA_PROVIDER);
     }
     #[cfg(any(
+        feature = "runtime-2d",
         feature = "presentation-2d",
         feature = "presentation-ui",
         feature = "render-wgpu"

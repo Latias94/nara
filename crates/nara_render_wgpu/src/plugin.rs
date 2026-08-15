@@ -120,6 +120,7 @@ mod tests {
             nara_reflect::ComponentRegistryPlugin,
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
+            nara_render::RenderComponentsPlugin,
             nara_render::RenderPlugin,
             crate::WgpuRenderPlugin,
         ))
@@ -137,6 +138,7 @@ mod tests {
             nara_reflect::ComponentRegistryPlugin,
             nara_hierarchy::HierarchyPlugin,
             nara_transform::TransformPlugin,
+            nara_render::RenderComponentsPlugin,
             nara_render::RenderPlugin,
             crate::WgpuRenderPlugin,
         ))

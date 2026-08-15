@@ -3009,6 +3009,7 @@ fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
         nara_reflect::ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
+        nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin,
     ))
     .unwrap();
@@ -3102,6 +3103,7 @@ fn app_with_image_plugin_configuration(
         nara_asset::AssetPlugin,
         nara_hierarchy::HierarchyPlugin,
         nara_transform::TransformPlugin,
+        nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin,
         ImagePreparePlugin,
         plugin.with_source_directory(image_source_directory(asset_root)),

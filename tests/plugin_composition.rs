@@ -1701,15 +1701,16 @@ requested = ["runtime-2d"]
 }
 
 #[cfg(any(
+    feature = "runtime-2d",
     feature = "presentation-2d",
     feature = "presentation-ui",
     feature = "render-wgpu"
 ))]
 #[test]
-fn schema_contribution_cannot_inject_render_into_runtime_core() {
+fn schema_contribution_cannot_inject_render_components_into_runtime_core() {
     let manifest = TestManifest::new(MINIMAL_MANIFEST);
     let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
-    let contribution = SchemaContribution::<nara::render::RenderPlugin>::for_default([
+    let contribution = SchemaContribution::<nara::render::RenderComponentsPlugin>::for_default([
         nara::render::RENDER_SCHEMA_PROVIDER,
     ])
     .unwrap();
@@ -1718,10 +1719,53 @@ fn schema_contribution_cannot_inject_render_into_runtime_core() {
     assert!(matches!(
         resolve_product_recipe(&candidate, recipe).unwrap_err(),
         RuntimePlanError::Composition(CompositionError::UnrequestedProductCapabilityAlternatives {
-            plugin: nara::render::RENDER_PLUGIN_ID,
+            plugin: nara::render::RENDER_COMPONENTS_PLUGIN_ID,
             ..
         })
     ));
+}
+
+#[cfg(feature = "runtime-2d")]
+#[test]
+fn runtime_2d_selects_camera_content_without_presentation_scheduling() {
+    let manifest = TestManifest::new(
+        r#"
+schema_version = 1
+
+[project]
+name = "Runtime 2D Camera Content"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d"]
+"#,
+    );
+    let candidate = ingest_project_manifest(&manifest.capability(), None).unwrap();
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    let entries = plan.plugin_plan().entries();
+
+    assert!(
+        entries
+            .iter()
+            .any(|entry| { entry.plugin_id() == nara::render::RENDER_COMPONENTS_PLUGIN_ID })
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry.plugin_id() != nara::render::RENDER_PLUGIN_ID)
+    );
+    assert!(
+        plan.schema_validation()
+            .provider_ids()
+            .contains(&nara::render::RENDER_SCHEMA_PROVIDER_ID)
+    );
 }
 
 #[test]
