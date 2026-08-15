@@ -13,7 +13,7 @@ use nara::project_workflow::{
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::host_fs::{self, HostFileError};
+use crate::host_fs::{self, HostDirectoryError, HostFileError};
 
 const MAX_TOOL_IDENTITY_BYTES: usize = 16 * 1024;
 const MAX_CARGO_JSON_BYTES: u64 = 64 * 1024 * 1024;
@@ -46,6 +46,10 @@ pub(crate) enum CargoBuildAdapterError {
     BuildFinishedMissing,
     #[error("the locked Cargo build failed")]
     BuildFailed,
+    #[error("failed to reopen the project directory around the locked Cargo build")]
+    ProjectRoot(#[source] HostDirectoryError),
+    #[error("the project path no longer refers to the checked project authority")]
+    ProjectRootChanged,
     #[error(transparent)]
     HostFile(#[from] HostFileError),
     #[error(transparent)]
@@ -57,6 +61,7 @@ pub(super) fn build(
     startup_content: &StartupContentClosureReceipt,
 ) -> Result<ProjectExportBuildReceipt, CargoBuildAdapterError> {
     let preparation = ProjectExportBuildPreparation::capture(startup_content)?;
+    verify_project_path_authority(project_root, &preparation)?;
     let target_triple = host_target()?;
     let manifest_path = project_root.join("Cargo.toml");
     let mut child = Command::new("cargo")
@@ -87,6 +92,7 @@ pub(super) fn build(
         let _ = child.kill();
     }
     let status = child.wait().map_err(CargoBuildAdapterError::Wait)?;
+    verify_project_path_authority(project_root, &preparation)?;
     if reader.limit() == 0 {
         return Err(CargoBuildAdapterError::OutputLimitExceeded);
     }
@@ -101,6 +107,19 @@ pub(super) fn build(
     preparation
         .bind([headless, desktop])
         .map_err(CargoBuildAdapterError::from)
+}
+
+fn verify_project_path_authority(
+    project_root: &Path,
+    preparation: &ProjectExportBuildPreparation,
+) -> Result<(), CargoBuildAdapterError> {
+    let current =
+        host_fs::readable_directory(project_root).map_err(CargoBuildAdapterError::ProjectRoot)?;
+    if current.identity() == preparation.project_root_identity() {
+        Ok(())
+    } else {
+        Err(CargoBuildAdapterError::ProjectRootChanged)
+    }
 }
 
 fn bind_artifact(
