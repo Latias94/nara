@@ -1,14 +1,12 @@
-use nara::ecs::schedule::IntoScheduleConfigs;
 use nara::ecs as bevy_ecs;
+use nara::ecs::schedule::IntoScheduleConfigs;
 use nara::{
     app::{
         CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId,
         PluginProductCapability, PluginShutdownContext, PluginShutdownObligationId, RuntimeFault,
         RuntimeFaultKind, RuntimeFaultReporter,
     },
-    ecs::{
-        Commands, Component, Entity, Mut, Query, Res, ResMut, Resource, system::SystemParam,
-    },
+    ecs::{Commands, Component, Entity, Mut, Query, Res, ResMut, Resource, system::SystemParam},
     gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
     input::{InputPointerId, InputSeatId, InputWindowId},
     scene::SceneEntitySource,
@@ -21,7 +19,9 @@ use nara::{
 
 use crate::{
     ReferenceWaveCaptureSet, WaveOutcome, WaveRetryPhase, WaveRetryRejection, WaveRetryStatus,
-    WaveSnapshot, resources::WaveRunOwner, retry_draft_for_ui_action,
+    WaveSnapshot,
+    resources::WaveRunOwner,
+    retry_draft_for_ui_action,
     ui_observation::{
         ReferenceProductObservation, capture_reference_product_observation,
         reference_ui_source_entity,
@@ -242,10 +242,7 @@ fn project_runtime_ui(
                     snapshot.defeated_enemies, snapshot.planned_enemies
                 ),
             ),
-            "score-status" => replace_text_content(
-                text,
-                format!("SCORE {:06}", snapshot.score),
-            ),
+            "score-status" => replace_text_content(text, format!("SCORE {:06}", snapshot.score)),
             "movement-status" => replace_text_content(
                 text,
                 format!(
@@ -323,11 +320,7 @@ struct ReferenceRetryIntentContext<'w, 's> {
     snapshot: Res<'w, WaveSnapshot>,
     retry: Res<'w, WaveRetryStatus>,
     owner: Option<Res<'w, WaveRunOwner>>,
-    buttons: Query<
-        'w,
-        's,
-        (Entity, &'static SceneEntitySource, &'static UiButton),
-    >,
+    buttons: Query<'w, 's, (Entity, &'static SceneEntitySource, &'static UiButton)>,
 }
 
 impl ReferenceRetryIntentContext<'_, '_> {

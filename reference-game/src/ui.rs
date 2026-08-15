@@ -7,9 +7,7 @@ use nara::{
     asset::{AssetServer, Handle},
     core::{Color, Vec2},
     ecs::{Commands, Component, Entity, Query, Res, World},
-    hierarchy::{
-        HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter,
-    },
+    hierarchy::{HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter},
     image::ImageAsset,
     material::SamplerDescriptor,
     render::Camera2d,
@@ -104,13 +102,13 @@ fn spawn_desktop_view(
     let world = app.world_mut()?;
     let camera = world
         .spawn((
-        Transform2d::default(),
-        Camera2d {
-            viewport_height: 18.0,
-            clear_color: Some(Color::rgba(0.025, 0.035, 0.045, 1.0)),
-            ..Camera2d::default()
-        },
-    ))
+            Transform2d::default(),
+            Camera2d {
+                viewport_height: 18.0,
+                clear_color: Some(Color::rgba(0.025, 0.035, 0.045, 1.0)),
+                ..Camera2d::default()
+            },
+        ))
         .id();
     let mut placements = vec![root_placement(camera)];
     spawn_arena(world, atlas_texture, &mut placements);
