@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-08-05
+**Last Revised**: 2026-08-15
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -12,6 +12,7 @@ Placement and Runtime Projection;
 Installation
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
+**Implementation Plan**: [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
 
 ## ADR 0095 Refinement
 

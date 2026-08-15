@@ -7,10 +7,8 @@ license.workspace = true
 
 [dependencies]
 egui.workspace = true
+nara_diagnostic.workspace = true
 nara_identity.workspace = true
 nara_reflect.workspace = true
 nara_scene.workspace = true
 nara_tooling.workspace = true
-
-[dev-dependencies]
-nara_diagnostic.workspace = true

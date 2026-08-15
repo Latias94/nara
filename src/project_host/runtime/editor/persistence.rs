@@ -2,12 +2,12 @@ use super::*;
 
 impl EditorProjectSession {
     #[cfg(test)]
-    pub(super) fn test_reject_next_valid_persistence_receipt(&mut self) {
+    pub(crate) fn test_reject_next_valid_persistence_receipt(&mut self) {
         self.persistence.test_reject_next_valid_receipt();
     }
 
     #[cfg(test)]
-    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
+    pub(crate) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
         self.persistence.test_fail_next_save(stage);
     }
 
@@ -58,24 +58,11 @@ impl EditorProjectSession {
         if self.pending_persistence.is_some() {
             return EditorPersistenceRequestResult::Rejected(EditorPersistenceRejection::Busy);
         }
-        if self.persistence_result.is_some()
-            && !matches!(
-                (self.persistence_result, command),
-                (
-                    Some(EditorPersistenceResult::PersistenceUncertain { .. }),
-                    EditorPersistenceCommand::Reopen { .. }
-                )
-            )
-        {
-            return EditorPersistenceRequestResult::Rejected(
-                EditorPersistenceRejection::ResultPending,
-            );
-        }
-
-        let requested_document = match command {
+        let (request, requested_document) = match command {
             EditorPersistenceCommand::Save { document } => {
                 let Some(document) = document.or(self.workspace.active_document()) else {
                     self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                        request: EditorPersistenceRequestKind::Save,
                         document: None,
                         reason: EditorPersistenceRejection::NoActiveDocument,
                     });
@@ -83,19 +70,30 @@ impl EditorProjectSession {
                         EditorPersistenceRejection::NoActiveDocument,
                     );
                 };
-                document
+                (EditorPersistenceRequestKind::Save, document)
             }
-            EditorPersistenceCommand::Reopen { document } => document
-                .or(self.workspace.active_document())
-                .unwrap_or(self.source_document),
+            EditorPersistenceCommand::Reopen { document } => (
+                EditorPersistenceRequestKind::Reopen,
+                document
+                    .or(self.workspace.active_document())
+                    .unwrap_or(self.source_document),
+            ),
             EditorPersistenceCommand::AcknowledgeResult => unreachable!(),
         };
+        if self.persistence_result.is_some_and(|result| {
+            !persistence_result_allows_retry(result, request, requested_document)
+        }) {
+            return EditorPersistenceRequestResult::Rejected(
+                EditorPersistenceRejection::ResultPending,
+            );
+        }
 
         if matches!(command, EditorPersistenceCommand::Reopen { .. })
             && (!matches!(self.runtime_owner, EditorRuntimeOwnerState::Empty)
                 || self.runtime_host.has_cleanup_owner())
         {
             self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Reopen,
                 document: Some(requested_document),
                 reason: EditorPersistenceRejection::RuntimeActive,
             });
@@ -108,6 +106,7 @@ impl EditorProjectSession {
             EditorPersistenceCommand::Save { .. } => {
                 let Some(slot) = self.workspace.scene(requested_document) else {
                     self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                        request: EditorPersistenceRequestKind::Save,
                         document: Some(requested_document),
                         reason: EditorPersistenceRejection::MissingDocument,
                     });
@@ -117,6 +116,7 @@ impl EditorProjectSession {
                 };
                 if !slot.is_dirty() {
                     self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                        request: EditorPersistenceRequestKind::Save,
                         document: Some(requested_document),
                         reason: EditorPersistenceRejection::NotDirty,
                     });
@@ -129,6 +129,7 @@ impl EditorProjectSession {
                     .capture(&self.workspace, requested_document)
                 else {
                     self.persistence_result = Some(EditorPersistenceResult::Rejected {
+                        request: EditorPersistenceRequestKind::Save,
                         document: Some(requested_document),
                         reason: EditorPersistenceRejection::StaleRevision,
                     });
@@ -145,7 +146,6 @@ impl EditorProjectSession {
                 };
             }
             EditorPersistenceCommand::Reopen { .. } => {
-                self.persistence_result = None;
                 let base_revision = self
                     .workspace
                     .scene(requested_document)
@@ -224,10 +224,12 @@ impl EditorProjectSession {
                 }
             }
             SceneSaveOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Save,
                 document: Some(document),
                 reason,
             },
             SceneSaveOutcome::Failed(stage) => EditorPersistenceResult::Failed {
+                request: EditorPersistenceRequestKind::Save,
                 document: Some(document),
                 stage,
             },
@@ -270,6 +272,7 @@ impl EditorProjectSession {
                         Ok(report) => report,
                         Err(_) => {
                             return EditorPersistenceResult::Rejected {
+                                request: EditorPersistenceRequestKind::Reopen,
                                 document: Some(document),
                                 reason: EditorPersistenceRejection::StaleRevision,
                             };
@@ -283,6 +286,7 @@ impl EditorProjectSession {
                         Ok(report) => report,
                         Err(_) => {
                             return EditorPersistenceResult::Failed {
+                                request: EditorPersistenceRequestKind::Reopen,
                                 document: Some(document),
                                 stage: EditorPersistenceFailureStage::Validate,
                             };
@@ -290,6 +294,7 @@ impl EditorProjectSession {
                     }
                 } else {
                     return EditorPersistenceResult::Rejected {
+                        request: EditorPersistenceRequestKind::Reopen,
                         document: Some(document),
                         reason: EditorPersistenceRejection::MissingDocument,
                     };
@@ -306,6 +311,7 @@ impl EditorProjectSession {
                     );
                     if !binding.applied {
                         return EditorPersistenceResult::Failed {
+                            request: EditorPersistenceRequestKind::Reopen,
                             document: Some(opened_document),
                             stage: EditorPersistenceFailureStage::Validate,
                         };
@@ -320,13 +326,42 @@ impl EditorProjectSession {
                 }
             }
             SceneReopenOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Reopen,
                 document: Some(document),
                 reason,
             },
             SceneReopenOutcome::Failed(stage) => EditorPersistenceResult::Failed {
+                request: EditorPersistenceRequestKind::Reopen,
                 document: Some(document),
                 stage,
             },
         }
+    }
+}
+
+fn persistence_result_allows_retry(
+    result: EditorPersistenceResult,
+    request: EditorPersistenceRequestKind,
+    document: EditorDocumentId,
+) -> bool {
+    match result {
+        EditorPersistenceResult::Rejected {
+            request: failed_request,
+            document: failed_document,
+            ..
+        }
+        | EditorPersistenceResult::Failed {
+            request: failed_request,
+            document: failed_document,
+            ..
+        } => {
+            failed_request == request
+                && failed_document.is_none_or(|failed_document| failed_document == document)
+        }
+        EditorPersistenceResult::PersistenceUncertain {
+            document: uncertain_document,
+            ..
+        } => request == EditorPersistenceRequestKind::Reopen && uncertain_document == document,
+        EditorPersistenceResult::Saved { .. } | EditorPersistenceResult::Opened { .. } => false,
     }
 }

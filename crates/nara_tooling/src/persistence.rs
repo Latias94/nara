@@ -25,6 +25,12 @@ pub enum EditorPersistenceOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPersistenceRequestKind {
+    Save,
+    Reopen,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPersistenceRejection {
     Busy,
     ResultPending,
@@ -66,10 +72,12 @@ pub enum EditorPersistenceResult {
         digest: EditorDocumentDigest,
     },
     Rejected {
+        request: EditorPersistenceRequestKind,
         document: Option<EditorDocumentId>,
         reason: EditorPersistenceRejection,
     },
     Failed {
+        request: EditorPersistenceRequestKind,
         document: Option<EditorDocumentId>,
         stage: EditorPersistenceFailureStage,
     },

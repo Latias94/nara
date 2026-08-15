@@ -29,9 +29,9 @@ use nara::{
     tooling::{
         EditorAction, EditorActionOutcome, EditorCloseDecision, EditorDocumentMutation,
         EditorPersistenceAction, EditorPersistenceCommand, EditorPersistenceCommit,
-        EditorPersistenceRejection, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPlayCommand, EditorPlayRequestResult, EditorPlayState, EditorWorkspace,
-        EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+        EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+        EditorPersistenceResult, EditorPlayCommand, EditorPlayRequestResult, EditorPlayState,
+        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
         EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
 };
@@ -322,6 +322,7 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Rejected {
+            request: EditorPersistenceRequestKind::Save,
             document: Some(document),
             reason: EditorPersistenceRejection::TargetChanged,
         })
@@ -332,6 +333,27 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
     let disk = fs::read_to_string(project.scene_path()).unwrap();
     assert!(disk.contains("external"));
     assert!(!disk.contains("local"));
+
+    assert_eq!(
+        editor_driver::request_persistence(
+            &mut editor,
+            EditorPersistenceCommand::Save {
+                document: Some(document),
+            },
+        ),
+        EditorPersistenceRequestResult::Accepted
+    );
+    assert!(matches!(
+        editor
+            .drive_editor_frame(Duration::ZERO)
+            .persistence()
+            .result(),
+        Some(EditorPersistenceResult::Rejected {
+            request: EditorPersistenceRequestKind::Save,
+            document: Some(rejected_document),
+            reason: EditorPersistenceRejection::TargetChanged,
+        }) if rejected_document == document
+    ));
 }
 
 #[test]
@@ -425,6 +447,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Failed {
+            request: EditorPersistenceRequestKind::Reopen,
             document: Some(document),
             stage: nara::tooling::EditorPersistenceFailureStage::Decode,
         })
@@ -465,6 +488,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Failed {
+            request: EditorPersistenceRequestKind::Reopen,
             document: Some(document),
             stage: nara::tooling::EditorPersistenceFailureStage::Validate,
         })
@@ -495,6 +519,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Rejected {
+            request: EditorPersistenceRequestKind::Reopen,
             document: Some(document),
             reason: EditorPersistenceRejection::TargetDeleted,
         })
@@ -525,6 +550,7 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
             .persistence()
             .result(),
         Some(EditorPersistenceResult::Failed {
+            request: EditorPersistenceRequestKind::Reopen,
             document: Some(failed_document),
             stage: nara::tooling::EditorPersistenceFailureStage::OpenTarget
                 | nara::tooling::EditorPersistenceFailureStage::ReadTarget,
@@ -731,6 +757,7 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     assert_eq!(
         editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Rejected {
+            request: EditorPersistenceRequestKind::Save,
             document: Some(document),
             reason: EditorPersistenceRejection::TargetChanged,
         })
@@ -770,6 +797,7 @@ fn reopen_rejects_while_a_runtime_owner_is_live() {
     assert_eq!(
         editor.current_frame().persistence().result(),
         Some(EditorPersistenceResult::Rejected {
+            request: EditorPersistenceRequestKind::Reopen,
             document: editor.current_frame().workspace().active_document,
             reason: EditorPersistenceRejection::RuntimeActive,
         })

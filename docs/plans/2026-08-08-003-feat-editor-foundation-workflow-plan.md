@@ -387,6 +387,9 @@ U5 proves the workflow and publishes documentation/evidence.
 - `crates/nara_tooling_egui/src/fields.rs`
 - `crates/nara_tooling_egui/src/tests.rs`
 - `crates/nara_tooling_egui/Cargo.toml`
+- `crates/nara_tooling/src/persistence.rs`
+- `src/project_host/runtime/editor/persistence.rs`
+- `tests/editor_persistence.rs`
 
 **Approach:**
 
@@ -396,6 +399,7 @@ U5 proves the workflow and publishes documentation/evidence.
 4. Render the fixed toolbar, canonical Scene Tree, Inspector, and Diagnostics from one frame model.
 5. Apply the fixed layout, independent scrolling, toolbar enabled-state rules, inline field errors, and persistent operation diagnostics from the frame model.
 6. Split the Adapter implementation by responsibility while keeping egui types private to this crate.
+7. Stamp rejected and failed persistence results with the exact Save or Reopen request kind, and allow only a matching document/request retry while the result remains visible.
 
 **Patterns to follow:** Existing `EguiSceneEditorPanel`, controlled `SceneInspectorModel`, typed `SceneInspectorCommand`, and immutable frame/action direction from KTD3.
 

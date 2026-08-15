@@ -789,6 +789,7 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
     assert!(matches!(
         editor.persistence_view().result(),
         Some(EditorPersistenceResult::Failed {
+            request: nara_tooling::EditorPersistenceRequestKind::Save,
             document: Some(failed_document),
             stage: nara_tooling::EditorPersistenceFailureStage::Encode,
         }) if failed_document == document

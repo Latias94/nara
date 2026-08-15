@@ -395,12 +395,13 @@ pub mod tooling_prelude {
         EditorApplyChangesRejection, EditorApplyChangesResult, EditorCloseDecision,
         EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState,
         EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
-        EditorPersistenceRejection, EditorPersistenceRequestResult, EditorPersistenceResult,
-        EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
-        EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-        EditorPlayView, EditorProjectView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
-        EditorRuntimeEditResult, EditorSceneModel, EditorSceneSlot, EditorSceneTabModel,
-        EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
+        EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+        EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+        EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection,
+        EditorPlayRequestResult, EditorPlayState, EditorPlayView, EditorProjectView,
+        EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
+        EditorSceneModel, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
+        EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
         EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
         EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
         EditorWorkspaceModel, SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
@@ -410,10 +411,7 @@ pub mod tooling_prelude {
         SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState, WorldIdentitySnapshot,
     };
     #[cfg(feature = "tooling-egui")]
-    pub use nara_tooling_egui::{
-        EguiSceneEditorPanel, EguiSceneEditorPanelResponse, EguiSceneInspectorPanel,
-        EguiSceneInspectorPanelResponse,
-    };
+    pub use nara_tooling_egui::EguiSceneEditorPanel;
 }
 
 #[cfg(feature = "runtime-core")]

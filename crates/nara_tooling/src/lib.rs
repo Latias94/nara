@@ -23,9 +23,10 @@ pub use inspector::{
 };
 pub use persistence::{
     EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceFailureStage,
-    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestResult,
-    EditorPersistenceResult, EditorPersistenceView, EditorProjectView, EditorWorkspaceIntent,
-    EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
+    EditorPersistenceRequestResult, EditorPersistenceResult, EditorPersistenceView,
+    EditorProjectView, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+    EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
 };
 #[doc(hidden)]
