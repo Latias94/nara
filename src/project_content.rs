@@ -717,6 +717,14 @@ impl<'a> LoadContext<'a> {
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
         let settings = candidate.settings();
+        self.startup_closure
+            .as_mut()
+            .expect("load context owns one startup closure builder until publication")
+            .set_runtime_directories([
+                &settings.paths.assets,
+                &settings.paths.scenes,
+                &settings.paths.prefabs,
+            ]);
         let scenes = self.open_directory(&settings.paths.scenes)?;
         let prefabs = self.open_directory(&settings.paths.prefabs)?;
         let assets = self.open_directory(&settings.paths.assets)?;
@@ -1878,8 +1886,20 @@ fn startup_closure_retained_bytes(
                 startup_closure.members().len(),
                 size_of::<StartupContentMemberReceipt>(),
             )?,
+            checked_plan_product(
+                ProjectContentBudgetKind::RetainedBytes,
+                startup_closure.runtime_directories().len(),
+                size_of::<nara_project::ProjectPath>(),
+            )?,
         ],
     )?;
+    for path in startup_closure.runtime_directories() {
+        checked_add_to(
+            &mut total,
+            string_retained_bytes(path.as_str())?,
+            ProjectContentBudgetKind::RetainedBytes,
+        )?;
+    }
     for member in startup_closure.members() {
         checked_add_to(
             &mut total,

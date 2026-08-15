@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, btree_map::Entry},
+    collections::{BTreeMap, BTreeSet, btree_map::Entry},
     sync::Arc,
 };
 
@@ -83,6 +83,7 @@ pub(super) struct StartupContentClosureReceiptInner {
     schema_fingerprint: SchemaCompositionFingerprint,
     content_revision: ProjectContentRevision,
     content_digest: ContentDigest,
+    runtime_directories: Box<[ProjectPath]>,
     members: Box<[StartupContentMemberReceipt]>,
     _lease: ProjectContentLease,
 }
@@ -118,6 +119,10 @@ impl StartupContentClosureReceipt {
         &self.inner.members
     }
 
+    pub(crate) fn runtime_directories(&self) -> &[ProjectPath] {
+        &self.inner.runtime_directories
+    }
+
     #[must_use]
     pub fn project_root_identity(&self) -> FileIdentity {
         self.inner.project_root.identity()
@@ -138,6 +143,10 @@ impl std::fmt::Debug for StartupContentClosureReceipt {
             .field("schema_fingerprint", &self.inner.schema_fingerprint)
             .field("content_revision", &self.inner.content_revision)
             .field("content_digest", &self.inner.content_digest)
+            .field(
+                "runtime_directory_count",
+                &self.inner.runtime_directories.len(),
+            )
             .field("member_count", &self.inner.members.len())
             .finish()
     }
@@ -149,12 +158,17 @@ pub(super) struct StartupContentClosureDraft {
     schema_fingerprint: SchemaCompositionFingerprint,
     content_revision: ProjectContentRevision,
     content_digest: ContentDigest,
+    runtime_directories: Box<[ProjectPath]>,
     members: Box<[StartupContentMemberReceipt]>,
 }
 
 impl StartupContentClosureDraft {
     pub(super) fn members(&self) -> &[StartupContentMemberReceipt] {
         &self.members
+    }
+
+    pub(super) fn runtime_directories(&self) -> &[ProjectPath] {
+        &self.runtime_directories
     }
 
     pub(super) fn publish(
@@ -170,6 +184,7 @@ impl StartupContentClosureDraft {
                 schema_fingerprint: self.schema_fingerprint,
                 content_revision: self.content_revision,
                 content_digest: self.content_digest,
+                runtime_directories: self.runtime_directories,
                 members: self.members,
                 _lease: lease,
             }),
@@ -179,6 +194,7 @@ impl StartupContentClosureDraft {
 
 pub(super) struct StartupContentClosureBuilder {
     manifest_digest: ContentDigest,
+    runtime_directories: BTreeSet<String>,
     members: BTreeMap<String, StartupContentMemberFacts>,
 }
 
@@ -192,6 +208,7 @@ impl StartupContentClosureBuilder {
     pub(super) fn new(manifest_digest: ContentDigest) -> Result<Self, ProjectContentError> {
         let mut builder = Self {
             manifest_digest,
+            runtime_directories: BTreeSet::new(),
             members: BTreeMap::new(),
         };
         builder.insert_path(
@@ -200,6 +217,11 @@ impl StartupContentClosureBuilder {
             manifest_digest,
         )?;
         Ok(builder)
+    }
+
+    pub(super) fn set_runtime_directories(&mut self, paths: [&ProjectPath; 3]) {
+        self.runtime_directories
+            .extend(paths.into_iter().map(|path| path.as_str().to_owned()));
     }
 
     pub(super) fn insert(
@@ -309,6 +331,14 @@ impl StartupContentClosureBuilder {
             schema_fingerprint,
             content_revision,
             content_digest,
+            runtime_directories: self
+                .runtime_directories
+                .into_iter()
+                .map(|path| {
+                    ProjectPath::new(path)
+                        .expect("runtime directory paths were validated before admission")
+                })
+                .collect(),
             members: self
                 .members
                 .into_iter()

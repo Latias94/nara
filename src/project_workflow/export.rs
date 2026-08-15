@@ -69,6 +69,7 @@ pub struct ProjectExportPlanReceipt {
     startup_content_digest: ContentDigest,
     build_input_digest: ContentDigest,
     member_plan_digest: ContentDigest,
+    runtime_directories: Box<[ProjectPath]>,
     members: Box<[ProjectExportMemberReceipt]>,
     sources: Box<[ProjectExportMemberSource]>,
 }
@@ -98,6 +99,10 @@ impl ProjectExportPlanReceipt {
     pub fn members(&self) -> &[ProjectExportMemberReceipt] {
         &self.members
     }
+
+    pub(crate) fn runtime_directories(&self) -> &[ProjectPath] {
+        &self.runtime_directories
+    }
 }
 
 impl Debug for ProjectExportPlanReceipt {
@@ -108,6 +113,7 @@ impl Debug for ProjectExportPlanReceipt {
             .field("startup_content_digest", &self.startup_content_digest)
             .field("build_input_digest", &self.build_input_digest)
             .field("member_plan_digest", &self.member_plan_digest)
+            .field("runtime_directory_count", &self.runtime_directories.len())
             .field("member_count", &self.members.len())
             .finish()
     }
@@ -220,6 +226,12 @@ pub enum ProjectExportPlanError {
     Build(#[from] ProjectExportBuildError),
     #[error("startup-content member {path} changed after project check")]
     StartupContentChanged {
+        path: ProjectPath,
+        #[source]
+        source: FsError,
+    },
+    #[error("startup runtime directory {path} changed after project check")]
+    StartupDirectoryChanged {
         path: ProjectPath,
         #[source]
         source: FsError,
@@ -477,6 +489,14 @@ fn plan_export(
     startup_content: &StartupContentClosureReceipt,
     build: &ProjectExportBuildReceipt,
 ) -> Result<ProjectExportPlanReceipt, ProjectExportPlanError> {
+    let runtime_directories = startup_content
+        .runtime_directories()
+        .iter()
+        .map(|path| {
+            ProjectPath::new(format!("project/{}", path.as_str()))
+                .expect("an admitted runtime directory remains valid under the project prefix")
+        })
+        .collect::<Box<[_]>>();
     let mut members = Vec::with_capacity(startup_content.members().len().saturating_add(2));
     let mut sources = Vec::with_capacity(members.capacity());
     let executable_suffix = if build.target_triple().contains("windows") {
@@ -522,6 +542,9 @@ fn plan_export(
         return Err(ProjectExportPlanError::ByteLimitExceeded);
     }
     let mut paths = BTreeSet::new();
+    for directory in &runtime_directories {
+        paths.insert(directory.as_str());
+    }
     for member in &members {
         if !paths.insert(member.path.as_str()) {
             return Err(ProjectExportPlanError::TargetPathCollision {
@@ -529,20 +552,28 @@ fn plan_export(
             });
         }
     }
-    let member_plan_digest = digest_member_plan(&members);
+    let member_plan_digest = digest_member_plan(&runtime_directories, &members);
     Ok(ProjectExportPlanReceipt {
         destination,
         startup_content_digest: startup_content.content_digest(),
         build_input_digest: build.build_input_digest(),
         member_plan_digest,
+        runtime_directories,
         members: members.into_boxed_slice(),
         sources: sources.into_boxed_slice(),
     })
 }
 
-fn digest_member_plan(members: &[ProjectExportMemberReceipt]) -> ContentDigest {
+fn digest_member_plan(
+    runtime_directories: &[ProjectPath],
+    members: &[ProjectExportMemberReceipt],
+) -> ContentDigest {
     let mut framed = Vec::new();
-    framed.extend_from_slice(b"nara.project-startup-closure-export.v1\0");
+    framed.extend_from_slice(b"nara.project-startup-closure-export.v2\0");
+    for directory in runtime_directories {
+        append_frame(&mut framed, b"runtime-directory");
+        append_frame(&mut framed, directory.as_str().as_bytes());
+    }
     for member in members {
         append_frame(&mut framed, member_kind_name(member.kind).as_bytes());
         append_frame(&mut framed, member.path.as_str().as_bytes());
@@ -579,6 +610,16 @@ fn revalidate_sources(
 ) -> Result<(), ProjectExportPlanError> {
     build.revalidate(startup_content)?;
     let project_root = startup_content.project_root();
+    for directory in startup_content.runtime_directories() {
+        let path = RelativePath::new(directory.as_str())
+            .expect("the project-content owner publishes valid runtime directory paths");
+        project_root.open_directory(&path).map_err(|source| {
+            ProjectExportPlanError::StartupDirectoryChanged {
+                path: directory.clone(),
+                source,
+            }
+        })?;
+    }
     for member in startup_content.members() {
         let path = RelativePath::new(member.path().as_str())
             .expect("the project-content owner publishes valid project paths");

@@ -182,6 +182,12 @@ fn create_directories(
     plan: &ProjectExportPlanReceipt,
 ) -> Result<ExportDirectories, ProjectExportStageError> {
     let mut paths = BTreeSet::new();
+    for directory in plan.runtime_directories() {
+        let components = directory.as_str().split('/').collect::<Vec<_>>();
+        for depth in 1..=components.len() {
+            paths.insert(components[..depth].join("/"));
+        }
+    }
     for member in &plan.members {
         let components = member.path.as_str().split('/').collect::<Vec<_>>();
         for depth in 1..components.len() {
