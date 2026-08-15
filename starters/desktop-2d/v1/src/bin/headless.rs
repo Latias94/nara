@@ -26,6 +26,17 @@ fn main() -> ExitCode {
         let report = run.execute_bounded();
         match report.outcome() {
             HeadlessRunOutcome::Completed(outcome) if outcome.fixed_tick == 1 => {
+                let Some(closure) = report.startup_content_closure() else {
+                    eprintln!("headless run completed without startup-content evidence");
+                    return ExitCode::FAILURE;
+                };
+                if let Err(error) = nara_game::record_product_observation(
+                    nara_game::ProductObservationTarget::Headless,
+                    closure,
+                ) {
+                    eprintln!("failed to record headless product observation: {error}");
+                    return ExitCode::FAILURE;
+                }
                 println!("starter_headless: ok fixed_ticks={}", outcome.fixed_tick);
                 return ExitCode::SUCCESS;
             }

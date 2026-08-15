@@ -37,6 +37,17 @@ fn main() -> ExitCode {
         match report.outcome() {
             DesktopRunOutcome::Completed(_) if !verify_first_present => return ExitCode::SUCCESS,
             DesktopRunOutcome::Completed(_) if report.presentation_verification().is_some() => {
+                let Some(closure) = report.startup_content_closure() else {
+                    eprintln!("desktop run completed without startup-content evidence");
+                    return ExitCode::FAILURE;
+                };
+                if let Err(error) = nara_game::record_product_observation(
+                    nara_game::ProductObservationTarget::Desktop,
+                    closure,
+                ) {
+                    eprintln!("failed to record desktop product observation: {error}");
+                    return ExitCode::FAILURE;
+                }
                 println!("starter_desktop: ok first_present_verified=true");
                 return ExitCode::SUCCESS;
             }

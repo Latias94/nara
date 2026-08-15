@@ -54,15 +54,43 @@ pub(crate) enum CargoBuildAdapterError {
     BuildContract(#[from] ProjectExportBuildError),
 }
 
+pub(super) struct CargoBuildOutput {
+    receipt: ProjectExportBuildReceipt,
+}
+
+impl CargoBuildOutput {
+    pub(super) fn into_receipt(self) -> ProjectExportBuildReceipt {
+        self.receipt
+    }
+}
+
 pub(super) fn build(
     project_root: &Path,
     startup_content: &StartupContentClosureReceipt,
-) -> Result<ProjectExportBuildReceipt, CargoBuildAdapterError> {
+) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
+    build_with_target_directory(project_root, startup_content, None)
+}
+
+#[cfg(test)]
+pub(super) fn build_in_target_directory(
+    project_root: &Path,
+    startup_content: &StartupContentClosureReceipt,
+    target_directory: &Path,
+) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
+    build_with_target_directory(project_root, startup_content, Some(target_directory))
+}
+
+fn build_with_target_directory(
+    project_root: &Path,
+    startup_content: &StartupContentClosureReceipt,
+    target_directory: Option<&Path>,
+) -> Result<CargoBuildOutput, CargoBuildAdapterError> {
     let preparation = ProjectExportBuildPreparation::capture(startup_content)?;
     verify_project_path_authority(project_root, &preparation)?;
     let target_triple = host_target()?;
     let manifest_path = project_root.join("Cargo.toml");
-    let mut child = Command::new("cargo")
+    let mut command = Command::new("cargo");
+    command
         .current_dir(project_root)
         .arg("build")
         .arg("--locked")
@@ -76,9 +104,11 @@ pub(super) fn build(
         .arg("--manifest-path")
         .arg(&manifest_path)
         .arg("--message-format=json")
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(CargoBuildAdapterError::Start)?;
+        .stdout(Stdio::piped());
+    if let Some(target_directory) = target_directory {
+        command.env("CARGO_TARGET_DIR", target_directory);
+    }
+    let mut child = command.spawn().map_err(CargoBuildAdapterError::Start)?;
     let stdout = child
         .stdout
         .take()
@@ -102,9 +132,10 @@ pub(super) fn build(
     let [headless, desktop] = selected;
     let headless = bind_artifact(headless, &target_triple)?;
     let desktop = bind_artifact(desktop, &target_triple)?;
-    preparation
+    let receipt = preparation
         .bind([headless, desktop])
-        .map_err(CargoBuildAdapterError::from)
+        .map_err(CargoBuildAdapterError::from)?;
+    Ok(CargoBuildOutput { receipt })
 }
 
 fn verify_project_path_authority(

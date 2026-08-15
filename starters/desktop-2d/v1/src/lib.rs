@@ -1,21 +1,115 @@
 use std::{
     env,
-    fs::File,
-    io,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
-#[cfg(windows)]
-use std::fs::OpenOptions;
-
 use nara::fs::{
-    CapabilityRights, DirectoryCapability, FsError, FsOperation, HostCapabilityOptions, TrustMode,
+    CapabilityRights, ContentDigest, DirectoryCapability, FsError, FsOperation,
+    HostCapabilityOptions, TrustMode,
 };
+use nara::project_host::StartupContentClosureReceipt;
+
+const OBSERVATION_ATTEMPT_ENV: &str = "NARA_STARTER_OBSERVATION_ATTEMPT";
+const OBSERVATION_FILE_ENV: &str = "NARA_STARTER_OBSERVATION_FILE";
+
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub enum ProductObservationTarget {
+    Headless,
+    Desktop,
+}
+
+impl ProductObservationTarget {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Headless => "headless",
+            Self::Desktop => "desktop",
+        }
+    }
+
+    const fn profile(self) -> &'static str {
+        match self {
+            Self::Headless => "default",
+            Self::Desktop => "desktop",
+        }
+    }
+}
 
 /// Returns the one product recipe shared by the generated targets.
 #[must_use]
 pub fn product_recipe() -> nara::ProductRecipe {
     nara::ProductRecipe::new()
+}
+
+/// Writes one exact startup-closure observation when the parent verification adapter requests it.
+#[doc(hidden)]
+pub fn record_product_observation(
+    target: ProductObservationTarget,
+    closure: &StartupContentClosureReceipt,
+) -> io::Result<()> {
+    let (attempt, output) = match (
+        env::var_os(OBSERVATION_ATTEMPT_ENV),
+        env::var_os(OBSERVATION_FILE_ENV),
+    ) {
+        (None, None) => return Ok(()),
+        (Some(attempt), Some(output)) => (attempt, output),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "starter observation requires both attempt and output",
+            ));
+        }
+    };
+    let attempt = attempt.into_string().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "starter observation attempt must be Unicode",
+        )
+    })?;
+    if attempt.is_empty()
+        || attempt.len() > 128
+        || !attempt
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "starter observation attempt is invalid",
+        ));
+    }
+    let executable = ContentDigest::of_bytes(&fs::read(env::current_exe()?)?);
+    let manifest = closure.manifest_digest();
+    let content = closure.content_digest();
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)?;
+    file.write_all(b"{")?;
+    write!(
+        file,
+        "\"version\":1,\"attempt\":\"{attempt}\",\"target\":\"{}\",\"profile\":\"{}\",\"executable_length\":{},\"executable_blake3\":\"{}\",\"manifest_length\":{},\"manifest_blake3\":\"{}\",\"content_length\":{},\"content_blake3\":\"{}\"",
+        target.name(),
+        target.profile(),
+        executable.length(),
+        digest_hex(executable),
+        manifest.length(),
+        digest_hex(manifest),
+        content.length(),
+        digest_hex(content),
+    )?;
+    file.write_all(b"}\n")
+}
+
+fn digest_hex(digest: ContentDigest) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut encoded = String::with_capacity(64);
+    for byte in digest.as_bytes() {
+        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    encoded
 }
 
 /// Opens the project source selected by the executable location, never by the process CWD.

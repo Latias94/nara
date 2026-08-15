@@ -5,9 +5,15 @@ use thiserror::Error;
 pub(crate) enum Command {
     Help,
     Version,
+    Check(CheckArguments),
     New(NewArguments),
     Export(ExportArguments),
     Repair(RepairArguments),
+}
+
+pub(crate) struct CheckArguments {
+    pub(crate) project: PathBuf,
+    pub(crate) profile: Option<String>,
 }
 
 pub(crate) struct NewArguments {
@@ -52,11 +58,33 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
     match command.to_str() {
         Some("--help" | "-h" | "help") => ensure_terminal(arguments, Command::Help),
         Some("--version" | "-V") => ensure_terminal(arguments, Command::Version),
+        Some("check") => parse_check(arguments),
         Some("new") => parse_new(arguments),
         Some("export") => parse_export(arguments),
         Some("repair") => parse_repair(arguments),
         _ => Err(error("unknown command")),
     }
+}
+
+fn parse_check(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {
+    let project = arguments
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| error("missing project directory"))?;
+    let mut profile = None;
+    while let Some(flag) = arguments.next() {
+        let value = arguments
+            .next()
+            .ok_or_else(|| error("command option is missing its value"))?;
+        match flag.to_str() {
+            Some("--profile") => set_once(
+                &mut profile,
+                required_unicode(Some(value), "profile must be Unicode")?,
+            )?,
+            _ => return Err(error("unknown check-command option")),
+        }
+    }
+    Ok(Command::Check(CheckArguments { project, profile }))
 }
 
 fn parse_repair(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {

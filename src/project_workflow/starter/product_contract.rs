@@ -26,6 +26,9 @@ const BINARY_MARKER: &[u8] = b"nara_game::product_recipe()";
 pub(super) struct ProductContractSources<'a> {
     pub(super) cargo_manifest: &'a [u8],
     pub(super) project_manifest: &'a [u8],
+    pub(super) dependency_manifest_fragment: &'a str,
+    pub(super) creation_command_arguments: &'a str,
+    pub(super) author_guide: &'a str,
     pub(super) library: &'a [u8],
     pub(super) headless: &'a [u8],
     pub(super) desktop: &'a [u8],
@@ -132,6 +135,12 @@ pub(super) fn validate(
     sources: ProductContractSources<'_>,
 ) -> Result<(), &'static str> {
     validate_cargo_manifest(slug, dependency, sources.cargo_manifest)?;
+    validate_author_guide(
+        slug,
+        sources.dependency_manifest_fragment,
+        sources.creation_command_arguments,
+        sources.author_guide,
+    )?;
     if !product_recipe().is_empty() {
         return Err("generated ProductRecipe disagrees with the starter product contract");
     }
@@ -194,6 +203,31 @@ pub(super) fn validate(
     }
     SceneDocumentCandidate::decode_json_bytes(sources.startup_scene)
         .map_err(|_| "generated startup scene is invalid")?;
+    Ok(())
+}
+
+fn validate_author_guide(
+    slug: &ProjectSlug,
+    dependency_manifest_fragment: &str,
+    creation_command_arguments: &str,
+    guide: &str,
+) -> Result<(), &'static str> {
+    let dependency_marker = format!("Nara dependency: `{dependency_manifest_fragment}`");
+    let creation_command = format!(
+        "nara new desktop-2d/v1 {} --parent . {creation_command_arguments}",
+        slug.as_str()
+    );
+    if !guide.starts_with(&format!("# {} author guide\n", slug.as_str()))
+        || !guide.contains("Starter: `desktop-2d/v1`")
+        || !guide.contains(&dependency_marker)
+        || !guide.contains(&creation_command)
+        || !guide.contains("nara check .")
+        || !guide.contains("nara export .")
+        || !guide.contains("nara repair startup-scene .")
+        || !guide.contains("source-carrying startup-closure candidate")
+    {
+        return Err("generated author guide disagrees with the starter workflow");
+    }
     Ok(())
 }
 

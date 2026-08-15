@@ -108,11 +108,17 @@ pub fn prepare_desktop_2d_project(
         })?;
     let PreparedDependency {
         manifest_fragment,
+        creation_command_arguments,
         receipt,
         revalidation: dependency_revalidation,
     } = dependency;
-    let plan = build_desktop_2d_v1_plan(slug, &manifest_fragment, receipt)
-        .map_err(ProjectCreationPlanError::StarterContract)?;
+    let plan = build_desktop_2d_v1_plan(
+        slug,
+        &manifest_fragment,
+        &creation_command_arguments,
+        receipt,
+    )
+    .map_err(ProjectCreationPlanError::StarterContract)?;
     Ok(PreparedProjectCreation {
         publication_parent,
         destination,

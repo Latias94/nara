@@ -15,7 +15,7 @@ const MAX_PROJECT_SLUG_BYTES: usize = 64;
 const MAX_STARTER_MEMBER_BYTES: usize = 256 * 1024;
 const DESKTOP_2D_V1_SCENE_FORMAT_VERSION: u32 = 1;
 
-const AUTHOR_GUIDE: &[u8] = include_bytes!(concat!(
+const AUTHOR_GUIDE_BODY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/starters/desktop-2d/v1/README.md"
 ));
@@ -324,16 +324,25 @@ const PROJECT_DIRECTORIES: [ProjectDirectory; 5] = [
 pub(crate) fn build_desktop_2d_v1_plan(
     slug: ProjectSlug,
     dependency_manifest_fragment: &str,
+    creation_command_arguments: &str,
     dependency_receipt: NaraDependencyReceipt,
 ) -> Result<ProjectCreationPlan, &'static str> {
     let cargo_manifest = render_cargo_manifest(&slug, dependency_manifest_fragment);
     let project_manifest = render_project_manifest(&slug);
+    let author_guide = render_author_guide(
+        &slug,
+        dependency_manifest_fragment,
+        creation_command_arguments,
+    );
     product_contract::validate(
         &slug,
         &dependency_receipt,
         ProductContractSources {
             cargo_manifest: cargo_manifest.as_bytes(),
             project_manifest: project_manifest.as_bytes(),
+            dependency_manifest_fragment,
+            creation_command_arguments,
+            author_guide: &author_guide,
             library: LIBRARY_SOURCE,
             headless: HEADLESS_SOURCE,
             desktop: DESKTOP_SOURCE,
@@ -344,7 +353,7 @@ pub(crate) fn build_desktop_2d_v1_plan(
     let members = [
         member(ProjectMember::CargoManifest, cargo_manifest.as_bytes())?,
         member(ProjectMember::ProjectManifest, project_manifest.as_bytes())?,
-        member(ProjectMember::AuthorGuide, AUTHOR_GUIDE)?,
+        member(ProjectMember::AuthorGuide, author_guide.as_bytes())?,
         member(ProjectMember::LibrarySource, LIBRARY_SOURCE)?,
         member(ProjectMember::HeadlessSource, HEADLESS_SOURCE)?,
         member(ProjectMember::DesktopSource, DESKTOP_SOURCE)?,
@@ -365,6 +374,19 @@ pub(crate) fn build_desktop_2d_v1_plan(
         dependency: dependency_receipt,
         members: Box::new(members),
     })
+}
+
+fn render_author_guide(
+    slug: &ProjectSlug,
+    dependency_manifest_fragment: &str,
+    creation_command_arguments: &str,
+) -> String {
+    format!(
+        "# {} author guide\n\n## Pinned identity\n\n- Starter: `desktop-2d/v1`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n## Creation command\n\nRun this command from the authorized destination parent:\n\n```text\nnara new desktop-2d/v1 {} --parent . {creation_command_arguments}\n```\n\n{body}",
+        slug.as_str(),
+        slug.as_str(),
+        body = AUTHOR_GUIDE_BODY,
+    )
 }
 
 fn member(member: ProjectMember, bytes: &[u8]) -> Result<ProjectMemberPlan, &'static str> {

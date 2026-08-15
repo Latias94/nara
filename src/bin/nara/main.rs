@@ -3,6 +3,7 @@ use std::process::ExitCode;
 use nara::project_workflow::{ProjectCreationOutcome, ProjectStartupSceneRepairOutcome};
 
 mod args;
+mod check;
 mod export;
 mod host_fs;
 mod new;
@@ -12,6 +13,7 @@ const HELP: &str = "\
 Nara project workflow
 
 Usage:
+  nara check <project-directory> [--profile <name>]
   nara new desktop-2d/v1 <slug> --parent <directory> --local-checkout <directory>
   nara new desktop-2d/v1 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara export <project-directory> --parent <directory> --destination <name>
@@ -30,12 +32,46 @@ fn main() -> ExitCode {
             println!("nara {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Ok(args::Command::Check(arguments)) => run_check(arguments),
         Ok(args::Command::New(arguments)) => run_new(arguments),
         Ok(args::Command::Export(arguments)) => run_export(arguments),
         Ok(args::Command::Repair(arguments)) => run_repair(arguments),
         Err(error) => {
             eprintln!("error: {error}\n\n{HELP}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn run_check(arguments: args::CheckArguments) -> ExitCode {
+    let profile = arguments.profile.clone();
+    match check::execute(arguments) {
+        Ok(receipt) => {
+            println!(
+                "Project check passed with {} startup-closure members.",
+                receipt.members().len()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            if let Some(issue) = error.startup_scene_issue() {
+                eprintln!(
+                    "error: startup Scene `{}` is missing under the project Scene root `{}`.",
+                    issue.selected_scene(),
+                    issue.scenes_path()
+                );
+                match profile {
+                    Some(profile) => eprintln!(
+                        "repair: nara repair startup-scene <project-directory> --profile {profile} --replacement <scenes-root-relative-scene>"
+                    ),
+                    None => eprintln!(
+                        "repair: nara repair startup-scene <project-directory> --replacement <scenes-root-relative-scene>"
+                    ),
+                }
+            } else {
+                eprintln!("error: {error}");
+            }
+            ExitCode::FAILURE
         }
     }
 }
@@ -65,10 +101,18 @@ fn run_repair(arguments: args::RepairArguments) -> ExitCode {
 
 fn run_export(arguments: args::ExportArguments) -> ExitCode {
     match export::execute(arguments) {
-        Ok(export::ExportCommandOutcome::Accepted(receipt)) => {
+        Ok(export::ExportCommandOutcome::Accepted {
+            receipt,
+            acceptance,
+        }) => {
+            if let Err(error) = export::record_acceptance_observation(&receipt, &acceptance) {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
             println!(
-                "Exported and accepted a candidate with {} startup-closure members.",
-                receipt.plan().members().len()
+                "Exported and accepted a candidate with {} startup-closure members through {} exact product observations.",
+                receipt.plan().members().len(),
+                acceptance.products().len()
             );
             ExitCode::SUCCESS
         }

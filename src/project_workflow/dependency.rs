@@ -190,6 +190,7 @@ impl NaraDependencySourceError {
 
 pub(crate) struct PreparedDependency {
     pub(crate) manifest_fragment: String,
+    pub(crate) creation_command_arguments: String,
     pub(crate) receipt: NaraDependencyReceipt,
     pub(crate) revalidation: PreparedDependencyRevalidation,
 }
@@ -272,8 +273,15 @@ pub(crate) fn prepare_dependency(
             let cargo_path = std::iter::repeat_n("..", parent_jumps)
                 .collect::<Vec<_>>()
                 .join("/");
+            let author_checkout = match destination_parent.depth() {
+                0 => ".".to_owned(),
+                depth => std::iter::repeat_n("..", depth)
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            };
             Ok(PreparedDependency {
                 manifest_fragment: format!("path = \"{cargo_path}\""),
+                creation_command_arguments: format!("--local-checkout {author_checkout}"),
                 receipt: NaraDependencyReceipt {
                     inner: NaraDependencyReceiptInner::LocalCheckout {
                         checkout_identity: checkout.identity(),
@@ -293,6 +301,7 @@ pub(crate) fn prepare_dependency(
             revision,
         } => Ok(PreparedDependency {
             manifest_fragment: format!("git = \"{repository}\", rev = \"{revision}\""),
+            creation_command_arguments: format!("--git {repository} --rev {revision}"),
             receipt: NaraDependencyReceipt {
                 inner: NaraDependencyReceiptInner::ImmutableGit {
                     repository_digest: ContentDigest::of_bytes(repository.as_bytes()),
@@ -359,7 +368,7 @@ fn valid_git_authority(authority: &str) -> bool {
 }
 
 fn valid_git_path_byte(byte: u8) -> bool {
-    byte.is_ascii_graphic() && !matches!(byte, b'"' | b'\'' | b'\\' | b'#' | b'?' | b'&' | b'@')
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~')
 }
 
 fn validate_git_revision(revision: &str) -> Result<(), NaraDependencySourceError> {

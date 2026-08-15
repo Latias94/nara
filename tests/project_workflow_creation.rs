@@ -82,6 +82,17 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
     );
     assert!(!cargo.contains("{{"));
     assert!(!cargo.contains("reference-game"));
+    let guide = plan.member(ProjectMember::AuthorGuide).unwrap();
+    let guide = std::str::from_utf8(guide.bytes()).unwrap();
+    assert!(guide.starts_with("# sample-game author guide\n"));
+    assert!(guide.contains("Starter: `desktop-2d/v1`"));
+    assert!(guide.contains(GIT_REVISION));
+    assert!(guide.contains(&format!(
+        "nara new desktop-2d/v1 sample-game --parent . --git https://github.com/nara-engine/nara.git --rev {GIT_REVISION}"
+    )));
+    assert!(guide.contains("nara check ."));
+    assert!(guide.contains("nara export ."));
+    assert!(guide.contains("nara repair startup-scene ."));
     assert_eq!(
         plan.dependency().immutable_git_repository_digest(),
         Some(ContentDigest::of_bytes(
@@ -158,6 +169,7 @@ fn immutable_git_source_rejects_mutable_or_unsafe_coordinates() {
         "https://user:password@example.com/nara.git",
         "https://example.com:443/nara.git?token=secret",
         "https://example.com:+443/nara.git",
+        "https://example.com/nara;touch-pwned.git",
     ] {
         assert!(
             NaraDependencySource::immutable_git(repository, GIT_REVISION).is_err(),
