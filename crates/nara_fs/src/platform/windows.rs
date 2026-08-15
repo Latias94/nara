@@ -45,7 +45,7 @@ use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
     LockMode, NativeFileIdentity, ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus,
     PublicationAtomicity, PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
-    platform::DirectoryPublicationSupport,
+    platform::{DirectoryPublicationSupport, FileCreateMode},
 };
 
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
@@ -219,6 +219,7 @@ pub(crate) fn create_file_exclusive(
     parent: &File,
     component: &RelativeComponent,
     operation: FsOperation,
+    _mode: FileCreateMode,
 ) -> Result<File, FsError> {
     nt_open(
         parent,

@@ -343,9 +343,28 @@ impl DirectoryCapability {
 
     /// Creates one direct child regular file without overwrite.
     pub fn create_child_file(&self, name: &RelativeComponent) -> Result<FileCapability, FsError> {
+        self.create_child_file_with_mode(name, platform::FileCreateMode::Regular)
+    }
+
+    /// Creates one direct child file with the host's executable permission without overwrite.
+    ///
+    /// Unix adapters create the file with owner execute permission. Platforms without executable
+    /// permission bits use the same exclusive regular-file creation contract.
+    pub fn create_child_executable_file(
+        &self,
+        name: &RelativeComponent,
+    ) -> Result<FileCapability, FsError> {
+        self.create_child_file_with_mode(name, platform::FileCreateMode::Executable)
+    }
+
+    fn create_child_file_with_mode(
+        &self,
+        name: &RelativeComponent,
+        mode: platform::FileCreateMode,
+    ) -> Result<FileCapability, FsError> {
         self.ensure_write(FsOperation::CreateFile)?;
         let file =
-            platform::create_file_exclusive(&self.inner.file, name, FsOperation::CreateFile)?;
+            platform::create_file_exclusive(&self.inner.file, name, FsOperation::CreateFile, mode)?;
         let facts = platform::facts(&file)
             .map_err(|error| FsError::exclusive_child_unverified(FsOperation::CreateFile, error))?;
         validate_file_facts(&self.inner, facts)
@@ -367,8 +386,12 @@ impl DirectoryCapability {
 
     pub fn create_temp(&self, name: &RelativeComponent) -> Result<TemporaryFile, FsError> {
         self.ensure_write(FsOperation::CreateTemporary)?;
-        let file =
-            platform::create_file_exclusive(&self.inner.file, name, FsOperation::CreateTemporary)?;
+        let file = platform::create_file_exclusive(
+            &self.inner.file,
+            name,
+            FsOperation::CreateTemporary,
+            platform::FileCreateMode::Regular,
+        )?;
         let facts = platform::facts(&file)?;
         validate_file_facts(&self.inner, facts)?;
         let file = FileCapability::from_opened(
@@ -716,6 +739,41 @@ mod tests {
             Err(FsError::CapabilitySessionExhausted)
         ));
         assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_child_has_owner_execute_permission() {
+        use std::os::unix::fs::PermissionsExt;
+
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "nara_fs_executable_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let capability = DirectoryCapability::from_host_handle(
+            File::open(&root).unwrap(),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+        )
+        .unwrap();
+
+        let executable = capability
+            .create_child_executable_file(&RelativeComponent::new("runner").unwrap())
+            .unwrap();
+        drop(executable);
+        assert_ne!(
+            std::fs::metadata(root.join("runner"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o100,
+            0
+        );
+
+        drop(capability);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(any(unix, windows))]

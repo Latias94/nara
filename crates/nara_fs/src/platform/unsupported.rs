@@ -4,7 +4,7 @@ use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileSyncTier, FsError, FsOperation, LockMode,
     ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus, PublicationAtomicity,
     PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
-    platform::DirectoryPublicationSupport,
+    platform::{DirectoryPublicationSupport, FileCreateMode},
 };
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
@@ -89,6 +89,7 @@ pub(crate) fn create_file_exclusive(
     _parent: &File,
     _component: &RelativeComponent,
     operation: FsOperation,
+    _mode: FileCreateMode,
 ) -> Result<File, FsError> {
     unsupported(operation)
 }

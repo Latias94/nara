@@ -40,6 +40,12 @@ pub(crate) enum DirectoryCreation {
     CreatedButUnopened(FsError),
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum FileCreateMode {
+    Regular,
+    Executable,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DirectoryPublicationSupport {
     Proven(PublicationSourceBinding),
@@ -406,8 +412,9 @@ pub(crate) fn create_file_exclusive(
     parent: &File,
     component: &RelativeComponent,
     operation: crate::FsOperation,
+    mode: FileCreateMode,
 ) -> Result<File, FsError> {
-    imp::create_file_exclusive(parent, component, operation)
+    imp::create_file_exclusive(parent, component, operation, mode)
 }
 
 pub(crate) fn publish_directory_no_replace(

@@ -10,7 +10,7 @@ use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
     LockMode, NativeFileIdentity, ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus,
     PublicationAtomicity, PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
-    platform::DirectoryPublicationSupport,
+    platform::{DirectoryPublicationSupport, FileCreateMode},
 };
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
@@ -231,12 +231,17 @@ pub(crate) fn create_file_exclusive(
     parent: &File,
     component: &RelativeComponent,
     operation: FsOperation,
+    mode: FileCreateMode,
 ) -> Result<File, FsError> {
+    let mode = match mode {
+        FileCreateMode::Regular => Mode::RUSR | Mode::WUSR,
+        FileCreateMode::Executable => Mode::RUSR | Mode::WUSR | Mode::XUSR,
+    };
     let result = openat(
         parent,
         component.as_os_str(),
         OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-        Mode::RUSR | Mode::WUSR,
+        mode,
     );
     match result {
         Ok(file) => Ok(File::from(file)),

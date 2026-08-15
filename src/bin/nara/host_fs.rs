@@ -38,7 +38,7 @@ fn directory(
     path: &Path,
     rights: CapabilityRights,
 ) -> Result<DirectoryCapability, HostDirectoryError> {
-    let file = open_directory(path).map_err(HostDirectoryError::Open)?;
+    let file = open_directory(path, rights).map_err(HostDirectoryError::Open)?;
     DirectoryCapability::from_host_handle(
         file,
         HostCapabilityOptions::new(rights, TrustMode::TrustedLocal),
@@ -53,19 +53,20 @@ pub(crate) fn readable_file(path: &Path) -> Result<FileCapability, HostFileError
 }
 
 #[cfg(windows)]
-fn open_directory(path: &Path) -> io::Result<File> {
+fn open_directory(path: &Path, rights: CapabilityRights) -> io::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
 
     const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x1 | 0x2 | 0x4;
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 
-    OpenOptions::new()
+    let mut options = OpenOptions::new();
+    options
         .read(true)
-        .write(true)
+        .write(rights == CapabilityRights::ReadWrite)
         .share_mode(FILE_SHARE_READ_WRITE_DELETE)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    options.open(path)
 }
 
 #[cfg(windows)]
@@ -83,7 +84,7 @@ fn open_file(path: &Path) -> io::Result<File> {
 }
 
 #[cfg(not(windows))]
-fn open_directory(path: &Path) -> io::Result<File> {
+fn open_directory(path: &Path, _rights: CapabilityRights) -> io::Result<File> {
     File::open(path)
 }
 

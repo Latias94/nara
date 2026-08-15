@@ -108,12 +108,18 @@ pub(super) fn stage_export_tree(
                     source,
                 })?,
         };
-        let mut target_file = parent.create_child_file(&leaf).map_err(|source| {
-            ProjectExportStageError::CreateFile {
+        let target_file = match member.kind {
+            super::ProjectExportMemberKind::HeadlessExecutable
+            | super::ProjectExportMemberKind::DesktopExecutable => {
+                parent.create_child_executable_file(&leaf)
+            }
+            super::ProjectExportMemberKind::StartupContent(_) => parent.create_child_file(&leaf),
+        };
+        let mut target_file =
+            target_file.map_err(|source| ProjectExportStageError::CreateFile {
                 path: member.path.clone(),
                 source,
-            }
-        })?;
+            })?;
         let copied = {
             let mut limited = (&mut source_reader).take(member.digest.length().saturating_add(1));
             let mut writer =
