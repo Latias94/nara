@@ -995,10 +995,12 @@ fn apply_changes_rejects_prefab_expansion_and_stale_document_without_mutation() 
         [ComponentTypeId::new("nara.sprite.Sprite")],
     );
     editor.request_apply_changes(stale_request).unwrap();
+    let base_revision = editor.workspace().scene(document).unwrap().revision();
     assert!(
         editor
             .apply_workspace_command(nara::tooling::EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(document),
+                document,
+                base_revision,
                 patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                     entity: SceneEntityRecord::new(SceneEntityId::new("later-edit").unwrap()),
                     placement: ScenePlacement::last(ScenePlacementOwner::Root),

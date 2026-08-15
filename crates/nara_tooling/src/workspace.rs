@@ -11,8 +11,8 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    SceneAuthoringRevision, SceneAuthoringSession, SceneDocument, SceneEntityId,
-    ScenePatchDocument, ScenePatchReport,
+    SceneAuthoringContentState, SceneAuthoringRevision, SceneAuthoringSession, SceneDocument,
+    SceneEntityId, ScenePatchDocument, ScenePatchReport,
 };
 
 use crate::diagnostic;
@@ -82,6 +82,8 @@ pub struct EditorPersistenceCheckpoint {
     identity: Arc<EditorWorkspacePersistenceIdentity>,
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
+    content_state: SceneAuthoringContentState,
+    scene: SceneDocument,
 }
 
 /// Linear proof that one captured revision was published with the required filesystem evidence.
@@ -138,6 +140,17 @@ impl EditorPersistenceCheckpoint {
     #[must_use]
     pub const fn revision(&self) -> SceneAuthoringRevision {
         self.revision
+    }
+
+    #[must_use]
+    pub const fn content_state(&self) -> SceneAuthoringContentState {
+        self.content_state
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn scene(&self) -> &SceneDocument {
+        &self.scene
     }
 }
 
@@ -216,6 +229,7 @@ impl EditorWorkspace {
         &mut self,
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
+        content_state: SceneAuthoringContentState,
         digest: EditorDocumentDigest,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
@@ -229,14 +243,18 @@ impl EditorWorkspace {
         let revision_not_ahead = revision.generation() <= current.generation();
         let revision_not_regressed = revision.source_id() == saved.source_id()
             && revision.generation() >= saved.generation();
-        if !revision_matches_source || !revision_not_ahead || !revision_not_regressed {
+        if !revision_matches_source
+            || !revision_not_ahead
+            || !revision_not_regressed
+            || !slot.session.owns_content_state(content_state)
+        {
             return workspace_error_report(
                 context,
                 "tooling.workspace-persistence-checkpoint-mismatch",
                 "persistence checkpoint does not match the open document revision",
             );
         }
-        slot.apply_persistence_checkpoint(revision, digest);
+        slot.apply_persistence_checkpoint(revision, content_state, digest);
         report_for_slot(document, active_document, slot)
     }
 
@@ -306,14 +324,24 @@ impl EditorWorkspace {
             EditorWorkspaceCommand::SelectEntity { document, entity } => {
                 self.select_entity(document, entity)
             }
-            EditorWorkspaceCommand::ApplyInspectorCommand { document, command } => {
-                self.apply_inspector_command(registry, document, command)
-            }
-            EditorWorkspaceCommand::ApplyScenePatch { document, patch } => {
-                self.apply_scene_patch(registry, document, patch)
-            }
-            EditorWorkspaceCommand::Undo { document } => self.undo(registry, document),
-            EditorWorkspaceCommand::Redo { document } => self.redo(registry, document),
+            EditorWorkspaceCommand::ApplyInspectorCommand {
+                document,
+                base_revision,
+                command,
+            } => self.apply_inspector_command(registry, document, base_revision, command),
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document,
+                base_revision,
+                patch,
+            } => self.apply_scene_patch(registry, document, base_revision, patch),
+            EditorWorkspaceCommand::Undo {
+                document,
+                base_revision,
+            } => self.undo(registry, document, base_revision),
+            EditorWorkspaceCommand::Redo {
+                document,
+                base_revision,
+            } => self.redo(registry, document, base_revision),
             EditorWorkspaceCommand::MarkExternalChanged { document } => {
                 self.mark_external_changed(document)
             }
@@ -322,13 +350,13 @@ impl EditorWorkspace {
 
     #[must_use]
     pub fn model(
-        &mut self,
+        &self,
         registry: &ComponentRegistry,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> EditorWorkspaceModel {
         let active_scene = self.active_document.and_then(|document| {
             self.scenes
-                .get_mut(&document)
+                .get(&document)
                 .map(|slot| slot.model(document, registry, edit_world_snapshot))
         });
 
@@ -350,15 +378,8 @@ impl EditorWorkspace {
         }
     }
 
-    fn close_scene(&mut self, document: Option<EditorDocumentId>) -> EditorWorkspaceCommandReport {
-        let context = WorkspaceDocumentContext::new(self.active_document, document);
-        let Some(document) = context.target else {
-            return workspace_error_report(
-                context,
-                "tooling.workspace-no-active-document",
-                "workspace command requires an active document",
-            );
-        };
+    fn close_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
         let Some(slot) = self.scenes.get(&document) else {
             return workspace_document_error_report(context, document);
         };
@@ -400,18 +421,8 @@ impl EditorWorkspace {
         }
     }
 
-    fn set_active_scene(
-        &mut self,
-        document: Option<EditorDocumentId>,
-    ) -> EditorWorkspaceCommandReport {
-        let context = WorkspaceDocumentContext::new(self.active_document, document);
-        let Some(document) = context.target else {
-            return workspace_error_report(
-                context,
-                "tooling.workspace-no-active-document",
-                "workspace has no active document",
-            );
-        };
+    fn set_active_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
         if !self.scenes.contains_key(&document) {
             return workspace_document_error_report(context, document);
         }
@@ -427,13 +438,13 @@ impl EditorWorkspace {
 
     fn select_entity(
         &mut self,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
         entity: Option<SceneEntityId>,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.scenes.get_mut(&document) else {
+            return workspace_document_error_report(context, document);
         };
         if let Some(entity) = &entity
             && !document_has_entity(slot.session.document(), entity)
@@ -447,30 +458,26 @@ impl EditorWorkspace {
             );
         }
         slot.selection.select_entity(entity);
-        slot.sync_editor_selection();
         report_for_slot(document, active_document, slot)
     }
 
     fn apply_inspector_command(
         &mut self,
         registry: &ComponentRegistry,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         command: SceneInspectorCommand,
     ) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
-        slot.sync_editor_selection();
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
         let inspector_report =
             slot.editor
                 .apply_inspector_command(&mut slot.session, registry, command);
         if inspector_report.applied {
-            slot.selection
-                .select_entity(inspector_report.selected_entity.clone());
             slot.selection.retain_existing(slot.session.document());
-            slot.sync_editor_selection();
         }
         let mut report = report_for_slot(document, active_document, slot);
         report.applied = inspector_report.applied;
@@ -482,78 +489,79 @@ impl EditorWorkspace {
     fn apply_scene_patch(
         &mut self,
         registry: &ComponentRegistry,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     ) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
         let patch_report = slot.session.apply_patch(&patch, registry);
-        if patch_report.applied {
-            slot.selection.retain_existing(slot.session.document());
-            slot.sync_editor_selection();
-        }
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = patch_report.applied;
-        report.patch_report = Some(patch_report.clone());
-        let _ = report.diagnostics.extend(patch_report.diagnostics);
-        report
+        report_for_patch_slot(document, active_document, slot, patch_report)
     }
 
     fn undo(
         &mut self,
         registry: &ComponentRegistry,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
         let patch_report = slot.session.undo(registry);
-        if patch_report.applied {
-            slot.selection.retain_existing(slot.session.document());
-            slot.sync_editor_selection();
-        }
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = patch_report.applied;
-        report.patch_report = Some(patch_report.clone());
-        let _ = report.diagnostics.extend(patch_report.diagnostics);
-        report
+        report_for_patch_slot(document, active_document, slot, patch_report)
     }
 
     fn redo(
         &mut self,
         registry: &ComponentRegistry,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
-        };
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
         let patch_report = slot.session.redo(registry);
-        if patch_report.applied {
-            slot.selection.retain_existing(slot.session.document());
-            slot.sync_editor_selection();
+        report_for_patch_slot(document, active_document, slot, patch_report)
+    }
+
+    fn resolve_exact_mutation_slot(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<(Option<EditorDocumentId>, &mut EditorSceneSlot), EditorWorkspaceCommandReport>
+    {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.scenes.get_mut(&document) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if slot.revision() != base_revision {
+            return Err(workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision(),
+            ));
         }
-        let mut report = report_for_slot(document, active_document, slot);
-        report.applied = patch_report.applied;
-        report.patch_report = Some(patch_report.clone());
-        let _ = report.diagnostics.extend(patch_report.diagnostics);
-        report
+        Ok((active_document, slot))
     }
 
     fn mark_external_changed(
         &mut self,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return workspace_resolution_error_report(context);
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.scenes.get_mut(&document) else {
+            return workspace_document_error_report(context, document);
         };
         slot.external_reload = if slot.is_dirty() {
             EditorExternalReloadState::Conflict
@@ -565,17 +573,18 @@ impl EditorWorkspace {
 
     pub fn reload_external_session(
         &mut self,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         session: SceneAuthoringSession,
     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return Err(EditorSceneSessionPublicationError::new(
-                workspace_resolution_error_report(context),
-                session,
-            ));
-        };
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => {
+                    return Err(EditorSceneSessionPublicationError::new(report, session));
+                }
+            };
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
         if slot.session.live_instance().is_some() {
             return Err(EditorSceneSessionPublicationError::new(
                 workspace_error_report(
@@ -611,6 +620,7 @@ impl EditorWorkspace {
         slot.selection.clear();
         slot.editor = SceneEditorState::new();
         slot.saved_revision = slot.session.revision();
+        slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = None;
         slot.external_reload = EditorExternalReloadState::Clean;
         Ok(report_for_slot(document, active_document, slot))
@@ -623,18 +633,19 @@ impl EditorWorkspace {
     /// this method only performs the workspace publication and resets authoring-local state.
     fn publish_reopened_session(
         &mut self,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         session: SceneAuthoringSession,
         digest: EditorDocumentDigest,
     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
-        let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, document);
-        let Some((document, slot)) = self.resolve_scene_mut(document) else {
-            return Err(EditorSceneSessionPublicationError::new(
-                workspace_resolution_error_report(context),
-                session,
-            ));
-        };
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => {
+                    return Err(EditorSceneSessionPublicationError::new(report, session));
+                }
+            };
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
         if slot.session.live_instance().is_some() {
             return Err(EditorSceneSessionPublicationError::new(
                 workspace_error_report(
@@ -660,6 +671,7 @@ impl EditorWorkspace {
         slot.selection.clear();
         slot.editor = SceneEditorState::new();
         slot.saved_revision = slot.session.revision();
+        slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = Some(digest);
         slot.external_reload = EditorExternalReloadState::Clean;
         Ok(report_for_slot(document, active_document, slot))
@@ -668,19 +680,6 @@ impl EditorWorkspace {
     fn allocate_document_id(&mut self) -> EditorDocumentId {
         self.next_document_id = self.next_document_id.saturating_add(1);
         EditorDocumentId::from_raw(self.next_document_id)
-    }
-
-    fn resolve_document(&self, document: Option<EditorDocumentId>) -> Option<EditorDocumentId> {
-        document.or(self.active_document)
-    }
-
-    fn resolve_scene_mut(
-        &mut self,
-        document: Option<EditorDocumentId>,
-    ) -> Option<(EditorDocumentId, &mut EditorSceneSlot)> {
-        let document = self.resolve_document(document)?;
-        let slot = self.scenes.get_mut(&document)?;
-        Some((document, slot))
     }
 }
 
@@ -691,6 +690,7 @@ pub struct EditorSceneSlot {
     editor: SceneEditorState,
     selection: EditorSelectionSet,
     saved_revision: SceneAuthoringRevision,
+    saved_content_state: SceneAuthoringContentState,
     saved_digest: Option<EditorDocumentDigest>,
     external_reload: EditorExternalReloadState,
 }
@@ -698,12 +698,14 @@ pub struct EditorSceneSlot {
 impl EditorSceneSlot {
     fn from_session(title: impl Into<String>, session: SceneAuthoringSession) -> Self {
         let saved_revision = session.revision();
+        let saved_content_state = session.content_state();
         Self {
             title: title.into(),
             session,
             editor: SceneEditorState::new(),
             selection: EditorSelectionSet::default(),
             saved_revision,
+            saved_content_state,
             saved_digest: None,
             external_reload: EditorExternalReloadState::Clean,
         }
@@ -740,13 +742,19 @@ impl EditorSceneSlot {
     }
 
     #[must_use]
+    pub fn saved_content_state(&self) -> SceneAuthoringContentState {
+        self.saved_content_state
+    }
+
+    #[must_use]
     pub const fn saved_digest(&self) -> Option<EditorDocumentDigest> {
         self.saved_digest
     }
 
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.session.revision() != self.saved_revision || self.session.source_upgrade_required()
+        self.session.content_state() != self.saved_content_state
+            || self.session.source_upgrade_required()
     }
 
     #[must_use]
@@ -757,18 +765,24 @@ impl EditorSceneSlot {
     fn apply_persistence_checkpoint(
         &mut self,
         revision: SceneAuthoringRevision,
+        content_state: SceneAuthoringContentState,
         digest: EditorDocumentDigest,
     ) {
         self.saved_revision = revision;
+        self.saved_content_state = content_state;
         self.saved_digest = Some(digest);
-        self.session.acknowledge_source_saved();
+        let acknowledged = self.session.acknowledge_source_saved(content_state);
+        debug_assert!(
+            acknowledged,
+            "checkpoint source was validated before commit"
+        );
         if self.external_reload != EditorExternalReloadState::Conflict {
             self.external_reload = EditorExternalReloadState::Clean;
         }
     }
 
     fn model(
-        &mut self,
+        &self,
         document: EditorDocumentId,
         registry: &ComponentRegistry,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
@@ -790,12 +804,6 @@ impl EditorSceneSlot {
             editor,
         }
     }
-
-    fn sync_editor_selection(&mut self) {
-        self.editor
-            .inspector_mut()
-            .select_entity(self.selection.top_entity().cloned());
-    }
 }
 
 impl EditorPersistenceAuthority {
@@ -809,11 +817,13 @@ impl EditorPersistenceAuthority {
         if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
             return None;
         }
-        let revision = workspace.scene(document)?.revision();
+        let slot = workspace.scene(document)?;
         Some(EditorPersistenceCheckpoint {
             identity: Arc::clone(&self.identity),
             document,
-            revision,
+            revision: slot.revision(),
+            content_state: slot.session.content_state(),
+            scene: slot.session.document().clone(),
         })
     }
 
@@ -839,7 +849,12 @@ impl EditorPersistenceAuthority {
                 "persistence checkpoint does not belong to the hosted workspace authority",
             );
         }
-        workspace.apply_persistence_checkpoint(checkpoint.document, checkpoint.revision, digest)
+        workspace.apply_persistence_checkpoint(
+            checkpoint.document,
+            checkpoint.revision,
+            checkpoint.content_state,
+            digest,
+        )
     }
 
     /// Binds bytes read by the concrete Host when it first opened a document.
@@ -866,12 +881,13 @@ impl EditorPersistenceAuthority {
     pub fn publish_reopened_session(
         &mut self,
         workspace: &mut EditorWorkspace,
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         session: SceneAuthoringSession,
         digest: EditorDocumentDigest,
     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
         if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
-            let context = WorkspaceDocumentContext::new(workspace.active_document, document);
+            let context = WorkspaceDocumentContext::new(workspace.active_document, Some(document));
             return Err(EditorSceneSessionPublicationError::new(
                 workspace_error_report(
                     context,
@@ -881,7 +897,7 @@ impl EditorPersistenceAuthority {
                 session,
             ));
         }
-        workspace.publish_reopened_session(document, session, digest)
+        workspace.publish_reopened_session(document, base_revision, session, digest)
     }
 }
 
@@ -947,31 +963,35 @@ pub enum EditorExternalReloadState {
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorWorkspaceCommand {
     CloseScene {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
     },
     SetActiveScene {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
     },
     SelectEntity {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
         entity: Option<SceneEntityId>,
     },
     ApplyInspectorCommand {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         command: SceneInspectorCommand,
     },
     ApplyScenePatch {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     },
     Undo {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
     },
     Redo {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
     },
     MarkExternalChanged {
-        document: Option<EditorDocumentId>,
+        document: EditorDocumentId,
     },
 }
 
@@ -1071,6 +1091,24 @@ fn report_for_slot(
     }
 }
 
+fn report_for_patch_slot(
+    document: EditorDocumentId,
+    active_document: Option<EditorDocumentId>,
+    slot: &mut EditorSceneSlot,
+    patch_report: ScenePatchReport,
+) -> EditorWorkspaceCommandReport {
+    if patch_report.applied {
+        slot.selection.retain_existing(slot.session.document());
+    }
+    let applied = patch_report.applied;
+    let diagnostics = patch_report.diagnostics.clone();
+    let mut report = report_for_slot(document, active_document, slot);
+    report.applied = applied;
+    report.patch_report = Some(patch_report);
+    let _ = report.diagnostics.extend(diagnostics);
+    report
+}
+
 fn workspace_error_report(
     context: WorkspaceDocumentContext,
     code: &'static str,
@@ -1115,6 +1153,39 @@ fn workspace_document_error_report(
     }
 }
 
+fn workspace_revision_error_report(
+    context: WorkspaceDocumentContext,
+    document: EditorDocumentId,
+    base_revision: SceneAuthoringRevision,
+    current_revision: SceneAuthoringRevision,
+) -> EditorWorkspaceCommandReport {
+    let diagnostic = diagnostic::with_public_u64(
+        diagnostic::with_public_u64(
+            with_workspace_document_context(
+                diagnostic::error(
+                    "tooling.workspace-stale-document-revision",
+                    "workspace mutation targets a stale document revision",
+                ),
+                context,
+            ),
+            "base_generation",
+            base_revision.generation(),
+        ),
+        "current_generation",
+        current_revision.generation(),
+    );
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic);
+    EditorWorkspaceCommandReport {
+        applied: false,
+        document: Some(document),
+        active_document: context.active,
+        revision: Some(current_revision),
+        diagnostics,
+        ..EditorWorkspaceCommandReport::default()
+    }
+}
+
 fn workspace_entity_error_report(
     context: WorkspaceDocumentContext,
     document: EditorDocumentId,
@@ -1133,19 +1204,6 @@ fn workspace_entity_error_report(
         active_document: context.active,
         diagnostics,
         ..EditorWorkspaceCommandReport::default()
-    }
-}
-
-fn workspace_resolution_error_report(
-    context: WorkspaceDocumentContext,
-) -> EditorWorkspaceCommandReport {
-    match context.target {
-        Some(document) => workspace_document_error_report(context, document),
-        None => workspace_error_report(
-            context,
-            "tooling.workspace-no-active-document",
-            "workspace command requires an active document",
-        ),
     }
 }
 
@@ -1185,21 +1243,16 @@ mod tests {
             .unwrap();
         let document = opened.opened_document.unwrap();
 
-        let edited = workspace.apply_command(
+        let edited = apply_patch(
+            &mut workspace,
             &registry,
-            EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(document),
-                patch: add_entity_patch("dirty"),
-            },
+            document,
+            add_entity_patch("dirty"),
         );
         assert!(edited.applied);
 
-        let close = workspace.apply_command(
-            &registry,
-            EditorWorkspaceCommand::CloseScene {
-                document: Some(document),
-            },
-        );
+        let close =
+            workspace.apply_command(&registry, EditorWorkspaceCommand::CloseScene { document });
         assert!(!close.applied);
         assert_eq!(workspace.len(), 1);
         assert_eq!(workspace.active_document(), Some(document));
@@ -1224,28 +1277,24 @@ mod tests {
         let stale = authority.capture(&workspace, document).unwrap();
 
         assert!(
-            workspace
-                .apply_command(
-                    &registry,
-                    EditorWorkspaceCommand::ApplyScenePatch {
-                        document: Some(document),
-                        patch: add_entity_patch("captured"),
-                    },
-                )
-                .applied
+            apply_patch(
+                &mut workspace,
+                &registry,
+                document,
+                add_entity_patch("captured")
+            )
+            .applied
         );
         let captured_revision = workspace.scene(document).unwrap().revision();
         let accepted_checkpoint = authority.capture(&workspace, document).unwrap();
         assert!(
-            workspace
-                .apply_command(
-                    &registry,
-                    EditorWorkspaceCommand::ApplyScenePatch {
-                        document: Some(document),
-                        patch: add_entity_patch("later"),
-                    },
-                )
-                .applied
+            apply_patch(
+                &mut workspace,
+                &registry,
+                document,
+                add_entity_patch("later")
+            )
+            .applied
         );
 
         let digest = EditorDocumentDigest::new(7, [0x5a; 32]);
@@ -1357,24 +1406,18 @@ mod tests {
         workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SelectEntity {
-                document: Some(first),
+                document: first,
                 entity: Some(hero.clone()),
             },
         );
         workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SelectEntity {
-                document: Some(second),
+                document: second,
                 entity: Some(enemy.clone()),
             },
         );
-        workspace.apply_command(
-            &registry,
-            EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(first),
-                patch: add_entity_patch("prop"),
-            },
-        );
+        apply_patch(&mut workspace, &registry, first, add_entity_patch("prop"));
 
         let first_slot = workspace.scene(first).unwrap();
         let second_slot = workspace.scene(second).unwrap();
@@ -1397,7 +1440,7 @@ mod tests {
         let report = workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SelectEntity {
-                document: Some(document),
+                document,
                 entity: Some(entity_id("missing")),
             },
         );
@@ -1434,7 +1477,7 @@ mod tests {
         let report = workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SelectEntity {
-                document: Some(requested),
+                document: requested,
                 entity: Some(entity_id("target-b")),
             },
         );
@@ -1466,6 +1509,82 @@ mod tests {
     }
 
     #[test]
+    fn exact_mutation_rejects_wrong_document_and_stale_revision_atomically() {
+        let mut workspace = EditorWorkspace::new();
+        let registry = frozen_empty_registry();
+        let hero = entity_id("hero");
+        let document = open_scene(&mut workspace, "scene", scene_with_entity(hero.clone()));
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::SelectEntity {
+                        document,
+                        entity: Some(hero.clone()),
+                    },
+                )
+                .applied
+        );
+        let base_revision = workspace.scene(document).unwrap().revision();
+        let missing = EditorDocumentId::from_raw(document.raw().saturating_add(100));
+        let wrong_document = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document: missing,
+                base_revision,
+                patch: add_entity_patch("wrong"),
+            },
+        );
+        assert!(!wrong_document.applied);
+        assert_eq!(workspace.scene(document).unwrap().revision(), base_revision);
+        assert_eq!(
+            workspace.scene(document).unwrap().selection().top_entity(),
+            Some(&hero)
+        );
+
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::ApplyScenePatch {
+                        document,
+                        base_revision,
+                        patch: add_entity_patch("accepted"),
+                    },
+                )
+                .applied
+        );
+        let after = workspace.scene(document).unwrap();
+        let after_document = after.session().document().clone();
+        let after_revision = after.revision();
+        let after_state = after.session().content_state();
+        let after_history = after.session().history_status();
+        let after_selection = after.selection().clone();
+        let after_dirty = after.is_dirty();
+
+        let stale = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document,
+                base_revision,
+                patch: add_entity_patch("stale"),
+            },
+        );
+        assert!(!stale.applied);
+        assert_eq!(
+            stale.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-stale-document-revision"
+        );
+        let current = workspace.scene(document).unwrap();
+        assert_eq!(current.session().document(), &after_document);
+        assert_eq!(current.revision(), after_revision);
+        assert_eq!(current.session().content_state(), after_state);
+        assert_eq!(current.session().history_status(), after_history);
+        assert_eq!(current.selection(), &after_selection);
+        assert_eq!(current.is_dirty(), after_dirty);
+    }
+
+    #[test]
     fn requested_document_remains_target_when_another_document_is_active() {
         let mut workspace = EditorWorkspace::new();
         let registry = frozen_empty_registry();
@@ -1481,15 +1600,13 @@ mod tests {
         );
         workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::SetActiveScene {
-                document: Some(active),
-            },
+            EditorWorkspaceCommand::SetActiveScene { document: active },
         );
 
         let report = workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SelectEntity {
-                document: Some(requested),
+                document: requested,
                 entity: Some(entity_id("missing-in-b")),
             },
         );
@@ -1517,33 +1634,44 @@ mod tests {
     }
 
     #[test]
-    fn undo_targets_active_document_only() {
+    fn undo_requires_the_exact_document_and_current_revision() {
         let mut workspace = EditorWorkspace::new();
         let registry = frozen_empty_registry();
         let first = open_scene(&mut workspace, "first", SceneDocument::default());
         let second = open_scene(&mut workspace, "second", SceneDocument::default());
 
-        workspace.apply_command(
+        apply_patch(
+            &mut workspace,
             &registry,
-            EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(first),
-                patch: add_entity_patch("first_entity"),
-            },
+            first,
+            add_entity_patch("first_entity"),
+        );
+        let stale_second = workspace.scene(second).unwrap().revision();
+        apply_patch(
+            &mut workspace,
+            &registry,
+            second,
+            add_entity_patch("second_entity"),
         );
         workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(second),
-                patch: add_entity_patch("second_entity"),
-            },
+            EditorWorkspaceCommand::SetActiveScene { document: first },
         );
-        workspace.apply_command(
+
+        let stale = workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::SetActiveScene {
-                document: Some(second),
+            EditorWorkspaceCommand::Undo {
+                document: second,
+                base_revision: stale_second,
             },
         );
-        workspace.apply_command(&registry, EditorWorkspaceCommand::Undo { document: None });
+        assert!(!stale.applied);
+        assert!(document_has_entity(
+            workspace.scene(second).unwrap().session().document(),
+            &entity_id("second_entity")
+        ));
+
+        assert!(undo(&mut workspace, &registry, second).applied);
 
         assert!(document_has_entity(
             workspace.scene(first).unwrap().session().document(),
@@ -1569,14 +1697,13 @@ mod tests {
         ]);
         let document = open_scene(&mut workspace, "ordered", original.clone());
 
-        let moved = workspace.apply_command(
+        let moved = apply_inspector(
+            &mut workspace,
             &registry,
-            EditorWorkspaceCommand::ApplyInspectorCommand {
-                document: Some(document),
-                command: SceneInspectorCommand::MoveEntity {
-                    entity: last.clone(),
-                    to: ScenePlacement::first(ScenePlacementOwner::Root),
-                },
+            document,
+            SceneInspectorCommand::MoveEntity {
+                entity: last.clone(),
+                to: ScenePlacement::first(ScenePlacementOwner::Root),
             },
         );
 
@@ -1588,31 +1715,13 @@ mod tests {
         );
         assert_eq!(slot.session().history_status().undo_depth, 1);
 
-        assert!(
-            workspace
-                .apply_command(
-                    &registry,
-                    EditorWorkspaceCommand::Undo {
-                        document: Some(document),
-                    },
-                )
-                .applied
-        );
+        assert!(undo(&mut workspace, &registry, document).applied);
         assert_eq!(
             workspace.scene(document).unwrap().session().document(),
             &original
         );
 
-        assert!(
-            workspace
-                .apply_command(
-                    &registry,
-                    EditorWorkspaceCommand::Redo {
-                        document: Some(document),
-                    },
-                )
-                .applied
-        );
+        assert!(redo(&mut workspace, &registry, document).applied);
         assert_eq!(
             workspace
                 .scene(document)
@@ -1632,18 +1741,18 @@ mod tests {
 
         workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::MarkExternalChanged {
-                document: Some(document),
-            },
+            EditorWorkspaceCommand::MarkExternalChanged { document },
         );
         assert_eq!(
             workspace.scene(document).unwrap().external_reload(),
             EditorExternalReloadState::Pending
         );
 
+        let base_revision = workspace.scene(document).unwrap().revision();
         workspace
             .reload_external_session(
-                Some(document),
+                document,
+                base_revision,
                 SceneAuthoringSession::new(scene_with_entity(entity_id("fresh"))),
             )
             .unwrap();
@@ -1656,18 +1765,15 @@ mod tests {
             EditorExternalReloadState::Clean
         );
 
-        workspace.apply_command(
+        apply_patch(
+            &mut workspace,
             &registry,
-            EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(document),
-                patch: add_entity_patch("dirty"),
-            },
+            document,
+            add_entity_patch("dirty"),
         );
         workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::MarkExternalChanged {
-                document: Some(document),
-            },
+            EditorWorkspaceCommand::MarkExternalChanged { document },
         );
         assert_eq!(
             workspace.scene(document).unwrap().external_reload(),
@@ -1676,8 +1782,9 @@ mod tests {
 
         let replacement = SceneAuthoringSession::new(scene_with_entity(entity_id("rejected")));
         let replacement_revision = replacement.revision();
+        let base_revision = workspace.scene(document).unwrap().revision();
         let error = workspace
-            .reload_external_session(Some(document), replacement)
+            .reload_external_session(document, base_revision, replacement)
             .unwrap_err();
         assert!(
             error
@@ -1729,8 +1836,9 @@ mod tests {
             original_revision.source_id()
         );
 
+        let base_revision = workspace.scene(document).unwrap().revision();
         let report = workspace
-            .reload_external_session(Some(document), replacement)
+            .reload_external_session(document, base_revision, replacement)
             .unwrap();
 
         assert!(report.applied);
@@ -1752,7 +1860,7 @@ mod tests {
         let replacement_revision = replacement.revision();
 
         let error = workspace
-            .reload_external_session(Some(missing), replacement)
+            .reload_external_session(missing, replacement_revision, replacement)
             .unwrap_err();
         assert!(
             error
@@ -1802,6 +1910,70 @@ mod tests {
             .find(|field| field.key().as_str() == key)
             .unwrap()
             .value()
+    }
+
+    fn apply_patch(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        patch: ScenePatchDocument,
+    ) -> EditorWorkspaceCommandReport {
+        let base_revision = workspace.scene(document).unwrap().revision();
+        workspace.apply_command(
+            registry,
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document,
+                base_revision,
+                patch,
+            },
+        )
+    }
+
+    fn apply_inspector(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        command: SceneInspectorCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let base_revision = workspace.scene(document).unwrap().revision();
+        workspace.apply_command(
+            registry,
+            EditorWorkspaceCommand::ApplyInspectorCommand {
+                document,
+                base_revision,
+                command,
+            },
+        )
+    }
+
+    fn undo(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+    ) -> EditorWorkspaceCommandReport {
+        let base_revision = workspace.scene(document).unwrap().revision();
+        workspace.apply_command(
+            registry,
+            EditorWorkspaceCommand::Undo {
+                document,
+                base_revision,
+            },
+        )
+    }
+
+    fn redo(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+    ) -> EditorWorkspaceCommandReport {
+        let base_revision = workspace.scene(document).unwrap().revision();
+        workspace.apply_command(
+            registry,
+            EditorWorkspaceCommand::Redo {
+                document,
+                base_revision,
+            },
+        )
     }
 
     fn frozen_empty_registry() -> ComponentRegistry {

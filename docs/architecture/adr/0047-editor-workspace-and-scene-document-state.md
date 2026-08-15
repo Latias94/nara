@@ -2,7 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-07-28
+**Last Revised**: 2026-08-15
+**Amended**: 2026-08-15 to make selection single-owner and separate monotonic revision from
+receipt-backed content state
 **Refines**: ADR 0015, ADR 0026, ADR 0034, ADR 0038, ADR 0043
 **Refined By**: [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor
 Workspace Installation
@@ -18,7 +20,7 @@ nara already has strong authoring foundations:
 - UI adapters render tooling models rather than owning scene mutation.
 
 What is missing is the editor workspace layer. Mature editor behavior needs open documents, active
-scene, selection sets, dirty/saved revisions, external file reload conflicts, per-document undo, and
+scene, selection sets, dirty/saved content state, external file reload conflicts, per-document undo, and
 multi-document operations. If this stays implicit, egui, future dear-imgui, future nara UI editor
 panels, and AI agents will each invent their own workspace state.
 
@@ -52,15 +54,21 @@ Rules:
   ownership rules.
 - Selection is workspace state: a selection set, top-selected item, selection history, and optional
   viewport/tool context. Selection targets use authoring identities and provenance, not runtime
-  `Entity` values.
+  `Entity` values. Inspector state consumes that selection and does not retain a second durable
+  selected entity.
 - Undo/redo is per document by default. Cross-document operations must be represented as explicit
   multi-document transactions with per-document patches and rollback diagnostics.
-- Dirty/saved state is revision-based. A document is dirty when its current authoring revision
-  differs from the last successful save revision.
+- Document mutations, Undo, and Redo target a non-optional document identity and exact base
+  `SceneAuthoringRevision`. Active-document state is presentation/navigation context, never a
+  mutation fallback.
+- Authoring revision remains monotonic for conflict detection. Dirty state compares the current
+  opaque content-state identity with the receipt-backed saved content-state identity, with
+  source-upgrade-required as an additional dirty condition.
 - A successful save is proven by a non-cloneable, workspace-bound persistence checkpoint plus a
   consumed filesystem replacement receipt bound to the prior/candidate identity, captured
-  revision, canonical content digest, post-publication content observation, and required guarantee
-  tier. A UI/tooling command or an unhosted `EditorWorkspace` cannot advance saved state.
+  revision, content-state identity, exact Scene snapshot, canonical content digest,
+  post-publication content observation, and required guarantee tier. A UI/tooling command or an
+  unhosted `EditorWorkspace` cannot advance saved state.
 - External file changes enter as conflict state, not silent overwrite. The editor may offer reload,
   merge, save-as, or keep-local actions, but these are explicit workspace commands.
 - Play Mode is anchored to a document snapshot and workspace mode state. Stop Play still discards
@@ -78,7 +86,8 @@ Rules:
 | `OpenDocumentSlot` | Document value plus path/source identity, revisions, diagnostics, and conflict state |
 | `ActiveDocument` | Document currently receiving inspector, viewport, and command focus |
 | `SelectionSet` | Ordered selected authoring targets plus top-selected target |
-| `DocumentRevision` | Monotonic authoring revision for dirty/saved/conflict checks |
+| `DocumentRevision` | Monotonic authoring revision for mutation preconditions and conflict checks |
+| `ContentState` | Opaque branch-safe identity used to compare current content with a verified saved checkpoint |
 | `ExternalReloadState` | Clean, changed-on-disk, deleted-on-disk, conflict, or reload-failed |
 | `WorkspaceCommand` | UI/AI command that resolves to document patches, selection changes, mode changes, or save/reload actions |
 
@@ -120,6 +129,8 @@ surface as editor UI, and keeps save/reload/conflict semantics centralized.
 | Safe reload | External file changes never silently overwrite dirty local documents | Unit tests |
 | Provenance safety | Selection targets use authoring identities/provenance, not runtime `Entity` | API review |
 | Command consistency | UI and AI commands flow through workspace commands and scene patches | Unit/integration tests |
+| Single selection authority | Inspector models project the workspace slot selection and retain no parallel selected entity | Tooling tests and API review |
+| Clean-state recovery | Undo to a verified saved content state reports clean even though revision remains monotonic | Persistence integration tests |
 
 ## Risks and Mitigations
 
@@ -128,13 +139,14 @@ surface as editor UI, and keeps save/reload/conflict semantics centralized.
 | Workspace becomes a hidden editor runtime | Medium | Medium | Keep it as UI-agnostic state/commands; runtime logic stays in app/world systems. |
 | Cross-document transactions overcomplicate early tooling | Medium | Medium | Start with per-document undo and reject unsupported multi-document writes with diagnostics. |
 | External reload merge is hard | High | Medium | Model conflict state first; merging can be explicit later. |
-| Selection state duplicates inspector state | Low | Medium | Make inspector selection a projection of workspace selection once workspace ships. |
+| Selection state duplicates inspector state | Low | Medium | Keep the workspace slot as the only selection owner; Inspector receives selection as model input. |
+| An old Save receipt marks newer edits clean | High | Medium | Commit only the content-state identity captured with the saved bytes, then compare it with the current state. |
 
 ## Consequences
 
 - `nara_tooling` should grow `EditorWorkspace` / `OpenDocumentSlot` before editor dogfooding expands.
-- `SceneInspectorState` and `SceneEditorState` can remain useful, but they should become parts of a
-  broader workspace model rather than independent editor singletons.
+- `SceneInspectorState` and `SceneEditorState` remain UI-neutral model/command helpers, but selection
+  is always supplied by the workspace slot rather than retained by those helpers.
 - The process Host installs the workspace and any UI adapter deliberately; runtime Worlds receive
   only authorized Play inputs and never an Editor workspace resource.
 - Save/reload/dirty/conflict behavior should be tested at the tooling layer before a visual editor
@@ -143,16 +155,17 @@ surface as editor UI, and keeps save/reload/conflict semantics centralized.
 ## Implemented Slice: RGF-U17 Known-Schema Product Loop
 
 `EditorWorkspace` now remains the UI-neutral authority for document slots, selection, dirty/saved
-revision, source digest, undo, and external-conflict state. The concrete root `EditorProjectSession`
+content state, source digest, undo, and external-conflict state. The concrete root `EditorProjectSession`
 owns filesystem capability, persistence receipts, and the single Play lifecycle; tooling and egui
 hold no `World`, `RuntimeStartAttempt`, or `RuntimeInstance`.
 
-Known-schema Save captures one linear checkpoint through the workspace's non-cloneable
+Known-schema Save captures the exact document identity, revision, content-state identity, and Scene
+snapshot in one linear checkpoint through the workspace's non-cloneable
 `EditorPersistenceAuthority`. The concrete Host writes through `nara_fs`, then consumes a
 non-cloneable `ReplaceReceipt`; the receipt distinguishes bytes accepted by the temporary-file
 capability from bytes rebound and observed through the published target name. Only matching,
 identity-bound post-publication content creates an `EditorPersistenceCommit`. Failure, conflict, or
-ambiguous publication leaves the saved revision/digest unchanged and the document dirty; ambiguous
+ambiguous publication leaves the saved checkpoint unchanged and the document dirty; ambiguous
 publication additionally blocks retry until explicit Reopen reconciliation.
 
 Dirty Close and Exit require Save, Discard, or Cancel and retain the document until the selected
@@ -169,15 +182,18 @@ The former public `EditorPersistenceCheckpoint { document, revision, digest }` c
 `EditorWorkspace::__apply_persistence_checkpoint` mutation path are removed. Embedding Hosts now:
 
 1. create the paired workspace/authority through `EditorWorkspace::new_hosted`;
-2. capture a document revision through `EditorPersistenceAuthority::capture`;
+2. capture one exact document revision, content-state identity, and Scene snapshot through
+   `EditorPersistenceAuthority::capture`;
 3. publish canonical bytes through a real `nara_fs` replacement operation;
 4. consume its `ReplaceReceipt` through `EditorPersistenceCommit::from_publication`; and
 5. advance saved state through the matching authority's `commit` method.
 
 Ordinary UI/tooling consumers continue to use `EditorWorkspace::new` and cannot obtain persistence
-authority. Opened-source digest binding and Reopen publication also require the paired authority;
-`#[doc(hidden)]` is used only to de-emphasize the Host embedding surface, not as the capability
-boundary.
+authority. Opened-source digest binding and Reopen publication also require the paired authority.
+Reload and Reopen publication name one non-optional document plus its captured
+`SceneAuthoringRevision`; an active-document fallback or revision change rejects before replacing
+the workspace slot. `#[doc(hidden)]` is used only to de-emphasize the Host embedding surface, not
+as the capability boundary.
 
 ## Open Questions
 
@@ -185,3 +201,7 @@ boundary.
   source metadata?
 - What is the minimal external reload conflict workflow before the editor has a full UI?
 - How should project-wide asset documents participate in the same workspace model?
+
+## Implementation Plan
+
+- [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)

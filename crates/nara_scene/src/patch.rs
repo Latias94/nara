@@ -136,6 +136,45 @@ impl ScenePatchDocument {
         )
     }
 
+    pub(crate) fn prepare_to_scene(
+        &self,
+        document: &SceneDocument,
+        registry: &ComponentRegistry,
+    ) -> Result<PreparedScenePatch, ScenePatchReport> {
+        self.prepare_to_scene_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => {
+                    document.validate_authoring_for_patch(registry, operation_index)
+                }
+                None => document.validate_authoring(registry),
+            },
+        )
+    }
+
+    pub(crate) fn prepare_to_scene_with_asset_database(
+        &self,
+        document: &SceneDocument,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<PreparedScenePatch, ScenePatchReport> {
+        self.prepare_to_scene_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => document.validate_authoring_for_patch_with_asset_database(
+                    registry,
+                    database,
+                    operation_index,
+                ),
+                None => document.validate_authoring_with_asset_database(registry, database),
+            },
+        )
+    }
+
     /// Consumes this patch into an unpublished candidate document without retaining an inverse.
     ///
     /// The caller must discard `document` when this returns an unapplied report: operations before
@@ -191,10 +230,23 @@ impl ScenePatchDocument {
         limits: ScenePatchApplyLimits,
         mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
     ) -> ScenePatchReport {
+        match self.prepare_to_scene_with_validator(document, registry, limits, &mut validate) {
+            Ok(prepared) => prepared.publish_into(document),
+            Err(report) => report,
+        }
+    }
+
+    fn prepare_to_scene_with_validator(
+        &self,
+        document: &SceneDocument,
+        registry: &ComponentRegistry,
+        limits: ScenePatchApplyLimits,
+        mut validate: impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+    ) -> Result<PreparedScenePatch, ScenePatchReport> {
         let source_work =
             match self.validate_patch_source(document, registry, limits, &mut validate) {
                 Ok(source_work) => source_work,
-                Err(report) => return *report,
+                Err(report) => return Err(*report),
             };
 
         let mut scratch = document.clone();
@@ -205,7 +257,7 @@ impl ScenePatchDocument {
                 match apply_operation_for_patch(&mut scratch, registry, operation, operation_index)
                 {
                     Ok(inverse) => inverse,
-                    Err(report) => return *report,
+                    Err(report) => return Err(*report),
                 };
             if let Err(report) = validate_applied_operation(
                 &scratch,
@@ -215,23 +267,25 @@ impl ScenePatchDocument {
                 limits,
                 &mut validate,
             ) {
-                return *report;
+                return Err(*report);
             }
 
             inverse_groups.push(inverse);
         }
 
         scratch.canonicalize();
-        *document = scratch;
 
         let inverse_operations: Vec<ScenePatchOperation> =
             inverse_groups.into_iter().rev().flatten().collect();
 
-        ScenePatchReport {
-            applied: true,
-            inverse: Some(ScenePatchDocument::new(inverse_operations)),
-            diagnostics: DiagnosticReport::default(),
-        }
+        Ok(PreparedScenePatch {
+            document: scratch,
+            report: ScenePatchReport {
+                applied: true,
+                inverse: Some(ScenePatchDocument::new(inverse_operations)),
+                diagnostics: DiagnosticReport::default(),
+            },
+        })
     }
 
     fn apply_owned_to_unpublished_scene_with_validator(
@@ -537,6 +591,29 @@ enum ValueCostNode<'a> {
     Value(&'a ComponentValue),
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ScenePatchCost {
+    value_cost: ComponentValueCost,
+    operation_count: usize,
+    structural_logical_bytes: usize,
+}
+
+impl ScenePatchCost {
+    pub(crate) const fn value_cost(self) -> ComponentValueCost {
+        self.value_cost
+    }
+
+    pub(crate) const fn operation_count(self) -> usize {
+        self.operation_count
+    }
+
+    pub(crate) const fn logical_bytes(self) -> usize {
+        self.value_cost
+            .logical_bytes()
+            .saturating_add(self.structural_logical_bytes)
+    }
+}
+
 pub(crate) fn scene_entity_component_value_cost(entity: &SceneEntityRecord) -> ComponentValueCost {
     entity
         .components
@@ -549,60 +626,183 @@ pub(crate) fn scene_entity_component_value_cost(entity: &SceneEntityRecord) -> C
 pub(crate) fn scene_entities_source_value_cost(
     entities: &[SceneEntityRecord],
 ) -> ComponentValueCost {
-    value_cost(entities.iter().map(ValueCostNode::Entity).collect())
+    tree_cost(entities.iter().map(ValueCostNode::Entity).collect()).value_cost()
 }
 
 pub(crate) fn scene_patch_value_cost(patch: &ScenePatchDocument) -> ComponentValueCost {
-    value_cost(vec![ValueCostNode::Patch(patch)])
+    scene_patch_cost(patch).value_cost()
 }
 
-fn value_cost(mut pending: Vec<ValueCostNode<'_>>) -> ComponentValueCost {
-    let mut cost = ComponentValueCost::ZERO;
+pub(crate) fn scene_patch_cost(patch: &ScenePatchDocument) -> ScenePatchCost {
+    tree_cost(vec![ValueCostNode::Patch(patch)])
+}
+
+fn tree_cost(mut pending: Vec<ValueCostNode<'_>>) -> ScenePatchCost {
+    let mut cost = ScenePatchCost::default();
     while let Some(node) = pending.pop() {
         match node {
             ValueCostNode::Entity(entity) => {
-                cost = cost.saturating_add(scene_entity_component_value_cost(entity));
+                cost.operation_count = cost
+                    .operation_count
+                    .saturating_add(1)
+                    .saturating_add(entity.children.len())
+                    .saturating_add(entity.components.len());
+                cost.structural_logical_bytes = cost
+                    .structural_logical_bytes
+                    .saturating_add(entity.id.as_str().len())
+                    .saturating_add(entity.children.iter().fold(0usize, |bytes, child| {
+                        bytes.saturating_add(child.as_str().len())
+                    }))
+                    .saturating_add(entity.components.keys().fold(0usize, |bytes, component| {
+                        bytes.saturating_add(component.as_str().len())
+                    }));
+                cost.value_cost = cost
+                    .value_cost
+                    .saturating_add(scene_entity_component_value_cost(entity));
                 if let Some(prefab) = &entity.prefab {
+                    cost.operation_count = cost.operation_count.saturating_add(1);
+                    cost.structural_logical_bytes = cost
+                        .structural_logical_bytes
+                        .saturating_add(asset_ref_value(&prefab.source).cost().logical_bytes());
                     pending.push(ValueCostNode::Patch(&prefab.overrides));
                 }
             }
             ValueCostNode::Patch(patch) => {
+                cost.operation_count = cost.operation_count.saturating_add(patch.operations.len());
                 for operation in &patch.operations {
                     match operation {
-                        ScenePatchOperation::AddEntity { entity, .. } => {
+                        ScenePatchOperation::AddEntity { entity, placement } => {
+                            add_placement_cost(&mut cost, placement);
                             pending.push(ValueCostNode::Entity(entity));
                         }
                         ScenePatchOperation::RestoreEntity {
                             entity,
                             descendants,
-                            ..
+                            placement,
                         } => {
+                            add_placement_cost(&mut cost, placement);
                             pending.push(ValueCostNode::Entity(entity));
                             pending.extend(descendants.iter().map(ValueCostNode::Entity));
                         }
-                        ScenePatchOperation::AddComponent { value, .. }
-                        | ScenePatchOperation::ReplaceComponent { value, .. } => {
+                        ScenePatchOperation::RemoveEntity { entity, from } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_placement_cost(&mut cost, from);
+                        }
+                        ScenePatchOperation::AddComponent {
+                            entity,
+                            component,
+                            value,
+                        }
+                        | ScenePatchOperation::ReplaceComponent {
+                            entity,
+                            component,
+                            value,
+                        } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_component_type_id_cost(&mut cost, component);
                             pending.push(ValueCostNode::Value(&value.value));
                         }
-                        ScenePatchOperation::SetField { value, .. } => {
+                        ScenePatchOperation::RemoveComponent { entity, component } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_component_type_id_cost(&mut cost, component);
+                        }
+                        ScenePatchOperation::SetField {
+                            entity,
+                            component,
+                            field,
+                            value,
+                            ..
+                        } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_component_type_id_cost(&mut cost, component);
+                            add_component_field_id_cost(&mut cost, field);
                             pending.push(ValueCostNode::Value(value));
                         }
-                        ScenePatchOperation::SetAssetRefField { asset_ref, .. } => {
-                            cost = cost.saturating_add(asset_ref_value(asset_ref).cost());
+                        ScenePatchOperation::RemoveField {
+                            entity,
+                            component,
+                            field,
+                            ..
+                        } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_component_type_id_cost(&mut cost, component);
+                            add_component_field_id_cost(&mut cost, field);
                         }
-                        ScenePatchOperation::RemoveEntity { .. }
-                        | ScenePatchOperation::RemoveComponent { .. }
-                        | ScenePatchOperation::RemoveField { .. }
-                        | ScenePatchOperation::MoveEntity { .. } => {}
+                        ScenePatchOperation::MoveEntity { entity, from, to } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_placement_cost(&mut cost, from);
+                            add_placement_cost(&mut cost, to);
+                        }
+                        ScenePatchOperation::SetAssetRefField {
+                            entity,
+                            component,
+                            field,
+                            asset_ref,
+                            ..
+                        } => {
+                            add_scene_entity_id_cost(&mut cost, entity);
+                            add_component_type_id_cost(&mut cost, component);
+                            add_component_field_id_cost(&mut cost, field);
+                            cost.value_cost = cost
+                                .value_cost
+                                .saturating_add(asset_ref_value(asset_ref).cost());
+                        }
                     }
                 }
             }
             ValueCostNode::Value(value) => {
-                cost = cost.saturating_add(value.cost());
+                cost.value_cost = cost.value_cost.saturating_add(value.cost());
             }
         }
     }
     cost
+}
+
+fn add_scene_entity_id_cost(cost: &mut ScenePatchCost, entity: &SceneEntityId) {
+    cost.structural_logical_bytes = cost
+        .structural_logical_bytes
+        .saturating_add(entity.as_str().len());
+}
+
+fn add_component_type_id_cost(cost: &mut ScenePatchCost, component: &ComponentTypeId) {
+    cost.structural_logical_bytes = cost
+        .structural_logical_bytes
+        .saturating_add(component.as_str().len());
+}
+
+fn add_component_field_id_cost(cost: &mut ScenePatchCost, field: &ComponentFieldId) {
+    cost.structural_logical_bytes = cost
+        .structural_logical_bytes
+        .saturating_add(field.as_str().len());
+}
+
+fn add_placement_cost(cost: &mut ScenePatchCost, placement: &ScenePlacement) {
+    if let ScenePlacementOwner::Parent { parent } = &placement.owner {
+        add_scene_entity_id_cost(cost, parent);
+    }
+    match &placement.anchor {
+        ScenePlacementAnchor::Before { sibling } | ScenePlacementAnchor::After { sibling } => {
+            add_scene_entity_id_cost(cost, sibling)
+        }
+        ScenePlacementAnchor::First | ScenePlacementAnchor::Last => {}
+    }
+}
+
+pub(crate) struct PreparedScenePatch {
+    document: SceneDocument,
+    report: ScenePatchReport,
+}
+
+impl PreparedScenePatch {
+    pub(crate) fn into_parts(self) -> (SceneDocument, ScenePatchReport) {
+        (self.document, self.report)
+    }
+
+    fn publish_into(self, document: &mut SceneDocument) -> ScenePatchReport {
+        let (candidate, report) = self.into_parts();
+        *document = candidate;
+        report
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -315,28 +315,18 @@ impl SceneEditorState {
     }
 
     #[must_use]
-    pub fn inspector_mut(&mut self) -> &mut SceneInspectorState {
-        &mut self.inspector
-    }
-
-    #[must_use]
     pub fn model(
-        &mut self,
+        &self,
         session: &SceneAuthoringSession,
         registry: &ComponentRegistry,
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneEditorModel {
-        let inspector = self.inspector.model(session, registry, edit_world_snapshot);
-
-        SceneEditorModel {
-            inspector,
-            diagnostics: DiagnosticReport::default(),
-        }
+        self.model_with_selection(session, registry, None, edit_world_snapshot)
     }
 
     #[must_use]
     pub fn model_with_selection(
-        &mut self,
+        &self,
         session: &SceneAuthoringSession,
         registry: &ComponentRegistry,
         selected_entity: Option<&SceneEntityId>,
@@ -355,7 +345,7 @@ impl SceneEditorState {
     }
 
     pub fn apply_inspector_command(
-        &mut self,
+        &self,
         session: &mut SceneAuthoringSession,
         registry: &ComponentRegistry,
         command: SceneInspectorCommand,
@@ -364,7 +354,7 @@ impl SceneEditorState {
     }
 
     pub fn apply_inspector_command_with_asset_database(
-        &mut self,
+        &self,
         session: &mut SceneAuthoringSession,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,

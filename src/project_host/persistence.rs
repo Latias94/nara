@@ -49,7 +49,6 @@ pub(super) struct OpenedScenePersistence {
 
 pub(super) struct SceneSaveCandidate {
     pub checkpoint: EditorPersistenceCheckpoint,
-    pub scene: SceneDocument,
 }
 
 pub(super) enum SceneSaveOutcome {
@@ -198,8 +197,8 @@ impl ScenePersistenceHost {
         if let Some(stage) = self.fail_next_save.take() {
             return SceneSaveOutcome::Failed(stage);
         }
-        let SceneSaveCandidate { checkpoint, scene } = candidate;
-        let bytes = match encode_scene(self.encoding, &scene) {
+        let SceneSaveCandidate { checkpoint } = candidate;
+        let bytes = match encode_scene(self.encoding, checkpoint.scene()) {
             Ok(bytes) => bytes,
             Err(stage) => return SceneSaveOutcome::Failed(stage),
         };
@@ -473,7 +472,7 @@ mod tests {
         let document = workspace
             .open_scene_session(
                 "startup.scene.json",
-                SceneAuthoringSession::new(SceneDocument::default()),
+                SceneAuthoringSession::new(first.clone()),
             )
             .unwrap()
             .opened_document
@@ -483,7 +482,6 @@ mod tests {
         host.reject_next_valid_receipt = true;
         let SceneSaveOutcome::PersistenceUncertain { evidence } = host.save(SceneSaveCandidate {
             checkpoint: authority.capture(&workspace, document).unwrap(),
-            scene: first.clone(),
         }) else {
             panic!("a rejected post-publication receipt must be uncertain");
         };
@@ -503,7 +501,6 @@ mod tests {
         assert!(matches!(
             host.save(SceneSaveCandidate {
                 checkpoint: authority.capture(&workspace, document).unwrap(),
-                scene: scene_with_entity("blind-retry"),
             }),
             SceneSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile)
         ));
@@ -526,7 +523,6 @@ mod tests {
         assert!(matches!(
             host.save(SceneSaveCandidate {
                 checkpoint: authority.capture(&workspace, document).unwrap(),
-                scene: scene_with_entity("after-reconcile"),
             }),
             SceneSaveOutcome::Saved { .. }
         ));

@@ -11,5 +11,6 @@ fn main() {
     let digest = EditorDocumentDigest::new(4, [0x44; 32]);
     let _ = workspace.bind_opened_source_digest(document, digest);
     let reopened = SceneAuthoringSession::new(SceneDocument::default());
-    let _ = workspace.publish_reopened_session(Some(document), reopened, digest);
+    let base_revision = workspace.scene(document).unwrap().revision();
+    let _ = workspace.publish_reopened_session(document, base_revision, reopened, digest);
 }

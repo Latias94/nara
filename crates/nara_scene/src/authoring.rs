@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    collections::VecDeque,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use nara_asset::ProjectAssetDatabase;
 use nara_diagnostic::DiagnosticReport;
@@ -10,6 +13,7 @@ use crate::{
     PrefabSourceResolver, SceneDocument, ScenePatchDocument, ScenePatchReport, SceneSpawnReport,
     SceneSpawner,
     diagnostics::{error as diagnostic_error, info as diagnostic_info, with_codec_error},
+    patch::{PreparedScenePatch, scene_patch_cost},
     spawn::{SceneInstanceRetirementTransactionError, retire_scene_instance_exact},
 };
 
@@ -22,6 +26,131 @@ pub struct SceneAuthoringSourceId(u64);
 pub struct SceneAuthoringRevision {
     source_id: SceneAuthoringSourceId,
     generation: u64,
+}
+
+/// Opaque identity for one committed authoring content state.
+///
+/// Revisions remain monotonic across every accepted transition. Content-state identities instead
+/// follow Undo and Redo so callers can recognize that the document has returned to an earlier
+/// saved state without hashing the document again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SceneAuthoringContentState {
+    source_id: SceneAuthoringSourceId,
+    generation: u64,
+}
+
+/// Fixed limits for the combined Undo and Redo history of one authoring session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneAuthoringHistoryLimits {
+    max_records: usize,
+    max_operations: usize,
+    max_value_nodes: usize,
+    max_logical_bytes: usize,
+    max_inverse_operations: usize,
+    max_inverse_value_nodes: usize,
+    max_inverse_logical_bytes: usize,
+}
+
+impl SceneAuthoringHistoryLimits {
+    pub const DEFAULT_MAX_RECORDS: usize = 256;
+    pub const DEFAULT_MAX_OPERATIONS: usize = 1_048_576;
+    pub const DEFAULT_MAX_VALUE_NODES: usize = 1_048_576;
+    pub const DEFAULT_MAX_LOGICAL_BYTES: usize = 64 * 1024 * 1024;
+    pub const DEFAULT_MAX_INVERSE_OPERATIONS: usize = 262_144;
+    pub const DEFAULT_MAX_INVERSE_VALUE_NODES: usize = 262_144;
+    pub const DEFAULT_MAX_INVERSE_LOGICAL_BYTES: usize = 16 * 1024 * 1024;
+
+    #[must_use]
+    pub const fn new(
+        max_records: usize,
+        max_operations: usize,
+        max_value_nodes: usize,
+        max_logical_bytes: usize,
+        max_inverse_operations: usize,
+        max_inverse_value_nodes: usize,
+        max_inverse_logical_bytes: usize,
+    ) -> Option<Self> {
+        if max_records == 0
+            || max_operations == 0
+            || max_value_nodes == 0
+            || max_logical_bytes == 0
+            || max_inverse_operations == 0
+            || max_inverse_value_nodes == 0
+            || max_inverse_logical_bytes == 0
+            || max_inverse_operations > max_operations
+            || max_inverse_value_nodes > max_value_nodes
+            || max_inverse_logical_bytes > max_logical_bytes
+        {
+            return None;
+        }
+        Some(Self {
+            max_records,
+            max_operations,
+            max_value_nodes,
+            max_logical_bytes,
+            max_inverse_operations,
+            max_inverse_value_nodes,
+            max_inverse_logical_bytes,
+        })
+    }
+
+    #[must_use]
+    pub const fn max_records(self) -> usize {
+        self.max_records
+    }
+
+    #[must_use]
+    pub const fn max_operations(self) -> usize {
+        self.max_operations
+    }
+
+    #[must_use]
+    pub const fn max_value_nodes(self) -> usize {
+        self.max_value_nodes
+    }
+
+    #[must_use]
+    pub const fn max_logical_bytes(self) -> usize {
+        self.max_logical_bytes
+    }
+
+    #[must_use]
+    pub const fn max_inverse_operations(self) -> usize {
+        self.max_inverse_operations
+    }
+
+    #[must_use]
+    pub const fn max_inverse_value_nodes(self) -> usize {
+        self.max_inverse_value_nodes
+    }
+
+    #[must_use]
+    pub const fn max_inverse_logical_bytes(self) -> usize {
+        self.max_inverse_logical_bytes
+    }
+}
+
+impl Default for SceneAuthoringHistoryLimits {
+    fn default() -> Self {
+        Self::new(
+            Self::DEFAULT_MAX_RECORDS,
+            Self::DEFAULT_MAX_OPERATIONS,
+            Self::DEFAULT_MAX_VALUE_NODES,
+            Self::DEFAULT_MAX_LOGICAL_BYTES,
+            Self::DEFAULT_MAX_INVERSE_OPERATIONS,
+            Self::DEFAULT_MAX_INVERSE_VALUE_NODES,
+            Self::DEFAULT_MAX_INVERSE_LOGICAL_BYTES,
+        )
+        .expect("default authoring history limits are valid")
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SceneAuthoringHistoryUsage {
+    pub records: usize,
+    pub operations: usize,
+    pub value_nodes: usize,
+    pub logical_bytes: usize,
 }
 
 impl SceneAuthoringRevision {
@@ -50,6 +179,69 @@ pub struct SceneAuthoringHistoryStatus {
     pub redo_depth: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct SceneAuthoringHistoryCost {
+    operations: usize,
+    value_nodes: usize,
+    logical_bytes: usize,
+}
+
+impl SceneAuthoringHistoryCost {
+    fn for_patch(patch: &ScenePatchDocument) -> Self {
+        let patch_cost = scene_patch_cost(patch);
+        let values = patch_cost.value_cost();
+        Self {
+            operations: patch_cost.operation_count(),
+            value_nodes: values.nodes(),
+            logical_bytes: patch_cost.logical_bytes(),
+        }
+    }
+
+    const fn max(self, other: Self) -> Self {
+        Self {
+            operations: if self.operations > other.operations {
+                self.operations
+            } else {
+                other.operations
+            },
+            value_nodes: if self.value_nodes > other.value_nodes {
+                self.value_nodes
+            } else {
+                other.value_nodes
+            },
+            logical_bytes: if self.logical_bytes > other.logical_bytes {
+                self.logical_bytes
+            } else {
+                other.logical_bytes
+            },
+        }
+    }
+
+    const fn saturating_add(self, other: Self) -> Self {
+        Self {
+            operations: self.operations.saturating_add(other.operations),
+            value_nodes: self.value_nodes.saturating_add(other.value_nodes),
+            logical_bytes: self.logical_bytes.saturating_add(other.logical_bytes),
+        }
+    }
+
+    const fn saturating_sub(self, other: Self) -> Self {
+        Self {
+            operations: self.operations.saturating_sub(other.operations),
+            value_nodes: self.value_nodes.saturating_sub(other.value_nodes),
+            logical_bytes: self.logical_bytes.saturating_sub(other.logical_bytes),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct SceneAuthoringHistoryEntry {
+    patch: ScenePatchDocument,
+    from_state: SceneAuthoringContentState,
+    to_state: SceneAuthoringContentState,
+    cost: SceneAuthoringHistoryCost,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SceneAuthoringSyncReport {
     pub synced: bool,
@@ -70,8 +262,11 @@ pub struct SceneAuthoringClearReport {
 pub struct SceneAuthoringSession {
     document: SceneDocument,
     revision: SceneAuthoringRevision,
-    undo_stack: Vec<ScenePatchDocument>,
-    redo_stack: Vec<ScenePatchDocument>,
+    content_state: SceneAuthoringContentState,
+    history_limits: SceneAuthoringHistoryLimits,
+    history_cost: SceneAuthoringHistoryCost,
+    undo_stack: VecDeque<SceneAuthoringHistoryEntry>,
+    redo_stack: VecDeque<SceneAuthoringHistoryEntry>,
     live_instance: Option<SpawnedSceneInstance>,
     live_dirty: bool,
     source_upgrade_required: bool,
@@ -80,18 +275,37 @@ pub struct SceneAuthoringSession {
 impl SceneAuthoringSession {
     #[must_use]
     pub fn new(document: SceneDocument) -> Self {
-        Self::new_with_source_state(document, false)
+        Self::new_with_history_limits(document, SceneAuthoringHistoryLimits::default())
     }
 
-    fn new_with_source_state(document: SceneDocument, source_upgrade_required: bool) -> Self {
+    #[must_use]
+    pub fn new_with_history_limits(
+        document: SceneDocument,
+        history_limits: SceneAuthoringHistoryLimits,
+    ) -> Self {
+        Self::new_with_source_state(document, false, history_limits)
+    }
+
+    fn new_with_source_state(
+        document: SceneDocument,
+        source_upgrade_required: bool,
+        history_limits: SceneAuthoringHistoryLimits,
+    ) -> Self {
+        let revision = SceneAuthoringRevision {
+            source_id: next_authoring_source_id(),
+            generation: 0,
+        };
         Self {
             document,
-            revision: SceneAuthoringRevision {
-                source_id: next_authoring_source_id(),
-                generation: 0,
+            revision,
+            content_state: SceneAuthoringContentState {
+                source_id: revision.source_id,
+                generation: revision.generation,
             },
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            history_limits,
+            history_cost: SceneAuthoringHistoryCost::default(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             live_instance: None,
             live_dirty: true,
             source_upgrade_required,
@@ -108,6 +322,7 @@ impl SceneAuthoringSession {
         Ok(Self::new_with_source_state(
             published.into_document(),
             source_upgrade_required,
+            SceneAuthoringHistoryLimits::default(),
         ))
     }
 
@@ -125,6 +340,7 @@ impl SceneAuthoringSession {
         Ok(Self::new_with_source_state(
             document,
             source_upgrade_required,
+            SceneAuthoringHistoryLimits::default(),
         ))
     }
 
@@ -138,6 +354,31 @@ impl SceneAuthoringSession {
         self.revision
     }
 
+    #[must_use]
+    pub fn content_state(&self) -> SceneAuthoringContentState {
+        self.content_state
+    }
+
+    #[must_use]
+    pub fn owns_content_state(&self, state: SceneAuthoringContentState) -> bool {
+        self.revision.source_id == state.source_id
+    }
+
+    #[must_use]
+    pub const fn history_limits(&self) -> SceneAuthoringHistoryLimits {
+        self.history_limits
+    }
+
+    #[must_use]
+    pub fn history_usage(&self) -> SceneAuthoringHistoryUsage {
+        SceneAuthoringHistoryUsage {
+            records: self.undo_stack.len().saturating_add(self.redo_stack.len()),
+            operations: self.history_cost.operations,
+            value_nodes: self.history_cost.value_nodes,
+            logical_bytes: self.history_cost.logical_bytes,
+        }
+    }
+
     pub fn replace_document(&mut self, document: SceneDocument) {
         self.replace_document_with_source_state(document, false);
     }
@@ -147,8 +388,16 @@ impl SceneAuthoringSession {
         document: SceneDocument,
         source_upgrade_required: bool,
     ) {
+        let source_id = next_authoring_source_id();
         self.document = document;
-        self.advance_revision();
+        self.revision = SceneAuthoringRevision {
+            source_id,
+            generation: 0,
+        };
+        self.content_state = SceneAuthoringContentState {
+            source_id,
+            generation: 0,
+        };
         self.clear_history();
         self.live_dirty = true;
         self.source_upgrade_required = source_upgrade_required;
@@ -182,9 +431,10 @@ impl SceneAuthoringSession {
         Ok(())
     }
 
-    pub fn clear_history(&mut self) {
+    fn clear_history(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.history_cost = SceneAuthoringHistoryCost::default();
     }
 
     #[must_use]
@@ -210,8 +460,13 @@ impl SceneAuthoringSession {
         self.source_upgrade_required
     }
 
-    pub fn acknowledge_source_saved(&mut self) {
+    #[doc(hidden)]
+    pub fn acknowledge_source_saved(&mut self, state: SceneAuthoringContentState) -> bool {
+        if !self.owns_content_state(state) {
+            return false;
+        }
         self.source_upgrade_required = false;
+        true
     }
 
     pub fn apply_patch(
@@ -219,9 +474,7 @@ impl SceneAuthoringSession {
         patch: &ScenePatchDocument,
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
-        let report = patch.apply_to_scene(&mut self.document, registry);
-        self.record_forward_patch(patch, &report);
-        report
+        self.apply_forward_patch_with(patch, patch.prepare_to_scene(&self.document, registry))
     }
 
     pub fn apply_patch_with_asset_database(
@@ -230,10 +483,10 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
-        let report =
-            patch.apply_to_scene_with_asset_database(&mut self.document, registry, database);
-        self.record_forward_patch(patch, &report);
-        report
+        self.apply_forward_patch_with(
+            patch,
+            patch.prepare_to_scene_with_asset_database(&self.document, registry, database),
+        )
     }
 
     #[cfg(feature = "serde")]
@@ -262,11 +515,9 @@ impl SceneAuthoringSession {
     }
 
     pub fn undo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {
-        let Some(patch) = self.undo_stack.pop() else {
-            return history_miss_report("scene.undo-empty", "undo history is empty");
-        };
-        let report = patch.apply_to_scene(&mut self.document, registry);
-        self.record_history_patch(patch, report, HistoryDirection::Undo)
+        self.apply_history_patch_with(HistoryDirection::Undo, |patch, document| {
+            patch.prepare_to_scene(document, registry)
+        })
     }
 
     pub fn undo_with_asset_database(
@@ -274,20 +525,15 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
-        let Some(patch) = self.undo_stack.pop() else {
-            return history_miss_report("scene.undo-empty", "undo history is empty");
-        };
-        let report =
-            patch.apply_to_scene_with_asset_database(&mut self.document, registry, database);
-        self.record_history_patch(patch, report, HistoryDirection::Undo)
+        self.apply_history_patch_with(HistoryDirection::Undo, |patch, document| {
+            patch.prepare_to_scene_with_asset_database(document, registry, database)
+        })
     }
 
     pub fn redo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {
-        let Some(patch) = self.redo_stack.pop() else {
-            return history_miss_report("scene.redo-empty", "redo history is empty");
-        };
-        let report = patch.apply_to_scene(&mut self.document, registry);
-        self.record_history_patch(patch, report, HistoryDirection::Redo)
+        self.apply_history_patch_with(HistoryDirection::Redo, |patch, document| {
+            patch.prepare_to_scene(document, registry)
+        })
     }
 
     pub fn redo_with_asset_database(
@@ -295,12 +541,9 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
-        let Some(patch) = self.redo_stack.pop() else {
-            return history_miss_report("scene.redo-empty", "redo history is empty");
-        };
-        let report =
-            patch.apply_to_scene_with_asset_database(&mut self.document, registry, database);
-        self.record_history_patch(patch, report, HistoryDirection::Redo)
+        self.apply_history_patch_with(HistoryDirection::Redo, |patch, document| {
+            patch.prepare_to_scene_with_asset_database(document, registry, database)
+        })
     }
 
     pub fn sync_world(
@@ -455,41 +698,172 @@ impl SceneAuthoringSession {
         }
     }
 
-    fn record_forward_patch(&mut self, patch: &ScenePatchDocument, report: &ScenePatchReport) {
-        if !report.applied || patch.is_empty() {
-            return;
-        }
-        self.advance_revision();
-        self.live_dirty = true;
-        self.redo_stack.clear();
-        if let Some(inverse) = report.inverse.clone() {
-            self.undo_stack.push(inverse);
-        }
-    }
-
-    fn record_history_patch(
+    fn apply_forward_patch_with(
         &mut self,
-        patch: ScenePatchDocument,
-        report: ScenePatchReport,
-        direction: HistoryDirection,
+        patch: &ScenePatchDocument,
+        prepared: Result<PreparedScenePatch, ScenePatchReport>,
     ) -> ScenePatchReport {
-        if !report.applied {
-            match direction {
-                HistoryDirection::Undo => self.undo_stack.push(patch),
-                HistoryDirection::Redo => self.redo_stack.push(patch),
-            }
+        let (candidate, report) = match prepared {
+            Ok(prepared) => prepared.into_parts(),
+            Err(report) => return report,
+        };
+        if !report.applied || patch.is_empty() {
             return report;
         }
 
-        self.advance_revision();
-        self.live_dirty = true;
-        if let Some(inverse) = report.inverse.clone() {
-            match direction {
-                HistoryDirection::Undo => self.redo_stack.push(inverse),
-                HistoryDirection::Redo => self.undo_stack.push(inverse),
-            }
+        let Some(inverse) = report.inverse.clone() else {
+            return reject_history_publication(
+                report,
+                "scene.authoring-history-inverse-missing",
+                "accepted authoring patch did not produce an inverse",
+            );
+        };
+        let cost = SceneAuthoringHistoryCost::for_patch(patch)
+            .max(SceneAuthoringHistoryCost::for_patch(&inverse));
+        if !self.history_entry_is_admissible(cost) {
+            return reject_history_publication(
+                report,
+                "scene.authoring-history-entry-limit-exceeded",
+                "authoring patch exceeds the per-entry history limit",
+            );
         }
+
+        let before_state = self.content_state;
+        self.document = candidate;
+        self.advance_revision();
+        let after_state = self.content_state_for_current_revision();
+        self.content_state = after_state;
+        self.live_dirty = true;
+        self.clear_redo_history();
+        self.push_undo_history(SceneAuthoringHistoryEntry {
+            patch: inverse,
+            from_state: after_state,
+            to_state: before_state,
+            cost,
+        });
         report
+    }
+
+    fn apply_history_patch_with(
+        &mut self,
+        direction: HistoryDirection,
+        apply: impl FnOnce(
+            &ScenePatchDocument,
+            &SceneDocument,
+        ) -> Result<PreparedScenePatch, ScenePatchReport>,
+    ) -> ScenePatchReport {
+        let Some(entry) = self.pop_history_entry(direction) else {
+            return history_miss_report(direction.empty_code(), direction.empty_summary());
+        };
+        if self.content_state != entry.from_state {
+            self.restore_history_entry(direction, entry);
+            return history_error_report(
+                "scene.authoring-history-state-mismatch",
+                "authoring history does not match the current content state",
+            );
+        }
+
+        let (candidate, report) = match apply(&entry.patch, &self.document) {
+            Ok(prepared) => prepared.into_parts(),
+            Err(report) => {
+                self.restore_history_entry(direction, entry);
+                return report;
+            }
+        };
+        let Some(inverse) = report.inverse.clone() else {
+            self.restore_history_entry(direction, entry);
+            return reject_history_publication(
+                report,
+                "scene.authoring-history-inverse-missing",
+                "accepted history patch did not produce an inverse",
+            );
+        };
+        let observed_cost = SceneAuthoringHistoryCost::for_patch(&entry.patch)
+            .max(SceneAuthoringHistoryCost::for_patch(&inverse));
+        if observed_cost.operations > entry.cost.operations
+            || observed_cost.value_nodes > entry.cost.value_nodes
+            || observed_cost.logical_bytes > entry.cost.logical_bytes
+        {
+            self.restore_history_entry(direction, entry);
+            return reject_history_publication(
+                report,
+                "scene.authoring-history-cost-changed",
+                "history inverse exceeded the cost admitted by the originating edit",
+            );
+        }
+
+        let reverse = SceneAuthoringHistoryEntry {
+            patch: inverse,
+            from_state: entry.to_state,
+            to_state: entry.from_state,
+            cost: entry.cost,
+        };
+        self.document = candidate;
+        self.advance_revision();
+        self.content_state = entry.to_state;
+        self.live_dirty = true;
+        self.restore_history_entry(direction.opposite(), reverse);
+        report
+    }
+
+    fn history_entry_is_admissible(&self, cost: SceneAuthoringHistoryCost) -> bool {
+        cost.operations <= self.history_limits.max_inverse_operations
+            && cost.value_nodes <= self.history_limits.max_inverse_value_nodes
+            && cost.logical_bytes <= self.history_limits.max_inverse_logical_bytes
+    }
+
+    fn clear_redo_history(&mut self) {
+        for entry in self.redo_stack.drain(..) {
+            self.history_cost = self.history_cost.saturating_sub(entry.cost);
+        }
+    }
+
+    fn push_undo_history(&mut self, entry: SceneAuthoringHistoryEntry) {
+        self.history_cost = self.history_cost.saturating_add(entry.cost);
+        self.undo_stack.push_back(entry);
+        while self.history_usage_exceeds_limits() {
+            let evicted = self
+                .undo_stack
+                .pop_front()
+                .expect("an admitted entry fits alone within the total history limits");
+            self.history_cost = self.history_cost.saturating_sub(evicted.cost);
+        }
+    }
+
+    fn history_usage_exceeds_limits(&self) -> bool {
+        self.undo_stack.len().saturating_add(self.redo_stack.len())
+            > self.history_limits.max_records
+            || self.history_cost.operations > self.history_limits.max_operations
+            || self.history_cost.value_nodes > self.history_limits.max_value_nodes
+            || self.history_cost.logical_bytes > self.history_limits.max_logical_bytes
+    }
+
+    fn pop_history_entry(
+        &mut self,
+        direction: HistoryDirection,
+    ) -> Option<SceneAuthoringHistoryEntry> {
+        match direction {
+            HistoryDirection::Undo => self.undo_stack.pop_back(),
+            HistoryDirection::Redo => self.redo_stack.pop_back(),
+        }
+    }
+
+    fn restore_history_entry(
+        &mut self,
+        direction: HistoryDirection,
+        entry: SceneAuthoringHistoryEntry,
+    ) {
+        match direction {
+            HistoryDirection::Undo => self.undo_stack.push_back(entry),
+            HistoryDirection::Redo => self.redo_stack.push_back(entry),
+        }
+    }
+
+    fn content_state_for_current_revision(&self) -> SceneAuthoringContentState {
+        SceneAuthoringContentState {
+            source_id: self.revision.source_id,
+            generation: self.revision.generation,
+        }
     }
 
     fn advance_revision(&mut self) {
@@ -545,6 +919,29 @@ enum HistoryDirection {
     Redo,
 }
 
+impl HistoryDirection {
+    const fn opposite(self) -> Self {
+        match self {
+            Self::Undo => Self::Redo,
+            Self::Redo => Self::Undo,
+        }
+    }
+
+    const fn empty_code(self) -> &'static str {
+        match self {
+            Self::Undo => "scene.undo-empty",
+            Self::Redo => "scene.redo-empty",
+        }
+    }
+
+    const fn empty_summary(self) -> &'static str {
+        match self {
+            Self::Undo => "undo history is empty",
+            Self::Redo => "redo history is empty",
+        }
+    }
+}
+
 fn next_authoring_source_id() -> SceneAuthoringSourceId {
     SceneAuthoringSourceId(NEXT_AUTHORING_SOURCE_ID.fetch_add(1, Ordering::Relaxed))
 }
@@ -557,4 +954,25 @@ fn history_miss_report(code: &'static str, summary: &'static str) -> ScenePatchR
         inverse: None,
         diagnostics,
     }
+}
+
+fn history_error_report(code: &'static str, summary: &'static str) -> ScenePatchReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic_error(code, summary));
+    ScenePatchReport {
+        applied: false,
+        inverse: None,
+        diagnostics,
+    }
+}
+
+fn reject_history_publication(
+    mut report: ScenePatchReport,
+    code: &'static str,
+    summary: &'static str,
+) -> ScenePatchReport {
+    report.applied = false;
+    report.inverse = None;
+    report.diagnostics.push(diagnostic_error(code, summary));
+    report
 }

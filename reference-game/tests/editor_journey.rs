@@ -68,9 +68,11 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
         .scene(document)
         .expect("the startup scene should be active")
         .saved_revision();
+    let base_revision = editor.workspace().scene(document).unwrap().revision();
 
     let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
-        document: Some(document),
+        document,
+        base_revision,
         patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
             entity: nara::identity::SceneEntityId::new("player-weapon").unwrap(),
             component: ComponentTypeId::new("nara.transform.Transform2d"),

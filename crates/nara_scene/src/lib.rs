@@ -23,7 +23,8 @@ mod product_transaction_tests;
 mod tests;
 
 pub use authoring::{
-    SceneAuthoringClearReport, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
+    SceneAuthoringClearReport, SceneAuthoringContentState, SceneAuthoringHistoryLimits,
+    SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneAuthoringRevision,
     SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
 };
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};

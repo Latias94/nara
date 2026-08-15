@@ -16,7 +16,7 @@ use nara_reflect::{
 };
 use nara_scene::SceneEntityId;
 use nara_tooling::{
-    EditorApplyChangesResult, EditorCloseDecision, EditorPersistenceCommand,
+    EditorApplyChangesResult, EditorCloseDecision, EditorDocumentId, EditorPersistenceCommand,
     EditorPersistenceOperation, EditorPersistenceResult, EditorPlayCommand,
     EditorPlayOperationResult, EditorPlayState, EditorProjectView, EditorRuntimeEditRequest,
     EditorRuntimeEditResult, EditorSceneModel, EditorWorkspaceCommand, EditorWorkspaceIntent,
@@ -85,9 +85,13 @@ impl EguiSceneEditorPanel {
             } else {
                 InspectorEditMode::Disabled
             };
-            let inspector_response =
-                self.inspector
-                    .show_with_mode(ui, &scene.editor.inspector, edit_mode);
+            let inspector_response = self.inspector.show_with_mode(
+                ui,
+                &scene.editor.inspector,
+                scene.document,
+                scene.revision,
+                edit_mode,
+            );
             response.extend_inspector(inspector_response, play, runtime_edit);
         } else {
             ui.label(RichText::new("No active scene").weak());
@@ -136,6 +140,8 @@ impl EguiSceneEditorPanelResponse {
     ) {
         for command in response.workspace_commands {
             let EditorWorkspaceCommand::ApplyInspectorCommand {
+                document,
+                base_revision,
                 command:
                     SceneInspectorCommand::SetField {
                         entity,
@@ -144,7 +150,6 @@ impl EguiSceneEditorPanelResponse {
                         field,
                         value,
                     },
-                ..
             } = command
             else {
                 if runtime_edit
@@ -175,7 +180,8 @@ impl EguiSceneEditorPanelResponse {
             } else {
                 self.workspace_commands
                     .push(EditorWorkspaceCommand::ApplyInspectorCommand {
-                        document: None,
+                        document,
+                        base_revision,
                         command: SceneInspectorCommand::SetField {
                             entity,
                             component,
@@ -222,6 +228,8 @@ impl EguiSceneInspectorPanel {
         &mut self,
         ui: &mut Ui,
         model: &SceneInspectorModel,
+        document: EditorDocumentId,
+        base_revision: nara_scene::SceneAuthoringRevision,
         editing_enabled: bool,
     ) -> EguiSceneInspectorPanelResponse {
         let edit_mode = if editing_enabled {
@@ -229,16 +237,18 @@ impl EguiSceneInspectorPanel {
         } else {
             InspectorEditMode::Disabled
         };
-        self.show_with_mode(ui, model, edit_mode)
+        self.show_with_mode(ui, model, document, base_revision, edit_mode)
     }
 
     fn show_with_mode(
         &mut self,
         ui: &mut Ui,
         model: &SceneInspectorModel,
+        document: EditorDocumentId,
+        base_revision: nara_scene::SceneAuthoringRevision,
         edit_mode: InspectorEditMode,
     ) -> EguiSceneInspectorPanelResponse {
-        let mut response = EguiSceneInspectorPanelResponse::default();
+        let mut response = EguiSceneInspectorPanelResponse::new(document, base_revision);
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -275,9 +285,7 @@ impl EguiSceneInspectorPanel {
                 for entity in &model.entities {
                     let label = entity_row_label(entity);
                     if ui.selectable_label(entity.selected, label).clicked() {
-                        response.push_command(SceneInspectorCommand::SelectEntity {
-                            entity: Some(entity.id.clone()),
-                        });
+                        response.push_selection(Some(entity.id.clone()));
                     }
                 }
             });
@@ -517,31 +525,42 @@ impl EguiSceneInspectorPanel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EguiSceneInspectorPanelResponse {
+    document: EditorDocumentId,
+    base_revision: nara_scene::SceneAuthoringRevision,
     pub workspace_commands: Vec<EditorWorkspaceCommand>,
 }
 
 impl EguiSceneInspectorPanelResponse {
+    fn new(document: EditorDocumentId, base_revision: nara_scene::SceneAuthoringRevision) -> Self {
+        Self {
+            document,
+            base_revision,
+            workspace_commands: Vec::new(),
+        }
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.workspace_commands.is_empty()
     }
 
     fn push_command(&mut self, command: SceneInspectorCommand) {
-        let command = match command {
-            SceneInspectorCommand::SelectEntity { entity } => {
-                EditorWorkspaceCommand::SelectEntity {
-                    document: None,
-                    entity,
-                }
-            }
-            command => EditorWorkspaceCommand::ApplyInspectorCommand {
-                document: None,
+        self.workspace_commands
+            .push(EditorWorkspaceCommand::ApplyInspectorCommand {
+                document: self.document,
+                base_revision: self.base_revision,
                 command,
-            },
-        };
-        self.workspace_commands.push(command);
+            });
+    }
+
+    fn push_selection(&mut self, entity: Option<SceneEntityId>) {
+        self.workspace_commands
+            .push(EditorWorkspaceCommand::SelectEntity {
+                document: self.document,
+                entity,
+            });
     }
 }
 
@@ -1463,7 +1482,8 @@ mod tests {
         let entity = SceneEntityId::new("player").unwrap();
         let component = ComponentTypeId::new("nara.test.Transform");
         let command = EditorWorkspaceCommand::ApplyInspectorCommand {
-            document: Some(scene.document),
+            document: scene.document,
+            base_revision: scene.revision,
             command: SceneInspectorCommand::RemoveField {
                 entity,
                 component,
@@ -1471,9 +1491,8 @@ mod tests {
                 field: ComponentFieldId::new("x"),
             },
         };
-        let inspector = EguiSceneInspectorPanelResponse {
-            workspace_commands: vec![command.clone()],
-        };
+        let mut inspector = EguiSceneInspectorPanelResponse::new(scene.document, scene.revision);
+        inspector.workspace_commands.push(command.clone());
         let play = play_view(&scene, EditorPlayState::Running, false, None);
         let mut runtime_response = EguiSceneEditorPanelResponse::default();
         runtime_response.extend_inspector(inspector, play, true);
@@ -1481,10 +1500,10 @@ mod tests {
         assert!(runtime_response.runtime_edits.is_empty());
 
         let mut authoring_response = EguiSceneEditorPanelResponse::default();
+        let mut inspector = EguiSceneInspectorPanelResponse::new(scene.document, scene.revision);
+        inspector.workspace_commands.push(command.clone());
         authoring_response.extend_inspector(
-            EguiSceneInspectorPanelResponse {
-                workspace_commands: vec![command.clone()],
-            },
+            inspector,
             play_view(&scene, EditorPlayState::Empty, false, None),
             false,
         );
@@ -1603,16 +1622,15 @@ mod tests {
             value: ComponentValue::I64(4),
         };
         let mut response = EguiSceneEditorPanelResponse::default();
-        response.extend_inspector(
-            EguiSceneInspectorPanelResponse {
-                workspace_commands: vec![EditorWorkspaceCommand::ApplyInspectorCommand {
-                    document: Some(scene.document),
-                    command,
-                }],
-            },
-            play,
-            true,
-        );
+        let mut inspector = EguiSceneInspectorPanelResponse::new(scene.document, scene.revision);
+        inspector
+            .workspace_commands
+            .push(EditorWorkspaceCommand::ApplyInspectorCommand {
+                document: scene.document,
+                base_revision: scene.revision,
+                command,
+            });
+        response.extend_inspector(inspector, play, true);
 
         assert_eq!(response.runtime_edits.len(), 1);
         assert_eq!(response.runtime_edits[0].generation, 7);

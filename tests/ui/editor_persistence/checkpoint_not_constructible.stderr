@@ -8,7 +8,7 @@ error: cannot construct `EditorPersistenceCheckpoint` with struct literal syntax
 9 |         revision: session.revision(),
   |         ---------------------------- private field
   |
-  = note: ...and other private field `identity` that was not provided
+  = note: ...and other private fields `identity`, `content_state` and `scene` that were not provided
 
 error[E0599]: no method named `__apply_persistence_checkpoint` found for struct `EditorWorkspace` in the current scope
   --> tests/ui/editor_persistence/checkpoint_not_constructible.rs:12:23

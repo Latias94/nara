@@ -1029,7 +1029,7 @@ fn scene_candidate_migrates_to_the_current_schema_and_requires_source_save() {
     assert_eq!(component.version, ComponentSchemaVersion(2));
     assert_eq!(component.value.field_str("current").unwrap(), "before");
     assert!(session.source_upgrade_required());
-    session.acknowledge_source_saved();
+    assert!(session.acknowledge_source_saved(session.content_state()));
     assert!(!session.source_upgrade_required());
 }
 

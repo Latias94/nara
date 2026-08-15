@@ -676,8 +676,10 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
     let _ = editor.workspace_model();
     assert!(expected.ptr_eq(&editor.test_schema_snapshot()));
     let document = editor.workspace().active_document().unwrap();
+    let base_revision = editor.workspace().scene(document).unwrap().revision();
     let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
-        document: Some(document),
+        document,
+        base_revision,
         patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
             entity: SceneEntityRecord::new(nara_identity::SceneEntityId::new("edited").unwrap()),
             placement: ScenePlacement::last(ScenePlacementOwner::Root),
@@ -758,10 +760,12 @@ fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
     )
     .unwrap();
     let document = editor.workspace().active_document().unwrap();
+    let base_revision = editor.workspace().scene(document).unwrap().revision();
     assert!(
         editor
             .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(document),
+                document,
+                base_revision,
                 patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
                     entity: SceneEntityRecord::new(
                         nara_identity::SceneEntityId::new("unsaved").unwrap(),

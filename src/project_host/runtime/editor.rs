@@ -355,7 +355,10 @@ impl std::error::Error for EditorProjectOpenError {}
 
 enum PendingPersistence {
     Save(SceneSaveCandidate),
-    Reopen { document: EditorDocumentId },
+    Reopen {
+        document: EditorDocumentId,
+        base_revision: Option<nara_scene::SceneAuthoringRevision>,
+    },
 }
 
 enum EditorRuntimeOwnerState {
@@ -936,11 +939,8 @@ impl EditorProjectSession {
                     );
                 };
                 let revision = checkpoint.revision();
-                let scene = slot.session().document().clone();
-                self.pending_persistence = Some(PendingPersistence::Save(SceneSaveCandidate {
-                    checkpoint,
-                    scene,
-                }));
+                self.pending_persistence =
+                    Some(PendingPersistence::Save(SceneSaveCandidate { checkpoint }));
                 self.persistence_operation = EditorPersistenceOperation::Saving {
                     document: requested_document,
                     captured_revision: revision,
@@ -948,8 +948,13 @@ impl EditorProjectSession {
             }
             EditorPersistenceCommand::Reopen { .. } => {
                 self.persistence_result = None;
+                let base_revision = self
+                    .workspace
+                    .scene(requested_document)
+                    .map(|slot| slot.revision());
                 self.pending_persistence = Some(PendingPersistence::Reopen {
                     document: requested_document,
+                    base_revision,
                 });
                 self.persistence_operation = EditorPersistenceOperation::Opening {
                     document: requested_document,
@@ -1223,7 +1228,10 @@ impl EditorProjectSession {
         if let Some(operation) = self.pending_persistence.take() {
             self.persistence_result = Some(match operation {
                 PendingPersistence::Save(save) => self.complete_save(save),
-                PendingPersistence::Reopen { document } => self.complete_reopen(document),
+                PendingPersistence::Reopen {
+                    document,
+                    base_revision,
+                } => self.complete_reopen(document, base_revision),
             });
             self.persistence_operation = EditorPersistenceOperation::Idle;
         }
@@ -1860,7 +1868,8 @@ impl EditorProjectSession {
         let patch_report = self.workspace.apply_command(
             self.plan.schema_validation().registry(),
             EditorWorkspaceCommand::ApplyScenePatch {
-                document: Some(document),
+                document,
+                base_revision: pending.document_revision,
                 patch,
             },
         );
@@ -1945,7 +1954,11 @@ impl EditorProjectSession {
         }
     }
 
-    fn complete_reopen(&mut self, document: EditorDocumentId) -> EditorPersistenceResult {
+    fn complete_reopen(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: Option<nara_scene::SceneAuthoringRevision>,
+    ) -> EditorPersistenceResult {
         match self
             .persistence
             .reopen(self.plan.schema_validation().registry())
@@ -1957,11 +1970,12 @@ impl EditorProjectSession {
                     identity,
                     content_digest,
                 } = *opened;
-                let replacing_existing = self.workspace.scene(document).is_some();
-                let report = if replacing_existing {
+                let replacing_existing = base_revision.is_some();
+                let report = if let Some(base_revision) = base_revision {
                     match self.persistence_authority.publish_reopened_session(
                         &mut self.workspace,
-                        Some(document),
+                        document,
+                        base_revision,
                         session,
                         digest,
                     ) {

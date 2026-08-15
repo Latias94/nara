@@ -3,8 +3,8 @@ use nara::{
     prelude::*,
     reflect::ComponentValueKind,
     scene::{
-        SceneAuthoringHistoryStatus, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
-        ScenePlacementOwner,
+        SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     },
 };
 
@@ -108,6 +108,219 @@ fn authoring_session_undo_redo_are_transactional() {
             redo_depth: 0,
         }
     );
+}
+
+#[test]
+fn content_state_tracks_undo_redo_and_divergent_branches() {
+    let registry = scene_registry();
+    let player = scene_id("player");
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Player",
+        )]));
+    let initial_state = session.content_state();
+    let initial_revision = session.revision();
+
+    assert!(
+        session
+            .apply_patch(&set_label_patch(&player, "Hero"), &registry)
+            .applied
+    );
+    let edited_state = session.content_state();
+    assert_ne!(edited_state, initial_state);
+
+    assert!(session.undo(&registry).applied);
+    assert_eq!(session.content_state(), initial_state);
+    assert!(session.revision().generation() > initial_revision.generation());
+
+    assert!(session.redo(&registry).applied);
+    assert_eq!(session.content_state(), edited_state);
+
+    assert!(session.undo(&registry).applied);
+    assert!(
+        session
+            .apply_patch(&set_label_patch(&player, "Pilot"), &registry)
+            .applied
+    );
+    let divergent_state = session.content_state();
+    assert_ne!(divergent_state, initial_state);
+    assert_ne!(divergent_state, edited_state);
+    assert!(!session.redo(&registry).applied);
+    assert_eq!(document_label(session.document(), &player), "Pilot");
+}
+
+#[test]
+fn history_limits_evict_the_oldest_undo_record() {
+    let registry = scene_registry();
+    let player = scene_id("player");
+    let limits =
+        SceneAuthoringHistoryLimits::new(2, 1_024, 1_024, 1_024, 1_024, 1_024, 1_024).unwrap();
+    let mut session = SceneAuthoringSession::new_with_history_limits(
+        SceneDocument::from_ordered_roots([labeled_entity(player.clone(), "Player")]),
+        limits,
+    );
+
+    assert!(
+        session
+            .apply_patch(&set_label_patch(&player, "One"), &registry)
+            .applied
+    );
+    assert!(
+        session
+            .apply_patch(&set_label_patch(&player, "Two"), &registry)
+            .applied
+    );
+    assert!(
+        session
+            .apply_patch(&set_label_patch(&player, "Three"), &registry)
+            .applied
+    );
+    let newest_state = session.content_state();
+
+    assert_eq!(session.history_status().undo_depth, 2);
+    assert_eq!(session.history_usage().records, 2);
+    assert_eq!(session.content_state(), newest_state);
+    assert!(session.undo(&registry).applied);
+    assert_eq!(document_label(session.document(), &player), "Two");
+    assert!(session.undo(&registry).applied);
+    assert_eq!(document_label(session.document(), &player), "One");
+    assert!(!session.undo(&registry).applied);
+}
+
+#[test]
+fn aggregate_history_cost_limits_evict_the_oldest_undo_record() {
+    let cases = [
+        (
+            SceneAuthoringHistoryLimits::new(8, 2, 1_024, 1_024, 2, 1_024, 1_024).unwrap(),
+            2,
+            (|usage: nara::scene::SceneAuthoringHistoryUsage| usage.operations)
+                as fn(nara::scene::SceneAuthoringHistoryUsage) -> usize,
+        ),
+        (
+            SceneAuthoringHistoryLimits::new(8, 1_024, 2, 1_024, 1_024, 2, 1_024).unwrap(),
+            2,
+            (|usage: nara::scene::SceneAuthoringHistoryUsage| usage.value_nodes)
+                as fn(nara::scene::SceneAuthoringHistoryUsage) -> usize,
+        ),
+        (
+            SceneAuthoringHistoryLimits::new(8, 1_024, 1_024, 64, 1_024, 1_024, 64).unwrap(),
+            64,
+            (|usage: nara::scene::SceneAuthoringHistoryUsage| usage.logical_bytes)
+                as fn(nara::scene::SceneAuthoringHistoryUsage) -> usize,
+        ),
+    ];
+
+    for (limits, expected_maximum, measured_cost) in cases {
+        let registry = scene_registry();
+        let player = scene_id("player");
+        let mut session = SceneAuthoringSession::new_with_history_limits(
+            SceneDocument::from_ordered_roots([labeled_entity(player.clone(), "Player")]),
+            limits,
+        );
+
+        for label in ["One", "Two", "Three"] {
+            assert!(
+                session
+                    .apply_patch(&set_label_patch(&player, label), &registry)
+                    .applied
+            );
+        }
+
+        assert_eq!(session.history_status().undo_depth, 2);
+        assert!(measured_cost(session.history_usage()) <= expected_maximum);
+        assert!(session.undo(&registry).applied);
+        assert_eq!(document_label(session.document(), &player), "Two");
+        assert!(session.redo(&registry).applied);
+        assert_eq!(document_label(session.document(), &player), "Three");
+    }
+}
+
+#[test]
+fn oversized_history_records_reject_before_document_publication() {
+    let registry = scene_registry();
+    let player = scene_id("player");
+    let byte_limited =
+        SceneAuthoringHistoryLimits::new(4, 1_024, 1_024, 1_024, 1_024, 1_024, 4).unwrap();
+    let mut session = SceneAuthoringSession::new_with_history_limits(
+        SceneDocument::from_ordered_roots([labeled_entity(player.clone(), "Player")]),
+        byte_limited,
+    );
+    let before_document = session.document().clone();
+    let before_revision = session.revision();
+    let before_state = session.content_state();
+    let before_live_dirty = session.is_live_dirty();
+
+    let report = session.apply_patch(&set_label_patch(&player, "H"), &registry);
+
+    assert!(!report.applied);
+    assert_eq!(
+        report.diagnostics.iter().next().unwrap().code().as_str(),
+        "scene.authoring-history-entry-limit-exceeded"
+    );
+    assert_eq!(session.document(), &before_document);
+    assert_eq!(session.revision(), before_revision);
+    assert_eq!(session.content_state(), before_state);
+    assert_eq!(session.history_usage().records, 0);
+    assert_eq!(session.is_live_dirty(), before_live_dirty);
+
+    let operation_limited =
+        SceneAuthoringHistoryLimits::new(4, 1, 1_024, 1_024, 1, 1_024, 1_024).unwrap();
+    let mut structural =
+        SceneAuthoringSession::new_with_history_limits(SceneDocument::default(), operation_limited);
+    let structural_revision = structural.revision();
+    let structural_state = structural.content_state();
+    let report = structural.apply_patch(
+        &ScenePatchDocument::new([
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(scene_id("first")),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+            ScenePatchOperation::AddEntity {
+                entity: SceneEntityRecord::new(scene_id("second")),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+        ]),
+        &registry,
+    );
+    assert!(!report.applied);
+    assert!(structural.document().entities.is_empty());
+    assert_eq!(structural.revision(), structural_revision);
+    assert_eq!(structural.content_state(), structural_state);
+
+    let root = scene_id("root");
+    let children = [
+        scene_id("child-a"),
+        scene_id("child-b"),
+        scene_id("child-c"),
+    ];
+    let subtree = SceneDocument::new(
+        [root.clone()],
+        [
+            SceneEntityRecord::new(root.clone()).with_children(children.clone()),
+            SceneEntityRecord::new(children[0].clone()),
+            SceneEntityRecord::new(children[1].clone()),
+            SceneEntityRecord::new(children[2].clone()),
+        ],
+    );
+    let subtree_limits =
+        SceneAuthoringHistoryLimits::new(4, 7, 1_024, 1_024, 7, 1_024, 1_024).unwrap();
+    let mut structural = SceneAuthoringSession::new_with_history_limits(subtree, subtree_limits);
+    let before_document = structural.document().clone();
+    let before_revision = structural.revision();
+
+    let report = structural.apply_patch(
+        &ScenePatchDocument::new([ScenePatchOperation::RemoveEntity {
+            entity: root,
+            from: ScenePlacement::first(ScenePlacementOwner::Root),
+        }]),
+        &registry,
+    );
+
+    assert!(!report.applied);
+    assert_eq!(structural.document(), &before_document);
+    assert_eq!(structural.revision(), before_revision);
+    assert_eq!(structural.history_usage().records, 0);
 }
 
 #[test]
@@ -272,9 +485,6 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     assert_eq!(after_patch.source_id(), initial.source_id());
     assert_eq!(after_patch.generation(), initial.generation() + 1);
 
-    session.clear_history();
-    assert_eq!(session.revision(), after_patch);
-
     let clear = session.clear_live_world(&mut world);
     assert!(clear.cleared);
     assert_eq!(clear.removed_entities, 1);
@@ -287,8 +497,8 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
         "Replacement",
     )]));
     let after_replace = session.revision();
-    assert_eq!(after_replace.source_id(), initial.source_id());
-    assert_eq!(after_replace.generation(), after_patch.generation() + 1);
+    assert_ne!(after_replace.source_id(), initial.source_id());
+    assert_eq!(after_replace.generation(), 0);
     assert_eq!(
         session.history_status(),
         SceneAuthoringHistoryStatus {

@@ -1,6 +1,5 @@
 use nara::{
     advanced_prelude::*,
-    diagnostic::DiagnosticValueRef,
     scene::SceneAuthoringHistoryStatus,
     scene::{ScenePlacement, ScenePlacementOwner},
     tooling_prelude::*,
@@ -32,14 +31,13 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
         ],
     );
     let mut session = SceneAuthoringSession::new(document);
-    let mut inspector = SceneInspectorState::new();
-    inspector.select_entity(Some(player.clone()));
+    let inspector = SceneInspectorState::new();
     let mut world = World::new();
     world.spawn_empty();
     assert!(session.sync_world(&mut world, &registry).synced);
     let snapshot = WorldIdentitySnapshot::capture_default(&world).unwrap();
 
-    let model = inspector.model(&session, &registry, Some(&snapshot));
+    let model = inspector.model_with_selection(&session, &registry, Some(&player), Some(&snapshot));
 
     let world_snapshot = model.world_snapshot.as_ref().unwrap();
     assert_eq!(world_snapshot.total_entity_count, 3);
@@ -93,6 +91,42 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
 }
 
 #[test]
+fn inspector_tree_uses_canonical_root_and_child_order_with_depth() {
+    let registry = test_registry();
+    let z_root = scene_id("z-root");
+    let a_root = scene_id("a-root");
+    let z_second = scene_id("z-root/z-second");
+    let z_first = scene_id("z-root/z-first");
+    let session = SceneAuthoringSession::new(SceneDocument::new(
+        [z_root.clone(), a_root.clone()],
+        [
+            SceneEntityRecord::new(a_root.clone()),
+            SceneEntityRecord::new(z_first.clone()),
+            SceneEntityRecord::new(z_root.clone())
+                .with_children([z_second.clone(), z_first.clone()]),
+            SceneEntityRecord::new(z_second.clone()),
+        ],
+    ));
+
+    let model = SceneInspectorState::new().model(&session, &registry, None);
+    let rows = model
+        .entities
+        .iter()
+        .map(|row| (row.id.clone(), row.parent.clone(), row.depth))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        rows,
+        [
+            (z_root.clone(), None, 0),
+            (z_second, Some(z_root.clone()), 1),
+            (z_first, Some(z_root), 1),
+            (a_root, None, 0),
+        ]
+    );
+}
+
+#[test]
 fn inspector_model_omits_components_without_observation_eligibility() {
     let registry = visibility_registry();
     let player = scene_id("player");
@@ -112,10 +146,9 @@ fn inspector_model_omits_components_without_observation_eligibility() {
             ),
         )]);
     let session = SceneAuthoringSession::new(document);
-    let mut inspector = SceneInspectorState::new();
-    inspector.select_entity(Some(player.clone()));
+    let inspector = SceneInspectorState::new();
 
-    let model = inspector.model(&session, &registry, None);
+    let model = inspector.model_with_selection(&session, &registry, Some(&player), None);
 
     let row = model
         .entities
@@ -138,10 +171,9 @@ fn inspector_model_does_not_project_an_unfrozen_registry_candidate() {
         player.clone(),
         "Player",
     )]));
-    let mut inspector = SceneInspectorState::new();
-    inspector.select_entity(Some(player.clone()));
+    let inspector = SceneInspectorState::new();
 
-    let model = inspector.model(&session, &registry, None);
+    let model = inspector.model_with_selection(&session, &registry, Some(&player), None);
 
     assert!(model.diagnostics.has_errors());
     assert_eq!(model.entities[0].inspectable_component_count, 0);
@@ -164,8 +196,7 @@ fn inspector_read_only_field_command_is_failure_atomic() {
             "Player",
         )]));
     let before = session.document().clone();
-    let mut inspector = SceneInspectorState::new();
-    inspector.select_entity(Some(player.clone()));
+    let inspector = SceneInspectorState::new();
 
     let report = inspector.apply_command(
         &mut session,
@@ -186,11 +217,10 @@ fn inspector_read_only_field_command_is_failure_atomic() {
         session.history_status(),
         SceneAuthoringHistoryStatus::default()
     );
-    assert_eq!(inspector.selected_entity(), Some(&player));
 }
 
 #[test]
-fn inspector_set_field_command_applies_patch_and_selects_target() {
+fn inspector_set_field_command_applies_one_patch_without_owning_selection() {
     let registry = test_registry();
     let player = scene_id("player");
     let mut session =
@@ -198,7 +228,7 @@ fn inspector_set_field_command_applies_patch_and_selects_target() {
             player.clone(),
             "Player",
         )]));
-    let mut inspector = SceneInspectorState::new();
+    let inspector = SceneInspectorState::new();
 
     let report = inspector.apply_command(
         &mut session,
@@ -215,8 +245,6 @@ fn inspector_set_field_command_applies_patch_and_selects_target() {
     assert!(report.applied);
     assert!(report.patch.is_some());
     assert!(report.patch_report.as_ref().unwrap().applied);
-    assert_eq!(report.selected_entity.as_ref(), Some(&player));
-    assert_eq!(inspector.selected_entity(), Some(&player));
     assert_eq!(document_label(session.document(), &player), "Hero");
     assert_eq!(
         session.history_status(),
@@ -249,7 +277,7 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
         ],
     );
     let mut session = SceneAuthoringSession::new(original.clone());
-    let mut inspector = SceneInspectorState::new();
+    let inspector = SceneInspectorState::new();
 
     let report = inspector.apply_command(
         &mut session,
@@ -263,7 +291,6 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
     );
 
     assert!(report.applied, "{:?}", report.diagnostics);
-    assert_eq!(report.selected_entity.as_ref(), Some(&last));
     assert_eq!(session.history_status().undo_depth, 1);
     assert_eq!(session.history_status().redo_depth, 0);
     assert_eq!(
@@ -293,51 +320,6 @@ fn inspector_move_command_preserves_exact_order_through_undo_and_redo() {
 }
 
 #[test]
-fn inspector_selection_rejects_missing_entities_without_losing_selection() {
-    let registry = test_registry();
-    let player = scene_id("player");
-    let missing = scene_id("missing");
-    let mut session =
-        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([labeled_entity(
-            player.clone(),
-            "Player",
-        )]));
-    let mut inspector = SceneInspectorState::new();
-    assert!(
-        inspector
-            .apply_command(
-                &mut session,
-                &registry,
-                SceneInspectorCommand::SelectEntity {
-                    entity: Some(player.clone()),
-                },
-            )
-            .applied
-    );
-
-    let report = inspector.apply_command(
-        &mut session,
-        &registry,
-        SceneInspectorCommand::SelectEntity {
-            entity: Some(missing),
-        },
-    );
-
-    assert!(!report.applied);
-    assert!(report.diagnostics.has_errors());
-    let diagnostic = report.diagnostics.iter().next().unwrap();
-    assert_eq!(
-        diagnostic.code().as_str(),
-        "tooling.inspector-missing-entity"
-    );
-    let entity = diagnostic_field(diagnostic, "entity");
-    assert_eq!(entity.class(), DiagnosticFieldClass::Public);
-    assert_eq!(entity.value(), DiagnosticValueRef::Identifier("missing"));
-    assert_eq!(report.selected_entity.as_ref(), Some(&player));
-    assert_eq!(inspector.selected_entity(), Some(&player));
-}
-
-#[test]
 fn inspector_failed_patch_command_does_not_enter_history() {
     let registry = test_registry();
     let player = scene_id("player");
@@ -346,8 +328,7 @@ fn inspector_failed_patch_command_does_not_enter_history() {
             player.clone(),
             "Player",
         )]));
-    let mut inspector = SceneInspectorState::new();
-    inspector.select_entity(Some(player.clone()));
+    let inspector = SceneInspectorState::new();
 
     let report = inspector.apply_command(
         &mut session,
@@ -370,7 +351,6 @@ fn inspector_failed_patch_command_does_not_enter_history() {
             .diagnostics
             .has_errors()
     );
-    assert_eq!(report.selected_entity.as_ref(), Some(&player));
     assert_eq!(document_label(session.document(), &player), "Player");
     assert_eq!(
         session.history_status(),
@@ -394,10 +374,9 @@ fn inspector_migrates_legacy_component_for_display_and_atomic_edit() {
             player.clone(),
         )
         .with_component(position_type_id(), legacy.clone())]));
-    let mut inspector = SceneInspectorState::new();
-    inspector.select_entity(Some(player.clone()));
+    let inspector = SceneInspectorState::new();
 
-    let model = inspector.model(&session, &registry, None);
+    let model = inspector.model_with_selection(&session, &registry, Some(&player), None);
     assert!(!model.diagnostics.has_errors());
     let component = &model.selected_entity_view.unwrap().components[0];
     assert_eq!(component.document_version, ComponentSchemaVersion::ONE);
@@ -634,14 +613,6 @@ fn labeled_entity(id: SceneEntityId, label: &str) -> SceneEntityRecord {
 
 fn field<'a>(fields: &'a [SceneInspectorFieldView], id: &str) -> &'a SceneInspectorFieldView {
     fields.iter().find(|field| field.id.as_str() == id).unwrap()
-}
-
-fn diagnostic_field<'a>(diagnostic: &'a Diagnostic, key: &str) -> &'a DiagnosticField {
-    diagnostic
-        .fields()
-        .iter()
-        .find(|field| field.key().as_str() == key)
-        .unwrap()
 }
 
 fn document_label(document: &SceneDocument, id: &SceneEntityId) -> String {
