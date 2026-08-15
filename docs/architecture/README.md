@@ -9,8 +9,8 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. [Editor Authoring Loop v1](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md) is
-   the sole active implementation plan. EFI-U4 is the only active unit under registration
-   `5240deaf104f404193d5d53d8d52fed8`; EFI-U5 remains inactive and dependency-ordered. The
+   the sole active implementation plan. EFI-U5 is the only active unit under registration
+   `36ea603afc824178b52da630d628de34`; EFI-U1 through EFI-U4 are verified and immutable. The
    completed Fresh Project, Capability Directory Publication, Runtime UI,
    and focused correction plans remain immutable lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.

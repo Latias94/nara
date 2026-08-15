@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "0a8924928c958b21d05f54b26224b3b1c1aced70ca0c1d1635f99c38a3469560"
+source_fingerprint: "933e9a2b4b1aab4c991ee11e30f38e69deaa172316675118be86c0a439cf7e37"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "0a8924928c958b21d05f54b26224b3b1c1aced70ca0c1d1635f99c38a34
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `0a8924928c958b21d05f54b26224b3b1c1aced70ca0c1d1635f99c38a3469560`
-- Immutable records: 463
+- Source fingerprint: `933e9a2b4b1aab4c991ee11e30f38e69deaa172316675118be86c0a439cf7e37`
+- Immutable records: 465
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Editor Authoring Loop v1: EFI-U4 active](registry/2026-08/2026-08-15T214924Z-editor-authoring-loop-v1-codex-root-5240deaf104f404193d5d53d8d52fed8.md): `active` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
+- [Editor Authoring Loop v1: EFI-U5 active](registry/2026-08/2026-08-15T223600Z-editor-authoring-loop-v1-codex-root-36ea603afc824178b52da630d628de34.md): `active` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -32,6 +32,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EFI-U4 private native Editor application](verification/2026-08/2026-08-15T223500Z-efi-u4-private-native-editor-application-26373f31c4664b89b0d33eed4bef93db.md) - Verifies the private native nara-editor package, exact frame/action integration, bounded failure feedback, dirty-close arbitration, and one real Windows WGPU window canary.
 - **Verification Evidence**: [EFI-U3 revision-bound egui Adapter and fixed panel model](verification/2026-08/2026-08-15T214835Z-efi-u3-revision-bound-egui-adapter-and-fixed-panel-model-87a848bea2894fd1ba91db03c224f9e2.md) - Verifies the exact-frame egui Adapter, revision-bound transient drafts, ordered actions, fixed panel model, and exact persistence retry identity.
 - **Verification Evidence**: [EFI-U2 coherent Editor frame and ordered Host dispatch](verification/2026-08/2026-08-15T204901Z-efi-u2-coherent-editor-frame-and-ordered-host-dispatch-cef874a6d30f450b936f21dc11931bed.md) - Verifies one immutable post-drive Editor frame, exact ordered Host dispatch, durable stale-action diagnostics, and preserved Play, persistence, and independent consumer behavior.
 - **Verification Evidence**: [EFI-U1 corrected proving commit](verification/2026-08/2026-08-15T204900Z-efi-u1-corrected-proving-commit-5c4a026fa6e548bdb7a5ade915b23e94.md) - Rebinds prior EFI-U1 evidence to commit 8f3cc19 after correcting unshared clock-skewed commit dates; behavioral evidence is unchanged.
@@ -43,7 +44,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [FPER-U0 versioned starter and creation conformance](verification/2026-08/2026-08-14T140058Z-fper-u0-versioned-starter-and-creation-conformance-6717111091f5451fa4708a04b79e1c35.md) - Verifies the closed desktop-2d/v1 starter, typed dependency authority, atomic publication, ordinary admission, thin CLI and independent public consumer.
 - **Verification Evidence**: [CDPF-U3 external directory publication conformance baseline](verification/2026-08/2026-08-14T060149Z-cdpf-u3-external-directory-publication-conformance-baseline-1c01523e7462406dabf4a177cf64285c.md) - Verifies the public nara_fs directory-publication Interface through an isolated external consumer and records the exact hosted support boundary.
 - **Verification Evidence**: [CDPF-U2 exact directory publication and terminal outcomes](verification/2026-08/2026-08-14T043354Z-cdpf-u2-exact-directory-publication-and-terminal-outcomes-b27082ccee9b484bb298d4d00901400c.md) - Verifies exact Windows no-replace publication, Linux cooperative no-replace compilation, truthful begin/publish failure terminality, and bounded public filesystem authority.
-- **Verification Evidence**: [CDPF-U1 capability-owned directory staging](verification/2026-08/2026-08-14T024337Z-cdpf-u1-capability-owned-directory-staging-44a2fdb822d94c268972bf50f7fa7168.md) - Verifies move-only same-parent staging, explicit file write authority, runtime filesystem-tier admission, and fail-closed pre-publication behavior.
 
 # Integration Notes
 

@@ -7,8 +7,8 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
 execution_state: active
-active_unit: EFI-U4
-activation_record: 5240deaf104f404193d5d53d8d52fed8
+active_unit: EFI-U5
+activation_record: 36ea603afc824178b52da630d628de34
 product_contract_source: docs/architecture/ui-product-boundaries-editor-dogfood-and-porting-strategy.md
 origin: docs/plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md
 depends_on: docs/plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md
