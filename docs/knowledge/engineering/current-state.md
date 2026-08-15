@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "ea2c9d0476a9afbd096db45f725d5662957bd30105a16492aca65798b0add54d"
+source_fingerprint: "67a232d5e747d3f8a15f7c08284dfdbf13c0cca0a6de5161e87ab4a4bbc4e9a9"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "ea2c9d0476a9afbd096db45f725d5662957bd30105a16492aca65798b0a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `ea2c9d0476a9afbd096db45f725d5662957bd30105a16492aca65798b0add54d`
-- Immutable records: 456
+- Source fingerprint: `67a232d5e747d3f8a15f7c08284dfdbf13c0cca0a6de5161e87ab4a4bbc4e9a9`
+- Immutable records: 458
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Editor Authoring Loop v1: EFI-U1 active](registry/2026-08/2026-08-15T161048Z-editor-authoring-loop-v1-codex-root-18ab55170b6d4529bb72a91173c0b9ed.md): `active` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
+- [Editor Authoring Loop v1: EFI-U2 active](registry/2026-08/2026-08-15T185258Z-editor-authoring-loop-v1-codex-root-7f4c94a841264859b59d03cfc1e69afe.md): `active` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -32,6 +32,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EFI-U1 exact bounded authoring conformance](verification/2026-08/2026-08-15T185031Z-efi-u1-exact-bounded-authoring-conformance-b8d1206722cd47a1931e34c05258c221.md) - Verifies exact document and revision authority, single-owner selection, canonical Scene Tree projection, bounded branch-aware history, and receipt-bound clean-state recovery.
 - **Session Handoff**: [Editor Authoring Loop v1 plan prepared](sessions/2026-08/2026-08-15T154346Z-editor-authoring-loop-v1-plan-prepared-56512cbf4c964df2aef385ccf5f04f4f.md) - Records the reviewed, implementation-ready Editor Authoring Loop v1 plan while leaving implementation inactive pending explicit user activation.
 - **Verification Evidence**: [FPER-U3 linked fresh-project export and repair conformance](verification/2026-08/2026-08-15T110328Z-fper-u3-linked-fresh-project-export-and-repair-conformance-386a7ba1b9694f09b2e34795b3d3ddfe.md) - Verifies the public create, check, source run, source-carrying export, explicit repair, rerun and re-export trajectory.
 - **Verification Evidence**: [FPER-U2 startup-closure export conformance](verification/2026-08/2026-08-15T054430Z-fper-u2-startup-closure-export-conformance-64c7375e92e64f958174aa1bc37b09ee.md) - Verifies exact Cargo artifact selection, startup-closure publication, portable executable permissions, independent consumption, and arbitrary-CWD headless and desktop acceptance.
@@ -43,7 +44,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [RUP-U3 Runtime UI Product-Validated Baseline](verification/2026-08/2026-08-13T155950Z-rup-u3-runtime-ui-product-validated-baseline-a203485f0c8e478eb3ec1e03426aca67.md) - Closes the data-authored Runtime UI product slice with exact desktop, headless, accessibility, package and performance evidence.
 - **Verification Evidence**: [PUEC-U3 Presented UI Evidence Correlation Conformance](verification/2026-08/2026-08-13T155000Z-puec-u3-presented-evidence-correlation-conformance-a87355beec2241669936985528c9c172.md) - Closes the focused correction with exact backend-to-receipt correlation and bounded post-readiness product measurement.
 - **Verification Evidence**: [PUEC-U2 receipt-bound presented observation](verification/2026-08/2026-08-13T110513Z-puec-u2-receipt-bound-presented-observation-97aa78c6bbf74fada0b7d99219e271a6.md) - Proves that the presentation owner publishes one immutable observation from the exact accepted WGPU packet only after committing its matching receipt.
-- **Verification Evidence**: [PUEC-U1 exact WGPU frame identity](verification/2026-08/2026-08-13T090735Z-puec-u1-exact-wgpu-frame-identity-5207658a400a48c99783ed034b5b5125.md) - Proves that WGPU transaction and completion evidence retains distinct App-frame and Render-transaction identities.
 
 # Integration Notes
 
