@@ -1,9 +1,9 @@
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A stable product capability that may be compiled by a host and requested by a project.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[repr(u8)]
 pub enum ProductCapability {
     #[serde(rename = "runtime-core")]
@@ -160,7 +160,7 @@ impl fmt::Debug for ProductCapabilitySet {
 }
 
 /// Runtime execution policy, independent from additive product capabilities.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimePreset {
     #[default]

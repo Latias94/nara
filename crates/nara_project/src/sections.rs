@@ -11,7 +11,7 @@ use nara_tasks::{
     TaskKindConfig, TaskPoolConfig, TaskPoolKind, TaskShutdownPolicy,
 };
 use nara_window::{PresentMode, WindowMode};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::defaults::*;
@@ -31,7 +31,7 @@ use crate::validation::{
 // roughly 256 bytes per entry at the engine's maximum capacity.
 const PROJECT_RUNTIME_DIAGNOSTIC_BYTE_LIMIT: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectInfo {
     pub name: String,
@@ -41,7 +41,7 @@ pub struct ProjectInfo {
     pub version: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPathsManifest {
     #[serde(default = "default_assets_path")]
@@ -68,14 +68,14 @@ impl Default for ProjectPathsManifest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectStartupManifest {
     #[serde(default)]
     pub default_scene: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectCapabilitiesManifest {
     #[serde(default)]
@@ -106,7 +106,7 @@ impl ProjectCapabilitiesManifest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectRuntimeManifest {
     #[serde(default)]
@@ -199,7 +199,7 @@ impl ProjectRuntimeManifest {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectFixedCatchUpPolicy {
     #[default]
@@ -216,7 +216,7 @@ impl From<ProjectFixedCatchUpPolicy> for FixedCatchUpPolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTaskPoolManifest {
     pub workers: u32,
@@ -232,7 +232,7 @@ impl ProjectTaskPoolManifest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTaskShutdownManifest {
     pub drain_timeout_ms: u64,
@@ -250,7 +250,7 @@ impl ProjectTaskShutdownManifest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTasksManifest {
     #[serde(default = "default_io_task_pool")]
@@ -511,7 +511,7 @@ fn duration_millis_u64(duration: Duration) -> u64 {
     u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectWindowManifest {
     #[serde(default = "default_window_enabled")]
@@ -604,7 +604,7 @@ impl ProjectWindowManifest {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectWindowMode {
     #[default]
@@ -623,7 +623,7 @@ impl From<ProjectWindowMode> for WindowMode {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectPresentMode {
     #[default]
@@ -646,7 +646,7 @@ impl From<ProjectPresentMode> for PresentMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectInputManifest {
     #[serde(default)]
@@ -671,7 +671,7 @@ impl ProjectInputManifest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectDiagnosticsManifest {
     #[serde(default = "default_diagnostics_capacity")]

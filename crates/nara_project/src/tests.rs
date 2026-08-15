@@ -1075,3 +1075,23 @@ fn product_capability_discriminants_preserve_existing_bits() {
     assert_eq!(ProductCapability::RenderWgpu as u8, 5);
     assert_eq!(ProductCapability::Presentation2d as u8, 6);
 }
+
+#[test]
+fn canonical_writer_changes_only_the_selected_profile_startup_scene_semantics() {
+    let source = format!(
+        "{COMPLETE_MANIFEST}\n[startup]\ndefault_scene = \"base.scene.json\"\n\n[profiles.dev.startup]\ndefault_scene = \"old.scene.json\"\n"
+    );
+    let mut expected = ProjectManifest::parse_toml_str(&source).manifest.unwrap();
+    expected
+        .replace_startup_scene(
+            Some("dev"),
+            ProjectPath::new("replacement.scene.json").unwrap(),
+        )
+        .unwrap();
+
+    let encoded = expected.to_canonical_toml_bytes().unwrap();
+    let loaded = ProjectManifest::parse_toml_bytes(&encoded);
+
+    assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+    assert_eq!(loaded.manifest.unwrap(), expected);
+}

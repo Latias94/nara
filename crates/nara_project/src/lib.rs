@@ -25,7 +25,9 @@ pub use effective::{
     EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
     EffectiveStartupSettings, EffectiveTaskSettings, EffectiveWindowSettings,
 };
-pub use manifest::{ProjectManifest, ProjectManifestLoad};
+pub use manifest::{
+    ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError,
+};
 pub use path::{ProjectPath, ProjectPathError};
 pub use profile::{
     ProjectCapabilitiesPatch, ProjectDiagnosticsPatch, ProjectInputPatch, ProjectPathsPatch,
@@ -48,12 +50,12 @@ pub mod prelude {
         MAX_PROJECT_FIXED_STEPS_PER_FRAME, ProductCapability, ProductCapabilitySet,
         ProjectCapabilitiesManifest, ProjectCapabilitiesPatch, ProjectDiagnosticsManifest,
         ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
-        ProjectManifestLoad, ProjectPath, ProjectPathError, ProjectPathsManifest,
-        ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
-        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
-        ProjectTaskPoolPatch, ProjectTaskShutdownManifest, ProjectTaskShutdownPatch,
-        ProjectTasksManifest, ProjectTasksPatch, ProjectWindowManifest, ProjectWindowMode,
-        RuntimePreset,
+        ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
+        ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
+        ProjectProfileKind, ProjectProfileOverlay, ProjectRuntimeManifest, ProjectStartupManifest,
+        ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
+        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectWindowManifest,
+        ProjectWindowMode, RuntimePreset,
     };
 }
 

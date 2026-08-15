@@ -5,9 +5,10 @@ use nara_core::{
     preflight_serde_shape,
 };
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::effective::EffectiveProjectSettings;
+use crate::path::ProjectPath;
 use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
 use crate::sections::{
     ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest,
@@ -60,7 +61,7 @@ impl ProjectManifestLoad {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectManifest {
     pub schema_version: u32,
@@ -114,6 +115,55 @@ impl ProjectManifest {
         };
 
         parse_bounded_toml(source)
+    }
+
+    /// Replaces the modeled startup Scene selection for the base manifest or one exact profile.
+    ///
+    /// The path is relative to the effective `paths.scenes` directory. This operation changes
+    /// typed manifest semantics only; filesystem publication remains the caller's responsibility.
+    pub fn replace_startup_scene(
+        &mut self,
+        profile: Option<&str>,
+        replacement: ProjectPath,
+    ) -> Result<(), ProjectManifestMutationError> {
+        let replacement = replacement.as_str().to_owned();
+        match profile {
+            None => self.startup.default_scene = Some(replacement),
+            Some(profile) => {
+                let overlay = self
+                    .profiles
+                    .get_mut(profile)
+                    .ok_or(ProjectManifestMutationError::UnknownProfile)?;
+                overlay.startup.default_scene = Some(replacement);
+                overlay.startup.clear_default_scene = false;
+            }
+        }
+        Ok(())
+    }
+
+    /// Encodes every modeled field into deterministic, complete-schema TOML.
+    pub fn to_canonical_toml_bytes(&self) -> Result<Vec<u8>, ProjectManifestWriteError> {
+        let diagnostics = self.validate();
+        if diagnostics.has_errors() {
+            return Err(ProjectManifestWriteError::Invalid {
+                diagnostics: Box::new(diagnostics),
+            });
+        }
+        let mut encoded = toml::to_string_pretty(self)
+            .map_err(ProjectManifestWriteError::Encode)?
+            .into_bytes();
+        if !encoded.ends_with(b"\n") {
+            encoded.push(b'\n');
+        }
+        let limit = usize::try_from(DEFAULT_MANIFEST_BYTE_LIMIT)
+            .expect("the project manifest byte limit fits usize on supported targets");
+        if encoded.len() > limit {
+            return Err(ProjectManifestWriteError::TooLarge {
+                actual: encoded.len(),
+                limit,
+            });
+        }
+        Ok(encoded)
     }
 
     #[must_use]
@@ -231,6 +281,58 @@ impl ProjectManifest {
         settings.enforce_profile_kind_invariants(profile_kind);
         settings.enforce_product_invariants();
         Ok(settings)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectManifestMutationError {
+    UnknownProfile,
+}
+
+impl fmt::Display for ProjectManifestMutationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("project profile does not exist")
+    }
+}
+
+impl std::error::Error for ProjectManifestMutationError {}
+
+#[derive(Debug)]
+pub enum ProjectManifestWriteError {
+    Invalid { diagnostics: Box<DiagnosticReport> },
+    Encode(toml::ser::Error),
+    TooLarge { actual: usize, limit: usize },
+}
+
+impl ProjectManifestWriteError {
+    #[must_use]
+    pub const fn diagnostics(&self) -> Option<&DiagnosticReport> {
+        match self {
+            Self::Invalid { diagnostics } => Some(diagnostics),
+            Self::Encode(_) | Self::TooLarge { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for ProjectManifestWriteError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Invalid { .. } => formatter.write_str("project manifest is invalid"),
+            Self::Encode(_) => formatter.write_str("project manifest encoding failed"),
+            Self::TooLarge { actual, limit } => write!(
+                formatter,
+                "encoded project manifest has {actual} bytes and exceeds the {limit}-byte limit"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProjectManifestWriteError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Encode(error) => Some(error),
+            Self::Invalid { .. } | Self::TooLarge { .. } => None,
+        }
     }
 }
 

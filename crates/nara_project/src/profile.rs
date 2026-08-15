@@ -3,7 +3,7 @@ use std::fmt;
 use nara_app::TimeSettingsError;
 use nara_diagnostic::{DiagnosticReport, DiagnosticSettingsError, MAX_RUNTIME_DIAGNOSTIC_ENTRIES};
 use nara_tasks::TaskConfigError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
@@ -24,7 +24,7 @@ use crate::validation::{
     with_public_u64,
 };
 
-#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectProfileOverlay {
     #[serde(default)]
@@ -90,7 +90,7 @@ impl ProjectProfileOverlay {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectCapabilitiesPatch {
     #[serde(default)]
@@ -114,7 +114,7 @@ impl ProjectCapabilitiesPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPathsPatch {
     #[serde(default)]
@@ -183,7 +183,7 @@ impl ProjectPathsPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectStartupPatch {
     #[serde(default)]
@@ -222,7 +222,7 @@ impl ProjectStartupPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectRuntimePatch {
     #[serde(default)]
@@ -329,7 +329,7 @@ impl ProjectRuntimePatch {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTasksPatch {
     #[serde(default)]
@@ -367,7 +367,7 @@ impl ProjectTasksPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTaskPoolPatch {
     #[serde(default)]
@@ -387,7 +387,7 @@ impl ProjectTaskPoolPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectTaskShutdownPatch {
     #[serde(default)]
@@ -412,7 +412,7 @@ impl ProjectTaskShutdownPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectWindowPatch {
     #[serde(default)]
@@ -502,7 +502,7 @@ impl ProjectWindowPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectInputPatch {
     #[serde(default)]
@@ -541,7 +541,7 @@ impl ProjectInputPatch {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectDiagnosticsPatch {
     #[serde(default)]
