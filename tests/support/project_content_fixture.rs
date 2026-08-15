@@ -107,8 +107,16 @@ requested = ["runtime-2d"]
 
     pub fn root_capability(&self) -> DirectoryCapability {
         DirectoryCapability::from_host_handle(
-            host_directory(&self.root),
+            host_directory(&self.root, CapabilityRights::ReadOnly),
             HostCapabilityOptions::new(CapabilityRights::ReadOnly, portable_trust()),
+        )
+        .unwrap()
+    }
+
+    pub fn writable_root_capability(&self) -> DirectoryCapability {
+        DirectoryCapability::from_host_handle(
+            host_directory(&self.root, CapabilityRights::ReadWrite),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
         )
         .unwrap()
     }
@@ -309,7 +317,7 @@ fn portable_trust() -> TrustMode {
     }
 }
 
-fn host_directory(path: &Path) -> File {
+fn host_directory(path: &Path, rights: CapabilityRights) -> File {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
@@ -320,6 +328,7 @@ fn host_directory(path: &Path) -> File {
 
         OpenOptions::new()
             .read(true)
+            .write(rights == CapabilityRights::ReadWrite)
             .share_mode(FILE_SHARE_READ_WRITE_DELETE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)
@@ -328,6 +337,7 @@ fn host_directory(path: &Path) -> File {
 
     #[cfg(unix)]
     {
+        let _ = rights;
         File::open(path).unwrap()
     }
 }

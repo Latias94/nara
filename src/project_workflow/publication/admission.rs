@@ -127,7 +127,7 @@ fn project_admission_error(error: ProjectSourceCheckError) -> ProjectCreationAdm
         ProjectSourceCheckError::ProductComposition(error) => {
             ProjectCreationAdmissionErrorInner::ProductRecipe(Box::new(error))
         }
-        ProjectSourceCheckError::StartupContent(error) => {
+        ProjectSourceCheckError::StartupContent { error, .. } => {
             ProjectCreationAdmissionErrorInner::Content(Box::new(error))
         }
     };

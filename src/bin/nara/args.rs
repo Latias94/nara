@@ -7,6 +7,7 @@ pub(crate) enum Command {
     Version,
     New(NewArguments),
     Export(ExportArguments),
+    Repair(RepairArguments),
 }
 
 pub(crate) struct NewArguments {
@@ -19,6 +20,12 @@ pub(crate) struct ExportArguments {
     pub(crate) project: PathBuf,
     pub(crate) parent: PathBuf,
     pub(crate) destination: OsString,
+}
+
+pub(crate) struct RepairArguments {
+    pub(crate) project: PathBuf,
+    pub(crate) profile: Option<String>,
+    pub(crate) replacement: String,
 }
 
 pub(crate) enum DependencyArguments {
@@ -47,8 +54,43 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         Some("--version" | "-V") => ensure_terminal(arguments, Command::Version),
         Some("new") => parse_new(arguments),
         Some("export") => parse_export(arguments),
+        Some("repair") => parse_repair(arguments),
         _ => Err(error("unknown command")),
     }
+}
+
+fn parse_repair(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {
+    let repair = required_unicode(arguments.next(), "missing repair kind")?;
+    if repair != "startup-scene" {
+        return Err(error("unsupported repair kind"));
+    }
+    let project = arguments
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| error("missing project directory"))?;
+    let mut profile = None;
+    let mut replacement = None;
+    while let Some(flag) = arguments.next() {
+        let value = arguments
+            .next()
+            .ok_or_else(|| error("command option is missing its value"))?;
+        match flag.to_str() {
+            Some("--profile") => set_once(
+                &mut profile,
+                required_unicode(Some(value), "profile must be Unicode")?,
+            )?,
+            Some("--replacement") => set_once(
+                &mut replacement,
+                required_unicode(Some(value), "replacement Scene path must be Unicode")?,
+            )?,
+            _ => return Err(error("unknown repair-command option")),
+        }
+    }
+    Ok(Command::Repair(RepairArguments {
+        project,
+        profile,
+        replacement: replacement.ok_or_else(|| error("missing --replacement Scene path"))?,
+    }))
 }
 
 fn parse_export(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {

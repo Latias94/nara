@@ -1,11 +1,12 @@
 use std::process::ExitCode;
 
-use nara::project_workflow::ProjectCreationOutcome;
+use nara::project_workflow::{ProjectCreationOutcome, ProjectStartupSceneRepairOutcome};
 
 mod args;
 mod export;
 mod host_fs;
 mod new;
+mod repair;
 
 const HELP: &str = "\
 Nara project workflow
@@ -14,6 +15,7 @@ Usage:
   nara new desktop-2d/v1 <slug> --parent <directory> --local-checkout <directory>
   nara new desktop-2d/v1 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara export <project-directory> --parent <directory> --destination <name>
+  nara repair startup-scene <project-directory> [--profile <name>] --replacement <scene-path>
   nara --help
   nara --version
 ";
@@ -30,9 +32,33 @@ fn main() -> ExitCode {
         }
         Ok(args::Command::New(arguments)) => run_new(arguments),
         Ok(args::Command::Export(arguments)) => run_export(arguments),
+        Ok(args::Command::Repair(arguments)) => run_repair(arguments),
         Err(error) => {
             eprintln!("error: {error}\n\n{HELP}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn run_repair(arguments: args::RepairArguments) -> ExitCode {
+    match repair::execute(arguments) {
+        Ok(ProjectStartupSceneRepairOutcome::Repaired(receipt)) => {
+            println!(
+                "Repaired startup Scene selection to {}.",
+                receipt.publication().replacement()
+            );
+            ExitCode::SUCCESS
+        }
+        Ok(ProjectStartupSceneRepairOutcome::PublishedButNotRepaired(outcome)) => {
+            eprintln!(
+                "error: the manifest was published but the project did not pass its fresh check: {}",
+                outcome.error()
+            );
+            ExitCode::FAILURE
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
         }
     }
 }

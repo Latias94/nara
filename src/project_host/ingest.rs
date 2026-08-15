@@ -4,7 +4,9 @@ use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
     PublicDiagnosticIdentifier, SafeSummary,
 };
-use nara_fs::{ContentDigest, FileCapability, FsError, FsOperation, PathValidationError};
+use nara_fs::{
+    ContentDigest, FileCapability, FileIdentity, FsError, FsOperation, PathValidationError,
+};
 use nara_project::{
     DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveProjectSettings, ProductCapability, ProductCapabilitySet,
     ProjectManifest, ProjectProfileError, RuntimePreset,
@@ -140,7 +142,35 @@ fn ingest_project_manifest_inner(
             ),
         ));
     }
-    let load = ProjectManifest::parse_toml_bytes(&bytes);
+    ingest_project_manifest_bytes_with_digest(
+        &bytes,
+        profile,
+        project_root_identity,
+        manifest_digest,
+    )
+}
+
+pub(crate) fn ingest_project_manifest_bytes(
+    bytes: &[u8],
+    profile: Option<&str>,
+    project_root_identity: FileIdentity,
+) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
+    let manifest_digest = ContentDigest::of_bytes(bytes);
+    ingest_project_manifest_bytes_with_digest(
+        bytes,
+        profile,
+        Some(project_root_identity),
+        manifest_digest,
+    )
+}
+
+fn ingest_project_manifest_bytes_with_digest(
+    bytes: &[u8],
+    profile: Option<&str>,
+    project_root_identity: Option<FileIdentity>,
+    manifest_digest: ContentDigest,
+) -> Result<ProjectSettingsCandidate, ProjectCandidateError> {
+    let load = ProjectManifest::parse_toml_bytes(bytes);
     if load.has_errors() || load.manifest.is_none() {
         return Err(ProjectCandidateError::new(
             ProjectCandidateErrorKind::Manifest,

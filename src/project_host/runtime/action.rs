@@ -1378,7 +1378,7 @@ fn project_source_check_fault(error: ProjectSourceCheckError) -> HostFault {
     let diagnostics = match error {
         ProjectSourceCheckError::Manifest(error) => error.diagnostics().clone(),
         ProjectSourceCheckError::ProductComposition(error) => runtime_plan_failure_report(&error),
-        ProjectSourceCheckError::StartupContent(error) => error.diagnostics().clone(),
+        ProjectSourceCheckError::StartupContent { error, .. } => error.diagnostics().clone(),
     };
     HostFault::new(diagnostics)
 }

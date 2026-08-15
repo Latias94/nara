@@ -7,8 +7,10 @@
 use nara::project_workflow::{
     PreparedProjectCreation, PreparedProjectExport, ProjectCheckError, ProjectCheckRequest,
     ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest, ProjectExportOutcome,
-    ProjectExportPlanError, ProjectExportRequest, StartupContentClosureReceipt, check_project,
-    prepare_desktop_2d_project, prepare_project_export,
+    ProjectExportPlanError, ProjectExportRequest, ProjectStartupSceneRepairError,
+    ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest,
+    StartupContentClosureReceipt, check_project, prepare_desktop_2d_project,
+    prepare_project_export, repair_startup_scene,
 };
 
 /// Prepares the immutable `desktop-2d/v1` creation plan through the public root Module.
@@ -42,4 +44,11 @@ pub fn prepare_export(
 #[must_use = "the project-export terminal outcome must be handled"]
 pub fn publish_export(prepared: PreparedProjectExport) -> ProjectExportOutcome {
     prepared.publish()
+}
+
+/// Repairs one explicit startup Scene selection without importing CLI or process adapters.
+pub fn repair_startup_scene_selection(
+    request: ProjectStartupSceneRepairRequest,
+) -> Result<ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairError> {
+    repair_startup_scene(request)
 }

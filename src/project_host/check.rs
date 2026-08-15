@@ -1,15 +1,18 @@
 use std::{error::Error, fmt};
 
-use nara_fs::{ContentDigest, DirectoryCapability, RelativePath};
+use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
+use nara_project::ProjectPath;
 
 use super::{
-    ProjectCandidateError, ProjectContentError, ProjectContentLoader, ProjectContentSnapshot,
-    RuntimePlan, RuntimePlanError,
+    ProjectCandidateError, ProjectContentError, ProjectContentErrorKind, ProjectContentLoader,
+    ProjectContentSnapshot, ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan,
+    RuntimePlanError,
     composition::{
         RuntimeHostPolicyContribution, RuntimePluginOverlay,
         resolve_product_recipe_with_host_policy, resolve_product_recipe_with_overlay,
     },
-    ingest_project_manifest, ingest_project_manifest_with_expected_digest,
+    ingest_project_manifest, ingest_project_manifest_bytes,
+    ingest_project_manifest_with_expected_digest,
 };
 use crate::ProductRecipe;
 
@@ -37,7 +40,18 @@ impl CheckedProjectSource {
 pub(crate) enum ProjectSourceCheckError {
     Manifest(ProjectCandidateError),
     ProductComposition(RuntimePlanError),
-    StartupContent(ProjectContentError),
+    StartupContent {
+        error: ProjectContentError,
+        missing_startup_scene: Option<MissingStartupSceneContext>,
+    },
+}
+
+pub(crate) struct MissingStartupSceneContext {
+    pub(crate) manifest_identity: FileIdentity,
+    pub(crate) manifest_digest: ContentDigest,
+    pub(crate) settings_lineage: ProjectSettingsLineage,
+    pub(crate) scenes_path: ProjectPath,
+    pub(crate) selected_scene: ProjectPath,
 }
 
 impl fmt::Debug for ProjectSourceCheckError {
@@ -48,7 +62,7 @@ impl fmt::Debug for ProjectSourceCheckError {
                 .debug_tuple("ProductComposition")
                 .field(error)
                 .finish(),
-            Self::StartupContent(error) => formatter
+            Self::StartupContent { error, .. } => formatter
                 .debug_tuple("StartupContent")
                 .field(error)
                 .finish(),
@@ -61,7 +75,7 @@ impl fmt::Display for ProjectSourceCheckError {
         formatter.write_str(match self {
             Self::Manifest(_) => "project manifest check failed",
             Self::ProductComposition(_) => "project product composition check failed",
-            Self::StartupContent(_) => "project startup content check failed",
+            Self::StartupContent { .. } => "project startup content check failed",
         })
     }
 }
@@ -71,7 +85,7 @@ impl Error for ProjectSourceCheckError {
         match self {
             Self::Manifest(error) => Some(error),
             Self::ProductComposition(error) => Some(error),
-            Self::StartupContent(error) => Some(error),
+            Self::StartupContent { error, .. } => Some(error),
         }
     }
 }
@@ -144,6 +158,23 @@ pub(crate) fn check_project_source_with_expected_digests(
     )
 }
 
+pub(crate) fn check_project_source_from_manifest_bytes(
+    project_root: DirectoryCapability,
+    profile: Option<&str>,
+    recipe: ProductRecipe,
+    manifest_bytes: &[u8],
+) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
+    let candidate = ingest_project_manifest_bytes(manifest_bytes, profile, project_root.identity())
+        .map_err(ProjectSourceCheckError::Manifest)?;
+    load_checked_candidate(
+        project_root,
+        recipe,
+        ProjectSourceCheckOptions::default(),
+        candidate,
+        None,
+    )
+}
+
 fn check_project_source_inner(
     project_root: DirectoryCapability,
     profile: Option<&str>,
@@ -155,6 +186,7 @@ fn check_project_source_inner(
     let manifest = project_root.open_file(&manifest_path).map_err(|error| {
         ProjectSourceCheckError::Manifest(ProjectCandidateError::from_manifest_authority(error))
     })?;
+    let manifest_identity = manifest.identity();
     let candidate = match options.manifest_digest {
         Some(expected) => {
             ingest_project_manifest_with_expected_digest(&manifest, profile, expected)
@@ -164,6 +196,22 @@ fn check_project_source_inner(
     .map_err(ProjectSourceCheckError::Manifest)?;
     drop(manifest);
 
+    load_checked_candidate(
+        project_root,
+        recipe,
+        options,
+        candidate,
+        Some(manifest_identity),
+    )
+}
+
+fn load_checked_candidate(
+    project_root: DirectoryCapability,
+    recipe: ProductRecipe,
+    options: ProjectSourceCheckOptions,
+    candidate: ProjectSettingsCandidate,
+    manifest_identity: Option<FileIdentity>,
+) -> Result<CheckedProjectSource, ProjectSourceCheckError> {
     let plan = match options.host_policy {
         Some(host_policy) => resolve_product_recipe_with_host_policy(
             &candidate,
@@ -174,15 +222,48 @@ fn check_project_source_inner(
         None => resolve_product_recipe_with_overlay(&candidate, recipe, options.overlay),
     }
     .map_err(ProjectSourceCheckError::ProductComposition)?;
-    let loader =
-        ProjectContentLoader::new(project_root).map_err(ProjectSourceCheckError::StartupContent)?;
+    let loader = ProjectContentLoader::new(project_root).map_err(|error| {
+        ProjectSourceCheckError::StartupContent {
+            error,
+            missing_startup_scene: None,
+        }
+    })?;
     let snapshot = match options.startup_scene_digest {
         Some(expected) => {
             loader.load_with_expected_startup_scene_digest(&candidate, &plan, expected)
         }
         None => loader.load(&candidate, &plan),
     }
-    .map_err(ProjectSourceCheckError::StartupContent)?;
+    .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
 
     Ok(CheckedProjectSource { plan, snapshot })
+}
+
+fn startup_content_failure(
+    error: ProjectContentError,
+    candidate: &ProjectSettingsCandidate,
+    manifest_identity: Option<FileIdentity>,
+) -> ProjectSourceCheckError {
+    let missing_startup_scene = if error.kind() == ProjectContentErrorKind::MissingStartupScene {
+        manifest_identity.and_then(|manifest_identity| {
+            candidate
+                .settings()
+                .startup
+                .default_scene
+                .as_ref()
+                .map(|selected_scene| MissingStartupSceneContext {
+                    manifest_identity,
+                    manifest_digest: candidate.manifest_digest(),
+                    settings_lineage: candidate.lineage(),
+                    scenes_path: candidate.settings().paths.scenes.clone(),
+                    selected_scene: selected_scene.clone(),
+                })
+        })
+    } else {
+        None
+    };
+    ProjectSourceCheckError::StartupContent {
+        error,
+        missing_startup_scene,
+    }
 }

@@ -7,6 +7,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     error::Error,
     fmt::{self, Display, Formatter},
+    io,
     mem::size_of,
     sync::Arc,
 };
@@ -467,7 +468,7 @@ impl Display for ProjectContentError {
             ProjectContentErrorKind::ProjectRootMismatch => {
                 "project content root does not match project settings"
             }
-            ProjectContentErrorKind::MissingStartupScene => "project has no startup scene",
+            ProjectContentErrorKind::MissingStartupScene => "project startup Scene is missing",
             ProjectContentErrorKind::InvalidLogicalPath => {
                 "project content contains an invalid logical path"
             }
@@ -736,7 +737,7 @@ impl<'a> LoadContext<'a> {
             )
         })?;
 
-        let (scene_bytes, scene_digest) = self.read_file(
+        let (scene_bytes, scene_digest) = self.read_startup_scene_file(
             &scenes,
             startup.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
@@ -913,6 +914,25 @@ impl<'a> LoadContext<'a> {
         logical_path: &str,
         encoded_ceiling: usize,
     ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
+        self.read_file_inner(directory, logical_path, encoded_ceiling, false)
+    }
+
+    fn read_startup_scene_file(
+        &mut self,
+        directory: &DirectoryCapability,
+        logical_path: &str,
+        encoded_ceiling: usize,
+    ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
+        self.read_file_inner(directory, logical_path, encoded_ceiling, true)
+    }
+
+    fn read_file_inner(
+        &mut self,
+        directory: &DirectoryCapability,
+        logical_path: &str,
+        encoded_ceiling: usize,
+        selected_startup_scene: bool,
+    ) -> Result<(Vec<u8>, ContentDigest), ProjectContentError> {
         let relative = self.observe_path(logical_path)?;
         self.add_budget(ProjectContentBudgetKind::Files, 1)?;
         self.add_budget(
@@ -926,6 +946,15 @@ impl<'a> LoadContext<'a> {
                     ProjectContentBudgetKind::OpenHandles,
                     RELATIVE_OPEN_HANDLE_PEAK,
                 );
+                if selected_startup_scene && fs_error_is_not_found(&error) {
+                    return Err(ProjectContentError::with_identifier(
+                        ProjectContentErrorKind::MissingStartupScene,
+                        "project.content.selected-startup-scene-missing",
+                        "Selected project startup Scene is missing",
+                        "scene",
+                        logical_path,
+                    ));
+                }
                 return Err(map_fs_error(error));
             }
         };
@@ -1478,6 +1507,13 @@ impl<'a> LoadContext<'a> {
     fn subtract_budget(&mut self, kind: ProjectContentBudgetKind, amount: usize) {
         self.budget_mut().subtract(kind, amount);
     }
+}
+
+fn fs_error_is_not_found(error: &FsError) -> bool {
+    matches!(
+        error,
+        FsError::Io { source, .. } if source.kind() == io::ErrorKind::NotFound
+    )
 }
 
 fn decode_scene_candidate(

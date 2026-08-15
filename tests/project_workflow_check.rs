@@ -7,9 +7,12 @@ use std::fs;
 
 use nara::{
     ProductRecipe,
+    project::ProjectPath,
     project_host::ProjectContentErrorKind,
     project_workflow::{
-        ProjectCheckErrorKind, ProjectCheckRequest, StartupContentMemberKind, check_project,
+        ProjectCheckErrorKind, ProjectCheckRequest, ProjectStartupSceneRepairError,
+        ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest,
+        StartupContentMemberKind, check_project, repair_startup_scene,
     },
 };
 use project_content_fixture::TestProject;
@@ -54,13 +57,21 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
     );
 }
 
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
 #[test]
-fn public_check_classifies_missing_startup_content_without_publishing_a_receipt() {
+fn typed_missing_startup_scene_issue_drives_one_explicit_repair() {
     let project = TestProject::with_prefab_startup();
-    fs::remove_file(project.path().join("scenes/startup.scene.json")).unwrap();
+    fs::rename(
+        project.path().join("scenes/startup.scene.json"),
+        project.path().join("scenes/recovered.scene.json"),
+    )
+    .unwrap();
 
     let error = check_project(ProjectCheckRequest::new(
-        project.root_capability(),
+        project.writable_root_capability(),
         ProductRecipe::new(),
     ))
     .unwrap_err();
@@ -68,8 +79,71 @@ fn public_check_classifies_missing_startup_content_without_publishing_a_receipt(
     assert_eq!(error.kind(), ProjectCheckErrorKind::StartupContent);
     assert_eq!(
         error.startup_content_error().unwrap().kind(),
-        ProjectContentErrorKind::HostIo
+        ProjectContentErrorKind::MissingStartupScene
     );
     assert!(error.manifest_error().is_none());
     assert!(error.product_composition_error().is_none());
+    let issue = error.into_startup_scene_issue().unwrap();
+    assert_eq!(issue.selected_scene().as_str(), "startup.scene.json");
+
+    let outcome = repair_startup_scene(ProjectStartupSceneRepairRequest::new(
+        issue,
+        ProjectPath::new("recovered.scene.json").unwrap(),
+    ))
+    .unwrap();
+    let ProjectStartupSceneRepairOutcome::Repaired(receipt) = outcome else {
+        panic!("expected a repaired project: {outcome:?}");
+    };
+
+    assert_eq!(
+        receipt.publication().replacement().as_str(),
+        "recovered.scene.json"
+    );
+    assert_eq!(
+        receipt.startup_content().manifest_digest(),
+        receipt.publication().manifest_digest()
+    );
+    let manifest = fs::read(project.path().join("nara.toml")).unwrap();
+    let load = nara::project::ProjectManifest::parse_toml_bytes(&manifest);
+    assert!(!load.has_errors());
+    assert_eq!(
+        load.manifest
+            .unwrap()
+            .resolve_profile(None)
+            .unwrap()
+            .startup
+            .default_scene
+            .unwrap()
+            .as_str(),
+        "recovered.scene.json"
+    );
+}
+
+#[test]
+fn repair_rejects_a_stale_missing_scene_issue_before_publication() {
+    let project = TestProject::with_prefab_startup();
+    fs::rename(
+        project.path().join("scenes/startup.scene.json"),
+        project.path().join("scenes/recovered.scene.json"),
+    )
+    .unwrap();
+    let error = check_project(ProjectCheckRequest::new(
+        project.writable_root_capability(),
+        ProductRecipe::new(),
+    ))
+    .unwrap_err();
+    let issue = error.into_startup_scene_issue().unwrap();
+    let manifest = project.path().join("nara.toml");
+    let mut changed = fs::read_to_string(&manifest).unwrap();
+    changed.push_str("\n# changed after issue\n");
+    fs::write(&manifest, &changed).unwrap();
+
+    let error = repair_startup_scene(ProjectStartupSceneRepairRequest::new(
+        issue,
+        ProjectPath::new("recovered.scene.json").unwrap(),
+    ))
+    .unwrap_err();
+
+    assert!(matches!(error, ProjectStartupSceneRepairError::StaleIssue));
+    assert_eq!(fs::read_to_string(manifest).unwrap(), changed);
 }

@@ -8,12 +8,16 @@ mod creation;
 mod dependency;
 mod export;
 mod publication;
+mod repair;
 mod starter;
 
 pub use crate::project_host::{
     StartupContentClosureReceipt, StartupContentMemberKind, StartupContentMemberReceipt,
 };
-pub use check::{ProjectCheckError, ProjectCheckErrorKind, ProjectCheckRequest, check_project};
+pub use check::{
+    ProjectCheckError, ProjectCheckErrorKind, ProjectCheckRequest, ProjectStartupSceneIssue,
+    check_project,
+};
 pub use creation::{
     PreparedProjectCreation, ProjectCreationPlanError, ProjectCreationPlanErrorKind,
     ProjectCreationRequest, prepare_desktop_2d_project,
@@ -35,6 +39,12 @@ pub use publication::{
     ProjectCreationOutcome, ProjectCreationReceipt, ProjectCreationRejection,
     ProjectCreationRejectionKind, ProjectCreationUnresolved, ProjectTreeStageError,
     PublishedButUnadmitted,
+};
+pub use repair::{
+    ProjectStartupScenePostcheckError, ProjectStartupScenePublicationReceipt,
+    ProjectStartupSceneRepairError, ProjectStartupSceneRepairOutcome,
+    ProjectStartupSceneRepairReceipt, ProjectStartupSceneRepairRequest, PublishedButNotRepaired,
+    repair_startup_scene,
 };
 pub use starter::{
     ProjectCreationPlan, ProjectCreationPlanReceipt, ProjectDirectory, ProjectMember,
