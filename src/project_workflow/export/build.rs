@@ -197,6 +197,13 @@ impl ProjectExportBuildPreparation {
         self.revision.digest
     }
 
+    pub fn verify_build_inputs(
+        &self,
+        project_root: &DirectoryCapability,
+    ) -> Result<(), ProjectExportBuildError> {
+        self.revision.revalidate(project_root)
+    }
+
     pub fn bind(
         self,
         artifacts: [ProjectExportCargoArtifact; 2],

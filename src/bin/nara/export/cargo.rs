@@ -48,8 +48,6 @@ pub(crate) enum CargoBuildAdapterError {
     BuildFailed,
     #[error("failed to reopen the project directory around the locked Cargo build")]
     ProjectRoot(#[source] HostDirectoryError),
-    #[error("the project path no longer refers to the checked project authority")]
-    ProjectRootChanged,
     #[error(transparent)]
     HostFile(#[from] HostFileError),
     #[error(transparent)]
@@ -115,11 +113,9 @@ fn verify_project_path_authority(
 ) -> Result<(), CargoBuildAdapterError> {
     let current =
         host_fs::readable_directory(project_root).map_err(CargoBuildAdapterError::ProjectRoot)?;
-    if current.identity() == preparation.project_root_identity() {
-        Ok(())
-    } else {
-        Err(CargoBuildAdapterError::ProjectRootChanged)
-    }
+    preparation
+        .verify_build_inputs(&current)
+        .map_err(CargoBuildAdapterError::from)
 }
 
 fn bind_artifact(
