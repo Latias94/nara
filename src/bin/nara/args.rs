@@ -6,12 +6,19 @@ pub(crate) enum Command {
     Help,
     Version,
     New(NewArguments),
+    Export(ExportArguments),
 }
 
 pub(crate) struct NewArguments {
     pub(crate) slug: String,
     pub(crate) parent: PathBuf,
     pub(crate) dependency: DependencyArguments,
+}
+
+pub(crate) struct ExportArguments {
+    pub(crate) project: PathBuf,
+    pub(crate) parent: PathBuf,
+    pub(crate) destination: OsString,
 }
 
 pub(crate) enum DependencyArguments {
@@ -39,8 +46,33 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         Some("--help" | "-h" | "help") => ensure_terminal(arguments, Command::Help),
         Some("--version" | "-V") => ensure_terminal(arguments, Command::Version),
         Some("new") => parse_new(arguments),
+        Some("export") => parse_export(arguments),
         _ => Err(error("unknown command")),
     }
+}
+
+fn parse_export(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {
+    let project = arguments
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| error("missing project directory"))?;
+    let mut parent = None;
+    let mut destination = None;
+    while let Some(flag) = arguments.next() {
+        let value = arguments
+            .next()
+            .ok_or_else(|| error("command option is missing its value"))?;
+        match flag.to_str() {
+            Some("--parent") => set_once(&mut parent, PathBuf::from(value))?,
+            Some("--destination") => set_once(&mut destination, value)?,
+            _ => return Err(error("unknown export-command option")),
+        }
+    }
+    Ok(Command::Export(ExportArguments {
+        project,
+        parent: parent.ok_or_else(|| error("missing --parent directory"))?,
+        destination: destination.ok_or_else(|| error("missing --destination name"))?,
+    }))
 }
 
 fn parse_new(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {

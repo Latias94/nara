@@ -6,6 +6,7 @@
 mod check;
 mod creation;
 mod dependency;
+mod export;
 mod publication;
 mod starter;
 
@@ -21,6 +22,14 @@ pub use dependency::{
     LocalDependencyParent, NaraDependencyReceipt, NaraDependencySource, NaraDependencySourceError,
     NaraDependencySourceErrorKind, NaraDependencySourceKind,
 };
+pub use export::{
+    PreparedProjectExport, ProjectExportBinaryTarget, ProjectExportBuildError,
+    ProjectExportBuildReceipt, ProjectExportExecutableReceipt, ProjectExportMemberKind,
+    ProjectExportMemberReceipt, ProjectExportOrphan, ProjectExportOutcome, ProjectExportPlanError,
+    ProjectExportPlanReceipt, ProjectExportReceipt, ProjectExportRejection,
+    ProjectExportRejectionKind, ProjectExportRequest, ProjectExportUnresolved,
+    prepare_project_export,
+};
 pub use publication::{
     ProjectCreationAdmissionError, ProjectCreationAdmissionErrorKind, ProjectCreationOrphan,
     ProjectCreationOutcome, ProjectCreationReceipt, ProjectCreationRejection,
@@ -32,3 +41,13 @@ pub use starter::{
     ProjectMemberPlan, ProjectMemberReceipt, ProjectSlug, ProjectSlugError, ProjectSlugErrorKind,
     ProjectStarter,
 };
+
+/// Adapter-only construction surface for the first-party Cargo integration.
+///
+/// This Module is not a product extension seam. Public workflow consumers receive the resulting
+/// opaque build receipt and never parse Cargo JSON or import executable native paths themselves.
+#[doc(hidden)]
+#[cfg(feature = "project-workflow-cli")]
+pub mod __private {
+    pub use super::export::{ProjectExportBuildPreparation, ProjectExportCargoArtifact};
+}
