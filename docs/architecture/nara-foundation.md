@@ -30,10 +30,10 @@ nara is unreleased. Incorrect prototype APIs and draft persistent shapes are rem
   or performance hotspots.
 - Keep the public authoring interface small: `App`, `Plugin`, `World`, typed components, asset
   handles, and renderer-facing data.
-- Keep simulation data strongly typed and ECS-backed. Scene/prefab documents retain stable parent
-  facts, while one dedicated non-linked runtime hierarchy Module owns the ECS parent relation and
-  its derived reverse projection; editor state, lifecycle ownership, and native services retain
-  separate authorities.
+- Keep simulation data strongly typed and ECS-backed. Scene/prefab documents own one ordered
+  roots-and-children placement closure, while one dedicated non-linked runtime hierarchy Module
+  owns the ECS parent relation and its derived reverse projection; editor state, lifecycle
+  ownership, and native services retain separate authorities.
 - Compose first-party modules into a coherent default product while preserving documented crate,
   plugin, and backend boundaries for supported reuse and replacement.
 - Isolate backends. wgpu, windowing, audio, egui, and dear-imgui must sit behind adapters rather than leak into gameplay code.
@@ -144,7 +144,7 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara_diagnostic` | Privacy-safe `Diagnostic`, sticky bounded `DiagnosticReport`, `RuntimeDiagnostics`, and `RuntimePressureSnapshots` | Static engine-owned identities and summaries, classified fields, deterministic count/byte retention, O(1) runtime dedupe indexes, output-only snapshots, and explicit incremental tracing sinks without producer overload policy |
 | `nara_asset` | `AssetServer`, `AssetId`, `Handle<T>`, `AssetStateRevision`, `AssetSlotRevision`, `AssetRef`, `AssetPath`, `ProjectAssetDatabase`, strict canonical `.meta` candidates, stable artifact identity/records, bounded `AssetSourceChanges`, bounded `AssetReloadRequests`, and bounded `AssetEvents` | Deterministic artifact keys, O(1) state and persistent slot revisions, dependency-aware reload generations, private concrete-domain consumer authority, same-frame terminal rejection, and sticky full-rescan observation recovery; no generic decoder registry or erased importer executor |
 | `nara_asset_watch` | Optional `AssetWatchPlugin`, bounded semantic watch event queue, runtime status/diagnostics, source-change translator, and downstream admission observation | All `notify` integration and desktop filesystem watcher details behind the root `asset-watch` feature |
-| `nara_scene` | Bounded `SceneDocument`/`PrefabDocument` candidates, stable parent facts, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, `Name`/`Visibility` schemas, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware validation, patch transactions, undo/redo, prefab expansion, one-way lowering into `nara_hierarchy`, failure-atomic exact-membership replacement/unload, and rejection of runtime topology export; no runtime relation ownership or transform re-export |
+| `nara_scene` | Bounded `SceneDocument`/`PrefabDocument` candidates, one canonical ordered roots-and-children placement closure, `ScenePatchDocument`, `SceneAuthoringSession`, `PrefabSourceResolver`, `SceneEntityId`, `Name`/`Visibility` schemas, scene materialization/export, and documented direct use with caller-owned `nara_reflect::ComponentRegistry` and `bevy_ecs::World` | Asset-aware placement/component validation, exact anchor-based patch transactions, undo/redo, order-preserving Prefab expansion, one-way ordered lowering into `nara_hierarchy`, failure-atomic exact-membership replacement/unload, and rejection of runtime topology export |
 | `nara_render` | `Camera2d`, `RenderTarget`, `ViewportRect`, completed-global `ExtractedView`, owned topology-only `RenderFramePacket`, `RenderFrame`, and `RenderBackendStatus` | Backend-neutral render-domain data and the admitted generation-stamped one-window/one-target/one-view topology; current camera extraction accepts completed translation and rejects unsupported global linear state; one hidden non-configurable content-before-UI assembly boundary, frame lifecycle, backend state, skipped-frame reason, last error, and render resource lifetime vocabulary; no public pass, phase, dependency, or graph construction |
 | `nara_image` | Non-`Clone` `ImageAsset` with shared immutable pixel storage, `ImageImporter`, owned byte/file import requests, `ImageImportLimits`, `ImageImportBudgetHost`, reservation-bearing imported candidates, `ImagePlugin`, prepared image resources, image reload stats | Audited static non-interlaced PNG preflight/decode, shared RAII peak accounting, async image reload jobs, candidate-owned publication, last-good reload preservation, and backend-neutral image content preparation; no arbitrary-codec, sampler, or material policy |
 | `nara_material` | `FilterMode`, `AddressMode`, `SamplerDescriptor`, `AlphaMode2d`, `Material2dDescriptor`, `Material2dKey` | Backend-neutral 2D material intent shared by sprites, tilemaps, runtime UI images, and future material assets |
@@ -527,7 +527,15 @@ second real adapter or stronger isolation pressure.
 - `nara_tooling::EditorWorkspace` is the UI-agnostic editor document authority. It owns open scene slots, active document, selection sets, dirty/saved revisions, external reload pending/conflict state, per-document undo/redo, and workspace command reports. Saved state advances only through its matching non-cloneable `EditorPersistenceAuthority` after a consumed `nara_fs::ReplaceReceipt` proves prior/candidate identity, required durability, and matching post-publication content; ordinary workspace/UI code cannot forge the transition. The current policy remains `DetectOnly`, so a non-cooperative write after receipt observation is handled by external-change detection and explicit Reopen rather than a strong CAS claim.
 - `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns `EditorWorkspaceCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
-- `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule.
+- `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before
+  spawn. Expanded IDs use the deterministic `anchor/source_entity` namespace rule. Namespaced
+  prefab roots retain source order and are inserted before any children authored directly on the
+  instance anchor; entity-record sorting never reconstructs either order.
+- Canonical Scene and Prefab files store an ordered document `roots` list and an ordered `children`
+  list on each parent record while sorting records only by stable entity ID. Publication rejects
+  dangling, duplicate, missing, cyclic, overlapping, or multiply owned placement. The removed
+  record-owned `parent` shape and documents without explicit roots are rejected without guessing
+  sibling order or silently migrating source.
 - `nara_asset` owns typed importer contracts, bounded source-change coalescing, dependency-aware bounded reload-request scheduling, load generations, asset state transitions, and bounded asset observations. Source changes and requests are admitted by item and retained-byte ceilings; every admitted request either reaches its registered concrete consumer or becomes a diagnosed terminal rejection in the same task-update frame.
 - Asset reload scheduling coalesces same-frame source changes by last semantic event, walks each dependent source once, and combines generation checks with expected-version, state-revision, and slot-revision guards before domain apply systems mutate runtime asset state. The first concrete image consumer is registered through a private non-cloneable authority; unsupported kinds and missing consumers cannot remain queued or indefinitely `Loading`.
 - Asset source-change, request-admission, and terminal-resolution failures are structured diagnostics rather than discarded errors. `AssetEvents` is an observational bounded queue: overflow suppresses later deltas behind a sticky rescan marker until a consumer rebuilds from all `AssetStates` and explicitly completes the rescan. Asset reload policy preserves last-good typed values on failed reload, records failed first loads without inventing values, rejects stale removals after a same-frame replacement, and keeps GPU objects in backend caches rather than imported artifacts.
@@ -574,8 +582,8 @@ second real adapter or stronger isolation pressure.
 ADRs 0101 through 0106 define the accepted correction boundary. Their live implementation states
 and evidence anchors belong only in the [implementation ledger](adr/implementation-status.md).
 
-- Scene and Prefab documents will own one ordered root/child placement closure. Runtime hierarchy
-  will be its ordered projection, and UI will not add a sibling-order authority.
+- Scene and Prefab documents own one ordered root/child placement closure. Runtime hierarchy is
+  its ordered projection, and UI does not add a sibling-order authority.
 - `nara_text`, `nara_ui_kernel`, and `nara_ui_widgets` will form renderer-neutral deep modules.
   Runtime and future Editor products will share those modules through separate adapters,
   persistence, session state, and domain commands.

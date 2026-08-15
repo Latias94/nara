@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
+**Amended**: 2026-08-15 to clarify the implemented Prefab-root projection order
 **Owner**: Persistent Scene/Prefab/Patch documents, runtime hierarchy, authoring tools, and UI projection
 **Refines**: [ADR 0005](0005-dimension-aware-runtime-with-2d-first-authoring.md),
 [ADR 0006](0006-scene-and-prefab-data-model.md),
@@ -56,6 +57,10 @@ flowchart LR
 - Prefab expansion, overrides, copy/export, and nested instance projection preserve the ordered
   closure. They never reconstruct order from map iteration, a numeric rank, source order that is
   not part of the document, or runtime entity allocation.
+- Expanding a prefab instance preserves the prefab's ordered roots and inserts their namespaced
+  projections before children authored directly on the instance anchor. This makes base prefab
+  content precede scene-local additions without deriving order from canonical entity-record
+  sorting.
 - `nara_hierarchy` owns the synchronized non-linked runtime parent/ordered-children projection.
   Supported first-party mutation goes through its writer/command transaction. Structure remains
   independent from lifecycle ownership, transform math, visibility, and UI state.
