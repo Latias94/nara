@@ -8,11 +8,12 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. [Editor Authoring Loop v1](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md) is
-   the sole active implementation plan. EFI-U5 is the only active unit under registration
-   `36ea603afc824178b52da630d628de34`; EFI-U1 through EFI-U4 are verified and immutable. The
-   completed Fresh Project, Capability Directory Publication, Runtime UI,
-   and focused correction plans remain immutable lineage evidence; the
+3. No implementation plan is active. [Editor Authoring Loop
+   v1](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md) completed EFI-U1 through
+   EFI-U5 at commit `6a4a9e2` with conformance record
+   `b1cd751875db4d91958a0fb9e609a04d` and completed registration
+   `055fa3f07b8640e6b91a90e8de5eb00e`. The completed Fresh Project, Capability Directory
+   Publication, Runtime UI, and focused correction plans remain immutable lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and

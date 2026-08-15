@@ -1,20 +1,21 @@
 # Nara UI Program Roadmap
 
 This page is a navigation index, not an execution authority or an implementation ledger. The
-active plan is the only plan allowed to order work. UIF-U5 has published the pinned conformance
-record, and the Runtime UI Product Slice is the selected product priority.
+active plan is the only plan allowed to order work. UI Foundation, the Runtime UI Product Slice,
+and Editor Authoring Loop v1 are complete. No successor is active.
 
 ```text
 UI Foundation Correction (complete)
         +-----------------------------+
         |                             |
         v                             v
-Runtime UI Product Slice      Editor Foundation Workflow
-          (active)                    (inactive)
+Runtime UI Product Slice      Editor Authoring Loop v1
+         (complete)                   (complete)
         |                             |
         +-------------+---------------+
                       v
              Nara UI Inspector Parity
+                    (inactive)
 ```
 
 ## 1. UI Foundation Correction
@@ -37,17 +38,20 @@ Consumes a pinned Foundation Conformance Baseline to prove the data-authored HUD
 and headless / desktop package workflow. It may expose a missing shared capability, but cannot
 change a shared Interface without a focused successor baseline and explicit rebase.
 
-## 3. Editor Foundation Workflow
+## 3. Editor Authoring Loop v1
 
-Plan: [Editor Foundation Workflow](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
+Plan: [Editor Authoring Loop v1](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
 
-Builds the first single-window egui Editor flow: open, Scene Tree, Inspector, typed patch/undo,
-save/reopen, Viewport, Play/Stop and diagnostics. Docking, detached windows and convergence on
-Nara UI remain evidence-gated successors.
+Builds the first single-window egui Editor flow: open, canonical Scene Tree, Inspector, exact
+revision-bound edit, stale rejection, Undo/Redo, Save, Close/Reopen/Close, diagnostics, and handoff
+of the same source change to check, generated-product run, and source-carrying export. Viewport,
+in-Editor Play placement, docking, detached windows, IME/accessibility completion, and convergence
+on Nara UI remain evidence-gated successors.
 
 Runtime UI and Editor are independent technical successors. Only one becomes active at a time; the
-choice is product priority, not a fabricated dependency. The later Nara UI Inspector parity gate,
-not the egui Inspector, is the heterogeneous consumer for shared widget/convergence decisions.
+choice is product priority, not a fabricated dependency. Both first product slices are now
+complete. The later Nara UI Inspector parity gate, not the egui Inspector, is the heterogeneous
+consumer for shared widget/convergence decisions and requires a new reviewed plan before work.
 
 ## Admission rule
 

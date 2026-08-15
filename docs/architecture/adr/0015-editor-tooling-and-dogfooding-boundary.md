@@ -13,6 +13,8 @@ Installation
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
 **Implementation Plan**: [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
+**Implementation Evidence**: [EFI-U5 Editor authoring-loop
+conformance](../../knowledge/engineering/verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md)
 
 ## ADR 0095 Refinement
 
@@ -55,15 +57,25 @@ Dogfooding policy:
 - UI adapters should render UI-agnostic tooling models and submit tooling commands. They should not
   own scene mutation semantics.
 
-Implementation notes as of 2026-07-08:
+Implementation notes as of 2026-08-15:
 
-- `nara_tooling::SceneInspectorState` is the first UI-agnostic inspector controller.
+- `nara_tooling::SceneInspectorState` remains the UI-agnostic inspector controller while
+  `EditorWorkspace` owns document identity, selection, history, dirty state, and exact mutation
+  authority.
 - `SceneInspectorModel` combines authoring entity rows, selected component schema fields,
   `ComponentSchemaCatalog`, `WorldSnapshot`, undo/redo status, live dirty state, and diagnostics.
 - `SceneInspectorCommand` converts selected field and ordered placement edits into
   `ScenePatchDocument` transactions applied through `SceneAuthoringSession`.
-- egui, dear-imgui-rs, or future nara UI adapters should render these models rather than owning
-  separate inspector state machines.
+- The private `nara-editor` application owns one native Winit window and its egui/WGPU lifetimes,
+  consumes one immutable `EditorFrameModel`, and returns only ordered UI-neutral actions.
+- The first bounded authoring trajectory proves exact edit, stale rejection, Undo/Redo,
+  receipt-backed Save, Close/Reopen/Close, project check, generated-product run, and
+  source-carrying export against the same starter source change.
+- Future nara UI adapters must render the same model and submit the same action vocabulary rather
+  than owning separate Inspector, document, or persistence state machines.
+- This evidence is an authoring-slice conformance baseline, not the complete Editor
+  Product-Validated Baseline; Viewport, IME, semantic output, and native accessibility remain
+  focused successors.
 
 ```mermaid
 flowchart TD

@@ -2,9 +2,12 @@
 
 **Status**: Accepted
 **Date**: 2026-08-08
+**Last Revised**: 2026-08-15
 **Owner**: UI Foundation, Runtime UI, Editor Domain, Editor Host
 **Refines**: [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
 **Implementation Plans**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md); [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
+**Implementation Evidence**: [EFI-U5 Editor authoring-loop
+conformance](../../knowledge/engineering/verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md)
 
 ## Context
 
@@ -52,8 +55,9 @@ flowchart TB
   transient adapter facts.
 - The Host owns native windows, surfaces, seats, focus, IME, clipboard, GPU generation, Viewport
   leases and Play Runtime lifecycle.
-- The first Editor shell remains egui-first. One complete Nara UI Inspector is required before a
-  decision to converge the Editor on Nara UI.
+- The first Editor shell is egui-first and has completed one bounded startup-Scene authoring
+  workflow. One complete Nara UI Inspector is still required before a decision to converge the
+  Editor on Nara UI.
 - Runtime UI and the egui-first Editor are independent successors of a UI Foundation conformance
   baseline. Product priority may serialize them, but neither is a technical prerequisite of the
   other.
@@ -96,6 +100,8 @@ different rates and makes eventual convergence an evidence-based decision.
 - A product-local composite may remain local; it does not need a shared widget registry.
 - Editor docking, multi-window and convergence decisions require focused successors.
 - The Foundation Interface stays small even when its private implementation becomes large.
+- Completion of the egui authoring slice validates the Editor model/action seam but does not count
+  as a heterogeneous Nara UI consumer or authorize a cross-toolkit Widget trait.
 
 ## Success Metrics
 
