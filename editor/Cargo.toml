@@ -14,3 +14,6 @@ nara = { path = "..", default-features = false, features = ["project-workflow", 
 pollster.workspace = true
 thiserror.workspace = true
 winit.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

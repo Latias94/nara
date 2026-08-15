@@ -10,6 +10,16 @@ The project has two explicit product targets:
 - `desktop`, enabled with the Cargo `desktop` feature and using the matching desktop capabilities
   declared by the `desktop` project profile.
 
+Open the complete-schema startup Scene in the first-party Editor from the project root:
+
+```text
+nara-editor .
+```
+
+Select `main-camera`, edit `Camera2d.viewport_height` from `720` to `768`, then use the fixed
+Undo, Redo, Save, and Reopen controls. The Editor writes the same ordinary Scene source consumed
+by the commands below; it does not create an Editor-private project format.
+
 For one observable authored-data edit, change the startup Scene's
 `Camera2d.clear_color.r` value in `scenes/startup.scene.json` from `0.06` to `0.14`. No Rust source
 change is required. Then check the admitted startup closure and run both products from any process

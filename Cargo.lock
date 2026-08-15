@@ -2306,6 +2306,7 @@ dependencies = [
  "egui-winit",
  "nara",
  "pollster",
+ "serde_json",
  "thiserror 2.0.18",
  "winit",
 ]
