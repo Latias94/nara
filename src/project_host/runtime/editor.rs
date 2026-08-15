@@ -20,8 +20,8 @@ use nara_reflect::{
 };
 use nara_scene::SceneEntitySource;
 use nara_tooling::{
-    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorFrameClock,
-    EditorFrameModel, EditorPersistenceAuthority, EditorPersistenceCommand,
+    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorFieldFeedback,
+    EditorFrameClock, EditorFrameModel, EditorPersistenceAuthority, EditorPersistenceCommand,
     EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
     EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
     EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
@@ -440,6 +440,7 @@ pub struct EditorProjectSession {
     persistence_result: Option<EditorPersistenceResult>,
     last_persistence_receipt: Option<EditorPersistenceReceipt>,
     diagnostics: DiagnosticReport,
+    field_feedback: Option<EditorFieldFeedback>,
     runtime_host: ProjectHost,
     runtime_owner: EditorRuntimeOwnerState,
     pending_control: Option<PendingEditorControl>,
@@ -575,6 +576,7 @@ impl EditorProjectSession {
             persistence_result: None,
             last_persistence_receipt: None,
             diagnostics,
+            field_feedback: None,
             runtime_host: ProjectHost::new(cleanup_policy),
             runtime_owner: EditorRuntimeOwnerState::Empty,
             pending_control: None,

@@ -12,7 +12,8 @@ mod workspace;
 pub use frame::EditorFrameClock;
 pub use frame::{
     EditorAction, EditorActionAcknowledgement, EditorActionBatch, EditorActionBatchReport,
-    EditorActionOutcome, EditorActionRejection, EditorDocumentMutation, EditorFrameModel,
+    EditorActionOutcome, EditorActionRejection, EditorDocumentMutation, EditorFieldFeedback,
+    EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure, EditorFrameModel,
     EditorFrameRevision, EditorNavigationAction, EditorPersistenceAction, EditorPlayAction,
     EditorReopenTarget, EditorWorkspaceIntentAction,
 };

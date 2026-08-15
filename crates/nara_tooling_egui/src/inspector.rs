@@ -7,9 +7,10 @@ use nara_reflect::{
 };
 use nara_scene::{SceneAuthoringRevision, SceneEntityId};
 use nara_tooling::{
-    EditorAction, EditorDocumentId, EditorDocumentMutation, EditorNavigationAction,
-    EditorSceneModel, SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorFieldState,
-    SceneInspectorFieldView,
+    EditorAction, EditorDocumentId, EditorDocumentMutation, EditorFieldFeedback,
+    EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure,
+    EditorNavigationAction, EditorSceneModel, SceneInspectorCommand, SceneInspectorComponentView,
+    SceneInspectorFieldState, SceneInspectorFieldView,
 };
 
 use crate::fields::{
@@ -46,6 +47,16 @@ impl EguiInspectorFieldKey {
             component: component.clone(),
             field: field.clone(),
         }
+    }
+
+    fn target(&self) -> EditorFieldTarget {
+        EditorFieldTarget::new(
+            self.document,
+            self.revision,
+            self.entity.clone(),
+            self.component.clone(),
+            self.field.clone(),
+        )
     }
 }
 
@@ -104,7 +115,9 @@ impl EguiSceneInspectorPanel {
         scene: Option<&EditorSceneModel>,
         actions: &mut Vec<EditorAction>,
     ) {
-        ui.heading("Scene Tree");
+        let _heading = ui.heading("Scene Tree");
+        #[cfg(test)]
+        crate::editor::record_test_control("Scene Tree heading", _heading.rect);
         let Some(scene) = scene else {
             ui.label(RichText::new("No active scene").weak());
             return;
@@ -146,10 +159,13 @@ impl EguiSceneInspectorPanel {
         &mut self,
         ui: &mut Ui,
         scene: Option<&EditorSceneModel>,
+        field_feedback: Option<&EditorFieldFeedback>,
         editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
-        ui.heading("Inspector");
+        let _heading = ui.heading("Inspector");
+        #[cfg(test)]
+        crate::editor::record_test_control("Inspector heading", _heading.rect);
         let Some(scene) = scene else {
             ui.label(RichText::new("No active scene").weak());
             return;
@@ -172,7 +188,15 @@ impl EguiSceneInspectorPanel {
         }
 
         for component in &view.components {
-            self.show_component(ui, scene, &view.id, component, editing_enabled, actions);
+            self.show_component(
+                ui,
+                scene,
+                &view.id,
+                component,
+                field_feedback,
+                editing_enabled,
+                actions,
+            );
         }
     }
 
@@ -182,6 +206,7 @@ impl EguiSceneInspectorPanel {
         scene: &EditorSceneModel,
         entity: &SceneEntityId,
         component: &SceneInspectorComponentView,
+        field_feedback: Option<&EditorFieldFeedback>,
         editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
@@ -204,7 +229,7 @@ impl EguiSceneInspectorPanel {
                         ),
                         component_version: component.schema_version,
                     };
-                    self.show_field(ui, &target, field, editing_enabled, actions);
+                    self.show_field(ui, &target, field, field_feedback, editing_enabled, actions);
                 }
             });
     }
@@ -214,6 +239,7 @@ impl EguiSceneInspectorPanel {
         ui: &mut Ui,
         target: &EguiInspectorFieldTarget,
         field: &SceneInspectorFieldView,
+        field_feedback: Option<&EditorFieldFeedback>,
         editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
@@ -266,12 +292,19 @@ impl EguiSceneInspectorPanel {
         if let SceneInspectorFieldState::InvalidPath(reason) = &field.state {
             ui.label(RichText::new(reason).weak());
         }
-        if let Some(error) = self
+        let draft_error = self
             .field_drafts
             .get(&target.key)
-            .and_then(|draft| draft.error.as_deref())
-        {
+            .and_then(|draft| draft.error.as_deref());
+        if let Some(error) = draft_error {
             ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
+        } else if let Some(feedback) = field_feedback
+            && feedback.target().same_field(&target.key.target())
+        {
+            let summary = field_feedback_summary(feedback.reason());
+            ui.label(RichText::new(summary).color(ui.visuals().error_fg_color));
+            #[cfg(test)]
+            crate::editor::record_test_inline_field_feedback(summary);
         }
     }
 
@@ -372,6 +405,9 @@ impl EguiSceneInspectorPanel {
                         error: Some(error),
                     },
                 );
+                actions.push(EditorAction::ReportFieldValidation(
+                    EditorFieldValidationFailure::new(target.key.target(), field.value_kind),
+                ));
             }
         }
     }
@@ -398,6 +434,35 @@ impl EguiSceneInspectorPanel {
     #[cfg(test)]
     pub(crate) fn test_transient_entry_count(&self) -> usize {
         self.field_drafts.len()
+    }
+}
+
+fn field_feedback_summary(reason: EditorFieldFeedbackReason) -> &'static str {
+    match reason {
+        EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::Bool) => {
+            "Expected true or false"
+        }
+        EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::I64) => {
+            "Expected a signed integer"
+        }
+        EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::U64) => {
+            "Expected an unsigned integer"
+        }
+        EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::F64) => {
+            "Expected a finite number"
+        }
+        EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::String) => "Expected text",
+        EditorFieldFeedbackReason::InvalidValue(
+            ComponentValueKind::Null
+            | ComponentValueKind::List
+            | ComponentValueKind::Map
+            | ComponentValueKind::AssetRef
+            | ComponentValueKind::EntityRef,
+        ) => "This field kind is not editable as text",
+        EditorFieldFeedbackReason::StaleAction => "The field changed before this edit was applied",
+        EditorFieldFeedbackReason::MutationRejected => {
+            "The field edit was rejected; see Diagnostics"
+        }
     }
 }
 

@@ -52,11 +52,13 @@ impl EditorProjectSession {
                 document: self.source_document,
             },
         };
-        let frame =
-            Arc::new(
-                self.frame_clock
-                    .publish(workspace, project, diagnostics, reopen_target),
-            );
+        let frame = Arc::new(self.frame_clock.publish(
+            workspace,
+            project,
+            diagnostics,
+            reopen_target,
+            self.field_feedback.clone(),
+        ));
         self.published_frame = Some(PublishedEditorFrame {
             model: Arc::clone(&frame),
             dispatched: false,

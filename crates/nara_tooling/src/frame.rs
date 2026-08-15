@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_diagnostic::DiagnosticReport;
+use nara_reflect::{ComponentFieldId, ComponentTypeId, ComponentValueKind};
 use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePatchDocument};
 
 use crate::{
@@ -51,6 +52,7 @@ impl EditorFrameClock {
         project: EditorProjectView,
         diagnostics: DiagnosticReport,
         reopen_target: EditorReopenTarget,
+        field_feedback: Option<EditorFieldFeedback>,
     ) -> EditorFrameModel {
         let revision = EditorFrameRevision {
             source_id: self.source_id,
@@ -66,6 +68,7 @@ impl EditorFrameClock {
             project,
             diagnostics,
             reopen_target,
+            field_feedback,
         }
     }
 }
@@ -88,6 +91,113 @@ pub enum EditorReopenTarget {
     },
 }
 
+/// Stable field identity used by UI-neutral validation and action feedback.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorFieldTarget {
+    document: EditorDocumentId,
+    base_revision: SceneAuthoringRevision,
+    entity: SceneEntityId,
+    component: ComponentTypeId,
+    field: ComponentFieldId,
+}
+
+impl EditorFieldTarget {
+    #[must_use]
+    pub fn new(
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        entity: SceneEntityId,
+        component: ComponentTypeId,
+        field: ComponentFieldId,
+    ) -> Self {
+        Self {
+            document,
+            base_revision,
+            entity,
+            component,
+            field,
+        }
+    }
+
+    #[must_use]
+    pub const fn document(&self) -> EditorDocumentId {
+        self.document
+    }
+
+    #[must_use]
+    pub const fn base_revision(&self) -> SceneAuthoringRevision {
+        self.base_revision
+    }
+
+    /// Compares durable field identity while intentionally ignoring the source revision.
+    ///
+    /// This lets a stale-action message attach to the corresponding field in the successor frame;
+    /// the exact revision remains available through [`Self::base_revision`] for dispatch checks.
+    #[must_use]
+    pub fn same_field(&self, other: &Self) -> bool {
+        self.document == other.document
+            && self.entity == other.entity
+            && self.component == other.component
+            && self.field == other.field
+    }
+}
+
+/// Adapter-originated validation failure that must become durable Host feedback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorFieldValidationFailure {
+    target: EditorFieldTarget,
+    expected: ComponentValueKind,
+}
+
+impl EditorFieldValidationFailure {
+    #[must_use]
+    pub const fn new(target: EditorFieldTarget, expected: ComponentValueKind) -> Self {
+        Self { target, expected }
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> &EditorFieldTarget {
+        &self.target
+    }
+
+    #[must_use]
+    pub const fn expected(&self) -> ComponentValueKind {
+        self.expected
+    }
+}
+
+/// Reason shown inline for the latest exact field failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorFieldFeedbackReason {
+    InvalidValue(ComponentValueKind),
+    StaleAction,
+    MutationRejected,
+}
+
+/// Latest Host-owned inline feedback for one stable field target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorFieldFeedback {
+    target: EditorFieldTarget,
+    reason: EditorFieldFeedbackReason,
+}
+
+impl EditorFieldFeedback {
+    #[must_use]
+    pub const fn new(target: EditorFieldTarget, reason: EditorFieldFeedbackReason) -> Self {
+        Self { target, reason }
+    }
+
+    #[must_use]
+    pub const fn target(&self) -> &EditorFieldTarget {
+        &self.target
+    }
+
+    #[must_use]
+    pub const fn reason(&self) -> EditorFieldFeedbackReason {
+        self.reason
+    }
+}
+
 /// One coherent, post-drive Editor snapshot consumed by every UI Adapter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorFrameModel {
@@ -96,6 +206,7 @@ pub struct EditorFrameModel {
     project: EditorProjectView,
     diagnostics: DiagnosticReport,
     reopen_target: EditorReopenTarget,
+    field_feedback: Option<EditorFieldFeedback>,
 }
 
 impl EditorFrameModel {
@@ -122,6 +233,11 @@ impl EditorFrameModel {
     #[must_use]
     pub const fn reopen_target(&self) -> EditorReopenTarget {
         self.reopen_target
+    }
+
+    #[must_use]
+    pub const fn field_feedback(&self) -> Option<&EditorFieldFeedback> {
+        self.field_feedback.as_ref()
     }
 
     #[must_use]
@@ -268,6 +384,7 @@ pub enum EditorAction {
     Persistence(EditorPersistenceAction),
     WorkspaceIntent(EditorWorkspaceIntentAction),
     Play(EditorPlayAction),
+    ReportFieldValidation(EditorFieldValidationFailure),
     RuntimeEdit {
         document: EditorDocumentId,
         request: EditorRuntimeEditRequest,
@@ -293,6 +410,20 @@ impl EditorAction {
                 | EditorReopenTarget::ClosedSource { document } => *document,
             }),
             Self::ApplyChanges { document, .. } => Some(*document),
+            _ => None,
+        }
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn field_target(&self) -> Option<EditorFieldTarget> {
+        match self {
+            Self::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
+                document,
+                base_revision,
+                command,
+            }) => inspector_field_target(*document, *base_revision, command),
+            Self::ReportFieldValidation(failure) => Some(failure.target().clone()),
             _ => None,
         }
     }
@@ -325,6 +456,12 @@ impl EditorActionBatch {
     #[doc(hidden)]
     pub fn into_actions(self) -> Vec<EditorAction> {
         self.actions
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn first_field_target(&self) -> Option<EditorFieldTarget> {
+        self.actions.iter().find_map(EditorAction::field_target)
     }
 }
 
@@ -367,6 +504,42 @@ pub enum EditorActionAcknowledgement {
     WorkspaceIntent(bool),
     RuntimeEdit(bool),
     ApplyChanges(bool),
+    FieldValidation,
+}
+
+fn inspector_field_target(
+    document: EditorDocumentId,
+    base_revision: SceneAuthoringRevision,
+    command: &SceneInspectorCommand,
+) -> Option<EditorFieldTarget> {
+    let (entity, component, field) = match command {
+        SceneInspectorCommand::SetField {
+            entity,
+            component,
+            field,
+            ..
+        }
+        | SceneInspectorCommand::RemoveField {
+            entity,
+            component,
+            field,
+            ..
+        }
+        | SceneInspectorCommand::SetAssetRefField {
+            entity,
+            component,
+            field,
+            ..
+        } => (entity, component, field),
+        SceneInspectorCommand::MoveEntity { .. } => return None,
+    };
+    Some(EditorFieldTarget::new(
+        document,
+        base_revision,
+        entity.clone(),
+        component.clone(),
+        field.clone(),
+    ))
 }
 
 /// Typed outcome for one action in an ordered Editor batch.

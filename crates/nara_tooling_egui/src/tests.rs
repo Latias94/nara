@@ -10,20 +10,20 @@ use nara_scene::{
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentId, EditorDocumentMutation,
-    EditorExternalReloadState, EditorFrameClock, EditorFrameModel, EditorNavigationAction,
-    EditorPersistenceAction, EditorPersistenceRejection, EditorPersistenceRequestKind,
-    EditorPersistenceResult, EditorPersistenceView, EditorPlayState, EditorPlayView,
-    EditorProjectView, EditorReopenTarget, EditorSceneModel, EditorSceneTabModel,
-    EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-    EditorWorkspaceIntentPhase, EditorWorkspaceIntentView, EditorWorkspaceModel, SceneEditorModel,
-    SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorEntityRow,
-    SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
-    SceneInspectorModel,
+    EditorExternalReloadState, EditorFieldFeedback, EditorFieldFeedbackReason, EditorFieldTarget,
+    EditorFrameClock, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceResult,
+    EditorPersistenceView, EditorPlayState, EditorPlayView, EditorProjectView, EditorReopenTarget,
+    EditorSceneModel, EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent,
+    EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentView,
+    EditorWorkspaceModel, SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView,
+    SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
+    SceneInspectorFieldView, SceneInspectorModel,
 };
 
 use crate::{
     EguiSceneEditorPanel,
-    editor::{test_control_rect, test_diagnostic_codes},
+    editor::{test_control_rect, test_diagnostic_codes, test_inline_field_feedback},
     fields::parse_editable_value,
 };
 
@@ -132,6 +132,31 @@ fn canonical_tree_selection_emits_one_revision_free_navigation_action() {
 }
 
 #[test]
+fn fixed_panels_remain_inside_the_native_viewport() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    );
+    let frame = default_frame(Some(scene));
+    let mut panel = EguiSceneEditorPanel::new();
+    let _ = render_editor_frame(
+        &egui::Context::default(),
+        &mut panel,
+        &frame,
+        egui::RawInput::default(),
+    );
+
+    let tree = test_control_rect("Scene Tree heading").unwrap();
+    let inspector = test_control_rect("Inspector heading").unwrap();
+    let diagnostics = test_control_rect("Diagnostics heading").unwrap();
+    assert!(tree.top() < diagnostics.top());
+    assert!(inspector.top() < diagnostics.top());
+    assert!(diagnostics.bottom() <= 720.0, "{diagnostics:?}");
+}
+
+#[test]
 fn inspector_edit_uses_the_exact_document_and_revision_from_its_frame() {
     let scene = scene_model(
         revision(),
@@ -192,6 +217,49 @@ fn document_or_revision_change_invalidates_drafts_and_inline_errors() {
 
     panel.inspector_mut().synchronize_scene(Some(&replacement));
     assert_eq!(panel.inspector_mut().test_transient_entry_count(), 0);
+}
+
+#[test]
+fn host_field_feedback_is_rendered_only_for_the_matching_field() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        true,
+    );
+    let feedback = EditorFieldFeedback::new(
+        EditorFieldTarget::new(
+            scene.document,
+            scene.revision,
+            SceneEntityId::new("player").unwrap(),
+            ComponentTypeId::new("nara.test.Transform"),
+            ComponentFieldId::new("x"),
+        ),
+        EditorFieldFeedbackReason::StaleAction,
+    );
+    let frame = frame_with_feedback(
+        Some(scene.clone()),
+        EditorProjectView::new(
+            play_view(Some(&scene)),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::default(),
+        ),
+        DiagnosticReport::default(),
+        Some(feedback),
+    );
+    let mut panel = EguiSceneEditorPanel::new();
+
+    let _ = render_editor_frame(
+        &egui::Context::default(),
+        &mut panel,
+        &frame,
+        egui::RawInput::default(),
+    );
+
+    assert_eq!(
+        test_inline_field_feedback(),
+        ["The field changed before this edit was applied"]
+    );
 }
 
 #[test]
@@ -378,6 +446,15 @@ fn frame(
     project: EditorProjectView,
     diagnostics: DiagnosticReport,
 ) -> EditorFrameModel {
+    frame_with_feedback(scene, project, diagnostics, None)
+}
+
+fn frame_with_feedback(
+    scene: Option<EditorSceneModel>,
+    project: EditorProjectView,
+    diagnostics: DiagnosticReport,
+    field_feedback: Option<EditorFieldFeedback>,
+) -> EditorFrameModel {
     let active_document = scene.as_ref().map(|scene| scene.document);
     let reopen_target = scene.as_ref().map_or(
         EditorReopenTarget::ClosedSource {
@@ -411,6 +488,7 @@ fn frame(
         project,
         diagnostics,
         reopen_target,
+        field_feedback,
     )
 }
 
@@ -473,8 +551,9 @@ fn render_editor_frame(
         egui::vec2(1280.0, 720.0),
     ));
     let mut response = None;
-    let _ = context.run_ui(input, |ui| {
+    let output = context.run_ui(input, |ui| {
         response = Some(panel.show(ui, frame));
     });
+    output.drop_without_applying_deltas();
     response.expect("the Editor frame should render the fixed panel")
 }

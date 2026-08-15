@@ -24,6 +24,7 @@ thread_local! {
     static TEST_CONTROL_RECTS: RefCell<HashMap<String, egui::Rect>> =
         RefCell::new(HashMap::new());
     static TEST_DIAGNOSTIC_CODES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static TEST_INLINE_FIELD_FEEDBACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Stateful egui Adapter for one fixed Editor authoring panel.
@@ -193,7 +194,13 @@ fn render_authoring_content(
                             .max_height(content_height)
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                inspector.show_inspector(ui, scene, editing_enabled, actions)
+                                inspector.show_inspector(
+                                    ui,
+                                    scene,
+                                    frame.field_feedback(),
+                                    editing_enabled,
+                                    actions,
+                                )
                             });
                     },
                 );
@@ -202,7 +209,9 @@ fn render_authoring_content(
 }
 
 fn render_diagnostics(ui: &mut Ui, frame: &EditorFrameModel, actions: &mut Vec<EditorAction>) {
-    ui.heading("Diagnostics");
+    let _heading = ui.heading("Diagnostics");
+    #[cfg(test)]
+    record_test_control("Diagnostics heading", _heading.rect);
     ScrollArea::vertical()
         .id_salt("nara_editor_diagnostics")
         .max_height(DIAGNOSTICS_HEIGHT)
@@ -451,7 +460,18 @@ pub(crate) fn test_diagnostic_codes() -> Vec<String> {
 }
 
 #[cfg(test)]
+pub(crate) fn record_test_inline_field_feedback(summary: &'static str) {
+    TEST_INLINE_FIELD_FEEDBACK.with(|feedback| feedback.borrow_mut().push(summary.to_owned()));
+}
+
+#[cfg(test)]
+pub(crate) fn test_inline_field_feedback() -> Vec<String> {
+    TEST_INLINE_FIELD_FEEDBACK.with(|feedback| feedback.borrow().clone())
+}
+
+#[cfg(test)]
 fn clear_test_observations() {
     TEST_CONTROL_RECTS.with(|rects| rects.borrow_mut().clear());
     TEST_DIAGNOSTIC_CODES.with(|codes| codes.borrow_mut().clear());
+    TEST_INLINE_FIELD_FEEDBACK.with(|feedback| feedback.borrow_mut().clear());
 }

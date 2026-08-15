@@ -7,9 +7,10 @@ use nara_scene::SceneAuthoringRevision;
 use nara_tooling::{
     EditorAction, EditorActionAcknowledgement, EditorActionBatch, EditorActionBatchReport,
     EditorActionOutcome, EditorActionRejection, EditorDocumentId, EditorDocumentMutation,
-    EditorFrameModel, EditorNavigationAction, EditorPersistenceAction, EditorPersistenceCommand,
-    EditorPlayAction, EditorPlayCommand, EditorReopenTarget, EditorWorkspaceCommand,
-    EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorFieldFeedback, EditorFieldFeedbackReason, EditorFieldTarget,
+    EditorFieldValidationFailure, EditorFrameModel, EditorNavigationAction,
+    EditorPersistenceAction, EditorPersistenceCommand, EditorPlayAction, EditorPlayCommand,
+    EditorReopenTarget, EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
 };
 
 use super::{EditorProjectSession, EditorRuntimeOwnerState};
@@ -24,6 +25,7 @@ impl EditorProjectSession {
         &mut self,
         batch: EditorActionBatch,
     ) -> Result<EditorActionBatchReport, EditorActionRejection> {
+        let batch_field_target = batch.first_field_target();
         let received = batch.frame_revision();
         let frame = match self.published_frame.as_mut() {
             None => Err(EditorActionRejection::NoPublishedFrame),
@@ -43,6 +45,12 @@ impl EditorProjectSession {
             Ok(frame) => frame,
             Err(rejection) => {
                 self.record_editor_action_rejection(rejection);
+                if let Some(target) = batch_field_target {
+                    self.field_feedback = Some(EditorFieldFeedback::new(
+                        target,
+                        EditorFieldFeedbackReason::StaleAction,
+                    ));
+                }
                 return Err(rejection);
             }
         };
@@ -50,6 +58,7 @@ impl EditorProjectSession {
 
         let mut mutation_documents = BTreeSet::new();
         let outcomes = batch.into_actions().into_iter().map(|action| {
+            let field_target = action.field_target();
             let outcome = if let Some(document) = action.revision_advancing_document()
                 && !mutation_documents.insert(document)
             {
@@ -62,6 +71,7 @@ impl EditorProjectSession {
             if let EditorActionOutcome::Rejected(rejection) = &outcome {
                 self.record_editor_action_rejection(*rejection);
             }
+            self.update_editor_field_feedback(field_target, &outcome);
             outcome
         });
         Ok(EditorActionBatchReport::new(expected, outcomes))
@@ -83,6 +93,9 @@ impl EditorProjectSession {
             EditorAction::Persistence(action) => self.dispatch_persistence(frame, action),
             EditorAction::WorkspaceIntent(action) => self.dispatch_workspace_intent(frame, action),
             EditorAction::Play(action) => self.dispatch_play(frame, action),
+            EditorAction::ReportFieldValidation(failure) => {
+                self.dispatch_field_validation(frame, failure)
+            }
             EditorAction::RuntimeEdit { document, request } => {
                 if let Err(rejection) =
                     self.verify_document_fact(frame, document, request.document_revision)
@@ -144,6 +157,67 @@ impl EditorProjectSession {
         EditorActionOutcome::Workspace(self.apply_workspace_command(command))
     }
 
+    fn dispatch_field_validation(
+        &mut self,
+        frame: &EditorFrameModel,
+        failure: EditorFieldValidationFailure,
+    ) -> EditorActionOutcome {
+        if let Err(rejection) = self.verify_document_fact(
+            frame,
+            failure.target().document(),
+            failure.target().base_revision(),
+        ) {
+            return EditorActionOutcome::Rejected(rejection);
+        }
+        let _ = self
+            .diagnostics
+            .push(editor_field_validation_diagnostic(&failure));
+        self.field_feedback = Some(EditorFieldFeedback::new(
+            failure.target().clone(),
+            EditorFieldFeedbackReason::InvalidValue(failure.expected()),
+        ));
+        EditorActionOutcome::Acknowledged(EditorActionAcknowledgement::FieldValidation)
+    }
+
+    fn update_editor_field_feedback(
+        &mut self,
+        target: Option<EditorFieldTarget>,
+        outcome: &EditorActionOutcome,
+    ) {
+        let Some(target) = target else {
+            return;
+        };
+        match outcome {
+            EditorActionOutcome::Workspace(report) if report.applied => {
+                if self
+                    .field_feedback
+                    .as_ref()
+                    .is_some_and(|feedback| feedback.target().same_field(&target))
+                {
+                    self.field_feedback = None;
+                }
+            }
+            EditorActionOutcome::Workspace(_) => {
+                self.field_feedback = Some(EditorFieldFeedback::new(
+                    target,
+                    EditorFieldFeedbackReason::MutationRejected,
+                ));
+            }
+            EditorActionOutcome::Rejected(_) => {
+                self.field_feedback = Some(EditorFieldFeedback::new(
+                    target,
+                    EditorFieldFeedbackReason::StaleAction,
+                ));
+            }
+            EditorActionOutcome::Persistence(_)
+            | EditorActionOutcome::WorkspaceIntent(_)
+            | EditorActionOutcome::Play(_)
+            | EditorActionOutcome::RuntimeEdit(_)
+            | EditorActionOutcome::ApplyChanges(_)
+            | EditorActionOutcome::Acknowledged(_) => {}
+        }
+    }
+
     fn dispatch_document_mutation(
         &mut self,
         frame: &EditorFrameModel,
@@ -188,7 +262,9 @@ impl EditorProjectSession {
                 base_revision,
             },
         };
-        EditorActionOutcome::Workspace(self.apply_workspace_command(command))
+        let report = self.apply_workspace_command(command);
+        let _ = self.diagnostics.extend(report.diagnostics.clone());
+        EditorActionOutcome::Workspace(report)
     }
 
     fn dispatch_persistence(
@@ -453,6 +529,21 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
         | EditorActionRejection::InvalidReopenTarget => {}
     }
     diagnostic
+}
+
+fn editor_field_validation_diagnostic(failure: &EditorFieldValidationFailure) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error(
+        DiagnosticCode::new("editor.field.invalid-value")
+            .expect("Editor field diagnostic codes are engine-owned"),
+        SafeSummary::new("Editor field value does not match its declared type")
+            .expect("Editor field diagnostic summaries are safe literals"),
+    );
+    diagnostic = with_public_u64(diagnostic, "document", failure.target().document().raw());
+    with_public_u64(
+        diagnostic,
+        "revision_generation",
+        failure.target().base_revision().generation(),
+    )
 }
 
 fn with_public_u64(diagnostic: Diagnostic, key: &'static str, value: u64) -> Diagnostic {

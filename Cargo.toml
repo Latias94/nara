@@ -44,6 +44,7 @@ members = [
     "crates/nara_ui_render",
     "crates/nara_window",
     "crates/nara_winit",
+    "editor",
 ]
 
 [workspace.package]
@@ -96,7 +97,9 @@ bevy_macro_utils = "0.19"
 bevy_reflect = { version = "0.19", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
-egui = "0.35.0"
+egui = "0.36.1"
+egui-wgpu = "0.36.1"
+egui-winit = "0.36.1"
 glam = { version = "0.30", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
@@ -116,7 +119,7 @@ ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"]
 toml = "1.1"
 tracing = "0.1"
 uuid = "1.23.4"
-winit = "=0.30.12"
+winit = "=0.30.13"
 pollster = "0.4"
 proc-macro-crate = "3.5"
 proc-macro2 = "1"
