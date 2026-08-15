@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "0352cc41603e69cb2fb4552d7fe2fc200d2974a06bf377c510b6556cad244ca2"
+source_fingerprint: "37660b7c2137143813cf6324d7cc955b8e0b3638ee39129f4513508c0943c9de"
 ---
 
 # Current State
@@ -12,15 +12,15 @@ source_fingerprint: "0352cc41603e69cb2fb4552d7fe2fc200d2974a06bf377c510b6556cad2
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `0352cc41603e69cb2fb4552d7fe2fc200d2974a06bf377c510b6556cad244ca2`
-- Immutable records: 450
+- Source fingerprint: `37660b7c2137143813cf6324d7cc955b8e0b3638ee39129f4513508c0943c9de`
+- Immutable records: 452
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
-- [Fresh Project workflow: FPER-U1 complete; FPER-U2 active](registry/2026-08/2026-08-15T035929Z-fresh-project-export-repair-codex-root-f83e3eb5ed1b4067a3cbed9abb46e590.md): `active` (fresh-project-export-repair-codex-root; producer `codex-root`)
+- [Fresh Project workflow: FPER-U2 complete; FPER-U3 active](registry/2026-08/2026-08-15T054430Z-fresh-project-export-repair-codex-root-e3b1b5a00a574006bc8c0728f1b7e77c.md): `active` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -31,6 +31,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [FPER-U2 startup-closure export conformance](verification/2026-08/2026-08-15T054430Z-fper-u2-startup-closure-export-conformance-64c7375e92e64f958174aa1bc37b09ee.md) - Verifies exact Cargo artifact selection, startup-closure publication, portable executable permissions, independent consumption, and arbitrary-CWD headless and desktop acceptance.
 - **Verification Evidence**: [FPER-U1 shared check and generated product conformance](verification/2026-08/2026-08-15T035815Z-fper-u1-shared-check-and-generated-product-conformance-9c30143011a44596a7dd7e007adf1d01.md) - Verifies the shared project check facts, presentation-free headless product, generated desktop product adapter, and camera-content/presentation scheduling split.
 - **Verification Evidence**: [FPER-U0 versioned starter and creation conformance](verification/2026-08/2026-08-14T140058Z-fper-u0-versioned-starter-and-creation-conformance-6717111091f5451fa4708a04b79e1c35.md) - Verifies the closed desktop-2d/v1 starter, typed dependency authority, atomic publication, ordinary admission, thin CLI and independent public consumer.
 - **Verification Evidence**: [CDPF-U3 external directory publication conformance baseline](verification/2026-08/2026-08-14T060149Z-cdpf-u3-external-directory-publication-conformance-baseline-1c01523e7462406dabf4a177cf64285c.md) - Verifies the public nara_fs directory-publication Interface through an isolated external consumer and records the exact hosted support boundary.
@@ -42,7 +43,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [PUEC-U1 exact WGPU frame identity](verification/2026-08/2026-08-13T090735Z-puec-u1-exact-wgpu-frame-identity-5207658a400a48c99783ed034b5b5125.md) - Proves that WGPU transaction and completion evidence retains distinct App-frame and Render-transaction identities.
 - **Verification Evidence**: [RUP-U3 presented evidence identity reproduction](verification/2026-08/2026-08-13T085318Z-rup-u3-presented-evidence-identity-reproduction-05669e8601e647e396ccf92bb372235c.md) - Static owner-local reproduction proves App-frame/Render-transaction conflation, latest-candidate substitution, and pre-readiness telemetry admission.
 - **Verification Evidence**: [PCC-U4 Reviewed Product Composition Conformance Baseline](verification/2026-08/2026-08-13T073115Z-pcc-u4-reviewed-product-composition-conformance-baseline-56264181873249c18d5477ce2170c8b1.md) - Supersedes the initial PCC-U4 evidence with the reviewed narrow-feature, backpressure, and product-profile module proof.
-- **Verification Evidence**: [PCC-U4 Product Composition Conformance Baseline](verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md) - Publishes the independent product-composition baseline for explicit WGPU, Winit accessibility and ProductRecipe Host authority.
 
 # Integration Notes
 
