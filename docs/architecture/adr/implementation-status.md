@@ -3,9 +3,12 @@
 **Status**: Active
 **Last Verified**: 2026-08-15
 
-This ledger tracks implementation evidence independently from ADR decision acceptance. No
-implementation plan is active. The completed [Fresh Project, Source-Carrying Export, and Explicit
-Repair plan](../../plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md)
+This ledger tracks implementation evidence independently from ADR decision acceptance. The
+[Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md) is
+the sole active implementation plan. EFI-U1 is the only active unit under registration
+`18ab55170b6d4529bb72a91173c0b9ed`; EFI-U2 through EFI-U5 remain inactive and dependency-ordered.
+The completed [Fresh Project, Source-Carrying Export, and Explicit Repair
+plan](../../plans/2026-08-14-002-feat-fresh-project-source-carrying-export-and-repair-plan.md)
 implements FPER-U0 through FPER-U3 and closes at `e37eb0f` with conformance record
 `386a7ba1b9694f09b2e34795b3d3ddfe` and completed registration
 `be2dd60d831d43a782707e8be9c1bc0c`. The completed [Capability
