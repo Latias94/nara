@@ -28,6 +28,25 @@ pub enum SceneCompositionComponentKind {
     Sprite,
 }
 
+impl SceneCompositionComponentKind {
+    /// Resolves one admitted stable component type into the bounded composition vocabulary.
+    #[must_use]
+    pub fn from_component_type(component: &ComponentTypeId) -> Option<Self> {
+        match component.as_str() {
+            TRANSFORM_COMPONENT => Some(Self::Transform2d),
+            SPRITE_COMPONENT => Some(Self::Sprite),
+            _ => None,
+        }
+    }
+
+    const fn component_type_name(self) -> &'static str {
+        match self {
+            Self::Transform2d => TRANSFORM_COMPONENT,
+            Self::Sprite => SPRITE_COMPONENT,
+        }
+    }
+}
+
 /// One UI-neutral Scene Composition command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SceneCompositionCommand {
@@ -214,10 +233,7 @@ fn admitted_component(
 }
 
 fn component_type(component: SceneCompositionComponentKind) -> ComponentTypeId {
-    ComponentTypeId::new(match component {
-        SceneCompositionComponentKind::Transform2d => TRANSFORM_COMPONENT,
-        SceneCompositionComponentKind::Sprite => SPRITE_COMPONENT,
-    })
+    ComponentTypeId::new(component.component_type_name())
 }
 
 fn default_transform_value() -> ComponentValue {

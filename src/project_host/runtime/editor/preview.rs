@@ -5,6 +5,7 @@ use std::{
 
 use nara_app::{App, CoreStage};
 use nara_asset::{AssetId, Handle};
+use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
 use nara_reflect::{ComponentRegistry, ComponentRegistrySnapshot};
@@ -45,6 +46,21 @@ impl EditorPreviewHit {
     #[must_use]
     pub const fn instance(&self) -> SpriteInstance {
         self.instance
+    }
+
+    /// Tests one clip-space point against the exact projected quad used by this hit fact.
+    #[must_use]
+    pub fn contains_clip_point(&self, point: [f32; 2]) -> bool {
+        let delta_x = point[0] - self.instance.center.x;
+        let delta_y = point[1] - self.instance.center.y;
+        let delta = Vec2::new(delta_x, delta_y);
+        let determinant = self.instance.x_axis.perp_dot(self.instance.y_axis);
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return false;
+        }
+        let local_x = delta.perp_dot(self.instance.y_axis) / determinant;
+        let local_y = self.instance.x_axis.perp_dot(delta) / determinant;
+        local_x.is_finite() && local_y.is_finite() && local_x.abs() <= 1.0 && local_y.abs() <= 1.0
     }
 }
 

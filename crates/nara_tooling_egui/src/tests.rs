@@ -7,6 +7,7 @@ use nara_reflect::{
 };
 use nara_scene::{
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneDocument, SceneEntityId,
+    ScenePlacement, ScenePlacementOwner,
 };
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentId, EditorDocumentMutation,
@@ -16,9 +17,10 @@ use nara_tooling::{
     EditorPersistenceView, EditorPlayState, EditorPlayView, EditorProjectView, EditorReopenTarget,
     EditorSceneModel, EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent,
     EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentView,
-    EditorWorkspaceModel, SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView,
-    SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
-    SceneInspectorFieldView, SceneInspectorModel,
+    EditorWorkspaceModel, SceneCompositionCommand, SceneCompositionComponentKind,
+    SceneCompositionEntityKind, SceneEditorModel, SceneInspectorCommand,
+    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
+    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
 };
 
 use crate::{
@@ -132,6 +134,49 @@ fn canonical_tree_selection_emits_one_revision_free_navigation_action() {
 }
 
 #[test]
+fn composition_controls_emit_exact_revision_bound_actions() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        true,
+    );
+    let frame = default_frame(Some(scene.clone()));
+
+    let add_root = click_control(&mut EguiSceneEditorPanel::new(), &frame, "Add Root");
+    assert_eq!(
+        add_root,
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+                document: scene.document,
+                base_revision: scene.revision,
+                command: SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::ColoredSprite,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                },
+            })]
+        )
+    );
+
+    let add_sprite = click_control(&mut EguiSceneEditorPanel::new(), &frame, "+ Sprite");
+    assert_eq!(
+        add_sprite,
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+                document: scene.document,
+                base_revision: scene.revision,
+                command: SceneCompositionCommand::AddComponent {
+                    entity: SceneEntityId::new("player").unwrap(),
+                    component: SceneCompositionComponentKind::Sprite,
+                },
+            })]
+        )
+    );
+}
+
+#[test]
 fn fixed_panels_remain_inside_the_native_viewport() {
     let scene = scene_model(
         revision(),
@@ -141,19 +186,28 @@ fn fixed_panels_remain_inside_the_native_viewport() {
     );
     let frame = default_frame(Some(scene));
     let mut panel = EguiSceneEditorPanel::new();
-    let _ = render_editor_frame(
+    let viewport = egui::vec2(800.0, 540.0);
+    let _ = render_editor_frame_at(
         &egui::Context::default(),
         &mut panel,
         &frame,
         egui::RawInput::default(),
+        viewport,
     );
 
     let tree = test_control_rect("Scene Tree heading").unwrap();
+    let scene_view = test_control_rect("Scene View heading").unwrap();
     let inspector = test_control_rect("Inspector heading").unwrap();
     let diagnostics = test_control_rect("Diagnostics heading").unwrap();
     assert!(tree.top() < diagnostics.top());
+    assert!(tree.right() < scene_view.right());
+    assert!(scene_view.right() < inspector.right());
+    assert!(inspector.right() <= viewport.x, "{inspector:?}");
     assert!(inspector.top() < diagnostics.top());
-    assert!(diagnostics.bottom() <= 720.0, "{diagnostics:?}");
+    assert!(
+        diagnostics.bottom() <= viewport.y,
+        "tree={tree:?}, scene={scene_view:?}, inspector={inspector:?}, diagnostics={diagnostics:?}"
+    );
 }
 
 #[test]
@@ -544,12 +598,19 @@ fn render_editor_frame(
     context: &egui::Context,
     panel: &mut EguiSceneEditorPanel,
     frame: &EditorFrameModel,
-    mut input: egui::RawInput,
+    input: egui::RawInput,
 ) -> EditorActionBatch {
-    input.screen_rect = Some(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        egui::vec2(1280.0, 720.0),
-    ));
+    render_editor_frame_at(context, panel, frame, input, egui::vec2(1280.0, 720.0))
+}
+
+fn render_editor_frame_at(
+    context: &egui::Context,
+    panel: &mut EguiSceneEditorPanel,
+    frame: &EditorFrameModel,
+    mut input: egui::RawInput,
+    viewport: egui::Vec2,
+) -> EditorActionBatch {
+    input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, viewport));
     let mut response = None;
     let output = context.run_ui(input, |ui| {
         response = Some(panel.show(ui, frame));

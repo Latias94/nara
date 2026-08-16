@@ -17,7 +17,7 @@ use nara::{
         EditorAction, EditorActionBatch, EditorFrameModel, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
     },
-    tooling_egui::EguiSceneEditorPanel,
+    tooling_egui::{EguiSceneEditorOutput, EguiSceneEditorPanel, EguiSceneViewInput},
 };
 use thiserror::Error;
 
@@ -138,9 +138,22 @@ impl EditorApplication {
 
     #[must_use]
     pub fn show(&mut self, root: &mut egui::Ui) -> EditorActionBatch {
+        self.show_with_scene_view(root, EguiSceneViewInput::unavailable())
+            .into_parts()
+            .0
+    }
+
+    #[must_use]
+    pub fn show_with_scene_view(
+        &mut self,
+        root: &mut egui::Ui,
+        scene_view: EguiSceneViewInput,
+    ) -> EguiSceneEditorOutput {
         let frame = self.session.current_frame();
         egui::Frame::central_panel(root.style())
-            .show(root, |ui| self.panel.show(ui, &frame))
+            .show(root, |ui| {
+                self.panel.show_with_scene_view(ui, &frame, scene_view)
+            })
             .inner
     }
 
@@ -160,8 +173,8 @@ impl EditorApplication {
         }
     }
 
-    pub fn configure_scene_preview(&mut self, extent: Option<Extent2d>) {
-        self.session.configure_editor_preview(extent);
+    pub fn set_scene_preview_extent(&mut self, extent: Option<Extent2d>) {
+        self.session.set_editor_preview_extent(extent);
     }
 
     #[must_use]

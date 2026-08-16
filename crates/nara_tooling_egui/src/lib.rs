@@ -7,8 +7,10 @@
 mod editor;
 mod fields;
 mod inspector;
+mod scene_view;
 
 #[cfg(test)]
 mod tests;
 
-pub use editor::EguiSceneEditorPanel;
+pub use editor::{EguiSceneEditorOutput, EguiSceneEditorPanel};
+pub use scene_view::{EguiSceneViewInput, EguiSceneViewOutput};

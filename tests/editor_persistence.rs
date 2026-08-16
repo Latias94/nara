@@ -86,6 +86,8 @@ fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].entity(), &scene_id("editor_entity_1"));
     assert_eq!(hits[0].draw_ordinal(), 0);
+    assert!(hits[0].contains_clip_point([0.0, 0.0]));
+    assert!(!hits[0].contains_clip_point([2.0, 2.0]));
     assert!(matches!(
         packet.target(),
         RenderFrameTarget::Image(target) if target.extent() == Extent2d::new(320, 180).unwrap()

@@ -1,4 +1,6 @@
-use egui::{Align, Button, Color32, Layout, RichText, ScrollArea, Ui, Vec2, Window};
+use egui::{
+    Align, Button, Color32, Layout, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, Vec2, Window,
+};
 use nara_diagnostic::{DiagnosticReport, DiagnosticSeverity};
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation, EditorFrameModel,
@@ -7,14 +9,21 @@ use nara_tooling::{
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
 };
 
-use crate::inspector::EguiSceneInspectorPanel;
+use crate::{
+    inspector::EguiSceneInspectorPanel,
+    scene_view::{EguiSceneViewInput, EguiSceneViewOutput, EguiSceneViewPanel},
+};
 
 const MIN_EDITOR_WIDTH: f32 = 720.0;
 const MIN_EDITOR_HEIGHT: f32 = 520.0;
-const TREE_PANEL_WIDTH: f32 = 240.0;
-const INSPECTOR_PANEL_WIDTH: f32 = 420.0;
-const MIN_CONTENT_HEIGHT: f32 = 260.0;
-const DIAGNOSTICS_HEIGHT: f32 = 150.0;
+// Keep the fixed columns usable on a high-DPI laptop window. The Scene View receives the
+// remaining width, while the tree and inspector retain enough room for their bounded controls.
+const TREE_PANEL_WIDTH: f32 = 180.0;
+const SCENE_PANEL_WIDTH: f32 = 240.0;
+const INSPECTOR_PANEL_WIDTH: f32 = 280.0;
+const COLUMN_GAP: f32 = 10.0;
+const MIN_CONTENT_HEIGHT: f32 = 220.0;
+const DIAGNOSTICS_HEIGHT: f32 = 120.0;
 
 #[cfg(test)]
 use std::{cell::RefCell, collections::HashMap};
@@ -34,6 +43,21 @@ thread_local! {
 #[derive(Debug, Default)]
 pub struct EguiSceneEditorPanel {
     inspector: EguiSceneInspectorPanel,
+    scene_view: EguiSceneViewPanel,
+}
+
+/// One ordered Editor action batch plus transient Scene View interaction from the same redraw.
+#[derive(Debug)]
+pub struct EguiSceneEditorOutput {
+    actions: EditorActionBatch,
+    scene_view: EguiSceneViewOutput,
+}
+
+impl EguiSceneEditorOutput {
+    #[must_use]
+    pub fn into_parts(self) -> (EditorActionBatch, EguiSceneViewOutput) {
+        (self.actions, self.scene_view)
+    }
 }
 
 impl EguiSceneEditorPanel {
@@ -44,6 +68,17 @@ impl EguiSceneEditorPanel {
 
     #[must_use]
     pub fn show(&mut self, ui: &mut Ui, frame: &EditorFrameModel) -> EditorActionBatch {
+        self.show_with_scene_view(ui, frame, EguiSceneViewInput::unavailable())
+            .actions
+    }
+
+    #[must_use]
+    pub fn show_with_scene_view(
+        &mut self,
+        ui: &mut Ui,
+        frame: &EditorFrameModel,
+        scene_view: EguiSceneViewInput,
+    ) -> EguiSceneEditorOutput {
         #[cfg(test)]
         clear_test_observations();
 
@@ -54,12 +89,23 @@ impl EguiSceneEditorPanel {
         ui.set_min_size(Vec2::new(MIN_EDITOR_WIDTH, MIN_EDITOR_HEIGHT));
         render_toolbar(ui, frame, &mut actions);
         ui.separator();
-        render_authoring_content(ui, scene, &mut self.inspector, frame, &mut actions);
+        let scene_view = render_authoring_content(
+            ui,
+            scene,
+            &mut self.inspector,
+            &mut self.scene_view,
+            scene_view,
+            frame,
+            &mut actions,
+        );
         ui.separator();
         render_diagnostics(ui, frame, &mut actions);
         render_dirty_close_dialog(ui, frame, &mut actions);
 
-        EditorActionBatch::new(frame.revision(), actions)
+        EguiSceneEditorOutput {
+            actions: EditorActionBatch::new(frame.revision(), actions),
+            scene_view,
+        }
     }
 
     #[cfg(test)]
@@ -152,86 +198,111 @@ fn render_authoring_content(
     ui: &mut Ui,
     scene: Option<&nara_tooling::EditorSceneModel>,
     inspector: &mut EguiSceneInspectorPanel,
+    scene_view_panel: &mut EguiSceneViewPanel,
+    scene_view: EguiSceneViewInput,
     frame: &EditorFrameModel,
     actions: &mut Vec<EditorAction>,
-) {
+) -> EguiSceneViewOutput {
     let reserved = DIAGNOSTICS_HEIGHT + ui.spacing().item_spacing.y * 2.0;
     let content_height = (ui.available_height() - reserved).max(MIN_CONTENT_HEIGHT);
     let editing_enabled = frame.play().state() == EditorPlayState::Empty
         && frame.workspace_intent().intent().is_none()
         && frame.persistence().operation() == EditorPersistenceOperation::Idle;
 
-    ScrollArea::horizontal()
-        .id_salt("nara_editor_authoring_overflow")
+    let visible_width = (ui.ctx().viewport_rect().right() - ui.cursor().left()).max(1.0);
+    let content_width = ui
+        .available_width()
+        .min(visible_width)
+        .max(TREE_PANEL_WIDTH + SCENE_PANEL_WIDTH + INSPECTOR_PANEL_WIDTH + COLUMN_GAP * 2.0);
+    let (row_rect, _) =
+        ui.allocate_exact_size(Vec2::new(content_width, content_height), Sense::hover());
+    let tree_rect = Rect::from_min_size(row_rect.min, Vec2::new(TREE_PANEL_WIDTH, content_height));
+    let inspector_rect = Rect::from_min_size(
+        row_rect.right_top() - Vec2::new(INSPECTOR_PANEL_WIDTH, 0.0),
+        Vec2::new(INSPECTOR_PANEL_WIDTH, content_height),
+    );
+    let scene_rect = Rect::from_min_max(
+        tree_rect.right_top() + Vec2::new(COLUMN_GAP, 0.0),
+        inspector_rect.left_bottom() - Vec2::new(COLUMN_GAP, 0.0),
+    );
+
+    let mut tree_ui = fixed_column(ui, "nara_editor_scene_tree_column", tree_rect);
+    ScrollArea::vertical()
+        .id_salt("nara_editor_scene_tree")
         .max_height(content_height)
         .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.set_min_width(TREE_PANEL_WIDTH + INSPECTOR_PANEL_WIDTH + 24.0);
-            ui.horizontal(|ui| {
-                ui.allocate_ui_with_layout(
-                    Vec2::new(TREE_PANEL_WIDTH, content_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_height(content_height);
-                        ScrollArea::vertical()
-                            .id_salt("nara_editor_scene_tree")
-                            .max_height(content_height)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| inspector.show_tree(ui, scene, actions));
-                    },
-                );
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    Vec2::new(
-                        INSPECTOR_PANEL_WIDTH.max(ui.available_width()),
-                        content_height,
-                    ),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_height(content_height);
-                        ScrollArea::vertical()
-                            .id_salt("nara_editor_inspector")
-                            .max_height(content_height)
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                inspector.show_inspector(
-                                    ui,
-                                    scene,
-                                    frame.field_feedback(),
-                                    editing_enabled,
-                                    actions,
-                                )
-                            });
-                    },
-                );
-            });
+        .show(&mut tree_ui, |ui| {
+            inspector.show_tree(ui, scene, editing_enabled, actions)
         });
+
+    let mut scene_ui = fixed_column(ui, "nara_editor_scene_view_column", scene_rect);
+    let scene_view = scene_view_panel.show(&mut scene_ui, scene_view, scene_rect.size());
+
+    let mut inspector_ui = fixed_column(ui, "nara_editor_inspector_column", inspector_rect);
+    ScrollArea::vertical()
+        .id_salt("nara_editor_inspector")
+        .max_height(content_height)
+        .auto_shrink([false, false])
+        .show(&mut inspector_ui, |ui| {
+            inspector.show_inspector(ui, scene, frame.field_feedback(), editing_enabled, actions)
+        });
+
+    let separator = ui.visuals().widgets.noninteractive.bg_stroke;
+    ui.painter().vline(
+        tree_rect.right() + COLUMN_GAP * 0.5,
+        row_rect.y_range(),
+        separator,
+    );
+    ui.painter().vline(
+        inspector_rect.left() - COLUMN_GAP * 0.5,
+        row_rect.y_range(),
+        separator,
+    );
+    scene_view
+}
+
+fn fixed_column(parent: &mut Ui, id_salt: &'static str, rect: Rect) -> Ui {
+    let mut child = parent.new_child(
+        UiBuilder::new()
+            .id_salt(id_salt)
+            .max_rect(rect)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    child.set_clip_rect(parent.clip_rect().intersect(rect));
+    child
 }
 
 fn render_diagnostics(ui: &mut Ui, frame: &EditorFrameModel, actions: &mut Vec<EditorAction>) {
-    let _heading = ui.heading("Diagnostics");
-    #[cfg(test)]
-    record_test_control("Diagnostics heading", _heading.rect);
-    ScrollArea::vertical()
-        .id_salt("nara_editor_diagnostics")
-        .max_height(DIAGNOSTICS_HEIGHT)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let status_rendered = render_editor_status(ui, frame, actions);
-            let mut rendered = 0_usize;
-            render_diagnostic_report(ui, "Host", frame.diagnostics(), &mut rendered);
-            if let Some(scene) = frame.workspace().active_scene.as_ref() {
-                render_diagnostic_report(
-                    ui,
-                    "Inspector",
-                    &scene.editor.inspector.diagnostics,
-                    &mut rendered,
-                );
-            }
-            if rendered == 0 && !status_rendered {
-                ui.label(RichText::new("No diagnostics").weak());
-            }
-        });
+    ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), DIAGNOSTICS_HEIGHT),
+        Layout::top_down(Align::Min),
+        |ui| {
+            ui.set_height(DIAGNOSTICS_HEIGHT);
+            let _heading = ui.heading("Diagnostics");
+            #[cfg(test)]
+            record_test_control("Diagnostics heading", _heading.rect);
+            ScrollArea::vertical()
+                .id_salt("nara_editor_diagnostics")
+                .max_height(ui.available_height())
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let status_rendered = render_editor_status(ui, frame, actions);
+                    let mut rendered = 0_usize;
+                    render_diagnostic_report(ui, "Host", frame.diagnostics(), &mut rendered);
+                    if let Some(scene) = frame.workspace().active_scene.as_ref() {
+                        render_diagnostic_report(
+                            ui,
+                            "Inspector",
+                            &scene.editor.inspector.diagnostics,
+                            &mut rendered,
+                        );
+                    }
+                    if rendered == 0 && !status_rendered {
+                        ui.label(RichText::new("No diagnostics").weak());
+                    }
+                });
+        },
+    );
 }
 
 fn render_editor_status(

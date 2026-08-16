@@ -1,16 +1,18 @@
 use std::collections::HashMap;
 
-use egui::{Button, CollapsingHeader, RichText, TextEdit, Ui};
+use egui::{Button, CollapsingHeader, ComboBox, RichText, TextEdit, Ui, Window};
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
     ComponentValueKind,
 };
-use nara_scene::{SceneAuthoringRevision, SceneEntityId};
+use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementOwner};
 use nara_tooling::{
     EditorAction, EditorDocumentId, EditorDocumentMutation, EditorFieldFeedback,
     EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure,
-    EditorNavigationAction, EditorSceneModel, SceneInspectorCommand, SceneInspectorComponentView,
-    SceneInspectorFieldState, SceneInspectorFieldView,
+    EditorNavigationAction, EditorSceneModel, SceneCompositionCommand,
+    SceneCompositionComponentKind, SceneCompositionEntityKind, SceneInspectorCommand,
+    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorFieldState,
+    SceneInspectorFieldView,
 };
 
 use crate::fields::{
@@ -19,7 +21,7 @@ use crate::fields::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct InspectorDraftScope {
+struct InspectorSceneScope {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
 }
@@ -91,21 +93,28 @@ struct FieldDraft {
     error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingEntityRemoval {
+    entity: SceneEntityId,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct EguiSceneInspectorPanel {
-    active_scope: Option<InspectorDraftScope>,
+    active_scope: Option<InspectorSceneScope>,
     field_drafts: HashMap<EguiInspectorFieldKey, FieldDraft>,
+    pending_removal: Option<PendingEntityRemoval>,
 }
 
 impl EguiSceneInspectorPanel {
     pub(crate) fn synchronize_scene(&mut self, scene: Option<&EditorSceneModel>) {
-        let next = scene.map(|scene| InspectorDraftScope {
+        let next = scene.map(|scene| InspectorSceneScope {
             document: scene.document,
             revision: scene.revision,
         });
         if self.active_scope != next {
             self.active_scope = next;
             self.field_drafts.clear();
+            self.pending_removal = None;
         }
     }
 
@@ -113,6 +122,7 @@ impl EguiSceneInspectorPanel {
         &mut self,
         ui: &mut Ui,
         scene: Option<&EditorSceneModel>,
+        editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
         let _heading = ui.heading("Scene Tree");
@@ -122,8 +132,10 @@ impl EguiSceneInspectorPanel {
             ui.label(RichText::new("No active scene").weak());
             return;
         };
+        self.show_composition_toolbar(ui, scene, editing_enabled, actions);
         if scene.editor.inspector.entities.is_empty() {
             ui.label(RichText::new("No entities").weak());
+            self.show_remove_confirmation(ui, scene, editing_enabled, actions);
             return;
         }
 
@@ -153,6 +165,244 @@ impl EguiSceneInspectorPanel {
                 ));
             }
         }
+        self.show_remove_confirmation(ui, scene, editing_enabled, actions);
+    }
+
+    fn show_composition_toolbar(
+        &mut self,
+        ui: &mut Ui,
+        scene: &EditorSceneModel,
+        editing_enabled: bool,
+        actions: &mut Vec<EditorAction>,
+    ) {
+        let selected = scene
+            .editor
+            .inspector
+            .selected_entity
+            .as_ref()
+            .and_then(|entity| selected_tree_position(&scene.editor.inspector.entities, entity));
+        ui.horizontal_wrapped(|ui| {
+            let add_root = ui
+                .add_enabled(editing_enabled, Button::new("+ Root"))
+                .on_hover_text("Add a visible root entity");
+            #[cfg(test)]
+            crate::editor::record_test_control("Add Root", add_root.rect);
+            if add_root.clicked() {
+                actions.push(compose_action(
+                    scene,
+                    SceneCompositionCommand::CreateEntity {
+                        kind: SceneCompositionEntityKind::ColoredSprite,
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    },
+                ));
+            }
+
+            let add_child = ui
+                .add_enabled(
+                    editing_enabled && selected.is_some(),
+                    Button::new("+ Child"),
+                )
+                .on_hover_text("Add a visible child to the selection");
+            #[cfg(test)]
+            crate::editor::record_test_control("Add Child", add_child.rect);
+            if add_child.clicked() {
+                let parent = selected
+                    .expect("Add Child is enabled only with a selection")
+                    .row
+                    .id
+                    .clone();
+                actions.push(compose_action(
+                    scene,
+                    SceneCompositionCommand::CreateEntity {
+                        kind: SceneCompositionEntityKind::ColoredSprite,
+                        placement: ScenePlacement::last(ScenePlacementOwner::Parent { parent }),
+                    },
+                ));
+            }
+
+            let (previous, next) =
+                selected.map_or((None, None), |selected| (selected.previous, selected.next));
+            let move_up = ui
+                .add_enabled(editing_enabled && previous.is_some(), Button::new("Up"))
+                .on_hover_text("Move before the previous sibling");
+            if move_up.clicked() {
+                let entity = selected
+                    .expect("Move Up is enabled only with a selection")
+                    .row
+                    .id
+                    .clone();
+                let previous = previous.expect("Move Up is enabled only with a previous sibling");
+                actions.push(compose_action(
+                    scene,
+                    SceneCompositionCommand::MoveEntity {
+                        entity: entity.clone(),
+                        to: ScenePlacement::before(
+                            placement_owner(scene, &entity),
+                            previous.clone(),
+                        ),
+                    },
+                ));
+            }
+            let move_down = ui
+                .add_enabled(editing_enabled && next.is_some(), Button::new("Down"))
+                .on_hover_text("Move after the next sibling");
+            if move_down.clicked() {
+                let entity = selected
+                    .expect("Move Down is enabled only with a selection")
+                    .row
+                    .id
+                    .clone();
+                let next = next.expect("Move Down is enabled only with a next sibling");
+                actions.push(compose_action(
+                    scene,
+                    SceneCompositionCommand::MoveEntity {
+                        entity: entity.clone(),
+                        to: ScenePlacement::after(placement_owner(scene, &entity), next.clone()),
+                    },
+                ));
+            }
+
+            let remove = ui
+                .add_enabled(editing_enabled && selected.is_some(), Button::new("Remove"))
+                .on_hover_text("Remove the selected entity subtree");
+            #[cfg(test)]
+            crate::editor::record_test_control("Remove Entity", remove.rect);
+            if remove.clicked() {
+                let entity = selected
+                    .expect("Remove is enabled only with a selection")
+                    .row
+                    .id
+                    .clone();
+                self.pending_removal = Some(PendingEntityRemoval { entity });
+            }
+        });
+
+        let Some(selected) = selected else {
+            return;
+        };
+        let selected_id = &selected.row.id;
+        let current_parent = selected.row.parent.as_ref();
+        let selected_text = current_parent.map_or("Root", SceneEntityId::as_str);
+        ComboBox::from_id_salt(("nara_editor_parent", selected_id.as_str()))
+            .selected_text(format!("Parent: {selected_text}"))
+            .show_ui(ui, |ui| {
+                if ui
+                    .add_enabled(
+                        editing_enabled && current_parent.is_some(),
+                        Button::new("Root"),
+                    )
+                    .clicked()
+                {
+                    actions.push(compose_action(
+                        scene,
+                        SceneCompositionCommand::MoveEntity {
+                            entity: selected_id.clone(),
+                            to: ScenePlacement::last(ScenePlacementOwner::Root),
+                        },
+                    ));
+                }
+                for (index, candidate) in scene.editor.inspector.entities.iter().enumerate() {
+                    let eligible = editing_enabled
+                        && index != selected.index
+                        && current_parent != Some(&candidate.id)
+                        && !selected.is_descendant_index(index);
+                    if ui
+                        .add_enabled(eligible, Button::new(candidate.id.as_str()))
+                        .clicked()
+                    {
+                        actions.push(compose_action(
+                            scene,
+                            SceneCompositionCommand::MoveEntity {
+                                entity: selected_id.clone(),
+                                to: ScenePlacement::last(ScenePlacementOwner::Parent {
+                                    parent: candidate.id.clone(),
+                                }),
+                            },
+                        ));
+                    }
+                }
+            });
+    }
+
+    fn show_remove_confirmation(
+        &mut self,
+        ui: &mut Ui,
+        scene: &EditorSceneModel,
+        editing_enabled: bool,
+        actions: &mut Vec<EditorAction>,
+    ) {
+        let Some(pending) = self.pending_removal.clone() else {
+            return;
+        };
+        let Some(position) =
+            selected_tree_position(&scene.editor.inspector.entities, &pending.entity)
+        else {
+            self.pending_removal = None;
+            return;
+        };
+
+        Window::new("Remove entity")
+            .collapsible(false)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(format!(
+                    "Remove {} and {} affected entity(s)?",
+                    pending.entity.as_str(),
+                    position.subtree_end - position.index
+                ));
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(editing_enabled, Button::new("Remove"))
+                        .clicked()
+                    {
+                        actions.push(compose_action(
+                            scene,
+                            SceneCompositionCommand::RemoveEntity {
+                                entity: pending.entity.clone(),
+                            },
+                        ));
+                        self.pending_removal = None;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending_removal = None;
+                    }
+                });
+            });
+    }
+
+    fn show_component_toolbar(
+        &self,
+        ui: &mut Ui,
+        scene: &EditorSceneModel,
+        view: &nara_tooling::SceneInspectorEntityView,
+        editing_enabled: bool,
+        actions: &mut Vec<EditorAction>,
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            for (label, kind) in [
+                ("+ Transform", SceneCompositionComponentKind::Transform2d),
+                ("+ Sprite", SceneCompositionComponentKind::Sprite),
+            ] {
+                let present = view.components.iter().any(|component| {
+                    SceneCompositionComponentKind::from_component_type(&component.component)
+                        == Some(kind)
+                });
+                let response = ui
+                    .add_enabled(editing_enabled && !present, Button::new(label))
+                    .on_hover_text("Add an admitted component");
+                #[cfg(test)]
+                crate::editor::record_test_control(label, response.rect);
+                if response.clicked() {
+                    actions.push(compose_action(
+                        scene,
+                        SceneCompositionCommand::AddComponent {
+                            entity: view.id.clone(),
+                            component: kind,
+                        },
+                    ));
+                }
+            }
+        });
     }
 
     pub(crate) fn show_inspector(
@@ -182,6 +432,7 @@ impl EguiSceneInspectorPanel {
         if view.has_prefab {
             ui.label("Prefab instance");
         }
+        self.show_component_toolbar(ui, scene, view, editing_enabled, actions);
         if view.components.is_empty() {
             ui.label(RichText::new("No components").weak());
             return;
@@ -215,6 +466,21 @@ impl EguiSceneInspectorPanel {
             .id_salt(component_key)
             .default_open(true)
             .show(ui, |ui| {
+                if let Some(kind) =
+                    SceneCompositionComponentKind::from_component_type(&component.component)
+                    && ui
+                        .add_enabled(editing_enabled, Button::new("Remove Component"))
+                        .on_hover_text("Remove this admitted component")
+                        .clicked()
+                {
+                    actions.push(compose_action(
+                        scene,
+                        SceneCompositionCommand::RemoveComponent {
+                            entity: entity.clone(),
+                            component: kind,
+                        },
+                    ));
+                }
                 if component.fields.is_empty() {
                     ui.label(RichText::new("No inspectable fields").weak());
                     return;
@@ -435,6 +701,70 @@ impl EguiSceneInspectorPanel {
     pub(crate) fn test_transient_entry_count(&self) -> usize {
         self.field_drafts.len()
     }
+}
+
+fn compose_action(scene: &EditorSceneModel, command: SceneCompositionCommand) -> EditorAction {
+    EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+        document: scene.document,
+        base_revision: scene.revision,
+        command,
+    })
+}
+
+fn placement_owner(scene: &EditorSceneModel, entity: &SceneEntityId) -> ScenePlacementOwner {
+    scene
+        .editor
+        .inspector
+        .entities
+        .iter()
+        .find(|row| &row.id == entity)
+        .and_then(|row| row.parent.clone())
+        .map_or(ScenePlacementOwner::Root, |parent| {
+            ScenePlacementOwner::Parent { parent }
+        })
+}
+
+#[derive(Clone, Copy)]
+struct SelectedTreePosition<'rows> {
+    index: usize,
+    subtree_end: usize,
+    row: &'rows SceneInspectorEntityRow,
+    previous: Option<&'rows SceneEntityId>,
+    next: Option<&'rows SceneEntityId>,
+}
+
+impl SelectedTreePosition<'_> {
+    fn is_descendant_index(self, index: usize) -> bool {
+        (self.index + 1..self.subtree_end).contains(&index)
+    }
+}
+
+fn selected_tree_position<'rows>(
+    rows: &'rows [SceneInspectorEntityRow],
+    selected: &SceneEntityId,
+) -> Option<SelectedTreePosition<'rows>> {
+    let index = rows.iter().position(|row| &row.id == selected)?;
+    let row = &rows[index];
+    let subtree_end = rows[index + 1..]
+        .iter()
+        .position(|candidate| candidate.depth <= row.depth)
+        .map_or(rows.len(), |offset| index + 1 + offset);
+    let previous = rows[..index]
+        .iter()
+        .rev()
+        .find(|candidate| candidate.parent == row.parent)
+        .map(|candidate| &candidate.id);
+    let next = rows
+        .get(subtree_end)
+        .filter(|candidate| candidate.parent == row.parent)
+        .map(|candidate| &candidate.id);
+    Some(SelectedTreePosition {
+        index,
+        subtree_end,
+        row,
+        previous,
+        next,
+    })
 }
 
 fn field_feedback_summary(reason: EditorFieldFeedbackReason) -> &'static str {

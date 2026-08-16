@@ -613,8 +613,15 @@ impl EditorProjectSession {
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     pub fn configure_editor_preview(&mut self, extent: Option<Extent2d>) {
-        self.preview.set_extent(extent);
+        self.set_editor_preview_extent(extent);
         self.drive_editor_preview();
+    }
+
+    /// Changes the extent used by the next ordinary Editor drive without publishing an extra frame.
+    #[cfg(feature = "presentation-2d")]
+    #[doc(hidden)]
+    pub fn set_editor_preview_extent(&mut self, extent: Option<Extent2d>) {
+        self.preview.set_extent(extent);
     }
 
     #[cfg(feature = "presentation-2d")]

@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egui::{Color32, Pos2, Rect, TextureId, Vec2, ViewportId, epaint::Primitive};
+use egui::{TextureId, Vec2, ViewportId, epaint::Primitive};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor, wgpu};
 use nara::{
     project_host::{EditorPreviewCandidate, EditorPreviewHit},
@@ -13,7 +13,10 @@ use nara::{
         WgpuEditorExecutionError, WgpuSubmittedImageReceipt,
     },
     scene::SceneAuthoringRevision,
-    tooling::EditorDocumentId,
+    tooling::{
+        EditorAction, EditorActionBatch, EditorDocumentId, EditorFrameModel, EditorNavigationAction,
+    },
+    tooling_egui::EguiSceneViewInput,
     window::{
         PresentMode, WindowId as NaraWindowId, WindowResolution, backend::WindowHandleProvider,
     },
@@ -98,6 +101,8 @@ struct NativeEditorHost {
     renderer: Option<EditorEguiRenderer>,
     pending_textures: egui::TexturesDelta,
     scene_presenter: EditorScenePresenter,
+    requested_scene_extent: Option<Extent2d>,
+    scene_view_notice: Option<&'static str>,
     gpu_replacement_attempted: bool,
     editor_frame_index: u64,
     last_frame: Instant,
@@ -116,6 +121,8 @@ impl NativeEditorHost {
             renderer: None,
             pending_textures: egui::TexturesDelta::default(),
             scene_presenter: EditorScenePresenter::new(),
+            requested_scene_extent: None,
+            scene_view_notice: None,
             gpu_replacement_attempted: false,
             editor_frame_index: 0,
             last_frame: Instant::now(),
@@ -139,9 +146,6 @@ impl NativeEditorHost {
         );
         let (gpu, renderer, egui_state) =
             create_editor_gpu_namespace(&self.context, Arc::clone(&window))?;
-        self.application
-            .configure_scene_preview(window_preview_extent(window.as_ref()));
-
         window.request_redraw();
         self.window = Some(window);
         self.egui_state = Some(egui_state);
@@ -166,8 +170,11 @@ impl NativeEditorHost {
         self.gpu = Some(gpu);
         self.renderer = Some(renderer);
         self.egui_state = Some(egui_state);
-        self.application
-            .configure_scene_preview(window_preview_extent(window.as_ref()));
+        set_requested_scene_extent(
+            &mut self.application,
+            &mut self.requested_scene_extent,
+            None,
+        );
         self.last_frame = Instant::now();
         window.request_redraw();
         Ok(())
@@ -205,18 +212,25 @@ impl NativeEditorHost {
                     window.request_redraw();
                 }
             }
-            WindowEvent::Resized(size) => {
+            WindowEvent::Resized(_) => {
                 if let (Some(gpu), Some(renderer)) = (self.gpu.as_mut(), self.renderer.as_mut()) {
                     self.scene_presenter.retire_target(gpu, renderer);
                 }
-                self.application
-                    .configure_scene_preview(Extent2d::new(size.width, size.height));
+                set_requested_scene_extent(
+                    &mut self.application,
+                    &mut self.requested_scene_extent,
+                    None,
+                );
                 window.request_redraw();
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop)?,
             WindowEvent::Destroyed => {
                 self.scene_presenter.retire_gpu_binding();
-                self.application.configure_scene_preview(None);
+                set_requested_scene_extent(
+                    &mut self.application,
+                    &mut self.requested_scene_extent,
+                    None,
+                );
                 self.pending_textures.clear();
                 self.renderer = None;
                 self.gpu = None;
@@ -244,6 +258,10 @@ impl NativeEditorHost {
         {
             return Ok(());
         }
+        let editor_frame = self.application.current_frame();
+        let mut pick_stamp = self
+            .scene_presenter
+            .pick_stamp(&editor_frame, self.requested_scene_extent);
         let candidate = self.application.take_scene_preview_candidate();
         let mut scene_retry_pending = false;
         let prepared_scene = match candidate {
@@ -260,25 +278,52 @@ impl NativeEditorHost {
                 Ok(prepared) => Some(prepared),
                 Err(EditorRunError::Gpu(error)) if error.is_deferred() => {
                     scene_retry_pending = true;
+                    pick_stamp = None;
                     None
                 }
                 Err(error) => return Err(error),
             },
             None => None,
         };
-        let mut batch = None;
+        let mut scene_view_input = self.scene_presenter.scene_view_input(
+            &editor_frame,
+            self.requested_scene_extent,
+            prepared_scene.as_ref(),
+            pick_stamp,
+            scene_retry_pending,
+        );
+        if let Some(notice) = self.scene_view_notice.take() {
+            scene_view_input = scene_view_input.with_notice(notice);
+        }
+        let mut panel_output = None;
         let output = self.context.run_ui(raw_input, |ui| {
-            batch = Some(self.application.show(ui));
-            if let Some(prepared_scene) = prepared_scene.as_ref() {
-                let sample_rect = Rect::from_min_size(ui.max_rect().left_top(), Vec2::splat(1.0));
-                ui.painter().image(
-                    prepared_scene.texture_id,
-                    sample_rect,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            }
+            panel_output = Some(self.application.show_with_scene_view(ui, scene_view_input));
         });
+        let (mut batch, scene_view_output) = panel_output
+            .expect("the Editor panel always returns one output")
+            .into_parts();
+        if let Some(uv) = scene_view_output.pick_uv() {
+            match pick_stamp.map(|stamp| EditorScenePickRequest { stamp, uv }) {
+                Some(request) => match self.scene_presenter.resolve_pick(request) {
+                    Ok(entity) => {
+                        batch = append_editor_action(
+                            batch,
+                            EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                                document: request.stamp.document,
+                                entity,
+                            }),
+                        );
+                    }
+                    Err(()) => self.scene_view_notice = Some("Scene View input became stale"),
+                },
+                None => self.scene_view_notice = Some("Scene View input is unavailable"),
+            }
+        }
+        let desired_scene_extent = physical_scene_extent(
+            scene_view_output.desired_size_points(),
+            output.pixels_per_point,
+        );
+        let camera_changed = scene_view_output.camera_changed();
         let repaint_delay = output
             .viewport_output
             .get(&ViewportId::ROOT)
@@ -409,21 +454,35 @@ impl NativeEditorHost {
                     "the Editor GPU published a Scene receipt without a candidate".to_owned(),
                 ));
             }
-            (None, None) => self.scene_presenter.retire_presentation(),
+            (None, None) if scene_retry_pending || pick_stamp.is_none() => {
+                self.scene_presenter.retire_presentation();
+            }
+            (None, None) => {}
+        }
+
+        if desired_scene_extent != self.requested_scene_extent {
+            self.scene_presenter.retire_target(gpu, renderer);
+            set_requested_scene_extent(
+                &mut self.application,
+                &mut self.requested_scene_extent,
+                desired_scene_extent,
+            );
+            scene_retry_pending = true;
         }
 
         let now = Instant::now();
         let delta = now.saturating_duration_since(self.last_frame);
         self.last_frame = now;
-        let update = self.application.submit_and_drive(
-            batch.expect("the Editor panel always returns one action batch"),
-            delta,
-        );
+        let update = self.application.submit_and_drive(batch, delta);
         if update.exit_ready() {
             event_loop.exit();
             return Ok(());
         }
-        if update.actions_observed() || scene_retry_pending || repaint_delay.is_zero() {
+        if update.actions_observed()
+            || scene_retry_pending
+            || camera_changed
+            || repaint_delay.is_zero()
+        {
             window.request_redraw();
             self.repaint_deadline = None;
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -464,7 +523,11 @@ impl ApplicationHandler for NativeEditorHost {
         self.renderer = None;
         self.gpu = None;
         self.scene_presenter.retire_gpu_binding();
-        self.application.configure_scene_preview(None);
+        set_requested_scene_extent(
+            &mut self.application,
+            &mut self.requested_scene_extent,
+            None,
+        );
         self.pending_textures.clear();
         self.window = None;
         self.egui_state = None;
@@ -506,11 +569,22 @@ struct PreparedEditorScene {
 }
 
 struct PresentedEditorScene {
+    stamp: EditorScenePickStamp,
+    hits: Vec<EditorPreviewHit>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EditorScenePickStamp {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     geometry_revision: u64,
-    hits: Vec<EditorPreviewHit>,
     receipt: WgpuEditorCompositeReceipt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EditorScenePickRequest {
+    stamp: EditorScenePickStamp,
+    uv: [f32; 2],
 }
 
 #[derive(Clone, Copy)]
@@ -527,6 +601,11 @@ impl EditorSceneTextureBinding {
         self.target_generation == submission.target_generation()
             && self.backend_instance_id == submission.backend_instance_id()
             && self.device_epoch == submission.device_epoch()
+    }
+
+    fn matches_presented(self, receipt: WgpuEditorCompositeReceipt) -> bool {
+        self.matches(receipt.image())
+            && self.registration_generation == receipt.texture_registration_generation()
     }
 }
 
@@ -619,6 +698,92 @@ impl EditorScenePresenter {
         })
     }
 
+    fn pick_stamp(
+        &self,
+        frame: &EditorFrameModel,
+        requested_extent: Option<Extent2d>,
+    ) -> Option<EditorScenePickStamp> {
+        let presented = self.presented.as_ref()?;
+        let binding = self.binding?;
+        let extent = presented.stamp.receipt.image().target().extent();
+        if requested_extent != Some(extent)
+            || !binding.matches_presented(presented.stamp.receipt)
+            || !scene_matches_frame(frame, presented.stamp.document, presented.stamp.revision)
+        {
+            return None;
+        }
+        Some(presented.stamp)
+    }
+
+    fn scene_view_input(
+        &self,
+        frame: &EditorFrameModel,
+        requested_extent: Option<Extent2d>,
+        prepared: Option<&PreparedEditorScene>,
+        pick_stamp: Option<EditorScenePickStamp>,
+        retry_pending: bool,
+    ) -> EguiSceneViewInput {
+        if retry_pending {
+            return EguiSceneViewInput::resizing();
+        }
+        if let Some(prepared) = prepared {
+            let extent = prepared.submission.target().extent();
+            if requested_extent == Some(extent)
+                && scene_matches_frame(frame, prepared.document, prepared.revision)
+            {
+                let extent = [extent.width, extent.height];
+                return if pick_stamp.is_some() {
+                    EguiSceneViewInput::presented(prepared.texture_id, extent)
+                } else {
+                    EguiSceneViewInput::previewing(prepared.texture_id, extent)
+                };
+            }
+        }
+        if let Some(stamp) = pick_stamp {
+            let presented = self
+                .presented
+                .as_ref()
+                .expect("pickable Scene View state owns one presented lease");
+            debug_assert_eq!(presented.stamp, stamp);
+            let binding = self
+                .binding
+                .expect("pickable Scene View state owns one texture binding");
+            let extent = stamp.receipt.image().target().extent();
+            return EguiSceneViewInput::presented(
+                binding.texture_id,
+                [extent.width, extent.height],
+            );
+        }
+        if requested_extent.is_some() {
+            EguiSceneViewInput::resizing()
+        } else {
+            EguiSceneViewInput::unavailable()
+        }
+    }
+
+    fn resolve_pick(
+        &self,
+        request: EditorScenePickRequest,
+    ) -> Result<Option<nara::scene::SceneEntityId>, ()> {
+        let presented = self.presented.as_ref().ok_or(())?;
+        if presented.stamp != request.stamp
+            || !request.uv.into_iter().all(f32::is_finite)
+            || request
+                .uv
+                .into_iter()
+                .any(|value| !(0.0..=1.0).contains(&value))
+        {
+            return Err(());
+        }
+        let clip = [request.uv[0] * 2.0 - 1.0, 1.0 - request.uv[1] * 2.0];
+        Ok(presented
+            .hits
+            .iter()
+            .rev()
+            .find(|hit| hit.contains_clip_point(clip))
+            .map(|hit| hit.entity().clone()))
+    }
+
     fn promote(
         &mut self,
         prepared: PreparedEditorScene,
@@ -632,11 +797,13 @@ impl EditorScenePresenter {
             ));
         }
         self.presented = Some(PresentedEditorScene {
-            document: prepared.document,
-            revision: prepared.revision,
-            geometry_revision: prepared.geometry_revision,
+            stamp: EditorScenePickStamp {
+                document: prepared.document,
+                revision: prepared.revision,
+                geometry_revision: prepared.geometry_revision,
+                receipt,
+            },
             hits: prepared.hits,
-            receipt,
         });
         Ok(())
     }
@@ -666,6 +833,43 @@ fn primitives_sample_texture(primitives: &[egui::ClippedPrimitive], texture_id: 
             Primitive::Mesh(mesh) if mesh.texture_id == texture_id
         )
     })
+}
+
+fn scene_matches_frame(
+    frame: &EditorFrameModel,
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+) -> bool {
+    frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .is_some_and(|scene| scene.document == document && scene.revision == revision)
+}
+
+fn append_editor_action(batch: EditorActionBatch, action: EditorAction) -> EditorActionBatch {
+    let revision = batch.frame_revision();
+    let mut actions = batch.into_actions();
+    actions.push(action);
+    EditorActionBatch::new(revision, actions)
+}
+
+fn set_requested_scene_extent(
+    application: &mut EditorApplication,
+    requested_extent: &mut Option<Extent2d>,
+    extent: Option<Extent2d>,
+) {
+    *requested_extent = extent;
+    application.set_scene_preview_extent(extent);
+}
+
+fn physical_scene_extent(points: Vec2, pixels_per_point: f32) -> Option<Extent2d> {
+    if !points.is_finite() || !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        return None;
+    }
+    let width = (points.x * pixels_per_point).round() as u32;
+    let height = (points.y * pixels_per_point).round() as u32;
+    Extent2d::new(width, height)
 }
 
 struct EditorEguiRenderer {
@@ -732,11 +936,6 @@ fn editor_window_packet(window: &Window) -> RenderWindowPacket {
             .with_scale_factor(window.scale_factor()),
         present_mode: PresentMode::AutoVsync,
     }
-}
-
-fn window_preview_extent(window: &Window) -> Option<Extent2d> {
-    let size = window.inner_size();
-    Extent2d::new(size.width, size.height)
 }
 
 fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {
