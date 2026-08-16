@@ -165,6 +165,23 @@ impl UiSubmittedBackendSubmission {
             },
         }
     }
+
+    #[must_use]
+    pub fn superseded(
+        self,
+        successor: UiPresentationAttemptIdentity,
+        message: String,
+    ) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::Superseded {
+                attempt: submission.into_attempt(),
+                successor,
+                message,
+            },
+        }
+    }
 }
 
 /// Failure-atomic batch bind result retaining every prepared submission for rejection outcomes.
@@ -288,6 +305,23 @@ impl UiBackendSubmission {
             },
         }
     }
+
+    #[must_use]
+    pub fn superseded(
+        self,
+        successor: UiPresentationAttemptIdentity,
+        message: String,
+    ) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::Superseded {
+                attempt: submission.into_attempt(),
+                successor,
+                message,
+            },
+        }
+    }
 }
 
 /// Move-only frame exchange populated by the Host and drained once by the concrete backend.
@@ -334,9 +368,21 @@ impl UiBackendPresentationFrame {
 
 impl UiPresentationOutcomes {
     pub fn commit_backend(&mut self, completed: UiCompletedBackendOutcome) {
+        self.try_commit_backend(completed)
+            .expect("a backend outcome must return to the runtime that reserved its permit");
+    }
+
+    fn try_commit_backend(
+        &mut self,
+        completed: UiCompletedBackendOutcome,
+    ) -> Result<(), UiCompletedBackendOutcome> {
+        if !self.reserved_backend.remove(&completed.permit.identity) {
+            return Err(completed);
+        }
         let UiCompletedBackendOutcome { permit, outcome } = completed;
-        self.reserved_backend.remove(&permit.identity);
+        let _ = permit;
         self.outcomes.push(outcome);
+        Ok(())
     }
 
     fn replace_content(
@@ -562,6 +608,40 @@ pub fn drain_ui_presentation_outcomes(
     outcomes.drain()
 }
 
+/// Moves one exact prepared backend frame out of a runtime-owned world.
+///
+/// Outcome storage is reserved before any packet or attempt leaves the runtime. A second take is
+/// rejected until every returned permit reaches a terminal outcome.
+#[doc(hidden)]
+pub fn take_ui_backend_presentation_frame(
+    world: &mut World,
+) -> Result<UiBackendPresentationFrame, UiPresentationIntegrationError> {
+    if !world.contains_resource::<UiBackendSubmissionQueue>()
+        || !world.contains_resource::<UiPresentationOutcomes>()
+    {
+        return Err(UiPresentationIntegrationError::Unavailable);
+    }
+    world.resource_scope(|world, mut queue: Mut<UiBackendSubmissionQueue>| {
+        let mut outcomes = world.resource_mut::<UiPresentationOutcomes>();
+        take_backend_presentation_frame(&mut queue, &mut outcomes)
+    })
+}
+
+/// Returns one move-only backend outcome to the runtime that reserved its permit.
+///
+/// A foreign or already-completed runtime returns the outcome unchanged so its owning Host can
+/// still terminalize it correctly.
+#[doc(hidden)]
+pub fn commit_ui_backend_outcome(
+    world: &mut World,
+    completed: UiCompletedBackendOutcome,
+) -> Result<(), UiCompletedBackendOutcome> {
+    let Some(mut outcomes) = world.get_resource_mut::<UiPresentationOutcomes>() else {
+        return Err(completed);
+    };
+    outcomes.try_commit_backend(completed)
+}
+
 /// Publishes the exact replay packets and move-only attempts for the next backend frame.
 #[doc(hidden)]
 pub fn replace_ui_backend_frame(
@@ -777,18 +857,25 @@ pub struct UiBackendSubmissionReader<'w> {
 
 impl UiBackendSubmissionReader<'_> {
     pub fn take(&mut self) -> Result<UiBackendPresentationFrame, UiPresentationIntegrationError> {
-        let permits = self.outcomes.reserve_backend(&self.queue.submissions)?;
-        let (packets, submissions) = self.queue.take();
-        let submissions = submissions
-            .into_iter()
-            .zip(permits)
-            .map(|(submission, permit)| UiBackendSubmission::pair_exact(submission, permit))
-            .collect::<Vec<_>>();
-        Ok(UiBackendPresentationFrame {
-            packets,
-            submissions,
-        })
+        take_backend_presentation_frame(&mut self.queue, &mut self.outcomes)
     }
+}
+
+fn take_backend_presentation_frame(
+    queue: &mut UiBackendSubmissionQueue,
+    outcomes: &mut UiPresentationOutcomes,
+) -> Result<UiBackendPresentationFrame, UiPresentationIntegrationError> {
+    let permits = outcomes.reserve_backend(&queue.submissions)?;
+    let (packets, submissions) = queue.take();
+    let submissions = submissions
+        .into_iter()
+        .zip(permits)
+        .map(|(submission, permit)| UiBackendSubmission::pair_exact(submission, permit))
+        .collect::<Vec<_>>();
+    Ok(UiBackendPresentationFrame {
+        packets,
+        submissions,
+    })
 }
 
 #[derive(Debug, Default, Clone, Copy)]

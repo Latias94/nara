@@ -7,10 +7,10 @@ use egui::{TextureId, Vec2, ViewportId, epaint::Primitive};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor, wgpu};
 use nara::{
     project_host::{EditorPreviewCandidate, EditorPreviewHit},
-    render::{Extent2d, RenderWindowPacket},
+    render::{Extent2d, RenderFrameTarget, RenderWindowPacket},
     render_wgpu::__private::{
         WgpuEditorCompositeReceipt, WgpuEditorDeviceScope, WgpuEditorExecution,
-        WgpuEditorExecutionError, WgpuSubmittedImageReceipt,
+        WgpuEditorExecutionError, WgpuEditorViewportIdentity, WgpuSubmittedImageReceipt,
     },
     scene::SceneAuthoringRevision,
     tooling::{
@@ -471,7 +471,7 @@ impl NativeEditorHost {
                             "egui did not sample the exact Editor Scene texture",
                         ));
                     }
-                    frame.record_scene_sample(prepared_scene.texture_registration_generation)?;
+                    frame.record_viewport_sample(prepared_scene.texture_registration_generation)?;
                 }
                 freed_textures.extend(pending_textures.free.drain());
                 Ok(())
@@ -699,17 +699,13 @@ struct EditorScenePickRequest {
 #[derive(Clone, Copy)]
 struct EditorSceneTextureBinding {
     texture_id: TextureId,
-    target_generation: u64,
-    backend_instance_id: u64,
-    device_epoch: u64,
+    viewport: WgpuEditorViewportIdentity,
     registration_generation: u64,
 }
 
 impl EditorSceneTextureBinding {
     fn matches(self, submission: WgpuSubmittedImageReceipt) -> bool {
-        self.target_generation == submission.target_generation()
-            && self.backend_instance_id == submission.backend_instance_id()
-            && self.device_epoch == submission.device_epoch()
+        self.viewport.matches_submission(submission)
     }
 
     fn matches_presented(self, receipt: WgpuEditorCompositeReceipt) -> bool {
@@ -747,54 +743,69 @@ impl EditorScenePresenter {
         }
         let (document, revision, geometry_revision, packet, sprite_batches, hits) =
             candidate.into_parts();
+        let RenderFrameTarget::Image(target) = packet.target() else {
+            return Err(EditorRunError::Platform(
+                "the Scene preview candidate did not retain its image target".to_owned(),
+            ));
+        };
+        let source_generation = packet.source_generation();
+        if !gpu.viewport_target_matches(source_generation, target) {
+            if self.binding.is_some() {
+                return Err(EditorRunError::Platform(
+                    "the previous viewport texture binding was not retired before target replacement"
+                        .to_owned(),
+                ));
+            }
+            let registration_generation = self
+                .texture_registration_generation
+                .checked_add(1)
+                .ok_or_else(|| {
+                    EditorRunError::Platform(
+                        "viewport texture registration generation exhausted".to_owned(),
+                    )
+                })?;
+            let (reservation, texture_id) = gpu
+                .reserve_viewport_target_with_texture(
+                    window,
+                    source_generation,
+                    target,
+                    |scope, texture| {
+                        renderer.renderer.register_native_texture(
+                            scope.device(),
+                            texture.view(),
+                            wgpu::FilterMode::Linear,
+                        )
+                    },
+                )
+                .map_err(platform_gpu_error)?;
+            let viewport = reservation.identity();
+            if let Err(error) = gpu.activate_viewport_target(reservation) {
+                renderer.renderer.free_texture(&texture_id);
+                return Err(platform_gpu_error(error));
+            }
+            self.texture_registration_generation = registration_generation;
+            self.binding = Some(EditorSceneTextureBinding {
+                texture_id,
+                viewport,
+                registration_generation,
+            });
+        } else if self.binding.is_none() {
+            return Err(EditorRunError::Platform(
+                "the active viewport target has no matching egui texture registration".to_owned(),
+            ));
+        }
         let submission = gpu
             .submit_sprite_image(window, packet, sprite_batches)
             .map_err(platform_gpu_error)?;
-
-        let binding = match self.binding.filter(|binding| binding.matches(submission)) {
-            Some(binding) => binding,
-            None => {
-                let registration_generation = self
-                    .texture_registration_generation
-                    .checked_add(1)
-                    .ok_or_else(|| {
-                    EditorRunError::Platform(
-                        "Scene texture registration generation exhausted".to_owned(),
-                    )
-                })?;
-                let existing_texture_id = self.binding.map(|binding| binding.texture_id);
-                let texture_id = gpu
-                    .with_scene_texture(window, submission, |scope, texture| {
-                        match existing_texture_id {
-                            Some(texture_id) => {
-                                renderer.renderer.update_egui_texture_from_wgpu_texture(
-                                    scope.device(),
-                                    texture.view(),
-                                    wgpu::FilterMode::Linear,
-                                    texture_id,
-                                );
-                                texture_id
-                            }
-                            None => renderer.renderer.register_native_texture(
-                                scope.device(),
-                                texture.view(),
-                                wgpu::FilterMode::Linear,
-                            ),
-                        }
-                    })
-                    .map_err(platform_gpu_error)?;
-                let binding = EditorSceneTextureBinding {
-                    texture_id,
-                    target_generation: submission.target_generation(),
-                    backend_instance_id: submission.backend_instance_id(),
-                    device_epoch: submission.device_epoch(),
-                    registration_generation,
-                };
-                self.texture_registration_generation = registration_generation;
-                self.binding = Some(binding);
-                binding
-            }
-        };
+        let binding = self
+            .binding
+            .filter(|binding| binding.matches(submission))
+            .ok_or_else(|| {
+                EditorRunError::Platform(
+                    "the submitted Scene frame did not match its committed viewport reservation"
+                        .to_owned(),
+                )
+            })?;
 
         Ok(PreparedEditorScene {
             document,
@@ -927,7 +938,7 @@ impl EditorScenePresenter {
     }
 
     fn retire_target(&mut self, gpu: &mut WgpuEditorExecution, renderer: &mut EditorEguiRenderer) {
-        gpu.retire_image_target();
+        gpu.retire_viewport_target();
         self.presented = None;
         if let Some(binding) = self.binding.take() {
             renderer.renderer.free_texture(&binding.texture_id);

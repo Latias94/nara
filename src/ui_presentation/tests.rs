@@ -939,3 +939,75 @@ fn deferred_attempt_is_superseded_when_its_behavior_changes_before_retry() {
             .is_empty()
     );
 }
+
+#[test]
+fn host_external_backend_rendezvous_reexports_the_exact_deferred_retry() {
+    let mut app = App::new();
+    app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
+        .expect("runtime and presentation UI products should install");
+    install_test_surface_and_root(&mut app, 23, 1);
+    app.update()
+        .expect("the Runtime should prepare one external backend frame");
+
+    let first = nara_ui_render::__private::take_ui_backend_presentation_frame(
+        app.world_mut()
+            .expect("the test app should expose its world"),
+    )
+    .expect("the external Host should reserve the prepared UI frame");
+    let (_, submissions) = first.into_parts();
+    let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(91, 4).unwrap();
+    let mut submitted =
+        nara_ui_render::__private::bind_backend_submission_batch(submissions, backend_generation)
+            .unwrap();
+    let first_identity = submitted[0].submission().identity();
+    let completed = submitted
+        .pop()
+        .unwrap()
+        .deferred("external Editor window deferral".to_owned());
+    nara_ui_render::__private::commit_ui_backend_outcome(
+        app.world_mut()
+            .expect("the test app should expose its world"),
+        completed,
+    )
+    .expect("the Runtime should reclaim its exact deferred permit");
+    commit_runtime_ui_presentations(
+        app.world_mut()
+            .expect("the test app should expose its world"),
+    );
+
+    app.update()
+        .expect("the Runtime should re-export the exact eligible retry");
+    let retry = nara_ui_render::__private::take_ui_backend_presentation_frame(
+        app.world_mut()
+            .expect("the test app should expose its world"),
+    )
+    .expect("the external Host should receive the deferred retry");
+    let (_, submissions) = retry.into_parts();
+    assert_eq!(submissions[0].submission().identity(), first_identity);
+    assert_eq!(
+        submissions[0].submission().required_backend_generation(),
+        Some(backend_generation)
+    );
+    let mut submitted =
+        nara_ui_render::__private::bind_backend_submission_batch(submissions, backend_generation)
+            .unwrap();
+    nara_ui_render::__private::commit_ui_backend_outcome(
+        app.world_mut()
+            .expect("the test app should expose its world"),
+        submitted.pop().unwrap().presented(),
+    )
+    .expect("the exact retry should reach one terminal presented outcome");
+    commit_runtime_ui_presentations(
+        app.world_mut()
+            .expect("the test app should expose its world"),
+    );
+
+    let stats = app.world().resource::<UiPresentationBridgeStats>();
+    assert_eq!(stats.deferred_packets, 1);
+    assert_eq!(stats.presented_packets, 1);
+    assert!(
+        app.world()
+            .resource::<UiPresentationAttemptLedger>()
+            .is_empty()
+    );
+}

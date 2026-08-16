@@ -13,12 +13,14 @@ use nara_render::{RenderTarget, ViewportRect};
 use nara_sprite_render::SpriteBatches;
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::__private::{
-    UiBackendSubmission, UiPresentationOutcomes, UiSubmittedBackendSubmission,
+    UiBackendSubmission, UiCompletedBackendOutcome, UiPresentationOutcomes,
+    UiSubmittedBackendSubmission,
 };
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
-    UiPacketPrimitive, UiPaintPacket, UiPaintPacketIdentity, UiPresentationBackendFaultDomain,
-    UiPresentationBackendGeneration, UiPresentationIntegrationError,
+    UiPacketPrimitive, UiPaintPacket, UiPaintPacketIdentity, UiPresentationAttemptIdentity,
+    UiPresentationBackendFaultDomain, UiPresentationBackendGeneration,
+    UiPresentationIntegrationError,
 };
 #[cfg(feature = "ui-submitter")]
 use nara_window::WindowId;
@@ -44,6 +46,8 @@ pub(crate) enum WgpuFrameSet {
 pub(crate) struct WgpuFramePayload {
     #[cfg(feature = "ui-submitter")]
     pub(crate) primary_window_id: Option<WindowId>,
+    #[cfg(feature = "ui-submitter")]
+    pub(crate) ui_logical_target: Option<RenderTarget>,
     #[cfg(feature = "sprite-submitter")]
     pub(crate) sprite_batches: Option<SpriteBatches>,
     #[cfg(feature = "ui-submitter")]
@@ -93,10 +97,39 @@ pub(crate) enum WgpuUiSubmissionState {
 
 #[cfg(feature = "ui-submitter")]
 impl WgpuUiSubmissionState {
+    pub(crate) fn validate_backend_generation(
+        &self,
+        backend_generation: UiPresentationBackendGeneration,
+    ) -> Result<(), WgpuRenderError> {
+        let Self::Prepared(submissions) = self else {
+            return Ok(());
+        };
+        let Some((admission_id, required)) = submissions.iter().find_map(|submission| {
+            submission
+                .submission()
+                .required_backend_generation()
+                .filter(|required| *required != backend_generation)
+                .map(|required| {
+                    (
+                        submission.submission().identity().admission_id().get(),
+                        required,
+                    )
+                })
+        }) else {
+            return Ok(());
+        };
+        Err(ui_backend_generation_mismatch(
+            admission_id,
+            required,
+            backend_generation,
+        ))
+    }
+
     pub(crate) fn bind_backend(
         &mut self,
         backend_generation: UiPresentationBackendGeneration,
     ) -> Result<(), WgpuRenderError> {
+        self.validate_backend_generation(backend_generation)?;
         let Self::Prepared(prepared) = self else {
             return Ok(());
         };
@@ -109,16 +142,13 @@ impl WgpuUiSubmissionState {
                 Ok(())
             }
             Err(error) => {
-                let message = format!(
-                    "UI backend attempt {} requires generation ({}, {}) but the live generation is ({}, {})",
+                let mismatch = ui_backend_generation_mismatch(
                     error.admission_id().get(),
-                    error.required().backend_instance_id(),
-                    error.required().device_epoch(),
-                    error.actual().backend_instance_id(),
-                    error.actual().device_epoch(),
+                    error.required(),
+                    error.actual(),
                 );
                 *prepared = error.into_submissions();
-                Err(WgpuRenderError::UiSubmissionRejected { message })
+                Err(mismatch)
             }
         }
     }
@@ -128,6 +158,135 @@ impl WgpuUiSubmissionState {
             return &[];
         };
         submissions
+    }
+}
+
+#[cfg(feature = "ui-submitter")]
+fn ui_backend_generation_mismatch(
+    admission_id: u64,
+    required: UiPresentationBackendGeneration,
+    actual: UiPresentationBackendGeneration,
+) -> WgpuRenderError {
+    WgpuRenderError::UiSubmissionRejected {
+        message: format!(
+            "UI backend attempt {admission_id} requires generation ({}, {}) but the live generation is ({}, {})",
+            required.backend_instance_id(),
+            required.device_epoch(),
+            actual.backend_instance_id(),
+            actual.device_epoch(),
+        ),
+    }
+}
+
+#[cfg(feature = "ui-submitter")]
+pub(crate) enum WgpuUiCompletion {
+    Presented,
+    Deferred(String),
+    ContentRejected(String),
+    BackendFault {
+        backend_generation: Option<UiPresentationBackendGeneration>,
+        domain: UiPresentationBackendFaultDomain,
+        message: String,
+    },
+    Superseded {
+        successor: UiPresentationAttemptIdentity,
+        message: String,
+    },
+}
+
+#[cfg(feature = "ui-submitter")]
+pub(crate) fn complete_ui_submissions(
+    submissions: WgpuUiSubmissionState,
+    completion: WgpuUiCompletion,
+) -> Vec<UiCompletedBackendOutcome> {
+    match (submissions, completion) {
+        (WgpuUiSubmissionState::Submitted(submissions), WgpuUiCompletion::Presented) => {
+            submissions
+                .into_iter()
+                .map(UiSubmittedBackendSubmission::presented)
+                .collect()
+        }
+        (WgpuUiSubmissionState::Prepared(submissions), WgpuUiCompletion::Presented) => submissions
+            .into_iter()
+            .map(|submission| {
+                submission.backend_fault(
+                    None,
+                    UiPresentationBackendFaultDomain::Target,
+                    "the Editor window reached a composite without binding Runtime UI to a live backend generation"
+                        .to_owned(),
+                )
+            })
+            .collect(),
+        (WgpuUiSubmissionState::Submitted(submissions), WgpuUiCompletion::Deferred(message)) => {
+            submissions
+                .into_iter()
+                .map(|submission| submission.deferred(message.clone()))
+                .collect()
+        }
+        (WgpuUiSubmissionState::Prepared(submissions), WgpuUiCompletion::Deferred(message)) => {
+            submissions
+                .into_iter()
+                .map(|submission| {
+                    submission.backend_fault(
+                        None,
+                        UiPresentationBackendFaultDomain::Target,
+                        message.clone(),
+                    )
+                })
+                .collect()
+        }
+        (
+            WgpuUiSubmissionState::Prepared(submissions),
+            WgpuUiCompletion::ContentRejected(message),
+        ) => submissions
+            .into_iter()
+            .map(|submission| submission.content_rejected(message.clone()))
+            .collect(),
+        (
+            WgpuUiSubmissionState::Submitted(submissions),
+            WgpuUiCompletion::ContentRejected(message),
+        ) => submissions
+            .into_iter()
+            .map(|submission| {
+                submission.backend_fault(UiPresentationBackendFaultDomain::Attempt, message.clone())
+            })
+            .collect(),
+        (
+            WgpuUiSubmissionState::Prepared(submissions),
+            WgpuUiCompletion::BackendFault {
+                backend_generation,
+                domain,
+                message,
+            },
+        ) => submissions
+            .into_iter()
+            .map(|submission| {
+                submission.backend_fault(backend_generation, domain, message.clone())
+            })
+            .collect(),
+        (
+            WgpuUiSubmissionState::Submitted(submissions),
+            WgpuUiCompletion::BackendFault {
+                domain, message, ..
+            },
+        ) => submissions
+            .into_iter()
+            .map(|submission| submission.backend_fault(domain, message.clone()))
+            .collect(),
+        (
+            WgpuUiSubmissionState::Prepared(submissions),
+            WgpuUiCompletion::Superseded { successor, message },
+        ) => submissions
+            .into_iter()
+            .map(|submission| submission.superseded(successor, message.clone()))
+            .collect(),
+        (
+            WgpuUiSubmissionState::Submitted(submissions),
+            WgpuUiCompletion::Superseded { successor, message },
+        ) => submissions
+            .into_iter()
+            .map(|submission| submission.superseded(successor, message.clone()))
+            .collect(),
     }
 }
 
@@ -308,10 +467,31 @@ impl WgpuFramePayload {
     }
 
     #[cfg(feature = "ui-submitter")]
+    pub(crate) fn for_editor_runtime_ui(ui_packets: Vec<Arc<UiPaintPacket>>) -> Self {
+        Self {
+            primary_window_id: Some(WindowId::PRIMARY),
+            ui_logical_target: Some(RenderTarget::Window(WindowId::PRIMARY)),
+            ui_packets,
+            ..Self::default()
+        }
+    }
+
+    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    pub(crate) fn for_editor_viewport(
+        sprite_batches: SpriteBatches,
+        ui_packets: Vec<Arc<UiPaintPacket>>,
+    ) -> Self {
+        let mut payload = Self::for_editor_runtime_ui(ui_packets);
+        payload.sprite_batches = Some(sprite_batches);
+        payload
+    }
+
+    #[cfg(feature = "ui-submitter")]
     pub(crate) fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
+        let packet_target = self.ui_packet_target(target);
         let mut facts = WgpuUiPayloadFacts::default();
         for packet in self.ui_packets.iter().filter(|packet| {
-            crate::ui::ui_packet_targets_view(packet, target, self.primary_window_id)
+            crate::ui::ui_packet_targets_view(packet, packet_target, self.primary_window_id)
         }) {
             facts.packet_count = facts.packet_count.saturating_add(1);
             facts.packet_identity = if facts.packet_count == 1 {
@@ -336,6 +516,11 @@ impl WgpuFramePayload {
         facts
     }
 
+    #[cfg(feature = "ui-submitter")]
+    fn ui_packet_target(&self, execution_target: RenderTarget) -> RenderTarget {
+        self.ui_logical_target.unwrap_or(execution_target)
+    }
+
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     pub(crate) fn lower_draw(
         &self,
@@ -352,11 +537,17 @@ impl WgpuFramePayload {
         #[cfg(not(feature = "sprite-submitter"))]
         let content = Vec::new();
         #[cfg(feature = "ui-submitter")]
-        let ui =
-            crate::ui::lower_ui_packets(&self.ui_packets, target, self.primary_window_id, viewport)
-                .map_err(|error| WgpuRenderError::UiPacketInvariant {
-                    message: error.to_string(),
-                })?;
+        let ui_packet_target = self.ui_packet_target(target);
+        #[cfg(feature = "ui-submitter")]
+        let ui = crate::ui::lower_ui_packets(
+            &self.ui_packets,
+            ui_packet_target,
+            self.primary_window_id,
+            viewport,
+        )
+        .map_err(|error| WgpuRenderError::UiPacketInvariant {
+            message: error.to_string(),
+        })?;
         #[cfg(not(feature = "ui-submitter"))]
         let ui_batches = {
             let _ = (target, viewport);
@@ -402,11 +593,10 @@ fn payload_batches_match_topology(
     }
     #[cfg(feature = "ui-submitter")]
     {
-        if payload
-            .ui_packets
-            .iter()
-            .any(|packet| !render_targets_match(packet.target(), view.target, primary_window_id))
-        {
+        let ui_packet_target = payload.ui_packet_target(view.target);
+        if payload.ui_packets.iter().any(|packet| {
+            !render_targets_match(packet.target(), ui_packet_target, primary_window_id)
+        }) {
             return false;
         }
     }
@@ -435,55 +625,48 @@ pub(crate) fn publish_ui_outcomes(
     device_fault_generation: Option<UiPresentationBackendGeneration>,
     skip_message: Option<&str>,
 ) {
-    match submissions {
-        WgpuUiSubmissionState::Prepared(submissions) => {
-            for envelope in submissions {
-                let completed = match result {
-                    Err(error) if error.is_content_rejection() => {
-                        envelope.content_rejected(error.to_string())
-                    }
-                    Err(error) => envelope.backend_fault(
-                        (classify_ui_backend_fault(error)
-                            == UiPresentationBackendFaultDomain::Device)
-                            .then_some(device_fault_generation)
-                            .flatten(),
-                        classify_ui_backend_fault(error),
-                        error.to_string(),
-                    ),
-                    Ok(()) => envelope.backend_fault(
-                        None,
-                        UiPresentationBackendFaultDomain::Target,
-                        skip_message
-                            .unwrap_or(
-                                "the target did not reach a live device generation before submit",
-                            )
-                            .to_owned(),
-                    ),
-                };
-                outcomes.commit_backend(completed);
+    let completion = match (&submissions, result) {
+        (WgpuUiSubmissionState::Submitted(_), Ok(()))
+            if frame_state == RenderFrameState::Submitted =>
+        {
+            WgpuUiCompletion::Presented
+        }
+        (WgpuUiSubmissionState::Submitted(_), Ok(())) => WgpuUiCompletion::BackendFault {
+            backend_generation: None,
+            domain: UiPresentationBackendFaultDomain::Target,
+            message: skip_message
+                .unwrap_or("the target surface did not submit the exact UI packet")
+                .to_owned(),
+        },
+        (WgpuUiSubmissionState::Submitted(_), Err(error)) if error.is_deferred() => {
+            WgpuUiCompletion::Deferred(error.to_string())
+        }
+        (WgpuUiSubmissionState::Submitted(_), Err(error)) if error.is_content_rejection() => {
+            WgpuUiCompletion::ContentRejected(error.to_string())
+        }
+        (WgpuUiSubmissionState::Prepared(_), Err(error)) if error.is_content_rejection() => {
+            WgpuUiCompletion::ContentRejected(error.to_string())
+        }
+        (WgpuUiSubmissionState::Prepared(_), Ok(())) => WgpuUiCompletion::BackendFault {
+            backend_generation: None,
+            domain: UiPresentationBackendFaultDomain::Target,
+            message: skip_message
+                .unwrap_or("the target did not reach a live device generation before submit")
+                .to_owned(),
+        },
+        (_, Err(error)) => {
+            let domain = classify_ui_backend_fault(error);
+            WgpuUiCompletion::BackendFault {
+                backend_generation: (domain == UiPresentationBackendFaultDomain::Device)
+                    .then_some(device_fault_generation)
+                    .flatten(),
+                domain,
+                message: error.to_string(),
             }
         }
-        WgpuUiSubmissionState::Submitted(submissions) => {
-            for submission in submissions {
-                let completed = match result {
-                    Ok(()) if frame_state == RenderFrameState::Submitted => submission.presented(),
-                    Ok(()) => submission.backend_fault(
-                        UiPresentationBackendFaultDomain::Target,
-                        skip_message
-                            .unwrap_or("the target surface did not submit the exact UI packet")
-                            .to_owned(),
-                    ),
-                    Err(error) if error.is_deferred() => submission.deferred(error.to_string()),
-                    Err(error) if error.is_content_rejection() => submission.backend_fault(
-                        UiPresentationBackendFaultDomain::Attempt,
-                        error.to_string(),
-                    ),
-                    Err(error) => submission
-                        .backend_fault(classify_ui_backend_fault(error), error.to_string()),
-                };
-                outcomes.commit_backend(completed);
-            }
-        }
+    };
+    for completed in complete_ui_submissions(submissions, completion) {
+        outcomes.commit_backend(completed);
     }
 }
 

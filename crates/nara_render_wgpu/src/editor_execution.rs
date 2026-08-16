@@ -1,14 +1,24 @@
 use nara_render::{
-    Extent2d, RenderFramePacket, RenderFrameTarget, RenderImagePacket, RenderWindowPacket,
+    Extent2d, RenderFramePacket, RenderFrameSourceGeneration, RenderFrameTarget, RenderImagePacket,
+    RenderWindowPacket,
 };
 #[cfg(feature = "sprite-submitter")]
 use nara_sprite_render::SpriteBatches;
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::__private::{UiBackendPresentationFrame, UiCompletedBackendOutcome};
+#[cfg(feature = "ui-submitter")]
+use nara_ui_render::{
+    UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+    UiPresentationBackendGeneration,
+};
 use nara_window::{
     WindowId,
     backend::{BackendWindowHandles, WindowHandleProvider, WindowTargetError},
 };
 use thiserror::Error;
 
+#[cfg(feature = "ui-submitter")]
+use crate::frame::{WgpuUiCompletion, WgpuUiSubmissionState, complete_ui_submissions};
 use crate::{
     WgpuFrameTransactionStats, WgpuRenderBackend, WgpuRenderError,
     backend::{WgpuEditorAcquiredSurface, WgpuEditorDeviceNamespace},
@@ -29,14 +39,22 @@ pub enum WgpuEditorExecutionError {
     Backend(#[from] WgpuRenderError),
     #[error(transparent)]
     WindowTarget(#[from] WindowTargetError),
-    #[error("the Editor Scene submission requires an image-target render packet")]
+    #[error("the Editor viewport submission requires an image-target render packet")]
     ExpectedImageTarget,
-    #[error("the Editor Scene image target generation was exhausted")]
+    #[error("the Editor viewport target generation was exhausted")]
     TargetGenerationExhausted,
+    #[error("the Editor viewport source-handoff generation was exhausted")]
+    SourceHandoffGenerationExhausted,
     #[error("the Editor composite presentation generation was exhausted")]
     PresentationGenerationExhausted,
-    #[error("the Editor Scene image submission no longer belongs to the live target")]
+    #[error("the Editor viewport submission no longer belongs to the live target")]
     StaleImageSubmission,
+    #[error("an Editor viewport target must be retired before another reservation is activated")]
+    ViewportTargetAlreadyActive,
+    #[error("an Editor viewport target must be admitted before image submission")]
+    ViewportTargetUnavailable,
+    #[error("the Editor viewport reservation no longer matches the live source or GPU namespace")]
+    StaleViewportReservation,
     #[error("the egui texture registration generation must be non-zero")]
     InvalidTextureRegistrationGeneration,
     #[error("the Editor toolkit paint callback failed: {message}")]
@@ -69,26 +87,243 @@ impl WgpuEditorExecutionError {
     }
 }
 
-struct WgpuEditorImageTarget {
-    packet: RenderImagePacket,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WgpuEditorViewportReservationStamp {
+    target: RenderImagePacket,
     generation: u64,
+    source_generation: RenderFrameSourceGeneration,
+    source_handoff_generation: u64,
     backend_instance_id: u64,
     device_epoch: u64,
+}
+
+/// Copyable WGPU-owned identity for one admitted Editor viewport target.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuEditorViewportIdentity {
+    stamp: WgpuEditorViewportReservationStamp,
+}
+
+impl WgpuEditorViewportIdentity {
+    #[must_use]
+    pub fn matches_submission(self, receipt: WgpuSubmittedImageReceipt) -> bool {
+        self.stamp.target == receipt.target()
+            && self.stamp.generation == receipt.target_generation()
+            && self.stamp.source_generation == receipt.source_generation()
+            && self.stamp.source_handoff_generation == receipt.source_handoff_generation()
+            && self.stamp.backend_instance_id == receipt.backend_instance_id()
+            && self.stamp.device_epoch == receipt.device_epoch()
+    }
+}
+
+struct WgpuEditorViewportTarget {
+    stamp: WgpuEditorViewportReservationStamp,
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
 }
 
-impl WgpuEditorImageTarget {
+impl WgpuEditorViewportTarget {
     fn matches_namespace(&self, namespace: &WgpuEditorDeviceNamespace) -> bool {
-        self.backend_instance_id == namespace.backend_instance_id
-            && self.device_epoch == namespace.device_epoch
+        self.stamp.backend_instance_id == namespace.backend_instance_id
+            && self.stamp.device_epoch == namespace.device_epoch
     }
 
     fn matches_receipt(&self, receipt: WgpuSubmittedImageReceipt) -> bool {
-        self.packet == receipt.target()
-            && self.generation == receipt.target_generation()
-            && self.backend_instance_id == receipt.backend_instance_id()
-            && self.device_epoch == receipt.device_epoch()
+        WgpuEditorViewportIdentity { stamp: self.stamp }.matches_submission(receipt)
+    }
+}
+
+/// Move-only inactive viewport target prepared for one coordinated Host publication.
+#[doc(hidden)]
+pub struct WgpuEditorViewportTargetReservation {
+    stamp: WgpuEditorViewportReservationStamp,
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+}
+
+/// Fully validated target activation that can participate in one infallible Host commit.
+#[doc(hidden)]
+pub struct WgpuEditorViewportTargetActivation {
+    reservation: WgpuEditorViewportTargetReservation,
+}
+
+impl std::fmt::Debug for WgpuEditorViewportTargetActivation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WgpuEditorViewportTargetActivation")
+            .field("stamp", &self.reservation.stamp)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WgpuEditorViewportTargetActivation {
+    #[must_use]
+    pub const fn identity(&self) -> WgpuEditorViewportIdentity {
+        WgpuEditorViewportIdentity {
+            stamp: self.reservation.stamp,
+        }
+    }
+}
+
+impl std::fmt::Debug for WgpuEditorViewportTargetReservation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WgpuEditorViewportTargetReservation")
+            .field("stamp", &self.stamp)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WgpuEditorViewportTargetReservation {
+    #[must_use]
+    pub const fn identity(&self) -> WgpuEditorViewportIdentity {
+        WgpuEditorViewportIdentity { stamp: self.stamp }
+    }
+}
+
+/// Exact Runtime UI completion authority retained by the private Editor GPU transaction.
+#[cfg(feature = "ui-submitter")]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WgpuEditorUiSubmission {
+    state: WgpuUiSubmissionState,
+}
+
+#[cfg(feature = "ui-submitter")]
+impl WgpuEditorUiSubmission {
+    fn validate_backend_generation(
+        &self,
+        backend_generation: UiPresentationBackendGeneration,
+    ) -> Result<(), WgpuEditorExecutionError> {
+        self.state
+            .validate_backend_generation(backend_generation)
+            .map_err(Into::into)
+    }
+
+    fn bind_backend(
+        &mut self,
+        backend_generation: UiPresentationBackendGeneration,
+    ) -> Result<(), WgpuEditorExecutionError> {
+        self.state
+            .bind_backend(backend_generation)
+            .map_err(Into::into)
+    }
+
+    #[must_use]
+    pub fn presented(self) -> Vec<UiCompletedBackendOutcome> {
+        complete_ui_submissions(self.state, WgpuUiCompletion::Presented)
+    }
+
+    #[must_use]
+    pub fn deferred(self, message: String) -> Vec<UiCompletedBackendOutcome> {
+        complete_ui_submissions(self.state, WgpuUiCompletion::Deferred(message))
+    }
+
+    #[must_use]
+    pub fn content_rejected(self, message: String) -> Vec<UiCompletedBackendOutcome> {
+        complete_ui_submissions(self.state, WgpuUiCompletion::ContentRejected(message))
+    }
+
+    #[must_use]
+    pub fn backend_fault(
+        self,
+        backend_generation: Option<UiPresentationBackendGeneration>,
+        domain: UiPresentationBackendFaultDomain,
+        message: String,
+    ) -> Vec<UiCompletedBackendOutcome> {
+        complete_ui_submissions(
+            self.state,
+            WgpuUiCompletion::BackendFault {
+                backend_generation,
+                domain,
+                message,
+            },
+        )
+    }
+
+    #[must_use]
+    pub fn superseded(
+        self,
+        successor: UiPresentationAttemptIdentity,
+        message: String,
+    ) -> Vec<UiCompletedBackendOutcome> {
+        complete_ui_submissions(
+            self.state,
+            WgpuUiCompletion::Superseded { successor, message },
+        )
+    }
+}
+
+/// One submitted viewport image retaining the Runtime UI completion authority until composite.
+#[cfg(feature = "ui-submitter")]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WgpuEditorUiImageSubmission {
+    image: WgpuSubmittedImageReceipt,
+    ui: WgpuEditorUiSubmission,
+}
+
+#[cfg(feature = "ui-submitter")]
+impl WgpuEditorUiImageSubmission {
+    #[must_use]
+    pub const fn image(&self) -> WgpuSubmittedImageReceipt {
+        self.image
+    }
+
+    pub fn presented(
+        self,
+        composite: WgpuEditorCompositeReceipt,
+    ) -> Result<Vec<UiCompletedBackendOutcome>, Self> {
+        if composite.image() != self.image {
+            return Err(self);
+        }
+        Ok(self.ui.presented())
+    }
+
+    #[must_use]
+    pub fn deferred(self, message: String) -> Vec<UiCompletedBackendOutcome> {
+        self.ui.deferred(message)
+    }
+
+    #[must_use]
+    pub fn backend_fault(
+        self,
+        backend_generation: Option<UiPresentationBackendGeneration>,
+        domain: UiPresentationBackendFaultDomain,
+        message: String,
+    ) -> Vec<UiCompletedBackendOutcome> {
+        self.ui.backend_fault(backend_generation, domain, message)
+    }
+
+    #[must_use]
+    pub fn superseded(
+        self,
+        successor: UiPresentationAttemptIdentity,
+        message: String,
+    ) -> Vec<UiCompletedBackendOutcome> {
+        self.ui.superseded(successor, message)
+    }
+}
+
+/// Failed image submission retaining the exact Runtime UI authority for terminal completion.
+#[cfg(feature = "ui-submitter")]
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct WgpuEditorUiSubmitFailure {
+    error: WgpuEditorExecutionError,
+    ui: WgpuEditorUiSubmission,
+}
+
+#[cfg(feature = "ui-submitter")]
+impl WgpuEditorUiSubmitFailure {
+    #[must_use]
+    pub const fn error(&self) -> &WgpuEditorExecutionError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (WgpuEditorExecutionError, WgpuEditorUiSubmission) {
+        (self.error, self.ui)
     }
 }
 
@@ -135,44 +370,43 @@ impl<'frame> WgpuEditorDeviceScope<'frame> {
     }
 }
 
-/// Scoped Scene texture facts available only while one Editor GPU call is active.
-#[doc(hidden)]
 #[derive(Clone, Copy)]
-pub struct WgpuEditorSceneTexture<'frame> {
-    view: &'frame wgpu::TextureView,
+struct WgpuEditorViewportTexture {
     receipt: WgpuSubmittedImageReceipt,
 }
 
-impl<'frame> WgpuEditorSceneTexture<'frame> {
+/// Scoped inactive viewport texture facts available only while one reservation is live.
+#[doc(hidden)]
+#[derive(Clone, Copy)]
+pub struct WgpuEditorReservedViewportTexture<'frame> {
+    view: &'frame wgpu::TextureView,
+}
+
+impl<'frame> WgpuEditorReservedViewportTexture<'frame> {
     #[must_use]
     pub const fn view(self) -> &'frame wgpu::TextureView {
         self.view
     }
-
-    #[must_use]
-    pub const fn receipt(self) -> WgpuSubmittedImageReceipt {
-        self.receipt
-    }
 }
 
 #[derive(Clone, Copy)]
-struct WgpuEditorSceneSample {
+struct WgpuEditorViewportSample {
     image: WgpuSubmittedImageReceipt,
     texture_registration_generation: u64,
 }
 
 fn join_composite_receipt(
     last_presentation_generation: &mut u64,
-    submitted_scene: Option<WgpuSubmittedImageReceipt>,
-    sampled_scene: Option<WgpuEditorSceneSample>,
+    submitted_viewport: Option<WgpuSubmittedImageReceipt>,
+    sampled_viewport: Option<WgpuEditorViewportSample>,
     window: WgpuEditorWindowPresentedReceipt,
 ) -> Result<Option<WgpuEditorCompositeReceipt>, WgpuEditorExecutionError> {
-    let sampled_scene = sampled_scene.filter(|sample| {
-        submitted_scene == Some(sample.image)
+    let sampled_viewport = sampled_viewport.filter(|sample| {
+        submitted_viewport == Some(sample.image)
             && sample.image.backend_instance_id() == window.backend_instance_id()
             && sample.image.device_epoch() == window.device_epoch()
     });
-    let Some(sample) = sampled_scene else {
+    let Some(sample) = sampled_viewport else {
         return Ok(None);
     };
     let generation = last_presentation_generation
@@ -187,6 +421,46 @@ fn join_composite_receipt(
     )))
 }
 
+fn next_source_handoff_generation(
+    last_generation: u64,
+    current_source: Option<RenderFrameSourceGeneration>,
+    next_source: RenderFrameSourceGeneration,
+) -> Result<u64, WgpuEditorExecutionError> {
+    if current_source == Some(next_source) {
+        return Ok(last_generation);
+    }
+    last_generation
+        .checked_add(1)
+        .ok_or(WgpuEditorExecutionError::SourceHandoffGenerationExhausted)
+}
+
+fn next_viewport_reservation_stamp(
+    last_target_generation: u64,
+    last_source_handoff_generation: u64,
+    current_source: Option<RenderFrameSourceGeneration>,
+    backend_instance_id: u64,
+    device_epoch: u64,
+    source_generation: RenderFrameSourceGeneration,
+    target: RenderImagePacket,
+) -> Result<WgpuEditorViewportReservationStamp, WgpuEditorExecutionError> {
+    let generation = last_target_generation
+        .checked_add(1)
+        .ok_or(WgpuEditorExecutionError::TargetGenerationExhausted)?;
+    let source_handoff_generation = next_source_handoff_generation(
+        last_source_handoff_generation,
+        current_source,
+        source_generation,
+    )?;
+    Ok(WgpuEditorViewportReservationStamp {
+        target,
+        generation,
+        source_generation,
+        source_handoff_generation,
+        backend_instance_id,
+        device_epoch,
+    })
+}
+
 /// Borrowed command-encoding scope for one Editor-window paint.
 #[doc(hidden)]
 pub struct WgpuEditorWindowFrame<'frame> {
@@ -196,9 +470,9 @@ pub struct WgpuEditorWindowFrame<'frame> {
     target_view: &'frame wgpu::TextureView,
     surface_format: wgpu::TextureFormat,
     surface_extent: Extent2d,
-    scene: Option<WgpuEditorSceneTexture<'frame>>,
+    viewport: Option<WgpuEditorViewportTexture>,
     leading_command_buffers: &'frame mut Vec<wgpu::CommandBuffer>,
-    sampled_scene: &'frame mut Option<WgpuEditorSceneSample>,
+    sampled_viewport: &'frame mut Option<WgpuEditorViewportSample>,
 }
 
 impl<'frame> WgpuEditorWindowFrame<'frame> {
@@ -210,11 +484,6 @@ impl<'frame> WgpuEditorWindowFrame<'frame> {
     #[must_use]
     pub const fn surface_extent(&self) -> Extent2d {
         self.surface_extent
-    }
-
-    #[must_use]
-    pub const fn scene_texture(&self) -> Option<WgpuEditorSceneTexture<'frame>> {
-        self.scene
     }
 
     pub fn encode<R>(
@@ -236,18 +505,18 @@ impl<'frame> WgpuEditorWindowFrame<'frame> {
         self.leading_command_buffers.extend(command_buffers);
     }
 
-    pub fn record_scene_sample(
+    pub fn record_viewport_sample(
         &mut self,
         texture_registration_generation: u64,
     ) -> Result<(), WgpuEditorExecutionError> {
         if texture_registration_generation == 0 {
             return Err(WgpuEditorExecutionError::InvalidTextureRegistrationGeneration);
         }
-        let Some(scene) = self.scene else {
+        let Some(viewport) = self.viewport else {
             return Err(WgpuEditorExecutionError::StaleImageSubmission);
         };
-        *self.sampled_scene = Some(WgpuEditorSceneSample {
-            image: scene.receipt,
+        *self.sampled_viewport = Some(WgpuEditorViewportSample {
+            image: viewport.receipt,
             texture_registration_generation,
         });
         Ok(())
@@ -282,8 +551,9 @@ impl WgpuEditorFrameOutcome {
 pub struct WgpuEditorExecution {
     backend: WgpuRenderBackend,
     handles: BackendWindowHandles,
-    image_target: Option<WgpuEditorImageTarget>,
+    viewport_target: Option<WgpuEditorViewportTarget>,
     last_target_generation: u64,
+    last_source_handoff_generation: u64,
     last_presentation_generation: u64,
 }
 
@@ -293,7 +563,7 @@ impl std::fmt::Debug for WgpuEditorExecution {
             .debug_struct("WgpuEditorExecution")
             .field("backend_instance_id", &self.backend.instance_id())
             .field("device_epoch", &self.backend.device_epoch())
-            .field("image_target_active", &self.image_target.is_some())
+            .field("viewport_target_active", &self.viewport_target.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -308,8 +578,9 @@ impl WgpuEditorExecution {
         Ok(Self {
             backend: WgpuRenderBackend::default(),
             handles,
-            image_target: None,
+            viewport_target: None,
             last_target_generation: 0,
+            last_source_handoff_generation: 0,
             last_presentation_generation: 0,
         })
     }
@@ -345,12 +616,103 @@ impl WgpuEditorExecution {
         }))
     }
 
+    pub fn reserve_viewport_target_with_texture<R>(
+        &mut self,
+        window: RenderWindowPacket,
+        source_generation: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
+        operation: impl for<'frame> FnOnce(
+            WgpuEditorDeviceScope<'frame>,
+            WgpuEditorReservedViewportTexture<'frame>,
+        ) -> R,
+    ) -> Result<(WgpuEditorViewportTargetReservation, R), WgpuEditorExecutionError> {
+        if self.viewport_target.is_some() {
+            return Err(WgpuEditorExecutionError::ViewportTargetAlreadyActive);
+        }
+        let namespace = self.backend.prepare_editor_window(&self.handles, window)?;
+        let reservation =
+            self.reserve_viewport_target_in_namespace(&namespace, source_generation, target)?;
+        let result = operation(
+            WgpuEditorDeviceScope {
+                device: &namespace.device,
+                queue: &namespace.queue,
+                surface_format: namespace.surface_format,
+                surface_extent: namespace.surface_extent,
+                backend_instance_id: namespace.backend_instance_id,
+                device_epoch: namespace.device_epoch,
+            },
+            WgpuEditorReservedViewportTexture {
+                view: &reservation.view,
+            },
+        );
+        Ok((reservation, result))
+    }
+
+    pub fn activate_viewport_target(
+        &mut self,
+        reservation: WgpuEditorViewportTargetReservation,
+    ) -> Result<(), WgpuEditorExecutionError> {
+        let activation = self.prepare_viewport_target_activation(reservation)?;
+        self.commit_viewport_target_activation(activation);
+        Ok(())
+    }
+
+    pub fn prepare_viewport_target_activation(
+        &self,
+        reservation: WgpuEditorViewportTargetReservation,
+    ) -> Result<WgpuEditorViewportTargetActivation, WgpuEditorExecutionError> {
+        self.validate_viewport_reservation(
+            &reservation,
+            self.backend.instance_id(),
+            self.backend.device_epoch(),
+        )?;
+        Ok(WgpuEditorViewportTargetActivation { reservation })
+    }
+
+    pub fn commit_viewport_target_activation(
+        &mut self,
+        activation: WgpuEditorViewportTargetActivation,
+    ) {
+        let reservation = activation.reservation;
+        debug_assert!(
+            self.validate_viewport_reservation(
+                &reservation,
+                self.backend.instance_id(),
+                self.backend.device_epoch(),
+            )
+            .is_ok()
+        );
+        self.backend
+            .activate_editor_source(reservation.stamp.source_generation);
+        self.last_target_generation = reservation.stamp.generation;
+        self.last_source_handoff_generation = reservation.stamp.source_handoff_generation;
+        self.viewport_target = Some(WgpuEditorViewportTarget {
+            stamp: reservation.stamp,
+            _texture: reservation.texture,
+            view: reservation.view,
+        });
+    }
+
+    #[must_use]
+    pub fn viewport_target_matches(
+        &self,
+        source_generation: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
+    ) -> bool {
+        self.viewport_target.as_ref().is_some_and(|active| {
+            active.stamp.source_generation == source_generation
+                && active.stamp.target == target
+                && active.stamp.backend_instance_id == self.backend.instance_id()
+                && active.stamp.device_epoch == self.backend.device_epoch()
+        })
+    }
+
     pub fn submit_image(
         &mut self,
         window: RenderWindowPacket,
         packet: RenderFramePacket,
     ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
-        self.submit_image_payload(window, packet, WgpuFramePayload::default())
+        self.submit_image_payload(window, packet, WgpuFramePayload::default(), None)
     }
 
     #[cfg(feature = "sprite-submitter")]
@@ -364,7 +726,45 @@ impl WgpuEditorExecution {
             window,
             packet,
             WgpuFramePayload::for_editor_sprites(sprite_batches),
+            None,
         )
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    pub fn submit_ui_image(
+        &mut self,
+        window: RenderWindowPacket,
+        packet: RenderFramePacket,
+        ui_frame: UiBackendPresentationFrame,
+    ) -> Result<WgpuEditorUiImageSubmission, WgpuEditorUiSubmitFailure> {
+        let (ui_packets, submissions) = ui_frame.into_parts();
+        let mut ui = WgpuEditorUiSubmission {
+            state: WgpuUiSubmissionState::Prepared(submissions),
+        };
+        let payload = WgpuFramePayload::for_editor_runtime_ui(ui_packets);
+        match self.submit_image_payload(window, packet, payload, Some(&mut ui)) {
+            Ok(image) => Ok(WgpuEditorUiImageSubmission { image, ui }),
+            Err(error) => Err(WgpuEditorUiSubmitFailure { error, ui }),
+        }
+    }
+
+    #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
+    pub fn submit_sprite_ui_image(
+        &mut self,
+        window: RenderWindowPacket,
+        packet: RenderFramePacket,
+        sprite_batches: SpriteBatches,
+        ui_frame: UiBackendPresentationFrame,
+    ) -> Result<WgpuEditorUiImageSubmission, WgpuEditorUiSubmitFailure> {
+        let (ui_packets, submissions) = ui_frame.into_parts();
+        let mut ui = WgpuEditorUiSubmission {
+            state: WgpuUiSubmissionState::Prepared(submissions),
+        };
+        let payload = WgpuFramePayload::for_editor_viewport(sprite_batches, ui_packets);
+        match self.submit_image_payload(window, packet, payload, Some(&mut ui)) {
+            Ok(image) => Ok(WgpuEditorUiImageSubmission { image, ui }),
+            Err(error) => Err(WgpuEditorUiSubmitFailure { error, ui }),
+        }
     }
 
     fn submit_image_payload(
@@ -372,10 +772,14 @@ impl WgpuEditorExecution {
         window: RenderWindowPacket,
         packet: RenderFramePacket,
         payload: WgpuFramePayload,
+        #[cfg(feature = "ui-submitter")] mut ui: Option<&mut WgpuEditorUiSubmission>,
+        #[cfg(not(feature = "ui-submitter"))] _ui: Option<&mut ()>,
     ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(WgpuEditorExecutionError::ExpectedImageTarget);
         };
+        let namespace = self.backend.prepare_editor_window(&self.handles, window)?;
+        self.require_viewport_target(packet.source_generation(), target)?;
         self.backend
             .begin_frame_transaction(packet.frame_index(), None);
         if let Err(error) = self
@@ -385,11 +789,26 @@ impl WgpuEditorExecution {
             self.backend.reject_captured_packet();
             return Err(error.into());
         }
-        let namespace = self.backend.prepare_editor_window(&self.handles, window)?;
-        self.ensure_image_target(&namespace, target)?;
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         self.backend
             .begin_editor_submitter_frame(packet.frame_index());
+        #[cfg(feature = "ui-submitter")]
+        let ui_backend_generation = if let Some(ui) = ui.as_deref_mut() {
+            let generation = UiPresentationBackendGeneration::new(
+                namespace.backend_instance_id,
+                namespace.device_epoch,
+            )
+            .ok_or_else(|| {
+                WgpuEditorExecutionError::Backend(WgpuRenderError::DeviceUnavailable {
+                    message: "the Editor GPU namespace has no non-zero UI presentation generation"
+                        .to_owned(),
+                })
+            })?;
+            ui.validate_backend_generation(generation)?;
+            Some(generation)
+        } else {
+            None
+        };
         let draw = self.backend.prepare_submitter_draw(
             EDITOR_IMAGE_FORMAT,
             packet.view().target,
@@ -397,21 +816,25 @@ impl WgpuEditorExecution {
             &payload,
             packet.frame_index(),
         )?;
-        let image_target = self
-            .image_target
+        #[cfg(feature = "ui-submitter")]
+        if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
+            ui.bind_backend(backend_generation)?;
+        }
+        let viewport_target = self
+            .viewport_target
             .as_ref()
-            .expect("ensuring an Editor image target installs it");
+            .expect("ensuring an Editor viewport target installs it");
         let mut encoder =
             namespace
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("nara_editor_scene_encoder"),
+                    label: Some("nara_editor_viewport_encoder"),
                 });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("nara_editor_scene_pass"),
+                label: Some("nara_editor_viewport_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &image_target.view,
+                    view: &viewport_target.view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -447,43 +870,12 @@ impl WgpuEditorExecution {
         self.backend.record_editor_image_submission();
         Ok(WgpuSubmittedImageReceipt::new(
             target,
-            image_target.generation,
+            viewport_target.stamp.generation,
+            viewport_target.stamp.source_generation,
+            viewport_target.stamp.source_handoff_generation,
             namespace.backend_instance_id,
             namespace.device_epoch,
             packet.frame_index(),
-        ))
-    }
-
-    pub fn with_scene_texture<R>(
-        &mut self,
-        window: RenderWindowPacket,
-        submission: WgpuSubmittedImageReceipt,
-        operation: impl for<'frame> FnOnce(
-            WgpuEditorDeviceScope<'frame>,
-            WgpuEditorSceneTexture<'frame>,
-        ) -> R,
-    ) -> Result<R, WgpuEditorExecutionError> {
-        let namespace = self.backend.prepare_editor_window(&self.handles, window)?;
-        let target = self
-            .image_target
-            .as_ref()
-            .filter(|target| {
-                target.matches_namespace(&namespace) && target.matches_receipt(submission)
-            })
-            .ok_or(WgpuEditorExecutionError::StaleImageSubmission)?;
-        Ok(operation(
-            WgpuEditorDeviceScope {
-                device: &namespace.device,
-                queue: &namespace.queue,
-                surface_format: namespace.surface_format,
-                surface_extent: namespace.surface_extent,
-                backend_instance_id: namespace.backend_instance_id,
-                device_epoch: namespace.device_epoch,
-            },
-            WgpuEditorSceneTexture {
-                view: &target.view,
-                receipt: submission,
-            },
         ))
     }
 
@@ -491,7 +883,7 @@ impl WgpuEditorExecution {
         &mut self,
         window: RenderWindowPacket,
         editor_frame_index: u64,
-        scene_submission: Option<WgpuSubmittedImageReceipt>,
+        viewport_submission: Option<WgpuSubmittedImageReceipt>,
         paint: impl for<'frame> FnOnce(
             &mut WgpuEditorWindowFrame<'frame>,
         ) -> Result<(), WgpuEditorExecutionError>,
@@ -501,8 +893,8 @@ impl WgpuEditorExecution {
         let Some(acquired) = self.backend.acquire_editor_surface(window.id)? else {
             return Ok(WgpuEditorFrameOutcome::default());
         };
-        let scene = match scene_submission {
-            Some(submission) => Some(self.scene_texture(&namespace, submission)?),
+        let viewport = match viewport_submission {
+            Some(submission) => Some(self.viewport_texture(&namespace, submission)?),
             None => None,
         };
         let WgpuEditorAcquiredSurface {
@@ -522,7 +914,7 @@ impl WgpuEditorExecution {
                     label: Some("nara_editor_window_encoder"),
                 });
         let mut leading_command_buffers = Vec::new();
-        let mut sampled_scene = None;
+        let mut sampled_viewport = None;
         paint(&mut WgpuEditorWindowFrame {
             device: &namespace.device,
             queue: &namespace.queue,
@@ -530,9 +922,9 @@ impl WgpuEditorExecution {
             target_view: &target_view,
             surface_format: format,
             surface_extent: extent,
-            scene,
+            viewport,
             leading_command_buffers: &mut leading_command_buffers,
-            sampled_scene: &mut sampled_scene,
+            sampled_viewport: &mut sampled_viewport,
         })?;
         namespace.queue.submit(
             leading_command_buffers
@@ -551,8 +943,8 @@ impl WgpuEditorExecution {
         );
         let composite = join_composite_receipt(
             &mut self.last_presentation_generation,
-            scene_submission,
-            sampled_scene,
+            viewport_submission,
+            sampled_viewport,
             window_receipt,
         )?;
         Ok(WgpuEditorFrameOutcome {
@@ -561,47 +953,49 @@ impl WgpuEditorExecution {
         })
     }
 
-    pub fn retire_image_target(&mut self) {
-        self.image_target = None;
+    pub fn retire_viewport_target(&mut self) {
+        self.viewport_target = None;
     }
 
-    fn scene_texture<'frame>(
-        &'frame self,
+    fn viewport_texture(
+        &self,
         namespace: &WgpuEditorDeviceNamespace,
         submission: WgpuSubmittedImageReceipt,
-    ) -> Result<WgpuEditorSceneTexture<'frame>, WgpuEditorExecutionError> {
-        let target = self
-            .image_target
-            .as_ref()
-            .filter(|target| {
-                target.matches_namespace(namespace) && target.matches_receipt(submission)
-            })
-            .ok_or(WgpuEditorExecutionError::StaleImageSubmission)?;
-        Ok(WgpuEditorSceneTexture {
-            view: &target.view,
+    ) -> Result<WgpuEditorViewportTexture, WgpuEditorExecutionError> {
+        if !self.viewport_target.as_ref().is_some_and(|target| {
+            target.matches_namespace(namespace) && target.matches_receipt(submission)
+        }) {
+            return Err(WgpuEditorExecutionError::StaleImageSubmission);
+        }
+        Ok(WgpuEditorViewportTexture {
             receipt: submission,
         })
     }
 
-    fn ensure_image_target(
-        &mut self,
-        namespace: &WgpuEditorDeviceNamespace,
-        packet: RenderImagePacket,
+    fn require_viewport_target(
+        &self,
+        source_generation: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
     ) -> Result<(), WgpuEditorExecutionError> {
-        if self
-            .image_target
-            .as_ref()
-            .is_some_and(|target| target.packet == packet && target.matches_namespace(namespace))
-        {
+        if self.viewport_target_matches(source_generation, target) {
             return Ok(());
         }
-        let generation = self
-            .last_target_generation
-            .checked_add(1)
-            .ok_or(WgpuEditorExecutionError::TargetGenerationExhausted)?;
-        let extent = packet.extent();
+        if self.viewport_target.is_some() {
+            return Err(WgpuEditorExecutionError::ViewportTargetAlreadyActive);
+        }
+        Err(WgpuEditorExecutionError::ViewportTargetUnavailable)
+    }
+
+    fn reserve_viewport_target_in_namespace(
+        &self,
+        namespace: &WgpuEditorDeviceNamespace,
+        source_generation: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
+    ) -> Result<WgpuEditorViewportTargetReservation, WgpuEditorExecutionError> {
+        let stamp = self.next_viewport_reservation_stamp(namespace, source_generation, target)?;
+        let extent = target.extent();
         let texture = namespace.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("nara_editor_scene_target"),
+            label: Some("nara_editor_viewport_target"),
             size: wgpu::Extent3d {
                 width: extent.width,
                 height: extent.height,
@@ -618,16 +1012,64 @@ impl WgpuEditorExecution {
             format: Some(EDITOR_IMAGE_FORMAT),
             ..Default::default()
         });
-        self.image_target = Some(WgpuEditorImageTarget {
-            packet,
-            generation,
-            backend_instance_id: namespace.backend_instance_id,
-            device_epoch: namespace.device_epoch,
-            _texture: texture,
+        Ok(WgpuEditorViewportTargetReservation {
+            stamp,
+            texture,
             view,
-        });
-        self.last_target_generation = generation;
+        })
+    }
+
+    fn next_viewport_reservation_stamp(
+        &self,
+        namespace: &WgpuEditorDeviceNamespace,
+        source_generation: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
+    ) -> Result<WgpuEditorViewportReservationStamp, WgpuEditorExecutionError> {
+        self.next_viewport_reservation_stamp_for_namespace(
+            namespace.backend_instance_id,
+            namespace.device_epoch,
+            source_generation,
+            target,
+        )
+    }
+
+    fn validate_viewport_reservation(
+        &self,
+        reservation: &WgpuEditorViewportTargetReservation,
+        backend_instance_id: u64,
+        device_epoch: u64,
+    ) -> Result<(), WgpuEditorExecutionError> {
+        if self.viewport_target.is_some() {
+            return Err(WgpuEditorExecutionError::ViewportTargetAlreadyActive);
+        }
+        let expected = self.next_viewport_reservation_stamp_for_namespace(
+            backend_instance_id,
+            device_epoch,
+            reservation.stamp.source_generation,
+            reservation.stamp.target,
+        )?;
+        if reservation.stamp != expected {
+            return Err(WgpuEditorExecutionError::StaleViewportReservation);
+        }
         Ok(())
+    }
+
+    fn next_viewport_reservation_stamp_for_namespace(
+        &self,
+        backend_instance_id: u64,
+        device_epoch: u64,
+        source_generation: RenderFrameSourceGeneration,
+        target: RenderImagePacket,
+    ) -> Result<WgpuEditorViewportReservationStamp, WgpuEditorExecutionError> {
+        next_viewport_reservation_stamp(
+            self.last_target_generation,
+            self.last_source_handoff_generation,
+            self.backend.editor_source_generation(),
+            backend_instance_id,
+            device_epoch,
+            source_generation,
+            target,
+        )
     }
 }
 
@@ -640,11 +1082,20 @@ mod tests {
         __private::{EditorRenderGeneration, build_editor_render_frame_packet},
         Color, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, ViewportRect,
     };
+    #[cfg(feature = "ui-submitter")]
+    use nara_ui_render::__private::UiBackendSubmission;
+    #[cfg(feature = "ui-submitter")]
+    use nara_ui_render::{
+        UiPaintPacket, UiPresentationAttemptId, UiPresentationCapabilityGeneration,
+        UiPresentationEpoch, UiPresentationOutcome, UiPresentationRuntimeGeneration,
+    };
 
     #[test]
     fn composite_receipt_requires_the_exact_submitted_sample_and_window_namespace() {
-        let image = test_image_packet();
-        let submitted = WgpuSubmittedImageReceipt::new(image, 4, 10, 2, 7);
+        let frame = test_image_frame();
+        let image = image_target(&frame);
+        let submitted =
+            WgpuSubmittedImageReceipt::new(image, 4, frame.source_generation(), 6, 10, 2, 7);
         let window = WgpuEditorWindowPresentedReceipt::new(
             WindowId::PRIMARY,
             3,
@@ -668,7 +1119,7 @@ mod tests {
             submitted.device_epoch(),
             9,
         );
-        let sample = WgpuEditorSceneSample {
+        let sample = WgpuEditorViewportSample {
             image: submitted,
             texture_registration_generation: 5,
         };
@@ -694,10 +1145,240 @@ mod tests {
         .unwrap();
         assert_eq!(composite.presentation_generation(), 1);
         assert_eq!(composite.texture_registration_generation(), 5);
+        assert_eq!(
+            composite.image().source_generation(),
+            frame.source_generation()
+        );
+        assert_eq!(composite.image().source_handoff_generation(), 6);
         assert_eq!(presentation_generation, 1);
     }
 
-    fn test_image_packet() -> RenderImagePacket {
+    #[test]
+    fn viewport_source_handoff_advances_only_when_the_producer_changes() {
+        let scene = test_image_frame().source_generation();
+        let successor = test_image_frame().source_generation();
+
+        assert_eq!(next_source_handoff_generation(0, None, scene).unwrap(), 1);
+        assert_eq!(
+            next_source_handoff_generation(1, Some(scene), scene).unwrap(),
+            1
+        );
+        assert_eq!(
+            next_source_handoff_generation(1, Some(scene), successor).unwrap(),
+            2
+        );
+    }
+
+    #[test]
+    fn stale_inactive_viewport_reservation_cannot_replace_a_committed_target() {
+        let first_frame = test_image_frame();
+        let source = first_frame.source_generation();
+        let first_target = image_target(&first_frame);
+        let first =
+            next_viewport_reservation_stamp(0, 0, None, 11, 2, source, first_target).unwrap();
+        let duplicate = first;
+        let resized_target = image_target(&test_image_frame());
+        let successor = next_viewport_reservation_stamp(
+            first.generation,
+            first.source_handoff_generation,
+            Some(first.source_generation),
+            11,
+            2,
+            source,
+            resized_target,
+        )
+        .unwrap();
+
+        assert_ne!(duplicate, successor);
+        assert_eq!(successor.generation, first.generation + 1);
+        assert_eq!(
+            successor.source_handoff_generation,
+            first.source_handoff_generation
+        );
+    }
+
+    #[test]
+    fn matching_runtime_and_target_reservations_publish_together_or_not_at_all() {
+        #[derive(Debug)]
+        struct RuntimeReservation {
+            source: RenderFrameSourceGeneration,
+            target: RenderImagePacket,
+        }
+
+        #[derive(Default)]
+        struct Publication {
+            runtime: Option<RenderFrameSourceGeneration>,
+            target: Option<WgpuEditorViewportReservationStamp>,
+        }
+
+        impl Publication {
+            fn commit(
+                &mut self,
+                runtime: RuntimeReservation,
+                target: WgpuEditorViewportReservationStamp,
+            ) -> Result<(), (RuntimeReservation, WgpuEditorViewportReservationStamp)> {
+                if self.runtime.is_some()
+                    || self.target.is_some()
+                    || runtime.source != target.source_generation
+                    || runtime.target != target.target
+                {
+                    return Err((runtime, target));
+                }
+                self.runtime = Some(runtime.source);
+                self.target = Some(target);
+                Ok(())
+            }
+        }
+
+        let frame = test_image_frame();
+        let source = frame.source_generation();
+        let target = image_target(&frame);
+        let target_reservation =
+            next_viewport_reservation_stamp(0, 0, None, 11, 2, source, target).unwrap();
+        let mut publication = Publication::default();
+        let mismatched_runtime = RuntimeReservation {
+            source: test_image_frame().source_generation(),
+            target,
+        };
+        let (runtime, target_reservation) = publication
+            .commit(mismatched_runtime, target_reservation)
+            .expect_err("mismatched reservations must remain unpublished");
+        assert!(publication.runtime.is_none());
+        assert!(publication.target.is_none());
+        drop(runtime);
+
+        publication
+            .commit(RuntimeReservation { source, target }, target_reservation)
+            .unwrap();
+        assert_eq!(publication.runtime, Some(source));
+        assert_eq!(publication.target, Some(target_reservation));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn editor_ui_completion_maps_every_terminal_path_without_stranding_permits() {
+        let backend_generation = UiPresentationBackendGeneration::new(21, 4).unwrap();
+
+        let (outcomes, mut presented) = editor_ui_submission(31);
+        presented.bind_backend(backend_generation).unwrap();
+        assert!(matches!(
+            publish_editor_ui_outcomes(outcomes, presented.presented()).remove(0),
+            UiPresentationOutcome::Presented(_)
+        ));
+
+        let (outcomes, mut deferred) = editor_ui_submission(32);
+        deferred.bind_backend(backend_generation).unwrap();
+        assert!(matches!(
+            publish_editor_ui_outcomes(
+                outcomes,
+                deferred.deferred("window present deferred".to_owned())
+            )
+            .remove(0),
+            UiPresentationOutcome::Deferred { .. }
+        ));
+
+        let (outcomes, rejected) = editor_ui_submission(33);
+        assert!(matches!(
+            publish_editor_ui_outcomes(
+                outcomes,
+                rejected.content_rejected("packet lowering rejected".to_owned())
+            )
+            .remove(0),
+            UiPresentationOutcome::ContentRejected { .. }
+        ));
+
+        let (outcomes, mut target_fault) = editor_ui_submission(34);
+        target_fault.bind_backend(backend_generation).unwrap();
+        assert!(matches!(
+            publish_editor_ui_outcomes(
+                outcomes,
+                target_fault.backend_fault(
+                    Some(backend_generation),
+                    UiPresentationBackendFaultDomain::Target,
+                    "viewport target retired".to_owned(),
+                )
+            )
+            .remove(0),
+            UiPresentationOutcome::BackendFault {
+                domain: UiPresentationBackendFaultDomain::Target,
+                ..
+            }
+        ));
+
+        let (outcomes, mut device_fault) = editor_ui_submission(35);
+        device_fault.bind_backend(backend_generation).unwrap();
+        assert!(matches!(
+            publish_editor_ui_outcomes(
+                outcomes,
+                device_fault.backend_fault(
+                    Some(backend_generation),
+                    UiPresentationBackendFaultDomain::Device,
+                    "device lost".to_owned(),
+                )
+            )
+            .remove(0),
+            UiPresentationOutcome::BackendFault {
+                backend_generation: Some(generation),
+                domain: UiPresentationBackendFaultDomain::Device,
+                ..
+            } if generation == backend_generation
+        ));
+
+        let (outcomes, superseded) = editor_ui_submission(36);
+        let successor =
+            nara_ui_render::__private::prepared_attempt(&test_ui_prepared_submission(37));
+        assert!(matches!(
+            publish_editor_ui_outcomes(
+                outcomes,
+                superseded.superseded(successor, "new viewport candidate".to_owned())
+            )
+            .remove(0),
+            UiPresentationOutcome::Superseded {
+                successor: actual,
+                ..
+            } if actual == successor
+        ));
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn editor_ui_presented_completion_requires_the_exact_final_composite() {
+        let frame = test_image_frame();
+        let image = image_target(&frame);
+        let submitted =
+            WgpuSubmittedImageReceipt::new(image, 8, frame.source_generation(), 3, 21, 4, 12);
+        let window = WgpuEditorWindowPresentedReceipt::new(
+            WindowId::PRIMARY,
+            5,
+            submitted.backend_instance_id(),
+            submitted.device_epoch(),
+            17,
+        );
+        let (outcomes, mut ui) = editor_ui_submission(38);
+        ui.bind_backend(UiPresentationBackendGeneration::new(21, 4).unwrap())
+            .unwrap();
+        let submission = WgpuEditorUiImageSubmission {
+            image: submitted,
+            ui,
+        };
+        let foreign = WgpuEditorCompositeReceipt::new(
+            WgpuSubmittedImageReceipt::new(image, 9, frame.source_generation(), 3, 21, 4, 12),
+            window,
+            6,
+            1,
+        );
+        let submission = submission
+            .presented(foreign)
+            .expect_err("a foreign image receipt must not commit Runtime UI presentation");
+        let exact = WgpuEditorCompositeReceipt::new(submitted, window, 6, 1);
+
+        assert!(matches!(
+            publish_editor_ui_outcomes(outcomes, submission.presented(exact).unwrap()).remove(0),
+            UiPresentationOutcome::Presented(_)
+        ));
+    }
+
+    fn test_image_frame() -> RenderFramePacket {
         let generation = EditorRenderGeneration::try_acquire().unwrap();
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
@@ -709,12 +1390,101 @@ mod tests {
             order: 0,
             clear_color: Color::BLACK,
         });
-        let packet = build_editor_render_frame_packet(generation, 1, &views)
+        build_editor_render_frame_packet(generation, 1, &views)
             .unwrap()
-            .unwrap();
+            .unwrap()
+    }
+
+    fn image_target(packet: &RenderFramePacket) -> RenderImagePacket {
         match packet.target() {
             RenderFrameTarget::Image(image) => image,
             RenderFrameTarget::Window(_) => panic!("test packet must target an image"),
         }
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn editor_ui_submission(
+        admission_id: u64,
+    ) -> (
+        nara_ui_render::__private::UiPresentationOutcomes,
+        WgpuEditorUiSubmission,
+    ) {
+        let prepared = test_ui_prepared_submission(admission_id);
+        let mut outcomes = nara_ui_render::__private::UiPresentationOutcomes::default();
+        let permit = outcomes
+            .reserve_backend(std::slice::from_ref(&prepared))
+            .unwrap()
+            .remove(0);
+        let submission = UiBackendSubmission::pair(prepared, permit).unwrap();
+        (
+            outcomes,
+            WgpuEditorUiSubmission {
+                state: WgpuUiSubmissionState::Prepared(vec![submission]),
+            },
+        )
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn test_ui_prepared_submission(
+        admission_id: u64,
+    ) -> nara_ui_render::__private::UiPreparedBackendSubmission {
+        nara_ui_render::__private::prepare_backend_submission(
+            UiPresentationAttemptId::new(admission_id).unwrap(),
+            test_ui_packet(),
+            UiPresentationEpoch::new(admission_id + 100).unwrap(),
+            UiPresentationRuntimeGeneration::new(7).unwrap(),
+            UiPresentationCapabilityGeneration::new(9).unwrap(),
+        )
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn publish_editor_ui_outcomes(
+        mut outcomes: nara_ui_render::__private::UiPresentationOutcomes,
+        completed: Vec<UiCompletedBackendOutcome>,
+    ) -> Vec<UiPresentationOutcome> {
+        for outcome in completed {
+            outcomes.commit_backend(outcome);
+        }
+        let mut world = nara_ecs::World::new();
+        world.insert_resource(outcomes);
+        nara_ui_render::drain_ui_presentation_outcomes(&mut world).unwrap()
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    fn test_ui_packet() -> std::sync::Arc<UiPaintPacket> {
+        use nara_text::bundled_font_face;
+        use nara_ui_kernel::{
+            UiAuthoringSnapshotBuilder, UiColor, UiCompiler, UiEnvironment, UiLayer, UiLocalKey,
+            UiNode, UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiTheme, UiVisual,
+        };
+
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("editor-game-view-ui", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(
+                    UiNode::new(UiStyle::absolute(0.0, 0.0, 32.0, 32.0))
+                        .with_key(UiLocalKey::runtime("editor-game-view-ui", "panel").unwrap())
+                        .with_visual(UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0))),
+                ),
+            )
+            .build()
+            .unwrap();
+        let environment =
+            UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 64.0, 64.0, 1.0, 1, 1, 1, 1).unwrap();
+        let frame = UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        nara_ui_render::UiPresentationPlanner::default()
+            .plan(
+                frame,
+                nara_render::RenderTarget::Window(WindowId::PRIMARY),
+                &nara_ui_render::UiPreparedImages::default(),
+            )
+            .unwrap()
     }
 }

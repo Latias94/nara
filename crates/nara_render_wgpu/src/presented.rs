@@ -1,5 +1,5 @@
 use nara_app::RuntimeGeneration;
-use nara_render::RenderImagePacket;
+use nara_render::{RenderFrameSourceGeneration, RenderImagePacket};
 use nara_window::WindowId;
 
 /// Exact process-local facts for one WGPU surface submission and present call.
@@ -85,6 +85,8 @@ impl WgpuPresentedFrameReceipt {
 pub struct WgpuSubmittedImageReceipt {
     target: RenderImagePacket,
     target_generation: u64,
+    source_generation: RenderFrameSourceGeneration,
+    source_handoff_generation: u64,
     backend_instance_id: u64,
     device_epoch: u64,
     render_transaction_frame_index: u64,
@@ -94,6 +96,8 @@ impl WgpuSubmittedImageReceipt {
     pub(crate) const fn new(
         target: RenderImagePacket,
         target_generation: u64,
+        source_generation: RenderFrameSourceGeneration,
+        source_handoff_generation: u64,
         backend_instance_id: u64,
         device_epoch: u64,
         render_transaction_frame_index: u64,
@@ -101,6 +105,8 @@ impl WgpuSubmittedImageReceipt {
         Self {
             target,
             target_generation,
+            source_generation,
+            source_handoff_generation,
             backend_instance_id,
             device_epoch,
             render_transaction_frame_index,
@@ -115,6 +121,16 @@ impl WgpuSubmittedImageReceipt {
     #[must_use]
     pub const fn target_generation(self) -> u64 {
         self.target_generation
+    }
+
+    #[must_use]
+    pub const fn source_generation(self) -> RenderFrameSourceGeneration {
+        self.source_generation
+    }
+
+    #[must_use]
+    pub const fn source_handoff_generation(self) -> u64 {
+        self.source_handoff_generation
     }
 
     #[must_use]
@@ -187,7 +203,7 @@ impl WgpuEditorWindowPresentedReceipt {
     }
 }
 
-/// Unforgeable join proving the fixed Scene-image/egui/Editor-window transaction.
+/// Unforgeable join proving the fixed viewport-image/egui/Editor-window transaction.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuEditorCompositeReceipt {

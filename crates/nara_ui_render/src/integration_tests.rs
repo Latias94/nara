@@ -307,6 +307,63 @@ fn backend_outcome_reservation_blocks_early_drain_until_every_attempt_commits() 
 }
 
 #[test]
+fn host_external_backend_frame_returns_each_outcome_to_its_owning_runtime_once() {
+    let mut runtime = packet_world();
+    compile_ui_paint_packets(
+        &mut runtime,
+        &[frame(
+            1,
+            1,
+            UiVisual::solid(UiColor::rgba(1.0, 1.0, 1.0, 1.0)),
+        )],
+    )
+    .unwrap();
+    let packet = runtime
+        .resource::<UiPresentationState>()
+        .0
+        .planned(RenderTarget::Window(WindowId::PRIMARY))
+        .unwrap();
+    assert!(
+        replace_ui_backend_frame(
+            &mut runtime,
+            vec![Arc::clone(&packet)],
+            vec![prepared_submission(packet, 21, 9)],
+        )
+        .unwrap()
+        .is_empty()
+    );
+
+    let frame = take_ui_backend_presentation_frame(&mut runtime).unwrap();
+    assert_eq!(
+        take_ui_backend_presentation_frame(&mut runtime).unwrap_err(),
+        UiPresentationIntegrationError::OutstandingBackendOutcomeReservations { count: 1 }
+    );
+    let (_, submissions) = frame.into_parts();
+    let mut submitted = bind_backend_submission_batch(
+        submissions,
+        UiPresentationBackendGeneration::new(7, 3).unwrap(),
+    )
+    .unwrap();
+    let completed = submitted
+        .pop()
+        .expect("the external frame should retain its exact submission")
+        .deferred("the Editor window is temporarily unavailable".to_owned());
+
+    let mut foreign_runtime = packet_world();
+    let completed = commit_ui_backend_outcome(&mut foreign_runtime, completed)
+        .expect_err("a foreign runtime must not consume the outcome permit");
+    commit_ui_backend_outcome(&mut runtime, completed)
+        .expect("the owning runtime should consume its exact permit");
+
+    let outcomes = drain_ui_presentation_outcomes(&mut runtime).unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert!(matches!(
+        outcomes[0],
+        UiPresentationOutcome::Deferred { .. }
+    ));
+}
+
+#[test]
 fn undrained_outcomes_block_the_next_compile_before_planner_mutation() {
     let mut world = packet_world();
     let white = UiColor::rgba(1.0, 1.0, 1.0, 1.0);

@@ -37,9 +37,9 @@ pub mod __private {
         UiBackendSubmissionBatchBindError, UiBackendSubmissionReader, UiCompletedBackendOutcome,
         UiPaintPacketSnapshots, UiPresentationOutcomes, UiPresentationRoute,
         UiPresentationRouteError, UiSubmittedBackendSubmission, abort_ui_planned_packet,
-        bind_backend_submission_batch, commit_ui_backend_presentation,
+        bind_backend_submission_batch, commit_ui_backend_outcome, commit_ui_backend_presentation,
         discard_ui_backend_acceptance, replace_ui_backend_frame, replace_ui_presentation_routes,
-        snapshot_ui_paint_packets,
+        snapshot_ui_paint_packets, take_ui_backend_presentation_frame,
     };
     pub use crate::planner::UiPlannedPacketAbortOutcome;
 

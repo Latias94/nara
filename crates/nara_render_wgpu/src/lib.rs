@@ -97,7 +97,9 @@ pub mod __private {
     pub use crate::{
         editor_execution::{
             WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,
-            WgpuEditorFrameOutcome, WgpuEditorSceneTexture, WgpuEditorWindowFrame,
+            WgpuEditorFrameOutcome, WgpuEditorReservedViewportTexture, WgpuEditorViewportIdentity,
+            WgpuEditorViewportTargetActivation, WgpuEditorViewportTargetReservation,
+            WgpuEditorWindowFrame,
         },
         presented::{
             WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,
@@ -107,6 +109,11 @@ pub mod __private {
 
     #[cfg(feature = "ui-submitter")]
     pub use crate::backend::WgpuSubmittedUiFacts;
+
+    #[cfg(feature = "ui-submitter")]
+    pub use crate::editor_execution::{
+        WgpuEditorUiImageSubmission, WgpuEditorUiSubmission, WgpuEditorUiSubmitFailure,
+    };
 
     #[cfg(feature = "ui-submitter")]
     #[must_use]
@@ -1773,6 +1780,7 @@ mod tests {
         let identity = packet.identity();
         let payload = frame::WgpuFramePayload {
             primary_window_id: Some(WindowId::PRIMARY),
+            ui_logical_target: None,
             #[cfg(feature = "sprite-submitter")]
             sprite_batches: None,
             ui_packets: vec![packet],
@@ -1797,6 +1805,7 @@ mod tests {
         let second_packet = ui_outcome_packet_for(second_target);
         let payload = frame::WgpuFramePayload {
             primary_window_id: Some(WindowId::PRIMARY),
+            ui_logical_target: None,
             #[cfg(feature = "sprite-submitter")]
             sprite_batches: None,
             ui_packets: vec![first_packet, second_packet],
@@ -1809,6 +1818,29 @@ mod tests {
         assert!(facts.primitives > 0);
         assert!(facts.glyph_primitives > 0);
         assert!(facts.glyph_pages > 0);
+    }
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn editor_viewport_maps_logical_primary_window_ui_to_the_private_image() {
+        let packet = ui_outcome_packet();
+        let packet_identity = packet.identity();
+        let image_target =
+            RenderTarget::Image(nara_asset::Handle::new(nara_asset::AssetId::from_raw(912)));
+        let payload = frame::WgpuFramePayload::for_editor_runtime_ui(vec![packet]);
+        let viewport = ViewportRect::new(0, 0, 16, 16).unwrap();
+
+        let facts = payload.ui_facts(image_target);
+        let lowered = payload.lower_draw(image_target, viewport).unwrap();
+
+        assert_eq!(facts.packet_count, 1);
+        assert_eq!(facts.packet_identity, Some(packet_identity));
+        assert_eq!(lowered.ui_packets.len(), 1);
+        assert_eq!(lowered.ui_packets[0].packet, packet_identity);
+        assert_eq!(
+            lowered.ui_packets[0].target,
+            RenderTarget::Window(WindowId::PRIMARY)
+        );
     }
 
     #[cfg(feature = "ui-submitter")]
