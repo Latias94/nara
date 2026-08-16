@@ -8,6 +8,7 @@ UIF-U3C corrections
 **Refines**: [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
 [ADR 0068](0068-global-resource-budgets-metrics-and-diagnostic-privacy.md), and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
+**Refined By**: [ADR 0112](0112-editor-game-view-runtime-presentation-and-input-authority.md)
 **Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), UIF-U2, UIF-U2C, UIF-U3 and UIF-U3C
 
 ## Context

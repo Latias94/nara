@@ -157,3 +157,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md): Root-Local UI Compilation and Presentation Closure
 - [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md): First-Party Project Workflow and Source-Carrying Export
 - [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md): Editor Scene View Execution and Picking Authority
+- [ADR 0112](0112-editor-game-view-runtime-presentation-and-input-authority.md): Editor Game View Runtime Presentation and Input Authority

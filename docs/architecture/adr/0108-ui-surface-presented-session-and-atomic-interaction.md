@@ -7,6 +7,7 @@ UIF-U4C surface-lifecycle corrections; 2026-08-10 by the UIFM-U1 modal-entry-foc
 **Owner**: UI kernel session, input routing, platform adapters, Host surface lifecycle
 **Refines**: [ADR 0041](0041-input-routing-actions-text-focus-and-accessibility.md) and
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md)
+**Refined By**: [ADR 0112](0112-editor-game-view-runtime-presentation-and-input-authority.md)
 **Implementation Plan**: [UI Foundation Correction](../../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md), UIF-U1, UIF-U3C and UIF-U4C; [UI Modal Entry Focus Correction](../../plans/2026-08-10-001-refactor-ui-modal-entry-focus-correction-plan.md), UIFM-U1
 
 ## Context

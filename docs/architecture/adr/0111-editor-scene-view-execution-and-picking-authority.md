@@ -9,6 +9,7 @@
 [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md),
 [ADR 0105](0105-closed-first-party-render-plan.md), and
 [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md)
+**Refined By**: [ADR 0112](0112-editor-game-view-runtime-presentation-and-input-authority.md)
 **Implementation Plan**: [Editor Scene Composition and Scene View v1](../../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md)
 **Initial Implementation**: `1f97c48` (`feat(editor): establish scene view gpu execution`)
 **Completed Implementation**: `f99de44` (`feat(editor): prove scene authoring trajectory`)

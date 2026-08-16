@@ -682,14 +682,16 @@ flowchart LR
 - **Trigger**: A child-process Play mode, crash-isolated preview, remote target, or a second
   production placement must preserve the current Editor Play semantics; or in-process placement
   causes a measured safety, reload, or lifecycle failure.
-- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093
+- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093, 0112
 - **Question**: Which in-process, child-process, or hybrid placement owns Play, and what smallest
   versioned local connection preserves control, observation, content/schema lineage, fault,
   retirement, and restart semantics across that placement?
 - **Boundary**: Tooling models communicate through bounded generation-stamped commands and
   observations that can be projected onto a connection; they do not expose `World`, native handles,
   or transport types. This question does not currently select IPC, wire encoding, process topology,
-  authentication, or a public universal runtime-session trait.
+  authentication, or a public universal runtime-session trait. ADR 0112 selects only the first
+  private in-process Game View placement; the second placement or measured failure remains the
+  trigger for this question.
 
 ## OQ-040: Editor-to-Play Live Edit
 
@@ -698,7 +700,7 @@ flowchart LR
 - **Trigger**: A measured authoring workflow needs a committed document edit to affect an active
   Play runtime without a fresh runtime, beyond the one-shot safe-point edit proven by the first
   Play/Inspector slice.
-- **Related ADRs**: 0026, 0034, 0038, 0047, 0076, 0084, 0090, 0093
+- **Related ADRs**: 0026, 0034, 0038, 0047, 0076, 0084, 0090, 0093, 0112
 - **Question**: Which component/field changes are safely projectable, at what safe point, and how do
   document revision, runtime generation, scene instance, prefab provenance, validation, overwrite,
   and fault outcomes remain explicit?
@@ -706,7 +708,8 @@ flowchart LR
   best-effort operation whose result distinguishes at least `Applied`, `Stale`, `Unsupported`,
   `Overwritten`, and `Faulted`; projection failure never rolls back a successful document commit.
   This question does not select a wire format, retained runtime override layer, arbitrary Rust-state
-  migration, or edit-while-playing merge algorithm.
+  migration, or edit-while-playing merge algorithm. ADR 0112 keeps Restart as the first Game View's
+  ordinary freshness path and does not close this question.
 
 ## OQ-041: Tooling Observation and Remote Command Session
 
