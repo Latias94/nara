@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-16
+**Last Revised**: 2026-08-16
 **Supersedes**: [ADR 0077](0077-render-pipeline-recipes-graph-compilation-and-backend-encoding.md)
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0016](0016-extension-seams-for-backends-and-domain-modules.md),
@@ -10,7 +11,8 @@
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
 [ADR 0078](0078-render-host-affinity-webgpu-initialization-and-device-recovery.md)
 **Refined By**: [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md);
-[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
+[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan; and
+[ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 
 ## Context
 
@@ -90,9 +92,11 @@ flowchart LR
 - Views, targets, viewport/scissor semantics, phases, and target-frame lifecycle remain explicit
   and backend-neutral so a future graph can replace static planning without changing gameplay
   authoring data.
-- The first intermediate/history resource or cross-target dependency that static planning cannot
-  express reopens OQ-001. That workflow chooses the smallest sufficient resource and scheduling
-  model; this ADR does not preselect a graph compiler or public execution kernel.
+- ADR 0111 resolves the first cross-target dependency with one private serialized fixed
+  transaction. A later intermediate/history resource or computed dependency that neither static
+  planning nor that fixed model can express opens a new focused question. That workflow chooses
+  the smallest sufficient resource and scheduling model; this ADR does not preselect a graph
+  compiler or public execution kernel.
 
 ### GPU authority, target transaction, and epoch
 
@@ -104,9 +108,9 @@ flowchart LR
   that epoch is retired.
 - For the currently admitted single-target frame, the execution authority acquires/imports the
   target at most once and presents, publishes, or discards it once after its final consumer.
-- Multi-target global dependency ordering is not accepted by this ADR. It enters through OQ-001
-  when a real offscreen or cross-target workflow cannot be represented by independent admitted
-  target transactions.
+- Multi-target global dependency ordering is not accepted by this ADR or ADR 0111. It requires a
+  new focused decision when a real workflow cannot be represented by independent admitted target
+  transactions or ADR 0111's single fixed edge.
 
 ### Evidence-gated extension freedom
 
@@ -193,7 +197,7 @@ and implementations land.
 |---|---|---:|---|
 | Minimal baseline becomes a permanently closed renderer | High | Medium | Keep pressure tracers and open questions, and admit the lowest sufficient authority when a real workflow fails. |
 | Backend-local hooks accumulate before a public extension path exists | High | Medium | Require explicit domain ownership and record each workaround as admission evidence; do not normalize hidden hooks. |
-| `RenderPassPlan` grows into a partial graph | High | High | Keep its data model phase-only and replace it under pre-1.0 policy when OQ-001 admits another model. |
+| `RenderPassPlan` grows into a partial graph | High | High | Keep its data model phase-only and replace it under pre-1.0 policy only after a new focused decision admits another model. |
 | Raw wgpu is exposed casually to restore freedom | Critical | Medium | Require a separate trust, ordering, epoch, target, and teardown decision for exact-GPU access. |
 | Tracers merely confirm the old taxonomy | High | Medium | Every tracer compares at least two viable shapes and includes reversal criteria before production APIs change. |
 
@@ -203,8 +207,8 @@ and implementations land.
 - Current render work may complete the owned frame-transfer, single-target transaction, browser-
   affinity, and epoch-recovery baseline without implementing Pipeline Family, recipes, a retained
   scene, a public graph/compiler, interop, or replacement Host.
-- OQ-001 selects the future graph or execution shape from concrete resource pressure rather than
-  asking how to implement a preselected compiler.
+- ADR 0111 records the first concrete-pressure selection. Any future graph or execution shape is
+  selected by a new focused question rather than by implementing a preselected compiler.
 - The render pressure matrix and Interface harness remain useful design inputs, but their role
   taxonomy is explicitly hypothetical until admitted one capability at a time.
 - The future render plan must be rebaselined after the reference-game release. Its existing units

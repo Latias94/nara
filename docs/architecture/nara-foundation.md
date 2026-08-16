@@ -794,11 +794,11 @@ security defect, or measured platform/product constraint fires and the owning de
    frame packet, add browser-local asynchronous WebGPU initialization with adapter-declared native
    placement, and make native plus
    `wasm32-unknown-unknown` render checks part of the local feature matrix.
-- Use the first real offscreen or cross-target workflow to reopen OQ-001. Compare independent target
-   transactions, a frame-wide coordinator, a minimal execution kernel, and a
-   logical graph; admit only the smallest model that owns acquire/finalization, ordering, resource
-   lifetime, and inspection truthfully. Until then, keep the accepted single-target transaction and
-   do not preselect global coordination.
+- ADR 0111 resolves the first real offscreen/cross-target workflow with one private fixed
+  Scene-image-to-Editor-window transaction. If a later workflow exceeds that edge, compare
+  independent target transactions, a frame-wide coordinator, a minimal execution kernel, and a
+  logical graph in a new focused decision; admit only the smallest model that owns
+  acquire/finalization, ordering, resource lifetime, and inspection truthfully.
 - Harden render resource lifetime beyond texture cache policy by measuring upload/allocation
    pressure, then trial the smallest private allocator/cache mechanism with epoch and loss tests.
 - Mature runtime UI beyond panels: one concrete Unicode-capable text/font integration, richer layout,
@@ -807,10 +807,11 @@ security defect, or measured platform/product constraint fires and the owning de
    remains an OQ-010 evidence question, not a runtime UI prerequisite.
    See [UI Product Boundaries, Editor Dogfooding, and Porting
    Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md).
-- Treat post-processing, render-to-texture, editor viewport composition, 3D depth/prepass, and
-   transient resource lifetime as OQ-001 evidence only when the closed first-party order cannot
-   express the concrete workflow. None of those feature labels selects a full `RenderGraph`; the
-   review still compares an extended static order, a minimal execution kernel, and a logical graph.
+- Treat post-processing, additional render-to-texture or Editor composition beyond ADR 0111's fixed
+  edge, 3D depth/prepass, and transient resource lifetime as admission evidence only when the
+  closed first-party order cannot express the concrete workflow. None of those feature labels
+  selects a full `RenderGraph`; a focused review still compares an extended static order, a fixed
+  transaction, a minimal execution kernel, and a logical graph.
 - Define incremental `WorldCommand` sync as an optimization over the rebuild-style authoring
    projection.
 - Extend Apply Changes beyond whole-component replacement only after field-level diffing, prefab

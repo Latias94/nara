@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Last Revised**: 2026-08-13
+**Last Revised**: 2026-08-16
 **Refines**: ADR 0010, ADR 0017, ADR 0032, ADR 0033, ADR 0037
 **Refined By**: ADR 0046: Plugin Metadata and Default Plugin Groups; ADR 0053: Visibility,
 Culling, and Tilemap Render Cache (Superseded); ADR 0054: GPU Upload Budget and Buffer Allocation Policy; ADR
@@ -15,7 +15,8 @@ UI, Text, Widget, and Presented-Frame Topology; [ADR 0105](0105-closed-first-par
 Closed First-Party Render Plan; [ADR 0106](0106-content-and-presentation-product-composition.md):
 Content and Presentation Product Composition;
 [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md): Root-Local UI Compilation and
-Presentation Closure
+Presentation Closure; [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md): Editor
+Scene View Execution and Picking Authority
 
 ## ADR 0106 Product-Contribution Refinement
 
@@ -96,9 +97,11 @@ Rules:
   current backend generation; epoch-correlated bounded recovery remains future work.
 - `RenderPassPlan` remains the static engine-owned pass-order contract. The unconsumed public
   `RenderPassDependency` edge/cycle surface should be removed or internalized; stock ordering can
-  validate phase presence/index directly. Computed ordering, transient resources, or pass-produced
-  lifetimes reopen OQ-001 to compare extended static phases, independent target transactions, a
-  minimal execution kernel, and a logical graph. The pressure does not itself select `RenderGraph`.
+  validate phase presence/index directly. ADR 0111 resolves the first cross-target dependency with
+  one fixed private transaction. Later computed ordering, transient resources, or pass-produced
+  lifetimes require a new focused comparison of extended static phases, independent target
+  transactions, a minimal execution kernel, and a logical graph. The pressure does not itself
+  select `RenderGraph`.
 - `WgpuRenderPlugin` owns wgpu device/surface/backend resources. Sprite, tilemap, UI, text, gizmo,
   and future 3D domains own extraction and batch data. Stock wgpu may encode concrete batches in
   private feature-gated modules whose concrete first-party contribution plugins are installed only
@@ -146,7 +149,7 @@ and submitter ownership mature enough for 2D, UI, and later 3D.
 | Reload behavior | Asset reload invalidates prepared/gpu resources by generation | Reload tests |
 | Feature decoupling | UI/sprite/text batch production and concrete wgpu encoders can be enabled independently from device/surface setup without claiming a submitter SPI | Feature/plugin tests |
 | Surface retirement | Surface loss retains provider ownership; shutdown and backend replacement retire surface ownership before provider/native target ownership | Window/wgpu lifecycle and platform smoke tests |
-| Execution-model trigger clarity | Need for computed ordering or transient resource lifetimes reopens OQ-001 without preselecting its answer | Design review |
+| Execution-model trigger clarity | ADR 0111 closes the first fixed cross-target edge; later computed ordering or transient lifetime pressure requires a new focused decision | Design review |
 
 ## Risks and Mitigations
 

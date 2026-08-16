@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
+**Last Revised**: 2026-08-16
 **Owner**: Renderer-neutral presentation planning, owned submitter packets, and concrete render backends
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0017](0017-render-graph-policy.md),
@@ -10,6 +11,7 @@
 [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md), and
 [ADR 0096](0096-evidence-gated-render-scaling-and-upload-policy.md)
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U4 and NUI-U14
+**Refined By**: [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 
 ## Context
 
@@ -65,9 +67,10 @@ flowchart LR
   packet for the matching surface/environment revision may emit its presentation receipt.
 - Backend-private batching, atlasing, pipeline caches, and command encoding remain optimization
   details. Their keys cannot become a second public ordering or resource-lifetime authority.
-- [OQ-001](../open-questions.md#oq-001-render-execution-model-trigger) is the only route to reopen a
-  more general execution model: a real intermediate logical resource, retained/history lifetime,
-  or cross-target dependency must first exceed the closed plan.
+- ADR 0111 resolves the first cross-target pressure with one private fixed transaction and does not
+  reopen the general execution model. A real intermediate logical resource, retained/history
+  lifetime, or computed dependency must exceed both the closed plan and that fixed edge before a
+  new focused question may admit broader authority.
 
 ## Alternatives Considered
 
@@ -113,7 +116,7 @@ leaving a measurable trigger for a later execution model.
 
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
-| The closed plan blocks the first real advanced render workflow | Medium | Low | Keep OQ-001 measurable and accept a successor only with a named static-plan-breaking consumer. |
+| The closed plan blocks a later advanced render workflow | Medium | Low | Accept a successor only with a named workflow that exceeds both the closed plan and ADR 0111's fixed transaction. |
 | Resource-complete packets copy excessive image or glyph data | High | Medium | Retain bounded immutable shared snapshots and generation keys instead of copying full resources per frame. |
 | Backend caches substitute a newer resource generation | Critical | Medium | Key residency by exact generation and device epoch; reject mismatches rather than consulting live state. |
 | Private stages leak back through ordinary preludes | High | Medium | Add public-surface and independent-consumer checks for every presentation crate. |

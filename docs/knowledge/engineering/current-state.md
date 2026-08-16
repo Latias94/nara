@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "54f1324b351847966c0344c74db74580e5d3d6bfa23d0640e2065ef162f85f83"
+source_fingerprint: "04d5a00ace6c9ea9085b780f4e5802fd9a3a1e9a7d7121b3b5f33b6237db2ed9"
 ---
 
 # Current State
@@ -12,15 +12,15 @@ source_fingerprint: "54f1324b351847966c0344c74db74580e5d3d6bfa23d0640e2065ef162f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `54f1324b351847966c0344c74db74580e5d3d6bfa23d0640e2065ef162f85f83`
-- Immutable records: 468
+- Source fingerprint: `04d5a00ace6c9ea9085b780f4e5802fd9a3a1e9a7d7121b3b5f33b6237db2ed9`
+- Immutable records: 470
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
-- [Editor Scene Composition and Scene View v1: ESV-U1 active](registry/2026-08/2026-08-16T072822Z-editor-scene-composition-view-v1-codex-root-68dab7e400b14d59b3deec1be3f63df4.md): `active` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
+- [Editor Scene Composition and Scene View v1: ESV-U2 active](registry/2026-08/2026-08-16T084917Z-editor-scene-composition-view-v1-codex-root-ad1c66d7dec742b59507f64ba14cd951.md): `active` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -33,6 +33,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [ESV-U1 Editor Scene View execution contract](verification/2026-08/2026-08-16T084916Z-esv-u1-editor-scene-view-execution-contract-1de9903b1b7b4623a0633b2a6565e0b0.md) - Verifies the private one-device Editor image-to-window execution, exact composite receipt, target retirement, and whole-owner replacement boundary.
 - **Verification Evidence**: [EFI-U5 Editor authoring-loop conformance](verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md) - Verifies one published starter edit through the private Editor, project check, generated headless product, and accepted source-carrying export.
 - **Verification Evidence**: [EFI-U4 private native Editor application](verification/2026-08/2026-08-15T223500Z-efi-u4-private-native-editor-application-26373f31c4664b89b0d33eed4bef93db.md) - Verifies the private native nara-editor package, exact frame/action integration, bounded failure feedback, dirty-close arbitration, and one real Windows WGPU window canary.
 - **Verification Evidence**: [EFI-U3 revision-bound egui Adapter and fixed panel model](verification/2026-08/2026-08-15T214835Z-efi-u3-revision-bound-egui-adapter-and-fixed-panel-model-87a848bea2894fd1ba91db03c224f9e2.md) - Verifies the exact-frame egui Adapter, revision-bound transient drafts, ordered actions, fixed panel model, and exact persistence retry identity.
@@ -44,7 +45,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [FPER-U2 startup-closure export conformance](verification/2026-08/2026-08-15T054430Z-fper-u2-startup-closure-export-conformance-64c7375e92e64f958174aa1bc37b09ee.md) - Verifies exact Cargo artifact selection, startup-closure publication, portable executable permissions, independent consumption, and arbitrary-CWD headless and desktop acceptance.
 - **Verification Evidence**: [FPER-U1 shared check and generated product conformance](verification/2026-08/2026-08-15T035815Z-fper-u1-shared-check-and-generated-product-conformance-9c30143011a44596a7dd7e007adf1d01.md) - Verifies the shared project check facts, presentation-free headless product, generated desktop product adapter, and camera-content/presentation scheduling split.
 - **Verification Evidence**: [FPER-U0 versioned starter and creation conformance](verification/2026-08/2026-08-14T140058Z-fper-u0-versioned-starter-and-creation-conformance-6717111091f5451fa4708a04b79e1c35.md) - Verifies the closed desktop-2d/v1 starter, typed dependency authority, atomic publication, ordinary admission, thin CLI and independent public consumer.
-- **Verification Evidence**: [CDPF-U3 external directory publication conformance baseline](verification/2026-08/2026-08-14T060149Z-cdpf-u3-external-directory-publication-conformance-baseline-1c01523e7462406dabf4a177cf64285c.md) - Verifies the public nara_fs directory-publication Interface through an isolated external consumer and records the exact hosted support boundary.
 
 # Integration Notes
 

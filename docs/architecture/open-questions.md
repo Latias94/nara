@@ -1,21 +1,23 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-08-14
+**Updated**: 2026-08-16
 
-This document contains undecided architecture questions only. Accepted decisions belong in ADRs; implementation evidence belongs in `adr/implementation-status.md` and engineering memory. Each question remains open until its trigger creates enough concrete pressure for an ADR.
+This document owns open architecture questions and stable redirects for recently resolved question
+identities. Accepted decisions belong in ADRs; implementation evidence belongs in
+`adr/implementation-status.md` and engineering memory. A resolved redirect contains no residual
+decision authority.
 
 ## OQ-001: Render Execution Model Trigger
 
-- **Status**: open
+- **Status**: resolved by [ADR 0111](adr/0111-editor-scene-view-execution-and-picking-authority.md)
 - **Owner**: `nara_render`
-- **Trigger**: An intermediate logical resource, retained/history lifetime, or cross-target
-  dependency requires scheduling that the closed first-party order cannot express.
-- **Related ADRs**: 0017, 0032, 0040, 0094, 0096
-- **Question**: What is the smallest execution model that satisfies the first static-plan-breaking workflow:
-  extended static phases, a minimal execution kernel, or a logical resource
-  graph? Which resource, lifetime, ordering, and inspection semantics does that workflow actually
-  require?
+- **Resolution**: The first Scene View cross-target dependency uses one private serialized
+  `Scene image -> egui -> Editor window` transaction under one GPU execution owner. It does not
+  admit a RenderGraph, public execution kernel, or general multi-target scheduler.
+- **Evidence**: ESV-U1 implementation commit `1f97c48` and ADR 0111. A future computed dependency,
+  retained/history lifetime, or independent multi-target schedule that exceeds this fixed edge
+  requires a new focused question.
 
 ## OQ-002: Reusable Material and Shader Specialization
 
@@ -377,14 +379,15 @@ flowchart LR
 
 ## OQ-022: Editor Render Execution Ownership
 
-- **Status**: open
+- **Status**: resolved by [ADR 0111](adr/0111-editor-scene-view-execution-and-picking-authority.md)
 - **Owner**: render/platform adapters and `nara_tooling`
-- **Trigger**: The first offscreen editor viewport or multiple isolated edit/play runtimes need to share a device, caches, or render targets.
-- **Related ADRs**: 0015, 0034, 0042, 0078, 0094
-- **Question**: Should the editor own or lease a shared process-level render execution authority,
-  should each isolated App retain an independent authority, or is another model smaller? How do
-  bounded frame transfer, target leases, device epochs, cache budgets, and shutdown rules prevent
-  one runtime from invalidating another?
+- **Resolution**: The private Editor Host owns one serialized WGPU execution authority for its
+  window and edit-world Scene target. Target generations, backend instance/device epoch, egui
+  registration generation, surface generation, and composite presentation generation reject stale
+  work. Device loss replaces the whole execution owner while preserving the Editor document.
+- **Evidence**: ESV-U1 implementation commit `1f97c48` and ADR 0111. Game View/Play placement,
+  multiple isolated runtime views, detached windows, and public renderer replacement remain
+  separate successor decisions.
 
 ## OQ-023: Platform Application Lifecycle
 

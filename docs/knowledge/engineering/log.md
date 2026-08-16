@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-16
+* **Work Registration**: [Editor Scene Composition and Scene View v1: ESV-U2 active](registry/2026-08/2026-08-16T084917Z-editor-scene-composition-view-v1-codex-root-ad1c66d7dec742b59507f64ba14cd951.md) - Closes ESV-U1 at commit 1f97c48 and activates only revision-bound Scene Composition and canonical tree actions.
+* **Verification Evidence**: [ESV-U1 Editor Scene View execution contract](verification/2026-08/2026-08-16T084916Z-esv-u1-editor-scene-view-execution-contract-1de9903b1b7b4623a0633b2a6565e0b0.md) - Verifies the private one-device Editor image-to-window execution, exact composite receipt, target retirement, and whole-owner replacement boundary.
 * **Work Registration**: [Editor Scene Composition and Scene View v1: ESV-U1 active](registry/2026-08/2026-08-16T072822Z-editor-scene-composition-view-v1-codex-root-68dab7e400b14d59b3deec1be3f63df4.md) - Activates the reviewed Scene View execution tracer and ownership contract as the sole implementation unit.
 
 ## 2026-08-15
@@ -145,7 +147,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Ordered UI kernel correction: NUI-U8 active](registry/2026-08/2026-08-05T062616Z-engine-foundation-contract-completion-codex-root-3735828fbf8a4bee87564d9728719129.md) - Records completed canonical ordered documents and exact placement patches, then activates ordered runtime hierarchy projection.
 * **Verification Evidence**: [NUI-U6/U7 canonical ordered documents and exact placement patches](verification/2026-08/2026-08-05T062453Z-nui-u6-u7-canonical-ordered-documents-and-exact-placement-patches-e0f908e2277c4a56b55090275d8591dd.md) - Verifies canonical ordered Scene and Prefab placement, bounded rejection of the removed parent shape, exact candidate-relative Patch inverses, tooling history, and persistence parity.
 * **Work Registration**: [Ordered UI kernel correction: NUI-U6 active](registry/2026-08/2026-08-05T021107Z-engine-foundation-contract-completion-codex-root-81e32271e18646c6a6f287b6bc770021.md) - Records the completed NUI-U5A 2D composition checkpoint, keeps final UI composition open after NUI-U13, and activates canonical ordered Scene and Prefab documents.
-* **Verification Evidence**: [NUI-U5A explicit 2D content and presentation composition](verification/2026-08/2026-08-05T020814Z-nui-u5a-explicit-2d-content-and-presentation-composition-cab380e2dfc34bb88b849f62b84b8c3b.md) - Verifies the content-only runtime-2d boundary, explicit presentation-2d composition, stable project capability bits, exact headless and desktop plans, and independently locked consumers.
-
-## 2026-08-04
-* **Verification Evidence**: [NUI-U4 closed first-party render and UI internals](verification/2026-08/2026-08-04T182540Z-nui-u4-closed-first-party-render-and-ui-internals-af4e0733217a483cb73239914fd21ef1.md) - Verifies deletion of arbitrary render topology, closure of technical UI stages and mutable batch resources, deterministic first-party ordering, and facade/dependency cleanup.

@@ -2,10 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-08-16
 **Refined By**: ADR 0040: Render Resource Lifetime and Submitter Ownership; ADR 0077: Render
 Pipeline Recipes, Graph Compilation, and Backend Encoding (Superseded); ADR 0094: Minimal Render
 Execution Boundary and Evidence-Gated Extensions;
-[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan
+[ADR 0105](0105-closed-first-party-render-plan.md): Closed First-Party Render Plan; and
+[ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md): Editor Scene View Execution
+and Picking Authority
 
 ## Context
 
@@ -95,18 +98,20 @@ This makes later graph migration a structural change, not a full conceptual rewr
 
 ### Rule 4: A graph decision waits for concrete resource pressure
 
-Do not build a full graph only for the initial sprite pass. Reopen OQ-001 when at least one of these
-arrives and `RenderPassPlan` cannot express its resource lifetime or dependency:
+Do not build a full graph only for the initial sprite pass. ADR 0111 resolved the first concrete
+cross-target pressure with one private serialized Scene-image-to-Editor-window transaction. Open a
+new focused question only when at least one of these arrives and neither `RenderPassPlan` nor a
+fixed owner-local transaction can express its resource lifetime or dependency:
 
 - Post-processing.
 - Multiple viewports/render-to-texture.
-- Editor viewport composition.
+- Additional Editor viewport composition beyond ADR 0111's fixed edge.
 - 3D shadow/depth/prepass needs.
 - UI composition requiring explicit pass ordering.
 
-The triggered review compares static phases, a typed provider, a minimal execution kernel, and a
-logical graph under ADR 0094. The presence of post-processing or another item in this list does not
-automatically select a full graph.
+That successor review compares static phases, a fixed transaction, a typed provider, a minimal
+execution kernel, and a logical graph under ADR 0094. The presence of post-processing or another
+item in this list does not automatically select a full graph.
 
 ## Alternatives Considered
 
@@ -155,7 +160,7 @@ automatically select a full graph.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | Static passes become hidden hardcoding | High | Medium | Name pass resources and phases even before graph exists |
-| Premature graph abstractions creep in | Medium | Medium | Require OQ-001 alternatives evidence and an Accepted decision; a feature label alone is not graph evidence |
+| Premature graph abstractions creep in | Medium | Medium | Require a new focused alternatives review and an Accepted decision; a feature label alone is not graph evidence |
 | Future graph conflicts with current phases | Medium | Medium | Treat phases as queue categories, not fixed pass ownership |
 
 ## Follow-Up Questions
@@ -166,7 +171,8 @@ automatically select a full graph.
   transactions, a typed provider, a minimal execution kernel, or a logical graph?
 - Where should resource-lifetime ownership and inspection live in the admitted model?
 
-OQ-001 owns this trigger and alternatives review.
+ADR 0111 records the first resolved trigger. Any later trigger receives a new focused question so
+the resolved OQ-001 identity does not regain decision authority.
 
 ## Citations
 

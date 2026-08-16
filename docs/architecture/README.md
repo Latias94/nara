@@ -10,10 +10,11 @@ an index, not another source of architecture decisions.
    gaps.
 3. [Editor Scene Composition and Scene View
    v1](../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md) is the sole active
-   implementation plan, fixed at `e7f3249`; ESV-U1 is the sole active unit under registration
-   `68dab7e400b14d59b3deec1be3f63df4`. ESV-U2 through ESV-U5 remain inactive and
-   dependency-ordered. The completed Editor Authoring Loop, Fresh Project, Capability Directory
-   Publication, Runtime UI, and focused correction plans remain immutable lineage evidence; the
+   implementation plan, fixed at `e7f3249`; ESV-U2 is the sole active unit under registration
+   `ad1c66d7dec742b59507f64ba14cd951`. ESV-U1 is verified at `1f97c48`; ESV-U3 through ESV-U5
+   remain inactive and dependency-ordered. The completed Editor Authoring Loop, Fresh Project,
+   Capability Directory Publication, Runtime UI, and focused correction plans remain immutable
+   lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and

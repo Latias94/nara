@@ -2,12 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
-**Last Revised**: 2026-07-20
+**Last Revised**: 2026-08-16
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
 [ADR 0032](0032-render-backend-integration-boundary.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md), and
 [ADR 0042](0042-runtime-service-and-backend-boundary.md)
-**Refined By**: [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md)
+**Refined By**: [ADR 0094](0094-minimal-render-execution-boundary-and-evidence-gated-extensions.md) and
+[ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 
 ## Context
 
@@ -184,8 +185,9 @@ Until then, exact wgpu access remains private backend implementation detail.
   backend-neutral data only. It never contains `Surface`,
   `SurfaceTexture`, `TextureView`, `Device`, `Queue`, an encoder, or a configured platform target.
 - Surface/offscreen acquisition, configuration, presentation, and discard remain inside the host's
-  target transaction. The currently admitted path has one target transaction per target frame;
-  cross-target dependency and submission ordering remains an OQ-001 decision under ADR 0094.
+  target transaction. ADR 0111 admits one private fixed Scene-image-to-Editor-window order under a
+  single execution owner; broader computed cross-target dependency and submission ordering still
+  requires a separate focused decision under ADR 0094.
 - A target is acquired at most once for one target frame and is presented or published only after
   its final consumer in the captured static plan.
 - The host must not reconfigure a surface while a prior acquired texture from that surface remains
