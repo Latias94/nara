@@ -516,13 +516,19 @@ impl EguiSceneInspectorPanel {
             if field.required {
                 field_label.push_str(" *");
             }
-            ui.label(field_label)
+            let field_label = ui
+                .label(field_label)
                 .on_hover_text(format!("kind: {}", value_kind_label(field.value_kind)));
 
             match field.value_kind {
-                ComponentValueKind::Bool => {
-                    self.show_bool_field(ui, target, field, field_editing_enabled, actions)
-                }
+                ComponentValueKind::Bool => self.show_bool_field(
+                    ui,
+                    target,
+                    field,
+                    field_label.id,
+                    field_editing_enabled,
+                    actions,
+                ),
                 ComponentValueKind::I64
                 | ComponentValueKind::U64
                 | ComponentValueKind::F64
@@ -579,6 +585,7 @@ impl EguiSceneInspectorPanel {
         ui: &mut Ui,
         target: &EguiInspectorFieldTarget,
         field: &SceneInspectorFieldView,
+        label_id: egui::Id,
         editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
@@ -588,7 +595,9 @@ impl EguiSceneInspectorPanel {
             .or(field.default_value.as_ref())
             .and_then(ComponentValue::as_bool)
             .unwrap_or(false);
-        let checkbox = ui.add_enabled(editing_enabled, egui::Checkbox::without_text(&mut value));
+        let checkbox = ui
+            .add_enabled(editing_enabled, egui::Checkbox::without_text(&mut value))
+            .labelled_by(label_id);
         if checkbox.changed() {
             self.field_drafts.remove(&target.key);
             actions.push(document_mutation(
@@ -622,6 +631,9 @@ impl EguiSceneInspectorPanel {
                 .id_salt(&target.key)
                 .desired_width(160.0),
         );
+        edit.ctx.accesskit_node_builder(edit.id, |builder| {
+            builder.set_label(field.path.to_string());
+        });
         if edit.changed() {
             self.field_drafts.insert(
                 target.key.clone(),
@@ -631,7 +643,7 @@ impl EguiSceneInspectorPanel {
                 },
             );
         }
-        let apply = {
+        let apply = edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) || {
             let response = ui.add_enabled(editing_enabled, Button::new("Apply"));
             #[cfg(test)]
             crate::editor::record_test_control(

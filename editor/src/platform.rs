@@ -26,8 +26,9 @@ use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     error::EventLoopError,
-    event::{StartCause, WindowEvent},
+    event::{ElementState, KeyEvent, StartCause, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
 
@@ -39,6 +40,7 @@ const INITIAL_HEIGHT: f64 = 800.0;
 const MIN_WIDTH: f64 = 720.0;
 const MIN_HEIGHT: f64 = 520.0;
 const CLEAR_COLOR: [f32; 4] = [0.055, 0.06, 0.075, 1.0];
+const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";
 
 #[derive(Debug, Error)]
 pub enum EditorRunError {
@@ -103,7 +105,7 @@ struct NativeEditorHost {
     scene_presenter: EditorScenePresenter,
     requested_scene_extent: Option<Extent2d>,
     scene_view_notice: Option<&'static str>,
-    gpu_replacement_attempted: bool,
+    gpu_recovery: EditorGpuRecovery,
     editor_frame_index: u64,
     last_frame: Instant,
     repaint_deadline: Option<Instant>,
@@ -123,7 +125,7 @@ impl NativeEditorHost {
             scene_presenter: EditorScenePresenter::new(),
             requested_scene_extent: None,
             scene_view_notice: None,
-            gpu_replacement_attempted: false,
+            gpu_recovery: EditorGpuRecovery::Ready,
             editor_frame_index: 0,
             last_frame: Instant::now(),
             repaint_deadline: None,
@@ -151,6 +153,7 @@ impl NativeEditorHost {
         self.egui_state = Some(egui_state);
         self.gpu = Some(gpu);
         self.renderer = Some(renderer);
+        self.gpu_recovery.owner_recreated_for_platform_resume();
         self.last_frame = Instant::now();
         Ok(())
     }
@@ -178,6 +181,47 @@ impl NativeEditorHost {
         self.last_frame = Instant::now();
         window.request_redraw();
         Ok(())
+    }
+
+    fn await_explicit_gpu_retry(&mut self, error: &EditorRunError) {
+        self.renderer = None;
+        self.gpu = None;
+        self.scene_presenter.retire_gpu_binding();
+        self.pending_textures.clear();
+        set_requested_scene_extent(
+            &mut self.application,
+            &mut self.requested_scene_extent,
+            None,
+        );
+        self.gpu_recovery.require_explicit_retry();
+        self.scene_view_notice = Some("Scene View GPU execution is unavailable");
+        if let Some(window) = self.window.as_ref() {
+            window.set_title(EDITOR_GPU_UNAVAILABLE_TITLE);
+        }
+        eprintln!("Nara Editor GPU recovery paused: {error}");
+    }
+
+    fn retry_gpu_execution(&mut self) {
+        if !self.gpu_recovery.begin_explicit_retry() {
+            return;
+        }
+        if let Err(error) = self.replace_gpu_execution() {
+            self.await_explicit_gpu_retry(&error);
+        }
+    }
+
+    fn handle_gpu_failure(&mut self, event_loop: &ActiveEventLoop, error: EditorRunError) {
+        if !error.requires_gpu_replacement() {
+            self.fail(event_loop, error);
+            return;
+        }
+        if self.gpu_recovery.begin_automatic_replacement() {
+            if let Err(replacement_error) = self.replace_gpu_execution() {
+                self.await_explicit_gpu_retry(&replacement_error);
+            }
+        } else {
+            self.await_explicit_gpu_retry(&error);
+        }
     }
 
     fn handle_window_event(
@@ -223,6 +267,11 @@ impl NativeEditorHost {
                 );
                 window.request_redraw();
             }
+            WindowEvent::KeyboardInput { event, .. } if explicit_gpu_retry_requested(&event) => {
+                self.retry_gpu_execution();
+            }
+            WindowEvent::RedrawRequested
+                if self.gpu_recovery == EditorGpuRecovery::AwaitingExplicitRetry => {}
             WindowEvent::RedrawRequested => self.redraw(event_loop)?,
             WindowEvent::Destroyed => {
                 self.scene_presenter.retire_gpu_binding();
@@ -434,7 +483,8 @@ impl NativeEditorHost {
         }
         let presentation = presentation.map_err(platform_gpu_error)?;
         if presentation.window().is_some() {
-            self.gpu_replacement_attempted = false;
+            self.gpu_recovery.mark_presented();
+            window.set_title(EDITOR_TITLE);
         }
         match (prepared_scene, presentation.composite()) {
             (Some(prepared), Some(receipt)) => {
@@ -540,22 +590,81 @@ impl ApplicationHandler for NativeEditorHost {
         event: WindowEvent,
     ) {
         if let Err(error) = self.handle_window_event(event_loop, window_id, event) {
-            if error.requires_gpu_replacement() {
-                if self.gpu_replacement_attempted {
-                    self.fail(event_loop, error);
-                    return;
-                }
-                self.gpu_replacement_attempted = true;
-                if let Err(replacement_error) = self.replace_gpu_execution() {
-                    self.fail(event_loop, replacement_error);
-                }
-            } else {
-                self.fail(event_loop, error);
-            }
+            self.handle_gpu_failure(event_loop, error);
         }
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditorGpuRecovery {
+    Ready,
+    AutomaticReplacementAttempted,
+    AwaitingExplicitRetry,
+}
+
+impl EditorGpuRecovery {
+    fn begin_automatic_replacement(&mut self) -> bool {
+        if *self != Self::Ready {
+            return false;
+        }
+        *self = Self::AutomaticReplacementAttempted;
+        true
+    }
+
+    fn begin_explicit_retry(&mut self) -> bool {
+        if *self != Self::AwaitingExplicitRetry {
+            return false;
+        }
+        *self = Self::AutomaticReplacementAttempted;
+        true
+    }
+
+    fn require_explicit_retry(&mut self) {
+        *self = Self::AwaitingExplicitRetry;
+    }
+
+    fn mark_presented(&mut self) {
+        *self = Self::Ready;
+    }
+
+    fn owner_recreated_for_platform_resume(&mut self) {
+        if *self == Self::AwaitingExplicitRetry {
+            *self = Self::AutomaticReplacementAttempted;
+        }
+    }
+}
+
+fn explicit_gpu_retry_requested(event: &KeyEvent) -> bool {
+    event.state == ElementState::Pressed
+        && !event.repeat
+        && event.physical_key == PhysicalKey::Code(KeyCode::F5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditorGpuRecovery;
+
+    #[test]
+    fn gpu_recovery_requires_explicit_retry_after_one_automatic_replacement() {
+        let mut recovery = EditorGpuRecovery::Ready;
+
+        assert!(recovery.begin_automatic_replacement());
+        assert!(!recovery.begin_automatic_replacement());
+
+        recovery.require_explicit_retry();
+        assert!(!recovery.begin_automatic_replacement());
+        recovery.owner_recreated_for_platform_resume();
+        assert!(!recovery.begin_automatic_replacement());
+
+        recovery.require_explicit_retry();
+        assert!(recovery.begin_explicit_retry());
+        assert!(!recovery.begin_explicit_retry());
+
+        recovery.mark_presented();
+        assert!(recovery.begin_automatic_replacement());
+    }
 }
 
 struct PreparedEditorScene {

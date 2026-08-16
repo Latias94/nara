@@ -11,6 +11,8 @@ use std::{
     time::Duration,
 };
 
+use egui::{Key, Modifiers, accesskit::Role};
+use egui_kittest::{Harness, kittest::Queryable as _};
 use nara::{
     ProductRecipe,
     fs::{
@@ -23,23 +25,23 @@ use nara::{
         prepare_desktop_2d_project,
     },
     reflect::{ComponentFieldId, ComponentTypeId, ComponentValue},
+    render::Extent2d,
+    scene::SceneEntityId,
     tooling::{
         EditorAction, EditorActionBatch, EditorDocumentMutation, EditorFieldFeedbackReason,
-        EditorNavigationAction, EditorPersistenceAction, EditorPersistenceResult,
-        EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
-        SceneInspectorCommand,
+        EditorPersistenceAction, EditorPersistenceResult, EditorWorkspaceIntent,
+        EditorWorkspaceIntentAction, EditorWorkspaceIntentResult, SceneInspectorCommand,
     },
 };
 use nara_editor::{EditorApplication, EditorLaunchOptions};
 use serde_json::Value;
 
 const PROJECT_SLUG: &str = "editor-authoring-loop";
-const CAMERA_ENTITY: &str = "main-camera";
-const CAMERA_COMPONENT: &str = "nara.render.Camera2d";
-const VIEWPORT_HEIGHT_FIELD: &str = "viewport_height";
-const INITIAL_VIEWPORT_HEIGHT: f64 = 720.0;
-const EDITED_VIEWPORT_HEIGHT: f64 = 768.0;
-const STALE_VIEWPORT_HEIGHT: f64 = 900.0;
+const CREATED_ENTITY: &str = "editor_entity_1";
+const TRANSFORM_COMPONENT: &str = "nara.transform.Transform2d";
+const TRANSLATION_X_FIELD: &str = "translation.x";
+const EDITED_TRANSLATION_X: f64 = 128.0;
+const STALE_TRANSLATION_X: f64 = 256.0;
 const EXPORT_DESTINATION: &str = "editor-authoring-candidate";
 const PRODUCT_OBSERVATION_ATTEMPT_ENV: &str = "NARA_STARTER_OBSERVATION_ATTEMPT";
 const PRODUCT_OBSERVATION_FILE_ENV: &str = "NARA_STARTER_OBSERVATION_FILE";
@@ -56,7 +58,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
 
     let mut application = EditorApplication::open(EditorLaunchOptions::new(&project))
         .expect("the published starter must open in the private Editor application");
-    select_camera(&mut application);
+    application.set_scene_preview_extent(Extent2d::new(960, 540));
     let opened = application.current_frame();
     let opened_scene = opened
         .workspace()
@@ -65,44 +67,71 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         .expect("the starter opens its configured startup Scene");
     let document = opened_scene.document;
     let initial_revision = opened_scene.revision;
-    let field = camera_viewport_field(&opened);
-    assert_eq!(field.value, INITIAL_VIEWPORT_HEIGHT);
     assert!(!opened_scene.dirty);
 
-    let edited = dispatch(
-        &mut application,
-        [EditorAction::Mutate(
-            EditorDocumentMutation::ApplyInspectorCommand {
-                document,
-                base_revision: initial_revision,
-                command: SceneInspectorCommand::SetField {
-                    entity: nara::scene::SceneEntityId::new(CAMERA_ENTITY).unwrap(),
-                    component: ComponentTypeId::new(CAMERA_COMPONENT),
-                    component_version: field.component_version,
-                    field: ComponentFieldId::new(VIEWPORT_HEIGHT_FIELD),
-                    value: ComponentValue::f64(EDITED_VIEWPORT_HEIGHT).unwrap(),
-                },
-            },
-        )],
+    let mut harness = editor_harness(application);
+    harness.get_by_label("+ Root").click();
+    harness.run();
+    let composed = harness.state().current_frame();
+    let composed_scene = composed.workspace().active_scene.as_ref().unwrap();
+    let composed_revision = composed_scene.revision;
+    let created_entity = SceneEntityId::new(CREATED_ENTITY).unwrap();
+    assert_ne!(composed_revision, initial_revision);
+    assert_eq!(
+        composed_scene.editor.inspector.selected_entity.as_ref(),
+        Some(&created_entity)
     );
+    assert!(composed_scene.dirty);
+    assert_eq!(transform_x_field(&composed).value, 0.0);
+
+    harness
+        .get_by_role_and_label(Role::TextInput, TRANSLATION_X_FIELD)
+        .focus();
+    harness.run();
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    harness.run();
+    harness
+        .get_by_role_and_label(Role::TextInput, TRANSLATION_X_FIELD)
+        .type_text("128");
+    harness.run();
+    harness.key_press(Key::Enter);
+    harness.run();
+
+    let edited = harness.state().current_frame();
     let edited_scene = edited.workspace().active_scene.as_ref().unwrap();
     let edited_revision = edited_scene.revision;
-    assert_ne!(edited_revision, initial_revision);
+    let field = transform_x_field(&edited);
+    assert_ne!(edited_revision, composed_revision);
     assert!(edited_scene.dirty);
-    assert_eq!(camera_viewport_height(&edited), EDITED_VIEWPORT_HEIGHT);
+    assert_eq!(field.value, EDITED_TRANSLATION_X);
+
+    let candidate = harness
+        .state_mut()
+        .take_scene_preview_candidate()
+        .expect("the accepted Transform edit publishes one preview candidate");
+    assert_eq!(candidate.document(), document);
+    assert_eq!(candidate.revision(), edited_revision);
+    let hit = candidate
+        .hits()
+        .iter()
+        .find(|hit| hit.entity() == &created_entity)
+        .expect("the composed visible entity contributes one preview hit");
+    assert!(hit.contains_clip_point([0.2, 0.0]));
+
+    let mut application = harness.into_state();
 
     let stale = dispatch(
         &mut application,
         [EditorAction::Mutate(
             EditorDocumentMutation::ApplyInspectorCommand {
                 document,
-                base_revision: initial_revision,
+                base_revision: composed_revision,
                 command: SceneInspectorCommand::SetField {
-                    entity: nara::scene::SceneEntityId::new(CAMERA_ENTITY).unwrap(),
-                    component: ComponentTypeId::new(CAMERA_COMPONENT),
+                    entity: created_entity.clone(),
+                    component: ComponentTypeId::new(TRANSFORM_COMPONENT),
                     component_version: field.component_version,
-                    field: ComponentFieldId::new(VIEWPORT_HEIGHT_FIELD),
-                    value: ComponentValue::f64(STALE_VIEWPORT_HEIGHT).unwrap(),
+                    field: ComponentFieldId::new(TRANSLATION_X_FIELD),
+                    value: ComponentValue::f64(STALE_TRANSLATION_X).unwrap(),
                 },
             },
         )],
@@ -111,42 +140,31 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         stale.workspace().active_scene.as_ref().unwrap().revision,
         edited_revision
     );
-    assert_eq!(camera_viewport_height(&stale), EDITED_VIEWPORT_HEIGHT);
+    assert_eq!(transform_x_field(&stale).value, EDITED_TRANSLATION_X);
     assert_eq!(
         stale.field_feedback().unwrap().reason(),
         EditorFieldFeedbackReason::StaleAction
     );
     assert!(has_diagnostic(&stale, "editor.action.stale-document"));
 
-    let undone = dispatch(
-        &mut application,
-        [EditorAction::Mutate(EditorDocumentMutation::Undo {
-            document,
-            base_revision: edited_revision,
-        })],
-    );
+    let mut harness = editor_harness(application);
+    harness.get_by_label("Undo").click();
+    harness.run();
+    let undone = harness.state().current_frame();
     let undone_scene = undone.workspace().active_scene.as_ref().unwrap();
-    assert!(!undone_scene.dirty);
-    assert_eq!(camera_viewport_height(&undone), INITIAL_VIEWPORT_HEIGHT);
+    assert!(undone_scene.dirty);
+    assert_eq!(transform_x_field(&undone).value, 0.0);
 
-    let redone = dispatch(
-        &mut application,
-        [EditorAction::Mutate(EditorDocumentMutation::Redo {
-            document,
-            base_revision: undone_scene.revision,
-        })],
-    );
+    harness.get_by_label("Redo").click();
+    harness.run();
+    let redone = harness.state().current_frame();
     let redone_scene = redone.workspace().active_scene.as_ref().unwrap();
     assert!(redone_scene.dirty);
-    assert_eq!(camera_viewport_height(&redone), EDITED_VIEWPORT_HEIGHT);
+    assert_eq!(transform_x_field(&redone).value, EDITED_TRANSLATION_X);
 
-    let saved = dispatch(
-        &mut application,
-        [EditorAction::Persistence(EditorPersistenceAction::Save {
-            document,
-            base_revision: redone_scene.revision,
-        })],
-    );
+    harness.get_by_label("Save").click();
+    harness.run();
+    let saved = harness.state().current_frame();
     assert!(matches!(
         saved.persistence().result(),
         Some(EditorPersistenceResult::Saved {
@@ -157,6 +175,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     ));
     assert!(!saved.workspace().active_scene.as_ref().unwrap().dirty);
     let saved_scene_digest = ContentDigest::of_bytes(&fs::read(&scene_path).unwrap());
+    let mut application = harness.into_state();
 
     let acknowledged_save = dispatch(
         &mut application,
@@ -196,10 +215,23 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         Some(EditorPersistenceResult::Opened { document, .. }) => document,
         other => panic!("expected a reopened document, got {other:?}"),
     };
-    select_camera(&mut application);
-    let reopened = application.current_frame();
+    let mut harness = editor_harness(application);
+    harness.get_by_label_contains(CREATED_ENTITY).click();
+    harness.run();
+    let reopened = harness.state().current_frame();
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
-    assert_eq!(camera_viewport_height(&reopened), EDITED_VIEWPORT_HEIGHT);
+    assert_eq!(transform_x_field(&reopened).value, EDITED_TRANSLATION_X);
+    let reopened_scene = reopened.workspace().active_scene.as_ref().unwrap();
+    let created_row = reopened_scene
+        .editor
+        .inspector
+        .entities
+        .iter()
+        .find(|row| row.id == created_entity)
+        .expect("reopen reconstructs the composed entity in the canonical tree");
+    assert!(created_row.parent.is_none());
+
+    let mut application = harness.into_state();
 
     dispatch(
         &mut application,
@@ -283,7 +315,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
 }
 
 #[derive(Clone)]
-struct CameraViewportField {
+struct TransformXField {
     component_version: nara::reflect::ComponentSchemaVersion,
     value: f64,
 }
@@ -310,18 +342,16 @@ fn create_project(root: &TrajectoryRoot) -> PathBuf {
     project
 }
 
-fn select_camera(application: &mut EditorApplication) {
-    let frame = application.current_frame();
-    let scene = frame.workspace().active_scene.as_ref().unwrap();
-    dispatch(
-        application,
-        [EditorAction::Navigate(
-            EditorNavigationAction::SelectEntity {
-                document: scene.document,
-                entity: Some(nara::scene::SceneEntityId::new(CAMERA_ENTITY).unwrap()),
+fn editor_harness(application: EditorApplication) -> Harness<'static, EditorApplication> {
+    Harness::builder()
+        .with_size(egui::vec2(1280.0, 800.0))
+        .build_ui_state(
+            |ui, application| {
+                let batch = application.show(ui);
+                application.submit_and_drive(batch, Duration::ZERO);
             },
-        )],
-    );
+            application,
+        )
 }
 
 fn dispatch(
@@ -336,38 +366,34 @@ fn dispatch(
     application.current_frame()
 }
 
-fn camera_viewport_field(frame: &nara::tooling::EditorFrameModel) -> CameraViewportField {
+fn transform_x_field(frame: &nara::tooling::EditorFrameModel) -> TransformXField {
     let selected = frame
         .workspace()
         .active_scene
         .as_ref()
         .and_then(|scene| scene.editor.inspector.selected_entity_view.as_ref())
-        .expect("the camera is selected in the Inspector");
+        .expect("the composed entity is selected in the Inspector");
     let component = selected
         .components
         .iter()
-        .find(|component| component.component.as_str() == CAMERA_COMPONENT)
-        .expect("the starter camera exposes Camera2d");
+        .find(|component| component.component.as_str() == TRANSFORM_COMPONENT)
+        .expect("the composed entity exposes Transform2d");
     let field = component
         .fields
         .iter()
-        .find(|field| field.id.as_str() == VIEWPORT_HEIGHT_FIELD)
-        .expect("the starter camera exposes viewport_height");
+        .find(|field| field.id.as_str() == TRANSLATION_X_FIELD)
+        .expect("the composed entity exposes translation.x");
     let value = field
         .value
         .as_ref()
-        .expect("viewport_height has a concrete authored value");
+        .expect("translation.x has a concrete authored value");
     let ComponentValue::F64(value) = value else {
-        panic!("viewport_height must remain an f64");
+        panic!("translation.x must remain an f64");
     };
-    CameraViewportField {
+    TransformXField {
         component_version: component.schema_version,
         value: (*value).get(),
     }
-}
-
-fn camera_viewport_height(frame: &nara::tooling::EditorFrameModel) -> f64 {
-    camera_viewport_field(frame).value
 }
 
 fn has_diagnostic(frame: &nara::tooling::EditorFrameModel, code: &str) -> bool {
