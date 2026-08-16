@@ -394,16 +394,28 @@ fn payload_batches_match_topology(
     }
     #[cfg(feature = "ui-submitter")]
     {
-        let view_window = view.target.window_id(primary_window_id);
         if payload
             .ui_packets
             .iter()
-            .any(|packet| packet.target().window_id(primary_window_id) != view_window)
+            .any(|packet| !render_targets_match(packet.target(), view.target, primary_window_id))
         {
             return false;
         }
     }
     true
+}
+
+#[cfg(feature = "ui-submitter")]
+fn render_targets_match(
+    packet: RenderTarget,
+    view: RenderTarget,
+    primary_window_id: Option<WindowId>,
+) -> bool {
+    match (packet, view) {
+        (RenderTarget::Image(packet), RenderTarget::Image(view)) => packet == view,
+        (RenderTarget::Image(_), _) | (_, RenderTarget::Image(_)) => false,
+        (packet, view) => packet.window_id(primary_window_id) == view.window_id(primary_window_id),
+    }
 }
 
 #[cfg(feature = "ui-submitter")]
@@ -483,6 +495,24 @@ pub(crate) const fn classify_ui_backend_fault(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn target_matching_normalizes_windows_but_keeps_images_exact() {
+        use nara_asset::{AssetId, Handle};
+        use nara_render::RenderImage2d;
+
+        assert!(render_targets_match(
+            RenderTarget::Window(WindowId::PRIMARY),
+            RenderTarget::PrimaryWindow,
+            Some(WindowId::PRIMARY),
+        ));
+        assert!(!render_targets_match(
+            RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(1))),
+            RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(2))),
+            Some(WindowId::PRIMARY),
+        ));
+    }
 
     #[cfg(feature = "sprite-submitter")]
     #[test]

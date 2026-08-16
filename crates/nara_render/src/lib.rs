@@ -26,7 +26,53 @@ pub use prepare::{
 
 #[doc(hidden)]
 pub mod __private {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use nara_ecs::SystemSet;
+
+    use super::{
+        ExtractedViews, RenderFramePacket, RenderFramePacketError, RenderFrameSourceGeneration,
+        RenderFrameTarget, build_render_frame_packet_for_source,
+    };
+
+    static NEXT_EDITOR_RENDER_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+    /// Process-local identity for one private Editor preview producer.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct EditorRenderGeneration(u64);
+
+    impl EditorRenderGeneration {
+        pub fn try_acquire() -> Option<Self> {
+            NEXT_EDITOR_RENDER_GENERATION
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_add(1)
+                })
+                .ok()
+                .map(Self)
+        }
+    }
+
+    /// Captures one private Editor preview image without pretending it is a managed runtime.
+    pub fn build_editor_render_frame_packet(
+        generation: EditorRenderGeneration,
+        frame_index: u64,
+        views: &ExtractedViews,
+    ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
+        let packet = build_render_frame_packet_for_source(
+            RenderFrameSourceGeneration::editor(generation.0),
+            frame_index,
+            None,
+            std::iter::empty(),
+            views,
+        )?;
+        if packet
+            .as_ref()
+            .is_some_and(|packet| matches!(packet.target(), RenderFrameTarget::Window(_)))
+        {
+            return Err(RenderFramePacketError::EditorPreviewRequiresImageTarget);
+        }
+        Ok(packet)
+    }
 
     /// Assembles the closed first-party draw order without exposing topology construction.
     pub fn assemble_first_party_draws<T>(mut content: Vec<T>, ui: Vec<T>) -> Vec<T> {
@@ -247,19 +293,83 @@ pub struct RenderWindowPacket {
     pub present_mode: PresentMode,
 }
 
+/// Immutable image target admitted for one render-frame submission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderImagePacket {
+    image: Handle<RenderImage2d>,
+    extent: Extent2d,
+}
+
+impl RenderImagePacket {
+    #[must_use]
+    pub const fn image(self) -> Handle<RenderImage2d> {
+        self.image
+    }
+
+    #[must_use]
+    pub const fn extent(self) -> Extent2d {
+        self.extent
+    }
+}
+
+/// The one backend-neutral target owned by a [`RenderFramePacket`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RenderFrameTarget {
+    Window(RenderWindowPacket),
+    Image(RenderImagePacket),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum RenderFrameSourceKind {
+    Runtime(RuntimeGeneration),
+    EditorPreview(u64),
+}
+
+/// Exact producer generation for one immutable render-frame packet stream.
+///
+/// Constructors are deliberately closed. Managed runtimes enter through
+/// [`build_render_frame_packet`], while the private first-party Editor owns the only independent
+/// preview producer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RenderFrameSourceGeneration(RenderFrameSourceKind);
+
+impl RenderFrameSourceGeneration {
+    const fn runtime(generation: RuntimeGeneration) -> Self {
+        Self(RenderFrameSourceKind::Runtime(generation))
+    }
+
+    const fn editor(generation: u64) -> Self {
+        Self(RenderFrameSourceKind::EditorPreview(generation))
+    }
+
+    #[must_use]
+    pub const fn runtime_generation(self) -> Option<RuntimeGeneration> {
+        match self.0 {
+            RenderFrameSourceKind::Runtime(generation) => Some(generation),
+            RenderFrameSourceKind::EditorPreview(_) => None,
+        }
+    }
+}
+
+impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
+    fn from(generation: RuntimeGeneration) -> Self {
+        Self::runtime(generation)
+    }
+}
+
 /// Owned backend-neutral render input captured before any surface acquisition.
 #[derive(Debug, PartialEq)]
 pub struct RenderFramePacket {
-    generation: RuntimeGeneration,
+    source_generation: RenderFrameSourceGeneration,
     frame_index: u64,
-    window: RenderWindowPacket,
+    target: RenderFrameTarget,
     view: ExtractedView,
 }
 
 impl RenderFramePacket {
     #[must_use]
-    pub const fn generation(&self) -> RuntimeGeneration {
-        self.generation
+    pub const fn source_generation(&self) -> RenderFrameSourceGeneration {
+        self.source_generation
     }
 
     #[must_use]
@@ -268,8 +378,8 @@ impl RenderFramePacket {
     }
 
     #[must_use]
-    pub const fn window(&self) -> RenderWindowPacket {
-        self.window
+    pub const fn target(&self) -> RenderFrameTarget {
+        self.target
     }
 
     #[must_use]
@@ -284,8 +394,12 @@ pub enum RenderFramePacketError {
     UnsupportedViewCount { actual: usize },
     #[error("the desktop renderer supports exactly one window, but captured {actual}")]
     UnsupportedWindowCount { actual: usize },
-    #[error("the desktop renderer does not support image render targets")]
-    UnsupportedImageTarget,
+    #[error("an image render target viewport must start at the target origin")]
+    ImageViewportMustStartAtOrigin,
+    #[error("an image render target must have a non-zero physical extent")]
+    ImageTargetHasZeroExtent,
+    #[error("an Editor preview render packet must target an image")]
+    EditorPreviewRequiresImageTarget,
     #[error("render target window {window_id:?} is not the admitted window")]
     TargetWindowMismatch { window_id: WindowId },
     #[error("the render viewport lies outside window {window_id:?}")]
@@ -302,6 +416,22 @@ pub fn build_render_frame_packet<'a>(
     windows: impl IntoIterator<Item = &'a Window>,
     views: &ExtractedViews,
 ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
+    build_render_frame_packet_for_source(
+        RenderFrameSourceGeneration::runtime(generation),
+        frame_index,
+        primary_window_id,
+        windows,
+        views,
+    )
+}
+
+fn build_render_frame_packet_for_source<'a>(
+    source_generation: RenderFrameSourceGeneration,
+    frame_index: u64,
+    primary_window_id: Option<WindowId>,
+    windows: impl IntoIterator<Item = &'a Window>,
+    views: &ExtractedViews,
+) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
     if views.is_empty() {
         return Ok(None);
     }
@@ -311,42 +441,55 @@ pub fn build_render_frame_packet<'a>(
         });
     }
 
-    let windows = windows.into_iter().collect::<Vec<_>>();
-    if windows.len() != 1 {
-        return Err(RenderFramePacketError::UnsupportedWindowCount {
-            actual: windows.len(),
-        });
-    }
-
     let view = views.as_slice()[0];
-    let window_id = match view.target {
-        RenderTarget::PrimaryWindow => primary_window_id.unwrap_or(WindowId::PRIMARY),
-        RenderTarget::Window(window_id) => window_id,
-        RenderTarget::Image(_) => return Err(RenderFramePacketError::UnsupportedImageTarget),
-    };
-    let window = windows[0];
-    if window.id != window_id {
-        return Err(RenderFramePacketError::TargetWindowMismatch { window_id });
-    }
+    let target = match view.target {
+        RenderTarget::Image(image) => {
+            if view.viewport.physical_x != 0 || view.viewport.physical_y != 0 {
+                return Err(RenderFramePacketError::ImageViewportMustStartAtOrigin);
+            }
+            let extent = view.viewport.extent();
+            if extent.is_empty() {
+                return Err(RenderFramePacketError::ImageTargetHasZeroExtent);
+            }
+            RenderFrameTarget::Image(RenderImagePacket { image, extent })
+        }
+        RenderTarget::PrimaryWindow | RenderTarget::Window(_) => {
+            let windows = windows.into_iter().collect::<Vec<_>>();
+            if windows.len() != 1 {
+                return Err(RenderFramePacketError::UnsupportedWindowCount {
+                    actual: windows.len(),
+                });
+            }
+            let window_id = view
+                .target
+                .window_id(primary_window_id)
+                .expect("window render targets always resolve to a window identity");
+            let window = windows[0];
+            if window.id != window_id {
+                return Err(RenderFramePacketError::TargetWindowMismatch { window_id });
+            }
 
-    let viewport_right =
-        u64::from(view.viewport.physical_x).saturating_add(u64::from(view.viewport.physical_width));
-    let viewport_bottom = u64::from(view.viewport.physical_y)
-        .saturating_add(u64::from(view.viewport.physical_height));
-    if viewport_right > u64::from(window.resolution.physical_width)
-        || viewport_bottom > u64::from(window.resolution.physical_height)
-    {
-        return Err(RenderFramePacketError::ViewportOutsideTarget { window_id });
-    }
+            let viewport_right = u64::from(view.viewport.physical_x)
+                .saturating_add(u64::from(view.viewport.physical_width));
+            let viewport_bottom = u64::from(view.viewport.physical_y)
+                .saturating_add(u64::from(view.viewport.physical_height));
+            if viewport_right > u64::from(window.resolution.physical_width)
+                || viewport_bottom > u64::from(window.resolution.physical_height)
+            {
+                return Err(RenderFramePacketError::ViewportOutsideTarget { window_id });
+            }
+            RenderFrameTarget::Window(RenderWindowPacket {
+                id: window.id,
+                resolution: window.resolution,
+                present_mode: window.present_mode,
+            })
+        }
+    };
 
     Ok(Some(RenderFramePacket {
-        generation,
+        source_generation,
         frame_index,
-        window: RenderWindowPacket {
-            id: window.id,
-            resolution: window.resolution,
-            present_mode: window.present_mode,
-        },
+        target,
         view,
     }))
 }
@@ -1084,14 +1227,20 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
-        assert_eq!(packet.generation(), generation);
+        assert_eq!(
+            packet.source_generation().runtime_generation(),
+            Some(generation)
+        );
         assert_eq!(packet.frame_index(), 9);
-        assert_eq!(packet.window().id, WindowId::PRIMARY);
+        assert!(matches!(
+            packet.target(),
+            RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
+        ));
         assert_eq!(packet.view(), &test_extracted_view());
     }
 
     #[test]
-    fn frame_packet_rejects_extra_or_unsupported_topology() {
+    fn frame_packet_rejects_extra_topology_and_admits_one_image_target() {
         let generation = test_runtime_generation();
         let window = Window::default();
         let mut views = ExtractedViews::default();
@@ -1113,15 +1262,69 @@ mod tests {
             Err(RenderFramePacketError::UnsupportedWindowCount { actual: 2 })
         ));
 
+        let image = Handle::new(AssetId::from_raw(17));
         let mut image_views = ExtractedViews::default();
         image_views.push(ExtractedView {
-            target: RenderTarget::Image(Handle::new(AssetId::from_raw(17))),
+            target: RenderTarget::Image(image),
+            viewport: ViewportRect::new(0, 0, 320, 180).unwrap(),
             ..test_extracted_view()
         });
-        assert!(matches!(
-            build_render_frame_packet(generation, 1, None, [&window], &image_views),
-            Err(RenderFramePacketError::UnsupportedImageTarget)
-        ));
+        let packet = build_render_frame_packet(
+            generation,
+            1,
+            None,
+            std::iter::empty::<&Window>(),
+            &image_views,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            packet.target(),
+            RenderFrameTarget::Image(RenderImagePacket {
+                image,
+                extent: Extent2d {
+                    width: 320,
+                    height: 180,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn frame_packet_rejects_an_offset_image_viewport() {
+        let generation = test_runtime_generation();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            target: RenderTarget::Image(Handle::new(AssetId::from_raw(17))),
+            viewport: ViewportRect::new(1, 0, 320, 180).unwrap(),
+            ..test_extracted_view()
+        });
+
+        assert_eq!(
+            build_render_frame_packet(generation, 1, None, std::iter::empty::<&Window>(), &views,),
+            Err(RenderFramePacketError::ImageViewportMustStartAtOrigin)
+        );
+    }
+
+    #[test]
+    fn frame_packet_rejects_a_zero_extent_image_viewport() {
+        let generation = test_runtime_generation();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            target: RenderTarget::Image(Handle::new(AssetId::from_raw(17))),
+            viewport: ViewportRect {
+                physical_x: 0,
+                physical_y: 0,
+                physical_width: 0,
+                physical_height: 180,
+            },
+            ..test_extracted_view()
+        });
+
+        assert_eq!(
+            build_render_frame_packet(generation, 1, None, std::iter::empty::<&Window>(), &views,),
+            Err(RenderFramePacketError::ImageTargetHasZeroExtent)
+        );
     }
 
     #[test]

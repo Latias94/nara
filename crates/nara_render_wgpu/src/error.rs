@@ -1,3 +1,4 @@
+use nara_render::RenderFrameSourceGeneration;
 use nara_window::{WindowId, backend::WindowTargetError};
 use thiserror::Error;
 
@@ -21,8 +22,11 @@ pub enum WgpuRenderError {
     TelemetryCompletionWaitFailed,
     #[error("wgpu telemetry completion poll failed")]
     TelemetryCompletionPollFailed,
-    #[error("render frame generation {actual} does not match active generation {expected}")]
-    StaleFrameGeneration { expected: u64, actual: u64 },
+    #[error("render frame generation {actual:?} does not match active generation {expected:?}")]
+    StaleFrameGeneration {
+        expected: RenderFrameSourceGeneration,
+        actual: RenderFrameSourceGeneration,
+    },
     #[error("render frame {frame_index} was already consumed")]
     FrameAlreadyConsumed { frame_index: u64 },
     #[error("render packet content was rejected: {message}")]

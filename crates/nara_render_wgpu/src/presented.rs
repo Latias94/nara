@@ -1,4 +1,5 @@
 use nara_app::RuntimeGeneration;
+use nara_render::RenderImagePacket;
 use nara_window::WindowId;
 
 /// Exact process-local facts for one WGPU surface submission and present call.
@@ -72,5 +73,162 @@ impl WgpuPresentedFrameReceipt {
     #[must_use]
     pub const fn render_transaction_frame_index(self) -> u64 {
         self.render_transaction_frame_index
+    }
+}
+
+/// Exact process-local facts for one submitted Editor image target.
+///
+/// This receipt proves queue submission for the image target. It deliberately carries no surface
+/// or present fact.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuSubmittedImageReceipt {
+    target: RenderImagePacket,
+    target_generation: u64,
+    backend_instance_id: u64,
+    device_epoch: u64,
+    render_transaction_frame_index: u64,
+}
+
+impl WgpuSubmittedImageReceipt {
+    pub(crate) const fn new(
+        target: RenderImagePacket,
+        target_generation: u64,
+        backend_instance_id: u64,
+        device_epoch: u64,
+        render_transaction_frame_index: u64,
+    ) -> Self {
+        Self {
+            target,
+            target_generation,
+            backend_instance_id,
+            device_epoch,
+            render_transaction_frame_index,
+        }
+    }
+
+    #[must_use]
+    pub const fn target(self) -> RenderImagePacket {
+        self.target
+    }
+
+    #[must_use]
+    pub const fn target_generation(self) -> u64 {
+        self.target_generation
+    }
+
+    #[must_use]
+    pub const fn backend_instance_id(self) -> u64 {
+        self.backend_instance_id
+    }
+
+    #[must_use]
+    pub const fn device_epoch(self) -> u64 {
+        self.device_epoch
+    }
+
+    #[must_use]
+    pub const fn render_transaction_frame_index(self) -> u64 {
+        self.render_transaction_frame_index
+    }
+}
+
+/// Exact Editor-window surface submission and present facts.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuEditorWindowPresentedReceipt {
+    window_id: WindowId,
+    surface_generation: u64,
+    backend_instance_id: u64,
+    device_epoch: u64,
+    editor_frame_index: u64,
+}
+
+impl WgpuEditorWindowPresentedReceipt {
+    pub(crate) const fn new(
+        window_id: WindowId,
+        surface_generation: u64,
+        backend_instance_id: u64,
+        device_epoch: u64,
+        editor_frame_index: u64,
+    ) -> Self {
+        Self {
+            window_id,
+            surface_generation,
+            backend_instance_id,
+            device_epoch,
+            editor_frame_index,
+        }
+    }
+
+    #[must_use]
+    pub const fn window_id(self) -> WindowId {
+        self.window_id
+    }
+
+    #[must_use]
+    pub const fn surface_generation(self) -> u64 {
+        self.surface_generation
+    }
+
+    #[must_use]
+    pub const fn backend_instance_id(self) -> u64 {
+        self.backend_instance_id
+    }
+
+    #[must_use]
+    pub const fn device_epoch(self) -> u64 {
+        self.device_epoch
+    }
+
+    #[must_use]
+    pub const fn editor_frame_index(self) -> u64 {
+        self.editor_frame_index
+    }
+}
+
+/// Unforgeable join proving the fixed Scene-image/egui/Editor-window transaction.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuEditorCompositeReceipt {
+    image: WgpuSubmittedImageReceipt,
+    window: WgpuEditorWindowPresentedReceipt,
+    texture_registration_generation: u64,
+    presentation_generation: u64,
+}
+
+impl WgpuEditorCompositeReceipt {
+    pub(crate) const fn new(
+        image: WgpuSubmittedImageReceipt,
+        window: WgpuEditorWindowPresentedReceipt,
+        texture_registration_generation: u64,
+        presentation_generation: u64,
+    ) -> Self {
+        Self {
+            image,
+            window,
+            texture_registration_generation,
+            presentation_generation,
+        }
+    }
+
+    #[must_use]
+    pub const fn image(self) -> WgpuSubmittedImageReceipt {
+        self.image
+    }
+
+    #[must_use]
+    pub const fn window(self) -> WgpuEditorWindowPresentedReceipt {
+        self.window
+    }
+
+    #[must_use]
+    pub const fn texture_registration_generation(self) -> u64 {
+        self.texture_registration_generation
+    }
+
+    #[must_use]
+    pub const fn presentation_generation(self) -> u64 {
+        self.presentation_generation
     }
 }

@@ -1122,7 +1122,6 @@ dependencies = [
  "ahash",
  "bytemuck",
  "document-features",
- "egui",
  "epaint",
  "log",
  "profiling",
@@ -1130,7 +1129,6 @@ dependencies = [
  "type-map",
  "web-time",
  "wgpu",
- "winit",
 ]
 
 [[package]]
@@ -2305,7 +2303,6 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "nara",
- "pollster",
  "serde_json",
  "thiserror 2.0.18",
  "winit",

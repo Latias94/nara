@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 mod backend;
+mod editor_execution;
 mod error;
 mod frame;
 mod plugin;
@@ -93,7 +94,16 @@ pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::presented::WgpuPresentedFrameReceipt;
+    pub use crate::{
+        editor_execution::{
+            WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,
+            WgpuEditorFrameOutcome, WgpuEditorSceneTexture, WgpuEditorWindowFrame,
+        },
+        presented::{
+            WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,
+            WgpuPresentedFrameReceipt, WgpuSubmittedImageReceipt,
+        },
+    };
 
     #[cfg(feature = "ui-submitter")]
     pub use crate::backend::WgpuSubmittedUiFacts;

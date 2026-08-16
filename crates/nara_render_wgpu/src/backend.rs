@@ -14,7 +14,8 @@ use nara_ecs::Resource;
 use nara_material::AlphaMode2d;
 use nara_render::{
     Color, Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
-    RenderFrameSkipReason, RenderTarget, RenderWindowPacket, ViewportRect,
+    RenderFrameSkipReason, RenderFrameSourceGeneration, RenderFrameTarget, RenderTarget,
+    RenderWindowPacket, ViewportRect,
 };
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
@@ -381,7 +382,7 @@ pub struct WgpuRenderBackend {
     device_loss_signal: Option<Arc<DeviceLossSignal>>,
     device_epoch: u64,
     surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
-    runtime_generation: Option<u64>,
+    source_generation: Option<RenderFrameSourceGeneration>,
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
     presented_frame_this_transaction: Option<WgpuPresentedFrameReceipt>,
@@ -395,6 +396,22 @@ pub struct WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_textures: WgpuSpriteTextureCache,
     last_error: Option<String>,
+}
+
+pub(super) struct WgpuEditorDeviceNamespace {
+    pub(super) device: wgpu::Device,
+    pub(super) queue: wgpu::Queue,
+    pub(super) surface_format: wgpu::TextureFormat,
+    pub(super) surface_extent: Extent2d,
+    pub(super) backend_instance_id: u64,
+    pub(super) device_epoch: u64,
+}
+
+pub(super) struct WgpuEditorAcquiredSurface {
+    pub(super) texture: wgpu::SurfaceTexture,
+    pub(super) surface_generation: u64,
+    pub(super) format: wgpu::TextureFormat,
+    pub(super) extent: Extent2d,
 }
 
 impl WgpuRenderBackend {
@@ -623,6 +640,119 @@ impl WgpuRenderBackend {
         self.quad_textures.stats()
     }
 
+    pub(super) fn prepare_editor_window(
+        &mut self,
+        handles: &BackendWindowHandles,
+        window: RenderWindowPacket,
+    ) -> Result<WgpuEditorDeviceNamespace, WgpuRenderError> {
+        self.fail_if_device_lost()?;
+        self.retire_requested_surfaces()?;
+        if self.state == WgpuBackendState::Unavailable {
+            return Err(WgpuRenderError::BackendUnavailable);
+        }
+        let size = surface_extent(
+            window.resolution.physical_width,
+            window.resolution.physical_height,
+        )
+        .ok_or_else(|| WgpuRenderError::ContentRejected {
+            message: "the Editor window target has zero physical extent".to_owned(),
+        })?;
+        self.ensure_instance()?;
+        if !self.create_surface_if_missing(window, handles, size)? {
+            return Err(WgpuRenderError::SurfaceMissing {
+                window_id: window.id,
+            });
+        }
+        self.ensure_device(window.id)?;
+        self.fail_if_device_lost()?;
+        self.configure_surface_if_needed(window, size)?;
+        let surface_format = self.surface_view_format(window.id)?;
+        Ok(WgpuEditorDeviceNamespace {
+            device: self
+                .device
+                .as_ref()
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .clone(),
+            queue: self
+                .queue
+                .as_ref()
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .clone(),
+            surface_format,
+            surface_extent: size,
+            backend_instance_id: self.instance_id(),
+            device_epoch: self.device_epoch(),
+        })
+    }
+
+    pub(super) fn acquire_editor_surface(
+        &mut self,
+        window_id: WindowId,
+    ) -> Result<Option<WgpuEditorAcquiredSurface>, WgpuRenderError> {
+        let surface = self
+            .surfaces
+            .get_mut(&window_id)
+            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
+        if !surface.can_acquire_frame() {
+            return Ok(None);
+        }
+        let surface_generation = surface
+            .surface_generation()
+            .ok_or(WgpuRenderError::SurfaceMissing { window_id })?;
+        let config = surface
+            .config
+            .as_ref()
+            .ok_or(WgpuRenderError::SurfaceUnconfigured { window_id })?;
+        let format = config.format.add_srgb_suffix();
+        let extent = surface.size;
+        self.frame_transaction_stats.surface_acquire_attempts = self
+            .frame_transaction_stats
+            .surface_acquire_attempts
+            .saturating_add(1);
+        let acquired = surface.surface(window_id)?.get_current_texture();
+        match acquired {
+            wgpu::CurrentSurfaceTexture::Success(texture) => {
+                self.frame_transaction_stats.surface_acquires = self
+                    .frame_transaction_stats
+                    .surface_acquires
+                    .saturating_add(1);
+                Ok(Some(WgpuEditorAcquiredSurface {
+                    texture,
+                    surface_generation,
+                    format,
+                    extent,
+                }))
+            }
+            wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
+                self.frame_transaction_stats.surface_acquires = self
+                    .frame_transaction_stats
+                    .surface_acquires
+                    .saturating_add(1);
+                surface.dirty = true;
+                Ok(Some(WgpuEditorAcquiredSurface {
+                    texture,
+                    surface_generation,
+                    format,
+                    extent,
+                }))
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                Ok(None)
+            }
+            wgpu::CurrentSurfaceTexture::Outdated => {
+                surface.dirty = true;
+                Ok(None)
+            }
+            wgpu::CurrentSurfaceTexture::Lost => {
+                self.retire_surface(window_id, SurfaceDropReason::SurfaceOrDeviceLost)?;
+                Ok(None)
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                Err(WgpuRenderError::SurfaceValidation { window_id })
+            }
+        }
+    }
+
     pub(super) fn render_packet(
         &mut self,
         handles: Option<&BackendWindowHandles>,
@@ -640,11 +770,16 @@ impl WgpuRenderBackend {
             app_frame_index,
             work_started_at,
         } = captured;
-        let runtime_generation = packet.generation();
+        let source_generation = packet.source_generation();
         stats.draw_calls = 0;
         stats.sprites = 0;
         self.begin_frame_transaction(packet.frame_index(), Some(app_frame_index));
-        if let Err(error) = self.admit_packet(packet.generation().get(), packet.frame_index()) {
+        let runtime_generation = source_generation.runtime_generation().ok_or_else(|| {
+            WgpuRenderError::ContentRejected {
+                message: "the runtime WGPU backend requires a managed-runtime packet".to_owned(),
+            }
+        })?;
+        if let Err(error) = self.admit_packet(source_generation, packet.frame_index()) {
             self.frame_transaction_stats.packet_rejections = 1;
             return Err(error);
         }
@@ -670,7 +805,12 @@ impl WgpuRenderBackend {
             return Err(WgpuRenderError::BackendUnavailable);
         }
 
-        let window = packet.window();
+        let RenderFrameTarget::Window(window) = packet.target() else {
+            return Err(WgpuRenderError::ContentRejected {
+                message: "image render targets require the private Editor execution owner"
+                    .to_owned(),
+            });
+        };
         let Some(size) = surface_extent(
             window.resolution.physical_width,
             window.resolution.physical_height,
@@ -869,8 +1009,12 @@ impl WgpuRenderBackend {
         self.submitted_ui_facts.extend(facts);
     }
 
-    fn admit_packet(&mut self, generation: u64, frame_index: u64) -> Result<(), WgpuRenderError> {
-        if let Some(expected) = self.runtime_generation {
+    pub(super) fn admit_packet(
+        &mut self,
+        generation: RenderFrameSourceGeneration,
+        frame_index: u64,
+    ) -> Result<(), WgpuRenderError> {
+        if let Some(expected) = self.source_generation {
             if expected != generation {
                 return Err(WgpuRenderError::StaleFrameGeneration {
                     expected,
@@ -878,7 +1022,7 @@ impl WgpuRenderBackend {
                 });
             }
         } else {
-            self.runtime_generation = Some(generation);
+            self.source_generation = Some(generation);
         }
         if self
             .last_frame_index
@@ -888,6 +1032,23 @@ impl WgpuRenderBackend {
         }
         self.last_frame_index = Some(frame_index);
         Ok(())
+    }
+
+    pub(super) fn record_editor_image_submission(&mut self) {
+        self.frame_transaction_stats.packet_admissions = 1;
+        self.frame_transaction_stats.queue_submissions = self
+            .frame_transaction_stats
+            .queue_submissions
+            .saturating_add(1);
+    }
+
+    pub(super) fn record_editor_window_presentation(&mut self) {
+        self.frame_transaction_stats.queue_submissions = self
+            .frame_transaction_stats
+            .queue_submissions
+            .saturating_add(1);
+        self.frame_transaction_stats.presents =
+            self.frame_transaction_stats.presents.saturating_add(1);
     }
 
     fn ensure_instance(&mut self) -> Result<(), WgpuRenderError> {
@@ -1805,7 +1966,7 @@ mod tests {
             .unwrap()
             .surface_generation;
 
-        backend.runtime_generation = Some(generation.get());
+        backend.source_generation = Some(generation.into());
         backend.last_frame_index = Some(10);
         let stale_error =
             render_packet_without_surface(&mut backend, test_packet(stale_generation, 12))
@@ -2032,7 +2193,7 @@ mod tests {
         let generation = test_runtime_generation();
         let mut backend = WgpuRenderBackend {
             state: WgpuBackendState::Unavailable,
-            runtime_generation: Some(generation.get()),
+            source_generation: Some(generation.into()),
             last_error: Some("device lost".to_owned()),
             ..WgpuRenderBackend::default()
         };
