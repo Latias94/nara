@@ -15,6 +15,9 @@ use nara_scene::{
     SceneEntityId, ScenePatchDocument, ScenePatchReport,
 };
 
+use crate::composition::{
+    SceneCompositionCommand, SceneCompositionSelection, prepare_scene_composition,
+};
 use crate::diagnostic;
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{SceneEditorModel, SceneEditorState};
@@ -334,6 +337,11 @@ impl EditorWorkspace {
                 base_revision,
                 patch,
             } => self.apply_scene_patch(registry, document, base_revision, patch),
+            EditorWorkspaceCommand::ComposeScene {
+                document,
+                base_revision,
+                command,
+            } => self.apply_scene_composition(registry, document, base_revision, command),
             EditorWorkspaceCommand::Undo {
                 document,
                 base_revision,
@@ -503,6 +511,62 @@ impl EditorWorkspace {
         report_for_patch_slot(document, active_document, slot, patch_report)
     }
 
+    fn apply_scene_composition(
+        &mut self,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: SceneCompositionCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let allocation = if command.allocates_entity() {
+            match slot.next_entity_candidate() {
+                Ok(candidate) => Some(candidate),
+                Err(entry) => {
+                    let mut report = report_for_slot(document, active_document, slot);
+                    report.applied = false;
+                    report.diagnostics.push(entry);
+                    return report;
+                }
+            }
+        } else {
+            None
+        };
+        let prepared = match prepare_scene_composition(
+            slot.session.document(),
+            registry,
+            slot.selection.top_entity(),
+            allocation.as_ref().map(|(entity, _)| entity.clone()),
+            command,
+        ) {
+            Ok(prepared) => prepared,
+            Err(entry) => {
+                let mut report = report_for_slot(document, active_document, slot);
+                report.applied = false;
+                report.diagnostics.push(entry);
+                return report;
+            }
+        };
+        let patch_report = slot.session.apply_patch(prepared.patch(), registry);
+        let report = report_for_patch_slot(document, active_document, slot, patch_report);
+        if report.applied {
+            match prepared.selection() {
+                SceneCompositionSelection::Preserve => {}
+                SceneCompositionSelection::Select(entity) => {
+                    slot.selection.select_entity(entity.clone());
+                }
+            }
+            if let Some((_, next_ordinal)) = allocation {
+                slot.next_entity_ordinal = next_ordinal;
+            }
+        }
+        report
+    }
+
     fn undo(
         &mut self,
         registry: &ComponentRegistry,
@@ -624,6 +688,7 @@ impl EditorWorkspace {
         slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = None;
         slot.external_reload = EditorExternalReloadState::Clean;
+        slot.next_entity_ordinal = Some(1);
         Ok(report_for_slot(document, active_document, slot))
     }
 
@@ -675,6 +740,7 @@ impl EditorWorkspace {
         slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = Some(digest);
         slot.external_reload = EditorExternalReloadState::Clean;
+        slot.next_entity_ordinal = Some(1);
         Ok(report_for_slot(document, active_document, slot))
     }
 
@@ -694,6 +760,7 @@ pub struct EditorSceneSlot {
     saved_content_state: SceneAuthoringContentState,
     saved_digest: Option<EditorDocumentDigest>,
     external_reload: EditorExternalReloadState,
+    next_entity_ordinal: Option<u64>,
 }
 
 impl EditorSceneSlot {
@@ -709,6 +776,7 @@ impl EditorSceneSlot {
             saved_content_state,
             saved_digest: None,
             external_reload: EditorExternalReloadState::Clean,
+            next_entity_ordinal: Some(1),
         }
     }
 
@@ -761,6 +829,31 @@ impl EditorSceneSlot {
     #[must_use]
     pub fn external_reload(&self) -> EditorExternalReloadState {
         self.external_reload
+    }
+
+    fn next_entity_candidate(
+        &self,
+    ) -> Result<(SceneEntityId, Option<u64>), nara_diagnostic::Diagnostic> {
+        let mut ordinal = self.next_entity_ordinal.ok_or_else(|| {
+            diagnostic::error(
+                "tooling.composition-entity-id-exhausted",
+                "scene composition cannot allocate another stable entity identity",
+            )
+        })?;
+        loop {
+            let entity = SceneEntityId::new(format!("editor_entity_{ordinal}"))
+                .expect("editor-generated entity identifiers must be valid");
+            let next = ordinal.checked_add(1);
+            if !document_has_entity(self.session.document(), &entity) {
+                return Ok((entity, next));
+            }
+            ordinal = next.ok_or_else(|| {
+                diagnostic::error(
+                    "tooling.composition-entity-id-exhausted",
+                    "scene composition cannot allocate another stable entity identity",
+                )
+            })?;
+        }
     }
 
     fn apply_persistence_checkpoint(
@@ -982,6 +1075,11 @@ pub enum EditorWorkspaceCommand {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
+    },
+    ComposeScene {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: SceneCompositionCommand,
     },
     Undo {
         document: EditorDocumentId,
@@ -1241,8 +1339,225 @@ fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool
 mod tests {
     use super::*;
     use nara_diagnostic::DiagnosticValueRef;
-    use nara_reflect::ComponentRegistry;
+    use nara_reflect::{ComponentRegistry, ComponentTypeId};
     use nara_scene::{SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
+
+    use crate::{SceneCompositionComponentKind, SceneCompositionEntityKind};
+
+    #[test]
+    fn composition_commands_form_one_ordered_atomic_authoring_trajectory() {
+        let registry = composition_registry();
+        let mut workspace = EditorWorkspace::new();
+        let document = open_scene(&mut workspace, "composition", SceneDocument::default());
+        let root = entity_id("editor_entity_1");
+        let sprite = entity_id("editor_entity_2");
+
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::Empty,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                },
+            )
+            .applied
+        );
+        assert_eq!(
+            workspace.scene(document).unwrap().selection().top_entity(),
+            Some(&root)
+        );
+
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::AddComponent {
+                    entity: root.clone(),
+                    component: SceneCompositionComponentKind::Transform2d,
+                },
+            )
+            .applied
+        );
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::RemoveComponent {
+                    entity: root.clone(),
+                    component: SceneCompositionComponentKind::Transform2d,
+                },
+            )
+            .applied
+        );
+
+        let history_before_sprite = workspace
+            .scene(document)
+            .unwrap()
+            .session()
+            .history_status()
+            .undo_depth;
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::ColoredSprite,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                },
+            )
+            .applied
+        );
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(
+            slot.session().history_status().undo_depth,
+            history_before_sprite + 1
+        );
+        let sprite_record = slot
+            .session()
+            .document()
+            .entities
+            .iter()
+            .find(|record| record.id == sprite)
+            .unwrap();
+        assert!(
+            sprite_record
+                .components
+                .contains_key(&ComponentTypeId::new("nara.transform.Transform2d"))
+        );
+        assert!(
+            sprite_record
+                .components
+                .contains_key(&ComponentTypeId::new("nara.sprite.Sprite"))
+        );
+
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::MoveEntity {
+                    entity: sprite.clone(),
+                    to: ScenePlacement::last(ScenePlacementOwner::Parent {
+                        parent: root.clone(),
+                    }),
+                },
+            )
+            .applied
+        );
+        let rows = &workspace
+            .model(&registry, None)
+            .active_scene
+            .unwrap()
+            .editor
+            .inspector
+            .entities;
+        assert_eq!(
+            rows.iter()
+                .map(|row| (&row.id, row.parent.as_ref(), row.depth))
+                .collect::<Vec<_>>(),
+            vec![(&root, None, 0), (&sprite, Some(&root), 1)]
+        );
+
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::RemoveEntity {
+                    entity: sprite.clone(),
+                },
+            )
+            .applied
+        );
+        assert_eq!(
+            workspace.scene(document).unwrap().selection().top_entity(),
+            Some(&root)
+        );
+        assert!(undo(&mut workspace, &registry, document).applied);
+        assert!(document_has_entity(
+            workspace.scene(document).unwrap().session().document(),
+            &sprite
+        ));
+    }
+
+    #[test]
+    fn composition_rejection_preserves_revision_history_selection_and_identity_allocation() {
+        let empty_registry = frozen_empty_registry();
+        let mut workspace = EditorWorkspace::new();
+        let document = open_scene(&mut workspace, "composition", SceneDocument::default());
+        let initial_revision = workspace.scene(document).unwrap().revision();
+
+        let unavailable = compose(
+            &mut workspace,
+            &empty_registry,
+            document,
+            SceneCompositionCommand::CreateEntity {
+                kind: SceneCompositionEntityKind::ColoredSprite,
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+        );
+        assert!(!unavailable.applied);
+        assert_eq!(
+            unavailable
+                .diagnostics
+                .iter()
+                .next()
+                .unwrap()
+                .code()
+                .as_str(),
+            "tooling.composition-component-unavailable"
+        );
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(slot.revision(), initial_revision);
+        assert_eq!(slot.session().history_status(), Default::default());
+        assert!(slot.selection().is_empty());
+
+        let registry = composition_registry();
+        assert!(
+            compose(
+                &mut workspace,
+                &registry,
+                document,
+                SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::Empty,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                },
+            )
+            .applied
+        );
+        let allocated = entity_id("editor_entity_1");
+        let current_revision = workspace.scene(document).unwrap().revision();
+        let current_history = workspace
+            .scene(document)
+            .unwrap()
+            .session()
+            .history_status();
+        let stale = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ComposeScene {
+                document,
+                base_revision: initial_revision,
+                command: SceneCompositionCommand::AddComponent {
+                    entity: allocated.clone(),
+                    component: SceneCompositionComponentKind::Transform2d,
+                },
+            },
+        );
+        assert!(!stale.applied);
+        assert_eq!(
+            stale.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-stale-document-revision"
+        );
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(slot.revision(), current_revision);
+        assert_eq!(slot.session().history_status(), current_history);
+        assert_eq!(slot.selection().top_entity(), Some(&allocated));
+    }
 
     #[test]
     fn dirty_close_requires_an_explicit_decision() {
@@ -1956,6 +2271,23 @@ mod tests {
         )
     }
 
+    fn compose(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        command: SceneCompositionCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let base_revision = workspace.scene(document).unwrap().revision();
+        workspace.apply_command(
+            registry,
+            EditorWorkspaceCommand::ComposeScene {
+                document,
+                base_revision,
+                command,
+            },
+        )
+    }
+
     fn undo(
         workspace: &mut EditorWorkspace,
         registry: &ComponentRegistry,
@@ -1988,6 +2320,14 @@ mod tests {
 
     fn frozen_empty_registry() -> ComponentRegistry {
         let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        registry
+    }
+
+    fn composition_registry() -> ComponentRegistry {
+        let mut registry = ComponentRegistry::new();
+        nara_transform::register_transform_components(&mut registry).unwrap();
+        nara_sprite::register_sprite_components(&mut registry).unwrap();
         registry.freeze().unwrap();
         registry
     }

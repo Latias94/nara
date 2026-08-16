@@ -247,6 +247,15 @@ impl EditorProjectSession {
                 base_revision,
                 patch,
             },
+            EditorDocumentMutation::ComposeScene {
+                document,
+                base_revision,
+                command,
+            } => EditorWorkspaceCommand::ComposeScene {
+                document,
+                base_revision,
+                command,
+            },
             EditorDocumentMutation::Undo {
                 document,
                 base_revision,

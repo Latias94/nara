@@ -1,5 +1,6 @@
 //! UI-agnostic Editor domain models and command seams.
 
+mod composition;
 mod diagnostic;
 mod frame;
 mod inspector;
@@ -8,6 +9,9 @@ mod play;
 mod snapshot;
 mod workspace;
 
+pub use composition::{
+    SceneCompositionCommand, SceneCompositionComponentKind, SceneCompositionEntityKind,
+};
 #[doc(hidden)]
 pub use frame::EditorFrameClock;
 pub use frame::{

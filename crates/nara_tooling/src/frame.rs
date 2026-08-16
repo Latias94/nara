@@ -11,7 +11,7 @@ use crate::{
     EditorPersistenceRequestResult, EditorPlayRequestResult, EditorProjectView,
     EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorWorkspaceCommandReport,
     EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult, EditorWorkspaceModel,
-    SceneApplyChangesRequest, SceneInspectorCommand,
+    SceneApplyChangesRequest, SceneCompositionCommand, SceneInspectorCommand,
 };
 
 static NEXT_EDITOR_FRAME_SOURCE: AtomicU64 = AtomicU64::new(0);
@@ -305,6 +305,11 @@ pub enum EditorDocumentMutation {
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     },
+    ComposeScene {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: SceneCompositionCommand,
+    },
     Undo {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
@@ -321,6 +326,7 @@ impl EditorDocumentMutation {
         match self {
             Self::ApplyInspectorCommand { document, .. }
             | Self::ApplyScenePatch { document, .. }
+            | Self::ComposeScene { document, .. }
             | Self::Undo { document, .. }
             | Self::Redo { document, .. } => *document,
         }
@@ -331,6 +337,7 @@ impl EditorDocumentMutation {
         match self {
             Self::ApplyInspectorCommand { base_revision, .. }
             | Self::ApplyScenePatch { base_revision, .. }
+            | Self::ComposeScene { base_revision, .. }
             | Self::Undo { base_revision, .. }
             | Self::Redo { base_revision, .. } => *base_revision,
         }

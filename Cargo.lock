@@ -2671,6 +2671,7 @@ dependencies = [
  "nara_identity",
  "nara_reflect",
  "nara_scene",
+ "nara_sprite",
  "nara_transform",
 ]
 
