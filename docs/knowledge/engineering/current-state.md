@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6f0c804a7cf2a62afdbcd5dfcc6442b1b295331f89d8bb70118e1ffd25554012"
+source_fingerprint: "948a72ec2390c45bd5a80661ac68f5e157b403c5a8e0ba1674fbc270e4da8bae"
 ---
 
 # Current State
@@ -12,14 +12,15 @@ source_fingerprint: "6f0c804a7cf2a62afdbcd5dfcc6442b1b295331f89d8bb70118e1ffd255
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6f0c804a7cf2a62afdbcd5dfcc6442b1b295331f89d8bb70118e1ffd25554012`
-- Immutable records: 474
-- Active lane heads: 0
+- Source fingerprint: `948a72ec2390c45bd5a80661ac68f5e157b403c5a8e0ba1674fbc270e4da8bae`
+- Immutable records: 475
+- Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
+- [Editor Game View v1: EGV-U1](registry/2026-08/2026-08-16T155134Z-editor-game-view-v1-codex-root-81725bed43d244a49114a7366308c8e4.md): `active` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)

@@ -4,11 +4,13 @@
 **Last Verified**: 2026-08-16
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. [Editor
-Scene Composition and Scene View
-v1](../../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md) is complete through
-ESV-U5 at commits `1f97c48`, `74dc037`, `ef5dda5`, `70de73e`, and `f99de44`. It closes with
-conformance record `b8ad1393f7f945b3984d9847b37cc7ba` and completed registration
-`cf2e6d93a351485c8381f6834cdd4e70`; no successor implementation plan is active. The completed
+Game View v1](../../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) is the sole active
+implementation plan. EGV-U1 is the only active unit under registration
+`81725bed43d244a49114a7366308c8e4`; EGV-U2 through EGV-U5 remain inactive and dependency-ordered.
+The completed [Editor Scene Composition and Scene View
+v1](../../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md) closes at `f99de44`
+with conformance record `b8ad1393f7f945b3984d9847b37cc7ba` and completed registration
+`cf2e6d93a351485c8381f6834cdd4e70`. The completed
 [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
 implements EFI-U1 through EFI-U5 and closes at `6a4a9e2` with conformance record
 `b1cd751875db4d91958a0fb9e609a04d` and completed registration

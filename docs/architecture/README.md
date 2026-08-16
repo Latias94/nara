@@ -8,12 +8,12 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. [Editor Scene Composition and Scene View
-   v1](../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md) is complete through
-   ESV-U5 at `f99de44`, with conformance record `b8ad1393f7f945b3984d9847b37cc7ba`
-   and completed registration `cf2e6d93a351485c8381f6834cdd4e70`. No successor implementation
-   plan is active. The completed Editor Authoring Loop, Fresh Project, Capability Directory
-   Publication, Runtime UI, and focused correction plans remain immutable lineage evidence; the
+3. [Editor Game View v1](../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) is the sole
+   active implementation plan. EGV-U1 is the only active unit under registration
+   `81725bed43d244a49114a7366308c8e4`; EGV-U2 through EGV-U5 remain inactive and
+   dependency-ordered. The completed Editor Scene Composition and Scene View, Editor Authoring
+   Loop, Fresh Project, Capability Directory Publication, Runtime UI, and focused correction plans
+   remain immutable lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and
