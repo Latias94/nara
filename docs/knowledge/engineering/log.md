@@ -4,6 +4,9 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-16
+* **Work Registration**: [Editor Scene Composition and Scene View v1: ESV-U1 active](registry/2026-08/2026-08-16T072822Z-editor-scene-composition-view-v1-codex-root-68dab7e400b14d59b3deec1be3f63df4.md) - Activates the reviewed Scene View execution tracer and ownership contract as the sole implementation unit.
+
 ## 2026-08-15
 * **Work Registration**: [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md) - Closes EFI-U1 through EFI-U5 after the linked starter edit, check, generated-product run, and source-carrying export trajectory.
 * **Verification Evidence**: [EFI-U5 Editor authoring-loop conformance](verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md) - Verifies one published starter edit through the private Editor, project check, generated headless product, and accepted source-carrying export.
@@ -146,4 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-08-04
 * **Verification Evidence**: [NUI-U4 closed first-party render and UI internals](verification/2026-08/2026-08-04T182540Z-nui-u4-closed-first-party-render-and-ui-internals-af4e0733217a483cb73239914fd21ef1.md) - Verifies deletion of arbitrary render topology, closure of technical UI stages and mutable batch resources, deterministic first-party ordering, and facade/dependency cleanup.
-* **Work Registration**: [Ordered UI kernel correction: NUI-U5 active](registry/2026-08/2026-08-04T182540Z-engine-foundation-contract-completion-codex-root-0b516441d98743b6a66ba5408f02346b.md) - Completes render/UI boundary closure and activates the split between content authoring and presentation composition.

@@ -8,11 +8,11 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. No implementation plan is active. [Editor Authoring Loop
-   v1](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md) completed EFI-U1 through
-   EFI-U5 at commit `6a4a9e2` with conformance record
-   `b1cd751875db4d91958a0fb9e609a04d` and completed registration
-   `055fa3f07b8640e6b91a90e8de5eb00e`. The completed Fresh Project, Capability Directory
+3. [Editor Scene Composition and Scene View
+   v1](../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md) is the sole active
+   implementation plan, fixed at `e7f3249`; ESV-U1 is the sole active unit under registration
+   `68dab7e400b14d59b3deec1be3f63df4`. ESV-U2 through ESV-U5 remain inactive and
+   dependency-ordered. The completed Editor Authoring Loop, Fresh Project, Capability Directory
    Publication, Runtime UI, and focused correction plans remain immutable lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.

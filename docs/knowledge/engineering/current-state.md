@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "329451ac2993fc8ba0319d28d9fc0514bc4195e314e228e2aa7b63bfafbf390b"
+source_fingerprint: "54f1324b351847966c0344c74db74580e5d3d6bfa23d0640e2065ef162f85f83"
 ---
 
 # Current State
@@ -12,14 +12,15 @@ source_fingerprint: "329451ac2993fc8ba0319d28d9fc0514bc4195e314e228e2aa7b63bfafb
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `329451ac2993fc8ba0319d28d9fc0514bc4195e314e228e2aa7b63bfafbf390b`
-- Immutable records: 467
-- Active lane heads: 0
+- Source fingerprint: `54f1324b351847966c0344c74db74580e5d3d6bfa23d0640e2065ef162f85f83`
+- Immutable records: 468
+- Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
+- [Editor Scene Composition and Scene View v1: ESV-U1 active](registry/2026-08/2026-08-16T072822Z-editor-scene-composition-view-v1-codex-root-68dab7e400b14d59b3deec1be3f63df4.md): `active` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
