@@ -10,9 +10,9 @@ an index, not another source of architecture decisions.
    gaps.
 3. [Editor Scene Composition and Scene View
    v1](../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md) is the sole active
-   implementation plan, fixed at `e7f3249`; ESV-U2 is the sole active unit under registration
-   `ad1c66d7dec742b59507f64ba14cd951`. ESV-U1 is verified at `1f97c48`; ESV-U3 through ESV-U5
-   remain inactive and dependency-ordered. The completed Editor Authoring Loop, Fresh Project,
+   implementation plan, fixed at `e7f3249`; ESV-U3 is the sole active unit under registration
+   `736273e588c9490fb1ad9594211c7c98`. ESV-U1 is verified at `1f97c48`, ESV-U2 at `74dc037`, and
+   ESV-U4 through ESV-U5 remain inactive and dependency-ordered. The completed Editor Authoring Loop, Fresh Project,
    Capability Directory Publication, Runtime UI, and focused correction plans remain immutable
    lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
