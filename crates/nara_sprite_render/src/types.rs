@@ -181,6 +181,8 @@ impl SpriteInstance {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueuedSpriteItem {
+    /// Runtime entity that produced this exact queued item.
+    pub entity: Entity,
     pub view_index: usize,
     pub view_order: i32,
     pub target: RenderTarget,

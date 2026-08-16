@@ -1,6 +1,8 @@
 use nara_render::{
     Extent2d, RenderFramePacket, RenderFrameTarget, RenderImagePacket, RenderWindowPacket,
 };
+#[cfg(feature = "sprite-submitter")]
+use nara_sprite_render::SpriteBatches;
 use nara_window::{
     WindowId,
     backend::{BackendWindowHandles, WindowHandleProvider, WindowTargetError},
@@ -10,6 +12,7 @@ use thiserror::Error;
 use crate::{
     WgpuFrameTransactionStats, WgpuRenderBackend, WgpuRenderError,
     backend::{WgpuEditorAcquiredSurface, WgpuEditorDeviceNamespace},
+    frame::WgpuFramePayload,
     presented::{
         WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt,
     },
@@ -58,6 +61,11 @@ impl WgpuEditorExecutionError {
                     | WgpuRenderError::DeviceEpochExhausted
             )
         )
+    }
+
+    #[must_use]
+    pub const fn is_deferred(&self) -> bool {
+        matches!(self, Self::Backend(error) if error.is_deferred())
     }
 }
 
@@ -342,6 +350,29 @@ impl WgpuEditorExecution {
         window: RenderWindowPacket,
         packet: RenderFramePacket,
     ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
+        self.submit_image_payload(window, packet, WgpuFramePayload::default())
+    }
+
+    #[cfg(feature = "sprite-submitter")]
+    pub fn submit_sprite_image(
+        &mut self,
+        window: RenderWindowPacket,
+        packet: RenderFramePacket,
+        sprite_batches: SpriteBatches,
+    ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
+        self.submit_image_payload(
+            window,
+            packet,
+            WgpuFramePayload::for_editor_sprites(sprite_batches),
+        )
+    }
+
+    fn submit_image_payload(
+        &mut self,
+        window: RenderWindowPacket,
+        packet: RenderFramePacket,
+        payload: WgpuFramePayload,
+    ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(WgpuEditorExecutionError::ExpectedImageTarget);
         };
@@ -356,6 +387,16 @@ impl WgpuEditorExecution {
         }
         let namespace = self.backend.prepare_editor_window(&self.handles, window)?;
         self.ensure_image_target(&namespace, target)?;
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        self.backend
+            .begin_editor_submitter_frame(packet.frame_index());
+        let draw = self.backend.prepare_submitter_draw(
+            EDITOR_IMAGE_FORMAT,
+            packet.view().target,
+            packet.view().viewport,
+            &payload,
+            packet.frame_index(),
+        )?;
         let image_target = self
             .image_target
             .as_ref()
@@ -367,7 +408,7 @@ impl WgpuEditorExecution {
                     label: Some("nara_editor_scene_encoder"),
                 });
         {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("nara_editor_scene_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &image_target.view,
@@ -383,6 +424,24 @@ impl WgpuEditorExecution {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            pass.set_viewport(
+                packet.view().viewport.physical_x as f32,
+                packet.view().viewport.physical_y as f32,
+                packet.view().viewport.physical_width as f32,
+                packet.view().viewport.physical_height as f32,
+                0.0,
+                1.0,
+            );
+            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+            crate::draw_quad_batch_buffers(
+                &mut pass,
+                &draw.pipelines,
+                &draw.buffers,
+                packet.view().viewport,
+            );
+            #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
+            let _ = (&mut pass, draw);
         }
         namespace.queue.submit([encoder.finish()]);
         self.backend.record_editor_image_submission();

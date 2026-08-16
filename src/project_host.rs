@@ -43,6 +43,13 @@ pub use runtime::{
     DesktopPresentationVerificationReceipt, DesktopRun, DesktopRunIntent, DesktopRunOutcome,
     DesktopRunReport,
 };
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "tooling",
+    feature = "presentation-2d"
+))]
+pub use runtime::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 pub use runtime::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]

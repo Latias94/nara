@@ -53,6 +53,8 @@ pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunRepo
 pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use desktop_verification::DesktopPresentationVerificationReceipt;
+#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
+pub use editor::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(feature = "tooling")]
 pub use editor::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
 

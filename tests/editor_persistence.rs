@@ -35,10 +35,62 @@ use nara::{
         EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult,
     },
 };
+#[cfg(feature = "presentation-2d")]
+use nara::{
+    render::{Extent2d, RenderFrameTarget},
+    tooling::{SceneCompositionCommand, SceneCompositionEntityKind},
+};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const ASYNC_DRIVER_TIMEOUT: Duration = Duration::from_secs(5);
 const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+#[cfg(feature = "presentation-2d")]
+#[test]
+fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
+    let project = TestProject::new("scene-preview-candidate");
+    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
+        .expect("the editor project should open");
+    editor.configure_editor_preview(Extent2d::new(320, 180));
+    let _ = editor.take_editor_preview_candidate();
+
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let base_revision = frame.workspace().scene(document).unwrap().revision;
+    let outcomes = editor_driver::dispatch(
+        &mut editor,
+        [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+            document,
+            base_revision,
+            command: SceneCompositionCommand::CreateEntity {
+                kind: SceneCompositionEntityKind::ColoredSprite,
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+        })],
+    );
+    assert!(matches!(
+        &outcomes[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let revision = frame.workspace().scene(document).unwrap().revision;
+    let candidate = editor
+        .take_editor_preview_candidate()
+        .expect("the accepted document should produce one preview candidate");
+    assert_eq!(candidate.document(), document);
+    assert_eq!(candidate.revision(), revision);
+    let (_, _, geometry_revision, packet, batches, hits) = candidate.into_parts();
+    assert_eq!(geometry_revision, 2);
+    assert_eq!(batches.total_instances(), 1);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].entity(), &scene_id("editor_entity_1"));
+    assert_eq!(hits[0].draw_ordinal(), 0);
+    assert!(matches!(
+        packet.target(),
+        RenderFrameTarget::Image(target) if target.extent() == Extent2d::new(320, 180).unwrap()
+    ));
+}
 
 #[test]
 fn persistence_authority_surface_is_opaque_and_linear() {

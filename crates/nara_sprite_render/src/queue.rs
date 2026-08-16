@@ -36,6 +36,7 @@ pub fn queue_sprites(
             };
 
             queued.push(QueuedSpriteItem {
+                entity: queueable.sprite.entity,
                 view_index,
                 view_order: view.order,
                 target: view.target,

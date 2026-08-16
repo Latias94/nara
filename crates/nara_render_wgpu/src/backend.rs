@@ -1042,6 +1042,11 @@ impl WgpuRenderBackend {
             .saturating_add(1);
     }
 
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    pub(super) fn begin_editor_submitter_frame(&mut self, frame_index: u64) {
+        self.quad_textures.begin_frame(frame_index);
+    }
+
     pub(super) fn record_editor_window_presentation(&mut self) {
         self.frame_transaction_stats.queue_submissions = self
             .frame_transaction_stats
@@ -1361,7 +1366,7 @@ impl WgpuRenderBackend {
         Ok(config.format.add_srgb_suffix())
     }
 
-    fn prepare_submitter_draw(
+    pub(super) fn prepare_submitter_draw(
         &mut self,
         view_format: wgpu::TextureFormat,
         target: RenderTarget,

@@ -559,6 +559,7 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
 fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
     let mut items = vec![
         QueuedSpriteItem {
+            entity: Entity::from_raw_u32(1).unwrap(),
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
@@ -571,6 +572,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             image: None,
         },
         QueuedSpriteItem {
+            entity: Entity::from_raw_u32(2).unwrap(),
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
@@ -583,6 +585,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             image: None,
         },
         QueuedSpriteItem {
+            entity: Entity::from_raw_u32(3).unwrap(),
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
@@ -595,6 +598,7 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             image: None,
         },
         QueuedSpriteItem {
+            entity: Entity::from_raw_u32(4).unwrap(),
             view_index: 0,
             view_order: 0,
             target: RenderTarget::PrimaryWindow,
@@ -618,6 +622,12 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             .map(|item| item.source_order)
             .collect::<Vec<_>>(),
         vec![0, 1]
+    );
+    assert_eq!(
+        items.iter().map(|item| item.entity).collect::<Vec<_>>(),
+        (1..=4)
+            .map(|index| Entity::from_raw_u32(index).unwrap())
+            .collect::<Vec<_>>()
     );
     assert_eq!(
         items
@@ -960,6 +970,7 @@ fn placeholder_extracted_sprite() -> ExtractedSprite {
 
 fn queued_item(entity_index: u32) -> QueuedSpriteItem {
     QueuedSpriteItem {
+        entity: Entity::from_raw_u32(entity_index.saturating_add(1)).unwrap(),
         view_index: 0,
         view_order: 0,
         target: RenderTarget::PrimaryWindow,

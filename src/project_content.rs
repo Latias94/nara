@@ -267,6 +267,19 @@ impl ProjectContentSnapshot {
             retained_bytes,
         ))
     }
+
+    #[cfg(feature = "presentation-2d")]
+    pub(crate) fn sync_editor_preview_scene(
+        &self,
+        session: &mut nara_scene::SceneAuthoringSession,
+        world: &mut nara_ecs::World,
+        registry: &nara_reflect::ComponentRegistry,
+    ) -> nara_scene::SceneAuthoringSyncReport {
+        let resolver = SnapshotPrefabResolver {
+            prefabs: self.prefabs(),
+        };
+        session.sync_world_with_prefab_resolver(world, registry, &resolver)
+    }
 }
 
 struct SnapshotPrefabResolver<'a> {

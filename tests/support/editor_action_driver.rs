@@ -67,6 +67,15 @@ pub fn apply_workspace_command(
             base_revision,
             patch,
         }),
+        EditorWorkspaceCommand::ComposeScene {
+            document,
+            base_revision,
+            command,
+        } => EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+            document,
+            base_revision,
+            command,
+        }),
         EditorWorkspaceCommand::Undo {
             document,
             base_revision,

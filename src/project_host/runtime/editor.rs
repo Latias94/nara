@@ -4,6 +4,11 @@ mod actions;
 mod model;
 mod persistence;
 mod play;
+#[cfg(feature = "presentation-2d")]
+mod preview;
+
+#[cfg(feature = "presentation-2d")]
+pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
 
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
@@ -18,6 +23,8 @@ use nara_reflect::{
     ComponentCapability, ComponentRegistry, component_registry,
     report_component_registry_authority_fault,
 };
+#[cfg(feature = "presentation-2d")]
+use nara_render::Extent2d;
 use nara_scene::SceneEntitySource;
 use nara_tooling::{
     __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorFieldFeedback,
@@ -434,6 +441,8 @@ pub struct EditorProjectSession {
     source_document: EditorDocumentId,
     plan: RuntimePlan,
     snapshot: crate::project_host::ProjectContentSnapshot,
+    #[cfg(feature = "presentation-2d")]
+    preview: preview::EditorPreviewSession,
     persistence: ScenePersistenceHost,
     persistence_operation: EditorPersistenceOperation,
     pending_persistence: Option<PendingPersistence>,
@@ -523,6 +532,12 @@ impl EditorProjectSession {
             .map_err(|error| EditorProjectOpenError {
                 diagnostics: error.diagnostics().clone(),
             })?;
+        #[cfg(feature = "presentation-2d")]
+        let preview = preview::EditorPreviewSession::new(
+            snapshot.clone(),
+            plan.schema_validation().snapshot(),
+        )
+        .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
         let scenes_path = RelativePath::new(candidate.settings().paths.scenes.as_str())
             .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
         let scenes = project_root
@@ -570,6 +585,8 @@ impl EditorProjectSession {
             source_document: document,
             plan,
             snapshot,
+            #[cfg(feature = "presentation-2d")]
+            preview,
             persistence: opened.host,
             persistence_operation: EditorPersistenceOperation::Idle,
             pending_persistence: None,
@@ -591,6 +608,35 @@ impl EditorProjectSession {
         };
         session.publish_editor_frame();
         Ok(session)
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    #[doc(hidden)]
+    pub fn configure_editor_preview(&mut self, extent: Option<Extent2d>) {
+        self.preview.set_extent(extent);
+        self.drive_editor_preview();
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
+        self.preview.take_candidate()
+    }
+
+    #[cfg(feature = "presentation-2d")]
+    fn drive_editor_preview(&mut self) {
+        let source =
+            self.workspace
+                .scene(self.source_document)
+                .map(|slot| preview::EditorPreviewSource {
+                    document: self.source_document,
+                    revision: slot.revision(),
+                    scene: slot.session().document().clone(),
+                });
+        if let Some(report) = self.preview.drive(source) {
+            let _ = self.diagnostics.extend(report);
+        }
     }
 
     #[cfg(test)]

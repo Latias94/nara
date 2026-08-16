@@ -6,17 +6,14 @@ use std::{
 use egui::{Color32, Pos2, Rect, TextureId, Vec2, ViewportId, epaint::Primitive};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor, wgpu};
 use nara::{
-    asset::{AssetId, Handle},
-    ecs::Entity,
-    render::{
-        __private::{EditorRenderGeneration, build_editor_render_frame_packet},
-        Color, ExtractedView, ExtractedViews, RenderImage2d, RenderTarget, RenderWindowPacket,
-        ViewportRect,
-    },
+    project_host::{EditorPreviewCandidate, EditorPreviewHit},
+    render::{Extent2d, RenderWindowPacket},
     render_wgpu::__private::{
-        WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,
-        WgpuSubmittedImageReceipt,
+        WgpuEditorCompositeReceipt, WgpuEditorDeviceScope, WgpuEditorExecution,
+        WgpuEditorExecutionError, WgpuSubmittedImageReceipt,
     },
+    scene::SceneAuthoringRevision,
+    tooling::EditorDocumentId,
     window::{
         PresentMode, WindowId as NaraWindowId, WindowResolution, backend::WindowHandleProvider,
     },
@@ -39,7 +36,6 @@ const INITIAL_HEIGHT: f64 = 800.0;
 const MIN_WIDTH: f64 = 720.0;
 const MIN_HEIGHT: f64 = 520.0;
 const CLEAR_COLOR: [f32; 4] = [0.055, 0.06, 0.075, 1.0];
-const TRACER_EXTENT: u32 = 64;
 
 #[derive(Debug, Error)]
 pub enum EditorRunError {
@@ -101,7 +97,8 @@ struct NativeEditorHost {
     gpu: Option<WgpuEditorExecution>,
     renderer: Option<EditorEguiRenderer>,
     pending_textures: egui::TexturesDelta,
-    scene_tracer: EditorSceneTracer,
+    scene_presenter: EditorScenePresenter,
+    gpu_replacement_attempted: bool,
     editor_frame_index: u64,
     last_frame: Instant,
     repaint_deadline: Option<Instant>,
@@ -118,7 +115,8 @@ impl NativeEditorHost {
             gpu: None,
             renderer: None,
             pending_textures: egui::TexturesDelta::default(),
-            scene_tracer: EditorSceneTracer::new()?,
+            scene_presenter: EditorScenePresenter::new(),
+            gpu_replacement_attempted: false,
             editor_frame_index: 0,
             last_frame: Instant::now(),
             repaint_deadline: None,
@@ -141,6 +139,8 @@ impl NativeEditorHost {
         );
         let (gpu, renderer, egui_state) =
             create_editor_gpu_namespace(&self.context, Arc::clone(&window))?;
+        self.application
+            .configure_scene_preview(window_preview_extent(window.as_ref()));
 
         window.request_redraw();
         self.window = Some(window);
@@ -158,7 +158,7 @@ impl NativeEditorHost {
             })?;
         self.renderer = None;
         self.gpu = None;
-        self.scene_tracer.retire_gpu_binding();
+        self.scene_presenter.retire_gpu_binding();
         self.pending_textures.clear();
         self.context = egui::Context::default();
         let (gpu, renderer, egui_state) =
@@ -166,6 +166,8 @@ impl NativeEditorHost {
         self.gpu = Some(gpu);
         self.renderer = Some(renderer);
         self.egui_state = Some(egui_state);
+        self.application
+            .configure_scene_preview(window_preview_extent(window.as_ref()));
         self.last_frame = Instant::now();
         window.request_redraw();
         Ok(())
@@ -204,16 +206,20 @@ impl NativeEditorHost {
                 }
             }
             WindowEvent::Resized(size) => {
-                if size.width > 0 && size.height > 0 {
-                    if let (Some(gpu), Some(renderer)) = (self.gpu.as_mut(), self.renderer.as_mut())
-                    {
-                        self.scene_tracer.retire_target(gpu, renderer);
-                    }
+                if let (Some(gpu), Some(renderer)) = (self.gpu.as_mut(), self.renderer.as_mut()) {
+                    self.scene_presenter.retire_target(gpu, renderer);
                 }
+                self.application
+                    .configure_scene_preview(Extent2d::new(size.width, size.height));
                 window.request_redraw();
             }
             WindowEvent::RedrawRequested => self.redraw(event_loop)?,
             WindowEvent::Destroyed => {
+                self.scene_presenter.retire_gpu_binding();
+                self.application.configure_scene_preview(None);
+                self.pending_textures.clear();
+                self.renderer = None;
+                self.gpu = None;
                 self.window = None;
                 self.egui_state = None;
             }
@@ -238,25 +244,40 @@ impl NativeEditorHost {
         {
             return Ok(());
         }
-        let prepared_scene = self.scene_tracer.prepare(
-            self.gpu
-                .as_mut()
-                .expect("an installed native window has one Editor GPU owner"),
-            self.renderer
-                .as_mut()
-                .expect("an installed native window has one egui renderer"),
-            window_packet,
-        )?;
+        let candidate = self.application.take_scene_preview_candidate();
+        let mut scene_retry_pending = false;
+        let prepared_scene = match candidate {
+            Some(candidate) => match self.scene_presenter.prepare(
+                self.gpu
+                    .as_mut()
+                    .expect("an installed native window has one Editor GPU owner"),
+                self.renderer
+                    .as_mut()
+                    .expect("an installed native window has one egui renderer"),
+                window_packet,
+                candidate,
+            ) {
+                Ok(prepared) => Some(prepared),
+                Err(EditorRunError::Gpu(error)) if error.is_deferred() => {
+                    scene_retry_pending = true;
+                    None
+                }
+                Err(error) => return Err(error),
+            },
+            None => None,
+        };
         let mut batch = None;
         let output = self.context.run_ui(raw_input, |ui| {
             batch = Some(self.application.show(ui));
-            let sample_rect = Rect::from_min_size(ui.max_rect().left_top(), Vec2::splat(1.0));
-            ui.painter().image(
-                prepared_scene.texture_id,
-                sample_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
+            if let Some(prepared_scene) = prepared_scene.as_ref() {
+                let sample_rect = Rect::from_min_size(ui.max_rect().left_top(), Vec2::splat(1.0));
+                ui.painter().image(
+                    prepared_scene.texture_id,
+                    sample_rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
         });
         let repaint_delay = output
             .viewport_output
@@ -288,13 +309,15 @@ impl NativeEditorHost {
                 "the egui renderer does not belong to the live Editor GPU namespace".to_owned(),
             ));
         }
-        let sampled_scene = primitives_sample_texture(&primitives, prepared_scene.texture_id);
+        let sampled_scene = prepared_scene
+            .as_ref()
+            .is_some_and(|scene| primitives_sample_texture(&primitives, scene.texture_id));
         let pending_textures = &mut self.pending_textures;
         let mut freed_textures = Vec::new();
         let presentation = gpu.present_window(
             window_packet,
             editor_frame_index,
-            Some(prepared_scene.submission),
+            prepared_scene.as_ref().map(|scene| scene.submission),
             |frame| {
                 if renderer.surface_format != frame.surface_format() {
                     return Err(WgpuEditorExecutionError::toolkit_paint(
@@ -348,12 +371,14 @@ impl NativeEditorHost {
                     command_buffers
                 });
                 frame.prepend_command_buffers(command_buffers);
-                if !sampled_scene {
-                    return Err(WgpuEditorExecutionError::toolkit_paint(
-                        "egui did not sample the exact Editor Scene tracer texture",
-                    ));
+                if let Some(prepared_scene) = prepared_scene.as_ref() {
+                    if !sampled_scene {
+                        return Err(WgpuEditorExecutionError::toolkit_paint(
+                            "egui did not sample the exact Editor Scene texture",
+                        ));
+                    }
+                    frame.record_scene_sample(prepared_scene.texture_registration_generation)?;
                 }
-                frame.record_scene_sample(prepared_scene.texture_registration_generation)?;
                 freed_textures.extend(pending_textures.free.drain());
                 Ok(())
             },
@@ -363,10 +388,28 @@ impl NativeEditorHost {
             renderer.renderer.free_texture(&id);
         }
         let presentation = presentation.map_err(platform_gpu_error)?;
-        if presentation.window().is_some() && presentation.composite().is_none() {
-            return Err(EditorRunError::Platform(
-                "the Editor window presented without the exact Scene tracer sample".to_owned(),
-            ));
+        if presentation.window().is_some() {
+            self.gpu_replacement_attempted = false;
+        }
+        match (prepared_scene, presentation.composite()) {
+            (Some(prepared), Some(receipt)) => {
+                self.scene_presenter.promote(prepared, receipt)?;
+            }
+            (Some(_), None) if presentation.window().is_none() => {
+                scene_retry_pending = true;
+                self.scene_presenter.retire_presentation();
+            }
+            (Some(_), None) => {
+                return Err(EditorRunError::Platform(
+                    "the Editor window presented without the exact Scene sample".to_owned(),
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(EditorRunError::Platform(
+                    "the Editor GPU published a Scene receipt without a candidate".to_owned(),
+                ));
+            }
+            (None, None) => self.scene_presenter.retire_presentation(),
         }
 
         let now = Instant::now();
@@ -380,7 +423,7 @@ impl NativeEditorHost {
             event_loop.exit();
             return Ok(());
         }
-        if update.actions_observed() || repaint_delay.is_zero() {
+        if update.actions_observed() || scene_retry_pending || repaint_delay.is_zero() {
             window.request_redraw();
             self.repaint_deadline = None;
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -420,7 +463,8 @@ impl ApplicationHandler for NativeEditorHost {
         let _ = event_loop;
         self.renderer = None;
         self.gpu = None;
-        self.scene_tracer.retire_gpu_binding();
+        self.scene_presenter.retire_gpu_binding();
+        self.application.configure_scene_preview(None);
         self.pending_textures.clear();
         self.window = None;
         self.egui_state = None;
@@ -434,6 +478,11 @@ impl ApplicationHandler for NativeEditorHost {
     ) {
         if let Err(error) = self.handle_window_event(event_loop, window_id, event) {
             if error.requires_gpu_replacement() {
+                if self.gpu_replacement_attempted {
+                    self.fail(event_loop, error);
+                    return;
+                }
+                self.gpu_replacement_attempted = true;
                 if let Err(replacement_error) = self.replace_gpu_execution() {
                     self.fail(event_loop, replacement_error);
                 }
@@ -446,11 +495,22 @@ impl ApplicationHandler for NativeEditorHost {
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {}
 }
 
-#[derive(Clone, Copy)]
 struct PreparedEditorScene {
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+    geometry_revision: u64,
+    hits: Vec<EditorPreviewHit>,
     submission: WgpuSubmittedImageReceipt,
     texture_id: TextureId,
     texture_registration_generation: u64,
+}
+
+struct PresentedEditorScene {
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+    geometry_revision: u64,
+    hits: Vec<EditorPreviewHit>,
+    receipt: WgpuEditorCompositeReceipt,
 }
 
 #[derive(Clone, Copy)]
@@ -470,26 +530,19 @@ impl EditorSceneTextureBinding {
     }
 }
 
-struct EditorSceneTracer {
-    generation: EditorRenderGeneration,
-    image: Handle<RenderImage2d>,
-    frame_index: u64,
+struct EditorScenePresenter {
     texture_registration_generation: u64,
     binding: Option<EditorSceneTextureBinding>,
+    presented: Option<PresentedEditorScene>,
 }
 
-impl EditorSceneTracer {
-    fn new() -> Result<Self, EditorRunError> {
-        let generation = EditorRenderGeneration::try_acquire().ok_or_else(|| {
-            EditorRunError::Platform("Editor preview render generations are exhausted".to_owned())
-        })?;
-        Ok(Self {
-            generation,
-            image: Handle::new(AssetId::from_raw(1)),
-            frame_index: 0,
+impl EditorScenePresenter {
+    fn new() -> Self {
+        Self {
             texture_registration_generation: 0,
             binding: None,
-        })
+            presented: None,
+        }
     }
 
     fn prepare(
@@ -497,33 +550,17 @@ impl EditorSceneTracer {
         gpu: &mut WgpuEditorExecution,
         renderer: &mut EditorEguiRenderer,
         window: RenderWindowPacket,
+        candidate: EditorPreviewCandidate,
     ) -> Result<PreparedEditorScene, EditorRunError> {
         if !renderer.matches(gpu) {
             return Err(EditorRunError::Platform(
-                "the Scene tracer renderer does not belong to the live GPU namespace".to_owned(),
+                "the Scene renderer does not belong to the live GPU namespace".to_owned(),
             ));
         }
-        self.frame_index = self.frame_index.checked_add(1).ok_or_else(|| {
-            EditorRunError::Platform("Scene tracer frame index exhausted".to_owned())
-        })?;
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            camera_entity: Entity::PLACEHOLDER,
-            target: RenderTarget::Image(self.image),
-            viewport: ViewportRect::new(0, 0, TRACER_EXTENT, TRACER_EXTENT)
-                .expect("the fixed Editor tracer extent is non-zero"),
-            world_position: nara::core::Vec2::ZERO,
-            viewport_height: TRACER_EXTENT as f32,
-            order: 0,
-            clear_color: Color::rgba(0.16, 0.29, 0.42, 1.0),
-        });
-        let packet = build_editor_render_frame_packet(self.generation, self.frame_index, &views)
-            .map_err(|error| EditorRunError::Platform(error.to_string()))?
-            .ok_or_else(|| {
-                EditorRunError::Platform("the Scene tracer produced no render packet".to_owned())
-            })?;
+        let (document, revision, geometry_revision, packet, sprite_batches, hits) =
+            candidate.into_parts();
         let submission = gpu
-            .submit_image(window, packet)
+            .submit_sprite_image(window, packet, sprite_batches)
             .map_err(platform_gpu_error)?;
 
         let binding = match self.binding.filter(|binding| binding.matches(submission)) {
@@ -572,18 +609,50 @@ impl EditorSceneTracer {
         };
 
         Ok(PreparedEditorScene {
+            document,
+            revision,
+            geometry_revision,
+            hits,
             submission,
             texture_id: binding.texture_id,
             texture_registration_generation: binding.registration_generation,
         })
     }
 
+    fn promote(
+        &mut self,
+        prepared: PreparedEditorScene,
+        receipt: WgpuEditorCompositeReceipt,
+    ) -> Result<(), EditorRunError> {
+        if receipt.image() != prepared.submission
+            || receipt.texture_registration_generation() != prepared.texture_registration_generation
+        {
+            return Err(EditorRunError::Platform(
+                "the Editor Scene receipt does not match the prepared candidate".to_owned(),
+            ));
+        }
+        self.presented = Some(PresentedEditorScene {
+            document: prepared.document,
+            revision: prepared.revision,
+            geometry_revision: prepared.geometry_revision,
+            hits: prepared.hits,
+            receipt,
+        });
+        Ok(())
+    }
+
+    fn retire_presentation(&mut self) {
+        self.presented = None;
+    }
+
     fn retire_gpu_binding(&mut self) {
         self.binding = None;
+        self.presented = None;
     }
 
     fn retire_target(&mut self, gpu: &mut WgpuEditorExecution, renderer: &mut EditorEguiRenderer) {
         gpu.retire_image_target();
+        self.presented = None;
         if let Some(binding) = self.binding.take() {
             renderer.renderer.free_texture(&binding.texture_id);
         }
@@ -663,6 +732,11 @@ fn editor_window_packet(window: &Window) -> RenderWindowPacket {
             .with_scale_factor(window.scale_factor()),
         present_mode: PresentMode::AutoVsync,
     }
+}
+
+fn window_preview_extent(window: &Window) -> Option<Extent2d> {
+    let size = window.inner_size();
+    Extent2d::new(size.width, size.height)
 }
 
 fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {

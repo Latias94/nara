@@ -299,6 +299,14 @@ impl WgpuFramePacketSlot {
 }
 
 impl WgpuFramePayload {
+    #[cfg(feature = "sprite-submitter")]
+    pub(crate) fn for_editor_sprites(sprite_batches: SpriteBatches) -> Self {
+        Self {
+            sprite_batches: Some(sprite_batches),
+            ..Self::default()
+        }
+    }
+
     #[cfg(feature = "ui-submitter")]
     pub(crate) fn ui_facts(&self, target: RenderTarget) -> WgpuUiPayloadFacts {
         let mut facts = WgpuUiPayloadFacts::default();

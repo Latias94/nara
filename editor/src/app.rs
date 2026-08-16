@@ -9,7 +9,10 @@ use std::{
 use nara::{
     diagnostic::DiagnosticReport,
     fs::{CapabilityRights, DirectoryCapability, FsError, HostCapabilityOptions, TrustMode},
-    project_host::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession},
+    project_host::{
+        EditorPreviewCandidate, EditorProjectIntent, EditorProjectOpenError, EditorProjectSession,
+    },
+    render::Extent2d,
     tooling::{
         EditorAction, EditorActionBatch, EditorFrameModel, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
@@ -155,6 +158,15 @@ impl EditorApplication {
             actions_observed,
             exit_ready: exit_ready(&frame),
         }
+    }
+
+    pub fn configure_scene_preview(&mut self, extent: Option<Extent2d>) {
+        self.session.configure_editor_preview(extent);
+    }
+
+    #[must_use]
+    pub fn take_scene_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
+        self.session.take_editor_preview_candidate()
     }
 
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {

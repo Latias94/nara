@@ -34,13 +34,19 @@ impl EditorProjectSession {
         self.advance_workspace_retirement();
         self.drive_play_owner(real_delta);
         self.advance_workspace_retirement();
+        #[cfg(feature = "presentation-2d")]
+        self.drive_editor_preview();
         self.publish_editor_frame()
     }
 
     pub(super) fn publish_editor_frame(&mut self) -> Arc<EditorFrameModel> {
+        #[cfg(feature = "presentation-2d")]
+        let preview_world = self.preview.world_snapshot();
+        #[cfg(not(feature = "presentation-2d"))]
+        let preview_world = None;
         let workspace = self
             .workspace
-            .model(self.plan.schema_validation().registry(), None);
+            .model(self.plan.schema_validation().registry(), preview_world);
         let project = self.editor_project_view();
         let diagnostics = self.diagnostics.clone();
         let reopen_target = match workspace.scene(self.source_document) {
