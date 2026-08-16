@@ -15,9 +15,10 @@ decision authority.
 - **Resolution**: The first Scene View cross-target dependency uses one private serialized
   `Scene image -> egui -> Editor window` transaction under one GPU execution owner. It does not
   admit a RenderGraph, public execution kernel, or general multi-target scheduler.
-- **Evidence**: ESV-U1 implementation commit `1f97c48` and ADR 0111. A future computed dependency,
-  retained/history lifetime, or independent multi-target schedule that exceeds this fixed edge
-  requires a new focused question.
+- **Evidence**: ESV-U1 implementation commit `1f97c48`, ESV-U3 through ESV-U5 conformance record
+  `b8ad1393f7f945b3984d9847b37cc7ba`, and ADR 0111 prove the fixed edge in the native product. A
+  future computed dependency, retained/history lifetime, or independent multi-target schedule that
+  exceeds this fixed edge requires a new focused question.
 
 ## OQ-002: Reusable Material and Shader Specialization
 
@@ -385,9 +386,10 @@ flowchart LR
   window and edit-world Scene target. Target generations, backend instance/device epoch, egui
   registration generation, surface generation, and composite presentation generation reject stale
   work. Device loss replaces the whole execution owner while preserving the Editor document.
-- **Evidence**: ESV-U1 implementation commit `1f97c48` and ADR 0111. Game View/Play placement,
-  multiple isolated runtime views, detached windows, and public renderer replacement remain
-  separate successor decisions.
+- **Evidence**: ESV-U1 implementation commit `1f97c48`, ESV-U3 through ESV-U5 conformance record
+  `b8ad1393f7f945b3984d9847b37cc7ba`, and ADR 0111 prove edit-preview publication, exact presented
+  picking, and bounded native owner recovery. Game View/Play placement, multiple isolated runtime
+  views, detached windows, and public renderer replacement remain separate successor decisions.
 
 ## OQ-023: Platform Application Lifecycle
 

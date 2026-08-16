@@ -11,7 +11,9 @@
 [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md)
 **Implementation Plan**: [Editor Scene Composition and Scene View v1](../../plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md)
 **Initial Implementation**: `1f97c48` (`feat(editor): establish scene view gpu execution`)
-**Implementation Evidence**: [ESV-U1 Editor Scene View execution contract](../../knowledge/engineering/verification/2026-08/2026-08-16T084916Z-esv-u1-editor-scene-view-execution-contract-1de9903b1b7b4623a0633b2a6565e0b0.md)
+**Completed Implementation**: `f99de44` (`feat(editor): prove scene authoring trajectory`)
+**Implementation Evidence**: [ESV-U1 Editor Scene View execution contract](../../knowledge/engineering/verification/2026-08/2026-08-16T084916Z-esv-u1-editor-scene-view-execution-contract-1de9903b1b7b4623a0633b2a6565e0b0.md),
+[ESV-U3 through ESV-U5 Scene View product conformance](../../knowledge/engineering/verification/2026-08/2026-08-16T121124Z-esv-u3-through-esv-u5-scene-view-product-conformance-b8ad1393f7f945b3984d9847b37cc7ba.md)
 
 ## Context
 
