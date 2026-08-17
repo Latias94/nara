@@ -8,8 +8,8 @@ product_contract_source: ce-plan-bootstrap
 origin: STRATEGY.md
 execution: code
 execution_state: active
-active_unit: EUA-U4
-activation_record: e879c69f996648fa85d4fedadf0623f0
+active_unit: EUA-U5
+activation_record: 464b807c1f924e35a900c1be8d2569c3
 depends_on: docs/plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md
 plan_id: editor-ui-prefab-authoring-canvas-2026-08
 unit_namespace: EUA
