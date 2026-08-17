@@ -9,9 +9,10 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor UI Prefab Authoring and Canvas v1](../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
-   is the sole active implementation plan at EUA-U2, registered by
-   `a234ba7c987f4e22b2e5756269470b3d`. EUA-U1 is verified at `dc7ea07` with
-   evidence `e6b43a9f24ed42deb3c8d19a03a55cdf`. The completed
+   is the sole active implementation plan at EUA-U3, registered by
+   `8f701cea4a6a4c7da995b6b6188f5ae5`. EUA-U1 and EUA-U2 are verified at
+   `dc7ea07` and `16b0d30` with evidence `e6b43a9f24ed42deb3c8d19a03a55cdf`
+   and `19920c861d394a4fb43db6f60e4cf2a5`. The completed
    [Editor Game View v1](../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) remains immutable
    lineage evidence at `b5697f3` with conformance record `9d0b0a17beef4c39bea70a8d6f025455` and
    completed registration `84ab40a2fd9b425a9d9827fd9a62e142`.

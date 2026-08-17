@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "0531349956825dbbe731604811e740ae286d988565ae0bed6f085f2068c55f01"
+source_fingerprint: "e39133e546b0f93eb637500d1d21982b4c815f0e74e0eb9da8731bab19b1873c"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "0531349956825dbbe731604811e740ae286d988565ae0bed6f085f2068c
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `0531349956825dbbe731604811e740ae286d988565ae0bed6f085f2068c55f01`
-- Immutable records: 490
+- Source fingerprint: `e39133e546b0f93eb637500d1d21982b4c815f0e74e0eb9da8731bab19b1873c`
+- Immutable records: 492
 - Active lane heads: 1
 
 # Active Registrations
@@ -22,7 +22,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
-- [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T145954Z-editor-ui-prefab-authoring-canvas-v1-codex-root-a234ba7c987f4e22b2e5756269470b3d.md): `active` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
+- [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T171453Z-editor-ui-prefab-authoring-canvas-v1-codex-root-8f701cea4a6a4c7da995b6b6188f5ae5.md): `active` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -35,6 +35,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EUA-U2 toolkit-neutral UI prefab authoring and gesture conformance](verification/2026-08/2026-08-17T171453Z-eua-u2-toolkit-neutral-ui-prefab-authoring-and-gesture-conformance-19920c861d394a4fb43db6f60e4cf2a5.md) - Verifies the immutable UI authoring frame, typed descriptors, complete component validation, source map, and bounded continuous gesture transaction.
 - **Verification Evidence**: [EUA-U1 Prefab document, workspace, and persistence authority](verification/2026-08/2026-08-17T145954Z-eua-u1-prefab-document-workspace-and-persistence-authority-e6b43a9f24ed42deb3c8d19a03a55cdf.md) - Verifies true path-bound UI Prefab document ownership, exact anchor navigation, kind/source-bound persistence, and Scene regression coverage.
 - **Verification Evidence**: [EGV-U5 embedded Game View product conformance](verification/2026-08/2026-08-17T100847Z-egv-u5-embedded-game-view-product-conformance-9d0b0a17beef4c39bea70a8d6f025455.md) - Verifies the generic starter trajectory, compiled Reference Game native Game View canary, bounded lifecycle recovery, and final in-process authority closure.
 - **Verification Evidence**: [EGV-U4 exact Game input and Play control transaction](verification/2026-08/2026-08-17T061259Z-egv-u4-exact-game-input-and-play-control-transaction-426e925f3fa14241b4c85ee8213c1e2a.md) - Verifies exact visible-generation Game input capture, balanced cleanup, visible Play controls, bounded Running cadence, and presentation-joined fixed Step behavior.
@@ -46,7 +47,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [ESV-U2 revision-bound Scene Composition](verification/2026-08/2026-08-16T091730Z-esv-u2-revision-bound-scene-composition-2ea0e3e881ff4c6a9d98e52e0937445a.md) - Verifies bounded schema-backed Scene Composition commands, exact revision rejection, canonical hierarchy projection, single-owner selection, and one-record atomic history.
 - **Verification Evidence**: [ESV-U1 Editor Scene View execution contract](verification/2026-08/2026-08-16T084916Z-esv-u1-editor-scene-view-execution-contract-1de9903b1b7b4623a0633b2a6565e0b0.md) - Verifies the private one-device Editor image-to-window execution, exact composite receipt, target retirement, and whole-owner replacement boundary.
 - **Verification Evidence**: [EFI-U5 Editor authoring-loop conformance](verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md) - Verifies one published starter edit through the private Editor, project check, generated headless product, and accepted source-carrying export.
-- **Verification Evidence**: [EFI-U4 private native Editor application](verification/2026-08/2026-08-15T223500Z-efi-u4-private-native-editor-application-26373f31c4664b89b0d33eed4bef93db.md) - Verifies the private native nara-editor package, exact frame/action integration, bounded failure feedback, dirty-close arbitration, and one real Windows WGPU window canary.
 
 # Integration Notes
 

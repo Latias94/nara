@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-17
+* **Work Registration**: [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T171453Z-editor-ui-prefab-authoring-canvas-v1-codex-root-8f701cea4a6a4c7da995b6b6188f5ae5.md) - Work Registration for Editor UI Prefab Authoring and Canvas v1.
+* **Verification Evidence**: [EUA-U2 toolkit-neutral UI prefab authoring and gesture conformance](verification/2026-08/2026-08-17T171453Z-eua-u2-toolkit-neutral-ui-prefab-authoring-and-gesture-conformance-19920c861d394a4fb43db6f60e4cf2a5.md) - Verifies the immutable UI authoring frame, typed descriptors, complete component validation, source map, and bounded continuous gesture transaction.
 * **Verification Evidence**: [EUA-U1 Prefab document, workspace, and persistence authority](verification/2026-08/2026-08-17T145954Z-eua-u1-prefab-document-workspace-and-persistence-authority-e6b43a9f24ed42deb3c8d19a03a55cdf.md) - Verifies true path-bound UI Prefab document ownership, exact anchor navigation, kind/source-bound persistence, and Scene regression coverage.
 * **Work Registration**: [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T145954Z-editor-ui-prefab-authoring-canvas-v1-codex-root-a234ba7c987f4e22b2e5756269470b3d.md) - Work Registration for Editor UI Prefab Authoring and Canvas v1.
 * **Work Registration**: [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T123302Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fdc10a41bc044ad5b3a93ed662abf4d8.md) - Active implementation lane for true Prefab authoring, exact-generation UI Canvas, typed Inspector, and Save-to-Restart product workflow.
@@ -145,5 +147,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-08-06
 * **Work Registration**: [Ordered UI kernel correction: NUI-U15 bounded product proof active](registry/2026-08/2026-08-06T182000Z-engine-foundation-contract-completion-codex-root-38a88f6cfc644db99ebd546baedebd69.md) - Activates the Reference-Game product proof only after the runtime UI module and interface checkpoint has closed.
-* **Work Registration**: [Ordered UI kernel correction: NUI-U17 runtime ownership checkpoint completed](registry/2026-08/2026-08-06T181500Z-engine-foundation-contract-completion-codex-root-54b90cb0a87a424b8340f002394a2755.md) - Closes the deep runtime UI lifecycle and interface checkpoint before any reference-game product-matrix expansion.
-* **Verification Evidence**: [NUI-U17 deep runtime UI ownership and interface closure](verification/2026-08/2026-08-06T181000Z-nui-u17-deep-runtime-ui-ownership-3eb9a95fdf4a43caa78aea9fad953e13.md) - Verifies exact presented-session authority, fail-closed routing, pause-safe journal delivery, route ownership, and private schedule/module boundaries without product-matrix expansion.
