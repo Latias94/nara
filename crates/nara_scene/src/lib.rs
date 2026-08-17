@@ -23,9 +23,10 @@ mod product_transaction_tests;
 mod tests;
 
 pub use authoring::{
-    SceneAuthoringClearReport, SceneAuthoringContentState, SceneAuthoringHistoryLimits,
-    SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage, SceneAuthoringRevision,
-    SceneAuthoringSession, SceneAuthoringSourceId, SceneAuthoringSyncReport,
+    PrefabAuthoringSession, SceneAuthoringClearReport, SceneAuthoringContentState,
+    SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage,
+    SceneAuthoringRevision, SceneAuthoringSession, SceneAuthoringSourceId,
+    SceneAuthoringSyncReport,
 };
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{

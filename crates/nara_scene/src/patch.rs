@@ -10,7 +10,7 @@ use nara_reflect::{
 };
 
 use crate::{
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
@@ -173,6 +173,206 @@ impl ScenePatchDocument {
                 None => document.validate_authoring_with_asset_database(registry, database),
             },
         )
+    }
+
+    pub(crate) fn prepare_to_prefab(
+        &self,
+        document: &PrefabDocument,
+        registry: &ComponentRegistry,
+    ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
+        self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
+            match index {
+                Some(index) => document
+                    .instantiate()
+                    .validate_authoring_for_patch(registry, index),
+                None => document.instantiate().validate_authoring(registry),
+            }
+        })
+    }
+
+    pub(crate) fn prepare_to_prefab_with_asset_database(
+        &self,
+        document: &PrefabDocument,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
+        self.prepare_to_prefab_with_validator(document, registry, |document, registry, index| {
+            match index {
+                Some(index) => document
+                    .instantiate()
+                    .validate_authoring_for_patch_with_asset_database(registry, database, index),
+                None => document
+                    .instantiate()
+                    .validate_authoring_with_asset_database(registry, database),
+            }
+        })
+    }
+
+    fn prepare_to_prefab_with_validator(
+        &self,
+        document: &PrefabDocument,
+        registry: &ComponentRegistry,
+        mut validate: impl FnMut(&PrefabDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
+    ) -> Result<PreparedPrefabPatch, ScenePatchReport> {
+        let limits = ScenePatchApplyLimits::default();
+        if let Some(format_version) = self.unsupported_format_version() {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(with_public_u64(
+                with_public_u64(
+                    diagnostic_error(
+                        "scene.patch-unsupported-format-version",
+                        "Scene patch format version is unsupported",
+                    ),
+                    "actual-version",
+                    u64::from(format_version),
+                ),
+                "expected-version",
+                u64::from(Self::CURRENT_FORMAT_VERSION),
+            ));
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            });
+        }
+
+        let mut validation_work = prefab_validation_work(document);
+        if let Some(diagnostic) = validation_work_budget_diagnostic(validation_work, limits, None) {
+            let mut diagnostics = DiagnosticReport::default();
+            diagnostics.push(diagnostic);
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics,
+            });
+        }
+        let source_validation = validate(document, registry, None);
+        if source_validation.has_errors() {
+            return Err(ScenePatchReport {
+                applied: false,
+                inverse: None,
+                diagnostics: source_validation,
+            });
+        }
+
+        let mut scratch = document.clone();
+        let mut inverse_groups = Vec::<Vec<ScenePatchOperation>>::new();
+        for (operation_index, operation) in self.operations.iter().enumerate() {
+            let inverse = match operation {
+                ScenePatchOperation::SetField {
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    value,
+                } => set_field(
+                    &mut scratch,
+                    FieldPatchTarget::new(
+                        registry,
+                        entity,
+                        component,
+                        component_version,
+                        field,
+                        operation_index,
+                    ),
+                    value.clone(),
+                ),
+                ScenePatchOperation::RemoveField {
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                } => remove_field(
+                    &mut scratch,
+                    registry,
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    operation_index,
+                ),
+                ScenePatchOperation::SetAssetRefField {
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    asset_ref,
+                } => set_asset_ref_field(
+                    &mut scratch,
+                    FieldPatchTarget::new(
+                        registry,
+                        entity,
+                        component,
+                        component_version,
+                        field,
+                        operation_index,
+                    ),
+                    asset_ref,
+                ),
+                ScenePatchOperation::AddEntity { .. }
+                | ScenePatchOperation::RemoveEntity { .. }
+                | ScenePatchOperation::RestoreEntity { .. }
+                | ScenePatchOperation::AddComponent { .. }
+                | ScenePatchOperation::RemoveComponent { .. }
+                | ScenePatchOperation::ReplaceComponent { .. }
+                | ScenePatchOperation::MoveEntity { .. } => Err(patch_diagnostic(
+                    operation_index,
+                    "scene.prefab-authoring-structural-operation-unsupported",
+                    "Prefab authoring v1 accepts existing component field edits only",
+                    None,
+                    None,
+                    None,
+                )),
+            };
+            let inverse = match inverse {
+                Ok(inverse) => inverse,
+                Err(diagnostic) => {
+                    let mut diagnostics = DiagnosticReport::default();
+                    diagnostics.push(diagnostic);
+                    return Err(ScenePatchReport {
+                        applied: false,
+                        inverse: None,
+                        diagnostics,
+                    });
+                }
+            };
+
+            let operation_work = prefab_validation_work(&scratch);
+            let observed = validation_work.saturating_add(operation_work);
+            if let Some(diagnostic) =
+                validation_work_budget_diagnostic(observed, limits, Some(operation_index))
+            {
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(diagnostic);
+                return Err(ScenePatchReport {
+                    applied: false,
+                    inverse: None,
+                    diagnostics,
+                });
+            }
+            validation_work = observed;
+            let validation = validate(&scratch, registry, Some(operation_index));
+            if validation.has_errors() {
+                return Err(ScenePatchReport {
+                    applied: false,
+                    inverse: None,
+                    diagnostics: validation,
+                });
+            }
+            inverse_groups.push(inverse);
+        }
+
+        scratch.canonicalize();
+        Ok(PreparedPrefabPatch {
+            document: scratch,
+            report: ScenePatchReport {
+                applied: true,
+                inverse: Some(ScenePatchDocument::new(
+                    inverse_groups.into_iter().rev().flatten(),
+                )),
+                diagnostics: DiagnosticReport::default(),
+            },
+        })
     }
 
     /// Consumes this patch into an unpublished candidate document without retaining an inverse.
@@ -793,6 +993,17 @@ pub(crate) struct PreparedScenePatch {
     report: ScenePatchReport,
 }
 
+pub(crate) struct PreparedPrefabPatch {
+    document: PrefabDocument,
+    report: ScenePatchReport,
+}
+
+impl PreparedPrefabPatch {
+    pub(crate) fn into_parts(self) -> (PrefabDocument, ScenePatchReport) {
+        (self.document, self.report)
+    }
+}
+
 impl PreparedScenePatch {
     pub(crate) fn into_parts(self) -> (SceneDocument, ScenePatchReport) {
         (self.document, self.report)
@@ -900,6 +1111,20 @@ impl ScenePatchValidationBudgetKind {
 }
 
 fn scene_validation_work(document: &SceneDocument) -> SceneValidationWork {
+    SceneValidationWork {
+        structural_items: document.entities.iter().fold(
+            1_usize.saturating_add(document.roots.len()),
+            |work, entity| {
+                work.saturating_add(1)
+                    .saturating_add(entity.children.len())
+                    .saturating_add(entity.components.len())
+            },
+        ),
+        value_cost: scene_entities_source_value_cost(&document.entities),
+    }
+}
+
+fn prefab_validation_work(document: &PrefabDocument) -> SceneValidationWork {
     SceneValidationWork {
         structural_items: document.entities.iter().fold(
             1_usize.saturating_add(document.roots.len()),
@@ -1547,8 +1772,8 @@ fn replace_component(
     }])
 }
 
-fn set_field(
-    document: &mut SceneDocument,
+fn set_field<D: EntityDocument>(
+    document: &mut D,
     target: FieldPatchTarget<'_>,
     value: ComponentValue,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
@@ -1577,8 +1802,8 @@ fn set_field(
     }])
 }
 
-fn set_field_value(
-    document: &mut SceneDocument,
+fn set_field_value<D: EntityDocument>(
+    document: &mut D,
     target: FieldPatchTarget<'_>,
     value: ComponentValue,
 ) -> Result<Option<ComponentValue>, Diagnostic> {
@@ -1654,8 +1879,8 @@ fn set_field_value(
     Ok(previous)
 }
 
-fn remove_field(
-    document: &mut SceneDocument,
+fn remove_field<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
@@ -1683,8 +1908,8 @@ fn remove_field(
     }])
 }
 
-fn remove_field_value(
-    document: &mut SceneDocument,
+fn remove_field_value<D: EntityDocument>(
+    document: &mut D,
     target: FieldPatchTarget<'_>,
 ) -> Result<ComponentValue, Diagnostic> {
     let FieldPatchTarget {
@@ -2166,8 +2391,8 @@ fn insert_placed_entity(
     }
 }
 
-fn set_asset_ref_field(
-    document: &mut SceneDocument,
+fn set_asset_ref_field<D: EntityDocument>(
+    document: &mut D,
     target: FieldPatchTarget<'_>,
     asset_ref: &AssetRef,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
@@ -2222,8 +2447,8 @@ fn set_asset_ref_field(
     set_field(document, target, asset_ref_value(asset_ref))
 }
 
-fn set_asset_ref_field_without_inverse(
-    document: &mut SceneDocument,
+fn set_asset_ref_field_without_inverse<D: EntityDocument>(
+    document: &mut D,
     target: FieldPatchTarget<'_>,
     asset_ref: AssetRef,
 ) -> Result<(), Diagnostic> {
@@ -2281,12 +2506,40 @@ fn set_asset_ref_field_without_inverse(
     Ok(())
 }
 
-fn find_entity(document: &SceneDocument, id: &SceneEntityId) -> Option<usize> {
-    document.entities.iter().position(|record| record.id == *id)
+trait EntityDocument {
+    fn entities(&self) -> &[SceneEntityRecord];
+    fn entities_mut(&mut self) -> &mut Vec<SceneEntityRecord>;
 }
 
-fn entity_mut<'a>(
-    document: &'a mut SceneDocument,
+impl EntityDocument for SceneDocument {
+    fn entities(&self) -> &[SceneEntityRecord] {
+        &self.entities
+    }
+
+    fn entities_mut(&mut self) -> &mut Vec<SceneEntityRecord> {
+        &mut self.entities
+    }
+}
+
+impl EntityDocument for PrefabDocument {
+    fn entities(&self) -> &[SceneEntityRecord] {
+        &self.entities
+    }
+
+    fn entities_mut(&mut self) -> &mut Vec<SceneEntityRecord> {
+        &mut self.entities
+    }
+}
+
+fn find_entity<D: EntityDocument + ?Sized>(document: &D, id: &SceneEntityId) -> Option<usize> {
+    document
+        .entities()
+        .iter()
+        .position(|record| record.id == *id)
+}
+
+fn entity_mut<'a, D: EntityDocument + ?Sized>(
+    document: &'a mut D,
     id: &SceneEntityId,
     operation_index: usize,
 ) -> Result<&'a mut SceneEntityRecord, Diagnostic> {
@@ -2300,11 +2553,11 @@ fn entity_mut<'a>(
             None,
         ));
     };
-    Ok(&mut document.entities[index])
+    Ok(&mut document.entities_mut()[index])
 }
 
-fn component_mut<'a>(
-    document: &'a mut SceneDocument,
+fn component_mut<'a, D: EntityDocument + ?Sized>(
+    document: &'a mut D,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     operation_index: usize,
@@ -2322,8 +2575,8 @@ fn component_mut<'a>(
     })
 }
 
-fn component_mut_for_field<'a>(
-    document: &'a mut SceneDocument,
+fn component_mut_for_field<'a, D: EntityDocument + ?Sized>(
+    document: &'a mut D,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     expected_version: ComponentSchemaVersion,

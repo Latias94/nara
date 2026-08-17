@@ -3,8 +3,9 @@ use nara::{
     prelude::*,
     reflect::ComponentValueKind,
     scene::{
-        SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus, ScenePatchDocument,
-        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        PrefabAuthoringSession, PrefabDocument, SceneAuthoringHistoryLimits,
+        SceneAuthoringHistoryStatus, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+        ScenePlacementOwner,
     },
 };
 
@@ -108,6 +109,52 @@ fn authoring_session_undo_redo_are_transactional() {
             redo_depth: 0,
         }
     );
+}
+
+#[test]
+fn prefab_authoring_session_keeps_prefab_source_kind_and_history_identity() {
+    let registry = scene_registry();
+    let retry = scene_id("retry");
+    let mut session =
+        PrefabAuthoringSession::new(PrefabDocument::from_ordered_roots([labeled_entity(
+            retry.clone(),
+            "Retry",
+        )]));
+    let initial_source = session.revision().source_id();
+    let patch = set_label_patch(&retry, "Try Again");
+
+    assert!(session.apply_patch(&patch, &registry).applied);
+    assert_eq!(session.document().roots, vec![retry.clone()]);
+    assert_eq!(session.document().entities.len(), 1);
+    assert_eq!(
+        session
+            .document()
+            .entities
+            .first()
+            .and_then(|entity| entity.components.get(&label_type_id()))
+            .and_then(|component| component.value.field_str("text").ok()),
+        Some("Try Again")
+    );
+    assert_eq!(session.revision().source_id(), initial_source);
+    assert_eq!(session.history_status().undo_depth, 1);
+
+    assert!(session.undo(&registry).applied);
+    assert_eq!(session.history_status().redo_depth, 1);
+    assert!(session.redo(&registry).applied);
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(session.document().roots, vec![retry]);
+
+    let before = session.document().clone();
+    let revision = session.revision();
+    let unsupported = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(scene_id("extra")),
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    }]);
+    let rejected = session.apply_patch(&unsupported, &registry);
+
+    assert!(!rejected.applied);
+    assert_eq!(session.document(), &before);
+    assert_eq!(session.revision(), revision);
 }
 
 #[test]
