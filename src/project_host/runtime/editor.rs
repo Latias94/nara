@@ -937,6 +937,12 @@ impl EditorProjectSession {
         &mut self,
         extent: Extent2d,
     ) -> Result<bool, EditorGameViewBridgeFailure> {
+        if !matches!(
+            self.runtime_host.running_runtime_state(),
+            Some(RuntimeState::Running | RuntimeState::Paused)
+        ) {
+            return Ok(false);
+        }
         let start = match self.runtime_owner {
             EditorRuntimeOwnerState::Active {
                 game: Some(game), ..

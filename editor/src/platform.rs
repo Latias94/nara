@@ -983,8 +983,10 @@ impl NativeEditorHost {
             }
         };
         if presentation.window().is_some() {
-            self.gpu_recovery.mark_presented();
             window.set_title(EDITOR_TITLE);
+        }
+        if presentation.composite().is_some() {
+            self.gpu_recovery.mark_viewport_presented();
         }
         match (prepared_viewport, presentation.composite()) {
             (Some(PreparedEditorViewportFrame::Scene(prepared)), Some(receipt)) => {
@@ -1220,7 +1222,7 @@ impl EditorGpuRecovery {
         *self = Self::AwaitingExplicitRetry;
     }
 
-    fn mark_presented(&mut self) {
+    fn mark_viewport_presented(&mut self) {
         *self = Self::Ready;
     }
 
@@ -1280,10 +1282,10 @@ mod tests {
         assert!(recovery.begin_explicit_retry());
         assert!(!recovery.begin_explicit_retry());
 
-        recovery.mark_presented();
+        recovery.mark_viewport_presented();
         assert!(recovery.begin_automatic_replacement());
 
-        recovery.mark_presented();
+        recovery.mark_viewport_presented();
         assert!(recovery.begin_runtime_pause());
         assert!(!recovery.begin_automatic_replacement());
         recovery.finish_runtime_pause();
