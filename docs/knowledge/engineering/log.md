@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-17
+* **Work Registration**: [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T205927Z-editor-ui-prefab-authoring-canvas-v1-codex-root-e879c69f996648fa85d4fedadf0623f0.md) - Work Registration for Editor UI Prefab Authoring and Canvas v1.
+* **Verification Evidence**: [EUA-U3 exact-generation UI Canvas conformance](verification/2026-08/2026-08-17T205912Z-eua-u3-exact-generation-ui-canvas-conformance-45077ece034c42569c6a460a562ab0b1.md) - Verifies exact U2 projection reuse, project-owned Canvas environment, resource-complete WGPU image presentation, composite-receipt pick authority, and bounded recovery.
 * **Work Registration**: [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T171453Z-editor-ui-prefab-authoring-canvas-v1-codex-root-8f701cea4a6a4c7da995b6b6188f5ae5.md) - Work Registration for Editor UI Prefab Authoring and Canvas v1.
 * **Verification Evidence**: [EUA-U2 toolkit-neutral UI prefab authoring and gesture conformance](verification/2026-08/2026-08-17T171453Z-eua-u2-toolkit-neutral-ui-prefab-authoring-and-gesture-conformance-19920c861d394a4fb43db6f60e4cf2a5.md) - Verifies the immutable UI authoring frame, typed descriptors, complete component validation, source map, and bounded continuous gesture transaction.
 * **Verification Evidence**: [EUA-U1 Prefab document, workspace, and persistence authority](verification/2026-08/2026-08-17T145954Z-eua-u1-prefab-document-workspace-and-persistence-authority-e6b43a9f24ed42deb3c8d19a03a55cdf.md) - Verifies true path-bound UI Prefab document ownership, exact anchor navigation, kind/source-bound persistence, and Scene regression coverage.
@@ -141,9 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Ordered UI kernel correction: focused NUI-U15A refreeze active](registry/2026-08/2026-08-08T073640Z-engine-foundation-contract-completion-codex-root-1073eee19b6b48f7ae4cd1d27b4f1c05.md) - Formally reopens the frozen shared focus identity and navigation-origin assertion exposed by bounded U15B product integration.
 * **Work Registration**: [Ordered UI kernel correction: NUI-U15B product integration active](registry/2026-08/2026-08-08T052339Z-engine-foundation-contract-completion-codex-root-d0c82695aaa647019700840f26617c89.md) - Activates bounded Reference Game UI product integration against the frozen NUI-U15A public inventory and semantic baseline.
 * **Verification Evidence**: [NUI-U15A neutral UI conformance and public boundary freeze](verification/2026-08/2026-08-08T051354Z-nui-u15a-neutral-ui-conformance-and-public-boundary-freeze-32535c96ab3b49d3affa4ecdcbb22e39.md) - Freezes the kernel, runtime adapter, and root presentation UI boundaries through three executable public-only examples.
-
-## 2026-08-07
-* **Work Registration**: [Ordered UI kernel correction: NUI-U15A UI foundation conformance active](registry/2026-08/2026-08-07T010500Z-engine-foundation-contract-completion-codex-root-b47fe204c2fb4706a00429c0d8ee86c8.md) - Activates neutral layered UI conformance examples and the shared-interface freeze before Reference Game product integration.
-
-## 2026-08-06
-* **Work Registration**: [Ordered UI kernel correction: NUI-U15 bounded product proof active](registry/2026-08/2026-08-06T182000Z-engine-foundation-contract-completion-codex-root-38a88f6cfc644db99ebd546baedebd69.md) - Activates the Reference-Game product proof only after the runtime UI module and interface checkpoint has closed.

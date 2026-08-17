@@ -8,8 +8,8 @@ product_contract_source: ce-plan-bootstrap
 origin: STRATEGY.md
 execution: code
 execution_state: active
-active_unit: EUA-U2
-activation_record: a234ba7c987f4e22b2e5756269470b3d
+active_unit: EUA-U4
+activation_record: e879c69f996648fa85d4fedadf0623f0
 depends_on: docs/plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md
 plan_id: editor-ui-prefab-authoring-canvas-2026-08
 unit_namespace: EUA
@@ -99,7 +99,7 @@ Undo/Redo, Reopen, stale drafts, runtime isolation, or future toolkit replacemen
 #### UI Canvas presentation and selection
 
 - R10. The private Editor viewport remains one top-level `Authoring` or `GameRuntime(runtime_generation)` source. `Authoring` has one active producer, `ScenePreview` or `UiPrefab(document)`, but never parallel targets. The selected producer supplies the only source association eligible for the current target and receipt; `WgpuEditorExecution` retains target, texture-registration, and composite-receipt lifecycle ownership, while `NativeEditorHost` retains physical input arbitration. Opening a Prefab selects the UI Canvas; leaving it retires Canvas presentation and gesture authority before another producer or Game activates.
-- R11. `EditorProjectSession` deepens the existing edit-preview owner so it materializes the active accepted Scene or Prefab plus any transient gesture overlay into one private World. The UI producer runs the existing Nara UI projection/compiler/planner to create an authoring-only image candidate and a source map from runtime UI keys to exact Prefab-local `SceneEntityId` values. It does not publish a Runtime `UiPresentationReceipt`, Runtime interaction session, focus/reducer state, accessibility actions, or backend outcome permits. The candidate contains no native, WGPU, egui, or durable workspace identity beyond the explicit document/revision stamp.
+- R11. `EditorProjectSession` applies any transient gesture overlay to the active accepted Prefab and builds one exact U2 authoring projection for that document revision. The UI producer consumes that same projection directly through the existing Nara UI kernel/compiler/planner to create an authoring-only image candidate and source-local Canvas facts; it does not traverse the Prefab into a second tree or synthesize a preview World. Runtime and Canvas share controlled-widget lowering, while the U2 projection remains the sole source hierarchy and identity authority. The producer does not publish a Runtime `UiPresentationReceipt`, Runtime interaction session, focus/reducer state, accessibility actions, or backend outcome permits. The candidate contains no native, WGPU, egui, or durable workspace identity beyond the explicit document/revision stamp.
 - R12. `NativeEditorHost` submits the authoring-only Canvas image through the existing one-device Editor execution owner, lets egui sample that exact texture registration, and publishes Canvas input authority only after the Editor window presents. The composite receipt binds document/revision, transient generation, UI frame/paint-packet identity, logical surface/content transform, image target/generation, texture-registration generation, backend instance, device epoch, window-surface generation, and Editor composite generation. It is an Editor Canvas presented stamp, not a Runtime UI presentation receipt.
 - R13. Canvas picking uses the prior exact visible authoring frame and source map. It considers all visible authored UI layout facts, not only runtime-interactive hit regions, respects clip and structural/paint order, and emits the same workspace selection action as the hierarchy. Candidate-only, resized, stale-revision, foreign-document, retired-target, or old-device facts cannot change selection.
 - R14. Hover, selection outline, direct-manipulation handles, drag threshold, the fixed fit-to-panel transform, and toolkit IDs are transient Editor state. Canvas mapping keeps two distinct transforms: `UiSurfaceContentTransform` maps authored logical space to the offscreen image, while a private `CanvasViewTransform` deterministically fits that image into the egui panel. Blank primary click clears selection; primary click on a visible node selects it; primary drag on the selected body starts move only when position is writable; primary drag on an admitted edge/corner handle starts resize; blank drag is a no-op in v1. An active drag retains pointer ownership outside the panel until release or cancellation. Escape cancels; focus loss, source switch, Reopen, target deletion, revision conflict, zero extent, fit-transform change during drag, or GPU retirement cancels or retires the gesture explicitly. User pan/zoom, marquee, snapping, guides, modifier transforms, and touch navigation are deferred. Canvas navigation never dirties the Prefab.
@@ -258,7 +258,7 @@ Prefab document + revision + selection
   -> egui hierarchy / Inspector / Canvas overlay
 
 Accepted Prefab + transient gesture overlay
-  -> private preview World + logical UI surface
+  -> exact U2 authoring projection + logical UI surface
   -> Nara UI layout/paint facts
   -> authoring-only resource-complete UI paint packets
   -> WgpuEditorExecution offscreen image
@@ -453,7 +453,7 @@ execution and composite receipt contracts.
 
 **Approach:**
 
-1. Deepen the existing private edit-preview owner so it materializes exactly one active Authoring document producer at a time. For a Prefab, apply the transient gesture overlay in a private preview World and lower the accepted project-owned primary UI surface profile into its logical Canvas environment. Missing/invalid profile produces `Unavailable` while Hierarchy/Inspector remain usable. The preview does not share the Play Runtime or write persistence state.
+1. Deepen the existing private edit-preview owner so it materializes exactly one active Authoring document producer at a time. For a Prefab, apply the transient gesture overlay, build one exact U2 authoring projection, and lower the accepted project-owned primary UI surface profile into its logical Canvas environment. The Canvas compiler consumes that projection directly, rather than constructing a synthetic World or independently traversing the Prefab. Missing/invalid profile produces `Unavailable` while Hierarchy/Inspector remain usable. The preview does not share the Play Runtime or write persistence state.
 2. Compile with existing Runtime UI components, kernel, planner, fonts, and backend capability closure, but capture authoring-only resource-complete paint packets rather than Runtime backend presentation attempts. Carry the exact U2 source map and authoring identity beside candidate facts rather than modifying UI stable keys for Editor purposes.
 3. Extend the Authoring producer sum to Scene/UI while preserving the existing top-level Authoring/Game handoff and one active target. Source or producer handoff retires the old target, texture registration, composite receipt, pick facts, and active gesture before admitting UI Canvas.
 4. Submit the UI Canvas packets through the existing `WgpuEditorExecution`, register/sample the image in egui, and promote one Canvas presented lease only after final Editor-window presentation. Candidate or image-only success is not Canvas input authority, and no Runtime UI receipt/outcome is manufactured.

@@ -2,7 +2,9 @@
 
 **Status**: Accepted
 **Date**: 2026-08-17
-**Last Revised**: 2026-08-17
+**Last Revised**: 2026-08-18
+**Amended**: 2026-08-18 to make the exact U2 authoring projection, rather than a synthetic preview
+World, the single Canvas source projection authority
 **Owner**: `nara_scene`, `nara_tooling`, project Host, and the private Editor execution owner
 **Refines**: [ADR 0026](0026-editor-command-patch-and-undo-model.md), [ADR 0047](0047-editor-workspace-and-scene-document-state.md), [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md), [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md), and [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 **Refined By**: None
@@ -145,7 +147,7 @@ heterogeneous document consumer exists.
 | Patch logic is duplicated between Scene and Prefab | High | Extract only a private document-neutral mechanics core; keep public document types nominal. |
 | Save receipt is applied to the wrong document kind | Critical | Bind checkpoints and persistence lanes to closed document kind and source identity. |
 | Editor window silently becomes UI resolution authority | High | Store one validated profile in effective project settings and derive target transforms at each consumer. |
-| Unsaved Canvas preview mutates Runtime or persistence state | Critical | Use a private preview World/candidate and require the final composite receipt for input authority. |
+| Unsaved Canvas preview mutates Runtime or persistence state | Critical | Compile a private candidate from the exact authoring projection and require the final composite receipt for input authority. |
 | Early generic abstractions freeze the wrong toolkit boundary | Medium | Keep the authoring frame/action seam private or narrow until a second consumer proves the need. |
 
 ## Implementation Evidence
