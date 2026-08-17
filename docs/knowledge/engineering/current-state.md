@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "1b570859c06f60c05be824b56d7f909be40f79feae159abd6017800c4476435c"
+source_fingerprint: "01b51d4fdea3d0cb35914ef124e3495a6f6fed0f345dae9c427da2784530c5c6"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "1b570859c06f60c05be824b56d7f909be40f79feae159abd6017800c447
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `1b570859c06f60c05be824b56d7f909be40f79feae159abd6017800c4476435c`
-- Immutable records: 487
-- Active lane heads: 0
+- Source fingerprint: `01b51d4fdea3d0cb35914ef124e3495a6f6fed0f345dae9c427da2784530c5c6`
+- Immutable records: 488
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -22,6 +22,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
+- [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T123302Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fdc10a41bc044ad5b3a93ed662abf4d8.md): `active` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)

@@ -8,14 +8,15 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. No implementation plan is active. The completed
-   [Editor Game View v1](../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) closes at
-   `b5697f3` with conformance record `9d0b0a17beef4c39bea70a8d6f025455` and completed
-   registration `84ab40a2fd9b425a9d9827fd9a62e142`.
-   The completed Editor Scene Composition and Scene View, Editor Authoring
-   Loop, Fresh Project, Capability Directory Publication, Runtime UI, and focused correction plans
-   remain immutable lineage evidence; the
-   [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
+3. The [Editor UI Prefab Authoring and Canvas v1](../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
+   is the sole active implementation plan at EUA-U1, registered by
+   `fdc10a41bc044ad5b3a93ed662abf4d8`. The completed
+   [Editor Game View v1](../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) remains immutable
+   lineage evidence at `b5697f3` with conformance record `9d0b0a17beef4c39bea70a8d6f025455` and
+   completed registration `84ab40a2fd9b425a9d9827fd9a62e142`.
+   The completed Editor Scene Composition and Scene View, Editor Authoring Loop, Fresh Project,
+   Capability Directory Publication, Runtime UI, and focused correction plans remain immutable
+   lineage evidence; the [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
 4. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
 5. Design harnesses, appendices, and guides are non-normative. They must yield to Accepted ADRs and
    must not authorize implementation by themselves.

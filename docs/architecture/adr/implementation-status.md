@@ -3,8 +3,10 @@
 **Status**: Active
 **Last Verified**: 2026-08-17
 
-This ledger tracks implementation evidence independently from ADR decision acceptance. No
-implementation plan is active. The completed [Editor Game View
+This ledger tracks implementation evidence independently from ADR decision acceptance. The
+[Editor UI Prefab Authoring and Canvas v1](../../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
+is the sole active implementation plan at EUA-U1 under registration
+`fdc10a41bc044ad5b3a93ed662abf4d8`. The completed [Editor Game View
 v1](../../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) closes at `b5697f3` with
 conformance record `9d0b0a17beef4c39bea70a8d6f025455` and completed registration
 `84ab40a2fd9b425a9d9827fd9a62e142`.

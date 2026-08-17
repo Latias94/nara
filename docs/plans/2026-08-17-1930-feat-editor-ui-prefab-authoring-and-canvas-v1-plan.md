@@ -7,7 +7,9 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 origin: STRATEGY.md
 execution: code
-execution_state: inactive
+execution_state: active
+active_unit: EUA-U1
+activation_record: fdc10a41bc044ad5b3a93ed662abf4d8
 depends_on: docs/plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md
 plan_id: editor-ui-prefab-authoring-canvas-2026-08
 unit_namespace: EUA
