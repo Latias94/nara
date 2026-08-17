@@ -4,6 +4,11 @@ use nara_app::{
     PluginProductCapability, RuntimeGeneration, RuntimeState,
 };
 use nara_ecs::{Mut, Resource, World};
+use nara_input::{
+    ButtonDriverInput, InputWindowEvent, KeyCode, MouseButton, PointerDriverInput,
+    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
+    apply_window_input_driver_event,
+};
 use nara_project::{ProductCapability, ProductCapabilitySet};
 use nara_reflect::SchemaCompositionFingerprint;
 use nara_render::{
@@ -291,6 +296,79 @@ impl EditorGameViewCandidateIdentity {
     }
 }
 
+/// One physical Game View event retained by the private Editor Host until the next Runtime drive.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EditorGameInputEvent {
+    Focused(bool),
+    SurfaceRetired,
+    Pointer(PointerDriverInput),
+    Mouse(ButtonDriverInput<MouseButton>),
+    Keyboard(ButtonDriverInput<KeyCode>),
+}
+
+/// Exact-generation-bound Game View input batch.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct EditorGameInputBatch {
+    events: Vec<EditorGameInputEnvelope>,
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EditorGameInputEnvelope {
+    identity: EditorGameViewCandidateIdentity,
+    route_generation: u64,
+    event: EditorGameInputEvent,
+}
+
+impl EditorGameInputEnvelope {
+    #[must_use]
+    pub const fn new(
+        identity: EditorGameViewCandidateIdentity,
+        route_generation: u64,
+        event: EditorGameInputEvent,
+    ) -> Self {
+        Self {
+            identity,
+            route_generation,
+            event,
+        }
+    }
+
+    #[must_use]
+    pub const fn identity(self) -> EditorGameViewCandidateIdentity {
+        self.identity
+    }
+
+    #[must_use]
+    pub const fn route_generation(self) -> u64 {
+        self.route_generation
+    }
+
+    #[must_use]
+    pub const fn event(self) -> EditorGameInputEvent {
+        self.event
+    }
+}
+
+impl EditorGameInputBatch {
+    /// Maximum number of native events admitted by one Editor redraw transaction.
+    pub const MAX_EVENTS: usize = 256;
+
+    #[must_use]
+    pub fn new(events: impl IntoIterator<Item = EditorGameInputEnvelope>) -> Self {
+        Self {
+            events: events.into_iter().collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn into_events(self) -> Vec<EditorGameInputEnvelope> {
+        self.events
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct PendingEditorGameViewCandidate {
     identity: EditorGameViewRuntimeCandidateIdentity,
@@ -363,6 +441,7 @@ impl EditorGameViewCandidate {
         let _ = &message;
         EditorGameViewCompletion {
             identity: self.identity,
+            disposition: EditorGameViewCompletionDisposition::ContentRejected,
             #[cfg(feature = "presentation-ui")]
             outcomes: self
                 .ui_frame
@@ -436,8 +515,18 @@ impl EditorGameViewCandidateParts {
 #[derive(Debug)]
 pub struct EditorGameViewCompletion {
     identity: EditorGameViewCandidateIdentity,
+    disposition: EditorGameViewCompletionDisposition,
     #[cfg(feature = "presentation-ui")]
     outcomes: Vec<UiCompletedBackendOutcome>,
+}
+
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditorGameViewCompletionDisposition {
+    Presented,
+    Deferred,
+    ContentRejected,
+    Failed,
 }
 
 impl EditorGameViewCompletion {
@@ -447,9 +536,40 @@ impl EditorGameViewCompletion {
     }
 
     #[must_use]
+    pub const fn disposition(&self) -> EditorGameViewCompletionDisposition {
+        self.disposition
+    }
+
+    #[must_use]
     pub const fn without_ui(identity: EditorGameViewCandidateIdentity) -> Self {
+        Self::without_ui_with_disposition(identity, EditorGameViewCompletionDisposition::Presented)
+    }
+
+    #[must_use]
+    pub const fn without_ui_deferred(identity: EditorGameViewCandidateIdentity) -> Self {
+        Self::without_ui_with_disposition(identity, EditorGameViewCompletionDisposition::Deferred)
+    }
+
+    #[must_use]
+    pub const fn without_ui_content_rejected(identity: EditorGameViewCandidateIdentity) -> Self {
+        Self::without_ui_with_disposition(
+            identity,
+            EditorGameViewCompletionDisposition::ContentRejected,
+        )
+    }
+
+    #[must_use]
+    pub const fn without_ui_failed(identity: EditorGameViewCandidateIdentity) -> Self {
+        Self::without_ui_with_disposition(identity, EditorGameViewCompletionDisposition::Failed)
+    }
+
+    const fn without_ui_with_disposition(
+        identity: EditorGameViewCandidateIdentity,
+        disposition: EditorGameViewCompletionDisposition,
+    ) -> Self {
         Self {
             identity,
+            disposition,
             #[cfg(feature = "presentation-ui")]
             outcomes: Vec::new(),
         }
@@ -461,7 +581,63 @@ impl EditorGameViewCompletion {
         identity: EditorGameViewCandidateIdentity,
         outcomes: Vec<UiCompletedBackendOutcome>,
     ) -> Self {
-        Self { identity, outcomes }
+        Self::with_ui_disposition(
+            identity,
+            EditorGameViewCompletionDisposition::Presented,
+            outcomes,
+        )
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    #[must_use]
+    pub fn with_ui_deferred(
+        identity: EditorGameViewCandidateIdentity,
+        outcomes: Vec<UiCompletedBackendOutcome>,
+    ) -> Self {
+        Self::with_ui_disposition(
+            identity,
+            EditorGameViewCompletionDisposition::Deferred,
+            outcomes,
+        )
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    #[must_use]
+    pub fn with_ui_content_rejected(
+        identity: EditorGameViewCandidateIdentity,
+        outcomes: Vec<UiCompletedBackendOutcome>,
+    ) -> Self {
+        Self::with_ui_disposition(
+            identity,
+            EditorGameViewCompletionDisposition::ContentRejected,
+            outcomes,
+        )
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    #[must_use]
+    pub fn with_ui_failed(
+        identity: EditorGameViewCandidateIdentity,
+        outcomes: Vec<UiCompletedBackendOutcome>,
+    ) -> Self {
+        Self::with_ui_disposition(
+            identity,
+            EditorGameViewCompletionDisposition::Failed,
+            outcomes,
+        )
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    fn with_ui_disposition(
+        identity: EditorGameViewCandidateIdentity,
+        disposition: EditorGameViewCompletionDisposition,
+        outcomes: Vec<UiCompletedBackendOutcome>,
+    ) -> Self {
+        Self {
+            identity,
+            disposition,
+            outcomes,
+        }
     }
 }
 
@@ -496,6 +672,12 @@ pub enum EditorGameViewBridgeFailure {
     NonWindowTarget,
     #[error("the managed Play Runtime is unavailable")]
     RuntimeUnavailable,
+    #[error("the Game View input batch mixes incompatible capture routes")]
+    InputRouteMismatch,
+    #[error("the Game View input batch exceeded its bounded event budget")]
+    InputBudgetExceeded,
+    #[error("the managed Play Runtime rejected the normalized Game View input batch")]
+    InputRejected,
     #[error("the Runtime render frame was rejected: {0}")]
     Packet(RenderFramePacketError),
     #[cfg(feature = "presentation-ui")]
@@ -715,6 +897,7 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
                         {
                             let EditorGameViewCompletion {
                                 identity: candidate_identity,
+                                disposition,
                                 outcomes,
                             } = completion;
                             if !outcomes.is_empty()
@@ -725,6 +908,7 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
                                 return EditorGameViewBridgeOutput::Completed(Err(
                                     EditorGameViewCompletion {
                                         identity: candidate_identity,
+                                        disposition,
                                         outcomes,
                                     },
                                 ));
@@ -982,5 +1166,75 @@ pub(super) fn complete_candidate(
             | EditorGameViewBridgeOutput::Updated(_)
             | EditorGameViewBridgeOutput::Failed(_),
         )) => unreachable!("the typed completion port returns a completion outcome"),
+    }
+}
+
+pub(super) fn apply_input_batch(
+    runtime: &mut nara_app::RuntimeInstance,
+    batch: EditorGameInputBatch,
+) -> Result<(), EditorGameViewBridgeFailure> {
+    let events = batch.into_events();
+    let Some(first) = events.first().copied() else {
+        return Ok(());
+    };
+    let window = nara_input::InputWindowId::new(first.identity.start().logical_window().id.get());
+    let result = runtime.with_driver_scope(|scope| {
+        for envelope in events {
+            let event = envelope.event();
+            match event {
+                EditorGameInputEvent::Focused(focused) => {
+                    apply_window_input_driver_event(
+                        scope,
+                        window,
+                        nara_input::InputSeatId::PRIMARY,
+                        InputWindowEvent::Focused(focused),
+                    )
+                    .map_err(|_| ())?;
+                }
+                EditorGameInputEvent::SurfaceRetired => {
+                    apply_window_input_driver_event(
+                        scope,
+                        window,
+                        nara_input::InputSeatId::PRIMARY,
+                        InputWindowEvent::SurfaceRetired,
+                    )
+                    .map_err(|_| ())?;
+                }
+                EditorGameInputEvent::Pointer(input) => {
+                    apply_pointer_driver_input_at(
+                        scope,
+                        window,
+                        nara_input::InputSeatId::PRIMARY,
+                        nara_input::InputPointerId::PRIMARY,
+                        input,
+                    )
+                    .map_err(|_| ())?;
+                }
+                EditorGameInputEvent::Mouse(input) => {
+                    apply_mouse_driver_input_at(
+                        scope,
+                        window,
+                        nara_input::InputSeatId::PRIMARY,
+                        nara_input::InputPointerId::PRIMARY,
+                        input,
+                    )
+                    .map_err(|_| ())?;
+                }
+                EditorGameInputEvent::Keyboard(input) => {
+                    apply_keyboard_driver_input_at(
+                        scope,
+                        window,
+                        nara_input::InputSeatId::PRIMARY,
+                        input,
+                    )
+                    .map_err(|_| ())?;
+                }
+            }
+        }
+        Ok(())
+    });
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(())) | Err(_) => Err(EditorGameViewBridgeFailure::InputRejected),
     }
 }

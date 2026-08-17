@@ -11,9 +11,10 @@ mod preview;
 
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
-    EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
-    EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCandidateParts,
-    EditorGameViewCompletion,
+    EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartActivation,
+    EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
+    EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
+    EditorGameViewCompletionDisposition,
 };
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
@@ -444,6 +445,17 @@ enum EditorRuntimeOwnerState {
     Transitioning,
 }
 
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum EditorStepPresentationState {
+    AwaitingCandidate {
+        generation: u64,
+    },
+    AwaitingPresentation {
+        identity: EditorGameViewCandidateIdentity,
+    },
+}
+
 #[derive(Clone, Copy)]
 struct PendingEditorControl {
     operation: EditorPlayOperation,
@@ -496,6 +508,8 @@ pub struct EditorProjectSession {
     runtime_host: ProjectHost,
     runtime_owner: EditorRuntimeOwnerState,
     pending_control: Option<PendingEditorControl>,
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    pending_step_presentation: Option<EditorStepPresentationState>,
     play_result: Option<EditorPlayOperationResult>,
     runtime_edit_result: Option<EditorRuntimeEditResult>,
     pending_apply_changes: Option<PendingApplyChanges>,
@@ -653,6 +667,8 @@ impl EditorProjectSession {
             runtime_host: ProjectHost::new(cleanup_policy),
             runtime_owner: EditorRuntimeOwnerState::Empty,
             pending_control: None,
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            pending_step_presentation: None,
             play_result: None,
             runtime_edit_result: None,
             pending_apply_changes: None,
@@ -777,6 +793,7 @@ impl EditorProjectSession {
             operation,
             generation,
         });
+        self.pending_step_presentation = None;
         self.runtime_owner = EditorRuntimeOwnerState::Active {
             document,
             source_revision: revision,
@@ -802,6 +819,7 @@ impl EditorProjectSession {
                 ..
             } if request == expected => {
                 self.runtime_host.abort_prepared_start(prepared);
+                self.pending_step_presentation = None;
                 self.play_result = Some(EditorPlayOperationResult::Pending { operation });
                 self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
                     terminal: EditorPlayOperationResult::Failed {
@@ -844,13 +862,24 @@ impl EditorProjectSession {
             return Ok(None);
         };
         let candidate = candidate.bind_start(start);
-        let EditorRuntimeOwnerState::Active {
-            game: Some(game), ..
-        } = &mut self.runtime_owner
-        else {
-            unreachable!("a captured Game candidate retains its active Runtime owner")
-        };
-        game.in_flight = Some(candidate.identity());
+        let identity = candidate.identity();
+        {
+            let EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } = &mut self.runtime_owner
+            else {
+                unreachable!("a captured Game candidate retains its active Runtime owner")
+            };
+            game.in_flight = Some(identity);
+        }
+        if let Some(EditorStepPresentationState::AwaitingCandidate { generation }) =
+            self.pending_step_presentation
+        {
+            if generation == identity.runtime_generation().get() {
+                self.pending_step_presentation =
+                    Some(EditorStepPresentationState::AwaitingPresentation { identity });
+            }
+        }
         Ok(Some(candidate))
     }
 
@@ -872,6 +901,8 @@ impl EditorProjectSession {
         ) {
             return Err(completion);
         }
+        let identity = completion.identity();
+        let disposition = completion.disposition();
         let Some(runtime) = self.runtime_host.running_runtime_mut() else {
             return Err(completion);
         };
@@ -884,6 +915,36 @@ impl EditorProjectSession {
                     unreachable!("a completed Game candidate retains its active Runtime owner")
                 };
                 game.in_flight = None;
+                if matches!(
+                    self.pending_step_presentation,
+                    Some(EditorStepPresentationState::AwaitingPresentation {
+                        identity: expected
+                    }) if expected == identity
+                ) {
+                    match disposition {
+                        EditorGameViewCompletionDisposition::Presented => {
+                            self.pending_step_presentation = None;
+                            self.play_result = Some(EditorPlayOperationResult::Applied {
+                                operation: EditorPlayOperation::StepFixedTick,
+                                generation: Some(identity.runtime_generation().get()),
+                            });
+                        }
+                        EditorGameViewCompletionDisposition::Deferred => {
+                            self.pending_step_presentation =
+                                Some(EditorStepPresentationState::AwaitingCandidate {
+                                    generation: identity.runtime_generation().get(),
+                                });
+                        }
+                        EditorGameViewCompletionDisposition::ContentRejected
+                        | EditorGameViewCompletionDisposition::Failed => {
+                            self.pending_step_presentation = None;
+                            self.play_result = Some(EditorPlayOperationResult::Failed {
+                                operation: EditorPlayOperation::StepFixedTick,
+                                failure: EditorPlayFailure::Presentation,
+                            });
+                        }
+                    }
+                }
                 Ok(())
             }
             Err(completion) => Err(completion),
@@ -908,6 +969,9 @@ impl EditorProjectSession {
             }
         ) {
             return Err(EditorGameViewBridgeFailure::CandidateBusy);
+        }
+        if !active {
+            self.cancel_game_step_presentation();
         }
         let runtime = self
             .runtime_host
@@ -960,6 +1024,7 @@ impl EditorProjectSession {
             return Ok(false);
         }
 
+        self.cancel_game_step_presentation();
         self.set_game_view_source_active(false, "the Game View geometry was superseded")?;
         let resized = start.resized(extent)?;
         {
@@ -982,6 +1047,69 @@ impl EditorProjectSession {
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
         game_view::set_capture_enabled(runtime, true)?;
         Ok(true)
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn cancel_game_step_presentation(&mut self) -> bool {
+        if self.pending_step_presentation.take().is_some() {
+            self.play_result = Some(EditorPlayOperationResult::Cancelled {
+                operation: EditorPlayOperation::StepFixedTick,
+            });
+            true
+        } else {
+            false
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn game_step_requires_runtime_drive(&self) -> bool {
+        matches!(
+            self.pending_step_presentation,
+            Some(EditorStepPresentationState::AwaitingCandidate { .. })
+        )
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn apply_game_view_input_batch(
+        &mut self,
+        batch: EditorGameInputBatch,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        let events = batch.into_events();
+        if events.is_empty() {
+            return Ok(());
+        }
+        if events.len() > EditorGameInputBatch::MAX_EVENTS {
+            return Err(EditorGameViewBridgeFailure::InputBudgetExceeded);
+        }
+        let expected_start = match self.runtime_owner {
+            EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } => game.start,
+            _ => return Err(EditorGameViewBridgeFailure::RuntimeUnavailable),
+        };
+        if events
+            .iter()
+            .any(|event| event.identity().start() != expected_start)
+        {
+            return Err(EditorGameViewBridgeFailure::GameStartRequestMismatch);
+        }
+        let expected_route = events[0].route_generation();
+        if expected_route == 0
+            || events
+                .iter()
+                .any(|event| event.route_generation() != expected_route)
+        {
+            return Err(EditorGameViewBridgeFailure::InputRouteMismatch);
+        }
+        let runtime = self
+            .runtime_host
+            .running_runtime_mut()
+            .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+        game_view::apply_input_batch(runtime, EditorGameInputBatch::new(events))
     }
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -1524,8 +1652,15 @@ impl EditorProjectSession {
         if self.pending_control.is_some() {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
         let mut game_capture_suspended = false;
+        #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
+        let game_capture_suspended = false;
         if retires_runtime {
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            {
+                self.pending_step_presentation = None;
+            }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             if matches!(
                 self.runtime_owner,
@@ -1820,6 +1955,10 @@ impl EditorProjectSession {
                     failure: EditorPlayFailure::Runtime,
                 });
             }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            {
+                self.pending_step_presentation = None;
+            }
             return EditorRuntimeOwnerState::Active {
                 document,
                 source_revision,
@@ -1849,6 +1988,10 @@ impl EditorProjectSession {
             let released = self.runtime_host.release_stopped_runtime();
             debug_assert!(released);
             if control_failed || close_failure.is_some() {
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                {
+                    self.pending_step_presentation = None;
+                }
                 if let Some(evidence) = close_failure {
                     let _ = self
                         .diagnostics
@@ -1876,6 +2019,10 @@ impl EditorProjectSession {
                     operation,
                 };
             }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            {
+                self.pending_step_presentation = None;
+            }
             self.play_result = Some(EditorPlayOperationResult::Applied {
                 operation,
                 generation,
@@ -1884,6 +2031,10 @@ impl EditorProjectSession {
         }
 
         if runtime_state == Some(RuntimeState::CloseIncomplete) {
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            {
+                self.pending_step_presentation = None;
+            }
             if let Some(pending) = self.pending_control.take() {
                 self.play_result = Some(EditorPlayOperationResult::Failed {
                     operation: pending.operation,
@@ -1902,13 +2053,38 @@ impl EditorProjectSession {
             match self.runtime_host.runtime_control_status(pending.ticket) {
                 Some(RuntimeControlStatus::Applied) => {
                     self.pending_control = None;
-                    self.play_result = Some(EditorPlayOperationResult::Applied {
-                        operation: pending.operation,
-                        generation: self.runtime_host.running_runtime_generation(),
-                    });
+                    if pending.operation == EditorPlayOperation::StepFixedTick {
+                        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                        {
+                            self.pending_step_presentation = self
+                                .runtime_host
+                                .running_runtime_generation()
+                                .map(
+                                    |generation| EditorStepPresentationState::AwaitingCandidate {
+                                        generation,
+                                    },
+                                );
+                        }
+                        #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
+                        {
+                            self.play_result = Some(EditorPlayOperationResult::Applied {
+                                operation: pending.operation,
+                                generation: self.runtime_host.running_runtime_generation(),
+                            });
+                        }
+                    } else {
+                        self.play_result = Some(EditorPlayOperationResult::Applied {
+                            operation: pending.operation,
+                            generation: self.runtime_host.running_runtime_generation(),
+                        });
+                    }
                 }
                 Some(RuntimeControlStatus::Failed(_)) | None => {
                     self.pending_control = None;
+                    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                    {
+                        self.pending_step_presentation = None;
+                    }
                     self.play_result = Some(EditorPlayOperationResult::Failed {
                         operation: pending.operation,
                         failure: EditorPlayFailure::Runtime,

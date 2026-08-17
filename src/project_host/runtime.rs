@@ -58,9 +58,10 @@ pub use desktop_verification::DesktopPresentationVerificationReceipt;
     any(feature = "presentation-2d", feature = "presentation-ui")
 ))]
 pub use editor::{
-    EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
-    EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCandidateParts,
-    EditorGameViewCompletion,
+    EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartActivation,
+    EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
+    EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
+    EditorGameViewCompletionDisposition,
 };
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
 pub use editor::{EditorPreviewCandidate, EditorPreviewHit};

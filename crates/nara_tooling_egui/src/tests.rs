@@ -14,13 +14,14 @@ use nara_tooling::{
     EditorExternalReloadState, EditorFieldFeedback, EditorFieldFeedbackReason, EditorFieldTarget,
     EditorFrameClock, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
     EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceResult,
-    EditorPersistenceView, EditorPlayState, EditorPlayView, EditorProjectView, EditorReopenTarget,
-    EditorSceneModel, EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent,
-    EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentView,
-    EditorWorkspaceModel, SceneCompositionCommand, SceneCompositionComponentKind,
-    SceneCompositionEntityKind, SceneEditorModel, SceneInspectorCommand,
-    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
-    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
+    EditorPersistenceView, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
+    EditorPlayState, EditorPlayView, EditorProjectView, EditorReopenTarget, EditorSceneModel,
+    EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorWorkspaceIntentPhase, EditorWorkspaceIntentView, EditorWorkspaceModel,
+    SceneCompositionCommand, SceneCompositionComponentKind, SceneCompositionEntityKind,
+    SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorEntityRow,
+    SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
+    SceneInspectorModel,
 };
 
 use crate::{
@@ -131,6 +132,55 @@ fn fixed_toolbar_emits_exact_frame_bound_authoring_actions() {
         let mut panel = EguiSceneEditorPanel::new();
         let batch = click_control(&mut panel, &frame, label);
         assert_eq!(batch, EditorActionBatch::new(frame.revision(), [expected]));
+    }
+}
+
+#[test]
+fn play_toolbar_emits_ui_neutral_pause_and_step_actions() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    );
+    let cases = [
+        (
+            EditorPlayState::Running,
+            None,
+            "Pause",
+            EditorPlayAction::Pause,
+        ),
+        (
+            EditorPlayState::Paused,
+            None,
+            "Step",
+            EditorPlayAction::StepFixedTick,
+        ),
+        (
+            EditorPlayState::Starting,
+            Some(EditorPlayOperationResult::Pending {
+                operation: EditorPlayOperation::Play,
+            }),
+            "Stop",
+            EditorPlayAction::Cancel,
+        ),
+        (
+            EditorPlayState::Stepping,
+            Some(EditorPlayOperationResult::Pending {
+                operation: EditorPlayOperation::StepFixedTick,
+            }),
+            "Stop",
+            EditorPlayAction::Stop,
+        ),
+    ];
+
+    for (state, result, label, expected) in cases {
+        let frame = frame_with_play_state_and_result(scene.clone(), state, result);
+        let mut panel = EguiSceneEditorPanel::new();
+        assert_eq!(
+            click_control(&mut panel, &frame, label),
+            EditorActionBatch::new(frame.revision(), [EditorAction::Play(expected)])
+        );
     }
 }
 
@@ -550,11 +600,26 @@ fn default_frame(scene: Option<EditorSceneModel>) -> EditorFrameModel {
 }
 
 fn frame_with_play_state(scene: EditorSceneModel, state: EditorPlayState) -> EditorFrameModel {
+    frame_with_play_state_and_result(scene, state, None)
+}
+
+fn frame_with_play_state_and_result(
+    scene: EditorSceneModel,
+    state: EditorPlayState,
+    result: Option<EditorPlayOperationResult>,
+) -> EditorFrameModel {
     let revision = scene.revision;
     frame(
         Some(scene),
         EditorProjectView::new(
-            EditorPlayView::new(state, Some(7), Some(revision), Some(revision), false, None),
+            EditorPlayView::new(
+                state,
+                Some(7),
+                Some(revision),
+                Some(revision),
+                false,
+                result,
+            ),
             EditorPersistenceView::default(),
             EditorWorkspaceIntentView::default(),
         ),

@@ -10,13 +10,13 @@ use nara::{
     diagnostic::DiagnosticReport,
     fs::{CapabilityRights, DirectoryCapability, FsError, HostCapabilityOptions, TrustMode},
     project_host::{
-        EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
-        EditorGameViewCandidate, EditorGameViewCompletion, EditorPreviewCandidate,
-        EditorProjectIntent, EditorProjectOpenError, EditorProjectSession,
+        EditorGameInputBatch, EditorGameStartActivation, EditorGameStartRequest,
+        EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
+        EditorPreviewCandidate, EditorProjectIntent, EditorProjectOpenError, EditorProjectSession,
     },
     render::Extent2d,
     tooling::{
-        EditorAction, EditorActionBatch, EditorFrameModel, EditorWorkspaceIntent,
+        EditorAction, EditorActionBatch, EditorFrameModel, EditorPlayAction, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
     },
     tooling_egui::{
@@ -106,6 +106,42 @@ impl EditorApplicationUpdate {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct EditorApplicationDispatch {
+    actions_observed: bool,
+    invalidates_game_input: bool,
+    retires_cadence: bool,
+    starts_cadence: bool,
+    requests_step: bool,
+    requires_runtime_drive: bool,
+}
+
+impl EditorApplicationDispatch {
+    pub(crate) const fn actions_observed(self) -> bool {
+        self.actions_observed
+    }
+
+    pub(crate) const fn invalidates_game_input(self) -> bool {
+        self.invalidates_game_input
+    }
+
+    pub(crate) const fn retires_cadence(self) -> bool {
+        self.retires_cadence
+    }
+
+    pub(crate) const fn starts_cadence(self) -> bool {
+        self.starts_cadence
+    }
+
+    pub(crate) const fn requests_step(self) -> bool {
+        self.requests_step
+    }
+
+    pub(crate) const fn requires_runtime_drive(self) -> bool {
+        self.requires_runtime_drive
+    }
+}
+
 /// Product-local orchestration around one Host-owned Editor session and one egui Adapter.
 pub struct EditorApplication {
     session: EditorProjectSession,
@@ -181,15 +217,82 @@ impl EditorApplication {
         batch: EditorActionBatch,
         real_delta: Duration,
     ) -> EditorApplicationUpdate {
-        let actions_observed = match self.session.dispatch_editor_actions(batch) {
+        let dispatch = self.dispatch_editor_actions(batch);
+        self.drive_editor_frame(real_delta, dispatch.actions_observed(), true)
+    }
+
+    pub(crate) fn dispatch_editor_actions(
+        &mut self,
+        batch: EditorActionBatch,
+    ) -> EditorApplicationDispatch {
+        let frame_revision = batch.frame_revision();
+        let actions = batch.into_actions();
+        let mut dispatch = EditorApplicationDispatch::default();
+        for action in &actions {
+            match action {
+                EditorAction::Play(EditorPlayAction::Stop)
+                | EditorAction::Play(EditorPlayAction::Restart)
+                | EditorAction::Play(EditorPlayAction::Cancel)
+                | EditorAction::Play(EditorPlayAction::RetryRetirement)
+                | EditorAction::Play(EditorPlayAction::RetryClose)
+                | EditorAction::WorkspaceIntent(_) => {
+                    dispatch.invalidates_game_input = true;
+                    dispatch.retires_cadence = true;
+                    dispatch.requires_runtime_drive = true;
+                }
+                EditorAction::Play(EditorPlayAction::Pause) => {
+                    dispatch.retires_cadence = true;
+                    dispatch.requires_runtime_drive = true;
+                }
+                EditorAction::Play(EditorPlayAction::Resume)
+                | EditorAction::Play(EditorPlayAction::Play { .. }) => {
+                    dispatch.starts_cadence = true;
+                    dispatch.requires_runtime_drive = true;
+                }
+                EditorAction::Play(EditorPlayAction::StepFixedTick) => {
+                    dispatch.retires_cadence = true;
+                    dispatch.requests_step = true;
+                    dispatch.requires_runtime_drive = true;
+                }
+                _ => {}
+            }
+        }
+        let batch = EditorActionBatch::new(frame_revision, actions);
+        dispatch.actions_observed = match self.session.dispatch_editor_actions(batch) {
             Ok(report) => !report.outcomes().is_empty(),
             Err(_) => true,
         };
-        let frame = self.session.drive_editor_frame(real_delta);
+        dispatch
+    }
+
+    pub(crate) fn drive_editor_frame(
+        &mut self,
+        real_delta: Duration,
+        actions_observed: bool,
+        drive_runtime: bool,
+    ) -> EditorApplicationUpdate {
+        let frame = self
+            .session
+            .drive_editor_frame_with_runtime(real_delta, drive_runtime);
         EditorApplicationUpdate {
             actions_observed,
             exit_ready: exit_ready(&frame),
         }
+    }
+
+    pub(crate) fn apply_game_view_input_batch(
+        &mut self,
+        batch: EditorGameInputBatch,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        self.session.apply_game_view_input_batch(batch)
+    }
+
+    pub(crate) fn cancel_game_step_presentation(&mut self) -> bool {
+        self.session.cancel_game_step_presentation()
+    }
+
+    pub(crate) fn game_step_requires_runtime_drive(&self) -> bool {
+        self.session.game_step_requires_runtime_drive()
     }
 
     pub fn set_scene_preview_extent(&mut self, extent: Option<Extent2d>) {

@@ -78,6 +78,7 @@ pub enum EditorPlayFailure {
     Preparation,
     Start,
     Runtime,
+    Presentation,
     Retirement,
     Close,
 }

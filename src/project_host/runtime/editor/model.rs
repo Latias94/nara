@@ -20,6 +20,19 @@ impl EditorProjectSession {
 
     /// Drives pending Host work and publishes one immutable post-drive Editor frame.
     pub fn drive_editor_frame(&mut self, real_delta: Duration) -> Arc<EditorFrameModel> {
+        self.drive_editor_frame_with_runtime(real_delta, true)
+    }
+
+    /// Publishes one coherent Editor frame while letting the native Host suppress an idle Paused
+    /// Runtime drive. Lifecycle actions, Running cadence, explicit Step, resize, and recovery still
+    /// pass `true`; ordinary Paused toolkit repaints pass `false` so they cannot fabricate a new
+    /// unseen Runtime frame or spin the event loop.
+    #[doc(hidden)]
+    pub fn drive_editor_frame_with_runtime(
+        &mut self,
+        real_delta: Duration,
+        drive_runtime: bool,
+    ) -> Arc<EditorFrameModel> {
         if let Some(operation) = self.pending_persistence.take() {
             self.persistence_result = Some(match operation {
                 PendingPersistence::Save(save) => self.complete_save(save),
@@ -32,7 +45,9 @@ impl EditorProjectSession {
         }
         self.advance_workspace_persistence();
         self.advance_workspace_retirement();
-        self.drive_play_owner(real_delta);
+        if drive_runtime {
+            self.drive_play_owner(real_delta);
+        }
         self.advance_workspace_retirement();
         #[cfg(feature = "presentation-2d")]
         self.drive_editor_preview();

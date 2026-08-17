@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, FontId, RichText, Sense, TextureId, Ui, Vec2};
+use egui::{Align2, Color32, FontId, PointerButton, Rect, RichText, Sense, TextureId, Ui, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EguiGameViewContent {
@@ -21,6 +21,9 @@ enum EguiGameViewContent {
 pub struct EguiGameViewInput {
     content: EguiGameViewContent,
     notice: Option<&'static str>,
+    capture_active: bool,
+    modal_active: bool,
+    restore_focus: bool,
 }
 
 impl EguiGameViewInput {
@@ -29,6 +32,9 @@ impl EguiGameViewInput {
         Self {
             content: EguiGameViewContent::Presented { texture_id, extent },
             notice: None,
+            capture_active: false,
+            modal_active: false,
+            restore_focus: false,
         }
     }
 
@@ -37,6 +43,9 @@ impl EguiGameViewInput {
         Self {
             content: EguiGameViewContent::Updating { texture_id, extent },
             notice: None,
+            capture_active: false,
+            modal_active: false,
+            restore_focus: false,
         }
     }
 
@@ -45,6 +54,9 @@ impl EguiGameViewInput {
         Self {
             content: EguiGameViewContent::Waiting,
             notice: None,
+            capture_active: false,
+            modal_active: false,
+            restore_focus: false,
         }
     }
 
@@ -53,12 +65,33 @@ impl EguiGameViewInput {
         Self {
             content: EguiGameViewContent::Unavailable,
             notice: None,
+            capture_active: false,
+            modal_active: false,
+            restore_focus: false,
         }
     }
 
     #[must_use]
     pub const fn with_notice(mut self, notice: &'static str) -> Self {
         self.notice = Some(notice);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_capture_active(mut self, active: bool) -> Self {
+        self.capture_active = active;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_modal_active(mut self, active: bool) -> Self {
+        self.modal_active = active;
+        self
+    }
+
+    #[must_use]
+    pub const fn with_restore_focus(mut self, restore: bool) -> Self {
+        self.restore_focus = restore;
         self
     }
 }
@@ -73,12 +106,24 @@ impl Default for EguiGameViewInput {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EguiGameViewOutput {
     desired_size_points: Vec2,
+    content_rect_points: Option<Rect>,
+    capture_requested: bool,
 }
 
 impl EguiGameViewOutput {
     #[must_use]
     pub const fn desired_size_points(self) -> Vec2 {
         self.desired_size_points
+    }
+
+    #[must_use]
+    pub const fn content_rect_points(self) -> Option<Rect> {
+        self.content_rect_points
+    }
+
+    #[must_use]
+    pub const fn capture_requested(self) -> bool {
+        self.capture_requested
     }
 }
 
@@ -103,11 +148,14 @@ impl EguiGameViewPanel {
         let header_height = (ui.cursor().top() - panel_top).max(0.0);
         let desired_size =
             Vec2::new(panel_size.x, panel_size.y - header_height).max(Vec2::splat(1.0));
-        let (outer_rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
+        let (outer_rect, response) = ui.allocate_exact_size(desired_size, Sense::click());
+        if input.restore_focus {
+            response.request_focus();
+        }
         ui.painter()
             .rect_filled(outer_rect, 2.0, Color32::from_rgb(18, 20, 25));
 
-        if let Some((texture_id, extent)) = texture_facts(input.content) {
+        let content_rect_points = if let Some((texture_id, extent)) = texture_facts(input.content) {
             let image_rect = crate::scene_view::fitted_image_rect(outer_rect, extent);
             ui.painter().image(
                 texture_id,
@@ -115,7 +163,19 @@ impl EguiGameViewPanel {
                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
                 Color32::WHITE,
             );
-        }
+            Some(image_rect)
+        } else {
+            None
+        };
+
+        let capture_requested = !input.capture_active
+            && !input.modal_active
+            && matches!(input.content, EguiGameViewContent::Presented { .. })
+            && response.clicked_by(PointerButton::Primary)
+            && response
+                .interact_pointer_pos()
+                .zip(content_rect_points)
+                .is_some_and(|(position, content)| content.contains(position));
 
         if !matches!(input.content, EguiGameViewContent::Presented { .. }) || input.notice.is_some()
         {
@@ -127,8 +187,19 @@ impl EguiGameViewPanel {
                 Color32::from_gray(210),
             );
         }
+        if input.capture_active {
+            ui.painter().text(
+                outer_rect.left_top() + Vec2::new(8.0, 8.0),
+                Align2::LEFT_TOP,
+                "Game input captured — Esc to release",
+                FontId::proportional(12.0),
+                Color32::from_gray(220),
+            );
+        }
         EguiGameViewOutput {
             desired_size_points: outer_rect.size(),
+            content_rect_points,
+            capture_requested,
         }
     }
 }

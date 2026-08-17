@@ -50,9 +50,10 @@ pub use runtime::{
     any(feature = "presentation-2d", feature = "presentation-ui")
 ))]
 pub use runtime::{
-    EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
-    EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCandidateParts,
-    EditorGameViewCompletion,
+    EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartActivation,
+    EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
+    EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
+    EditorGameViewCompletionDisposition,
 };
 #[cfg(all(
     feature = "runtime-2d",

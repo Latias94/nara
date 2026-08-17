@@ -51,6 +51,12 @@ impl EditorProjectSession {
                             | EditorPlayOperation::Resume
                             | EditorPlayOperation::RetryRetirement => state,
                         });
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                let projected = if self.pending_step_presentation.is_some() {
+                    EditorPlayState::Stepping
+                } else {
+                    projected
+                };
                 (projected, Some(*source_revision))
             }
             EditorRuntimeOwnerState::Transitioning => {

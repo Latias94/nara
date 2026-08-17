@@ -262,9 +262,9 @@ impl EditorGameImageSubmission {
         message: String,
     ) -> EditorGameViewCompletion {
         match self {
-            Self::Plain(_) => EditorGameViewCompletion::without_ui(identity),
+            Self::Plain(_) => EditorGameViewCompletion::without_ui_deferred(identity),
             Self::RuntimeUi(submission) => {
-                EditorGameViewCompletion::with_ui(identity, submission.deferred(message))
+                EditorGameViewCompletion::with_ui_deferred(identity, submission.deferred(message))
             }
         }
     }
@@ -275,9 +275,9 @@ impl EditorGameImageSubmission {
         error: &WgpuEditorExecutionError,
     ) -> EditorGameViewCompletion {
         match self {
-            Self::Plain(_) => EditorGameViewCompletion::without_ui(identity),
+            Self::Plain(_) => EditorGameViewCompletion::without_ui_failed(identity),
             Self::RuntimeUi(submission) => {
-                EditorGameViewCompletion::with_ui(identity, submission.failed(error))
+                EditorGameViewCompletion::with_ui_failed(identity, submission.failed(error))
             }
         }
     }
@@ -327,6 +327,38 @@ impl PreparedEditorViewportFrame {
 struct PresentedEditorGame {
     identity: EditorGameViewCandidateIdentity,
     receipt: WgpuEditorCompositeReceipt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct EditorGamePresentedStamp {
+    identity: EditorGameViewCandidateIdentity,
+    receipt: WgpuEditorCompositeReceipt,
+}
+
+impl EditorGamePresentedStamp {
+    pub(super) const fn identity(self) -> EditorGameViewCandidateIdentity {
+        self.identity
+    }
+
+    pub(super) const fn logical_window(self) -> RenderWindowPacket {
+        self.identity.start().logical_window()
+    }
+
+    pub(super) const fn runtime_generation(self) -> u64 {
+        self.identity.runtime_generation().get()
+    }
+
+    pub(super) const fn source_handoff_generation(self) -> u64 {
+        self.receipt.image().source_handoff_generation()
+    }
+
+    pub(super) const fn target_generation(self) -> u64 {
+        self.receipt.image().target_generation()
+    }
+
+    pub(super) const fn geometry_generation(self) -> u64 {
+        self.identity.start().geometry_generation()
+    }
 }
 
 enum EditorGamePresenterState {
@@ -456,14 +488,14 @@ impl EditorGamePresenter {
             .filter(|binding| matches!(binding.source, EditorViewportSource::Game(_)))
         else {
             let completion = match runtime_ui {
-                Some(runtime_ui) => EditorGameViewCompletion::with_ui(
+                Some(runtime_ui) => EditorGameViewCompletion::with_ui_failed(
                     identity,
                     WgpuEditorExecution::reject_editor_ui_frame(
                         runtime_ui,
                         "the Game candidate has no active viewport texture binding",
                     ),
                 ),
-                None => EditorGameViewCompletion::without_ui(identity),
+                None => EditorGameViewCompletion::without_ui_failed(identity),
             };
             self.return_completion(application, completion)?;
             return Err(EditorRunError::Platform(
@@ -472,14 +504,14 @@ impl EditorGamePresenter {
         };
         if binding.source != EditorViewportSource::Game(identity.start()) {
             let completion = match runtime_ui {
-                Some(runtime_ui) => EditorGameViewCompletion::with_ui(
+                Some(runtime_ui) => EditorGameViewCompletion::with_ui_failed(
                     identity,
                     WgpuEditorExecution::reject_editor_ui_frame(
                         runtime_ui,
                         "the Game candidate belongs to a foreign Runtime start",
                     ),
                 ),
-                None => EditorGameViewCompletion::without_ui(identity),
+                None => EditorGameViewCompletion::without_ui_failed(identity),
             };
             self.return_completion(application, completion)?;
             return Err(EditorRunError::Platform(
@@ -490,11 +522,11 @@ impl EditorGamePresenter {
             Ok(packet) => packet,
             Err(error) => {
                 let completion = match runtime_ui {
-                    Some(runtime_ui) => EditorGameViewCompletion::with_ui(
+                    Some(runtime_ui) => EditorGameViewCompletion::with_ui_failed(
                         identity,
                         WgpuEditorExecution::reject_editor_ui_frame(runtime_ui, error.to_string()),
                     ),
-                    None => EditorGameViewCompletion::without_ui(identity),
+                    None => EditorGameViewCompletion::without_ui_failed(identity),
                 };
                 self.return_completion(application, completion)?;
                 return Err(EditorRunError::Platform(error.to_string()));
@@ -507,10 +539,14 @@ impl EditorGamePresenter {
                     Ok(submission) => EditorGameImageSubmission::RuntimeUi(submission),
                     Err(failure) => {
                         let (error, outcomes) = failure.complete();
-                        self.return_completion(
-                            application,
-                            EditorGameViewCompletion::with_ui(identity, outcomes),
-                        )?;
+                        let completion = if error.is_deferred() {
+                            EditorGameViewCompletion::with_ui_deferred(identity, outcomes)
+                        } else if error.is_content_rejected() {
+                            EditorGameViewCompletion::with_ui_content_rejected(identity, outcomes)
+                        } else {
+                            EditorGameViewCompletion::with_ui_failed(identity, outcomes)
+                        };
+                        self.return_completion(application, completion)?;
                         return classify_game_prepare_failure(error);
                     }
                 }
@@ -521,7 +557,7 @@ impl EditorGamePresenter {
                     Err(error) => {
                         self.return_completion(
                             application,
-                            EditorGameViewCompletion::without_ui(identity),
+                            plain_completion_for_error(identity, &error),
                         )?;
                         return classify_game_prepare_failure(error);
                     }
@@ -532,10 +568,14 @@ impl EditorGamePresenter {
                     Ok(submission) => EditorGameImageSubmission::RuntimeUi(submission),
                     Err(failure) => {
                         let (error, outcomes) = failure.complete();
-                        self.return_completion(
-                            application,
-                            EditorGameViewCompletion::with_ui(identity, outcomes),
-                        )?;
+                        let completion = if error.is_deferred() {
+                            EditorGameViewCompletion::with_ui_deferred(identity, outcomes)
+                        } else if error.is_content_rejected() {
+                            EditorGameViewCompletion::with_ui_content_rejected(identity, outcomes)
+                        } else {
+                            EditorGameViewCompletion::with_ui_failed(identity, outcomes)
+                        };
+                        self.return_completion(application, completion)?;
                         return classify_game_prepare_failure(error);
                     }
                 }
@@ -545,7 +585,7 @@ impl EditorGamePresenter {
                 Err(error) => {
                     self.return_completion(
                         application,
-                        EditorGameViewCompletion::without_ui(identity),
+                        plain_completion_for_error(identity, &error),
                     )?;
                     return classify_game_prepare_failure(error);
                 }
@@ -654,6 +694,18 @@ impl EditorGamePresenter {
         EguiGameViewInput::presented(binding.texture_id, [extent.width, extent.height])
     }
 
+    pub(super) fn input_stamp(&self) -> Option<EditorGamePresentedStamp> {
+        match &self.state {
+            EditorGamePresenterState::Presented(presented) => Some(EditorGamePresentedStamp {
+                identity: presented.identity,
+                receipt: presented.receipt,
+            }),
+            EditorGamePresenterState::Empty | EditorGamePresenterState::CompletionRejected(_) => {
+                None
+            }
+        }
+    }
+
     fn return_completion(
         &mut self,
         application: &mut EditorApplication,
@@ -680,6 +732,19 @@ fn classify_game_prepare_failure(
         Ok(EditorGamePrepareOutcome::ContentRejected)
     } else {
         Err(platform_gpu_error(error))
+    }
+}
+
+fn plain_completion_for_error(
+    identity: EditorGameViewCandidateIdentity,
+    error: &WgpuEditorExecutionError,
+) -> EditorGameViewCompletion {
+    if error.is_deferred() {
+        EditorGameViewCompletion::without_ui_deferred(identity)
+    } else if error.is_content_rejected() {
+        EditorGameViewCompletion::without_ui_content_rejected(identity)
+    } else {
+        EditorGameViewCompletion::without_ui_failed(identity)
     }
 }
 

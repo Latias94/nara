@@ -881,6 +881,78 @@ resizable = true
     first
         .complete_game_view_candidate(EditorGameViewCompletion::without_ui(candidate_identity))
         .expect("the exact candidate completion returns its bridge authority");
+
+    assert_eq!(
+        editor_driver::request_play(&mut first, EditorPlayCommand::Pause),
+        EditorPlayRequestResult::Accepted
+    );
+    first.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        first.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
+    let paused_candidate = first
+        .take_game_view_candidate()
+        .unwrap()
+        .expect("Pause publishes one exact successor candidate");
+    let paused_identity = paused_candidate.identity();
+    first
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui(paused_identity))
+        .unwrap();
+
+    assert_eq!(
+        editor_driver::request_play(&mut first, EditorPlayCommand::StepFixedTick),
+        EditorPlayRequestResult::Accepted
+    );
+    first.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        first.current_frame().play().state(),
+        EditorPlayState::Stepping
+    );
+    assert_eq!(
+        first.current_frame().play().result(),
+        Some(EditorPlayOperationResult::Pending {
+            operation: EditorPlayOperation::StepFixedTick,
+        })
+    );
+    assert!(first.game_step_requires_runtime_drive());
+    first.drive_editor_frame(Duration::ZERO);
+    let step_candidate = first
+        .take_game_view_candidate()
+        .unwrap()
+        .expect("Step publishes one exact post-tick candidate");
+    let step_identity = step_candidate.identity();
+    first
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui_deferred(step_identity))
+        .expect("a transient presentation deferral returns the exact candidate authority");
+    assert!(first.game_step_requires_runtime_drive());
+
+    first.drive_editor_frame(Duration::ZERO);
+    let retry_candidate = first
+        .take_game_view_candidate()
+        .unwrap()
+        .expect("the paused Runtime republishes the completed Step without another fixed tick");
+    let retry_identity = retry_candidate.identity();
+    assert_eq!(
+        retry_identity.runtime_generation(),
+        step_identity.runtime_generation()
+    );
+    first
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui(retry_identity))
+        .expect("only the visible retry closes the Step presentation join");
+    first.drive_editor_frame_with_runtime(Duration::ZERO, false);
+    assert_eq!(
+        first.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
+    assert!(matches!(
+        first.current_frame().play().result(),
+        Some(EditorPlayOperationResult::Applied {
+            operation: EditorPlayOperation::StepFixedTick,
+            generation: Some(generation),
+        }) if generation == first_request.runtime_generation().get()
+    ));
+
     let resized_extent = Extent2d::new(640, 360).unwrap();
     assert!(first.resize_game_view(resized_extent).unwrap());
     let resized_request = first.active_game_start_request().unwrap();

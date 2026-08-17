@@ -5,7 +5,8 @@ use nara_diagnostic::{DiagnosticReport, DiagnosticSeverity};
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation, EditorFrameModel,
     EditorPersistenceAction, EditorPersistenceOperation, EditorPersistenceRequestKind,
-    EditorPersistenceResult, EditorPlayState, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorPersistenceResult, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
+    EditorPlayState, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
 };
 
@@ -213,6 +214,10 @@ fn render_toolbar(
     ) && no_workspace_intent
         && persistence_idle;
     let persistence_available = play_idle && no_workspace_intent && persistence_idle;
+    let play_pending = matches!(
+        frame.play().result(),
+        Some(EditorPlayOperationResult::Pending { .. })
+    );
 
     ui.horizontal(|ui| {
         let title = scene.map_or("No active scene", |scene| scene.title.as_str());
@@ -227,6 +232,7 @@ fn render_toolbar(
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.horizontal(|ui| {
+                render_play_controls(ui, frame, scene, no_workspace_intent, play_pending, actions);
                 let history = scene.map(|scene| scene.editor.inspector.history);
                 if toolbar_button(
                     ui,
@@ -270,6 +276,120 @@ fn render_toolbar(
                 }
             });
         });
+}
+
+fn render_play_controls(
+    ui: &mut Ui,
+    frame: &EditorFrameModel,
+    scene: Option<&nara_tooling::EditorSceneModel>,
+    no_workspace_intent: bool,
+    play_pending: bool,
+    actions: &mut Vec<EditorAction>,
+) {
+    let state = frame.play().state();
+    let can_request =
+        no_workspace_intent && frame.persistence().operation() == EditorPersistenceOperation::Idle;
+    ui.label(RichText::new(play_state_label(state)).weak());
+    let mut push = |enabled: bool,
+                    allow_while_pending: bool,
+                    label: &'static str,
+                    action: EditorPlayAction| {
+        if toolbar_button(
+            ui,
+            enabled && can_request && (allow_while_pending || !play_pending),
+            label,
+        ) {
+            actions.push(EditorAction::Play(action));
+        }
+    };
+
+    match state {
+        EditorPlayState::Empty => {
+            if let Some(scene) = scene {
+                push(
+                    true,
+                    false,
+                    "Play",
+                    EditorPlayAction::Play {
+                        document: scene.document,
+                        base_revision: scene.revision,
+                    },
+                );
+            } else {
+                let _ = toolbar_button(ui, false, "Play");
+            }
+        }
+        EditorPlayState::PreparingPlay | EditorPlayState::Starting => {
+            push(true, true, "Stop", EditorPlayAction::Cancel);
+        }
+        EditorPlayState::Running => {
+            push(true, false, "Pause", EditorPlayAction::Pause);
+            push(true, false, "Stop", EditorPlayAction::Stop);
+            push(true, false, "Restart", EditorPlayAction::Restart);
+        }
+        EditorPlayState::Paused => {
+            push(true, false, "Resume", EditorPlayAction::Resume);
+            push(true, false, "Step", EditorPlayAction::StepFixedTick);
+            push(true, false, "Stop", EditorPlayAction::Stop);
+            push(true, false, "Restart", EditorPlayAction::Restart);
+        }
+        EditorPlayState::Stepping => {
+            push(true, true, "Stop", EditorPlayAction::Stop);
+        }
+        EditorPlayState::Faulted => {
+            push(true, false, "Stop", EditorPlayAction::Stop);
+            push(true, false, "Restart", EditorPlayAction::Restart);
+        }
+        EditorPlayState::RetirementIncomplete => {
+            push(
+                true,
+                false,
+                "Retry retirement",
+                EditorPlayAction::RetryRetirement,
+            );
+        }
+        EditorPlayState::CloseIncomplete => {
+            push(true, false, "Retry close", EditorPlayAction::RetryClose);
+        }
+        EditorPlayState::RetiringPlay | EditorPlayState::Stopping => {}
+    }
+
+    if let Some(result) = frame.play().result()
+        && !matches!(result, EditorPlayOperationResult::Pending { .. })
+    {
+        let label = match result {
+            EditorPlayOperationResult::Applied { operation, .. } => match operation {
+                EditorPlayOperation::Play => "Play ready",
+                EditorPlayOperation::Pause => "Paused",
+                EditorPlayOperation::Resume => "Running",
+                EditorPlayOperation::StepFixedTick => "Step complete",
+                EditorPlayOperation::Stop => "Stopped",
+                EditorPlayOperation::Restart => "Restarted",
+                EditorPlayOperation::Cancel
+                | EditorPlayOperation::RetryRetirement
+                | EditorPlayOperation::RetryClose => "Play updated",
+            },
+            EditorPlayOperationResult::Rejected { .. } => "Play rejected",
+            EditorPlayOperationResult::Failed { .. } => "Play failed",
+            EditorPlayOperationResult::Cancelled { .. } => "Play cancelled",
+            EditorPlayOperationResult::Pending { .. } => unreachable!(),
+        };
+        ui.label(RichText::new(label).weak());
+    }
+}
+
+fn play_state_label(state: EditorPlayState) -> &'static str {
+    match state {
+        EditorPlayState::Empty => "Edit",
+        EditorPlayState::PreparingPlay | EditorPlayState::Starting => "Starting",
+        EditorPlayState::Running => "Running",
+        EditorPlayState::Paused => "Paused",
+        EditorPlayState::Stepping => "Stepping",
+        EditorPlayState::RetiringPlay | EditorPlayState::Stopping => "Stopping",
+        EditorPlayState::Faulted => "Faulted",
+        EditorPlayState::RetirementIncomplete => "Retirement incomplete",
+        EditorPlayState::CloseIncomplete => "Close incomplete",
+    }
 }
 
 fn render_authoring_content(
@@ -332,7 +452,10 @@ fn render_authoring_content(
         )),
         EguiEditorViewport::Game => EguiCentralViewportOutput::Game(game_view_panel.show(
             &mut scene_ui,
-            viewport.game,
+            viewport.game.with_modal_active(
+                frame.workspace_intent().phase()
+                    == Some(EditorWorkspaceIntentPhase::AwaitingDecision),
+            ),
             viewport_size,
         )),
     };
