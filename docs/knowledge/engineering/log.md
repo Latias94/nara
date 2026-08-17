@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-17
+* **Work Registration**: [Editor Game View v1: EGV-U3](registry/2026-08/2026-08-17T014912Z-editor-game-view-v1-codex-root-638ce8b3ee70442baab2ac3000eb5f08.md) - Work Registration for Editor Game View v1: EGV-U3 after verified private Play placement and candidate ownership.
+* **Verification Evidence**: [EGV-U2 managed Game View runtime placement](verification/2026-08/2026-08-17T014819Z-egv-u2-managed-game-view-runtime-placement-4012c0efb4d046c78031b9ad6d30a2c3.md) - Verifies pre-required-slot Editor Play placement, coordinated unpublished Runtime and target activation, and exact move-only Game candidate ownership.
+
 ## 2026-08-16
 * **Work Registration**: [Editor Game View v1: EGV-U2](registry/2026-08/2026-08-16T172516Z-editor-game-view-v1-codex-root-a0402d95024e4b808f42eca0eefe7e7f.md) - Work Registration for Editor Game View v1: EGV-U2 after verified EGV-U1 presentation authority.
 * **Verification Evidence**: [EGV-U1 Game View presentation authority](verification/2026-08/2026-08-16T172400Z-egv-u1-game-view-presentation-authority-ee246fd4862d4f0fb06423f9f6bbd9a0.md) - Verifies inactive viewport admission, logical-window Runtime UI mapping, exact external outcome rendezvous, source handoff, and final composite authority.
@@ -145,5 +149,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [NUI-U11 normalized input timeline and pause-safe routing](verification/2026-08/2026-08-05T132051Z-nui-u11-normalized-input-timeline-and-pause-safe-routing-aba5a9f9a3664dfdaf3093313a43989f.md) - Verifies the bounded globally ordered normalized input timeline, event-time route stamps, atomic lifecycle cancellation, independent consumer cursors, and pause-safe UI-before-gameplay handling.
 * **Verification Evidence**: [NUI-U10 renderer-neutral immutable UI frame kernel](verification/2026-08/2026-08-05T122212Z-nui-u10-renderer-neutral-immutable-ui-frame-kernel-524095a3d0614d7390aa2b2f8e8d3442.md) - Verifies the bounded renderer-neutral compiler, exact structured identity, stable layout and presentation order, root-local failure atomicity, and exact submitted-frame receipts.
 * **Work Registration**: [Ordered UI kernel correction: NUI-U11 input timeline active](registry/2026-08/2026-08-05T122212Z-engine-foundation-contract-completion-codex-root-3c1ccdb07e28445fb62b0e0c68176d20.md) - Records NUI-U10 immutable frame-kernel closure and activates the bounded normalized input timeline.
-* **Verification Evidence**: [NUI-U9 bounded deterministic text module](verification/2026-08/2026-08-05T111150Z-nui-u9-bounded-deterministic-text-module-9b67d709856c4004b32df7db37c0d2ae.md) - Verifies exact bundled-font admission, deterministic bounded shaping and raster output, no system discovery, and direct independently locked consumption.
-* **Work Registration**: [Ordered UI kernel correction: NUI-U10 frame compiler active](registry/2026-08/2026-08-05T111150Z-engine-foundation-contract-completion-codex-root-47e5678cceeb49de8736c56c11c83d4d.md) - Records NUI-U9 bounded text closure and activates the renderer-neutral immutable UI frame compiler.
