@@ -16,6 +16,7 @@ desktop = [
 ]
 desktop-accessibility-probe = ["desktop", "dep:windows"]
 editor = ["nara/tooling"]
+editor-game-view-canary = ["desktop", "editor", "dep:nara-editor"]
 host-parity = ["desktop", "editor"]
 
 [workspace]
@@ -23,6 +24,7 @@ resolver = "3"
 
 [dependencies]
 nara = { path = "..", default-features = false, features = ["runtime-2d", "runtime-ui", "serde"] }
+nara-editor = { path = "../editor", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", optional = true, features = [
@@ -61,3 +63,8 @@ required-features = ["desktop-accessibility-probe"]
 name = "host_parity_probe"
 path = "src/bin/host_parity_probe.rs"
 required-features = ["host-parity"]
+
+[[bin]]
+name = "editor_game_view_canary"
+path = "src/bin/editor_game_view_canary.rs"
+required-features = ["editor-game-view-canary"]

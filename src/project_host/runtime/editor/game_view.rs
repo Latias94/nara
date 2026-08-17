@@ -1,13 +1,13 @@
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
     PluginDefinition, PluginDefinitionId, PluginError, PluginId, PluginPlanFingerprint,
-    PluginProductCapability, RuntimeGeneration, RuntimeState,
+    PluginProductCapability, RuntimeGeneration, RuntimeScopeError, RuntimeState,
 };
 use nara_ecs::{Mut, Resource, World};
 use nara_input::{
-    ButtonDriverInput, InputWindowEvent, KeyCode, MouseButton, PointerDriverInput,
-    apply_keyboard_driver_input_at, apply_mouse_driver_input_at, apply_pointer_driver_input_at,
-    apply_window_input_driver_event,
+    ButtonDriverInput, ButtonInputDriverError, InputWindowEvent, KeyCode, MouseButton,
+    PointerDriverInput, apply_keyboard_driver_input_at, apply_mouse_driver_input_at,
+    apply_pointer_driver_input_at, apply_window_input_driver_event,
 };
 use nara_project::{ProductCapability, ProductCapabilitySet};
 use nara_reflect::SchemaCompositionFingerprint;
@@ -642,7 +642,7 @@ impl EditorGameViewCompletion {
 }
 
 #[doc(hidden)]
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq)]
 pub enum EditorGameViewBridgeFailure {
     #[error("a Game View candidate is already owned by the Host")]
     CandidateBusy,
@@ -676,8 +676,17 @@ pub enum EditorGameViewBridgeFailure {
     InputRouteMismatch,
     #[error("the Game View input batch exceeded its bounded event budget")]
     InputBudgetExceeded,
-    #[error("the managed Play Runtime rejected the normalized Game View input batch")]
-    InputRejected,
+    #[error("the managed Play Runtime rejected Game View input event {event_index}: {source}")]
+    InputEventRejected {
+        event_index: usize,
+        #[source]
+        source: ButtonInputDriverError,
+    },
+    #[error("the managed Play Runtime rejected the Game View input scope: {source}")]
+    InputScopeRejected {
+        #[source]
+        source: RuntimeScopeError,
+    },
     #[error("the Runtime render frame was rejected: {0}")]
     Packet(RenderFramePacketError),
     #[cfg(feature = "presentation-ui")]
@@ -900,18 +909,24 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
                                 disposition,
                                 outcomes,
                             } = completion;
-                            if !outcomes.is_empty()
-                                && let Err(outcomes) = commit_ui_backend_outcomes(world, outcomes)
+                            if !outcomes.is_empty() {
+                                if let Err(outcomes) = commit_ui_backend_outcomes(world, outcomes) {
+                                    bridge.failure = Some(
+                                        EditorGameViewBridgeFailure::CompletionAuthorityMismatch,
+                                    );
+                                    return EditorGameViewBridgeOutput::Completed(Err(
+                                        EditorGameViewCompletion {
+                                            identity: candidate_identity,
+                                            disposition,
+                                            outcomes,
+                                        },
+                                    ));
+                                }
+                            }
+                            if world
+                                .contains_resource::<nara_ui_render::__private::UiPresentationOutcomes>()
                             {
-                                bridge.failure =
-                                    Some(EditorGameViewBridgeFailure::CompletionAuthorityMismatch);
-                                return EditorGameViewBridgeOutput::Completed(Err(
-                                    EditorGameViewCompletion {
-                                        identity: candidate_identity,
-                                        disposition,
-                                        outcomes,
-                                    },
-                                ));
+                                crate::ui_presentation::commit_runtime_ui_presentations(world);
                             }
                         }
                         #[cfg(not(feature = "presentation-ui"))]
@@ -1179,62 +1194,57 @@ pub(super) fn apply_input_batch(
     };
     let window = nara_input::InputWindowId::new(first.identity.start().logical_window().id.get());
     let result = runtime.with_driver_scope(|scope| {
-        for envelope in events {
+        for (event_index, envelope) in events.into_iter().enumerate() {
             let event = envelope.event();
-            match event {
-                EditorGameInputEvent::Focused(focused) => {
-                    apply_window_input_driver_event(
-                        scope,
-                        window,
-                        nara_input::InputSeatId::PRIMARY,
-                        InputWindowEvent::Focused(focused),
-                    )
-                    .map_err(|_| ())?;
-                }
-                EditorGameInputEvent::SurfaceRetired => {
-                    apply_window_input_driver_event(
-                        scope,
-                        window,
-                        nara_input::InputSeatId::PRIMARY,
-                        InputWindowEvent::SurfaceRetired,
-                    )
-                    .map_err(|_| ())?;
-                }
-                EditorGameInputEvent::Pointer(input) => {
-                    apply_pointer_driver_input_at(
-                        scope,
-                        window,
-                        nara_input::InputSeatId::PRIMARY,
-                        nara_input::InputPointerId::PRIMARY,
-                        input,
-                    )
-                    .map_err(|_| ())?;
-                }
-                EditorGameInputEvent::Mouse(input) => {
-                    apply_mouse_driver_input_at(
-                        scope,
-                        window,
-                        nara_input::InputSeatId::PRIMARY,
-                        nara_input::InputPointerId::PRIMARY,
-                        input,
-                    )
-                    .map_err(|_| ())?;
-                }
-                EditorGameInputEvent::Keyboard(input) => {
-                    apply_keyboard_driver_input_at(
-                        scope,
-                        window,
-                        nara_input::InputSeatId::PRIMARY,
-                        input,
-                    )
-                    .map_err(|_| ())?;
-                }
-            }
+            let result = match event {
+                EditorGameInputEvent::Focused(focused) => apply_window_input_driver_event(
+                    scope,
+                    window,
+                    nara_input::InputSeatId::PRIMARY,
+                    InputWindowEvent::Focused(focused),
+                )
+                .map(|_| ()),
+                EditorGameInputEvent::SurfaceRetired => apply_window_input_driver_event(
+                    scope,
+                    window,
+                    nara_input::InputSeatId::PRIMARY,
+                    InputWindowEvent::SurfaceRetired,
+                )
+                .map(|_| ()),
+                EditorGameInputEvent::Pointer(input) => apply_pointer_driver_input_at(
+                    scope,
+                    window,
+                    nara_input::InputSeatId::PRIMARY,
+                    nara_input::InputPointerId::PRIMARY,
+                    input,
+                )
+                .map(|_| ()),
+                EditorGameInputEvent::Mouse(input) => apply_mouse_driver_input_at(
+                    scope,
+                    window,
+                    nara_input::InputSeatId::PRIMARY,
+                    nara_input::InputPointerId::PRIMARY,
+                    input,
+                )
+                .map(|_| ()),
+                EditorGameInputEvent::Keyboard(input) => apply_keyboard_driver_input_at(
+                    scope,
+                    window,
+                    nara_input::InputSeatId::PRIMARY,
+                    input,
+                )
+                .map(|_| ()),
+            };
+            result.map_err(|source| (event_index, source))?;
         }
         Ok(())
     });
     match result {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(())) | Err(_) => Err(EditorGameViewBridgeFailure::InputRejected),
+        Ok(Err((event_index, source))) => Err(EditorGameViewBridgeFailure::InputEventRejected {
+            event_index,
+            source,
+        }),
+        Err(source) => Err(EditorGameViewBridgeFailure::InputScopeRejected { source }),
     }
 }

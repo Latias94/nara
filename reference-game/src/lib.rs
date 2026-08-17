@@ -438,6 +438,16 @@ pub fn wave_editor_intent() -> EditorProjectIntent {
     EditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
 }
 
+/// Creates the focused compiled-product intent used by the private native Game View canary.
+#[cfg(feature = "editor-game-view-canary")]
+#[doc(hidden)]
+#[must_use]
+pub fn wave_game_view_intent() -> EditorProjectIntent {
+    EditorProjectIntent::new()
+        .with_profile("desktop")
+        .with_recipe(desktop_wave_recipe_or_panic())
+}
+
 /// Creates the complete wave run intent over the committed project content.
 #[must_use]
 pub fn wave_headless_intent(maximum_fixed_ticks: NonZeroU32) -> HeadlessRunIntent<WaveSnapshot> {

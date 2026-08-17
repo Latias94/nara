@@ -19,17 +19,22 @@ use nara::{
         CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, RelativePath,
         TrustMode,
     },
+    project_host::{EditorGameStartRequest, EditorGameViewCandidate, EditorGameViewCompletion},
     project_workflow::{
         LocalDependencyParent, NaraDependencySource, ProjectCheckRequest, ProjectCreationOutcome,
         ProjectCreationRequest, ProjectSlug, StartupContentMemberKind, check_project,
         prepare_desktop_2d_project,
     },
-    reflect::{ComponentFieldId, ComponentTypeId, ComponentValue},
+    reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     render::Extent2d,
-    scene::SceneEntityId,
+    scene::{
+        SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
+        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    },
     tooling::{
         EditorAction, EditorActionBatch, EditorDocumentMutation, EditorFieldFeedbackReason,
-        EditorPersistenceAction, EditorPersistenceResult, EditorWorkspaceIntent,
+        EditorNavigationAction, EditorPersistenceAction, EditorPersistenceResult, EditorPlayAction,
+        EditorPlayOperation, EditorPlayOperationResult, EditorPlayState, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult, SceneInspectorCommand,
     },
 };
@@ -38,8 +43,11 @@ use serde_json::Value;
 
 const PROJECT_SLUG: &str = "editor-authoring-loop";
 const CREATED_ENTITY: &str = "editor_entity_1";
+const GAME_VIEW_PROBE_ENTITY: &str = "game-view-probe";
+const SPRITE_COMPONENT: &str = "nara.sprite.Sprite";
 const TRANSFORM_COMPONENT: &str = "nara.transform.Transform2d";
 const TRANSLATION_X_FIELD: &str = "translation.x";
+const PAUSED_TRANSLATION_X: f64 = 48.0;
 const EDITED_TRANSLATION_X: f64 = 128.0;
 const STALE_TRANSLATION_X: f64 = 256.0;
 const EXPORT_DESTINATION: &str = "editor-authoring-candidate";
@@ -48,6 +56,282 @@ const PRODUCT_OBSERVATION_FILE_ENV: &str = "NARA_STARTER_OBSERVATION_FILE";
 const EXPORT_OBSERVATION_ATTEMPT_ENV: &str = "NARA_EXPORT_OBSERVATION_ATTEMPT";
 const EXPORT_OBSERVATION_FILE_ENV: &str = "NARA_EXPORT_OBSERVATION_FILE";
 static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
+    let root = TrajectoryRoot::new();
+    let project = create_project(&root);
+    let scene_path = project.join("scenes/startup.scene.json");
+    let source_before = fs::read(&scene_path).unwrap();
+    let mut application =
+        EditorApplication::open(EditorLaunchOptions::new(&project).with_profile("desktop"))
+            .expect("the desktop starter must open with its explicit desktop profile");
+    application.set_scene_preview_extent(Extent2d::new(960, 540));
+
+    let opened = application.current_frame();
+    let opened_scene = opened.workspace().active_scene.as_ref().unwrap();
+    let document = opened_scene.document;
+    let edited = dispatch(
+        &mut application,
+        [EditorAction::Mutate(
+            EditorDocumentMutation::ApplyScenePatch {
+                document,
+                base_revision: opened_scene.revision,
+                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(
+                        SceneEntityId::new(GAME_VIEW_PROBE_ENTITY).unwrap(),
+                    )
+                    .with_component(
+                        ComponentTypeId::new(TRANSFORM_COMPONENT),
+                        SceneComponentRecord::new(
+                            ComponentSchemaVersion::ONE,
+                            transform_value(0.0, 0.0),
+                        ),
+                    )
+                    .with_component(
+                        ComponentTypeId::new(SPRITE_COMPONENT),
+                        SceneComponentRecord::new(
+                            ComponentSchemaVersion::ONE,
+                            color_sprite_value(),
+                        ),
+                    ),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }]),
+            },
+        )],
+    );
+    let edited_scene = edited.workspace().active_scene.as_ref().unwrap();
+    let edited_revision = edited_scene.revision;
+    assert!(edited_scene.dirty);
+    assert!(
+        edited_scene
+            .editor
+            .inspector
+            .entities
+            .iter()
+            .any(|entity| entity.id.as_str() == GAME_VIEW_PROBE_ENTITY)
+    );
+    assert_eq!(fs::read(&scene_path).unwrap(), source_before);
+
+    let preview = take_scene_preview_candidate(&mut application, edited_revision);
+    assert_eq!(preview.document(), document);
+    assert_eq!(preview.revision(), edited_revision);
+    let preview_hit = preview
+        .hits()
+        .iter()
+        .find(|hit| hit.entity().as_str() == GAME_VIEW_PROBE_ENTITY)
+        .expect("the unsaved color sprite must be visible in Scene Preview");
+    assert!(preview_hit.contains_clip_point([0.0, 0.0]));
+    drop(preview);
+    select_entity(&mut application, document, GAME_VIEW_PROBE_ENTITY);
+
+    dispatch(
+        &mut application,
+        [EditorAction::Play(EditorPlayAction::Play {
+            document,
+            base_revision: edited_revision,
+        })],
+    );
+    let first_start = activate_pending_game(&mut application);
+    assert_eq!(first_start.source_revision(), edited_revision);
+    assert!(first_start.captures_sprites());
+    assert!(!first_start.captures_runtime_ui());
+
+    let first_candidate = take_game_candidate(&mut application);
+    assert_eq!(first_candidate.identity().start(), first_start);
+    let first_frame = first_candidate.identity().frame_index();
+    let first_identity = first_candidate.identity();
+    let mut first_parts = first_candidate.into_parts();
+    let first_batches = first_parts
+        .take_sprite_batches()
+        .expect("the desktop starter captures its unsaved color sprite");
+    assert_eq!(first_batches.total_instances(), 1);
+    let first_center = first_batches.as_slice()[0].instances[0].center;
+    assert_eq!(first_center.x, 0.0);
+    drop(first_parts);
+    complete_plain_identity(&mut application, first_identity);
+    drive_empty(&mut application);
+    assert_eq!(
+        application.current_frame().play().state(),
+        EditorPlayState::Running
+    );
+
+    dispatch(
+        &mut application,
+        [EditorAction::Play(EditorPlayAction::Pause)],
+    );
+    assert_eq!(
+        application.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
+    let paused_candidate = take_game_candidate(&mut application);
+    assert!(paused_candidate.identity().frame_index() > first_frame);
+    complete_plain_candidate(&mut application, paused_candidate);
+
+    let resized_extent = Extent2d::new(800, 450).unwrap();
+    assert!(application.resize_game_view(resized_extent).unwrap());
+    let resized_start = application.active_game_start_request().unwrap();
+    assert_eq!(resized_start.geometry_generation(), 2);
+    drive_empty(&mut application);
+    let resized_candidate = take_game_candidate(&mut application);
+    assert_eq!(resized_candidate.identity().start(), resized_start);
+    assert_eq!(
+        resized_candidate.packet().view().viewport.extent(),
+        resized_extent
+    );
+    complete_plain_candidate(&mut application, resized_candidate);
+
+    dispatch(
+        &mut application,
+        [EditorAction::Play(EditorPlayAction::StepFixedTick)],
+    );
+    assert_eq!(
+        application.current_frame().play().state(),
+        EditorPlayState::Stepping
+    );
+    let step_candidate = take_game_candidate(&mut application);
+    let step_identity = step_candidate.identity();
+    complete_plain_candidate(&mut application, step_candidate);
+    drive_empty(&mut application);
+    assert_eq!(
+        application.current_frame().play().state(),
+        EditorPlayState::Paused
+    );
+    assert!(matches!(
+        application.current_frame().play().result(),
+        Some(EditorPlayOperationResult::Applied {
+            operation: EditorPlayOperation::StepFixedTick,
+            generation: Some(generation),
+        }) if generation == step_identity.runtime_generation().get()
+    ));
+
+    application
+        .set_game_view_source_active(false, "the starter trajectory selected Scene View")
+        .unwrap();
+    let paused = application.current_frame();
+    let transform = selected_f64_field(&paused, TRANSFORM_COMPONENT, TRANSLATION_X_FIELD);
+    let paused_edit = dispatch(
+        &mut application,
+        [EditorAction::Mutate(
+            EditorDocumentMutation::ApplyInspectorCommand {
+                document,
+                base_revision: paused.workspace().active_scene.as_ref().unwrap().revision,
+                command: SceneInspectorCommand::SetField {
+                    entity: SceneEntityId::new(GAME_VIEW_PROBE_ENTITY).unwrap(),
+                    component: ComponentTypeId::new(TRANSFORM_COMPONENT),
+                    component_version: transform.component_version,
+                    field: ComponentFieldId::new(TRANSLATION_X_FIELD),
+                    value: ComponentValue::f64(PAUSED_TRANSLATION_X).unwrap(),
+                },
+            },
+        )],
+    );
+    let paused_edit_revision = paused_edit
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .revision;
+    let old_generation = paused_edit.play().generation().unwrap();
+    assert_eq!(paused_edit.play().state(), EditorPlayState::Paused);
+    assert!(paused_edit.play().is_out_of_date());
+    assert_eq!(
+        selected_f64_field(&paused_edit, TRANSFORM_COMPONENT, TRANSLATION_X_FIELD).value,
+        PAUSED_TRANSLATION_X
+    );
+
+    let harness = editor_harness(application);
+    let _ = harness.get_by_label_contains("Game View is out of date");
+    application = harness.into_state();
+
+    dispatch(
+        &mut application,
+        [EditorAction::Play(EditorPlayAction::Restart)],
+    );
+    let restarted = activate_pending_game(&mut application);
+    assert_eq!(restarted.source_revision(), paused_edit_revision);
+    assert_ne!(restarted.runtime_generation().get(), old_generation);
+    let restarted_candidate = take_game_candidate(&mut application);
+    assert_eq!(restarted_candidate.identity().start(), restarted);
+    let restarted_identity = restarted_candidate.identity();
+    let mut restarted_parts = restarted_candidate.into_parts();
+    let restarted_batches = restarted_parts
+        .take_sprite_batches()
+        .expect("Restart must capture the edited color sprite");
+    assert_eq!(restarted_batches.total_instances(), 1);
+    assert!(restarted_batches.as_slice()[0].instances[0].center.x > first_center.x);
+    drop(restarted_parts);
+    complete_plain_identity(&mut application, restarted_identity);
+    drive_empty(&mut application);
+    assert_eq!(
+        application.current_frame().play().state(),
+        EditorPlayState::Running
+    );
+    assert!(!application.current_frame().play().is_out_of_date());
+
+    dispatch(
+        &mut application,
+        [EditorAction::Play(EditorPlayAction::Stop)],
+    );
+    drive_until_play_state(&mut application, EditorPlayState::Empty);
+    let stopped = application.current_frame();
+    assert!(stopped.workspace().active_scene.as_ref().unwrap().dirty);
+    assert_eq!(fs::read(&scene_path).unwrap(), source_before);
+
+    let saved = dispatch(
+        &mut application,
+        [EditorAction::Persistence(EditorPersistenceAction::Save {
+            document,
+            base_revision: stopped.workspace().active_scene.as_ref().unwrap().revision,
+        })],
+    );
+    assert!(matches!(
+        saved.persistence().result(),
+        Some(EditorPersistenceResult::Saved {
+            document: saved_document,
+            revision,
+            ..
+        }) if saved_document == document && revision == paused_edit_revision
+    ));
+    assert!(!saved.workspace().active_scene.as_ref().unwrap().dirty);
+    assert_ne!(fs::read(&scene_path).unwrap(), source_before);
+
+    dispatch(
+        &mut application,
+        [EditorAction::Persistence(
+            EditorPersistenceAction::AcknowledgeResult,
+        )],
+    );
+    dispatch(
+        &mut application,
+        [EditorAction::WorkspaceIntent(
+            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseScene { document }),
+        )],
+    );
+    let closed = dispatch(
+        &mut application,
+        [EditorAction::WorkspaceIntent(
+            EditorWorkspaceIntentAction::AcknowledgeResult,
+        )],
+    );
+    let reopened = dispatch(
+        &mut application,
+        [EditorAction::Persistence(EditorPersistenceAction::Reopen {
+            target: closed.reopen_target(),
+        })],
+    );
+    let reopened_document = match reopened.persistence().result() {
+        Some(EditorPersistenceResult::Opened { document, .. }) => document,
+        other => panic!("expected the saved starter Scene to reopen, got {other:?}"),
+    };
+    select_entity(&mut application, reopened_document, GAME_VIEW_PROBE_ENTITY);
+    let reopened = application.current_frame();
+    assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
+    assert_eq!(
+        selected_f64_field(&reopened, TRANSFORM_COMPONENT, TRANSLATION_X_FIELD).value,
+        PAUSED_TRANSLATION_X
+    );
+}
 
 #[test]
 #[ignore = "runs one nested Cargo build, generated product, and real Winit/WGPU export acceptance"]
@@ -366,34 +650,185 @@ fn dispatch(
     application.current_frame()
 }
 
-fn transform_x_field(frame: &nara::tooling::EditorFrameModel) -> TransformXField {
+fn drive_empty(application: &mut EditorApplication) {
+    let _ = dispatch(application, std::iter::empty());
+}
+
+fn drive_until_play_state(application: &mut EditorApplication, expected: EditorPlayState) {
+    for _ in 0..32 {
+        if application.current_frame().play().state() == expected {
+            return;
+        }
+        drive_empty(application);
+    }
+    panic!(
+        "the Editor did not reach {expected:?}; current frame: {:?}",
+        application.current_frame().play()
+    );
+}
+
+fn activate_pending_game(application: &mut EditorApplication) -> EditorGameStartRequest {
+    let request = (0..32)
+        .find_map(|_| {
+            let request = application.pending_game_start_request();
+            if request.is_none() {
+                drive_empty(application);
+            }
+            request
+        })
+        .expect("the Play request must prepare one exact inactive Game target reservation");
+    let activation = application
+        .prepare_game_start_activation(request)
+        .expect("the exact inactive Game target reservation must match the prepared Runtime");
+    application.commit_game_start_activation(activation);
+    drive_empty(application);
+    request
+}
+
+fn take_game_candidate(application: &mut EditorApplication) -> EditorGameViewCandidate {
+    for _ in 0..32 {
+        if let Some(candidate) = application
+            .take_game_view_candidate()
+            .expect("the active starter Runtime must retain its Game candidate authority")
+        {
+            return candidate;
+        }
+        drive_empty(application);
+    }
+    panic!("the active starter Runtime did not publish a Game candidate");
+}
+
+fn complete_plain_candidate(
+    application: &mut EditorApplication,
+    candidate: EditorGameViewCandidate,
+) {
+    let identity = candidate.identity();
+    drop(candidate);
+    complete_plain_identity(application, identity);
+}
+
+fn complete_plain_identity(
+    application: &mut EditorApplication,
+    identity: nara::project_host::EditorGameViewCandidateIdentity,
+) {
+    application
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui(identity))
+        .expect("the exact starter Game candidate completion must return once");
+}
+
+fn take_scene_preview_candidate(
+    application: &mut EditorApplication,
+    expected_revision: nara::scene::SceneAuthoringRevision,
+) -> nara::project_host::EditorPreviewCandidate {
+    for _ in 0..16 {
+        if let Some(candidate) = application.take_scene_preview_candidate() {
+            if candidate.revision() == expected_revision {
+                return candidate;
+            }
+        }
+        drive_empty(application);
+    }
+    panic!("the accepted starter edit did not publish a Scene preview candidate");
+}
+
+fn select_entity(
+    application: &mut EditorApplication,
+    document: nara::tooling::EditorDocumentId,
+    id: &str,
+) {
+    let _ = dispatch(
+        application,
+        [EditorAction::Navigate(
+            EditorNavigationAction::SelectEntity {
+                document,
+                entity: Some(SceneEntityId::new(id).unwrap()),
+            },
+        )],
+    );
+}
+
+fn selected_f64_field(
+    frame: &nara::tooling::EditorFrameModel,
+    component_id: &str,
+    field_id: &str,
+) -> TransformXField {
     let selected = frame
         .workspace()
         .active_scene
         .as_ref()
         .and_then(|scene| scene.editor.inspector.selected_entity_view.as_ref())
-        .expect("the composed entity is selected in the Inspector");
+        .expect("the requested starter entity is selected in the Inspector");
     let component = selected
         .components
         .iter()
-        .find(|component| component.component.as_str() == TRANSFORM_COMPONENT)
-        .expect("the composed entity exposes Transform2d");
+        .find(|component| component.component.as_str() == component_id)
+        .expect("the selected starter entity exposes the requested component");
     let field = component
         .fields
         .iter()
-        .find(|field| field.id.as_str() == TRANSLATION_X_FIELD)
-        .expect("the composed entity exposes translation.x");
-    let value = field
+        .find(|field| field.id.as_str() == field_id)
+        .expect("the selected starter component exposes the requested field");
+    let ComponentValue::F64(value) = field
         .value
         .as_ref()
-        .expect("translation.x has a concrete authored value");
-    let ComponentValue::F64(value) = value else {
-        panic!("translation.x must remain an f64");
+        .expect("the requested starter field has a concrete authored value")
+    else {
+        panic!("the requested starter field must remain an f64");
     };
     TransformXField {
         component_version: component.schema_version,
-        value: (*value).get(),
+        value: value.get(),
     }
+}
+
+fn transform_value(x: f64, y: f64) -> ComponentValue {
+    ComponentValue::map([
+        (
+            "translation",
+            ComponentValue::map([
+                ("x", ComponentValue::f64(x).unwrap()),
+                ("y", ComponentValue::f64(y).unwrap()),
+            ]),
+        ),
+        ("rotation", ComponentValue::f64(0.0).unwrap()),
+        (
+            "scale",
+            ComponentValue::map([
+                ("x", ComponentValue::f64(1.0).unwrap()),
+                ("y", ComponentValue::f64(1.0).unwrap()),
+            ]),
+        ),
+    ])
+}
+
+fn color_sprite_value() -> ComponentValue {
+    ComponentValue::map([
+        (
+            "size",
+            ComponentValue::map([
+                ("x", ComponentValue::f64(96.0).unwrap()),
+                ("y", ComponentValue::f64(96.0).unwrap()),
+            ]),
+        ),
+        (
+            "material",
+            ComponentValue::map([(
+                "tint",
+                ComponentValue::map([
+                    ("r", ComponentValue::f64(0.2).unwrap()),
+                    ("g", ComponentValue::f64(0.7).unwrap()),
+                    ("b", ComponentValue::f64(1.0).unwrap()),
+                    ("a", ComponentValue::f64(1.0).unwrap()),
+                ]),
+            )]),
+        ),
+        ("layer", ComponentValue::I64(0)),
+        ("sort_key", ComponentValue::I64(0)),
+    ])
+}
+
+fn transform_x_field(frame: &nara::tooling::EditorFrameModel) -> TransformXField {
+    selected_f64_field(frame, TRANSFORM_COMPONENT, TRANSLATION_X_FIELD)
 }
 
 fn has_diagnostic(frame: &nara::tooling::EditorFrameModel, code: &str) -> bool {

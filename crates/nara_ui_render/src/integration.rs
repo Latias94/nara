@@ -361,6 +361,20 @@ pub struct UiBackendPresentationFrame {
 }
 
 impl UiBackendPresentationFrame {
+    /// Returns whether this backend frame contains at least one concrete UI paint packet.
+    #[must_use]
+    pub fn has_packets(&self) -> bool {
+        !self.packets.is_empty()
+    }
+
+    /// Returns whether any exact UI frame in this backend batch owns a modal input barrier.
+    #[must_use]
+    pub fn blocks_unhandled_input(&self) -> bool {
+        self.packets
+            .iter()
+            .any(|packet| packet.frame().blocks_unhandled_input())
+    }
+
     #[must_use]
     pub fn into_parts(self) -> (Vec<Arc<UiPaintPacket>>, Vec<UiBackendSubmission>) {
         (self.packets, self.submissions)

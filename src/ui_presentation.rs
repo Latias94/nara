@@ -467,7 +467,7 @@ fn upsert_draw_packet(packets: &mut Vec<Arc<UiPaintPacket>>, packet: Arc<UiPaint
     }
 }
 
-fn commit_runtime_ui_presentations(world: &mut World) {
+pub(crate) fn commit_runtime_ui_presentations(world: &mut World) {
     let outcomes = match nara_ui_render::drain_ui_presentation_outcomes(world) {
         Ok(outcomes) => outcomes,
         Err(error) => {

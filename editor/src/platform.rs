@@ -36,9 +36,15 @@ use winit::{
 use crate::app::EditorApplicationDispatch;
 use crate::{EditorApplication, EditorApplicationOpenError, EditorLaunchOptions};
 
+mod canary;
 mod game_input;
 mod viewport;
 
+pub use canary::{
+    EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
+};
+
+use canary::EditorGameViewCanaryHost;
 use game_input::EditorGameInputRouter;
 use viewport::{
     EditorGamePrepareOutcome, EditorGamePresenter, EditorScenePickRequest, EditorScenePresenter,
@@ -105,17 +111,40 @@ pub fn run_with_intent(
 }
 
 fn run_application(application: EditorApplication) -> Result<(), EditorRunError> {
+    let _host = drive_native_editor(application, None)?;
+    Ok(())
+}
+
+/// Runs one bounded native Game View canary over an already compiled first-party product intent.
+#[doc(hidden)]
+pub fn run_game_view_canary_with_intent(
+    options: EditorLaunchOptions,
+    intent: EditorProjectIntent,
+    request: EditorGameViewCanaryRequest,
+) -> Result<EditorGameViewCanaryEvidence, EditorRunError> {
+    let application = EditorApplication::open_with_intent(options, intent)?;
+    let mut host = drive_native_editor(application, Some(EditorGameViewCanaryHost::new(request)))?;
+    host.canary
+        .take()
+        .expect("the canary launch installs one canary host")
+        .finish()
+}
+
+fn drive_native_editor(
+    application: EditorApplication,
+    canary: Option<EditorGameViewCanaryHost>,
+) -> Result<NativeEditorHost, EditorRunError> {
     let event_loop = EventLoop::new().map_err(event_loop_error)?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut host = NativeEditorHost::new(application)?;
+    let mut host = NativeEditorHost::new(application, canary)?;
     if let Err(error) = event_loop.run_app(&mut host) {
         host.terminal_error
             .get_or_insert_with(|| event_loop_error(error));
     }
-    match host.terminal_error {
-        Some(error) => Err(error),
-        None => Ok(()),
+    if let Some(error) = host.terminal_error.take() {
+        return Err(error);
     }
+    Ok(host)
 }
 
 fn event_loop_error(error: EventLoopError) -> EditorRunError {
@@ -143,6 +172,7 @@ struct NativeEditorHost {
     editor_frame_index: u64,
     repaint_deadline: Option<Instant>,
     terminal_error: Option<EditorRunError>,
+    canary: Option<EditorGameViewCanaryHost>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -237,7 +267,10 @@ impl EditorViewportSelection {
 }
 
 impl NativeEditorHost {
-    fn new(application: EditorApplication) -> Result<Self, EditorRunError> {
+    fn new(
+        application: EditorApplication,
+        canary: Option<EditorGameViewCanaryHost>,
+    ) -> Result<Self, EditorRunError> {
         Ok(Self {
             application,
             context: egui::Context::default(),
@@ -259,6 +292,7 @@ impl NativeEditorHost {
             editor_frame_index: 0,
             repaint_deadline: None,
             terminal_error: None,
+            canary,
         })
     }
 
@@ -631,13 +665,15 @@ impl NativeEditorHost {
                 self.game_input.invalidate(false);
                 self.flush_game_input()?;
                 self.application.cancel_game_step_presentation();
-                self.application
-                    .set_game_view_source_active(false, "the Scene viewport became active")
-                    .map_err(|error| {
-                        EditorRunError::Platform(format!(
-                            "the Game View source could not retire before Scene handoff: {error}"
-                        ))
-                    })?;
+                if play_state != EditorPlayState::Empty {
+                    self.application
+                        .set_game_view_source_active(false, "the Scene viewport became active")
+                        .map_err(|error| {
+                            EditorRunError::Platform(format!(
+                                "the Game View source could not retire before Scene handoff: {error}"
+                            ))
+                        })?;
+                }
                 let gpu = self
                     .gpu
                     .as_mut()
@@ -741,6 +777,10 @@ impl NativeEditorHost {
         let mut awaiting_game_frame = false;
         let mut game_input_invalidated = false;
         let mut game_notice = None;
+        let canary_sprite_sort_key = self
+            .canary
+            .as_ref()
+            .map(EditorGameViewCanaryHost::tracked_sprite_sort_key);
         let prepared_viewport = match selected_viewport {
             EguiEditorViewport::Scene => match self.application.take_scene_preview_candidate() {
                 Some(candidate) => match self.scene_presenter.prepare(
@@ -782,6 +822,7 @@ impl NativeEditorHost {
                             .expect("an installed native window has one Editor GPU owner"),
                         window_packet,
                         candidate,
+                        canary_sprite_sort_key,
                     )? {
                         EditorGamePrepareOutcome::Prepared(prepared) => {
                             Some(PreparedEditorViewportFrame::Game(prepared))
@@ -887,7 +928,7 @@ impl NativeEditorHost {
         let (
             displayed_viewport,
             desired_scene_extent,
-            desired_game_extent,
+            mut desired_game_extent,
             game_content_rect,
             game_capture_requested,
             camera_changed,
@@ -936,6 +977,13 @@ impl NativeEditorHost {
                 false,
             ),
         };
+        if let Some(canary_extent) = self
+            .canary
+            .as_ref()
+            .and_then(EditorGameViewCanaryHost::viewport_extent_override)
+        {
+            desired_game_extent = Some(canary_extent);
+        }
         let selected_after_ui = self.viewport_selection.selected();
         let egui_repaint_delay = output
             .viewport_output
@@ -1161,6 +1209,30 @@ impl NativeEditorHost {
             self.game_input.invalidate(false);
         }
 
+        if self.canary.is_some() {
+            let canary_observation = self.game_presenter.presented_observation();
+            let active_start = self.application.active_game_start_request();
+            let canary = self
+                .canary
+                .as_mut()
+                .expect("the guarded canary remains installed");
+            let advance = canary.advance(
+                &editor_frame,
+                canary_observation.as_ref(),
+                active_start,
+                &mut self.game_input,
+                &window,
+            )?;
+            if let Some(action) = advance.action {
+                batch = append_editor_action(batch, action);
+                window.request_redraw();
+            }
+            if advance.exit {
+                event_loop.exit();
+                return Ok(());
+            }
+        }
+
         if displayed_viewport == EguiEditorViewport::Scene
             && desired_scene_extent != self.requested_scene_extent
         {
@@ -1211,6 +1283,7 @@ impl NativeEditorHost {
         self.flush_game_input()?;
         let drive_runtime = dispatch.requires_runtime_drive()
             || game_resized
+            || source_changed
             || self.application.game_step_requires_runtime_drive()
             || matches!(
                 play_state_before,
@@ -1261,6 +1334,10 @@ impl NativeEditorHost {
         let cadence_deadline =
             self.play_cadence
                 .deadline(now, play_state_after_update, selected_after_ui);
+        let wake_deadline = earliest_deadline(
+            cadence_deadline,
+            self.canary.as_ref().map(EditorGameViewCanaryHost::deadline),
+        );
         let scene_retry_pending =
             selected_after_ui == EguiEditorViewport::Scene && viewport_retry_pending;
         if update.actions_observed()
@@ -1274,8 +1351,8 @@ impl NativeEditorHost {
             window.request_redraw();
             self.repaint_deadline = None;
             event_loop.set_control_flow(ControlFlow::Wait);
-        } else if repaint_delay < Duration::MAX || cadence_deadline.is_some() {
-            let deadline = match (repaint_delay < Duration::MAX, cadence_deadline) {
+        } else if repaint_delay < Duration::MAX || wake_deadline.is_some() {
+            let deadline = match (repaint_delay < Duration::MAX, wake_deadline) {
                 (true, Some(cadence)) => cadence.min(now + repaint_delay),
                 (true, None) => now + repaint_delay,
                 (false, Some(cadence)) => cadence,
@@ -1317,7 +1394,11 @@ impl NativeEditorHost {
             self.flush_game_input()?;
         }
         self.play_cadence.observe_after(now, state, selected);
-        if let Some(deadline) = self.play_cadence.deadline(now, state, selected) {
+        let deadline = earliest_deadline(
+            self.play_cadence.deadline(now, state, selected),
+            self.canary.as_ref().map(EditorGameViewCanaryHost::deadline),
+        );
+        if let Some(deadline) = deadline {
             self.repaint_deadline = Some(deadline);
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
@@ -1333,11 +1414,34 @@ impl NativeEditorHost {
     }
 }
 
+fn earliest_deadline(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    }
+}
+
 impl ApplicationHandler for NativeEditorHost {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
         if matches!(cause, StartCause::ResumeTimeReached { .. })
             && self.repaint_deadline.take().is_some()
         {
+            if self
+                .canary
+                .as_ref()
+                .is_some_and(|canary| Instant::now() >= canary.deadline())
+            {
+                let observation = self.game_presenter.presented_observation();
+                let active_start = self.application.active_game_start_request();
+                let error = self
+                    .canary
+                    .as_ref()
+                    .expect("the expired canary remains installed")
+                    .timeout_error(observation.as_ref(), active_start);
+                self.fail(event_loop, error);
+                return;
+            }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }

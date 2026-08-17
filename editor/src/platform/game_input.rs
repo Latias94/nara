@@ -256,6 +256,21 @@ impl EditorGameInputRouter {
         true
     }
 
+    pub(super) fn capture_and_press_key(&mut self, key: KeyCode) -> bool {
+        let Some(presented) = self.presented else {
+            return false;
+        };
+        self.cursor_position = Some(PhysicalPosition::new(
+            (presented.transform.min_x + presented.transform.max_x) * 0.5,
+            (presented.transform.min_y + presented.transform.max_y) * 0.5,
+        ));
+        if !self.capture_requested() || !self.input_enabled {
+            return false;
+        }
+        self.apply_captured_key_transition(key, ElementState::Pressed);
+        true
+    }
+
     pub(super) fn take_focus_restore_request(&mut self, game_panel_active: bool) -> bool {
         let requested = std::mem::take(&mut self.focus_restore_requested);
         requested && game_panel_active
@@ -279,37 +294,12 @@ impl EditorGameInputRouter {
                     return false;
                 }
                 if !self.input_enabled {
-                    let was_held = matches!(
-                        &self.capture,
-                        EditorGameCaptureState::Captured { held_keys, .. } if held_keys.contains(&key)
-                    );
-                    if event.state == ElementState::Released && was_held {
-                        self.push_captured(EditorGameInputEvent::Keyboard(
-                            ButtonDriverInput::Release(key),
-                        ));
-                        if let EditorGameCaptureState::Captured { held_keys, .. } =
-                            &mut self.capture
-                        {
-                            held_keys.remove(&key);
-                        }
+                    if event.state == ElementState::Released && self.captured_key_is_held(key) {
+                        self.apply_captured_key_transition(key, event.state);
                     }
                     return false;
                 }
-                let input = match event.state {
-                    ElementState::Pressed => ButtonDriverInput::Press(key),
-                    ElementState::Released => ButtonDriverInput::Release(key),
-                };
-                self.push_captured(EditorGameInputEvent::Keyboard(input));
-                if let EditorGameCaptureState::Captured { held_keys, .. } = &mut self.capture {
-                    match event.state {
-                        ElementState::Pressed => {
-                            held_keys.insert(key);
-                        }
-                        ElementState::Released => {
-                            held_keys.remove(&key);
-                        }
-                    }
-                }
+                self.apply_captured_key_transition(key, event.state);
                 false
             }
             WindowEvent::MouseInput { state, button, .. } if self.is_captured() => {
@@ -444,13 +434,13 @@ impl EditorGameInputRouter {
         self.focus_restore_requested = false;
     }
 
-    fn push_captured(&mut self, event: EditorGameInputEvent) {
+    fn push_captured(&mut self, event: EditorGameInputEvent) -> bool {
         let EditorGameCaptureState::Captured { stamp, lease, .. } = &self.capture else {
-            return;
+            return false;
         };
         let stamp = *stamp;
         let lease = *lease;
-        self.push(stamp, lease, event);
+        self.push(stamp, lease, event)
     }
 
     fn push(
@@ -458,7 +448,7 @@ impl EditorGameInputRouter {
         stamp: EditorGamePresentedStamp,
         lease: EditorGameInputLease,
         event: EditorGameInputEvent,
-    ) {
+    ) -> bool {
         if self.pending.len() >= EditorGameInputBatch::MAX_EVENTS {
             self.pending.clear();
             self.presented = None;
@@ -476,13 +466,42 @@ impl EditorGameInputRouter {
                 lease.route_generation,
                 cleanup,
             ));
-            return;
+            return false;
         }
         self.pending.push(EditorGameInputEnvelope::new(
             stamp.identity(),
             lease.route_generation,
             event,
         ));
+        true
+    }
+
+    fn captured_key_is_held(&self, key: KeyCode) -> bool {
+        matches!(
+            &self.capture,
+            EditorGameCaptureState::Captured { held_keys, .. } if held_keys.contains(&key)
+        )
+    }
+
+    fn apply_captured_key_transition(&mut self, key: KeyCode, state: ElementState) {
+        let input = match state {
+            ElementState::Pressed => ButtonDriverInput::Press(key),
+            ElementState::Released => ButtonDriverInput::Release(key),
+        };
+        if !self.push_captured(EditorGameInputEvent::Keyboard(input)) {
+            return;
+        }
+        let EditorGameCaptureState::Captured { held_keys, .. } = &mut self.capture else {
+            return;
+        };
+        match state {
+            ElementState::Pressed => {
+                held_keys.insert(key);
+            }
+            ElementState::Released => {
+                held_keys.remove(&key);
+            }
+        }
     }
 
     fn release(&mut self, terminal: bool) {

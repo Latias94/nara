@@ -2,6 +2,7 @@ use egui::{TextureId, Vec2, epaint::Primitive};
 use egui_wgpu::wgpu;
 use nara::{
     asset::{AssetId, Handle},
+    prelude::Vec2 as NaraVec2,
     project_host::{
         EditorGameStartActivation, EditorGameStartRequest, EditorGameViewCandidate,
         EditorGameViewCandidateIdentity, EditorGameViewCompletion, EditorPreviewCandidate,
@@ -18,6 +19,7 @@ use nara::{
         WgpuEditorViewportTargetActivation, WgpuSubmittedImageReceipt,
     },
     scene::SceneAuthoringRevision,
+    sprite_render::SpriteBatches,
     tooling::{EditorAction, EditorActionBatch, EditorDocumentId, EditorFrameModel},
     tooling_egui::{EguiGameViewInput, EguiSceneViewInput},
 };
@@ -288,6 +290,7 @@ pub(super) struct PreparedEditorGame {
     submission: EditorGameImageSubmission,
     texture_id: TextureId,
     texture_registration_generation: u64,
+    canary_facts: Option<EditorGameCandidateFacts>,
 }
 
 impl PreparedEditorGame {
@@ -327,6 +330,77 @@ impl PreparedEditorViewportFrame {
 struct PresentedEditorGame {
     identity: EditorGameViewCandidateIdentity,
     receipt: WgpuEditorCompositeReceipt,
+    canary_facts: Option<EditorGameCandidateFacts>,
+}
+
+#[derive(Debug)]
+struct EditorGameCandidateFacts {
+    total_sprite_instances: usize,
+    tracked_center: Option<NaraVec2>,
+    runtime_ui_present: bool,
+    runtime_ui_blocks_unhandled_input: bool,
+}
+
+impl EditorGameCandidateFacts {
+    fn new(
+        sprites: Option<&SpriteBatches>,
+        runtime_ui_present: bool,
+        runtime_ui_blocks_unhandled_input: bool,
+        tracked_sprite_sort_key: i32,
+    ) -> Self {
+        let total_sprite_instances = sprites.map_or(0, SpriteBatches::total_instances);
+        let tracked_center = sprites.and_then(|sprites| {
+            let mut centers = sprites
+                .as_slice()
+                .iter()
+                .filter(|batch| batch.sort_key == tracked_sprite_sort_key)
+                .flat_map(|batch| batch.instances.iter().map(|instance| instance.center));
+            let center = centers.next()?;
+            centers.next().is_none().then_some(center)
+        });
+        Self {
+            total_sprite_instances,
+            tracked_center,
+            runtime_ui_present,
+            runtime_ui_blocks_unhandled_input,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct EditorGamePresentedObservation<'a> {
+    stamp: EditorGamePresentedStamp,
+    content: &'a EditorGameCandidateFacts,
+}
+
+impl EditorGamePresentedObservation<'_> {
+    pub(super) const fn stamp(&self) -> EditorGamePresentedStamp {
+        self.stamp
+    }
+
+    pub(super) const fn runtime_frame_index(&self) -> u64 {
+        self.stamp.identity.frame_index()
+    }
+
+    pub(super) const fn receipt(&self) -> WgpuEditorCompositeReceipt {
+        self.stamp.receipt
+    }
+
+    pub(super) fn total_sprite_instances(&self) -> usize {
+        self.content.total_sprite_instances
+    }
+
+    pub(super) const fn runtime_ui_present(&self) -> bool {
+        self.content.runtime_ui_present
+    }
+
+    pub(super) const fn runtime_ui_blocks_unhandled_input(&self) -> bool {
+        self.content.runtime_ui_blocks_unhandled_input
+    }
+
+    pub(super) const fn tracked_center(&self) -> Option<NaraVec2> {
+        self.content.tracked_center
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -474,6 +548,7 @@ impl EditorGamePresenter {
         gpu: &mut WgpuEditorExecution,
         editor_window: RenderWindowPacket,
         candidate: EditorGameViewCandidate,
+        canary_sprite_sort_key: Option<i32>,
     ) -> Result<EditorGamePrepareOutcome, EditorRunError> {
         if let EditorGamePresenterState::CompletionRejected(completion) = &self.state {
             return Err(EditorRunError::Platform(format!(
@@ -483,6 +558,16 @@ impl EditorGamePresenter {
         }
         let (identity, packet, sprites, runtime_ui) =
             candidate.into_parts().into_submission_parts();
+        let canary_facts = canary_sprite_sort_key.map(|tracked_sprite_sort_key| {
+            EditorGameCandidateFacts::new(
+                sprites.as_ref(),
+                runtime_ui.as_ref().is_some_and(|frame| frame.has_packets()),
+                runtime_ui
+                    .as_ref()
+                    .is_some_and(|frame| frame.blocks_unhandled_input()),
+                tracked_sprite_sort_key,
+            )
+        });
         let Some(binding) = slot
             .binding
             .filter(|binding| matches!(binding.source, EditorViewportSource::Game(_)))
@@ -602,6 +687,7 @@ impl EditorGamePresenter {
             submission,
             texture_id: binding.texture_id,
             texture_registration_generation: binding.registration_generation,
+            canary_facts,
         }))
     }
 
@@ -612,38 +698,46 @@ impl EditorGamePresenter {
         prepared: PreparedEditorGame,
         receipt: WgpuEditorCompositeReceipt,
     ) -> Result<(), EditorRunError> {
-        let Some(binding) = slot.game_binding().filter(|binding| {
-            binding.source == EditorViewportSource::Game(prepared.identity.start())
-        }) else {
+        let PreparedEditorGame {
+            identity,
+            submission,
+            texture_id: _,
+            texture_registration_generation,
+            canary_facts,
+        } = prepared;
+        let Some(binding) = slot
+            .game_binding()
+            .filter(|binding| binding.source == EditorViewportSource::Game(identity.start()))
+        else {
             let error = WgpuEditorExecutionError::StaleImageSubmission;
-            let completion = prepared.submission.failed(prepared.identity, &error);
+            let completion = submission.failed(identity, &error);
             self.return_completion(application, completion)?;
             return Err(EditorRunError::Platform(
                 "the Game composite has no matching active viewport binding".to_owned(),
             ));
         };
         if !binding.matches_presented(receipt)
-            || receipt.image() != prepared.image()
-            || receipt.texture_registration_generation() != prepared.texture_registration_generation
+            || receipt.image() != submission.image()
+            || receipt.texture_registration_generation() != texture_registration_generation
         {
             let error = WgpuEditorExecutionError::StaleImageSubmission;
-            let completion = prepared.submission.failed(prepared.identity, &error);
+            let completion = submission.failed(identity, &error);
             self.return_completion(application, completion)?;
             return Err(platform_gpu_error(error));
         }
-        let completion = prepared
-            .submission
-            .presented(prepared.identity, receipt)
+        let completion = submission
+            .presented(identity, receipt)
             .map_err(|submission| {
                 let error = WgpuEditorExecutionError::StaleImageSubmission;
-                let completion = submission.failed(prepared.identity, &error);
+                let completion = submission.failed(identity, &error);
                 self.state = EditorGamePresenterState::CompletionRejected(completion);
                 platform_gpu_error(error)
             })?;
         self.return_completion(application, completion)?;
         self.state = EditorGamePresenterState::Presented(PresentedEditorGame {
-            identity: prepared.identity,
+            identity,
             receipt,
+            canary_facts,
         });
         Ok(())
     }
@@ -700,6 +794,26 @@ impl EditorGamePresenter {
                 identity: presented.identity,
                 receipt: presented.receipt,
             }),
+            EditorGamePresenterState::Empty | EditorGamePresenterState::CompletionRejected(_) => {
+                None
+            }
+        }
+    }
+
+    pub(super) fn presented_observation(&self) -> Option<EditorGamePresentedObservation<'_>> {
+        match &self.state {
+            EditorGamePresenterState::Presented(presented) => {
+                presented
+                    .canary_facts
+                    .as_ref()
+                    .map(|content| EditorGamePresentedObservation {
+                        stamp: EditorGamePresentedStamp {
+                            identity: presented.identity,
+                            receipt: presented.receipt,
+                        },
+                        content,
+                    })
+            }
             EditorGamePresenterState::Empty | EditorGamePresenterState::CompletionRejected(_) => {
                 None
             }
