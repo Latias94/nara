@@ -7,8 +7,8 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 execution: code
 execution_state: active
-active_unit: EGV-U3
-activation_record: 638ce8b3ee70442baab2ac3000eb5f08
+active_unit: EGV-U4
+activation_record: c395dd3580764f73aa0baa7c5e9e4062
 depends_on: docs/plans/2026-08-16-1440-feat-editor-scene-view-and-composition-plan.md
 plan_id: editor-game-view-2026-08
 unit_namespace: EGV

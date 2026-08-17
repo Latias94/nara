@@ -9,10 +9,10 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. [Editor Game View v1](../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) is the sole
-   active implementation plan. EGV-U3 is the only active unit under registration
-   `638ce8b3ee70442baab2ac3000eb5f08`; EGV-U2 is verified at `66a1433` with record
-   `4012c0efb4d046c78031b9ad6d30a2c3`, while EGV-U4 and EGV-U5 remain inactive and
-   dependency-ordered. The completed Editor Scene Composition and Scene View, Editor Authoring
+   active implementation plan. EGV-U4 is the only active unit under registration
+   `c395dd3580764f73aa0baa7c5e9e4062`; EGV-U3 is verified at `67c9638` with record
+   `c793ec2941d64f75be7e2607699a9e79`, while EGV-U5 remains inactive and dependency-ordered.
+   The completed Editor Scene Composition and Scene View, Editor Authoring
    Loop, Fresh Project, Capability Directory Publication, Runtime UI, and focused correction plans
    remain immutable lineage evidence; the
    [UI program roadmap](../plans/ui-program-roadmap.md) is navigation only.
