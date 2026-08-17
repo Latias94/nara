@@ -11,8 +11,8 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    SceneAuthoringContentState, SceneAuthoringRevision, SceneAuthoringSession, SceneDocument,
-    SceneEntityId, ScenePatchDocument, ScenePatchReport,
+    PrefabAuthoringSession, PrefabDocument, SceneAuthoringContentState, SceneAuthoringRevision,
+    SceneAuthoringSession, SceneDocument, SceneEntityId, ScenePatchDocument, ScenePatchReport,
 };
 
 use crate::composition::{
@@ -35,6 +35,32 @@ impl EditorDocumentId {
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EditorDocumentKind {
+    Scene,
+    Prefab,
+}
+
+/// Host-normalized source identity carried by a document slot.
+///
+/// The workspace does not parse or resolve this locator. The concrete Host owns normalization;
+/// the workspace only preserves exact equality for persistence and stale-document checks.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorDocumentSourceBinding(Arc<str>);
+
+impl EditorDocumentSourceBinding {
+    #[doc(hidden)]
+    #[must_use]
+    pub fn new(normalized_locator: impl Into<Arc<str>>) -> Self {
+        Self(normalized_locator.into())
+    }
+
+    #[must_use]
+    pub fn locator(&self) -> &str {
+        &self.0
     }
 }
 
@@ -84,9 +110,17 @@ pub struct EditorPersistenceAuthority {
 pub struct EditorPersistenceCheckpoint {
     identity: Arc<EditorWorkspacePersistenceIdentity>,
     document: EditorDocumentId,
+    kind: EditorDocumentKind,
+    source_binding: Option<EditorDocumentSourceBinding>,
     revision: SceneAuthoringRevision,
     content_state: SceneAuthoringContentState,
-    scene: SceneDocument,
+    content: EditorPersistenceContent,
+}
+
+#[derive(Debug)]
+enum EditorPersistenceContent {
+    Scene(SceneDocument),
+    Prefab(PrefabDocument),
 }
 
 /// Linear proof that one captured revision was published with the required filesystem evidence.
@@ -141,6 +175,16 @@ impl EditorPersistenceCheckpoint {
     }
 
     #[must_use]
+    pub const fn kind(&self) -> EditorDocumentKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn source_binding(&self) -> Option<&EditorDocumentSourceBinding> {
+        self.source_binding.as_ref()
+    }
+
+    #[must_use]
     pub const fn revision(&self) -> SceneAuthoringRevision {
         self.revision
     }
@@ -153,7 +197,23 @@ impl EditorPersistenceCheckpoint {
     #[doc(hidden)]
     #[must_use]
     pub fn scene(&self) -> &SceneDocument {
-        &self.scene
+        match &self.content {
+            EditorPersistenceContent::Scene(scene) => scene,
+            EditorPersistenceContent::Prefab(_) => {
+                panic!("scene persistence checkpoint requested for a Prefab document")
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn prefab(&self) -> &PrefabDocument {
+        match &self.content {
+            EditorPersistenceContent::Prefab(prefab) => prefab,
+            EditorPersistenceContent::Scene(_) => {
+                panic!("prefab persistence checkpoint requested for a Scene document")
+            }
+        }
     }
 }
 
@@ -180,7 +240,92 @@ pub struct EditorWorkspace {
     persistence_identity: Arc<EditorWorkspacePersistenceIdentity>,
     next_document_id: u64,
     active_document: Option<EditorDocumentId>,
-    scenes: BTreeMap<EditorDocumentId, EditorSceneSlot>,
+    documents: BTreeMap<EditorDocumentId, EditorDocumentSlot>,
+}
+
+#[derive(Debug)]
+enum EditorDocumentSlot {
+    Scene(EditorSceneSlot),
+    Prefab(EditorPrefabSlot),
+}
+
+impl EditorDocumentSlot {
+    fn kind(&self) -> EditorDocumentKind {
+        match self {
+            Self::Scene(_) => EditorDocumentKind::Scene,
+            Self::Prefab(_) => EditorDocumentKind::Prefab,
+        }
+    }
+
+    fn title(&self) -> &str {
+        match self {
+            Self::Scene(slot) => slot.title(),
+            Self::Prefab(slot) => slot.title(),
+        }
+    }
+
+    fn revision(&self) -> SceneAuthoringRevision {
+        match self {
+            Self::Scene(slot) => slot.revision(),
+            Self::Prefab(slot) => slot.revision(),
+        }
+    }
+
+    fn saved_revision(&self) -> SceneAuthoringRevision {
+        match self {
+            Self::Scene(slot) => slot.saved_revision(),
+            Self::Prefab(slot) => slot.saved_revision(),
+        }
+    }
+
+    fn is_dirty(&self) -> bool {
+        match self {
+            Self::Scene(slot) => slot.is_dirty(),
+            Self::Prefab(slot) => slot.is_dirty(),
+        }
+    }
+
+    fn source_binding(&self) -> Option<&EditorDocumentSourceBinding> {
+        match self {
+            Self::Scene(slot) => slot.source_binding.as_ref(),
+            Self::Prefab(slot) => Some(&slot.source_binding),
+        }
+    }
+
+    fn external_reload(&self) -> EditorExternalReloadState {
+        match self {
+            Self::Scene(slot) => slot.external_reload(),
+            Self::Prefab(slot) => slot.external_reload(),
+        }
+    }
+
+    fn owns_content_state(&self, state: SceneAuthoringContentState) -> bool {
+        match self {
+            Self::Scene(slot) => slot.session().owns_content_state(state),
+            Self::Prefab(slot) => slot.session().owns_content_state(state),
+        }
+    }
+
+    fn set_saved_digest(&mut self, digest: EditorDocumentDigest) {
+        match self {
+            Self::Scene(slot) => slot.saved_digest = Some(digest),
+            Self::Prefab(slot) => slot.saved_digest = Some(digest),
+        }
+    }
+
+    fn apply_persistence_checkpoint(
+        &mut self,
+        revision: SceneAuthoringRevision,
+        content_state: SceneAuthoringContentState,
+        digest: EditorDocumentDigest,
+    ) {
+        match self {
+            Self::Scene(slot) => slot.apply_persistence_checkpoint(revision, content_state, digest),
+            Self::Prefab(slot) => {
+                slot.apply_persistence_checkpoint(revision, content_state, digest)
+            }
+        }
+    }
 }
 
 impl EditorWorkspace {
@@ -210,34 +355,52 @@ impl EditorWorkspace {
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.scenes.is_empty()
+        self.documents.is_empty()
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.scenes.len()
+        self.documents.len()
     }
 
     #[must_use]
     pub fn scene(&self, document: EditorDocumentId) -> Option<&EditorSceneSlot> {
-        self.scenes.get(&document)
+        match self.documents.get(&document) {
+            Some(EditorDocumentSlot::Scene(slot)) => Some(slot),
+            Some(EditorDocumentSlot::Prefab(_)) | None => None,
+        }
+    }
+
+    #[must_use]
+    pub fn prefab(&self, document: EditorDocumentId) -> Option<&EditorPrefabSlot> {
+        match self.documents.get(&document) {
+            Some(EditorDocumentSlot::Prefab(slot)) => Some(slot),
+            Some(EditorDocumentSlot::Scene(_)) | None => None,
+        }
     }
 
     #[must_use]
     pub fn active_scene(&self) -> Option<&EditorSceneSlot> {
-        self.active_document.and_then(|id| self.scenes.get(&id))
+        self.active_document.and_then(|id| self.scene(id))
+    }
+
+    #[must_use]
+    pub fn active_prefab(&self) -> Option<&EditorPrefabSlot> {
+        self.active_document.and_then(|id| self.prefab(id))
     }
 
     fn apply_persistence_checkpoint(
         &mut self,
         document: EditorDocumentId,
+        kind: EditorDocumentKind,
+        source_binding: Option<&EditorDocumentSourceBinding>,
         revision: SceneAuthoringRevision,
         content_state: SceneAuthoringContentState,
         digest: EditorDocumentDigest,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
         let context = WorkspaceDocumentContext::new(active_document, Some(document));
-        let Some(slot) = self.scenes.get_mut(&document) else {
+        let Some(slot) = self.documents.get_mut(&document) else {
             return workspace_document_error_report(context, document);
         };
         let current = slot.revision();
@@ -246,10 +409,12 @@ impl EditorWorkspace {
         let revision_not_ahead = revision.generation() <= current.generation();
         let revision_not_regressed = revision.source_id() == saved.source_id()
             && revision.generation() >= saved.generation();
-        if !revision_matches_source
+        if slot.kind() != kind
+            || slot.source_binding() != source_binding
+            || !revision_matches_source
             || !revision_not_ahead
             || !revision_not_regressed
-            || !slot.session.owns_content_state(content_state)
+            || !slot.owns_content_state(content_state)
         {
             return workspace_error_report(
                 context,
@@ -258,7 +423,7 @@ impl EditorWorkspace {
             );
         }
         slot.apply_persistence_checkpoint(revision, content_state, digest);
-        report_for_slot(document, active_document, slot)
+        report_for_document(document, active_document, slot)
     }
 
     fn bind_opened_source_digest(
@@ -268,11 +433,11 @@ impl EditorWorkspace {
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
         let context = WorkspaceDocumentContext::new(active_document, Some(document));
-        let Some(slot) = self.scenes.get_mut(&document) else {
+        let Some(slot) = self.documents.get_mut(&document) else {
             return workspace_document_error_report(context, document);
         };
-        slot.saved_digest = Some(digest);
-        report_for_slot(document, active_document, slot)
+        slot.set_saved_digest(digest);
+        report_for_document(document, active_document, slot)
     }
 
     pub fn open_scene_session(
@@ -298,19 +463,50 @@ impl EditorWorkspace {
 
         let document_id = self.allocate_document_id();
         let slot = EditorSceneSlot::from_session(title, session);
-        self.scenes.insert(document_id, slot);
+        self.documents
+            .insert(document_id, EditorDocumentSlot::Scene(slot));
         self.active_document = Some(document_id);
         let dirty = self
-            .scenes
+            .documents
             .get(&document_id)
-            .is_some_and(EditorSceneSlot::is_dirty);
+            .is_some_and(EditorDocumentSlot::is_dirty);
         Ok(EditorWorkspaceCommandReport {
             applied: true,
             document: Some(document_id),
             opened_document: Some(document_id),
             active_document: self.active_document,
             dirty: Some(dirty),
-            revision: self.scenes.get(&document_id).map(|slot| slot.revision()),
+            revision: self
+                .documents
+                .get(&document_id)
+                .map(EditorDocumentSlot::revision),
+            diagnostics: DiagnosticReport::default(),
+            ..EditorWorkspaceCommandReport::default()
+        })
+    }
+
+    pub fn open_prefab_session(
+        &mut self,
+        title: impl Into<String>,
+        source_binding: EditorDocumentSourceBinding,
+        session: PrefabAuthoringSession,
+    ) -> Result<EditorWorkspaceCommandReport, EditorPrefabSessionPublicationError> {
+        let document_id = self.allocate_document_id();
+        let slot = EditorPrefabSlot::from_session(title, source_binding, session);
+        self.documents
+            .insert(document_id, EditorDocumentSlot::Prefab(slot));
+        self.active_document = Some(document_id);
+        let slot = self
+            .documents
+            .get(&document_id)
+            .expect("newly opened Prefab slot must exist");
+        Ok(EditorWorkspaceCommandReport {
+            applied: true,
+            document: Some(document_id),
+            opened_document: Some(document_id),
+            active_document: self.active_document,
+            dirty: Some(slot.is_dirty()),
+            revision: Some(slot.revision()),
             diagnostics: DiagnosticReport::default(),
             ..EditorWorkspaceCommandReport::default()
         })
@@ -363,23 +559,42 @@ impl EditorWorkspace {
         edit_world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> EditorWorkspaceModel {
         let active_scene = self.active_document.and_then(|document| {
-            self.scenes
-                .get(&document)
+            self.scene(document)
                 .map(|slot| slot.model(document, registry, edit_world_snapshot))
         });
 
         EditorWorkspaceModel {
             active_document: self.active_document,
-            scenes: self
-                .scenes
+            documents: self
+                .documents
                 .iter()
-                .map(|(document, slot)| EditorSceneTabModel {
+                .map(|(document, slot)| EditorDocumentTabModel {
                     document: *document,
-                    title: slot.title.clone(),
+                    kind: slot.kind(),
+                    title: slot.title().to_owned(),
                     dirty: slot.is_dirty(),
                     revision: slot.revision(),
-                    external_reload: slot.external_reload,
+                    saved_revision: slot.saved_revision(),
+                    source_binding: slot.source_binding().cloned(),
+                    external_reload: slot.external_reload(),
                     active: Some(*document) == self.active_document,
+                })
+                .collect(),
+            scenes: self
+                .documents
+                .iter()
+                .filter_map(|(document, slot)| {
+                    let EditorDocumentSlot::Scene(slot) = slot else {
+                        return None;
+                    };
+                    Some(EditorSceneTabModel {
+                        document: *document,
+                        title: slot.title.clone(),
+                        dirty: slot.is_dirty(),
+                        revision: slot.revision(),
+                        external_reload: slot.external_reload,
+                        active: Some(*document) == self.active_document,
+                    })
                 })
                 .collect(),
             active_scene,
@@ -389,9 +604,17 @@ impl EditorWorkspace {
 
     fn close_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
         let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
-        let Some(slot) = self.scenes.get(&document) else {
+        let Some(slot) = self.documents.get(&document) else {
             return workspace_document_error_report(context, document);
         };
+        if !matches!(slot, EditorDocumentSlot::Scene(_)) {
+            return workspace_kind_error_report(
+                context,
+                document,
+                EditorDocumentKind::Scene,
+                slot.kind(),
+            );
+        }
         if slot.is_dirty() {
             return workspace_error_report(
                 context,
@@ -399,7 +622,7 @@ impl EditorWorkspace {
                 "closing a dirty document requires an explicit save, discard, or cancel decision",
             );
         }
-        self.remove_scene(document)
+        self.remove_document(document)
     }
 
     /// Removes one dirty document after a concrete Host has recorded an explicit discard choice.
@@ -409,17 +632,20 @@ impl EditorWorkspace {
     #[doc(hidden)]
     pub fn __discard_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
         let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
-        if !self.scenes.contains_key(&document) {
+        if !matches!(
+            self.documents.get(&document),
+            Some(EditorDocumentSlot::Scene(_))
+        ) {
             return workspace_document_error_report(context, document);
         }
-        self.remove_scene(document)
+        self.remove_document(document)
     }
 
-    fn remove_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
-        let removed = self.scenes.remove(&document);
+    fn remove_document(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+        let removed = self.documents.remove(&document);
         debug_assert!(removed.is_some(), "the document was checked before removal");
         if self.active_document == Some(document) {
-            self.active_document = self.scenes.keys().next().copied();
+            self.active_document = self.documents.keys().next().copied();
         }
         EditorWorkspaceCommandReport {
             applied: true,
@@ -432,8 +658,16 @@ impl EditorWorkspace {
 
     fn set_active_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
         let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
-        if !self.scenes.contains_key(&document) {
+        let Some(slot) = self.documents.get(&document) else {
             return workspace_document_error_report(context, document);
+        };
+        if slot.kind() != EditorDocumentKind::Scene {
+            return workspace_kind_error_report(
+                context,
+                document,
+                EditorDocumentKind::Scene,
+                slot.kind(),
+            );
         }
         self.active_document = Some(document);
         EditorWorkspaceCommandReport {
@@ -452,8 +686,9 @@ impl EditorWorkspace {
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
         let context = WorkspaceDocumentContext::new(active_document, Some(document));
-        let Some(slot) = self.scenes.get_mut(&document) else {
-            return workspace_document_error_report(context, document);
+        let slot = match self.scene_slot_mut(document) {
+            Ok(slot) => slot,
+            Err(report) => return report,
         };
         if let Some(entity) = &entity
             && !document_has_entity(slot.session.document(), entity)
@@ -605,8 +840,9 @@ impl EditorWorkspace {
     {
         let active_document = self.active_document;
         let context = WorkspaceDocumentContext::new(active_document, Some(document));
-        let Some(slot) = self.scenes.get_mut(&document) else {
-            return Err(workspace_document_error_report(context, document));
+        let slot = match self.scene_slot_mut(document) {
+            Ok(slot) => slot,
+            Err(report) => return Err(report),
         };
         if slot.revision() != base_revision {
             return Err(workspace_revision_error_report(
@@ -624,9 +860,9 @@ impl EditorWorkspace {
         document: EditorDocumentId,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
-        let context = WorkspaceDocumentContext::new(active_document, Some(document));
-        let Some(slot) = self.scenes.get_mut(&document) else {
-            return workspace_document_error_report(context, document);
+        let slot = match self.scene_slot_mut(document) {
+            Ok(slot) => slot,
+            Err(report) => return report,
         };
         slot.external_reload = if slot.is_dirty() {
             EditorExternalReloadState::Conflict
@@ -634,6 +870,31 @@ impl EditorWorkspace {
             EditorExternalReloadState::Pending
         };
         report_for_slot(document, active_document, slot)
+    }
+
+    fn scene_slot_mut(
+        &mut self,
+        document: EditorDocumentId,
+    ) -> Result<&mut EditorSceneSlot, EditorWorkspaceCommandReport> {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(kind) = self.documents.get(&document).map(EditorDocumentSlot::kind) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if kind != EditorDocumentKind::Scene {
+            return Err(workspace_kind_error_report(
+                context,
+                document,
+                EditorDocumentKind::Scene,
+                kind,
+            ));
+        }
+        match self.documents.get_mut(&document) {
+            Some(EditorDocumentSlot::Scene(slot)) => Ok(slot),
+            Some(EditorDocumentSlot::Prefab(_)) | None => {
+                unreachable!("document kind changed while the workspace was mutably borrowed")
+            }
+        }
     }
 
     pub fn reload_external_session(
@@ -744,6 +1005,54 @@ impl EditorWorkspace {
         Ok(report_for_slot(document, active_document, slot))
     }
 
+    fn publish_reopened_prefab_session(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        source_binding: EditorDocumentSourceBinding,
+        session: PrefabAuthoringSession,
+        digest: EditorDocumentDigest,
+    ) -> Result<EditorWorkspaceCommandReport, EditorPrefabSessionPublicationError> {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(EditorDocumentSlot::Prefab(slot)) = self.documents.get_mut(&document) else {
+            let report = if let Some(actual) =
+                self.documents.get(&document).map(EditorDocumentSlot::kind)
+            {
+                workspace_kind_error_report(context, document, EditorDocumentKind::Prefab, actual)
+            } else {
+                workspace_document_error_report(context, document)
+            };
+            return Err(EditorPrefabSessionPublicationError::new(report, session));
+        };
+        if slot.revision() != base_revision || slot.source_binding() != &source_binding {
+            return Err(EditorPrefabSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-prefab-reopen-mismatch",
+                    "reopened Prefab source or base revision does not match the open slot",
+                ),
+                session,
+            ));
+        }
+
+        slot.session = session;
+        slot.selection.clear();
+        slot.saved_revision = slot.session.revision();
+        slot.saved_content_state = slot.session.content_state();
+        slot.saved_digest = Some(digest);
+        slot.external_reload = EditorExternalReloadState::Clean;
+        Ok(EditorWorkspaceCommandReport {
+            applied: true,
+            document: Some(document),
+            active_document,
+            dirty: Some(slot.is_dirty()),
+            revision: Some(slot.revision()),
+            diagnostics: DiagnosticReport::default(),
+            ..EditorWorkspaceCommandReport::default()
+        })
+    }
+
     fn allocate_document_id(&mut self) -> EditorDocumentId {
         self.next_document_id = self.next_document_id.saturating_add(1);
         EditorDocumentId::from_raw(self.next_document_id)
@@ -753,6 +1062,7 @@ impl EditorWorkspace {
 #[derive(Debug)]
 pub struct EditorSceneSlot {
     title: String,
+    source_binding: Option<EditorDocumentSourceBinding>,
     session: SceneAuthoringSession,
     editor: SceneEditorState,
     selection: EditorSelectionSet,
@@ -769,6 +1079,7 @@ impl EditorSceneSlot {
         let saved_content_state = session.content_state();
         Self {
             title: title.into(),
+            source_binding: None,
             session,
             editor: SceneEditorState::new(),
             selection: EditorSelectionSet::default(),
@@ -783,6 +1094,11 @@ impl EditorSceneSlot {
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    #[must_use]
+    pub fn source_binding(&self) -> Option<&EditorDocumentSourceBinding> {
+        self.source_binding.as_ref()
     }
 
     #[must_use]
@@ -900,6 +1216,109 @@ impl EditorSceneSlot {
     }
 }
 
+#[derive(Debug)]
+pub struct EditorPrefabSlot {
+    title: String,
+    source_binding: EditorDocumentSourceBinding,
+    session: PrefabAuthoringSession,
+    selection: EditorSelectionSet,
+    saved_revision: SceneAuthoringRevision,
+    saved_content_state: SceneAuthoringContentState,
+    saved_digest: Option<EditorDocumentDigest>,
+    external_reload: EditorExternalReloadState,
+}
+
+impl EditorPrefabSlot {
+    fn from_session(
+        title: impl Into<String>,
+        source_binding: EditorDocumentSourceBinding,
+        session: PrefabAuthoringSession,
+    ) -> Self {
+        let saved_revision = session.revision();
+        let saved_content_state = session.content_state();
+        Self {
+            title: title.into(),
+            source_binding,
+            session,
+            selection: EditorSelectionSet::default(),
+            saved_revision,
+            saved_content_state,
+            saved_digest: None,
+            external_reload: EditorExternalReloadState::Clean,
+        }
+    }
+
+    #[must_use]
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    #[must_use]
+    pub fn source_binding(&self) -> &EditorDocumentSourceBinding {
+        &self.source_binding
+    }
+
+    #[must_use]
+    pub fn session(&self) -> &PrefabAuthoringSession {
+        &self.session
+    }
+
+    #[must_use]
+    pub fn selection(&self) -> &EditorSelectionSet {
+        &self.selection
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> SceneAuthoringRevision {
+        self.session.revision()
+    }
+
+    #[must_use]
+    pub fn saved_revision(&self) -> SceneAuthoringRevision {
+        self.saved_revision
+    }
+
+    #[must_use]
+    pub fn saved_content_state(&self) -> SceneAuthoringContentState {
+        self.saved_content_state
+    }
+
+    #[must_use]
+    pub const fn saved_digest(&self) -> Option<EditorDocumentDigest> {
+        self.saved_digest
+    }
+
+    #[must_use]
+    pub fn is_dirty(&self) -> bool {
+        self.session.content_state() != self.saved_content_state
+            || self.session.source_upgrade_required()
+    }
+
+    #[must_use]
+    pub fn external_reload(&self) -> EditorExternalReloadState {
+        self.external_reload
+    }
+
+    fn apply_persistence_checkpoint(
+        &mut self,
+        revision: SceneAuthoringRevision,
+        content_state: SceneAuthoringContentState,
+        digest: EditorDocumentDigest,
+    ) {
+        self.saved_revision = revision;
+        self.saved_content_state = content_state;
+        self.saved_digest = Some(digest);
+        let acknowledged = self.session.acknowledge_source_saved(content_state);
+        debug_assert!(
+            acknowledged,
+            "checkpoint source was validated before commit"
+        );
+        if self.external_reload != EditorExternalReloadState::Conflict {
+            self.external_reload = EditorExternalReloadState::Clean;
+        }
+    }
+}
+
 impl EditorPersistenceAuthority {
     /// Captures the current revision of one document for a concrete persistence Host.
     #[must_use]
@@ -911,13 +1330,31 @@ impl EditorPersistenceAuthority {
         if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
             return None;
         }
-        let slot = workspace.scene(document)?;
+        let slot = workspace.documents.get(&document)?;
+        let (kind, source_binding, revision, content_state, content) = match slot {
+            EditorDocumentSlot::Scene(slot) => (
+                EditorDocumentKind::Scene,
+                slot.source_binding.clone(),
+                slot.revision(),
+                slot.session.content_state(),
+                EditorPersistenceContent::Scene(slot.session.document().clone()),
+            ),
+            EditorDocumentSlot::Prefab(slot) => (
+                EditorDocumentKind::Prefab,
+                Some(slot.source_binding.clone()),
+                slot.revision(),
+                slot.session.content_state(),
+                EditorPersistenceContent::Prefab(slot.session.document().clone()),
+            ),
+        };
         Some(EditorPersistenceCheckpoint {
             identity: Arc::clone(&self.identity),
             document,
-            revision: slot.revision(),
-            content_state: slot.session.content_state(),
-            scene: slot.session.document().clone(),
+            kind,
+            source_binding,
+            revision,
+            content_state,
+            content,
         })
     }
 
@@ -945,6 +1382,8 @@ impl EditorPersistenceAuthority {
         }
         workspace.apply_persistence_checkpoint(
             checkpoint.document,
+            checkpoint.kind,
+            checkpoint.source_binding.as_ref(),
             checkpoint.revision,
             checkpoint.content_state,
             digest,
@@ -992,6 +1431,37 @@ impl EditorPersistenceAuthority {
             ));
         }
         workspace.publish_reopened_session(document, base_revision, session, digest)
+    }
+
+    /// Publishes a Prefab explicitly reopened and validated by the concrete Host.
+    #[doc(hidden)]
+    pub fn publish_reopened_prefab_session(
+        &mut self,
+        workspace: &mut EditorWorkspace,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        source_binding: EditorDocumentSourceBinding,
+        session: PrefabAuthoringSession,
+        digest: EditorDocumentDigest,
+    ) -> Result<EditorWorkspaceCommandReport, EditorPrefabSessionPublicationError> {
+        if !Arc::ptr_eq(&self.identity, &workspace.persistence_identity) {
+            let context = WorkspaceDocumentContext::new(workspace.active_document, Some(document));
+            return Err(EditorPrefabSessionPublicationError::new(
+                workspace_error_report(
+                    context,
+                    "tooling.workspace-persistence-authority-mismatch",
+                    "reopened Prefab session does not belong to the hosted workspace authority",
+                ),
+                session,
+            ));
+        }
+        workspace.publish_reopened_prefab_session(
+            document,
+            base_revision,
+            source_binding,
+            session,
+            digest,
+        )
     }
 }
 
@@ -1145,12 +1615,64 @@ impl Display for EditorSceneSessionPublicationError {
 
 impl Error for EditorSceneSessionPublicationError {}
 
+#[derive(Debug)]
+pub struct EditorPrefabSessionPublicationError {
+    report: Box<EditorWorkspaceCommandReport>,
+    session: Box<PrefabAuthoringSession>,
+}
+
+impl EditorPrefabSessionPublicationError {
+    fn new(report: EditorWorkspaceCommandReport, session: PrefabAuthoringSession) -> Self {
+        Self {
+            report: Box::new(report),
+            session: Box::new(session),
+        }
+    }
+
+    #[must_use]
+    pub fn report(&self) -> &EditorWorkspaceCommandReport {
+        &self.report
+    }
+
+    #[must_use]
+    pub fn into_session(self) -> PrefabAuthoringSession {
+        *self.session
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (EditorWorkspaceCommandReport, PrefabAuthoringSession) {
+        (*self.report, *self.session)
+    }
+}
+
+impl Display for EditorPrefabSessionPublicationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("prefab authoring session was not published to the editor workspace")
+    }
+}
+
+impl Error for EditorPrefabSessionPublicationError {}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorWorkspaceModel {
     pub active_document: Option<EditorDocumentId>,
+    pub documents: Vec<EditorDocumentTabModel>,
     pub scenes: Vec<EditorSceneTabModel>,
     pub active_scene: Option<EditorSceneModel>,
     pub diagnostics: DiagnosticReport,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorDocumentTabModel {
+    pub document: EditorDocumentId,
+    pub kind: EditorDocumentKind,
+    pub title: String,
+    pub dirty: bool,
+    pub revision: SceneAuthoringRevision,
+    pub saved_revision: SceneAuthoringRevision,
+    pub source_binding: Option<EditorDocumentSourceBinding>,
+    pub external_reload: EditorExternalReloadState,
+    pub active: bool,
 }
 
 impl EditorWorkspaceModel {
@@ -1187,6 +1709,22 @@ fn report_for_slot(
     document: EditorDocumentId,
     active_document: Option<EditorDocumentId>,
     slot: &EditorSceneSlot,
+) -> EditorWorkspaceCommandReport {
+    EditorWorkspaceCommandReport {
+        applied: true,
+        document: Some(document),
+        active_document,
+        dirty: Some(slot.is_dirty()),
+        revision: Some(slot.revision()),
+        diagnostics: DiagnosticReport::default(),
+        ..EditorWorkspaceCommandReport::default()
+    }
+}
+
+fn report_for_document(
+    document: EditorDocumentId,
+    active_document: Option<EditorDocumentId>,
+    slot: &EditorDocumentSlot,
 ) -> EditorWorkspaceCommandReport {
     EditorWorkspaceCommandReport {
         applied: true,
@@ -1258,6 +1796,45 @@ fn workspace_document_error_report(
         active_document: context.active,
         diagnostics,
         ..EditorWorkspaceCommandReport::default()
+    }
+}
+
+fn workspace_kind_error_report(
+    context: WorkspaceDocumentContext,
+    document: EditorDocumentId,
+    expected: EditorDocumentKind,
+    actual: EditorDocumentKind,
+) -> EditorWorkspaceCommandReport {
+    let mut diagnostics = DiagnosticReport::default();
+    let diagnostic = diagnostic::with_public_identifier(
+        diagnostic::with_public_identifier(
+            with_workspace_document_context(
+                diagnostic::error(
+                    "tooling.workspace-document-kind-mismatch",
+                    "workspace command targets a document of the wrong kind",
+                ),
+                context,
+            ),
+            "expected_kind",
+            document_kind_name(expected),
+        ),
+        "actual_kind",
+        document_kind_name(actual),
+    );
+    diagnostics.push(diagnostic);
+    EditorWorkspaceCommandReport {
+        applied: false,
+        document: Some(document),
+        active_document: context.active,
+        diagnostics,
+        ..EditorWorkspaceCommandReport::default()
+    }
+}
+
+fn document_kind_name(kind: EditorDocumentKind) -> &'static str {
+    match kind {
+        EditorDocumentKind::Scene => "scene",
+        EditorDocumentKind::Prefab => "prefab",
     }
 }
 
@@ -1340,7 +1917,9 @@ mod tests {
     use super::*;
     use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::{ComponentRegistry, ComponentTypeId};
-    use nara_scene::{SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
+    use nara_scene::{
+        PrefabDocument, SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    };
 
     use crate::{SceneCompositionComponentKind, SceneCompositionEntityKind};
 
@@ -1750,6 +2329,66 @@ mod tests {
         assert_eq!(second_slot.selection().top_entity(), Some(&enemy));
         assert!(first_slot.is_dirty());
         assert!(!second_slot.is_dirty());
+    }
+
+    #[test]
+    fn scene_and_prefab_slots_are_kind_isolated_in_one_workspace_document_map() {
+        let mut workspace = EditorWorkspace::new();
+        let registry = frozen_empty_registry();
+        let shared_id = entity_id("retry");
+        let scene = open_scene(
+            &mut workspace,
+            "startup",
+            scene_with_entity(shared_id.clone()),
+        );
+        let prefab = workspace
+            .open_prefab_session(
+                "ui",
+                EditorDocumentSourceBinding::new("prefabs/reference-ui.prefab.json"),
+                PrefabAuthoringSession::new(PrefabDocument::from_ordered_roots([
+                    SceneEntityRecord::new(shared_id.clone()),
+                ])),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+
+        assert!(workspace.scene(scene).is_some());
+        assert!(workspace.prefab(prefab).is_some());
+        assert_eq!(workspace.len(), 2);
+        assert_eq!(workspace.model(&registry, None).documents.len(), 2);
+
+        let report = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::SelectEntity {
+                document: prefab,
+                entity: Some(shared_id),
+            },
+        );
+        assert!(!report.applied);
+        assert_eq!(
+            report.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-document-kind-mismatch"
+        );
+        assert!(workspace.prefab(prefab).unwrap().selection().is_empty());
+
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+        let prefab = workspace
+            .open_prefab_session(
+                "ui",
+                EditorDocumentSourceBinding::new("prefabs/reference-ui.prefab.json"),
+                PrefabAuthoringSession::new(PrefabDocument::default()),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let checkpoint = authority.capture(&workspace, prefab).unwrap();
+        assert_eq!(checkpoint.kind(), EditorDocumentKind::Prefab);
+        assert_eq!(
+            checkpoint.source_binding().unwrap().locator(),
+            "prefabs/reference-ui.prefab.json"
+        );
+        assert!(checkpoint.prefab().roots.is_empty());
     }
 
     #[test]

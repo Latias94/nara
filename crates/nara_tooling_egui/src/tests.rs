@@ -667,6 +667,20 @@ fn frame_with_feedback(
     EditorFrameClock::new().publish(
         EditorWorkspaceModel {
             active_document,
+            documents: scenes
+                .iter()
+                .map(|scene| nara_tooling::EditorDocumentTabModel {
+                    document: scene.document,
+                    kind: nara_tooling::EditorDocumentKind::Scene,
+                    title: scene.title.clone(),
+                    dirty: scene.dirty,
+                    revision: scene.revision,
+                    saved_revision: scene.revision,
+                    source_binding: None,
+                    external_reload: scene.external_reload,
+                    active: scene.active,
+                })
+                .collect(),
             scenes,
             active_scene: scene,
             diagnostics: DiagnosticReport::default(),

@@ -45,9 +45,11 @@ pub use play::{
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{
-    EditorDocumentDigest, EditorDocumentId, EditorExternalReloadState, EditorSceneModel,
-    EditorSceneSessionPublicationError, EditorSceneSlot, EditorSceneTabModel, EditorSelectionSet,
-    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceModel,
+    EditorDocumentDigest, EditorDocumentId, EditorDocumentKind, EditorDocumentSourceBinding,
+    EditorDocumentTabModel, EditorExternalReloadState, EditorPrefabSessionPublicationError,
+    EditorPrefabSlot, EditorSceneModel, EditorSceneSessionPublicationError, EditorSceneSlot,
+    EditorSceneTabModel, EditorSelectionSet, EditorWorkspace, EditorWorkspaceCommand,
+    EditorWorkspaceCommandReport, EditorWorkspaceModel,
 };
 #[doc(hidden)]
 pub use workspace::{
