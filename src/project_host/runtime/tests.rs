@@ -750,6 +750,115 @@ fn editor_play_runtime_uses_the_plan_owned_schema_snapshot() {
     assert_eq!(stopped_state, nara_tooling::EditorPlayState::Empty);
 }
 
+#[cfg(all(
+    feature = "tooling",
+    feature = "runtime-ui",
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+#[test]
+fn editor_play_profile_keeps_logical_producers_without_native_gpu_contributions() {
+    let project = TestProject::new("editor-play-placement");
+    fs::write(
+        project.root.join("nara.toml"),
+        r#"schema_version = 1
+
+[project]
+name = "Editor Play Placement"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = [
+    "runtime-2d",
+    "runtime-ui",
+    "presentation-2d",
+    "presentation-ui",
+    "desktop-winit",
+    "render-wgpu",
+]
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+
+[profiles.desktop.window]
+enabled = true
+width = 960
+height = 540
+resizable = true
+"#,
+    )
+    .unwrap();
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, Some("desktop")).unwrap();
+    drop(manifest);
+
+    let shipping = crate::project_host::composition::resolve_project_runtime_request(
+        &candidate,
+        crate::project_host::composition::project_runtime_plugins_with_recipe(
+            &candidate,
+            crate::ProductRecipe::new(),
+            None,
+        ),
+    )
+    .unwrap();
+    let editor = crate::project_host::composition::resolve_project_runtime_request(
+        &candidate,
+        crate::project_host::composition::editor_play_runtime_plugins_with_recipe(
+            &candidate,
+            crate::ProductRecipe::new(),
+            None,
+            None,
+        ),
+    )
+    .unwrap();
+    let contains = |plan: &RuntimePlan, plugin: PluginId| {
+        plan.plugin_plan()
+            .entries()
+            .iter()
+            .any(|entry| entry.plugin_id() == plugin)
+    };
+
+    for plugin in [
+        nara_render_wgpu::WGPU_RENDER_PLUGIN_ID,
+        nara_render_wgpu::WGPU_SPRITE_SUBMITTER_PLUGIN_ID,
+        nara_render_wgpu::WGPU_UI_SUBMITTER_PLUGIN_ID,
+        crate::WINIT_UI_ACCESSIBILITY_CONTRIBUTION_PLUGIN_ID,
+    ] {
+        assert!(contains(&shipping, plugin));
+        assert!(!contains(&editor, plugin));
+    }
+    for plugin in [
+        nara_window::WINDOW_PLUGIN_ID,
+        nara_render::RENDER_PLUGIN_ID,
+        nara_sprite_render::SPRITE_RENDER_PLUGIN_ID,
+        nara_ui_render::UI_RENDER_PLUGIN_ID,
+    ] {
+        assert!(contains(&editor, plugin));
+    }
+    assert_eq!(
+        editor.normalized_capabilities(),
+        candidate.normalized_capabilities()
+    );
+}
+
 #[cfg(feature = "tooling")]
 #[test]
 fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
@@ -1282,18 +1391,20 @@ fn product_tick_uses_one_exact_step() {
 }
 
 #[test]
-fn publication_reservation_unwind_restores_the_empty_host_slot() {
+fn prepared_publication_unwind_keeps_the_host_slot_empty() {
     let project = TestProject::new("publication-reservation-unwind");
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+    let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
 
     let unwound = catch_unwind(AssertUnwindSafe(|| {
-        let _reservation = HostPublicationReservation::new(&mut host, 1, snapshot, plan);
+        let _prepared = host.prepare_start(&mut attempt).unwrap();
         panic!("injected pre-publication unwind");
     }));
 
     assert!(unwound.is_err());
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
+    assert!(!host.start_claim.any_active());
 }
 
 #[test]

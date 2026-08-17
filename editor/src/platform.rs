@@ -6,11 +6,19 @@ use std::{
 use egui::{TextureId, Vec2, ViewportId, epaint::Primitive};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor, wgpu};
 use nara::{
-    project_host::{EditorPreviewCandidate, EditorPreviewHit},
-    render::{Extent2d, RenderFrameTarget, RenderWindowPacket},
+    asset::{AssetId, Handle},
+    project_host::{
+        EditorGameStartActivation, EditorGameStartRequest, EditorPreviewCandidate,
+        EditorPreviewHit, EditorProjectIntent,
+    },
+    render::{
+        __private::editor_viewport_image_target, Extent2d, RenderFrameSourceGeneration,
+        RenderFrameTarget, RenderWindowPacket,
+    },
     render_wgpu::__private::{
         WgpuEditorCompositeReceipt, WgpuEditorDeviceScope, WgpuEditorExecution,
-        WgpuEditorExecutionError, WgpuEditorViewportIdentity, WgpuSubmittedImageReceipt,
+        WgpuEditorExecutionError, WgpuEditorViewportIdentity, WgpuEditorViewportTargetActivation,
+        WgpuSubmittedImageReceipt,
     },
     scene::SceneAuthoringRevision,
     tooling::{
@@ -77,6 +85,20 @@ impl EditorRunError {
 
 pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
     let application = EditorApplication::open(options)?;
+    run_application(application)
+}
+
+/// Runs one private first-party Editor with an already compiled product intent.
+#[doc(hidden)]
+pub fn run_with_intent(
+    options: EditorLaunchOptions,
+    intent: EditorProjectIntent,
+) -> Result<(), EditorRunError> {
+    let application = EditorApplication::open_with_intent(options, intent)?;
+    run_application(application)
+}
+
+fn run_application(application: EditorApplication) -> Result<(), EditorRunError> {
     let event_loop = EventLoop::new().map_err(event_loop_error)?;
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut host = NativeEditorHost::new(application)?;
@@ -103,6 +125,7 @@ struct NativeEditorHost {
     renderer: Option<EditorEguiRenderer>,
     pending_textures: egui::TexturesDelta,
     scene_presenter: EditorScenePresenter,
+    game_presenter: EditorGamePresenter,
     requested_scene_extent: Option<Extent2d>,
     scene_view_notice: Option<&'static str>,
     gpu_recovery: EditorGpuRecovery,
@@ -123,6 +146,7 @@ impl NativeEditorHost {
             renderer: None,
             pending_textures: egui::TexturesDelta::default(),
             scene_presenter: EditorScenePresenter::new(),
+            game_presenter: EditorGamePresenter::new(),
             requested_scene_extent: None,
             scene_view_notice: None,
             gpu_recovery: EditorGpuRecovery::Ready,
@@ -166,6 +190,7 @@ impl NativeEditorHost {
         self.renderer = None;
         self.gpu = None;
         self.scene_presenter.retire_gpu_binding();
+        self.game_presenter.retire_gpu_binding();
         self.pending_textures.clear();
         self.context = egui::Context::default();
         let (gpu, renderer, egui_state) =
@@ -187,6 +212,7 @@ impl NativeEditorHost {
         self.renderer = None;
         self.gpu = None;
         self.scene_presenter.retire_gpu_binding();
+        self.game_presenter.retire_gpu_binding();
         self.pending_textures.clear();
         set_requested_scene_extent(
             &mut self.application,
@@ -259,6 +285,7 @@ impl NativeEditorHost {
             WindowEvent::Resized(_) => {
                 if let (Some(gpu), Some(renderer)) = (self.gpu.as_mut(), self.renderer.as_mut()) {
                     self.scene_presenter.retire_target(gpu, renderer);
+                    self.game_presenter.retire_target(gpu, renderer);
                 }
                 set_requested_scene_extent(
                     &mut self.application,
@@ -275,6 +302,7 @@ impl NativeEditorHost {
             WindowEvent::RedrawRequested => self.redraw(event_loop)?,
             WindowEvent::Destroyed => {
                 self.scene_presenter.retire_gpu_binding();
+                self.game_presenter.retire_gpu_binding();
                 set_requested_scene_extent(
                     &mut self.application,
                     &mut self.requested_scene_extent,
@@ -291,17 +319,68 @@ impl NativeEditorHost {
         Ok(())
     }
 
+    fn commit_pending_game_start(
+        &mut self,
+        window: RenderWindowPacket,
+    ) -> Result<bool, EditorRunError> {
+        let Some(request) = self.application.pending_game_start_request() else {
+            return Ok(false);
+        };
+        let prepared = {
+            let gpu = self
+                .gpu
+                .as_mut()
+                .expect("an installed native window has one Editor GPU owner");
+            let renderer = self
+                .renderer
+                .as_mut()
+                .expect("an installed native window has one egui renderer");
+            self.game_presenter
+                .prepare_start(&mut self.application, gpu, renderer, window, request)
+        };
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let _ = self.application.abort_pending_game_start(request);
+                return Err(error);
+            }
+        };
+        let gpu = self
+            .gpu
+            .as_mut()
+            .expect("an installed native window has one Editor GPU owner");
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("an installed native window has one egui renderer");
+        self.game_presenter.commit_start(
+            &mut self.application,
+            gpu,
+            renderer,
+            &mut self.scene_presenter,
+            prepared,
+        );
+        set_requested_scene_extent(
+            &mut self.application,
+            &mut self.requested_scene_extent,
+            None,
+        );
+        self.scene_view_notice = Some("Game View is starting");
+        Ok(true)
+    }
+
     fn redraw(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
-        let window = self
-            .window
-            .as_ref()
-            .expect("redraw is emitted only for the installed window");
+        let window = Arc::clone(
+            self.window
+                .as_ref()
+                .expect("redraw is emitted only for the installed window"),
+        );
         let raw_input = self
             .egui_state
             .as_mut()
             .expect("an installed native window has egui platform state")
-            .take_egui_input(window);
-        let window_packet = editor_window_packet(window);
+            .take_egui_input(&window);
+        let window_packet = editor_window_packet(&window);
         if window_packet.resolution.physical_width == 0
             || window_packet.resolution.physical_height == 0
         {
@@ -311,7 +390,11 @@ impl NativeEditorHost {
         let mut pick_stamp = self
             .scene_presenter
             .pick_stamp(&editor_frame, self.requested_scene_extent);
-        let candidate = self.application.take_scene_preview_candidate();
+        let candidate = if self.game_presenter.is_active() {
+            None
+        } else {
+            self.application.take_scene_preview_candidate()
+        };
         let mut scene_retry_pending = false;
         let prepared_scene = match candidate {
             Some(candidate) => match self.scene_presenter.prepare(
@@ -368,10 +451,14 @@ impl NativeEditorHost {
                 None => self.scene_view_notice = Some("Scene View input is unavailable"),
             }
         }
-        let desired_scene_extent = physical_scene_extent(
-            scene_view_output.desired_size_points(),
-            output.pixels_per_point,
-        );
+        let desired_scene_extent = if self.game_presenter.is_active() {
+            None
+        } else {
+            physical_scene_extent(
+                scene_view_output.desired_size_points(),
+                output.pixels_per_point,
+            )
+        };
         let camera_changed = scene_view_output.camera_changed();
         let repaint_delay = output
             .viewport_output
@@ -380,7 +467,7 @@ impl NativeEditorHost {
         self.egui_state
             .as_mut()
             .expect("an installed native window has egui platform state")
-            .handle_platform_output_with_event_loop(window, event_loop, output.platform_output);
+            .handle_platform_output_with_event_loop(&window, event_loop, output.platform_output);
         let primitives = self
             .context
             .tessellate(output.shapes, output.pixels_per_point);
@@ -528,8 +615,10 @@ impl NativeEditorHost {
             event_loop.exit();
             return Ok(());
         }
+        let game_started = self.commit_pending_game_start(window_packet)?;
         if update.actions_observed()
             || scene_retry_pending
+            || game_started
             || camera_changed
             || repaint_delay.is_zero()
         {
@@ -573,6 +662,7 @@ impl ApplicationHandler for NativeEditorHost {
         self.renderer = None;
         self.gpu = None;
         self.scene_presenter.retire_gpu_binding();
+        self.game_presenter.retire_gpu_binding();
         set_requested_scene_extent(
             &mut self.application,
             &mut self.requested_scene_extent,
@@ -664,6 +754,145 @@ mod tests {
 
         recovery.mark_presented();
         assert!(recovery.begin_automatic_replacement());
+    }
+}
+
+const EDITOR_GAME_VIEW_TARGET_ID: u64 = 2;
+
+struct PreparedEditorGameStart {
+    application: EditorGameStartActivation,
+    gpu: WgpuEditorViewportTargetActivation,
+    texture_id: TextureId,
+    registration_generation: u64,
+}
+
+#[derive(Clone, Copy)]
+struct EditorGameTextureBinding {
+    texture_id: TextureId,
+}
+
+struct EditorGamePresenter {
+    texture_registration_generation: u64,
+    binding: Option<EditorGameTextureBinding>,
+}
+
+impl EditorGamePresenter {
+    const fn new() -> Self {
+        Self {
+            texture_registration_generation: 0,
+            binding: None,
+        }
+    }
+
+    const fn is_active(&self) -> bool {
+        self.binding.is_some()
+    }
+
+    fn prepare_start(
+        &self,
+        application: &mut EditorApplication,
+        gpu: &mut WgpuEditorExecution,
+        renderer: &mut EditorEguiRenderer,
+        editor_window: RenderWindowPacket,
+        request: EditorGameStartRequest,
+    ) -> Result<PreparedEditorGameStart, EditorRunError> {
+        if self.binding.is_some() {
+            return Err(EditorRunError::Platform(
+                "a Game viewport target is already active".to_owned(),
+            ));
+        }
+        if !renderer.matches(gpu) {
+            return Err(EditorRunError::Platform(
+                "the Game renderer does not belong to the live GPU namespace".to_owned(),
+            ));
+        }
+        let registration_generation = self
+            .texture_registration_generation
+            .checked_add(1)
+            .ok_or_else(|| {
+                EditorRunError::Platform(
+                    "Game viewport texture registration generation exhausted".to_owned(),
+                )
+            })?;
+        let logical_window = request.logical_window();
+        let extent = Extent2d::new(
+            logical_window.resolution.physical_width,
+            logical_window.resolution.physical_height,
+        )
+        .ok_or_else(|| {
+            EditorRunError::Platform("the Game logical window has zero extent".to_owned())
+        })?;
+        let target = editor_viewport_image_target(
+            Handle::new(AssetId::from_raw(EDITOR_GAME_VIEW_TARGET_ID)),
+            extent,
+        )
+        .map_err(|error| EditorRunError::Platform(error.to_string()))?;
+        let source_generation = RenderFrameSourceGeneration::from(request.runtime_generation());
+        let (reservation, texture_id) = gpu
+            .reserve_viewport_target_with_texture(
+                editor_window,
+                source_generation,
+                target,
+                |scope, texture| {
+                    renderer.renderer.register_native_texture(
+                        scope.device(),
+                        texture.view(),
+                        wgpu::FilterMode::Linear,
+                    )
+                },
+            )
+            .map_err(platform_gpu_error)?;
+        let gpu_activation = match gpu.prepare_viewport_target_activation(reservation) {
+            Ok(activation) => activation,
+            Err(error) => {
+                renderer.renderer.free_texture(&texture_id);
+                return Err(platform_gpu_error(error));
+            }
+        };
+        let application_activation = match application.prepare_game_start_activation(request) {
+            Ok(activation) => activation,
+            Err(error) => {
+                renderer.renderer.free_texture(&texture_id);
+                return Err(EditorRunError::Platform(format!(
+                    "the Game Runtime start reservation was rejected: {error}"
+                )));
+            }
+        };
+        Ok(PreparedEditorGameStart {
+            application: application_activation,
+            gpu: gpu_activation,
+            texture_id,
+            registration_generation,
+        })
+    }
+
+    fn commit_start(
+        &mut self,
+        application: &mut EditorApplication,
+        gpu: &mut WgpuEditorExecution,
+        renderer: &mut EditorEguiRenderer,
+        scene: &mut EditorScenePresenter,
+        prepared: PreparedEditorGameStart,
+    ) {
+        gpu.commit_viewport_target_activation(prepared.gpu);
+        scene.retire_replaced_binding(renderer);
+        application.commit_game_start_activation(prepared.application);
+        self.texture_registration_generation = prepared.registration_generation;
+        self.binding = Some(EditorGameTextureBinding {
+            texture_id: prepared.texture_id,
+        });
+    }
+
+    fn retire_gpu_binding(&mut self) {
+        self.binding = None;
+    }
+
+    fn retire_target(&mut self, gpu: &mut WgpuEditorExecution, renderer: &mut EditorEguiRenderer) {
+        let Some(binding) = self.binding.take() else {
+            return;
+        };
+        gpu.retire_viewport_target();
+        renderer.renderer.free_texture(&binding.texture_id);
     }
 }
 
@@ -937,10 +1166,17 @@ impl EditorScenePresenter {
         self.presented = None;
     }
 
-    fn retire_target(&mut self, gpu: &mut WgpuEditorExecution, renderer: &mut EditorEguiRenderer) {
-        gpu.retire_viewport_target();
+    fn retire_replaced_binding(&mut self, renderer: &mut EditorEguiRenderer) {
         self.presented = None;
         if let Some(binding) = self.binding.take() {
+            renderer.renderer.free_texture(&binding.texture_id);
+        }
+    }
+
+    fn retire_target(&mut self, gpu: &mut WgpuEditorExecution, renderer: &mut EditorEguiRenderer) {
+        self.presented = None;
+        if let Some(binding) = self.binding.take() {
+            gpu.retire_viewport_target();
             renderer.renderer.free_texture(&binding.texture_id);
         }
     }

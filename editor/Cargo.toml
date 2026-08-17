@@ -10,7 +10,7 @@ publish = false
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
-nara = { path = "..", default-features = false, features = ["presentation-2d", "project-workflow", "render-wgpu", "runtime-ui", "tooling-egui"] }
+nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-workflow", "render-wgpu", "runtime-ui", "tooling-egui"] }
 thiserror.workspace = true
 winit.workspace = true
 

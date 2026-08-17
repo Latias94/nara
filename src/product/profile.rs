@@ -23,6 +23,13 @@ pub(crate) struct ProjectProfilePlugins {
     capabilities: ProductCapabilitySet,
     task_config: nara_tasks::TaskPoolConfig,
     primary_window: Option<nara_window::Window>,
+    placement: ProjectProfilePlacement,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectProfilePlacement {
+    Shipping,
+    EditorPlay,
 }
 
 impl ProjectProfilePlugins {
@@ -30,11 +37,27 @@ impl ProjectProfilePlugins {
         settings: &EffectiveProjectSettings,
         capabilities: ProductCapabilitySet,
     ) -> Self {
+        Self::with_placement(settings, capabilities, ProjectProfilePlacement::Shipping)
+    }
+
+    pub(crate) fn for_editor_play(
+        settings: &EffectiveProjectSettings,
+        capabilities: ProductCapabilitySet,
+    ) -> Self {
+        Self::with_placement(settings, capabilities, ProjectProfilePlacement::EditorPlay)
+    }
+
+    fn with_placement(
+        settings: &EffectiveProjectSettings,
+        capabilities: ProductCapabilitySet,
+        placement: ProjectProfilePlacement,
+    ) -> Self {
         Self {
             preset: settings.runtime_preset,
             capabilities,
             task_config: settings.tasks.pool_config,
             primary_window: settings.window.to_window(),
+            placement,
         }
     }
 }
@@ -124,16 +147,24 @@ impl PluginGroup for ProjectProfilePlugins {
         };
 
         #[cfg(feature = "render-wgpu")]
-        let builder = if self
-            .capabilities
-            .contains(nara_project::ProductCapability::RenderWgpu)
+        let builder = if self.placement == ProjectProfilePlacement::Shipping
+            && self
+                .capabilities
+                .contains(nara_project::ProductCapability::RenderWgpu)
         {
             builder.add_group(super::WgpuBackendPlugins)
         } else {
             builder
         };
 
-        add_product_contributions(builder, &self.capabilities).add_slot(
+        let builder = match self.placement {
+            ProjectProfilePlacement::Shipping => {
+                add_product_contributions(builder, &self.capabilities)
+            }
+            ProjectProfilePlacement::EditorPlay => builder,
+        };
+
+        builder.add_slot(
             PluginSlot::required(
                 SLOT_STARTUP_SCENE_ACTIVATION,
                 crate::startup_scene::STARTUP_SCENE_ACTIVATION_PLUGIN_ID,

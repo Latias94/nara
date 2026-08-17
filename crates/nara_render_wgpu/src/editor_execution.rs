@@ -626,9 +626,6 @@ impl WgpuEditorExecution {
             WgpuEditorReservedViewportTexture<'frame>,
         ) -> R,
     ) -> Result<(WgpuEditorViewportTargetReservation, R), WgpuEditorExecutionError> {
-        if self.viewport_target.is_some() {
-            return Err(WgpuEditorExecutionError::ViewportTargetAlreadyActive);
-        }
         let namespace = self.backend.prepare_editor_window(&self.handles, window)?;
         let reservation =
             self.reserve_viewport_target_in_namespace(&namespace, source_generation, target)?;
@@ -1039,9 +1036,6 @@ impl WgpuEditorExecution {
         backend_instance_id: u64,
         device_epoch: u64,
     ) -> Result<(), WgpuEditorExecutionError> {
-        if self.viewport_target.is_some() {
-            return Err(WgpuEditorExecutionError::ViewportTargetAlreadyActive);
-        }
         let expected = self.next_viewport_reservation_stamp_for_namespace(
             backend_instance_id,
             device_epoch,

@@ -19,7 +19,7 @@ use nara_app::{
     RuntimeCloseErrorDisposition, RuntimeCloseEvidence, RuntimeCloseParticipantPhase,
     RuntimeClosePolicy, RuntimeConstructionError, RuntimeConstructionFailure, RuntimeControl,
     RuntimeControlRequestResult, RuntimeControlStatus, RuntimeControlTicket, RuntimeFault,
-    RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, RuntimeInstance,
+    RuntimeFaultDetail, RuntimeFaultKind, RuntimeFaultReporter, RuntimeGeneration, RuntimeInstance,
     RuntimeObligationLedger, RuntimePublicationFailure, RuntimePublicationSlot, RuntimeRetirement,
     RuntimeState,
 };
@@ -53,6 +53,15 @@ pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunRepo
 pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use desktop_verification::DesktopPresentationVerificationReceipt;
+#[cfg(all(
+    feature = "tooling",
+    any(feature = "presentation-2d", feature = "presentation-ui")
+))]
+pub use editor::{
+    EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
+    EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCandidateParts,
+    EditorGameViewCompletion,
+};
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
 pub use editor::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(feature = "tooling")]
@@ -63,6 +72,23 @@ struct RuntimeStartAttempt {
     epoch: u64,
     stamp: RuntimeStartStamp,
     inputs: Option<RuntimeStartInputs>,
+}
+
+struct PreparedRuntimeStart {
+    claim: ActiveStartClaim,
+    snapshot: ProjectContentSnapshot,
+    plan: RuntimePlan,
+    runtime: RuntimePublicationSlot,
+    diagnostics: DiagnosticReport,
+}
+
+impl PreparedRuntimeStart {
+    fn generation(&self) -> RuntimeGeneration {
+        self.runtime
+            .runtime()
+            .expect("a prepared runtime start owns one inactive publication")
+            .generation()
+    }
 }
 
 struct RuntimeStartInputs {
@@ -154,6 +180,10 @@ impl ActiveStartClaim {
         debug_assert!(released, "the Host must own the completed start claim");
         self.active = false;
     }
+
+    const fn epoch(&self) -> u64 {
+        self.epoch
+    }
 }
 
 impl Drop for ActiveStartClaim {
@@ -238,50 +268,6 @@ impl PublishedProjectRuntime {
         self.runtime
             .take()
             .expect("a visible project runtime slot is fully published")
-    }
-}
-
-struct HostPublicationReservation<'host> {
-    host: &'host mut ProjectHost,
-    active: bool,
-}
-
-impl<'host> HostPublicationReservation<'host> {
-    fn new(
-        host: &'host mut ProjectHost,
-        epoch: u64,
-        snapshot: ProjectContentSnapshot,
-        plan: RuntimePlan,
-    ) -> Self {
-        debug_assert!(matches!(host.slot, ProjectHostSlot::Empty));
-        host.slot = ProjectHostSlot::Running(Box::new(PublishedProjectRuntime {
-            epoch,
-            runtime: RuntimePublicationSlot::new(),
-            _snapshot: snapshot,
-            _plan: plan,
-        }));
-        Self { host, active: true }
-    }
-
-    fn destination(&mut self) -> &mut RuntimePublicationSlot {
-        match &mut self.host.slot {
-            ProjectHostSlot::Running(published) => &mut published.runtime,
-            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => {
-                unreachable!("an active publication reservation owns the publishing slot")
-            }
-        }
-    }
-
-    fn commit(mut self) {
-        self.active = false;
-    }
-}
-
-impl Drop for HostPublicationReservation<'_> {
-    fn drop(&mut self) {
-        if self.active {
-            self.host.slot = ProjectHostSlot::Empty;
-        }
     }
 }
 
@@ -527,10 +513,10 @@ impl ProjectHost {
         })
     }
 
-    fn complete_start(
+    fn prepare_start(
         &mut self,
         attempt: &mut RuntimeStartAttempt,
-    ) -> Result<DiagnosticReport, HostFault> {
+    ) -> Result<PreparedRuntimeStart, HostFault> {
         let epoch = attempt.epoch;
         let reservation = RuntimeAdmissionReservation::try_acquire().map_err(|_| {
             HostFault::new(single_error(
@@ -628,18 +614,17 @@ impl ProjectHost {
                 return Err(HostFault::new(diagnostics));
             }
         };
-        // `complete_start` has exclusive access to the Host, so a validated empty publication slot
-        // cannot change between claim and this commit boundary.
+        // `prepare_start` has exclusive access to the Host, and the active start claim prevents a
+        // second start from changing the empty Host slot before coordinated publication.
         debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
 
         #[cfg(test)]
         inject_publication_fault_if_armed(&publication_reporter);
 
-        let mut reservation = HostPublicationReservation::new(self, epoch, snapshot, plan);
-        match ready.publish_into(reservation.destination()) {
-            Ok(()) => reservation.commit(),
+        let mut runtime = RuntimePublicationSlot::new();
+        match ready.publish_into(&mut runtime) {
+            Ok(()) => {}
             Err(owner) => {
-                drop(reservation);
                 self.install_start_cleanup(epoch, CleanupOwner::Publication(owner));
                 return Err(HostFault::new(single_error(
                     "project.run.publication-faulted",
@@ -648,11 +633,55 @@ impl ProjectHost {
             }
         }
 
-        claim.finish();
         if diagnostics.has_errors() {
             unreachable!("scene admission rejects error diagnostics before publication");
         }
-        Ok(diagnostics)
+        Ok(PreparedRuntimeStart {
+            claim,
+            snapshot,
+            plan,
+            runtime,
+            diagnostics,
+        })
+    }
+
+    fn complete_start(
+        &mut self,
+        attempt: &mut RuntimeStartAttempt,
+    ) -> Result<DiagnosticReport, HostFault> {
+        let prepared = self.prepare_start(attempt)?;
+        Ok(self.commit_prepared_start(prepared))
+    }
+
+    fn commit_prepared_start(&mut self, prepared: PreparedRuntimeStart) -> DiagnosticReport {
+        let PreparedRuntimeStart {
+            claim,
+            snapshot,
+            plan,
+            runtime,
+            diagnostics,
+        } = prepared;
+        let epoch = claim.epoch();
+        debug_assert!(matches!(self.slot, ProjectHostSlot::Empty));
+        debug_assert!(claim.owner.is_active(epoch));
+        self.slot = ProjectHostSlot::Running(Box::new(PublishedProjectRuntime {
+            epoch,
+            runtime,
+            _snapshot: snapshot,
+            _plan: plan,
+        }));
+        claim.finish();
+        diagnostics
+    }
+
+    fn abort_prepared_start(&mut self, mut prepared: PreparedRuntimeStart) {
+        let epoch = prepared.claim.epoch();
+        let runtime = prepared
+            .runtime
+            .take()
+            .expect("a prepared runtime start owns one inactive publication");
+        drop(prepared);
+        self.install_start_cleanup(epoch, CleanupOwner::Candidate(runtime.begin_retirement()));
     }
 
     fn drive_one_fixed_tick(&mut self) -> Result<Option<AppExit>, HostFault> {

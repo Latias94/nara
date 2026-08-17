@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
@@ -285,20 +287,18 @@ pub struct SpriteBatch {
     pub instances: Vec<SpriteInstance>,
 }
 
-#[derive(Debug, Clone, PartialEq, Resource)]
+#[derive(Debug, Default, Clone, PartialEq, Resource)]
 pub struct SpriteBatches {
-    batches: Vec<SpriteBatch>,
+    batches: Arc<[SpriteBatch]>,
 }
 
 impl SpriteBatches {
-    pub(crate) const fn new() -> Self {
-        Self {
-            batches: Vec::new(),
-        }
+    pub(crate) fn new() -> Self {
+        Self::default()
     }
 
     pub(crate) fn replace(&mut self, batches: Vec<SpriteBatch>) {
-        self.batches = batches;
+        self.batches = batches.into();
     }
 
     #[must_use]

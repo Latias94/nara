@@ -10,7 +10,9 @@ use nara::{
     diagnostic::DiagnosticReport,
     fs::{CapabilityRights, DirectoryCapability, FsError, HostCapabilityOptions, TrustMode},
     project_host::{
-        EditorPreviewCandidate, EditorProjectIntent, EditorProjectOpenError, EditorProjectSession,
+        EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
+        EditorGameViewCandidate, EditorGameViewCompletion, EditorPreviewCandidate,
+        EditorProjectIntent, EditorProjectOpenError, EditorProjectSession,
     },
     render::Extent2d,
     tooling::{
@@ -119,11 +121,20 @@ impl std::fmt::Debug for EditorApplication {
 
 impl EditorApplication {
     pub fn open(options: EditorLaunchOptions) -> Result<Self, EditorApplicationOpenError> {
-        let project_root = open_project_root(options.project_root())?;
-        let intent = match options.profile {
+        let intent = match options.profile.as_deref() {
             Some(profile) => EditorProjectIntent::new().with_profile(profile),
             None => EditorProjectIntent::new(),
         };
+        Self::open_with_intent(options, intent)
+    }
+
+    /// Opens one private first-party Editor with an already compiled product intent.
+    #[doc(hidden)]
+    pub fn open_with_intent(
+        options: EditorLaunchOptions,
+        intent: EditorProjectIntent,
+    ) -> Result<Self, EditorApplicationOpenError> {
+        let project_root = open_project_root(options.project_root())?;
         let session = EditorProjectSession::open(project_root, intent)?;
         Ok(Self {
             session,
@@ -180,6 +191,48 @@ impl EditorApplication {
     #[must_use]
     pub fn take_scene_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
         self.session.take_editor_preview_candidate()
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn pending_game_start_request(&self) -> Option<EditorGameStartRequest> {
+        self.session.pending_game_start_request()
+    }
+
+    #[doc(hidden)]
+    pub fn prepare_game_start_activation(
+        &mut self,
+        expected: EditorGameStartRequest,
+    ) -> Result<EditorGameStartActivation, EditorGameViewBridgeFailure> {
+        self.session.prepare_game_start_activation(expected)
+    }
+
+    #[doc(hidden)]
+    pub fn commit_game_start_activation(&mut self, activation: EditorGameStartActivation) {
+        self.session.commit_game_start_activation(activation);
+    }
+
+    #[doc(hidden)]
+    pub fn abort_pending_game_start(
+        &mut self,
+        expected: EditorGameStartRequest,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        self.session.abort_pending_game_start(expected)
+    }
+
+    #[doc(hidden)]
+    pub fn take_game_view_candidate(
+        &mut self,
+    ) -> Result<Option<EditorGameViewCandidate>, EditorGameViewBridgeFailure> {
+        self.session.take_game_view_candidate()
+    }
+
+    #[doc(hidden)]
+    pub fn complete_game_view_candidate(
+        &mut self,
+        completion: EditorGameViewCompletion,
+    ) -> Result<(), EditorGameViewCompletion> {
+        self.session.complete_game_view_candidate(completion)
     }
 
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {

@@ -1,12 +1,20 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 mod actions;
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+mod game_view;
 mod model;
 mod persistence;
 mod play;
 #[cfg(feature = "presentation-2d")]
 mod preview;
 
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+pub use game_view::{
+    EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
+    EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCandidateParts,
+    EditorGameViewCompletion,
+};
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
 
@@ -18,7 +26,6 @@ use nara_app::{
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Mut, Resource, World};
 use nara_fs::{DirectoryCapability, RelativePath};
-use nara_gameplay::{GAMEPLAY_COMMAND_PLUGIN_ID, GameplayCommandPlugin};
 use nara_reflect::{
     ComponentCapability, ComponentRegistry, component_registry,
     report_component_registry_authority_fault,
@@ -43,7 +50,8 @@ use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
 use crate::ProductRecipe;
 use crate::project_host::composition::{
-    project_runtime_plugins_with_recipe, resolve_project_runtime_request,
+    editor_play_runtime_plugins_with_recipe, resolve_project_runtime_request,
+    runtime_host_policy_contribution,
 };
 use crate::project_host::{ProjectContentLoader, ingest_project_manifest};
 
@@ -59,10 +67,8 @@ use crate::project_host::persistence::{
 const EDITOR_RUNTIME_BRIDGE_PLUGIN_ID: PluginId = PluginId::new("nara.editor-runtime-bridge");
 const EDITOR_RUNTIME_BRIDGE_DEFINITION_ID: PluginDefinitionId =
     PluginDefinitionId::new("nara.editor-runtime-bridge", 1);
-const EDITOR_RUNTIME_BRIDGE_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
 const EDITOR_RUNTIME_BRIDGE_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(EDITOR_RUNTIME_BRIDGE_PLUGIN_ID, PluginCategory::Tooling)
-        .requires_plugins(EDITOR_RUNTIME_BRIDGE_REQUIREMENTS);
+    PluginDeclaration::new(EDITOR_RUNTIME_BRIDGE_PLUGIN_ID, PluginCategory::Tooling);
 
 #[derive(Debug, Default)]
 struct EditorRuntimeBridgePlugin;
@@ -373,6 +379,23 @@ enum PendingPersistence {
     },
 }
 
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+#[derive(Clone, Copy)]
+struct ActiveEditorGameView {
+    start: EditorGameStartRequest,
+    in_flight: Option<EditorGameViewCandidateIdentity>,
+}
+
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+impl ActiveEditorGameView {
+    const fn new(start: EditorGameStartRequest) -> Self {
+        Self {
+            start,
+            in_flight: None,
+        }
+    }
+}
+
 enum EditorRuntimeOwnerState {
     Empty,
     Preparing {
@@ -386,6 +409,22 @@ enum EditorRuntimeOwnerState {
         operation: EditorPlayOperation,
         attempt: super::RuntimeStartAttempt,
     },
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    AwaitingGameTarget {
+        document: EditorDocumentId,
+        revision: nara_scene::SceneAuthoringRevision,
+        operation: EditorPlayOperation,
+        request: EditorGameStartRequest,
+        prepared: super::PreparedRuntimeStart,
+    },
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    CommittingGameTarget {
+        document: EditorDocumentId,
+        revision: nara_scene::SceneAuthoringRevision,
+        operation: EditorPlayOperation,
+        request: EditorGameStartRequest,
+        prepared: super::PreparedRuntimeStart,
+    },
     CancellingStart {
         terminal: EditorPlayOperationResult,
         attempt: super::RuntimeStartAttempt,
@@ -396,6 +435,8 @@ enum EditorRuntimeOwnerState {
     Active {
         document: EditorDocumentId,
         source_revision: nara_scene::SceneAuthoringRevision,
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+        game: Option<ActiveEditorGameView>,
     },
     RetirementIncomplete {
         terminal: EditorPlayOperationResult,
@@ -441,6 +482,8 @@ pub struct EditorProjectSession {
     source_document: EditorDocumentId,
     plan: RuntimePlan,
     snapshot: crate::project_host::ProjectContentSnapshot,
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
     #[cfg(feature = "presentation-2d")]
     preview: preview::EditorPreviewSession,
     persistence: ScenePersistenceHost,
@@ -514,8 +557,19 @@ impl EditorProjectSession {
             })?;
         drop(manifest);
 
-        let mut request = project_runtime_plugins_with_recipe(&candidate, recipe, overlay);
-        request = request.insert_after::<GameplayCommandPlugin>(editor_runtime_bridge_definition());
+        let host_policy = runtime_host_policy_contribution(editor_runtime_bridge_definition());
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+        let (game_view_config, host_policy) = match game_view::editor_game_view_bridge_definition(
+            candidate.normalized_capabilities(),
+            candidate.settings().window.to_window(),
+        ) {
+            Some((config, definition)) => (Some(config), host_policy.with_definition(definition)),
+            None => (None, host_policy),
+        };
+        #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
+        let host_policy = host_policy;
+        let request =
+            editor_play_runtime_plugins_with_recipe(&candidate, recipe, overlay, Some(host_policy));
         let plan = resolve_project_runtime_request(&candidate, request).map_err(|error| {
             EditorProjectOpenError {
                 diagnostics: runtime_plan_failure_report(&error),
@@ -585,6 +639,8 @@ impl EditorProjectSession {
             source_document: document,
             plan,
             snapshot,
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            game_view_config,
             #[cfg(feature = "presentation-2d")]
             preview,
             persistence: opened.host,
@@ -629,6 +685,211 @@ impl EditorProjectSession {
     #[must_use]
     pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
         self.preview.take_candidate()
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn pending_game_start_request(&self) -> Option<EditorGameStartRequest> {
+        match self.runtime_owner {
+            EditorRuntimeOwnerState::AwaitingGameTarget { request, .. } => Some(request),
+            _ => None,
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn prepare_game_start_activation(
+        &mut self,
+        expected: EditorGameStartRequest,
+    ) -> Result<EditorGameStartActivation, EditorGameViewBridgeFailure> {
+        let state = std::mem::replace(
+            &mut self.runtime_owner,
+            EditorRuntimeOwnerState::Transitioning,
+        );
+        match state {
+            EditorRuntimeOwnerState::AwaitingGameTarget {
+                document,
+                revision,
+                operation,
+                request,
+                prepared,
+            } if request == expected => {
+                self.runtime_owner = EditorRuntimeOwnerState::CommittingGameTarget {
+                    document,
+                    revision,
+                    operation,
+                    request,
+                    prepared,
+                };
+                Ok(EditorGameStartActivation::new(request))
+            }
+            other @ EditorRuntimeOwnerState::AwaitingGameTarget { .. } => {
+                self.runtime_owner = other;
+                Err(EditorGameViewBridgeFailure::GameStartRequestMismatch)
+            }
+            other => {
+                self.runtime_owner = other;
+                Err(EditorGameViewBridgeFailure::GameStartNotPending)
+            }
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn commit_game_start_activation(&mut self, activation: EditorGameStartActivation) {
+        let expected = activation.into_request();
+        let state = std::mem::replace(
+            &mut self.runtime_owner,
+            EditorRuntimeOwnerState::Transitioning,
+        );
+        let EditorRuntimeOwnerState::CommittingGameTarget {
+            document,
+            revision,
+            operation,
+            request,
+            prepared,
+        } = state
+        else {
+            self.runtime_owner = state;
+            panic!("a Game start activation commits only its prepared Runtime");
+        };
+        assert_eq!(
+            request, expected,
+            "a Game start activation cannot commit a foreign Runtime reservation"
+        );
+        let diagnostics = self.runtime_host.commit_prepared_start(prepared);
+        let _ = self.diagnostics.extend(diagnostics);
+        let generation = self.runtime_host.running_runtime_generation();
+        self.play_result = Some(EditorPlayOperationResult::Applied {
+            operation,
+            generation,
+        });
+        self.runtime_owner = EditorRuntimeOwnerState::Active {
+            document,
+            source_revision: revision,
+            game: Some(ActiveEditorGameView::new(request)),
+        };
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn abort_pending_game_start(
+        &mut self,
+        expected: EditorGameStartRequest,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        let state = std::mem::replace(
+            &mut self.runtime_owner,
+            EditorRuntimeOwnerState::Transitioning,
+        );
+        match state {
+            EditorRuntimeOwnerState::AwaitingGameTarget {
+                operation,
+                request,
+                prepared,
+                ..
+            } if request == expected => {
+                self.runtime_host.abort_prepared_start(prepared);
+                self.play_result = Some(EditorPlayOperationResult::Pending { operation });
+                self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+                    terminal: EditorPlayOperationResult::Failed {
+                        operation,
+                        failure: EditorPlayFailure::Start,
+                    },
+                };
+                Ok(())
+            }
+            other @ EditorRuntimeOwnerState::AwaitingGameTarget { .. } => {
+                self.runtime_owner = other;
+                Err(EditorGameViewBridgeFailure::GameStartRequestMismatch)
+            }
+            other => {
+                self.runtime_owner = other;
+                Err(EditorGameViewBridgeFailure::GameStartNotPending)
+            }
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn take_game_view_candidate(
+        &mut self,
+    ) -> Result<Option<EditorGameViewCandidate>, EditorGameViewBridgeFailure> {
+        let start = match &self.runtime_owner {
+            EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } if game.in_flight.is_none() => game.start,
+            EditorRuntimeOwnerState::Active { game: Some(_), .. } => {
+                return Err(EditorGameViewBridgeFailure::CandidateBusy);
+            }
+            _ => return Err(EditorGameViewBridgeFailure::RuntimeUnavailable),
+        };
+        let runtime = self
+            .runtime_host
+            .running_runtime_mut()
+            .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+        let Some(candidate) = game_view::take_candidate(runtime)? else {
+            return Ok(None);
+        };
+        let candidate = candidate.bind_start(start);
+        let EditorRuntimeOwnerState::Active {
+            game: Some(game), ..
+        } = &mut self.runtime_owner
+        else {
+            unreachable!("a captured Game candidate retains its active Runtime owner")
+        };
+        game.in_flight = Some(candidate.identity());
+        Ok(Some(candidate))
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn complete_game_view_candidate(
+        &mut self,
+        completion: EditorGameViewCompletion,
+    ) -> Result<(), EditorGameViewCompletion> {
+        if !matches!(
+            &self.runtime_owner,
+            EditorRuntimeOwnerState::Active {
+                game: Some(ActiveEditorGameView {
+                    in_flight: Some(identity),
+                    ..
+                }),
+                ..
+            } if *identity == completion.identity()
+        ) {
+            return Err(completion);
+        }
+        let Some(runtime) = self.runtime_host.running_runtime_mut() else {
+            return Err(completion);
+        };
+        match game_view::complete_candidate(runtime, completion) {
+            Ok(()) => {
+                let EditorRuntimeOwnerState::Active {
+                    game: Some(game), ..
+                } = &mut self.runtime_owner
+                else {
+                    unreachable!("a completed Game candidate retains its active Runtime owner")
+                };
+                game.in_flight = None;
+                Ok(())
+            }
+            Err(completion) => Err(completion),
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    fn game_view_retirement_blocked(&mut self) -> bool {
+        match &self.runtime_owner {
+            EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } if game.in_flight.is_some() => return true,
+            EditorRuntimeOwnerState::Active { game: Some(_), .. } => {}
+            _ => return false,
+        }
+        self.runtime_host
+            .running_runtime_mut()
+            .is_some_and(game_view::retirement_blocked)
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -915,6 +1176,7 @@ impl EditorProjectSession {
         let EditorRuntimeOwnerState::Active {
             document,
             source_revision,
+            ..
         } = self.runtime_owner
         else {
             return Err(EditorApplyChangesRejection::InvalidRuntimeState);
@@ -1001,6 +1263,27 @@ impl EditorProjectSession {
                     attempt,
                 };
             }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::AwaitingGameTarget { .. } => {
+                let state = std::mem::replace(
+                    &mut self.runtime_owner,
+                    EditorRuntimeOwnerState::Transitioning,
+                );
+                let EditorRuntimeOwnerState::AwaitingGameTarget {
+                    operation,
+                    prepared,
+                    ..
+                } = state
+                else {
+                    unreachable!("the matched Game start remains owned by the editor")
+                };
+                self.runtime_host.abort_prepared_start(prepared);
+                self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+                    terminal: EditorPlayOperationResult::Cancelled { operation },
+                };
+            }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::CommittingGameTarget { .. } => {}
             EditorRuntimeOwnerState::Active { .. } => {
                 let runtime_state = self.runtime_host.running_runtime_state();
                 if self.pending_control.is_none()
@@ -1095,6 +1378,21 @@ impl EditorProjectSession {
                 });
                 EditorPlayRequestResult::Accepted
             }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::AwaitingGameTarget {
+                operation,
+                prepared,
+                ..
+            } => {
+                self.runtime_host.abort_prepared_start(prepared);
+                self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+                    terminal: EditorPlayOperationResult::Cancelled { operation },
+                };
+                self.play_result = Some(EditorPlayOperationResult::Pending {
+                    operation: EditorPlayOperation::Cancel,
+                });
+                EditorPlayRequestResult::Accepted
+            }
             other => {
                 self.runtime_owner = other;
                 EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState)
@@ -1121,6 +1419,10 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         if retires_runtime {
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            if self.game_view_retirement_blocked() {
+                return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+            }
             self.cancel_pending_runtime_edit();
             self.cancel_pending_apply_changes();
         }
@@ -1159,6 +1461,34 @@ impl EditorProjectSession {
                 operation,
                 attempt,
             } => self.drive_starting(document, revision, operation, attempt),
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::AwaitingGameTarget {
+                document,
+                revision,
+                operation,
+                request,
+                prepared,
+            } => EditorRuntimeOwnerState::AwaitingGameTarget {
+                document,
+                revision,
+                operation,
+                request,
+                prepared,
+            },
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::CommittingGameTarget {
+                document,
+                revision,
+                operation,
+                request,
+                prepared,
+            } => EditorRuntimeOwnerState::CommittingGameTarget {
+                document,
+                revision,
+                operation,
+                request,
+                prepared,
+            },
             EditorRuntimeOwnerState::CancellingStart { terminal, attempt } => {
                 self.drive_cancelled_start(terminal, attempt)
             }
@@ -1171,7 +1501,15 @@ impl EditorProjectSession {
             EditorRuntimeOwnerState::Active {
                 document,
                 source_revision,
-            } => self.drive_active(document, source_revision, real_delta),
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                game,
+            } => self.drive_active(
+                document,
+                source_revision,
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                game,
+                real_delta,
+            ),
             EditorRuntimeOwnerState::Transitioning => {
                 unreachable!("one Editor frame owns one runtime state transition")
             }
@@ -1243,8 +1581,21 @@ impl EditorProjectSession {
         operation: EditorPlayOperation,
         mut attempt: super::RuntimeStartAttempt,
     ) -> EditorRuntimeOwnerState {
-        match self.runtime_host.complete_start(&mut attempt) {
-            Ok(diagnostics) => {
+        match self.runtime_host.prepare_start(&mut attempt) {
+            Ok(prepared) => {
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                if let Some(config) = self.game_view_config {
+                    let request = game_view::start_request(config, document, revision, &prepared);
+                    return EditorRuntimeOwnerState::AwaitingGameTarget {
+                        document,
+                        revision,
+                        operation,
+                        request,
+                        prepared,
+                    };
+                }
+
+                let diagnostics = self.runtime_host.commit_prepared_start(prepared);
                 let _ = self.diagnostics.extend(diagnostics);
                 let generation = self.runtime_host.running_runtime_generation();
                 self.play_result = Some(EditorPlayOperationResult::Applied {
@@ -1254,6 +1605,8 @@ impl EditorProjectSession {
                 EditorRuntimeOwnerState::Active {
                     document,
                     source_revision: revision,
+                    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                    game: None,
                 }
             }
             Err(fault) => {
@@ -1318,6 +1671,9 @@ impl EditorProjectSession {
         &mut self,
         document: EditorDocumentId,
         source_revision: nara_scene::SceneAuthoringRevision,
+        #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))] game: Option<
+            ActiveEditorGameView,
+        >,
         real_delta: Duration,
     ) -> EditorRuntimeOwnerState {
         if let Err(fault) = self.runtime_host.drive_running_runtime(real_delta) {
@@ -1332,6 +1688,8 @@ impl EditorProjectSession {
             return EditorRuntimeOwnerState::Active {
                 document,
                 source_revision,
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                game,
             };
         }
 
@@ -1400,6 +1758,8 @@ impl EditorProjectSession {
             return EditorRuntimeOwnerState::Active {
                 document,
                 source_revision,
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                game,
             };
         }
 
@@ -1425,6 +1785,8 @@ impl EditorProjectSession {
         EditorRuntimeOwnerState::Active {
             document,
             source_revision,
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            game,
         }
     }
 

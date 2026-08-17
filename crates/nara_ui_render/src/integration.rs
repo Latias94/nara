@@ -80,6 +80,7 @@ struct UiPresentationState(UiPresentationPlanner);
 pub struct UiPresentationOutcomes {
     outcomes: Vec<UiPresentationOutcome>,
     reserved_backend: HashSet<UiBackendSubmissionIdentity>,
+    backend_commit_scratch: HashSet<UiBackendSubmissionIdentity>,
 }
 
 /// Move-only permission to publish exactly one backend outcome for one admitted submission.
@@ -385,6 +386,33 @@ impl UiPresentationOutcomes {
         Ok(())
     }
 
+    fn try_commit_backend_batch(
+        &mut self,
+        completed: Vec<UiCompletedBackendOutcome>,
+    ) -> Result<(), Vec<UiCompletedBackendOutcome>> {
+        self.backend_commit_scratch.clear();
+        if self
+            .backend_commit_scratch
+            .try_reserve(completed.len())
+            .is_err()
+            || completed.iter().any(|outcome| {
+                !self.reserved_backend.contains(&outcome.permit.identity)
+                    || !self.backend_commit_scratch.insert(outcome.permit.identity)
+            })
+        {
+            self.backend_commit_scratch.clear();
+            return Err(completed);
+        }
+        self.backend_commit_scratch.clear();
+        for completed in completed {
+            self.reserved_backend.remove(&completed.permit.identity);
+            let UiCompletedBackendOutcome { permit, outcome } = completed;
+            let _ = permit;
+            self.outcomes.push(outcome);
+        }
+        Ok(())
+    }
+
     fn replace_content(
         &mut self,
         outcomes: Vec<UiPresentationOutcome>,
@@ -640,6 +668,20 @@ pub fn commit_ui_backend_outcome(
         return Err(completed);
     };
     outcomes.try_commit_backend(completed)
+}
+
+/// Atomically returns one candidate's terminal backend outcomes to its owning Runtime.
+///
+/// A foreign identity or duplicate keeps the entire move-only batch with the caller.
+#[doc(hidden)]
+pub fn commit_ui_backend_outcomes(
+    world: &mut World,
+    completed: Vec<UiCompletedBackendOutcome>,
+) -> Result<(), Vec<UiCompletedBackendOutcome>> {
+    let Some(mut outcomes) = world.get_resource_mut::<UiPresentationOutcomes>() else {
+        return Err(completed);
+    };
+    outcomes.try_commit_backend_batch(completed)
 }
 
 /// Publishes the exact replay packets and move-only attempts for the next backend frame.

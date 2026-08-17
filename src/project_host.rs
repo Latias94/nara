@@ -47,6 +47,17 @@ pub use runtime::{
     feature = "runtime-2d",
     feature = "serde",
     feature = "tooling",
+    any(feature = "presentation-2d", feature = "presentation-ui")
+))]
+pub use runtime::{
+    EditorGameStartActivation, EditorGameStartRequest, EditorGameViewBridgeFailure,
+    EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCandidateParts,
+    EditorGameViewCompletion,
+};
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "tooling",
     feature = "presentation-2d"
 ))]
 pub use runtime::{EditorPreviewCandidate, EditorPreviewHit};

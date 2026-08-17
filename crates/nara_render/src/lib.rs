@@ -31,9 +31,11 @@ pub mod __private {
     use nara_ecs::SystemSet;
 
     use super::{
-        ExtractedViews, RenderFramePacket, RenderFramePacketError, RenderFrameSourceGeneration,
-        RenderFrameTarget, build_render_frame_packet_for_source,
+        Extent2d, ExtractedViews, RenderFramePacket, RenderFramePacketError,
+        RenderFrameSourceGeneration, RenderFrameTarget, RenderImage2d, RenderImagePacket,
+        build_render_frame_packet_for_source,
     };
+    use nara_asset::Handle;
 
     static NEXT_EDITOR_RENDER_GENERATION: AtomicU64 = AtomicU64::new(1);
 
@@ -72,6 +74,18 @@ pub mod __private {
             return Err(RenderFramePacketError::EditorPreviewRequiresImageTarget);
         }
         Ok(packet)
+    }
+
+    /// Creates the private image-target identity owned by the first-party Editor viewport.
+    #[doc(hidden)]
+    pub fn editor_viewport_image_target(
+        image: Handle<RenderImage2d>,
+        extent: Extent2d,
+    ) -> Result<RenderImagePacket, RenderFramePacketError> {
+        if extent.is_empty() {
+            return Err(RenderFramePacketError::ImageTargetHasZeroExtent);
+        }
+        Ok(RenderImagePacket { image, extent })
     }
 
     /// Assembles the closed first-party draw order without exposing topology construction.
@@ -454,17 +468,20 @@ fn build_render_frame_packet_for_source<'a>(
             RenderFrameTarget::Image(RenderImagePacket { image, extent })
         }
         RenderTarget::PrimaryWindow | RenderTarget::Window(_) => {
-            let windows = windows.into_iter().collect::<Vec<_>>();
-            if windows.len() != 1 {
+            let mut windows = windows.into_iter();
+            let Some(window) = windows.next() else {
+                return Err(RenderFramePacketError::UnsupportedWindowCount { actual: 0 });
+            };
+            let additional = windows.count();
+            if additional != 0 {
                 return Err(RenderFramePacketError::UnsupportedWindowCount {
-                    actual: windows.len(),
+                    actual: additional.saturating_add(1),
                 });
             }
             let window_id = view
                 .target
                 .window_id(primary_window_id)
                 .expect("window render targets always resolve to a window identity");
-            let window = windows[0];
             if window.id != window_id {
                 return Err(RenderFramePacketError::TargetWindowMismatch { window_id });
             }

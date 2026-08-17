@@ -825,6 +825,30 @@ pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
     }
 
     fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output;
+
+    /// Applies one typed operation that must coordinate multiple Runtime-owned resources.
+    ///
+    /// The default keeps ordinary ports resource-local. First-party ports may override this
+    /// method to perform one failure-atomic transaction without exposing the managed `World` to
+    /// the external Host.
+    #[doc(hidden)]
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        input: Self::Input,
+    ) -> Result<Self::Output, (RuntimeWorldAccessError, Self::Input)>
+    where
+        Self: Sized,
+    {
+        let Some(mut resource) = world.get_resource_mut::<Self>() else {
+            return Err((
+                RuntimeWorldAccessError::MissingResource {
+                    type_name: type_name::<Self>(),
+                },
+                input,
+            ));
+        };
+        Ok(resource.apply_driver_input(input))
+    }
 }
 
 /// Short-lived command application while a runtime candidate is still unpublished.
@@ -864,24 +888,42 @@ fn ensure_scoped_type_is_unprotected<T: 'static>() -> Result<(), RuntimeWorldAcc
 }
 
 impl RuntimeDriverScope<'_> {
+    fn validate_port_input<R: __RuntimeDriverPort>(
+        &self,
+        input: &R::Input,
+    ) -> Result<(), RuntimeWorldAccessError> {
+        if R::accepts_driver_input(self.state, input) {
+            Ok(())
+        } else {
+            Err(RuntimeWorldAccessError::PortUnavailable {
+                type_name: type_name::<R>(),
+                state: self.state,
+            })
+        }
+    }
+
     #[doc(hidden)]
     pub fn __apply_port<R: __RuntimeDriverPort>(
         &mut self,
         input: R::Input,
     ) -> Result<R::Output, RuntimeWorldAccessError> {
-        if !R::accepts_driver_input(self.state, &input) {
-            return Err(RuntimeWorldAccessError::PortUnavailable {
-                type_name: type_name::<R>(),
-                state: self.state,
-            });
+        self.validate_port_input::<R>(&input)?;
+        R::apply_driver_input_in_world(self.world, input).map_err(|(error, _)| error)
+    }
+
+    /// Applies one typed port operation while preserving an owned input on admission failure.
+    ///
+    /// This is reserved for move-only Host authorities that must never be dropped merely because
+    /// the Runtime state changed or the expected first-party port is unavailable.
+    #[doc(hidden)]
+    pub fn __apply_owned_port<R: __RuntimeDriverPort>(
+        &mut self,
+        input: R::Input,
+    ) -> Result<R::Output, (RuntimeWorldAccessError, R::Input)> {
+        if let Err(error) = self.validate_port_input::<R>(&input) {
+            return Err((error, input));
         }
-        let mut resource =
-            self.world
-                .get_resource_mut::<R>()
-                .ok_or(RuntimeWorldAccessError::MissingResource {
-                    type_name: type_name::<R>(),
-                })?;
-        Ok(resource.apply_driver_input(input))
+        R::apply_driver_input_in_world(self.world, input)
     }
 }
 

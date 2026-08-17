@@ -6,4 +6,4 @@ mod platform;
 pub use app::{
     EditorApplication, EditorApplicationOpenError, EditorApplicationUpdate, EditorLaunchOptions,
 };
-pub use platform::{EditorRunError, run};
+pub use platform::{EditorRunError, run, run_with_intent};

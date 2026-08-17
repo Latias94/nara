@@ -24,12 +24,14 @@ use nara::{
         RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeCloseProgress,
         StartupStage,
     },
-    ecs::{Query, Res, Resource, schedule::IntoScheduleConfigs},
+    ecs::{Commands, Query, Res, Resource, schedule::IntoScheduleConfigs},
     project_host::{
-        EditorProjectIntent, EditorProjectSession,
+        EditorGameViewBridgeFailure, EditorGameViewCompletion, EditorProjectIntent,
+        EditorProjectSession,
         advanced::{RuntimeProbe, open_editor_with_probe},
     },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    render::Camera2d,
     scene::{
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
         ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -41,7 +43,7 @@ use nara::{
         EditorPlayRequestResult, EditorPlayState, EditorWorkspaceIntent,
         EditorWorkspaceIntentRequestResult,
     },
-    transform::GlobalTransform2d,
+    transform::{GlobalTransform2d, Transform2d},
 };
 use project_content_fixture::TestProject;
 
@@ -74,6 +76,10 @@ const SPATIAL_OBSERVATION_REQUIREMENTS: &[PluginId] = &[nara::transform::TRANSFO
 const SPATIAL_OBSERVATION_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(SPATIAL_OBSERVATION_PLUGIN_ID, PluginCategory::Tooling)
         .requires_plugins(SPATIAL_OBSERVATION_REQUIREMENTS);
+const GAME_VIEW_CAMERA_PLUGIN_ID: PluginId = PluginId::new("nara.test.editor-game-view-camera");
+const GAME_VIEW_CAMERA_DECLARATION: PluginDeclaration =
+    PluginDeclaration::new(GAME_VIEW_CAMERA_PLUGIN_ID, PluginCategory::Tooling)
+        .requires_plugins(&[nara::render::RENDER_PLUGIN_ID]);
 
 static NEXT_RUNTIME_SERVICE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -191,6 +197,24 @@ fn spatial_observation_definition(
             observations: observations.clone(),
         },
     )
+}
+
+#[derive(Debug, Default)]
+struct GameViewCameraPlugin;
+
+impl Plugin for GameViewCameraPlugin {
+    fn declaration() -> &'static PluginDeclaration {
+        &GAME_VIEW_CAMERA_DECLARATION
+    }
+
+    fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        app.add_systems(StartupStage::Scene, spawn_game_view_camera)?;
+        Ok(())
+    }
+}
+
+fn spawn_game_view_camera(mut commands: Commands) {
+    commands.spawn((Transform2d::default(), Camera2d::default()));
 }
 
 #[derive(Debug)]
@@ -740,6 +764,146 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
             ..
         })
     ));
+}
+
+#[cfg(all(
+    feature = "presentation-2d",
+    feature = "presentation-ui",
+    feature = "desktop-winit",
+    feature = "render-wgpu"
+))]
+#[test]
+fn editor_game_start_publishes_only_after_the_exact_native_activation() {
+    let project = TestProject::with_prefab_startup();
+    std::fs::write(
+        project.path().join("nara.toml"),
+        r#"schema_version = 1
+
+[project]
+name = "Editor Game Start"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = [
+    "runtime-2d",
+    "presentation-2d",
+    "desktop-winit",
+    "render-wgpu",
+]
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+
+[profiles.desktop.window]
+enabled = true
+width = 960
+height = 540
+resizable = true
+"#,
+    )
+    .unwrap();
+    let intent = || {
+        EditorProjectIntent::new()
+            .with_profile("desktop")
+            .with_recipe(
+                ProductRecipe::new()
+                    .add_plugin::<GameViewCameraPlugin>()
+                    .unwrap(),
+            )
+    };
+    let mut first = EditorProjectSession::open(project.root_capability(), intent()).unwrap();
+    let mut second = EditorProjectSession::open(project.root_capability(), intent()).unwrap();
+
+    for editor in [&mut first, &mut second] {
+        assert_eq!(
+            editor_driver::request_play(editor, EditorPlayCommand::Play),
+            EditorPlayRequestResult::Accepted
+        );
+        editor.drive_editor_frame(Duration::ZERO);
+        editor.drive_editor_frame(Duration::ZERO);
+        assert_eq!(
+            editor.current_frame().play().state(),
+            EditorPlayState::Starting,
+            "diagnostics: {:?}",
+            editor.current_frame().diagnostics()
+        );
+        assert_eq!(editor.current_frame().play().generation(), None);
+    }
+
+    let first_request = first.pending_game_start_request().unwrap();
+    let second_request = second.pending_game_start_request().unwrap();
+    assert_ne!(
+        first_request.runtime_generation(),
+        second_request.runtime_generation()
+    );
+    assert!(matches!(
+        first.prepare_game_start_activation(second_request),
+        Err(EditorGameViewBridgeFailure::GameStartRequestMismatch)
+    ));
+    assert_eq!(first.pending_game_start_request(), Some(first_request));
+
+    let activation = first
+        .prepare_game_start_activation(first_request)
+        .expect("the exact Runtime/native start identity is accepted");
+    assert_eq!(activation.request(), first_request);
+    assert!(first.pending_game_start_request().is_none());
+    first.commit_game_start_activation(activation);
+    first.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        first.current_frame().play().state(),
+        EditorPlayState::Running
+    );
+    assert_eq!(
+        first.current_frame().play().generation(),
+        Some(first_request.runtime_generation().get())
+    );
+    first.drive_editor_frame(Duration::ZERO);
+    let candidate = first
+        .take_game_view_candidate()
+        .unwrap()
+        .expect("the active Play Runtime publishes one exact Game candidate");
+    let candidate_identity = candidate.identity();
+    assert_eq!(candidate_identity.start(), first_request);
+    drop(candidate);
+    first
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui(candidate_identity))
+        .expect("the exact candidate completion returns its bridge authority");
+    assert_eq!(
+        editor_driver::request_play(&mut first, EditorPlayCommand::Stop),
+        EditorPlayRequestResult::Accepted
+    );
+    for _ in 0..8 {
+        first.drive_editor_frame(Duration::ZERO);
+        if first.current_frame().play().state() == EditorPlayState::Empty {
+            break;
+        }
+    }
+    assert_eq!(first.current_frame().play().state(), EditorPlayState::Empty);
+
+    second.abort_pending_game_start(second_request).unwrap();
+    for _ in 0..8 {
+        second.drive_editor_frame(Duration::ZERO);
+        if second.current_frame().play().state() == EditorPlayState::Empty {
+            break;
+        }
+    }
+    assert_eq!(
+        second.current_frame().play().state(),
+        EditorPlayState::Empty
+    );
 }
 
 #[test]

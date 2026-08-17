@@ -16,6 +16,11 @@ impl EditorProjectSession {
             EditorRuntimeOwnerState::Starting { revision, .. } => {
                 (EditorPlayState::Starting, Some(*revision))
             }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            EditorRuntimeOwnerState::AwaitingGameTarget { revision, .. }
+            | EditorRuntimeOwnerState::CommittingGameTarget { revision, .. } => {
+                (EditorPlayState::Starting, Some(*revision))
+            }
             EditorRuntimeOwnerState::CancellingStart { .. }
             | EditorRuntimeOwnerState::RetiringPlay { .. } => (EditorPlayState::RetiringPlay, None),
             EditorRuntimeOwnerState::RetirementIncomplete { .. } => {
