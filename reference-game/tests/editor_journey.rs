@@ -196,13 +196,19 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
     assert_ne!(project.scene_bytes(), source_bytes);
 
     let acknowledged_frame = editor.drive_editor_frame(Duration::ZERO);
-    assert!(!acknowledged_frame.workspace().scene(document).unwrap().dirty);
+    assert!(
+        !acknowledged_frame
+            .workspace()
+            .scene(document)
+            .unwrap()
+            .dirty
+    );
     assert!(matches!(
         dispatch_editor_action(
             &mut editor,
             &acknowledged_frame,
             EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Request(
-                EditorWorkspaceIntent::CloseScene { document },
+                EditorWorkspaceIntent::CloseDocument { document },
             )),
         ),
         EditorActionOutcome::WorkspaceIntent(EditorWorkspaceIntentRequestResult::Accepted)

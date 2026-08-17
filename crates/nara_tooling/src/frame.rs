@@ -266,10 +266,15 @@ impl EditorFrameModel {
     }
 }
 
-/// Revision-free workspace navigation emitted from one exact Editor frame.
+/// Workspace navigation emitted from one exact Editor frame.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorNavigationAction {
-    SetActiveScene {
+    OpenPrefabSource {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        entity: SceneEntityId,
+    },
+    SetActiveDocument {
         document: EditorDocumentId,
     },
     SelectEntity {
@@ -285,7 +290,8 @@ impl EditorNavigationAction {
     #[must_use]
     pub const fn document(&self) -> EditorDocumentId {
         match self {
-            Self::SetActiveScene { document }
+            Self::OpenPrefabSource { document, .. }
+            | Self::SetActiveDocument { document }
             | Self::SelectEntity { document, .. }
             | Self::MarkExternalChanged { document } => *document,
         }
@@ -301,6 +307,11 @@ pub enum EditorDocumentMutation {
         command: SceneInspectorCommand,
     },
     ApplyScenePatch {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        patch: ScenePatchDocument,
+    },
+    ApplyPrefabPatch {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
@@ -326,6 +337,7 @@ impl EditorDocumentMutation {
         match self {
             Self::ApplyInspectorCommand { document, .. }
             | Self::ApplyScenePatch { document, .. }
+            | Self::ApplyPrefabPatch { document, .. }
             | Self::ComposeScene { document, .. }
             | Self::Undo { document, .. }
             | Self::Redo { document, .. } => *document,
@@ -337,6 +349,7 @@ impl EditorDocumentMutation {
         match self {
             Self::ApplyInspectorCommand { base_revision, .. }
             | Self::ApplyScenePatch { base_revision, .. }
+            | Self::ApplyPrefabPatch { base_revision, .. }
             | Self::ComposeScene { base_revision, .. }
             | Self::Undo { base_revision, .. }
             | Self::Redo { base_revision, .. } => *base_revision,

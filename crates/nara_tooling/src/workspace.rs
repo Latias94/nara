@@ -196,23 +196,19 @@ impl EditorPersistenceCheckpoint {
 
     #[doc(hidden)]
     #[must_use]
-    pub fn scene(&self) -> &SceneDocument {
+    pub fn scene(&self) -> Option<&SceneDocument> {
         match &self.content {
-            EditorPersistenceContent::Scene(scene) => scene,
-            EditorPersistenceContent::Prefab(_) => {
-                panic!("scene persistence checkpoint requested for a Prefab document")
-            }
+            EditorPersistenceContent::Scene(scene) => Some(scene),
+            EditorPersistenceContent::Prefab(_) => None,
         }
     }
 
     #[doc(hidden)]
     #[must_use]
-    pub fn prefab(&self) -> &PrefabDocument {
+    pub fn prefab(&self) -> Option<&PrefabDocument> {
         match &self.content {
-            EditorPersistenceContent::Prefab(prefab) => prefab,
-            EditorPersistenceContent::Scene(_) => {
-                panic!("prefab persistence checkpoint requested for a Scene document")
-            }
+            EditorPersistenceContent::Prefab(prefab) => Some(prefab),
+            EditorPersistenceContent::Scene(_) => None,
         }
     }
 }
@@ -299,6 +295,41 @@ impl EditorDocumentSlot {
         }
     }
 
+    fn selection_mut(&mut self) -> &mut EditorSelectionSet {
+        match self {
+            Self::Scene(slot) => &mut slot.selection,
+            Self::Prefab(slot) => &mut slot.selection,
+        }
+    }
+
+    fn has_entity(&self, entity: &SceneEntityId) -> bool {
+        match self {
+            Self::Scene(slot) => document_has_entity(slot.session.document(), entity),
+            Self::Prefab(slot) => prefab_has_entity(slot.session.document(), entity),
+        }
+    }
+
+    fn retain_existing_selection(&mut self) {
+        match self {
+            Self::Scene(slot) => slot.selection.retain_existing(slot.session.document()),
+            Self::Prefab(slot) => slot
+                .selection
+                .retain_existing_prefab(slot.session.document()),
+        }
+    }
+
+    fn mark_external_changed(&mut self) {
+        let state = if self.is_dirty() {
+            EditorExternalReloadState::Conflict
+        } else {
+            EditorExternalReloadState::Pending
+        };
+        match self {
+            Self::Scene(slot) => slot.external_reload = state,
+            Self::Prefab(slot) => slot.external_reload = state,
+        }
+    }
+
     fn owns_content_state(&self, state: SceneAuthoringContentState) -> bool {
         match self {
             Self::Scene(slot) => slot.session().owns_content_state(state),
@@ -377,6 +408,47 @@ impl EditorWorkspace {
             Some(EditorDocumentSlot::Prefab(slot)) => Some(slot),
             Some(EditorDocumentSlot::Scene(_)) | None => None,
         }
+    }
+
+    #[must_use]
+    pub fn document_kind(&self, document: EditorDocumentId) -> Option<EditorDocumentKind> {
+        self.documents.get(&document).map(EditorDocumentSlot::kind)
+    }
+
+    #[must_use]
+    pub fn document_is_dirty(&self, document: EditorDocumentId) -> Option<bool> {
+        self.documents
+            .get(&document)
+            .map(EditorDocumentSlot::is_dirty)
+    }
+
+    #[must_use]
+    pub fn document_revision(&self, document: EditorDocumentId) -> Option<SceneAuthoringRevision> {
+        self.documents
+            .get(&document)
+            .map(EditorDocumentSlot::revision)
+    }
+
+    #[must_use]
+    pub fn document_for_source_binding(
+        &self,
+        source_binding: &EditorDocumentSourceBinding,
+    ) -> Option<EditorDocumentId> {
+        self.documents.iter().find_map(|(document, slot)| {
+            (slot.source_binding() == Some(source_binding)).then_some(*document)
+        })
+    }
+
+    pub fn activate_document(
+        &mut self,
+        document: EditorDocumentId,
+    ) -> EditorWorkspaceCommandReport {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
+        let Some(slot) = self.documents.get(&document) else {
+            return workspace_document_error_report(context, document);
+        };
+        self.active_document = Some(document);
+        report_for_document(document, self.active_document, slot)
     }
 
     #[must_use]
@@ -518,8 +590,10 @@ impl EditorWorkspace {
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
         match command {
-            EditorWorkspaceCommand::CloseScene { document } => self.close_scene(document),
-            EditorWorkspaceCommand::SetActiveScene { document } => self.set_active_scene(document),
+            EditorWorkspaceCommand::CloseDocument { document } => self.close_document(document),
+            EditorWorkspaceCommand::SetActiveDocument { document } => {
+                self.set_active_document(document)
+            }
             EditorWorkspaceCommand::SelectEntity { document, entity } => {
                 self.select_entity(document, entity)
             }
@@ -533,6 +607,11 @@ impl EditorWorkspace {
                 base_revision,
                 patch,
             } => self.apply_scene_patch(registry, document, base_revision, patch),
+            EditorWorkspaceCommand::ApplyPrefabPatch {
+                document,
+                base_revision,
+                patch,
+            } => self.apply_prefab_patch(registry, document, base_revision, patch),
             EditorWorkspaceCommand::ComposeScene {
                 document,
                 base_revision,
@@ -602,19 +681,11 @@ impl EditorWorkspace {
         }
     }
 
-    fn close_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+    fn close_document(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
         let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
         let Some(slot) = self.documents.get(&document) else {
             return workspace_document_error_report(context, document);
         };
-        if !matches!(slot, EditorDocumentSlot::Scene(_)) {
-            return workspace_kind_error_report(
-                context,
-                document,
-                EditorDocumentKind::Scene,
-                slot.kind(),
-            );
-        }
         if slot.is_dirty() {
             return workspace_error_report(
                 context,
@@ -630,12 +701,12 @@ impl EditorWorkspace {
     /// This is Host plumbing rather than an author command. Product paths must present the
     /// Save/Discard/Cancel decision before invoking it.
     #[doc(hidden)]
-    pub fn __discard_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+    pub fn __discard_document(
+        &mut self,
+        document: EditorDocumentId,
+    ) -> EditorWorkspaceCommandReport {
         let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
-        if !matches!(
-            self.documents.get(&document),
-            Some(EditorDocumentSlot::Scene(_))
-        ) {
+        if !self.documents.contains_key(&document) {
             return workspace_document_error_report(context, document);
         }
         self.remove_document(document)
@@ -656,27 +727,8 @@ impl EditorWorkspace {
         }
     }
 
-    fn set_active_scene(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
-        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
-        let Some(slot) = self.documents.get(&document) else {
-            return workspace_document_error_report(context, document);
-        };
-        if slot.kind() != EditorDocumentKind::Scene {
-            return workspace_kind_error_report(
-                context,
-                document,
-                EditorDocumentKind::Scene,
-                slot.kind(),
-            );
-        }
-        self.active_document = Some(document);
-        EditorWorkspaceCommandReport {
-            applied: true,
-            document: Some(document),
-            active_document: self.active_document,
-            diagnostics: DiagnosticReport::default(),
-            ..EditorWorkspaceCommandReport::default()
-        }
+    fn set_active_document(&mut self, document: EditorDocumentId) -> EditorWorkspaceCommandReport {
+        self.activate_document(document)
     }
 
     fn select_entity(
@@ -686,23 +738,22 @@ impl EditorWorkspace {
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
         let context = WorkspaceDocumentContext::new(active_document, Some(document));
-        let slot = match self.scene_slot_mut(document) {
-            Ok(slot) => slot,
-            Err(report) => return report,
+        let Some(slot) = self.documents.get_mut(&document) else {
+            return workspace_document_error_report(context, document);
         };
         if let Some(entity) = &entity
-            && !document_has_entity(slot.session.document(), entity)
+            && !slot.has_entity(entity)
         {
             return workspace_entity_error_report(
                 context,
                 document,
                 "tooling.workspace-missing-entity",
-                "workspace selection targets an entity that is not in the scene document",
+                "workspace selection targets an entity that is not in the document",
                 entity,
             );
         }
-        slot.selection.select_entity(entity);
-        report_for_slot(document, active_document, slot)
+        slot.selection_mut().select_entity(entity);
+        report_for_document(document, active_document, slot)
     }
 
     fn apply_inspector_command(
@@ -713,7 +764,7 @@ impl EditorWorkspace {
         command: SceneInspectorCommand,
     ) -> EditorWorkspaceCommandReport {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_scene_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
@@ -738,12 +789,28 @@ impl EditorWorkspace {
         patch: ScenePatchDocument,
     ) -> EditorWorkspaceCommandReport {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_scene_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
         let patch_report = slot.session.apply_patch(&patch, registry);
         report_for_patch_slot(document, active_document, slot, patch_report)
+    }
+
+    fn apply_prefab_patch(
+        &mut self,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        patch: ScenePatchDocument,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_prefab_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let patch_report = slot.session.apply_patch(&patch, registry);
+        report_for_prefab_patch_slot(document, active_document, slot, patch_report)
     }
 
     fn apply_scene_composition(
@@ -754,7 +821,7 @@ impl EditorWorkspace {
         command: SceneCompositionCommand,
     ) -> EditorWorkspaceCommandReport {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_scene_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
@@ -809,12 +876,15 @@ impl EditorWorkspace {
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
-        let patch_report = slot.session.undo(registry);
-        report_for_patch_slot(document, active_document, slot, patch_report)
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.undo(registry),
+            EditorDocumentSlot::Prefab(slot) => slot.session.undo(registry),
+        };
+        report_for_document_patch(document, active_document, slot, patch_report)
     }
 
     fn redo(
@@ -824,15 +894,40 @@ impl EditorWorkspace {
         base_revision: SceneAuthoringRevision,
     ) -> EditorWorkspaceCommandReport {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_document_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
-        let patch_report = slot.session.redo(registry);
-        report_for_patch_slot(document, active_document, slot, patch_report)
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.redo(registry),
+            EditorDocumentSlot::Prefab(slot) => slot.session.redo(registry),
+        };
+        report_for_document_patch(document, active_document, slot, patch_report)
     }
 
-    fn resolve_exact_mutation_slot(
+    fn resolve_exact_document_mutation_slot(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<(Option<EditorDocumentId>, &mut EditorDocumentSlot), EditorWorkspaceCommandReport>
+    {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.documents.get_mut(&document) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if slot.revision() != base_revision {
+            return Err(workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision(),
+            ));
+        }
+        Ok((active_document, slot))
+    }
+
+    fn resolve_exact_scene_mutation_slot(
         &mut self,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
@@ -855,21 +950,40 @@ impl EditorWorkspace {
         Ok((active_document, slot))
     }
 
+    fn resolve_exact_prefab_mutation_slot(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<(Option<EditorDocumentId>, &mut EditorPrefabSlot), EditorWorkspaceCommandReport>
+    {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let slot = match self.prefab_slot_mut(document) {
+            Ok(slot) => slot,
+            Err(report) => return Err(report),
+        };
+        if slot.revision() != base_revision {
+            return Err(workspace_revision_error_report(
+                context,
+                document,
+                base_revision,
+                slot.revision(),
+            ));
+        }
+        Ok((active_document, slot))
+    }
+
     fn mark_external_changed(
         &mut self,
         document: EditorDocumentId,
     ) -> EditorWorkspaceCommandReport {
         let active_document = self.active_document;
-        let slot = match self.scene_slot_mut(document) {
-            Ok(slot) => slot,
-            Err(report) => return report,
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(slot) = self.documents.get_mut(&document) else {
+            return workspace_document_error_report(context, document);
         };
-        slot.external_reload = if slot.is_dirty() {
-            EditorExternalReloadState::Conflict
-        } else {
-            EditorExternalReloadState::Pending
-        };
-        report_for_slot(document, active_document, slot)
+        slot.mark_external_changed();
+        report_for_document(document, active_document, slot)
     }
 
     fn scene_slot_mut(
@@ -897,6 +1011,31 @@ impl EditorWorkspace {
         }
     }
 
+    fn prefab_slot_mut(
+        &mut self,
+        document: EditorDocumentId,
+    ) -> Result<&mut EditorPrefabSlot, EditorWorkspaceCommandReport> {
+        let active_document = self.active_document;
+        let context = WorkspaceDocumentContext::new(active_document, Some(document));
+        let Some(kind) = self.documents.get(&document).map(EditorDocumentSlot::kind) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if kind != EditorDocumentKind::Prefab {
+            return Err(workspace_kind_error_report(
+                context,
+                document,
+                EditorDocumentKind::Prefab,
+                kind,
+            ));
+        }
+        match self.documents.get_mut(&document) {
+            Some(EditorDocumentSlot::Prefab(slot)) => Ok(slot),
+            Some(EditorDocumentSlot::Scene(_)) | None => {
+                unreachable!("document kind changed while the workspace was mutably borrowed")
+            }
+        }
+    }
+
     pub fn reload_external_session(
         &mut self,
         document: EditorDocumentId,
@@ -904,7 +1043,7 @@ impl EditorWorkspace {
         session: SceneAuthoringSession,
     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_scene_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => {
                     return Err(EditorSceneSessionPublicationError::new(report, session));
@@ -966,7 +1105,7 @@ impl EditorWorkspace {
         digest: EditorDocumentDigest,
     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
         let (active_document, slot) =
-            match self.resolve_exact_mutation_slot(document, base_revision) {
+            match self.resolve_exact_scene_mutation_slot(document, base_revision) {
                 Ok(exact) => exact,
                 Err(report) => {
                     return Err(EditorSceneSessionPublicationError::new(report, session));
@@ -1515,6 +1654,18 @@ impl EditorSelectionSet {
             self.top_entity = self.entities.iter().next().cloned();
         }
     }
+
+    fn retain_existing_prefab(&mut self, document: &PrefabDocument) {
+        self.entities
+            .retain(|entity| prefab_has_entity(document, entity));
+        if self
+            .top_entity
+            .as_ref()
+            .is_some_and(|entity| !prefab_has_entity(document, entity))
+        {
+            self.top_entity = self.entities.iter().next().cloned();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1526,10 +1677,10 @@ pub enum EditorExternalReloadState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditorWorkspaceCommand {
-    CloseScene {
+    CloseDocument {
         document: EditorDocumentId,
     },
-    SetActiveScene {
+    SetActiveDocument {
         document: EditorDocumentId,
     },
     SelectEntity {
@@ -1542,6 +1693,11 @@ pub enum EditorWorkspaceCommand {
         command: SceneInspectorCommand,
     },
     ApplyScenePatch {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        patch: ScenePatchDocument,
+    },
+    ApplyPrefabPatch {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
@@ -1676,7 +1832,15 @@ pub struct EditorDocumentTabModel {
 }
 
 impl EditorWorkspaceModel {
-    /// Returns the exact tab facts for an open document in this model generation.
+    /// Returns the exact facts for an open document in this model generation.
+    #[must_use]
+    pub fn document(&self, document: EditorDocumentId) -> Option<&EditorDocumentTabModel> {
+        self.documents
+            .iter()
+            .find(|candidate| candidate.document == document)
+    }
+
+    /// Returns the exact Scene tab facts for an open document in this model generation.
     #[must_use]
     pub fn scene(&self, document: EditorDocumentId) -> Option<&EditorSceneTabModel> {
         self.scenes.iter().find(|scene| scene.document == document)
@@ -1749,6 +1913,50 @@ fn report_for_patch_slot(
     let applied = patch_report.applied;
     let diagnostics = patch_report.diagnostics.clone();
     let mut report = report_for_slot(document, active_document, slot);
+    report.applied = applied;
+    report.patch_report = Some(patch_report);
+    let _ = report.diagnostics.extend(diagnostics);
+    report
+}
+
+fn report_for_prefab_patch_slot(
+    document: EditorDocumentId,
+    active_document: Option<EditorDocumentId>,
+    slot: &mut EditorPrefabSlot,
+    patch_report: ScenePatchReport,
+) -> EditorWorkspaceCommandReport {
+    if patch_report.applied {
+        slot.selection
+            .retain_existing_prefab(slot.session.document());
+    }
+    let applied = patch_report.applied;
+    let diagnostics = patch_report.diagnostics.clone();
+    let mut report = EditorWorkspaceCommandReport {
+        applied,
+        document: Some(document),
+        active_document,
+        dirty: Some(slot.is_dirty()),
+        revision: Some(slot.revision()),
+        patch_report: Some(patch_report),
+        diagnostics: DiagnosticReport::default(),
+        ..EditorWorkspaceCommandReport::default()
+    };
+    let _ = report.diagnostics.extend(diagnostics);
+    report
+}
+
+fn report_for_document_patch(
+    document: EditorDocumentId,
+    active_document: Option<EditorDocumentId>,
+    slot: &mut EditorDocumentSlot,
+    patch_report: ScenePatchReport,
+) -> EditorWorkspaceCommandReport {
+    if patch_report.applied {
+        slot.retain_existing_selection();
+    }
+    let applied = patch_report.applied;
+    let diagnostics = patch_report.diagnostics.clone();
+    let mut report = report_for_document(document, active_document, slot);
     report.applied = applied;
     report.patch_report = Some(patch_report);
     let _ = report.diagnostics.extend(diagnostics);
@@ -1912,13 +2120,21 @@ fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool
     document.entities.iter().any(|record| record.id == *entity)
 }
 
+fn prefab_has_entity(document: &PrefabDocument, entity: &SceneEntityId) -> bool {
+    document.entities.iter().any(|record| record.id == *entity)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use nara_diagnostic::DiagnosticValueRef;
-    use nara_reflect::{ComponentRegistry, ComponentTypeId};
+    use nara_reflect::{
+        ComponentFieldId, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue,
+    };
     use nara_scene::{
-        PrefabDocument, SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        PrefabDocument, SceneComponentRecord, SceneEntityRecord, ScenePatchOperation,
+        ScenePlacement, ScenePlacementOwner,
     };
 
     use crate::{SceneCompositionComponentKind, SceneCompositionEntityKind};
@@ -2155,8 +2371,10 @@ mod tests {
         );
         assert!(edited.applied);
 
-        let close =
-            workspace.apply_command(&registry, EditorWorkspaceCommand::CloseScene { document });
+        let close = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::CloseDocument { document },
+        );
         assert!(!close.applied);
         assert_eq!(workspace.len(), 1);
         assert_eq!(workspace.active_document(), Some(document));
@@ -2165,7 +2383,7 @@ mod tests {
             "tooling.workspace-dirty-close-decision-required"
         );
 
-        let discarded = workspace.__discard_scene(document);
+        let discarded = workspace.__discard_document(document);
         assert!(discarded.applied);
         assert!(workspace.is_empty());
     }
@@ -2332,7 +2550,7 @@ mod tests {
     }
 
     #[test]
-    fn scene_and_prefab_slots_are_kind_isolated_in_one_workspace_document_map() {
+    fn scene_and_prefab_slots_keep_selection_and_identity_isolated() {
         let mut workspace = EditorWorkspace::new();
         let registry = frozen_empty_registry();
         let shared_id = entity_id("retry");
@@ -2358,19 +2576,30 @@ mod tests {
         assert_eq!(workspace.len(), 2);
         assert_eq!(workspace.model(&registry, None).documents.len(), 2);
 
-        let report = workspace.apply_command(
+        let scene_selection = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::SelectEntity {
+                document: scene,
+                entity: Some(shared_id.clone()),
+            },
+        );
+        let prefab_selection = workspace.apply_command(
             &registry,
             EditorWorkspaceCommand::SelectEntity {
                 document: prefab,
-                entity: Some(shared_id),
+                entity: Some(shared_id.clone()),
             },
         );
-        assert!(!report.applied);
+        assert!(scene_selection.applied);
+        assert!(prefab_selection.applied);
         assert_eq!(
-            report.diagnostics.iter().next().unwrap().code().as_str(),
-            "tooling.workspace-document-kind-mismatch"
+            workspace.scene(scene).unwrap().selection().top_entity(),
+            Some(&shared_id)
         );
-        assert!(workspace.prefab(prefab).unwrap().selection().is_empty());
+        assert_eq!(
+            workspace.prefab(prefab).unwrap().selection().top_entity(),
+            Some(&shared_id)
+        );
 
         let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
         let prefab = workspace
@@ -2388,7 +2617,108 @@ mod tests {
             checkpoint.source_binding().unwrap().locator(),
             "prefabs/reference-ui.prefab.json"
         );
-        assert!(checkpoint.prefab().roots.is_empty());
+        assert!(checkpoint.prefab().unwrap().roots.is_empty());
+    }
+
+    #[test]
+    fn prefab_patch_history_is_exact_and_scene_commands_remain_kind_bound() {
+        let mut workspace = EditorWorkspace::new();
+        let registry = composition_registry();
+        let prefab = workspace
+            .open_prefab_session(
+                "ui",
+                EditorDocumentSourceBinding::new("reference-ui.prefab.json"),
+                PrefabAuthoringSession::new(PrefabDocument::from_ordered_roots([
+                    SceneEntityRecord::new(entity_id("retry")).with_component(
+                        ComponentTypeId::new("nara.transform.Transform2d"),
+                        SceneComponentRecord::new(
+                            ComponentSchemaVersion::ONE,
+                            transform_value(0.0, 0.0),
+                        ),
+                    ),
+                ])),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let saved_revision = workspace.prefab(prefab).unwrap().revision();
+
+        let applied = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyPrefabPatch {
+                document: prefab,
+                base_revision: saved_revision,
+                patch: set_transform_x_patch("retry", 12.0),
+            },
+        );
+        assert!(applied.applied, "{:?}", applied.diagnostics);
+        let accepted_revision = workspace.prefab(prefab).unwrap().revision();
+        assert!(workspace.prefab(prefab).unwrap().is_dirty());
+
+        let scene_only = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document: prefab,
+                base_revision: accepted_revision,
+                patch: set_transform_x_patch("retry", 24.0),
+            },
+        );
+        assert!(!scene_only.applied);
+        assert_eq!(
+            scene_only
+                .diagnostics
+                .iter()
+                .next()
+                .unwrap()
+                .code()
+                .as_str(),
+            "tooling.workspace-document-kind-mismatch"
+        );
+
+        let stale = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ApplyPrefabPatch {
+                document: prefab,
+                base_revision: saved_revision,
+                patch: set_transform_x_patch("retry", 36.0),
+            },
+        );
+        assert!(!stale.applied);
+        assert_eq!(
+            stale.diagnostics.iter().next().unwrap().code().as_str(),
+            "tooling.workspace-stale-document-revision"
+        );
+
+        let undo = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::Undo {
+                document: prefab,
+                base_revision: accepted_revision,
+            },
+        );
+        assert!(undo.applied);
+        assert!(!workspace.prefab(prefab).unwrap().is_dirty());
+
+        let undo_revision = workspace.prefab(prefab).unwrap().revision();
+        let redo = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::Redo {
+                document: prefab,
+                base_revision: undo_revision,
+            },
+        );
+        assert!(redo.applied);
+        assert!(workspace.prefab(prefab).unwrap().is_dirty());
+        assert_eq!(
+            workspace
+                .prefab(prefab)
+                .unwrap()
+                .session()
+                .document()
+                .roots
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -2564,7 +2894,7 @@ mod tests {
         );
         workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::SetActiveScene { document: active },
+            EditorWorkspaceCommand::SetActiveDocument { document: active },
         );
 
         let report = workspace.apply_command(
@@ -2619,7 +2949,7 @@ mod tests {
         );
         workspace.apply_command(
             &registry,
-            EditorWorkspaceCommand::SetActiveScene { document: first },
+            EditorWorkspaceCommand::SetActiveDocument { document: first },
         );
 
         let stale = workspace.apply_command(
@@ -2992,6 +3322,36 @@ mod tests {
             entity: SceneEntityRecord::new(entity_id(id)),
             placement: ScenePlacement::last(ScenePlacementOwner::Root),
         }])
+    }
+
+    fn set_transform_x_patch(entity: &str, value: f64) -> ScenePatchDocument {
+        ScenePatchDocument::new([ScenePatchOperation::SetField {
+            entity: entity_id(entity),
+            component: ComponentTypeId::new("nara.transform.Transform2d"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("translation.x"),
+            value: ComponentValue::f64(value).unwrap(),
+        }])
+    }
+
+    fn transform_value(x: f64, y: f64) -> ComponentValue {
+        ComponentValue::map([
+            (
+                "translation",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(x).unwrap()),
+                    ("y", ComponentValue::f64(y).unwrap()),
+                ]),
+            ),
+            ("rotation", ComponentValue::f64(0.0).unwrap()),
+            (
+                "scale",
+                ComponentValue::map([
+                    ("x", ComponentValue::f64(1.0).unwrap()),
+                    ("y", ComponentValue::f64(1.0).unwrap()),
+                ]),
+            ),
+        ])
     }
 
     fn entity_id(id: &str) -> SceneEntityId {

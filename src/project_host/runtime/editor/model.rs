@@ -64,13 +64,14 @@ impl EditorProjectSession {
             .model(self.plan.schema_validation().registry(), preview_world);
         let project = self.editor_project_view();
         let diagnostics = self.diagnostics.clone();
-        let reopen_target = match workspace.scene(self.source_document) {
-            Some(scene) => EditorReopenTarget::OpenDocument {
-                document: self.source_document,
-                base_revision: scene.revision,
+        let reopen_document = workspace.active_document.unwrap_or(self.source_document);
+        let reopen_target = match workspace.document(reopen_document) {
+            Some(document) => EditorReopenTarget::OpenDocument {
+                document: reopen_document,
+                base_revision: document.revision,
             },
             None => EditorReopenTarget::ClosedSource {
-                document: self.source_document,
+                document: reopen_document,
             },
         };
         let frame = Arc::new(self.frame_clock.publish(

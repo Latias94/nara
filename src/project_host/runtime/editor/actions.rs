@@ -137,15 +137,29 @@ impl EditorProjectSession {
         frame: &EditorFrameModel,
         action: EditorNavigationAction,
     ) -> EditorActionOutcome {
+        if let EditorNavigationAction::OpenPrefabSource {
+            document,
+            base_revision,
+            entity,
+        } = action
+        {
+            if let Err(rejection) = self.verify_document_fact(frame, document, base_revision) {
+                return EditorActionOutcome::Rejected(rejection);
+            }
+            let report = self.open_prefab_source(document, base_revision, &entity);
+            let _ = self.diagnostics.extend(report.diagnostics.clone());
+            return EditorActionOutcome::Workspace(report);
+        }
         let document = action.document();
-        if frame.workspace().scene(document).is_none() {
+        if frame.workspace().document(document).is_none() {
             return EditorActionOutcome::Rejected(EditorActionRejection::DocumentNotInFrame {
                 document,
             });
         }
         let command = match action {
-            EditorNavigationAction::SetActiveScene { document } => {
-                EditorWorkspaceCommand::SetActiveScene { document }
+            EditorNavigationAction::OpenPrefabSource { .. } => unreachable!(),
+            EditorNavigationAction::SetActiveDocument { document } => {
+                EditorWorkspaceCommand::SetActiveDocument { document }
             }
             EditorNavigationAction::SelectEntity { document, entity } => {
                 EditorWorkspaceCommand::SelectEntity { document, entity }
@@ -247,6 +261,15 @@ impl EditorProjectSession {
                 base_revision,
                 patch,
             },
+            EditorDocumentMutation::ApplyPrefabPatch {
+                document,
+                base_revision,
+                patch,
+            } => EditorWorkspaceCommand::ApplyPrefabPatch {
+                document,
+                base_revision,
+                patch,
+            },
             EditorDocumentMutation::ComposeScene {
                 document,
                 base_revision,
@@ -314,7 +337,7 @@ impl EditorProjectSession {
                         document
                     }
                     EditorReopenTarget::ClosedSource { document } => {
-                        if self.workspace.scene(document).is_some() {
+                        if self.workspace.document_kind(document).is_some() {
                             return EditorActionOutcome::Rejected(
                                 EditorActionRejection::InvalidReopenTarget,
                             );
@@ -341,8 +364,8 @@ impl EditorProjectSession {
     ) -> EditorActionOutcome {
         match action {
             EditorWorkspaceIntentAction::Request(intent) => {
-                if let EditorWorkspaceIntent::CloseScene { document } = intent
-                    && frame.workspace().scene(document).is_none()
+                if let EditorWorkspaceIntent::CloseDocument { document } = intent
+                    && frame.workspace().document(document).is_none()
                 {
                     return EditorActionOutcome::Rejected(
                         EditorActionRejection::DocumentNotInFrame { document },
@@ -399,17 +422,17 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         expected: SceneAuthoringRevision,
     ) -> Result<(), EditorActionRejection> {
-        let Some(frame_scene) = frame.workspace().scene(document) else {
+        let Some(frame_document) = frame.workspace().document(document) else {
             return Err(EditorActionRejection::DocumentNotInFrame { document });
         };
-        if frame_scene.revision != expected {
+        if frame_document.revision != expected {
             return Err(EditorActionRejection::StaleDocumentFact {
                 document,
                 expected,
-                actual: Some(frame_scene.revision),
+                actual: Some(frame_document.revision),
             });
         }
-        let actual = self.workspace.scene(document).map(|scene| scene.revision());
+        let actual = self.workspace.document_revision(document);
         if actual != Some(expected) {
             return Err(EditorActionRejection::StaleDocumentFact {
                 document,

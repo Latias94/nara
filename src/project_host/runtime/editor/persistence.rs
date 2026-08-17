@@ -1,6 +1,140 @@
 use super::*;
 
+use nara_asset::AssetRef;
+use nara_scene::SceneEntityId;
+use nara_tooling::EditorDocumentSourceBinding;
+
+use crate::project_host::persistence::{
+    OpenedPrefabPersistence, OpenedPrefabReopen, PersistenceSaveOutcome, PrefabReopenOutcome,
+    PrefabSaveCandidate,
+};
+
 impl EditorProjectSession {
+    /// Opens or activates the one path-bound Prefab lane owned by this Editor session.
+    #[doc(hidden)]
+    pub(super) fn open_prefab_source(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: nara_scene::SceneAuthoringRevision,
+        entity: &SceneEntityId,
+    ) -> EditorWorkspaceCommandReport {
+        let source_binding = match self.prefab_source_binding(document, base_revision, entity) {
+            Ok(source_binding) => source_binding,
+            Err(code) => {
+                return editor_workspace_command_rejected(self.workspace.active_document(), code);
+            }
+        };
+        if !cfg!(feature = "runtime-ui") {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.ui-authoring-unavailable",
+            );
+        }
+        if let Some(document) = self.workspace.document_for_source_binding(&source_binding) {
+            return self.workspace.activate_document(document);
+        }
+        if self.prefab_persistence.is_some() {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-replacement-requires-close",
+            );
+        }
+        let opened = PrefabPersistenceHost::open(
+            &self.prefab_root,
+            source_binding.clone(),
+            self.plan.schema_validation().registry(),
+        );
+        let OpenedPrefabPersistence {
+            host,
+            session,
+            digest,
+        } = match opened {
+            Ok(opened) => opened,
+            Err(stage) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    prefab_open_failure_code(stage),
+                );
+            }
+        };
+        if !prefab_contains_ui_root(session.document()) {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-source-not-ui",
+            );
+        }
+        let title = source_binding.locator().to_owned();
+        let report = match self
+            .workspace
+            .open_prefab_session(title, source_binding, session)
+        {
+            Ok(report) => report,
+            Err(_) => {
+                return editor_workspace_command_rejected(
+                    self.workspace.active_document(),
+                    "project.editor.prefab-publication-failed",
+                );
+            }
+        };
+        let document = report
+            .opened_document
+            .expect("opening a Prefab source publishes one document identity");
+        let binding = self.persistence_authority.bind_opened_source_digest(
+            &mut self.workspace,
+            document,
+            digest,
+        );
+        if !binding.applied {
+            return editor_workspace_command_rejected(
+                self.workspace.active_document(),
+                "project.editor.prefab-persistence-binding-failed",
+            );
+        }
+        self.prefab_persistence = Some(host);
+        report
+    }
+
+    fn prefab_source_binding(
+        &self,
+        document: EditorDocumentId,
+        base_revision: nara_scene::SceneAuthoringRevision,
+        entity: &SceneEntityId,
+    ) -> Result<EditorDocumentSourceBinding, &'static str> {
+        let scene = self
+            .workspace
+            .scene(document)
+            .ok_or("project.editor.prefab-source-requires-scene")?;
+        if scene.revision() != base_revision {
+            return Err("project.editor.prefab-source-stale-scene");
+        }
+        if scene.selection().top_entity() != Some(entity) {
+            return Err("project.editor.prefab-source-not-selected");
+        }
+        let record = scene
+            .session()
+            .document()
+            .entities
+            .iter()
+            .find(|record| &record.id == entity)
+            .ok_or("project.editor.prefab-source-entity-missing")?;
+        let instance = record
+            .prefab
+            .as_ref()
+            .ok_or("project.editor.prefab-source-not-an-anchor")?;
+        let AssetRef::Path(source) = &instance.source else {
+            return Err("project.editor.prefab-source-stable-id-unsupported");
+        };
+        if !self
+            .snapshot
+            .prefabs()
+            .iter()
+            .any(|prefab| prefab.path() == source)
+        {
+            return Err("project.editor.prefab-source-outside-content-closure");
+        }
+        Ok(EditorDocumentSourceBinding::new(source.as_str().to_owned()))
+    }
+
     #[cfg(test)]
     pub(crate) fn test_reject_next_valid_persistence_receipt(&mut self) {
         self.persistence.test_reject_next_valid_receipt();
@@ -104,7 +238,7 @@ impl EditorProjectSession {
 
         match command {
             EditorPersistenceCommand::Save { .. } => {
-                let Some(slot) = self.workspace.scene(requested_document) else {
+                let Some(kind) = self.workspace.document_kind(requested_document) else {
                     self.persistence_result = Some(EditorPersistenceResult::Rejected {
                         request: EditorPersistenceRequestKind::Save,
                         document: Some(requested_document),
@@ -114,7 +248,11 @@ impl EditorProjectSession {
                         EditorPersistenceRejection::MissingDocument,
                     );
                 };
-                if !slot.is_dirty() {
+                if !self
+                    .workspace
+                    .document_is_dirty(requested_document)
+                    .unwrap_or(false)
+                {
                     self.persistence_result = Some(EditorPersistenceResult::Rejected {
                         request: EditorPersistenceRequestKind::Save,
                         document: Some(requested_document),
@@ -138,18 +276,33 @@ impl EditorProjectSession {
                     );
                 };
                 let revision = checkpoint.revision();
-                self.pending_persistence =
-                    Some(PendingPersistence::Save(SceneSaveCandidate { checkpoint }));
+                self.pending_persistence = Some(PendingPersistence::Save(match kind {
+                    EditorDocumentKind::Scene => {
+                        PendingSave::Scene(SceneSaveCandidate { checkpoint })
+                    }
+                    EditorDocumentKind::Prefab => {
+                        PendingSave::Prefab(PrefabSaveCandidate { checkpoint })
+                    }
+                }));
                 self.persistence_operation = EditorPersistenceOperation::Saving {
                     document: requested_document,
                     captured_revision: revision,
                 };
             }
             EditorPersistenceCommand::Reopen { .. } => {
-                let base_revision = self
-                    .workspace
-                    .scene(requested_document)
-                    .map(|slot| slot.revision());
+                let base_revision =
+                    self.workspace
+                        .document_kind(requested_document)
+                        .and_then(|kind| match kind {
+                            EditorDocumentKind::Scene => self
+                                .workspace
+                                .scene(requested_document)
+                                .map(|slot| slot.revision()),
+                            EditorDocumentKind::Prefab => self
+                                .workspace
+                                .prefab(requested_document)
+                                .map(|slot| slot.revision()),
+                        });
                 self.pending_persistence = Some(PendingPersistence::Reopen {
                     document: requested_document,
                     base_revision,
@@ -200,15 +353,35 @@ impl EditorProjectSession {
         }
     }
 
-    pub(super) fn complete_save(&mut self, save: SceneSaveCandidate) -> EditorPersistenceResult {
-        let document = save.checkpoint.document();
-        match self.persistence.save(save) {
-            SceneSaveOutcome::Saved { commit, evidence } => {
+    pub(super) fn complete_save(&mut self, save: PendingSave) -> EditorPersistenceResult {
+        let (lane, document, outcome) = match save {
+            PendingSave::Scene(save) => {
+                let document = save.checkpoint.document();
+                (
+                    PersistenceLane::Scene,
+                    document,
+                    self.persistence.save(save),
+                )
+            }
+            PendingSave::Prefab(save) => {
+                let document = save.checkpoint.document();
+                let Some(host) = self.prefab_persistence.as_mut() else {
+                    return EditorPersistenceResult::Failed {
+                        request: EditorPersistenceRequestKind::Save,
+                        document: Some(document),
+                        stage: EditorPersistenceFailureStage::OpenTarget,
+                    };
+                };
+                (PersistenceLane::Prefab, document, host.save(save))
+            }
+        };
+        match outcome {
+            PersistenceSaveOutcome::Saved { commit, evidence } => {
                 let report = self
                     .persistence_authority
                     .commit(&mut self.workspace, commit);
                 if !report.applied {
-                    self.persistence.mark_uncertain();
+                    self.mark_persistence_uncertain(lane);
                     self.last_persistence_receipt = Some(evidence);
                     return EditorPersistenceResult::PersistenceUncertain {
                         document: evidence.document(),
@@ -223,17 +396,17 @@ impl EditorProjectSession {
                     digest: evidence.digest(),
                 }
             }
-            SceneSaveOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
+            PersistenceSaveOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
                 request: EditorPersistenceRequestKind::Save,
                 document: Some(document),
                 reason,
             },
-            SceneSaveOutcome::Failed(stage) => EditorPersistenceResult::Failed {
+            PersistenceSaveOutcome::Failed(stage) => EditorPersistenceResult::Failed {
                 request: EditorPersistenceRequestKind::Save,
                 document: Some(document),
                 stage,
             },
-            SceneSaveOutcome::PersistenceUncertain { evidence } => {
+            PersistenceSaveOutcome::PersistenceUncertain { evidence } => {
                 self.last_persistence_receipt = Some(evidence);
                 EditorPersistenceResult::PersistenceUncertain {
                     document: evidence.document(),
@@ -244,7 +417,29 @@ impl EditorProjectSession {
         }
     }
 
+    fn mark_persistence_uncertain(&mut self, lane: PersistenceLane) {
+        match lane {
+            PersistenceLane::Scene => self.persistence.mark_uncertain(),
+            PersistenceLane::Prefab => {
+                if let Some(host) = self.prefab_persistence.as_mut() {
+                    host.mark_uncertain();
+                }
+            }
+        }
+    }
+
     pub(super) fn complete_reopen(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: Option<nara_scene::SceneAuthoringRevision>,
+    ) -> EditorPersistenceResult {
+        if self.workspace.document_kind(document) == Some(EditorDocumentKind::Prefab) {
+            return self.complete_prefab_reopen(document, base_revision);
+        }
+        self.complete_scene_reopen(document, base_revision)
+    }
+
+    fn complete_scene_reopen(
         &mut self,
         document: EditorDocumentId,
         base_revision: Option<nara_scene::SceneAuthoringRevision>,
@@ -335,6 +530,113 @@ impl EditorProjectSession {
                 document: Some(document),
                 stage,
             },
+        }
+    }
+
+    fn complete_prefab_reopen(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: Option<nara_scene::SceneAuthoringRevision>,
+    ) -> EditorPersistenceResult {
+        let Some(host) = self.prefab_persistence.as_ref() else {
+            return EditorPersistenceResult::Failed {
+                request: EditorPersistenceRequestKind::Reopen,
+                document: Some(document),
+                stage: EditorPersistenceFailureStage::OpenTarget,
+            };
+        };
+        let Some(base_revision) = base_revision else {
+            return EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Reopen,
+                document: Some(document),
+                reason: EditorPersistenceRejection::MissingDocument,
+            };
+        };
+        let source_binding = match self.workspace.prefab(document) {
+            Some(slot) => slot.source_binding().clone(),
+            None => {
+                return EditorPersistenceResult::Rejected {
+                    request: EditorPersistenceRequestKind::Reopen,
+                    document: Some(document),
+                    reason: EditorPersistenceRejection::MissingDocument,
+                };
+            }
+        };
+        match host.reopen(self.plan.schema_validation().registry()) {
+            PrefabReopenOutcome::Opened(opened) => {
+                let OpenedPrefabReopen {
+                    session,
+                    digest,
+                    identity,
+                    content_digest,
+                } = *opened;
+                let report = match self.persistence_authority.publish_reopened_prefab_session(
+                    &mut self.workspace,
+                    document,
+                    base_revision,
+                    source_binding,
+                    session,
+                    digest,
+                ) {
+                    Ok(report) => report,
+                    Err(_) => {
+                        return EditorPersistenceResult::Rejected {
+                            request: EditorPersistenceRequestKind::Reopen,
+                            document: Some(document),
+                            reason: EditorPersistenceRejection::StaleRevision,
+                        };
+                    }
+                };
+                let revision = report
+                    .revision
+                    .expect("a reopened Prefab reports its authoring revision");
+                if let Some(host) = self.prefab_persistence.as_mut() {
+                    host.commit_reopen(identity, content_digest);
+                }
+                EditorPersistenceResult::Opened {
+                    document,
+                    revision,
+                    digest,
+                }
+            }
+            PrefabReopenOutcome::Rejected(reason) => EditorPersistenceResult::Rejected {
+                request: EditorPersistenceRequestKind::Reopen,
+                document: Some(document),
+                reason,
+            },
+            PrefabReopenOutcome::Failed(stage) => EditorPersistenceResult::Failed {
+                request: EditorPersistenceRequestKind::Reopen,
+                document: Some(document),
+                stage,
+            },
+        }
+    }
+}
+
+fn prefab_contains_ui_root(document: &nara_scene::PrefabDocument) -> bool {
+    #[cfg(feature = "runtime-ui")]
+    {
+        return nara_ui::__private::prefab_contains_ui_root(document);
+    }
+    #[cfg(not(feature = "runtime-ui"))]
+    {
+        let _ = document;
+        false
+    }
+}
+
+fn prefab_open_failure_code(stage: EditorPersistenceFailureStage) -> &'static str {
+    match stage {
+        EditorPersistenceFailureStage::OpenTarget => "project.editor.prefab-open-failed",
+        EditorPersistenceFailureStage::ReadTarget => "project.editor.prefab-read-failed",
+        EditorPersistenceFailureStage::Decode => "project.editor.prefab-decode-failed",
+        EditorPersistenceFailureStage::Validate => "project.editor.prefab-validation-failed",
+        EditorPersistenceFailureStage::Encode
+        | EditorPersistenceFailureStage::CreateTemporary
+        | EditorPersistenceFailureStage::WriteTemporary
+        | EditorPersistenceFailureStage::SyncTemporary
+        | EditorPersistenceFailureStage::ReplaceTarget => {
+            "project.editor.prefab-open-internal-failed"
         }
     }
 }

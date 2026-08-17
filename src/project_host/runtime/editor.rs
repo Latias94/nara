@@ -35,17 +35,17 @@ use nara_reflect::{
 use nara_render::Extent2d;
 use nara_scene::SceneEntitySource;
 use nara_tooling::{
-    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorFieldFeedback,
-    EditorFrameClock, EditorFrameModel, EditorPersistenceAuthority, EditorPersistenceCommand,
-    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
-    EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
-    EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-    EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
-    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
-    EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
-    EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
-    SceneApplyChangesRequest,
+    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorDocumentKind,
+    EditorFieldFeedback, EditorFrameClock, EditorFrameModel, EditorPersistenceAuthority,
+    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
+    EditorPlayState, EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
+    EditorRuntimeEditResult, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
+    EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
+    EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
+    SceneApplyChangesComponentStatus, SceneApplyChangesRequest,
 };
 use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
@@ -61,8 +61,8 @@ use super::{
     runtime_plan_selected_report, single_error,
 };
 use crate::project_host::persistence::{
-    EditorPersistenceReceipt, OpenedSceneReopen, ScenePersistenceHost, SceneReopenOutcome,
-    SceneSaveCandidate, SceneSaveOutcome,
+    EditorPersistenceReceipt, OpenedSceneReopen, PrefabPersistenceHost, ScenePersistenceHost,
+    SceneReopenOutcome, SceneSaveCandidate,
 };
 
 const EDITOR_RUNTIME_BRIDGE_PLUGIN_ID: PluginId = PluginId::new("nara.editor-runtime-bridge");
@@ -373,11 +373,22 @@ impl fmt::Display for EditorProjectOpenError {
 impl std::error::Error for EditorProjectOpenError {}
 
 enum PendingPersistence {
-    Save(SceneSaveCandidate),
+    Save(PendingSave),
     Reopen {
         document: EditorDocumentId,
         base_revision: Option<nara_scene::SceneAuthoringRevision>,
     },
+}
+
+enum PendingSave {
+    Scene(SceneSaveCandidate),
+    Prefab(crate::project_host::persistence::PrefabSaveCandidate),
+}
+
+#[derive(Clone, Copy)]
+enum PersistenceLane {
+    Scene,
+    Prefab,
 }
 
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -445,6 +456,24 @@ enum EditorRuntimeOwnerState {
     Transitioning,
 }
 
+impl EditorRuntimeOwnerState {
+    fn document(&self) -> Option<EditorDocumentId> {
+        match self {
+            Self::Preparing { document, .. }
+            | Self::Starting { document, .. }
+            | Self::Active { document, .. } => Some(*document),
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            Self::AwaitingGameTarget { document, .. }
+            | Self::CommittingGameTarget { document, .. } => Some(*document),
+            Self::Empty
+            | Self::CancellingStart { .. }
+            | Self::RetiringPlay { .. }
+            | Self::RetirementIncomplete { .. }
+            | Self::Transitioning => None,
+        }
+    }
+}
+
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum EditorStepPresentationState {
@@ -494,11 +523,13 @@ pub struct EditorProjectSession {
     source_document: EditorDocumentId,
     plan: RuntimePlan,
     snapshot: crate::project_host::ProjectContentSnapshot,
+    prefab_root: DirectoryCapability,
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
     #[cfg(feature = "presentation-2d")]
     preview: preview::EditorPreviewSession,
     persistence: ScenePersistenceHost,
+    prefab_persistence: Option<PrefabPersistenceHost>,
     persistence_operation: EditorPersistenceOperation,
     pending_persistence: Option<PendingPersistence>,
     persistence_result: Option<EditorPersistenceResult>,
@@ -590,6 +621,12 @@ impl EditorProjectSession {
             }
         })?;
 
+        let prefabs_path = RelativePath::new(candidate.settings().paths.prefabs.as_str())
+            .map_err(|_| editor_open_error("project.editor.prefabs-path-invalid"))?;
+        let prefab_root = project_root
+            .open_directory(&prefabs_path)
+            .map_err(|_| editor_open_error("project.editor.prefabs-open-failed"))?;
+
         let loader = ProjectContentLoader::new(project_root.share()).map_err(|error| {
             EditorProjectOpenError {
                 diagnostics: error.diagnostics().clone(),
@@ -653,11 +690,13 @@ impl EditorProjectSession {
             source_document: document,
             plan,
             snapshot,
+            prefab_root,
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             game_view_config,
             #[cfg(feature = "presentation-2d")]
             preview,
             persistence: opened.host,
+            prefab_persistence: None,
             persistence_operation: EditorPersistenceOperation::Idle,
             pending_persistence: None,
             persistence_result: None,
@@ -1193,7 +1232,7 @@ impl EditorProjectSession {
         &mut self,
         command: EditorWorkspaceCommand,
     ) -> EditorWorkspaceCommandReport {
-        if matches!(command, EditorWorkspaceCommand::CloseScene { .. }) {
+        if matches!(command, EditorWorkspaceCommand::CloseDocument { .. }) {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
                 "project.editor.close-requires-workspace-intent",
@@ -1225,7 +1264,7 @@ impl EditorProjectSession {
         }
 
         let document = match intent {
-            EditorWorkspaceIntent::CloseScene { document } => document,
+            EditorWorkspaceIntent::CloseDocument { document } => document,
             EditorWorkspaceIntent::Exit => {
                 let Some(document) = self.workspace.active_document() else {
                     self.workspace_intent_result =
@@ -1235,7 +1274,7 @@ impl EditorProjectSession {
                 document
             }
         };
-        let Some(slot) = self.workspace.scene(document) else {
+        let Some(dirty) = self.workspace.document_is_dirty(document) else {
             let reason = if self.workspace.active_document().is_some() {
                 EditorWorkspaceIntentRejection::MissingDocument
             } else {
@@ -1245,7 +1284,7 @@ impl EditorProjectSession {
                 Some(EditorWorkspaceIntentResult::Rejected { intent, reason });
             return EditorWorkspaceIntentRequestResult::Rejected(reason);
         };
-        let phase = if slot.is_dirty() {
+        let phase = if dirty {
             EditorWorkspaceIntentPhase::AwaitingDecision
         } else {
             EditorWorkspaceIntentPhase::RetiringRuntime
@@ -1468,6 +1507,14 @@ impl EditorProjectSession {
         if pending.phase != EditorWorkspaceIntentPhase::RetiringRuntime {
             return;
         }
+        if self
+            .runtime_owner
+            .document()
+            .is_some_and(|document| document != pending.document)
+        {
+            self.finish_workspace_intent(pending);
+            return;
+        }
 
         match &self.runtime_owner {
             EditorRuntimeOwnerState::Empty => {
@@ -1544,8 +1591,35 @@ impl EditorProjectSession {
     }
 
     fn finish_workspace_intent(&mut self, pending: PendingWorkspaceIntent) {
-        let report = self.workspace.__discard_scene(pending.document);
+        let closing_prefab =
+            self.workspace.document_kind(pending.document) == Some(EditorDocumentKind::Prefab);
+        let report = self.workspace.__discard_document(pending.document);
+        if report.applied && closing_prefab {
+            self.prefab_persistence = None;
+        }
         let _ = self.diagnostics.extend(report.diagnostics);
+        if report.applied && pending.intent == EditorWorkspaceIntent::Exit {
+            if matches!(
+                self.persistence_result,
+                Some(EditorPersistenceResult::Saved { document, .. })
+                    if document == pending.document
+            ) {
+                self.persistence_result = None;
+            }
+            if let Some(document) = self.workspace.active_document() {
+                let phase = if self.workspace.document_is_dirty(document).unwrap_or(false) {
+                    EditorWorkspaceIntentPhase::AwaitingDecision
+                } else {
+                    EditorWorkspaceIntentPhase::RetiringRuntime
+                };
+                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
+                    intent: pending.intent,
+                    document,
+                    phase,
+                });
+                return;
+            }
+        }
         self.pending_workspace_intent = None;
         self.workspace_intent_result = Some(if report.applied {
             EditorWorkspaceIntentResult::Applied {

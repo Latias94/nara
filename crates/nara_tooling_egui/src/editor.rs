@@ -655,7 +655,7 @@ fn render_dirty_close_dialog(
         return;
     }
     let save_document = match frame.workspace_intent().intent() {
-        Some(EditorWorkspaceIntent::CloseScene { document }) => Some(document),
+        Some(EditorWorkspaceIntent::CloseDocument { document }) => Some(document),
         Some(EditorWorkspaceIntent::Exit) => frame.workspace().active_document,
         None => None,
     };
@@ -752,19 +752,20 @@ fn workspace_intent_label(
 ) -> &'static str {
     match (intent, phase) {
         (
-            EditorWorkspaceIntent::CloseScene { .. },
+            EditorWorkspaceIntent::CloseDocument { .. },
             EditorWorkspaceIntentPhase::AwaitingDecision,
         ) => "Close waiting for a decision",
         (EditorWorkspaceIntent::Exit, EditorWorkspaceIntentPhase::AwaitingDecision) => {
             "Exit waiting for a decision"
         }
-        (EditorWorkspaceIntent::CloseScene { .. }, EditorWorkspaceIntentPhase::Saving) => {
+        (EditorWorkspaceIntent::CloseDocument { .. }, EditorWorkspaceIntentPhase::Saving) => {
             "Saving before close"
         }
         (EditorWorkspaceIntent::Exit, EditorWorkspaceIntentPhase::Saving) => "Saving before exit",
-        (EditorWorkspaceIntent::CloseScene { .. }, EditorWorkspaceIntentPhase::RetiringRuntime) => {
-            "Closing scene"
-        }
+        (
+            EditorWorkspaceIntent::CloseDocument { .. },
+            EditorWorkspaceIntentPhase::RetiringRuntime,
+        ) => "Closing document",
         (EditorWorkspaceIntent::Exit, EditorWorkspaceIntentPhase::RetiringRuntime) => "Exiting",
     }
 }

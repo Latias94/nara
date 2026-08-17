@@ -36,6 +36,8 @@ pub enum EditorPersistenceRejection {
     ResultPending,
     NoActiveDocument,
     MissingDocument,
+    DocumentKindMismatch,
+    SourceBindingMismatch,
     NotDirty,
     StaleRevision,
     TargetChanged,
@@ -135,7 +137,7 @@ pub enum EditorCloseDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorWorkspaceIntent {
-    CloseScene { document: EditorDocumentId },
+    CloseDocument { document: EditorDocumentId },
     Exit,
 }
 

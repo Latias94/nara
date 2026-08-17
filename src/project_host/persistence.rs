@@ -10,8 +10,8 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    SceneAuthoringRevision, SceneAuthoringSession, SceneDocument, SceneDocumentCandidate,
-    SceneFileLimits,
+    PrefabAuthoringSession, PrefabDocumentCandidate, SceneAuthoringRevision, SceneAuthoringSession,
+    SceneDocument, SceneDocumentCandidate, SceneFileLimits,
 };
 use nara_tooling::{
     EditorDocumentDigest, EditorDocumentId, EditorPersistenceCheckpoint, EditorPersistenceCommit,
@@ -22,15 +22,16 @@ static NEXT_TEMPORARY_NAME: AtomicU64 = AtomicU64::new(1);
 const TEMPORARY_NAME_ATTEMPTS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SceneEncoding {
+enum DocumentEncoding {
     Json,
     Ron,
 }
 
-pub(super) struct ScenePersistenceHost {
+#[derive(Debug)]
+struct PersistenceFileState {
     parent: DirectoryCapability,
     target: RelativeComponent,
-    encoding: SceneEncoding,
+    encoding: DocumentEncoding,
     limits: SceneFileLimits,
     observed_identity: FileIdentity,
     observed_digest: ContentDigest,
@@ -41,9 +42,24 @@ pub(super) struct ScenePersistenceHost {
     fail_next_save: Option<EditorPersistenceFailureStage>,
 }
 
+pub(super) struct ScenePersistenceHost {
+    file: PersistenceFileState,
+}
+
+pub(super) struct PrefabPersistenceHost {
+    file: PersistenceFileState,
+    source_binding: nara_tooling::EditorDocumentSourceBinding,
+}
+
 pub(super) struct OpenedScenePersistence {
     pub host: ScenePersistenceHost,
     pub session: SceneAuthoringSession,
+    pub digest: EditorDocumentDigest,
+}
+
+pub(super) struct OpenedPrefabPersistence {
+    pub host: PrefabPersistenceHost,
+    pub session: PrefabAuthoringSession,
     pub digest: EditorDocumentDigest,
 }
 
@@ -51,7 +67,11 @@ pub(super) struct SceneSaveCandidate {
     pub checkpoint: EditorPersistenceCheckpoint,
 }
 
-pub(super) enum SceneSaveOutcome {
+pub(super) struct PrefabSaveCandidate {
+    pub checkpoint: EditorPersistenceCheckpoint,
+}
+
+pub(super) enum PersistenceSaveOutcome {
     Saved {
         commit: EditorPersistenceCommit,
         evidence: EditorPersistenceReceipt,
@@ -63,14 +83,40 @@ pub(super) enum SceneSaveOutcome {
     },
 }
 
+pub(super) type SceneSaveOutcome = PersistenceSaveOutcome;
+type PrefabSaveOutcome = PersistenceSaveOutcome;
+
 pub(super) enum SceneReopenOutcome {
     Opened(Box<OpenedSceneReopen>),
     Rejected(EditorPersistenceRejection),
     Failed(EditorPersistenceFailureStage),
 }
 
+pub(super) enum PrefabReopenOutcome {
+    Opened(Box<OpenedPrefabReopen>),
+    Rejected(EditorPersistenceRejection),
+    Failed(EditorPersistenceFailureStage),
+}
+
+enum FileReopenOutcome {
+    Opened {
+        bytes: Vec<u8>,
+        identity: FileIdentity,
+        content_digest: ContentDigest,
+    },
+    Rejected(EditorPersistenceRejection),
+    Failed(EditorPersistenceFailureStage),
+}
+
 pub(super) struct OpenedSceneReopen {
     pub(super) session: SceneAuthoringSession,
+    pub(super) digest: EditorDocumentDigest,
+    pub(super) identity: FileIdentity,
+    pub(super) content_digest: ContentDigest,
+}
+
+pub(super) struct OpenedPrefabReopen {
+    pub(super) session: PrefabAuthoringSession,
     pub(super) digest: EditorDocumentDigest,
     pub(super) identity: FileIdentity,
     pub(super) content_digest: ContentDigest,
@@ -148,19 +194,18 @@ impl EditorPersistenceReceipt {
     }
 }
 
-impl ScenePersistenceHost {
-    pub(super) fn open(
-        scenes: &DirectoryCapability,
-        scene_path: &str,
-        registry: &ComponentRegistry,
-    ) -> Result<OpenedScenePersistence, EditorPersistenceFailureStage> {
+impl PersistenceFileState {
+    fn open(
+        root: &DirectoryCapability,
+        path: &str,
+        limits: SceneFileLimits,
+    ) -> Result<(Self, Vec<u8>), EditorPersistenceFailureStage> {
+        let encoding = document_encoding(path).ok_or(EditorPersistenceFailureStage::Decode)?;
         let path =
-            RelativePath::new(scene_path).map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
-        let (parent, target) = scenes
+            RelativePath::new(path).map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
+        let (parent, target) = root
             .resolve_file_parent(&path)
             .map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
-        let encoding = scene_encoding(scene_path).ok_or(EditorPersistenceFailureStage::Decode)?;
-        let limits = SceneFileLimits::default();
         let file = parent
             .open_child_file(&target)
             .map_err(|_| EditorPersistenceFailureStage::OpenTarget)?;
@@ -169,9 +214,8 @@ impl ScenePersistenceHost {
             .read_to_end_bounded(file_byte_limit(limits))
             .map_err(|_| EditorPersistenceFailureStage::ReadTarget)?;
         let digest = ContentDigest::of_bytes(&bytes);
-        let session = decode_session(encoding, &bytes, limits, registry)?;
-        Ok(OpenedScenePersistence {
-            host: Self {
+        Ok((
+            Self {
                 parent,
                 target,
                 encoding,
@@ -184,32 +228,32 @@ impl ScenePersistenceHost {
                 #[cfg(test)]
                 fail_next_save: None,
             },
-            session,
-            digest: editor_digest(digest),
-        })
+            bytes,
+        ))
     }
 
-    pub(super) fn save(&mut self, candidate: SceneSaveCandidate) -> SceneSaveOutcome {
+    fn save(
+        &mut self,
+        checkpoint: EditorPersistenceCheckpoint,
+        bytes: &[u8],
+    ) -> PersistenceSaveOutcome {
         if self.uncertain {
-            return SceneSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile);
+            return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::RequiresReconcile);
         }
         #[cfg(test)]
         if let Some(stage) = self.fail_next_save.take() {
-            return SceneSaveOutcome::Failed(stage);
+            return PersistenceSaveOutcome::Failed(stage);
         }
-        let SceneSaveCandidate { checkpoint } = candidate;
-        let bytes = match encode_scene(self.encoding, checkpoint.scene()) {
-            Ok(bytes) => bytes,
-            Err(stage) => return SceneSaveOutcome::Failed(stage),
-        };
         if bytes.len() > self.limits.encoded_bytes().get() {
-            return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
+            return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
         }
         let matrix = nara_fs::platform_capability_matrix();
         if matrix.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
             || matrix.replace_source_binding() == PublicationSourceBinding::Unsupported
         {
-            return SceneSaveOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee);
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::UnsupportedGuarantee,
+            );
         }
 
         let target = match self.parent.open_child_file(&self.target) {
@@ -217,41 +261,51 @@ impl ScenePersistenceHost {
             Err(error) => return open_target_failure(error),
         };
         if target.identity() != self.observed_identity {
-            return SceneSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
+            return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
         }
         let lock = match target.try_lock(LockMode::Exclusive) {
             Ok(lock) => lock,
             Err(FsError::LockContended) => {
-                return SceneSaveOutcome::Rejected(EditorPersistenceRejection::LockUnavailable);
+                return PersistenceSaveOutcome::Rejected(
+                    EditorPersistenceRejection::LockUnavailable,
+                );
             }
-            Err(_) => return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::OpenTarget),
+            Err(_) => {
+                return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::OpenTarget);
+            }
         };
         if target
             .verify_digest(self.observed_digest, file_byte_limit(self.limits))
             .is_err()
         {
-            return SceneSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
+            return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
         }
 
         let mut temporary = match create_temporary(&self.parent) {
             Ok(temporary) => temporary,
             Err(_) => {
-                return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::CreateTemporary);
+                return PersistenceSaveOutcome::Failed(
+                    EditorPersistenceFailureStage::CreateTemporary,
+                );
             }
         };
-        if temporary.write_all(&bytes).is_err() || temporary.flush().is_err() {
-            return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::WriteTemporary);
+        if temporary.write_all(bytes).is_err() || temporary.flush().is_err() {
+            return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::WriteTemporary);
         }
         let sync = match temporary.sync() {
             Ok(sync) => sync,
             Err(_) => {
-                return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::SyncTemporary);
+                return PersistenceSaveOutcome::Failed(
+                    EditorPersistenceFailureStage::SyncTemporary,
+                );
             }
         };
         if sync.progress().data_synced() != StageStatus::Achieved
             || sync.progress().file_metadata_synced() != StageStatus::Achieved
         {
-            return SceneSaveOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee);
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::UnsupportedGuarantee,
+            );
         }
 
         let receipt = match self.parent.replace_temp(
@@ -261,10 +315,12 @@ impl ScenePersistenceHost {
         ) {
             Ok(receipt) => receipt,
             Err(FsError::TargetStateMismatch) => {
-                return SceneSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
+                return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
             }
             Err(_) => {
-                return SceneSaveOutcome::Failed(EditorPersistenceFailureStage::ReplaceTarget);
+                return PersistenceSaveOutcome::Failed(
+                    EditorPersistenceFailureStage::ReplaceTarget,
+                );
             }
         };
         drop(lock);
@@ -272,7 +328,7 @@ impl ScenePersistenceHost {
         let parent_directory_sync = self.parent.sync().map_or(StageStatus::Unknown, |receipt| {
             receipt.progress().parent_directory_synced()
         });
-        let expected_digest = ContentDigest::of_bytes(&bytes);
+        let expected_digest = ContentDigest::of_bytes(bytes);
         let written_digest = receipt.written_content_digest();
         let published_digest = receipt.published_content_digest();
         let evidence = EditorPersistenceReceipt {
@@ -292,114 +348,303 @@ impl ScenePersistenceHost {
         #[cfg(test)]
         if std::mem::take(&mut self.reject_next_valid_receipt) {
             self.uncertain = true;
-            return SceneSaveOutcome::PersistenceUncertain { evidence };
+            return PersistenceSaveOutcome::PersistenceUncertain { evidence };
         }
         if written_digest != expected_digest {
             self.uncertain = true;
-            return SceneSaveOutcome::PersistenceUncertain { evidence };
+            return PersistenceSaveOutcome::PersistenceUncertain { evidence };
         }
         let candidate_identity = receipt.candidate_identity();
         let Some(commit) =
             EditorPersistenceCommit::from_publication(checkpoint, self.observed_identity, receipt)
         else {
             self.uncertain = true;
-            return SceneSaveOutcome::PersistenceUncertain { evidence };
+            return PersistenceSaveOutcome::PersistenceUncertain { evidence };
         };
 
         self.observed_identity = candidate_identity;
         self.observed_digest = published_digest
             .expect("an accepted persistence commit has published content evidence");
-        SceneSaveOutcome::Saved { commit, evidence }
+        PersistenceSaveOutcome::Saved { commit, evidence }
     }
 
-    pub(super) fn reopen(&self, registry: &ComponentRegistry) -> SceneReopenOutcome {
+    fn reopen(&self) -> FileReopenOutcome {
         let file = match self.parent.open_child_file(&self.target) {
             Ok(file) => file,
-            Err(error) => {
-                return match open_target_failure(error) {
-                    SceneSaveOutcome::Rejected(reason) => SceneReopenOutcome::Rejected(reason),
-                    SceneSaveOutcome::Failed(stage) => SceneReopenOutcome::Failed(stage),
-                    SceneSaveOutcome::Saved { .. }
-                    | SceneSaveOutcome::PersistenceUncertain { .. } => {
-                        unreachable!()
-                    }
-                };
-            }
+            Err(error) => return open_target_reopen_failure(error),
         };
         let bytes = match file.read_to_end_bounded(file_byte_limit(self.limits)) {
             Ok(bytes) => bytes,
-            Err(_) => {
-                return SceneReopenOutcome::Failed(EditorPersistenceFailureStage::ReadTarget);
-            }
+            Err(_) => return FileReopenOutcome::Failed(EditorPersistenceFailureStage::ReadTarget),
         };
-        let session = match decode_session(self.encoding, &bytes, self.limits, registry) {
-            Ok(session) => session,
-            Err(stage) => return SceneReopenOutcome::Failed(stage),
-        };
-        let digest = ContentDigest::of_bytes(&bytes);
-        SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
-            session,
-            digest: editor_digest(digest),
+        let content_digest = ContentDigest::of_bytes(&bytes);
+        FileReopenOutcome::Opened {
+            bytes,
             identity: file.identity(),
-            content_digest: digest,
-        }))
+            content_digest,
+        }
     }
 
-    pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
+    fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
         self.observed_identity = identity;
         self.observed_digest = digest;
         self.uncertain = false;
     }
 
-    pub(super) fn mark_uncertain(&mut self) {
+    fn mark_uncertain(&mut self) {
         self.uncertain = true;
     }
 
     #[cfg(test)]
-    pub(super) fn test_reject_next_valid_receipt(&mut self) {
+    fn test_reject_next_valid_receipt(&mut self) {
         self.reject_next_valid_receipt = true;
     }
 
     #[cfg(test)]
-    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
+    fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
         self.fail_next_save = Some(stage);
     }
 }
 
-fn scene_encoding(path: &str) -> Option<SceneEncoding> {
+impl ScenePersistenceHost {
+    pub(super) fn open(
+        scenes: &DirectoryCapability,
+        scene_path: &str,
+        registry: &ComponentRegistry,
+    ) -> Result<OpenedScenePersistence, EditorPersistenceFailureStage> {
+        let limits = SceneFileLimits::default();
+        let (file, bytes) = PersistenceFileState::open(scenes, scene_path, limits)?;
+        let session = decode_scene_session(file.encoding, &bytes, limits, registry)?;
+        Ok(OpenedScenePersistence {
+            digest: editor_digest(file.observed_digest),
+            host: Self { file },
+            session,
+        })
+    }
+
+    pub(super) fn save(&mut self, candidate: SceneSaveCandidate) -> SceneSaveOutcome {
+        let SceneSaveCandidate { checkpoint } = candidate;
+        if checkpoint.kind() != nara_tooling::EditorDocumentKind::Scene {
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::DocumentKindMismatch,
+            );
+        }
+        let Some(scene) = checkpoint.scene() else {
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::DocumentKindMismatch,
+            );
+        };
+        let bytes = match encode_scene(self.file.encoding, scene) {
+            Ok(bytes) => bytes,
+            Err(stage) => return PersistenceSaveOutcome::Failed(stage),
+        };
+        self.file.save(checkpoint, &bytes)
+    }
+
+    pub(super) fn reopen(&self, registry: &ComponentRegistry) -> SceneReopenOutcome {
+        let reopened = self.file.reopen();
+        let FileReopenOutcome::Opened {
+            bytes,
+            identity,
+            content_digest,
+        } = reopened
+        else {
+            return match reopened {
+                FileReopenOutcome::Rejected(reason) => SceneReopenOutcome::Rejected(reason),
+                FileReopenOutcome::Failed(stage) => SceneReopenOutcome::Failed(stage),
+                FileReopenOutcome::Opened { .. } => unreachable!(),
+            };
+        };
+        let session =
+            match decode_scene_session(self.file.encoding, &bytes, self.file.limits, registry) {
+                Ok(session) => session,
+                Err(stage) => return SceneReopenOutcome::Failed(stage),
+            };
+        SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
+            session,
+            digest: editor_digest(content_digest),
+            identity,
+            content_digest,
+        }))
+    }
+
+    pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
+        self.file.commit_reopen(identity, digest);
+    }
+
+    pub(super) fn mark_uncertain(&mut self) {
+        self.file.mark_uncertain();
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_reject_next_valid_receipt(&mut self) {
+        self.file.test_reject_next_valid_receipt();
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
+        self.file.test_fail_next_save(stage);
+    }
+}
+
+impl PrefabPersistenceHost {
+    pub(super) fn open(
+        prefabs: &DirectoryCapability,
+        source_binding: nara_tooling::EditorDocumentSourceBinding,
+        registry: &ComponentRegistry,
+    ) -> Result<OpenedPrefabPersistence, EditorPersistenceFailureStage> {
+        let limits = SceneFileLimits::default();
+        let (file, bytes) = PersistenceFileState::open(prefabs, source_binding.locator(), limits)?;
+        let session = decode_prefab_session(file.encoding, &bytes, limits, registry)?;
+        Ok(OpenedPrefabPersistence {
+            digest: editor_digest(file.observed_digest),
+            host: Self {
+                file,
+                source_binding,
+            },
+            session,
+        })
+    }
+
+    pub(super) fn save(&mut self, candidate: PrefabSaveCandidate) -> PrefabSaveOutcome {
+        let PrefabSaveCandidate { checkpoint } = candidate;
+        if checkpoint.kind() != nara_tooling::EditorDocumentKind::Prefab {
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::DocumentKindMismatch,
+            );
+        }
+        if checkpoint.source_binding() != Some(&self.source_binding) {
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::SourceBindingMismatch,
+            );
+        }
+        let Some(prefab) = checkpoint.prefab() else {
+            return PersistenceSaveOutcome::Rejected(
+                EditorPersistenceRejection::DocumentKindMismatch,
+            );
+        };
+        let bytes = match encode_prefab(self.file.encoding, prefab) {
+            Ok(bytes) => bytes,
+            Err(stage) => return PersistenceSaveOutcome::Failed(stage),
+        };
+        self.file.save(checkpoint, &bytes)
+    }
+
+    pub(super) fn reopen(&self, registry: &ComponentRegistry) -> PrefabReopenOutcome {
+        let reopened = self.file.reopen();
+        let FileReopenOutcome::Opened {
+            bytes,
+            identity,
+            content_digest,
+        } = reopened
+        else {
+            return match reopened {
+                FileReopenOutcome::Rejected(reason) => PrefabReopenOutcome::Rejected(reason),
+                FileReopenOutcome::Failed(stage) => PrefabReopenOutcome::Failed(stage),
+                FileReopenOutcome::Opened { .. } => unreachable!(),
+            };
+        };
+        let session =
+            match decode_prefab_session(self.file.encoding, &bytes, self.file.limits, registry) {
+                Ok(session) => session,
+                Err(stage) => return PrefabReopenOutcome::Failed(stage),
+            };
+        PrefabReopenOutcome::Opened(Box::new(OpenedPrefabReopen {
+            session,
+            digest: editor_digest(content_digest),
+            identity,
+            content_digest,
+        }))
+    }
+
+    pub(super) fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
+        self.file.commit_reopen(identity, digest);
+    }
+
+    pub(super) fn mark_uncertain(&mut self) {
+        self.file.mark_uncertain();
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_reject_next_valid_receipt(&mut self) {
+        self.file.test_reject_next_valid_receipt();
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fail_next_save(&mut self, stage: EditorPersistenceFailureStage) {
+        self.file.test_fail_next_save(stage);
+    }
+}
+
+fn document_encoding(path: &str) -> Option<DocumentEncoding> {
     if path.ends_with(".json") {
-        Some(SceneEncoding::Json)
+        Some(DocumentEncoding::Json)
     } else if path.ends_with(".ron") {
-        Some(SceneEncoding::Ron)
+        Some(DocumentEncoding::Ron)
     } else {
         None
     }
 }
 
 fn encode_scene(
-    encoding: SceneEncoding,
+    encoding: DocumentEncoding,
     scene: &SceneDocument,
 ) -> Result<Vec<u8>, EditorPersistenceFailureStage> {
     let encoded = match encoding {
-        SceneEncoding::Json => scene.to_json_string(),
-        SceneEncoding::Ron => scene.to_ron_string(),
+        DocumentEncoding::Json => scene.to_json_string(),
+        DocumentEncoding::Ron => scene.to_ron_string(),
     }
     .map_err(|_| EditorPersistenceFailureStage::Encode)?;
     Ok(encoded.into_bytes())
 }
 
-fn decode_session(
-    encoding: SceneEncoding,
+fn decode_scene_session(
+    encoding: DocumentEncoding,
     bytes: &[u8],
     limits: SceneFileLimits,
     registry: &ComponentRegistry,
 ) -> Result<SceneAuthoringSession, EditorPersistenceFailureStage> {
     let candidate = match encoding {
-        SceneEncoding::Json => SceneDocumentCandidate::decode_json_bytes_with_limits(bytes, limits),
-        SceneEncoding::Ron => SceneDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits),
+        DocumentEncoding::Json => {
+            SceneDocumentCandidate::decode_json_bytes_with_limits(bytes, limits)
+        }
+        DocumentEncoding::Ron => {
+            SceneDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
+        }
     }
     .map_err(|_| EditorPersistenceFailureStage::Decode)?;
     SceneAuthoringSession::try_from_file_candidate(candidate, registry)
+        .map_err(|_| EditorPersistenceFailureStage::Validate)
+}
+
+fn encode_prefab(
+    encoding: DocumentEncoding,
+    prefab: &nara_scene::PrefabDocument,
+) -> Result<Vec<u8>, EditorPersistenceFailureStage> {
+    let encoded = match encoding {
+        DocumentEncoding::Json => prefab.to_json_string(),
+        DocumentEncoding::Ron => prefab.to_ron_string(),
+    }
+    .map_err(|_| EditorPersistenceFailureStage::Encode)?;
+    Ok(encoded.into_bytes())
+}
+
+fn decode_prefab_session(
+    encoding: DocumentEncoding,
+    bytes: &[u8],
+    limits: SceneFileLimits,
+    registry: &ComponentRegistry,
+) -> Result<PrefabAuthoringSession, EditorPersistenceFailureStage> {
+    let candidate = match encoding {
+        DocumentEncoding::Json => {
+            PrefabDocumentCandidate::decode_json_bytes_with_limits(bytes, limits)
+        }
+        DocumentEncoding::Ron => {
+            PrefabDocumentCandidate::decode_ron_bytes_with_limits(bytes, limits)
+        }
+    }
+    .map_err(|_| EditorPersistenceFailureStage::Decode)?;
+    PrefabAuthoringSession::try_from_file_candidate(candidate, registry)
         .map_err(|_| EditorPersistenceFailureStage::Validate)
 }
 
@@ -420,15 +665,27 @@ fn create_temporary(parent: &DirectoryCapability) -> Result<nara_fs::TemporaryFi
     })
 }
 
-fn open_target_failure(error: FsError) -> SceneSaveOutcome {
+fn open_target_failure(error: FsError) -> PersistenceSaveOutcome {
     match error {
         FsError::Io { ref source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
-            SceneSaveOutcome::Rejected(EditorPersistenceRejection::TargetDeleted)
+            PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetDeleted)
         }
         FsError::Unsupported { .. } | FsError::Unproven { .. } => {
-            SceneSaveOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee)
+            PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee)
         }
-        _ => SceneSaveOutcome::Failed(EditorPersistenceFailureStage::OpenTarget),
+        _ => PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::OpenTarget),
+    }
+}
+
+fn open_target_reopen_failure(error: FsError) -> FileReopenOutcome {
+    match error {
+        FsError::Io { ref source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
+            FileReopenOutcome::Rejected(EditorPersistenceRejection::TargetDeleted)
+        }
+        FsError::Unsupported { .. } | FsError::Unproven { .. } => {
+            FileReopenOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee)
+        }
+        _ => FileReopenOutcome::Failed(EditorPersistenceFailureStage::OpenTarget),
     }
 }
 
@@ -454,8 +711,8 @@ mod tests {
     use std::fs::OpenOptions;
 
     use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
-    use nara_scene::{SceneAuthoringSession, SceneEntityId, SceneEntityRecord};
-    use nara_tooling::EditorWorkspace;
+    use nara_scene::{PrefabDocument, SceneAuthoringSession, SceneEntityId, SceneEntityRecord};
+    use nara_tooling::{EditorDocumentSourceBinding, EditorWorkspace};
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 
@@ -479,7 +736,7 @@ mod tests {
             .unwrap();
         let revision = workspace.scene(document).unwrap().revision();
 
-        host.reject_next_valid_receipt = true;
+        host.file.reject_next_valid_receipt = true;
         let SceneSaveOutcome::PersistenceUncertain { evidence } = host.save(SceneSaveCandidate {
             checkpoint: authority.capture(&workspace, document).unwrap(),
         }) else {
@@ -495,7 +752,7 @@ mod tests {
             evidence.published_identity(),
             Some(evidence.candidate_identity())
         );
-        assert!(host.uncertain);
+        assert!(host.file.uncertain);
         let first_bytes = fs::read(root.scene_path()).unwrap();
 
         assert!(matches!(
@@ -516,10 +773,10 @@ mod tests {
             ..
         } = *opened;
         assert_eq!(session.document(), &first);
-        assert!(host.uncertain);
+        assert!(host.file.uncertain);
 
         host.commit_reopen(identity, content_digest);
-        assert!(!host.uncertain);
+        assert!(!host.file.uncertain);
         assert!(matches!(
             host.save(SceneSaveCandidate {
                 checkpoint: authority.capture(&workspace, document).unwrap(),
@@ -528,8 +785,85 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn prefab_lane_saves_and_reopens_the_prefab_source_without_scene_projection() {
+        let root = TestRoot::new();
+        let prefabs = root.capability();
+        let mut registry = ComponentRegistry::new();
+        registry.freeze().unwrap();
+        let source_binding = EditorDocumentSourceBinding::new("reference-ui.prefab.json");
+        let opened =
+            PrefabPersistenceHost::open(&prefabs, source_binding.clone(), &registry).unwrap();
+        let expected = prefab_with_entity("retry");
+        assert_eq!(opened.session.document(), &expected);
+
+        let (mut workspace, mut authority) = EditorWorkspace::new_hosted();
+        let document = workspace
+            .open_prefab_session("reference-ui.prefab.json", source_binding, opened.session)
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let mut host = opened.host;
+
+        let opened_scene =
+            ScenePersistenceHost::open(&prefabs, "startup.scene.json", &registry).unwrap();
+        let mut scene_host = opened_scene.host;
+        assert!(matches!(
+            scene_host.save(SceneSaveCandidate {
+                checkpoint: authority.capture(&workspace, document).unwrap(),
+            }),
+            SceneSaveOutcome::Rejected(EditorPersistenceRejection::DocumentKindMismatch)
+        ));
+        let scene_document = workspace
+            .open_scene_session("startup.scene.json", opened_scene.session)
+            .unwrap()
+            .opened_document
+            .unwrap();
+        assert!(matches!(
+            host.save(PrefabSaveCandidate {
+                checkpoint: authority.capture(&workspace, scene_document).unwrap(),
+            }),
+            PrefabSaveOutcome::Rejected(EditorPersistenceRejection::DocumentKindMismatch)
+        ));
+
+        let mut other_host = PrefabPersistenceHost::open(
+            &prefabs,
+            EditorDocumentSourceBinding::new("other.prefab.json"),
+            &registry,
+        )
+        .unwrap()
+        .host;
+        assert!(matches!(
+            other_host.save(PrefabSaveCandidate {
+                checkpoint: authority.capture(&workspace, document).unwrap(),
+            }),
+            PrefabSaveOutcome::Rejected(EditorPersistenceRejection::SourceBindingMismatch)
+        ));
+
+        let checkpoint = authority.capture(&workspace, document).unwrap();
+        let PrefabSaveOutcome::Saved { commit, evidence } =
+            host.save(PrefabSaveCandidate { checkpoint })
+        else {
+            panic!("the canonical Prefab source should publish through the shared receipt lane");
+        };
+        assert_eq!(evidence.document(), document);
+        assert!(authority.commit(&mut workspace, commit).applied);
+
+        let PrefabReopenOutcome::Opened(reopened) = host.reopen(&registry) else {
+            panic!("the saved Prefab source should reopen through its own lane");
+        };
+        assert_eq!(reopened.session.document(), &expected);
+        host.commit_reopen(reopened.identity, reopened.content_digest);
+    }
+
     fn scene_with_entity(id: &str) -> SceneDocument {
         SceneDocument::from_ordered_roots([SceneEntityRecord::new(SceneEntityId::new(id).unwrap())])
+    }
+
+    fn prefab_with_entity(id: &str) -> PrefabDocument {
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new(id).unwrap(),
+        )])
     }
 
     struct TestRoot {
@@ -548,6 +882,16 @@ mod tests {
             fs::write(
                 path.join("startup.scene.json"),
                 SceneDocument::default().to_json_string().unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                path.join("reference-ui.prefab.json"),
+                prefab_with_entity("retry").to_json_string().unwrap(),
+            )
+            .unwrap();
+            fs::write(
+                path.join("other.prefab.json"),
+                prefab_with_entity("other").to_json_string().unwrap(),
             )
             .unwrap();
             Self { path }

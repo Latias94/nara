@@ -1064,7 +1064,7 @@ fn play_without_an_active_document_rejects_without_creating_an_owner() {
         &mut editor,
         [
             EditorAction::WorkspaceIntent(nara::tooling::EditorWorkspaceIntentAction::Request(
-                EditorWorkspaceIntent::CloseScene { document },
+                EditorWorkspaceIntent::CloseDocument { document },
             )),
             EditorAction::Play(nara::tooling::EditorPlayAction::Play {
                 document,
@@ -1582,7 +1582,7 @@ fn workspace_close_retains_document_through_close_incomplete_and_retry() {
     assert_eq!(
         editor_driver::request_workspace_intent(
             &mut editor,
-            EditorWorkspaceIntent::CloseScene { document },
+            EditorWorkspaceIntent::CloseDocument { document },
         ),
         EditorWorkspaceIntentRequestResult::Accepted
     );

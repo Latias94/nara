@@ -305,7 +305,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     dispatch(
         &mut application,
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseScene { document }),
+            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseDocument { document }),
         )],
     );
     let closed = dispatch(
@@ -472,14 +472,14 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let closed = dispatch(
         &mut application,
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseScene { document }),
+            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseDocument { document }),
         )],
     );
     assert!(closed.workspace().scenes.is_empty());
     assert_eq!(
         closed.workspace_intent().result(),
         Some(EditorWorkspaceIntentResult::Applied {
-            intent: EditorWorkspaceIntent::CloseScene { document },
+            intent: EditorWorkspaceIntent::CloseDocument { document },
         })
     );
 
@@ -526,7 +526,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let finally_closed = dispatch(
         &mut application,
         [EditorAction::WorkspaceIntent(
-            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseScene {
+            EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseDocument {
                 document: reopened_document,
             }),
         )],

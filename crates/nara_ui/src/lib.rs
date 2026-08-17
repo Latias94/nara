@@ -122,6 +122,7 @@ impl Plugin for UiPlugin {
 /// First-party Host presentation seams that are not ordinary runtime UI API.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::codec::prefab_contains_ui_root;
     pub use crate::runtime::{
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,
         UiPreparedPresentationAuthority, abort_prepared_ui_presentation,

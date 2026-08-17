@@ -3,6 +3,7 @@ use nara_reflect::{
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
+use nara_scene::PrefabDocument;
 use nara_ui_kernel::{
     UiActionId, UiAlign, UiBorder, UiBrush, UiColor, UiColorRole, UiCornerRadii, UiDimension,
     UiEdges, UiFlexDirection, UiImageId, UiJustify, UiLayer, UiOverflow, UiPositionMode,
@@ -86,6 +87,14 @@ pub(crate) fn validate_ui_components(
         .validate_component_registration::<UiSemantics>(&ComponentTypeId::new(UI_SEMANTICS_ID))?;
     registry.validate_component_registration::<UiTheme>(&ComponentTypeId::new(UI_THEME_ID))?;
     Ok(())
+}
+
+pub fn prefab_contains_ui_root(document: &PrefabDocument) -> bool {
+    let root = ComponentTypeId::new(UI_ROOT_ID);
+    document
+        .entities
+        .iter()
+        .any(|entity| entity.components.contains_key(&root))
 }
 
 pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {

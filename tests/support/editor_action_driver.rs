@@ -40,8 +40,8 @@ pub fn apply_workspace_command(
     command: EditorWorkspaceCommand,
 ) -> EditorWorkspaceCommandReport {
     let action = match command {
-        EditorWorkspaceCommand::SetActiveScene { document } => {
-            EditorAction::Navigate(EditorNavigationAction::SetActiveScene { document })
+        EditorWorkspaceCommand::SetActiveDocument { document } => {
+            EditorAction::Navigate(EditorNavigationAction::SetActiveDocument { document })
         }
         EditorWorkspaceCommand::SelectEntity { document, entity } => {
             EditorAction::Navigate(EditorNavigationAction::SelectEntity { document, entity })
@@ -63,6 +63,15 @@ pub fn apply_workspace_command(
             base_revision,
             patch,
         } => EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+            document,
+            base_revision,
+            patch,
+        }),
+        EditorWorkspaceCommand::ApplyPrefabPatch {
+            document,
+            base_revision,
+            patch,
+        } => EditorAction::Mutate(EditorDocumentMutation::ApplyPrefabPatch {
             document,
             base_revision,
             patch,
@@ -90,7 +99,7 @@ pub fn apply_workspace_command(
             document,
             base_revision,
         }),
-        EditorWorkspaceCommand::CloseScene { .. } => {
+        EditorWorkspaceCommand::CloseDocument { .. } => {
             panic!("close must use the explicit workspace-intent action")
         }
     };
@@ -143,7 +152,11 @@ pub fn request_persistence(
             let document = document
                 .or(frame.workspace().active_document)
                 .expect("the test must dispatch Save for an open document");
-            let base_revision = frame.workspace().scene(document).unwrap().revision;
+            let base_revision = frame
+                .workspace()
+                .document(document)
+                .expect("the test must dispatch Save for an open document")
+                .revision;
             EditorPersistenceAction::Save {
                 document,
                 base_revision,

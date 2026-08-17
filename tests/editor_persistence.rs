@@ -309,7 +309,7 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
     assert_eq!(
         editor_driver::request_workspace_intent(
             &mut editor,
-            EditorWorkspaceIntent::CloseScene { document },
+            EditorWorkspaceIntent::CloseDocument { document },
         ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
@@ -664,7 +664,7 @@ fn dirty_close_cancel_preserves_the_running_owner_and_document() {
     assert_eq!(
         editor_driver::request_workspace_intent(
             &mut editor,
-            EditorWorkspaceIntent::CloseScene { document },
+            EditorWorkspaceIntent::CloseDocument { document },
         ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
@@ -692,7 +692,7 @@ fn dirty_close_cancel_preserves_the_running_owner_and_document() {
     assert_eq!(
         editor.current_frame().workspace_intent().result(),
         Some(EditorWorkspaceIntentResult::Cancelled {
-            intent: EditorWorkspaceIntent::CloseScene { document },
+            intent: EditorWorkspaceIntent::CloseDocument { document },
         })
     );
     assert!(editor_driver::acknowledge_workspace_intent_result(
@@ -727,7 +727,7 @@ fn dirty_close_discard_stops_play_before_removal_without_writing_disk() {
     assert_eq!(
         editor_driver::request_workspace_intent(
             &mut editor,
-            EditorWorkspaceIntent::CloseScene { document },
+            EditorWorkspaceIntent::CloseDocument { document },
         ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
@@ -747,7 +747,7 @@ fn dirty_close_discard_stops_play_before_removal_without_writing_disk() {
     assert_eq!(
         editor.current_frame().workspace_intent().result(),
         Some(EditorWorkspaceIntentResult::Applied {
-            intent: EditorWorkspaceIntent::CloseScene { document },
+            intent: EditorWorkspaceIntent::CloseDocument { document },
         })
     );
 }
@@ -780,7 +780,7 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     assert_eq!(
         editor_driver::request_workspace_intent(
             &mut editor,
-            EditorWorkspaceIntent::CloseScene { document },
+            EditorWorkspaceIntent::CloseDocument { document },
         ),
         EditorWorkspaceIntentRequestResult::Accepted
     );
@@ -892,7 +892,7 @@ fn dirty_close_save_publishes_bytes_before_retiring_play() {
     assert_eq!(
         editor_driver::request_workspace_intent(
             &mut editor,
-            EditorWorkspaceIntent::CloseScene { document },
+            EditorWorkspaceIntent::CloseDocument { document },
         ),
         EditorWorkspaceIntentRequestResult::Accepted
     );

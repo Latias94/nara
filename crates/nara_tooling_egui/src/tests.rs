@@ -493,7 +493,7 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
         play_view(Some(&scene)),
         EditorPersistenceView::default(),
         EditorWorkspaceIntentView::new(
-            Some(EditorWorkspaceIntent::CloseScene {
+            Some(EditorWorkspaceIntent::CloseDocument {
                 document: scene.document,
             }),
             Some(EditorWorkspaceIntentPhase::AwaitingDecision),
