@@ -13,6 +13,7 @@ use nara::{
         EditorGameInputBatch, EditorGameStartActivation, EditorGameStartRequest,
         EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
         EditorPreviewCandidate, EditorProjectIntent, EditorProjectOpenError, EditorProjectSession,
+        EditorUiAuthoringFrame, EditorUiPreviewCandidate,
     },
     render::Extent2d,
     tooling::{
@@ -302,6 +303,18 @@ impl EditorApplication {
     #[must_use]
     pub fn take_scene_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
         self.session.take_editor_preview_candidate()
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn take_editor_ui_preview_candidate(&mut self) -> Option<EditorUiPreviewCandidate> {
+        self.session.take_editor_ui_preview_candidate()
+    }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn current_ui_authoring_frame(&self) -> Option<Arc<EditorUiAuthoringFrame>> {
+        self.session.current_ui_authoring_frame()
     }
 
     #[doc(hidden)]

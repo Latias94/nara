@@ -7,13 +7,12 @@ use nara_ui_kernel::{
     UiAuthoringSnapshot, UiAuthoringSnapshotBuilder, UiKey, UiKeyError, UiLocalKey, UiOpaqueId,
     UiPersistentIdentity, UiProjectionPath, UiProjectionStep, UiRootDiagnostic, UiRootKey,
 };
-use nara_ui_widgets::{
-    UiButton as KernelButton, UiButtonState, UiButtonVisualState, UiWidgetError,
-};
+use nara_ui_widgets::{UiButton as KernelButton, UiButtonState, UiWidgetError};
 use thiserror::Error;
 
 use crate::{
-    UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
+    UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme,
+    UiVisual, authoring::resolve_controlled_button_visual,
 };
 
 use super::{UiAdapterDiagnostic, push_diagnostic};
@@ -350,14 +349,9 @@ fn project_children(
                 .get::<UiButtonVisuals>(child)
                 .copied()
                 .unwrap_or_default();
-            let (visual, text_brush) = button_visual(
-                visual,
-                button_visuals,
-                state,
-                state.visual_state(&description),
-                &description,
-            )
-            .map_err(UiWidgetError::Style)?;
+            let (visual, text_brush) =
+                resolve_controlled_button_visual(visual, button_visuals, state, &description)
+                    .map_err(UiWidgetError::Style)?;
             let authored = description
                 .authored_node(
                     root_key,
@@ -446,43 +440,4 @@ fn project_prefab_path(path: &PrefabProjectionPath) -> Result<UiProjectionPath, 
         ))?;
     }
     Ok(projected)
-}
-
-fn button_visual(
-    visual: &UiVisual,
-    visuals: UiButtonVisuals,
-    interaction: UiButtonState,
-    background_state: UiButtonVisualState,
-    button: &KernelButton,
-) -> Result<(nara_ui_kernel::UiVisual, nara_ui_kernel::UiBrush), nara_ui_kernel::UiStyleError> {
-    use nara_ui_kernel::{UiBorder, UiBrush};
-
-    let mut visual = visual.kernel();
-    let background = match background_state {
-        UiButtonVisualState::Hovered => Some(visuals.hovered_background()),
-        UiButtonVisualState::Pressed => Some(visuals.pressed_background()),
-        UiButtonVisualState::Disabled => Some(visuals.disabled_background()),
-        UiButtonVisualState::Idle | UiButtonVisualState::Focused => None,
-    };
-    if let Some(background) = background {
-        visual = visual.with_background(UiBrush::Role(background));
-    }
-    if interaction.focused() {
-        visual = visual.with_border(UiBorder::new(
-            visuals.focus_border_width(),
-            UiBrush::Role(visuals.focused_border()),
-        )?);
-    }
-    let text_role = if !button.enabled() {
-        visuals.disabled_text()
-    } else if background_state == UiButtonVisualState::Pressed {
-        visuals.pressed_text()
-    } else if interaction.focused() {
-        visuals.focused_text()
-    } else if background_state == UiButtonVisualState::Hovered {
-        visuals.hovered_text()
-    } else {
-        visuals.normal_text()
-    };
-    Ok((visual, UiBrush::Role(text_role)))
 }

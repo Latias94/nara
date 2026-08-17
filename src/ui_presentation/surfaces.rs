@@ -7,6 +7,9 @@ use nara_ui::{
 };
 
 pub(super) fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
+    let primary_profile = world
+        .get_resource::<crate::product::AcceptedPrimaryUiSurfaceProfile>()
+        .copied();
     let windows = {
         let mut query = world.query::<&nara_window::Window>();
         query
@@ -23,7 +26,7 @@ pub(super) fn synchronize_runtime_ui_surface_metrics(world: &mut World) {
     };
 
     for snapshot in snapshots {
-        let action = classify_surface_action(snapshot, &windows);
+        let action = classify_surface_action(snapshot, &windows, primary_profile);
         let Some(action) = action else {
             continue;
         };
@@ -72,6 +75,7 @@ pub(super) fn synchronize_runtime_ui_routes(world: &mut World) -> Result<(), Str
 fn classify_surface_action(
     snapshot: UiSurfaceSlotSnapshot,
     windows: &BTreeMap<nara_window::WindowId, nara_window::WindowResolution>,
+    primary_profile: Option<crate::product::AcceptedPrimaryUiSurfaceProfile>,
 ) -> Option<UiSurfaceLifecycleAction> {
     let slot = snapshot.slot();
     let window_id = nara_window::WindowId::new(slot.endpoint().window().get());
@@ -83,7 +87,7 @@ fn classify_surface_action(
                 UiSurfaceSuspensionReason::EndpointUnavailable,
             ));
     };
-    match surface_transform(slot, resolution) {
+    match surface_transform(slot, resolution, primary_profile) {
         Err(reason) => snapshot
             .availability()
             .is_active()
@@ -101,6 +105,7 @@ fn classify_surface_action(
 fn surface_transform(
     slot: UiSurfaceSlot,
     resolution: nara_window::WindowResolution,
+    primary_profile: Option<crate::product::AcceptedPrimaryUiSurfaceProfile>,
 ) -> Result<UiSurfaceContentTransform, UiSurfaceSuspensionReason> {
     if resolution.is_zero_sized() {
         return Err(UiSurfaceSuspensionReason::ZeroExtent);
@@ -120,6 +125,13 @@ fn surface_transform(
     else {
         return Err(UiSurfaceSuspensionReason::InvalidScale);
     };
+    if slot.surface_id().get() == crate::product::PROJECT_PRIMARY_UI_SURFACE_ID {
+        if let Some(profile) = primary_profile {
+            return profile
+                .target_transform(physical_size, safe_area, resolution.scale_factor as f32)
+                .ok_or(UiSurfaceSuspensionReason::InvalidScale);
+        }
+    }
     UiSurfaceContentTransform::new(
         slot.transform().authored_logical_size(),
         physical_size,
@@ -164,8 +176,9 @@ mod tests {
     #[test]
     fn physical_targets_preserve_design_space_and_letterbox_non_widescreen_windows() {
         let slot = test_slot();
-        let transform = surface_transform(slot, nara_window::WindowResolution::new(1_024, 768))
-            .expect("a 4:3 target should produce a letterboxed transform");
+        let transform =
+            surface_transform(slot, nara_window::WindowResolution::new(1_024, 768), None)
+                .expect("a 4:3 target should produce a letterboxed transform");
         assert!((transform.content_scale_factor() - (1024.0 / 960.0)).abs() < 1.0e-6);
         assert!((transform.physical_content_origin().y() - 96.0).abs() < 1.0e-6);
         assert!((transform.physical_content_origin().x()).abs() < 1.0e-6);
@@ -177,13 +190,14 @@ mod tests {
     fn unavailable_targets_have_typed_suspension_reasons() {
         let slot = test_slot();
         assert!(matches!(
-            surface_transform(slot, nara_window::WindowResolution::new(0, 720)),
+            surface_transform(slot, nara_window::WindowResolution::new(0, 720), None),
             Err(UiSurfaceSuspensionReason::ZeroExtent)
         ));
         assert!(matches!(
             surface_transform(
                 slot,
                 nara_window::WindowResolution::new(1_280, 720).with_scale_factor(0.0),
+                None,
             ),
             Err(UiSurfaceSuspensionReason::InvalidScale)
         ));

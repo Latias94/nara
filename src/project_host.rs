@@ -29,10 +29,21 @@ pub use composition::{
     compiled_product_capabilities, resolve_product_recipe,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
+#[cfg(feature = "runtime-ui")]
+#[doc(hidden)]
+pub const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = crate::product::PROJECT_PRIMARY_UI_SURFACE_ID;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) use ingest::{
     ingest_project_manifest_bytes, ingest_project_manifest_with_expected_digest,
 };
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "tooling",
+    feature = "presentation-ui"
+))]
+#[doc(hidden)]
+pub use runtime::EditorUiPreviewCandidate;
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",

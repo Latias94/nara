@@ -458,6 +458,14 @@ impl WgpuFramePacketSlot {
 }
 
 impl WgpuFramePayload {
+    #[cfg(feature = "ui-submitter")]
+    pub(crate) fn for_editor_authoring_ui(ui_packets: Vec<Arc<UiPaintPacket>>) -> Self {
+        Self {
+            ui_packets,
+            ..Self::default()
+        }
+    }
+
     #[cfg(feature = "sprite-submitter")]
     pub(crate) fn for_editor_sprites(sprite_batches: SpriteBatches) -> Self {
         Self {
@@ -604,7 +612,7 @@ fn payload_batches_match_topology(
 }
 
 #[cfg(feature = "ui-submitter")]
-fn render_targets_match(
+pub(crate) fn render_targets_match(
     packet: RenderTarget,
     view: RenderTarget,
     primary_window_id: Option<WindowId>,
@@ -612,7 +620,9 @@ fn render_targets_match(
     match (packet, view) {
         (RenderTarget::Image(packet), RenderTarget::Image(view)) => packet == view,
         (RenderTarget::Image(_), _) | (_, RenderTarget::Image(_)) => false,
-        (packet, view) => packet.window_id(primary_window_id) == view.window_id(primary_window_id),
+        (packet, view) => view
+            .window_id(primary_window_id)
+            .is_some_and(|window| packet.window_id(primary_window_id) == Some(window)),
     }
 }
 

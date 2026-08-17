@@ -8,12 +8,10 @@ use nara::{
     },
     ecs::{Commands, Component, Entity, Mut, Query, Res, ResMut, Resource, system::SystemParam},
     gameplay::{LocalGameplayCommands, add_local_gameplay_command_systems},
-    input::{InputPointerId, InputSeatId, InputWindowId},
     scene::SceneEntitySource,
     ui::{
         UiActionConsumerId, UiActionCursor, UiActionId, UiActionJournal, UiButton, UiDimension,
-        UiLayer, UiNode, UiRoot, UiSafeAreaInsets, UiSize, UiSurfaceContentTransform,
-        UiSurfaceEndpoint, UiSurfaceId, UiSurfaceSlot, UiText, install_ui_surface,
+        UiLayer, UiNode, UiRoot, UiText,
     },
 };
 
@@ -30,12 +28,10 @@ use crate::{
 
 pub const REFERENCE_RUNTIME_UI_PLUGIN_ID: PluginId = PluginId::new("reference-game.runtime-ui");
 pub const REFERENCE_RETRY_ACTION: &str = "reference-game.retry";
-pub const REFERENCE_UI_SURFACE_ID: u64 = 1;
+pub const REFERENCE_UI_SURFACE_ID: u64 = nara::project_host::PROJECT_PRIMARY_UI_SURFACE_ID;
 const REFERENCE_UI_ACTION_CONSUMER: &str = "reference-game.runtime-ui";
 const REFERENCE_RUNTIME_UI_SHUTDOWN_OBLIGATION: PluginShutdownObligationId =
     PluginShutdownObligationId::new("reference-game.runtime-ui.action-consumer");
-const LOGICAL_WIDTH: f32 = 960.0;
-const LOGICAL_HEIGHT: f32 = 540.0;
 
 const REFERENCE_RUNTIME_UI_REQUIREMENTS: &[PluginId] = &[
     crate::REFERENCE_WAVE_PLUGIN_ID,
@@ -62,29 +58,6 @@ impl Plugin for ReferenceRuntimeUiPlugin {
     }
 
     fn build(&self, app: &mut nara::prelude::App) -> Result<(), PluginError> {
-        let surface_id = UiSurfaceId::new(REFERENCE_UI_SURFACE_ID)
-            .expect("the reference UI surface ID is non-zero");
-        let logical_size = UiSize::new(LOGICAL_WIDTH, LOGICAL_HEIGHT)
-            .expect("the reference UI authored extent is valid");
-        let transform = UiSurfaceContentTransform::new(
-            logical_size,
-            logical_size,
-            UiSafeAreaInsets::default(),
-            1.0,
-        )
-        .map_err(|error| setup_error(error.to_string()))?;
-        let slot = UiSurfaceSlot::new(
-            surface_id,
-            UiSurfaceEndpoint::new(
-                InputWindowId::new(1),
-                InputSeatId::PRIMARY,
-                InputPointerId::PRIMARY,
-            ),
-            transform,
-        )
-        .map_err(|error| setup_error(error.to_string()))?;
-        install_ui_surface(app.world_mut()?, slot)
-            .map_err(|error| setup_error(error.to_string()))?;
         app.insert_resource(ReferenceHudProjection::default())?;
         app.insert_resource(ReferenceProductObservation::default())?;
         add_local_gameplay_command_systems(app, collect_retry_intents)?;

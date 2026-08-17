@@ -14,6 +14,9 @@ const SLOT_WGPU_SPRITE_SUBMITTER: PluginSlotId =
 #[cfg(all(feature = "presentation-ui", feature = "render-wgpu"))]
 const SLOT_WGPU_UI_SUBMITTER: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.render-wgpu.ui-submitter");
+#[cfg(feature = "runtime-ui")]
+const SLOT_PROJECT_PRIMARY_UI_SURFACE: PluginSlotId =
+    PluginSlotId::new("nara.plugins.slot.project-primary-ui-surface");
 const SLOT_STARTUP_SCENE_ACTIVATION: PluginSlotId =
     PluginSlotId::new("nara.plugins.slot.startup-scene-activation");
 
@@ -23,6 +26,8 @@ pub(crate) struct ProjectProfilePlugins {
     capabilities: ProductCapabilitySet,
     task_config: nara_tasks::TaskPoolConfig,
     primary_window: Option<nara_window::Window>,
+    #[cfg(feature = "runtime-ui")]
+    primary_ui_surface: Option<super::ui_surface::AcceptedPrimaryUiSurfaceProfile>,
     placement: ProjectProfilePlacement,
 }
 
@@ -57,6 +62,11 @@ impl ProjectProfilePlugins {
             capabilities,
             task_config: settings.tasks.pool_config,
             primary_window: settings.window.to_window(),
+            #[cfg(feature = "runtime-ui")]
+            primary_ui_surface: settings
+                .ui
+                .primary_surface
+                .map(super::ui_surface::AcceptedPrimaryUiSurfaceProfile::from_effective),
             placement,
         }
     }
@@ -103,11 +113,21 @@ impl PluginGroup for ProjectProfilePlugins {
             .capabilities
             .contains(nara_project::ProductCapability::RuntimeUi)
         {
-            builder.add_edited_group(
+            let builder = builder.add_edited_group(
                 super::RuntimeUiPlugins
                     .edit()
                     .configure(task_plugin.clone()),
-            )
+            );
+            match self.primary_ui_surface {
+                Some(profile) => builder.add_slot(
+                    PluginSlot::required(
+                        SLOT_PROJECT_PRIMARY_UI_SURFACE,
+                        super::ui_surface::PROJECT_PRIMARY_UI_SURFACE_PLUGIN_ID,
+                    ),
+                    super::ui_surface::project_primary_ui_surface_definition(profile),
+                ),
+                None => builder,
+            }
         } else {
             builder
         };

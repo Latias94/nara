@@ -133,28 +133,28 @@ pub(crate) fn validate_ui_component_value(
     }
 }
 
-fn decode_root(value: &ComponentValue) -> Result<UiRoot, ComponentCodecError> {
+pub(crate) fn decode_root(value: &ComponentValue) -> Result<UiRoot, ComponentCodecError> {
     expect_fields(value, "UiRoot", &["layer"])?;
     Ok(UiRoot::new(read_layer(value.field("layer")?, "layer")?))
 }
 
-fn encode_root(root: &UiRoot) -> Result<ComponentValue, ComponentCodecError> {
+pub(crate) fn encode_root(root: &UiRoot) -> Result<ComponentValue, ComponentCodecError> {
     Ok(ComponentValue::map([(
         "layer",
         ComponentValue::String(layer_name(root.layer()).to_string()),
     )]))
 }
 
-fn decode_node(value: &ComponentValue) -> Result<UiNode, ComponentCodecError> {
+pub(crate) fn decode_node(value: &ComponentValue) -> Result<UiNode, ComponentCodecError> {
     expect_fields(value, "UiNode", &["style"])?;
     Ok(UiNode::new(read_style(value.field("style")?)?))
 }
 
-fn encode_node(node: &UiNode) -> Result<ComponentValue, ComponentCodecError> {
+pub(crate) fn encode_node(node: &UiNode) -> Result<ComponentValue, ComponentCodecError> {
     Ok(ComponentValue::map([("style", style_value(node.style())?)]))
 }
 
-fn decode_visual(value: &ComponentValue) -> Result<UiVisual, ComponentCodecError> {
+pub(crate) fn decode_visual(value: &ComponentValue) -> Result<UiVisual, ComponentCodecError> {
     expect_fields(
         value,
         "UiVisual",
@@ -178,7 +178,7 @@ fn decode_visual(value: &ComponentValue) -> Result<UiVisual, ComponentCodecError
     Ok(visual)
 }
 
-fn encode_visual(visual: &UiVisual) -> Result<ComponentValue, ComponentCodecError> {
+pub(crate) fn encode_visual(visual: &UiVisual) -> Result<ComponentValue, ComponentCodecError> {
     let visual = visual.kernel();
     let background = visual
         .background()
@@ -195,7 +195,7 @@ fn encode_visual(visual: &UiVisual) -> Result<ComponentValue, ComponentCodecErro
     ]))
 }
 
-fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCodecError> {
+pub(crate) fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCodecError> {
     expect_fields(
         value,
         "UiText",
@@ -258,7 +258,7 @@ fn encode_text(text: &UiText) -> Result<ComponentValue, ComponentCodecError> {
     ]))
 }
 
-fn decode_button(value: &ComponentValue) -> Result<UiButton, ComponentCodecError> {
+pub(crate) fn decode_button(value: &ComponentValue) -> Result<UiButton, ComponentCodecError> {
     expect_fields(
         value,
         "UiButton",
@@ -290,7 +290,9 @@ fn encode_button(button: &UiButton) -> Result<ComponentValue, ComponentCodecErro
     ]))
 }
 
-fn decode_button_visuals(value: &ComponentValue) -> Result<UiButtonVisuals, ComponentCodecError> {
+pub(crate) fn decode_button_visuals(
+    value: &ComponentValue,
+) -> Result<UiButtonVisuals, ComponentCodecError> {
     expect_fields(
         value,
         "UiButtonVisuals",
@@ -374,7 +376,7 @@ fn encode_button_visuals(visuals: &UiButtonVisuals) -> Result<ComponentValue, Co
     ]))
 }
 
-fn decode_semantics(value: &ComponentValue) -> Result<UiSemantics, ComponentCodecError> {
+pub(crate) fn decode_semantics(value: &ComponentValue) -> Result<UiSemantics, ComponentCodecError> {
     expect_fields(
         value,
         "UiSemantics",
@@ -474,7 +476,7 @@ fn encode_semantics(semantics: &UiSemantics) -> Result<ComponentValue, Component
     ]))
 }
 
-fn decode_theme(value: &ComponentValue) -> Result<UiTheme, ComponentCodecError> {
+pub(crate) fn decode_theme(value: &ComponentValue) -> Result<UiTheme, ComponentCodecError> {
     expect_fields(value, "UiTheme", &["revision", "palette"])?;
     UiTheme::new(
         read_u64(value.field("revision")?, "revision")?,

@@ -1,3 +1,6 @@
+#[cfg(feature = "ui-submitter")]
+use std::sync::Arc;
+
 use nara_render::{
     Extent2d, RenderFramePacket, RenderFrameSourceGeneration, RenderFrameTarget, RenderImagePacket,
     RenderWindowPacket,
@@ -8,7 +11,7 @@ use nara_sprite_render::SpriteBatches;
 use nara_ui_render::__private::{UiBackendPresentationFrame, UiCompletedBackendOutcome};
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{
-    UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
+    UiPaintPacket, UiPresentationAttemptIdentity, UiPresentationBackendFaultDomain,
     UiPresentationBackendGeneration,
 };
 use nara_window::{
@@ -53,6 +56,14 @@ pub enum WgpuEditorExecutionError {
     ViewportTargetAlreadyActive,
     #[error("an Editor viewport target must be admitted before image submission")]
     ViewportTargetUnavailable,
+    #[error(
+        "the Editor viewport target extent {width}x{height} exceeds the live GPU 2D texture limit {maximum}"
+    )]
+    ViewportTargetExtentUnsupported {
+        width: u32,
+        height: u32,
+        maximum: u32,
+    },
     #[error("the Editor viewport reservation no longer matches the live source or GPU namespace")]
     StaleViewportReservation,
     #[error("the egui texture registration generation must be non-zero")]
@@ -273,6 +284,7 @@ impl WgpuEditorUiSubmission {
             | WgpuEditorExecutionError::StaleImageSubmission
             | WgpuEditorExecutionError::ViewportTargetAlreadyActive
             | WgpuEditorExecutionError::ViewportTargetUnavailable
+            | WgpuEditorExecutionError::ViewportTargetExtentUnsupported { .. }
             | WgpuEditorExecutionError::StaleViewportReservation => {
                 UiPresentationBackendFaultDomain::Target
             }
@@ -804,6 +816,22 @@ impl WgpuEditorExecution {
         }
     }
 
+    /// Submits an authoring-only UI packet without entering the Runtime UI outcome protocol.
+    #[cfg(feature = "ui-submitter")]
+    pub fn submit_authoring_ui_image(
+        &mut self,
+        window: RenderWindowPacket,
+        packet: RenderFramePacket,
+        ui_packet: Arc<UiPaintPacket>,
+    ) -> Result<WgpuSubmittedImageReceipt, WgpuEditorExecutionError> {
+        self.submit_image_payload(
+            window,
+            packet,
+            WgpuFramePayload::for_editor_authoring_ui(vec![ui_packet]),
+            None,
+        )
+    }
+
     #[cfg(all(feature = "sprite-submitter", feature = "ui-submitter"))]
     pub fn submit_sprite_ui_image(
         &mut self,
@@ -1050,6 +1078,14 @@ impl WgpuEditorExecution {
     ) -> Result<WgpuEditorViewportTargetReservation, WgpuEditorExecutionError> {
         let stamp = self.next_viewport_reservation_stamp(namespace, source_generation, target)?;
         let extent = target.extent();
+        let maximum = namespace.device.limits().max_texture_dimension_2d;
+        if extent.width > maximum || extent.height > maximum {
+            return Err(WgpuEditorExecutionError::ViewportTargetExtentUnsupported {
+                width: extent.width,
+                height: extent.height,
+                maximum,
+            });
+        }
         let texture = namespace.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("nara_editor_viewport_target"),
             size: wgpu::Extent3d {

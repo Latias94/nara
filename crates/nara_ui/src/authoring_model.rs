@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
 };
 
 use nara_reflect::{
@@ -13,7 +13,7 @@ use nara_scene::{
     PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
     ScenePatchOperation,
 };
-use nara_ui_kernel::{UiRect, UiSize};
+use nara_ui_kernel::{UiPoint, UiRect, UiSize, UiSurfaceContentTransform};
 use thiserror::Error;
 
 use crate::codec;
@@ -556,7 +556,7 @@ impl UiAuthoringSourceMapEntry {
     }
 }
 
-/// Resolved Canvas fact for one exact source node. U3 supplies these from the real UI compiler.
+/// Resolved Canvas fact for one exact source node, produced by the real UI compiler.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiAuthoringCanvasFact {
     entity: SceneEntityId,
@@ -613,25 +613,67 @@ impl UiAuthoringCanvasFact {
 /// Resource-free resolved Canvas facts. Native/GPU/presentation identities remain Host-owned.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiAuthoringCanvasReady {
-    logical_size: UiSize,
-    facts: Vec<UiAuthoringCanvasFact>,
+    content_transform: UiSurfaceContentTransform,
+    facts: Arc<[UiAuthoringCanvasFact]>,
 }
 
 impl UiAuthoringCanvasReady {
     #[must_use]
     pub fn new(
-        logical_size: UiSize,
+        content_transform: UiSurfaceContentTransform,
         facts: impl IntoIterator<Item = UiAuthoringCanvasFact>,
     ) -> Self {
         Self {
-            logical_size,
-            facts: facts.into_iter().collect(),
+            content_transform,
+            facts: facts.into_iter().collect::<Vec<_>>().into(),
         }
     }
 
     #[must_use]
     pub const fn logical_size(&self) -> UiSize {
-        self.logical_size
+        self.content_transform.authored_logical_size()
+    }
+
+    #[must_use]
+    pub const fn content_transform(&self) -> UiSurfaceContentTransform {
+        self.content_transform
+    }
+
+    /// Maps normalized physical-surface coordinates through the exact content transform.
+    /// Letterbox and safe-area points are rejected rather than clamped into authored content.
+    #[must_use]
+    pub fn authored_point_from_surface_uv(&self, uv: [f32; 2]) -> Option<UiPoint> {
+        if !uv
+            .into_iter()
+            .all(|value| value.is_finite() && (0.0..1.0).contains(&value))
+        {
+            return None;
+        }
+        let physical = self.content_transform.physical_surface_size();
+        self.content_transform.physical_to_authored(UiPoint::new(
+            uv[0] * physical.width(),
+            uv[1] * physical.height(),
+        ))
+    }
+
+    /// Resolves the topmost visible source entity at one normalized physical-surface point.
+    #[must_use]
+    pub fn source_at_surface_uv(&self, uv: [f32; 2]) -> Option<&SceneEntityId> {
+        let point = self.authored_point_from_surface_uv(uv)?;
+        self.facts
+            .iter()
+            .filter(|fact| fact.visible())
+            .filter(|fact| {
+                let Some(visible) = fact
+                    .clip_rect()
+                    .map_or(Some(fact.rect()), |clip| fact.rect().intersect(clip))
+                else {
+                    return false;
+                };
+                visible.contains(point)
+            })
+            .max_by_key(|fact| fact.paint_order())
+            .map(UiAuthoringCanvasFact::entity)
     }
 
     #[must_use]
@@ -666,6 +708,17 @@ pub struct UiAuthoringDiagnostic {
 }
 
 impl UiAuthoringDiagnostic {
+    /// Creates a projection-level diagnostic for a failed renderer-neutral Canvas compile.
+    #[must_use]
+    pub const fn canvas_compilation_rejected() -> Self {
+        Self {
+            entity: None,
+            component: None,
+            field: None,
+            reason: UiAuthoringDiagnosticReason::CanvasCompilationRejected,
+        }
+    }
+
     #[must_use]
     pub const fn entity(&self) -> Option<&SceneEntityId> {
         self.entity.as_ref()
@@ -693,17 +746,18 @@ pub enum UiAuthoringDiagnosticReason {
     ComponentVersionMismatch,
     MissingRequiredField,
     InvalidStoredValue,
+    CanvasCompilationRejected,
 }
 
 /// Immutable authoring projection over exactly one persistent Prefab document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiAuthoringProjection {
-    hierarchy: Vec<UiAuthoringHierarchyNode>,
-    fields: Vec<UiAuthoringFieldDescriptor>,
-    components: BTreeMap<(SceneEntityId, ComponentTypeId), SceneComponentRecord>,
-    source_map: Vec<UiAuthoringSourceMapEntry>,
+    hierarchy: Arc<[UiAuthoringHierarchyNode]>,
+    fields: Arc<[UiAuthoringFieldDescriptor]>,
+    components: Arc<BTreeMap<(SceneEntityId, ComponentTypeId), SceneComponentRecord>>,
+    source_map: Arc<[UiAuthoringSourceMapEntry]>,
     canvas: UiAuthoringCanvasProjection,
-    diagnostics: Vec<UiAuthoringDiagnostic>,
+    diagnostics: Arc<[UiAuthoringDiagnostic]>,
 }
 
 impl UiAuthoringProjection {
@@ -730,6 +784,15 @@ impl UiAuthoringProjection {
     #[must_use]
     pub fn diagnostics(&self) -> &[UiAuthoringDiagnostic] {
         &self.diagnostics
+    }
+
+    pub(crate) fn component_record(
+        &self,
+        entity: &SceneEntityId,
+        kind: UiAuthoringComponentKind,
+    ) -> Option<&SceneComponentRecord> {
+        self.components
+            .get(&(entity.clone(), kind.component_type()))
     }
 
     #[must_use]
@@ -1005,14 +1068,14 @@ impl ProjectionBuilder {
     fn finish(mut self) -> Result<UiAuthoringProjection, UiAuthoringProjectionError> {
         self.fields.sort_by(|left, right| left.key.cmp(&right.key));
         Ok(UiAuthoringProjection {
-            hierarchy: self.hierarchy,
-            fields: self.fields,
-            components: self.components,
-            source_map: self.source_map,
+            hierarchy: self.hierarchy.into(),
+            fields: self.fields.into(),
+            components: Arc::new(self.components),
+            source_map: self.source_map.into(),
             canvas: UiAuthoringCanvasProjection::Unavailable(
                 UiAuthoringCanvasUnavailableReason::PresentationNotCompiled,
             ),
-            diagnostics: self.diagnostics,
+            diagnostics: self.diagnostics.into(),
         })
     }
 }

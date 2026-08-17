@@ -4,6 +4,7 @@ use nara_ui_kernel::{
     UiImageId, UiKeyError, UiLayer, UiSemanticRole, UiStyle, UiStyleError, UiTextAlignment,
     UiTextOverflow, UiThemePalette,
 };
+use nara_ui_widgets::{UiButton as KernelButton, UiButtonState, UiButtonVisualState};
 
 /// Marks one ECS entity as the root of an authored UI tree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
@@ -94,6 +95,43 @@ impl UiVisual {
     pub(crate) fn kernel(&self) -> nara_ui_kernel::UiVisual {
         self.0.clone()
     }
+}
+
+pub(crate) fn resolve_controlled_button_visual(
+    visual: &UiVisual,
+    visuals: UiButtonVisuals,
+    interaction: UiButtonState,
+    button: &KernelButton,
+) -> Result<(nara_ui_kernel::UiVisual, UiBrush), UiStyleError> {
+    let background_state = interaction.visual_state(button);
+    let mut visual = visual.kernel();
+    let background = match background_state {
+        UiButtonVisualState::Hovered => Some(visuals.hovered_background()),
+        UiButtonVisualState::Pressed => Some(visuals.pressed_background()),
+        UiButtonVisualState::Disabled => Some(visuals.disabled_background()),
+        UiButtonVisualState::Idle | UiButtonVisualState::Focused => None,
+    };
+    if let Some(background) = background {
+        visual = visual.with_background(UiBrush::Role(background));
+    }
+    if interaction.focused() {
+        visual = visual.with_border(UiBorder::new(
+            visuals.focus_border_width(),
+            UiBrush::Role(visuals.focused_border()),
+        )?);
+    }
+    let text_role = if !button.enabled() {
+        visuals.disabled_text()
+    } else if background_state == UiButtonVisualState::Pressed {
+        visuals.pressed_text()
+    } else if interaction.focused() {
+        visuals.focused_text()
+    } else if background_state == UiButtonVisualState::Hovered {
+        visuals.hovered_text()
+    } else {
+        visuals.normal_text()
+    };
+    Ok((visual, UiBrush::Role(text_role)))
 }
 
 /// Bounded display text authored on one ECS node.

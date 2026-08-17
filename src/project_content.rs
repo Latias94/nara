@@ -204,7 +204,7 @@ impl ProjectContentSnapshot {
         &self.inner.images
     }
 
-    pub(crate) fn share_image_for_runtime(&self, index: usize) -> Option<ImageAsset> {
+    pub(crate) fn share_image_for_consumer(&self, index: usize) -> Option<ImageAsset> {
         self.inner
             .images
             .get(index)

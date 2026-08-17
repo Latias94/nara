@@ -17,10 +17,7 @@ pub(crate) fn ui_packet_targets_view(
     target: RenderTarget,
     primary_window_id: Option<nara_window::WindowId>,
 ) -> bool {
-    let Some(target_window_id) = target.window_id(primary_window_id) else {
-        return false;
-    };
-    packet.target().window_id(primary_window_id) == Some(target_window_id)
+    crate::frame::render_targets_match(packet.target(), target, primary_window_id)
 }
 
 #[cfg(test)]
@@ -471,6 +468,34 @@ mod tests {
     }
 
     #[test]
+    fn image_target_ui_packets_match_only_their_exact_target() {
+        let first = RenderTarget::Image(Handle::<nara_render::RenderImage2d>::new(
+            AssetId::from_raw(41),
+        ));
+        let second = RenderTarget::Image(Handle::<nara_render::RenderImage2d>::new(
+            AssetId::from_raw(42),
+        ));
+        let packet = text_packet_for_target(first);
+        let viewport = readback_viewport();
+
+        assert!(
+            !collect_ui_quad_batches(
+                &[Arc::clone(&packet)],
+                first,
+                Some(WindowId::PRIMARY),
+                viewport,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            collect_ui_quad_batches(&[packet], second, Some(WindowId::PRIMARY), viewport,)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn image_packet_renders_the_captured_snapshot_pixels() {
         let packet = image_packet();
         let viewport = readback_viewport();
@@ -688,16 +713,16 @@ mod tests {
     }
 
     fn text_packet() -> Arc<UiPaintPacket> {
+        text_packet_for_target(RenderTarget::Window(WindowId::PRIMARY))
+    }
+
+    fn text_packet_for_target(target: RenderTarget) -> Arc<UiPaintPacket> {
         let node = UiNode::new(UiStyle::absolute(4.0, 4.0, 56.0, 40.0))
             .with_key(UiLocalKey::runtime("wgpu-glyph-readback", "label").unwrap())
             .with_text(UiText::new("Nara", 20.0).unwrap());
         let frame = compile_frame("wgpu-glyph-readback", node);
         nara_ui_render::UiPresentationPlanner::default()
-            .plan(
-                frame,
-                RenderTarget::Window(WindowId::PRIMARY),
-                &nara_ui_render::UiPreparedImages::default(),
-            )
+            .plan(frame, target, &nara_ui_render::UiPreparedImages::default())
             .unwrap()
     }
 

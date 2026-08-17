@@ -5,6 +5,7 @@ extern crate nara_ecs as bevy_ecs;
 
 mod authoring;
 mod authoring_model;
+mod canvas;
 mod codec;
 mod interaction;
 mod runtime;
@@ -134,6 +135,10 @@ pub mod __private {
         UiAuthoringScalarMetadata, UiAuthoringSourceMapEntry, UiBrushAuthoringKind,
         UiDirectManipulationCapability, UiDirectManipulationReadOnlyReason,
         project_prefab_authoring,
+    };
+    pub use crate::canvas::{
+        UiAuthoringCanvasCandidate, UiAuthoringCanvasCompileError, UiAuthoringCanvasCompileRequest,
+        UiAuthoringCanvasCompiler,
     };
     pub use crate::codec::prefab_contains_ui_root;
     pub use crate::runtime::{

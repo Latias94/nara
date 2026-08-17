@@ -16,8 +16,14 @@ use nara_reflect::ComponentSchemaProviderDefinition;
 use thiserror::Error;
 
 mod profile;
+#[cfg(feature = "runtime-ui")]
+mod ui_surface;
 
 pub(crate) use profile::ProjectProfilePlugins;
+#[cfg(feature = "presentation-ui")]
+pub(crate) use ui_surface::AcceptedPrimaryUiSurfaceProfile;
+#[cfg(feature = "runtime-ui")]
+pub(crate) use ui_surface::PROJECT_PRIMARY_UI_SURFACE_ID;
 
 const PRODUCT_RECIPE_GROUP_ID: PluginGroupId = PluginGroupId::new("nara.product-recipe");
 const PRODUCT_RECIPE_CONFIGURATION_PREFIX: &[u8] = b"nara.product-recipe.config.v1\0";

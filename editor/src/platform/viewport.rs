@@ -6,7 +6,7 @@ use nara::{
     project_host::{
         EditorGameStartActivation, EditorGameStartRequest, EditorGameViewCandidate,
         EditorGameViewCandidateIdentity, EditorGameViewCompletion, EditorPreviewCandidate,
-        EditorPreviewHit,
+        EditorPreviewHit, EditorUiPreviewCandidate,
     },
     render::{
         __private::{editor_viewport_image_target, map_editor_game_view_packet},
@@ -20,7 +20,9 @@ use nara::{
     },
     scene::SceneAuthoringRevision,
     sprite_render::SpriteBatches,
-    tooling::{EditorAction, EditorActionBatch, EditorDocumentId, EditorFrameModel},
+    tooling::{
+        EditorAction, EditorActionBatch, EditorDocumentId, EditorFrameModel, EditorGestureStamp,
+    },
     tooling_egui::{EguiGameViewInput, EguiSceneViewInput},
 };
 
@@ -32,6 +34,10 @@ const EDITOR_GAME_VIEW_TARGET_ID: u64 = 2;
 enum EditorViewportSource {
     Scene,
     Game(EditorGameStartRequest),
+    UiPrefab {
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -84,6 +90,19 @@ impl EditorViewportSlot {
         self.scene_binding().is_some()
     }
 
+    pub(super) fn is_ui_prefab(
+        &self,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+    ) -> bool {
+        self.ui_prefab_binding(document, revision).is_some()
+    }
+
+    pub(super) fn is_ui_prefab_binding(&self) -> bool {
+        self.binding
+            .is_some_and(|binding| matches!(binding.source, EditorViewportSource::UiPrefab { .. }))
+    }
+
     fn game_binding(&self) -> Option<EditorViewportTextureBinding> {
         self.binding
             .filter(|binding| matches!(binding.source, EditorViewportSource::Game(_)))
@@ -92,6 +111,16 @@ impl EditorViewportSlot {
     fn scene_binding(&self) -> Option<EditorViewportTextureBinding> {
         self.binding
             .filter(|binding| binding.source == EditorViewportSource::Scene)
+    }
+
+    fn ui_prefab_binding(
+        &self,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+    ) -> Option<EditorViewportTextureBinding> {
+        self.binding.filter(|binding| {
+            binding.source == EditorViewportSource::UiPrefab { document, revision }
+        })
     }
 
     fn prepare_target(
@@ -302,6 +331,7 @@ impl PreparedEditorGame {
 pub(super) enum PreparedEditorViewportFrame {
     Scene(PreparedEditorScene),
     Game(PreparedEditorGame),
+    UiCanvas(PreparedEditorUiCanvas),
 }
 
 impl PreparedEditorViewportFrame {
@@ -309,6 +339,7 @@ impl PreparedEditorViewportFrame {
         match self {
             Self::Scene(scene) => scene.submission,
             Self::Game(game) => game.image(),
+            Self::UiCanvas(ui) => ui.submission,
         }
     }
 
@@ -316,6 +347,7 @@ impl PreparedEditorViewportFrame {
         match self {
             Self::Scene(scene) => scene.texture_id,
             Self::Game(game) => game.texture_id,
+            Self::UiCanvas(ui) => ui.texture_id,
         }
     }
 
@@ -323,8 +355,220 @@ impl PreparedEditorViewportFrame {
         match self {
             Self::Scene(scene) => scene.texture_registration_generation,
             Self::Game(game) => game.texture_registration_generation,
+            Self::UiCanvas(ui) => ui.texture_registration_generation,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct EditorUiCanvasIdentity {
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+    geometry_generation: u64,
+    gesture: Option<EditorGestureStamp>,
+}
+
+impl EditorUiCanvasIdentity {
+    pub(super) const fn new(
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        gesture: Option<EditorGestureStamp>,
+        geometry_generation: u64,
+    ) -> Self {
+        Self {
+            document,
+            revision,
+            geometry_generation,
+            gesture,
+        }
+    }
+}
+
+pub(super) struct PreparedEditorUiCanvas {
+    identity: EditorUiCanvasIdentity,
+    canvas: nara::ui::__private::UiAuthoringCanvasReady,
+    submission: WgpuSubmittedImageReceipt,
+    texture_id: TextureId,
+    texture_registration_generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct EditorUiCanvasPickStamp {
+    identity: EditorUiCanvasIdentity,
+    receipt: WgpuEditorCompositeReceipt,
+}
+
+impl EditorUiCanvasPickStamp {
+    pub(super) const fn document(self) -> EditorDocumentId {
+        self.identity.document
+    }
+
+    fn matches_current(self, current: Option<EditorUiCanvasIdentity>) -> bool {
+        current == Some(self.identity)
+    }
+}
+
+struct PresentedEditorUiCanvas {
+    stamp: EditorUiCanvasPickStamp,
+    canvas: nara::ui::__private::UiAuthoringCanvasReady,
+}
+
+pub(super) struct EditorUiCanvasPresenter {
+    presented: Option<PresentedEditorUiCanvas>,
+}
+
+impl EditorUiCanvasPresenter {
+    pub(super) const fn new() -> Self {
+        Self { presented: None }
+    }
+
+    pub(super) fn prepare(
+        &mut self,
+        slot: &mut EditorViewportSlot,
+        gpu: &mut WgpuEditorExecution,
+        renderer: &mut EditorEguiRenderer,
+        window: RenderWindowPacket,
+        candidate: EditorUiPreviewCandidate,
+    ) -> Result<PreparedEditorUiCanvas, EditorRunError> {
+        let (document, revision, gesture, geometry_generation, packet, paint_packet, canvas) =
+            candidate.into_parts();
+        let identity =
+            EditorUiCanvasIdentity::new(document, revision, gesture, geometry_generation);
+        let RenderFrameTarget::Image(target) = packet.target() else {
+            return Err(EditorRunError::Platform(
+                "the UI Canvas candidate did not retain its image target".to_owned(),
+            ));
+        };
+        let logical = canvas.logical_size();
+        let extent = target.extent();
+        if logical.width() != extent.width as f32 || logical.height() != extent.height as f32 {
+            return Err(EditorRunError::Platform(
+                "the UI Canvas logical extent does not match its image target".to_owned(),
+            ));
+        }
+        let binding = slot.ensure_target(
+            gpu,
+            renderer,
+            window,
+            packet.source_generation(),
+            target,
+            EditorViewportSource::UiPrefab { document, revision },
+        )?;
+        let submission = gpu
+            .submit_authoring_ui_image(window, packet, paint_packet)
+            .map_err(platform_gpu_error)?;
+        if !binding.matches(submission) {
+            return Err(EditorRunError::Platform(
+                "the submitted UI Canvas did not match its committed viewport reservation"
+                    .to_owned(),
+            ));
+        }
+        Ok(PreparedEditorUiCanvas {
+            identity,
+            canvas,
+            submission,
+            texture_id: binding.texture_id,
+            texture_registration_generation: binding.registration_generation,
+        })
+    }
+
+    pub(super) fn view_input(
+        &self,
+        slot: &EditorViewportSlot,
+        prepared: Option<&PreparedEditorUiCanvas>,
+        current: Option<EditorUiCanvasIdentity>,
+    ) -> EguiSceneViewInput {
+        if let Some(prepared) = prepared {
+            let extent = prepared.submission.target().extent();
+            return EguiSceneViewInput::previewing(
+                prepared.texture_id,
+                [extent.width, extent.height],
+            );
+        }
+        let Some(presented) = self.presented.as_ref() else {
+            return EguiSceneViewInput::unavailable();
+        };
+        let Some(binding) = slot.ui_prefab_binding(
+            presented.stamp.identity.document,
+            presented.stamp.identity.revision,
+        ) else {
+            return EguiSceneViewInput::unavailable();
+        };
+        if !binding.matches_presented(presented.stamp.receipt) {
+            return EguiSceneViewInput::unavailable();
+        }
+        let extent = presented.stamp.receipt.image().target().extent();
+        if presented.stamp.matches_current(current) {
+            EguiSceneViewInput::presented(binding.texture_id, [extent.width, extent.height])
+        } else {
+            EguiSceneViewInput::previewing(binding.texture_id, [extent.width, extent.height])
+        }
+    }
+
+    pub(super) fn pick_stamp(
+        &self,
+        slot: &EditorViewportSlot,
+        current: Option<EditorUiCanvasIdentity>,
+    ) -> Option<EditorUiCanvasPickStamp> {
+        let presented = self.presented.as_ref()?;
+        if !presented.stamp.matches_current(current) {
+            return None;
+        }
+        let binding = slot.ui_prefab_binding(
+            presented.stamp.identity.document,
+            presented.stamp.identity.revision,
+        )?;
+        binding
+            .matches_presented(presented.stamp.receipt)
+            .then_some(presented.stamp)
+    }
+
+    pub(super) fn resolve_pick(
+        &self,
+        request: EditorUiCanvasPickRequest,
+    ) -> Result<Option<nara::scene::SceneEntityId>, ()> {
+        let presented = self.presented.as_ref().ok_or(())?;
+        if presented.stamp != request.stamp || !is_normalized_viewport_uv(request.uv) {
+            return Err(());
+        }
+        Ok(presented.canvas.source_at_surface_uv(request.uv).cloned())
+    }
+
+    pub(super) fn promote(
+        &mut self,
+        prepared: PreparedEditorUiCanvas,
+        receipt: WgpuEditorCompositeReceipt,
+    ) -> Result<(), EditorRunError> {
+        if receipt.image() != prepared.submission
+            || receipt.texture_registration_generation() != prepared.texture_registration_generation
+        {
+            return Err(EditorRunError::Platform(
+                "the Editor UI Canvas receipt does not match the prepared candidate".to_owned(),
+            ));
+        }
+        self.presented = Some(PresentedEditorUiCanvas {
+            stamp: EditorUiCanvasPickStamp {
+                identity: prepared.identity,
+                receipt,
+            },
+            canvas: prepared.canvas,
+        });
+        Ok(())
+    }
+
+    pub(super) fn retire_presentation(&mut self) {
+        self.presented = None;
+    }
+
+    pub(super) fn retire_gpu_binding(&mut self) {
+        self.retire_presentation();
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct EditorUiCanvasPickRequest {
+    pub(super) stamp: EditorUiCanvasPickStamp,
+    pub(super) uv: [f32; 2],
 }
 
 struct PresentedEditorGame {
@@ -1046,13 +1290,7 @@ impl EditorScenePresenter {
         request: EditorScenePickRequest,
     ) -> Result<Option<nara::scene::SceneEntityId>, ()> {
         let presented = self.presented.as_ref().ok_or(())?;
-        if presented.stamp != request.stamp
-            || !request.uv.into_iter().all(f32::is_finite)
-            || request
-                .uv
-                .into_iter()
-                .any(|value| !(0.0..=1.0).contains(&value))
-        {
+        if presented.stamp != request.stamp || !is_normalized_viewport_uv(request.uv) {
             return Err(());
         }
         let clip = [request.uv[0] * 2.0 - 1.0, 1.0 - request.uv[1] * 2.0];
@@ -1095,6 +1333,11 @@ impl EditorScenePresenter {
     pub(super) fn retire_gpu_binding(&mut self) {
         self.presented = None;
     }
+}
+
+fn is_normalized_viewport_uv(uv: [f32; 2]) -> bool {
+    uv.into_iter()
+        .all(|value| value.is_finite() && (0.0..=1.0).contains(&value))
 }
 
 pub(super) fn primitives_sample_texture(

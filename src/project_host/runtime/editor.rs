@@ -10,6 +10,8 @@ mod play;
 mod preview;
 #[cfg(feature = "runtime-ui")]
 mod ui_authoring;
+#[cfg(feature = "presentation-ui")]
+mod ui_preview;
 
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
@@ -24,6 +26,8 @@ pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
 use ui_authoring::EditorUiAuthoringProjectionCache;
 #[cfg(feature = "runtime-ui")]
 pub use ui_authoring::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
+#[cfg(feature = "presentation-ui")]
+pub use ui_preview::EditorUiPreviewCandidate;
 
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
@@ -562,6 +566,8 @@ pub struct EditorProjectSession {
     ui_authoring_frame: Option<Arc<EditorUiAuthoringFrame>>,
     #[cfg(feature = "runtime-ui")]
     ui_authoring_projection_cache: Option<EditorUiAuthoringProjectionCache>,
+    #[cfg(feature = "presentation-ui")]
+    ui_preview: ui_preview::EditorUiPreviewSession,
 }
 
 impl fmt::Debug for EditorProjectSession {
@@ -650,6 +656,15 @@ impl EditorProjectSession {
             .map_err(|error| EditorProjectOpenError {
                 diagnostics: error.diagnostics().clone(),
             })?;
+        #[cfg(feature = "presentation-ui")]
+        let ui_preview = ui_preview::EditorUiPreviewSession::new(&snapshot).map_err(|_error| {
+            EditorProjectOpenError {
+                diagnostics: single_error(
+                    "project.editor.ui-preview-init-failed",
+                    "the Editor UI preview owner could not be initialized",
+                ),
+            }
+        })?;
         #[cfg(feature = "presentation-2d")]
         let preview = preview::EditorPreviewSession::new(
             snapshot.clone(),
@@ -735,6 +750,8 @@ impl EditorProjectSession {
             ui_authoring_frame: None,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_projection_cache: None,
+            #[cfg(feature = "presentation-ui")]
+            ui_preview,
         };
         session.publish_editor_frame();
         Ok(session)
@@ -759,6 +776,13 @@ impl EditorProjectSession {
     #[must_use]
     pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
         self.preview.take_candidate()
+    }
+
+    #[cfg(feature = "presentation-ui")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn take_editor_ui_preview_candidate(&mut self) -> Option<EditorUiPreviewCandidate> {
+        self.ui_preview.take_candidate()
     }
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]

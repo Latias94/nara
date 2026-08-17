@@ -53,6 +53,8 @@ pub use action::{DesktopRun, DesktopRunIntent, DesktopRunOutcome, DesktopRunRepo
 pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 pub use desktop_verification::DesktopPresentationVerificationReceipt;
+#[cfg(all(feature = "tooling", feature = "presentation-ui"))]
+pub use editor::EditorUiPreviewCandidate;
 #[cfg(all(
     feature = "tooling",
     any(feature = "presentation-2d", feature = "presentation-ui")
@@ -1040,7 +1042,7 @@ fn publish_snapshot_images(
                     "Project runtime image identity could not be reserved",
                 ))
             })?;
-            let image = snapshot.share_image_for_runtime(index).ok_or_else(|| {
+            let image = snapshot.share_image_for_consumer(index).ok_or_else(|| {
                 HostFault::new(single_error(
                     "project.run.image-snapshot-invalid",
                     "Project runtime image snapshot is inconsistent",

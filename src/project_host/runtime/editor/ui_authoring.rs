@@ -27,6 +27,7 @@ pub struct EditorUiAuthoringFrame {
     selection: EditorSelectionSet,
     gesture: Option<EditorGestureView>,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
+    canvas_generation: Option<u64>,
     projection: Result<Arc<UiAuthoringProjection>, UiAuthoringProjectionError>,
 }
 
@@ -64,6 +65,13 @@ impl EditorUiAuthoringFrame {
     #[must_use]
     pub const fn last_gesture_cancellation(&self) -> Option<EditorGestureCancelReason> {
         self.last_gesture_cancellation
+    }
+
+    /// Returns the exact private Canvas compile generation paired with this frame.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn canvas_generation(&self) -> Option<u64> {
+        self.canvas_generation
     }
 
     #[must_use]
@@ -216,19 +224,52 @@ impl EditorProjectSession {
         let Some(document) = self.workspace.active_document() else {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
+            #[cfg(feature = "presentation-ui")]
+            self.ui_preview.retire();
             return;
         };
         let Some(slot) = self.workspace.prefab(document) else {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
+            #[cfg(feature = "presentation-ui")]
+            self.ui_preview.retire();
             return;
         };
 
         let revision = slot.revision();
         let source_binding = slot.source_binding().clone();
         let selection = slot.selection().clone();
+        let accepted = slot.session().document();
         let mut gesture = self.gestures.active().cloned();
-        let mut key = EditorUiAuthoringProjectionKey {
+        let projected_document = gesture
+            .as_ref()
+            .filter(|gesture| {
+                gesture.baseline().target().document() == document
+                    && gesture.baseline().target().base_revision() == revision
+            })
+            .and_then(|gesture| {
+                let mut preview = PrefabAuthoringSession::new(accepted.clone());
+                preview
+                    .apply_patch(
+                        &gesture.preview().to_patch(),
+                        self.plan.schema_validation().registry(),
+                    )
+                    .applied
+                    .then(|| preview.document().clone())
+            });
+        let projected_document = match (gesture.is_some(), projected_document) {
+            (true, None) => {
+                let _ = self
+                    .gestures
+                    .cancel_active(EditorGestureCancelReason::InvalidPreview);
+                self.last_gesture_cancellation = Some(EditorGestureCancelReason::InvalidPreview);
+                gesture = None;
+                None
+            }
+            (_, projected) => projected,
+        };
+        let projected_document = projected_document.as_ref().unwrap_or(accepted);
+        let key = EditorUiAuthoringProjectionKey {
             document,
             revision,
             gesture: gesture.as_ref().map(EditorGestureView::stamp),
@@ -240,44 +281,43 @@ impl EditorProjectSession {
         {
             Some(cache) => cache.projection.clone(),
             None => {
-                let accepted = slot.session().document().clone();
-                let projected_document = gesture
-                    .as_ref()
-                    .filter(|gesture| {
-                        gesture.baseline().target().document() == document
-                            && gesture.baseline().target().base_revision() == revision
-                    })
-                    .and_then(|gesture| {
-                        let mut preview = PrefabAuthoringSession::new(accepted.clone());
-                        preview
-                            .apply_patch(
-                                &gesture.preview().to_patch(),
-                                self.plan.schema_validation().registry(),
-                            )
-                            .applied
-                            .then(|| preview.document().clone())
-                    });
-                let projected_document = match (gesture.is_some(), projected_document) {
-                    (true, None) => {
-                        let _ = self
-                            .gestures
-                            .cancel_active(EditorGestureCancelReason::InvalidPreview);
-                        self.last_gesture_cancellation =
-                            Some(EditorGestureCancelReason::InvalidPreview);
-                        gesture = None;
-                        key.gesture = None;
-                        accepted
-                    }
-                    (_, Some(projected)) => projected,
-                    (false, None) => accepted,
-                };
-                let projection = project_prefab_authoring(&projected_document).map(Arc::new);
+                let projection = project_prefab_authoring(projected_document).map(Arc::new);
                 self.ui_authoring_projection_cache = Some(EditorUiAuthoringProjectionCache {
                     key,
                     projection: projection.clone(),
                 });
                 projection
             }
+        };
+        #[cfg(feature = "presentation-ui")]
+        let (projection, canvas_generation) = match projection {
+            Ok(projection) => {
+                let canvas = self.ui_preview.prepare(
+                    document,
+                    revision,
+                    gesture.as_ref().map(EditorGestureView::stamp),
+                    projection.as_ref(),
+                    self.plan
+                        .settings()
+                        .ui
+                        .primary_surface
+                        .map(crate::product::AcceptedPrimaryUiSurfaceProfile::from_effective),
+                );
+                let generation = self.ui_preview.geometry_generation();
+                (
+                    Ok(Arc::new(projection.as_ref().clone().with_canvas(canvas))),
+                    generation,
+                )
+            }
+            Err(error) => {
+                self.ui_preview.retire();
+                (Err(error), None)
+            }
+        };
+        #[cfg(not(feature = "presentation-ui"))]
+        let canvas_generation = {
+            let _ = projected_document;
+            None
         };
         self.ui_authoring_frame = Some(Arc::new(EditorUiAuthoringFrame {
             editor_frame,
@@ -287,6 +327,7 @@ impl EditorProjectSession {
             selection,
             gesture,
             last_gesture_cancellation: self.last_gesture_cancellation.take(),
+            canvas_generation,
             projection,
         }));
     }

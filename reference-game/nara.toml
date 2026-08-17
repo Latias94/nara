@@ -37,6 +37,10 @@ join_timeout_ms = 100
 [capabilities]
 requested = ["runtime-2d", "runtime-ui"]
 
+[ui.primary_surface]
+logical_width = 960
+logical_height = 540
+
 [profiles.desktop.capabilities]
 requested = [
     "runtime-2d",

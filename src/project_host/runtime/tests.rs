@@ -743,6 +743,10 @@ preset = "local-headless"
 
 [capabilities]
 requested = ["runtime-2d", "runtime-ui"]
+
+[ui.primary_surface]
+logical_width = 960
+logical_height = 540
 "#,
     )
     .unwrap();
@@ -1052,7 +1056,7 @@ fn editor_ui_authoring_frame_and_continuous_gesture_share_one_exact_prefab_revis
         UiDirectManipulationCapability,
     };
 
-    let project = TestProject::new("editor-ui-authoring-frame");
+    let project = TestProject::with_image("editor-ui-authoring-frame");
     fs::write(
         project.root.join("nara.toml"),
         r#"schema_version = 1
@@ -1073,6 +1077,10 @@ preset = "local-headless"
 
 [capabilities]
 requested = ["runtime-2d", "runtime-ui"]
+
+[ui.primary_surface]
+logical_width = 960
+logical_height = 540
 "#,
     )
     .unwrap();
@@ -1102,6 +1110,10 @@ requested = ["runtime-2d", "runtime-ui"]
                     ui_node_record("absolute", "px", 180.0, "px", 48.0),
                 )
                 .with_component(
+                    ComponentTypeId::new("nara.ui.UiVisual"),
+                    ui_visual_record(Some("textures/player.png")),
+                )
+                .with_component(
                     ComponentTypeId::new("nara.ui.UiButton"),
                     SceneComponentRecord::new(
                         ComponentSchemaVersion::ONE,
@@ -1128,9 +1140,19 @@ requested = ["runtime-2d", "runtime-ui"]
         source: AssetRef::path("reference-ui.prefab.json").unwrap(),
         overrides: ScenePatchDocument::default(),
     });
+    let image = AssetRef::path("textures/player.png").unwrap();
+    let player = SceneEntityRecord::new(nara_identity::SceneEntityId::new("player").unwrap())
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, sprite_value(&image)),
+        );
     fs::write(
         project.root.join("scenes/startup.scene.json"),
-        SceneDocument::from_ordered_roots([anchor_record])
+        SceneDocument::from_ordered_roots([anchor_record, player])
             .to_json_string()
             .unwrap(),
     )
@@ -1185,6 +1207,38 @@ requested = ["runtime-2d", "runtime-ui"]
     let projection = ui_frame.projection().unwrap();
     assert_eq!(projection.hierarchy().len(), 2);
     assert_eq!(projection.source_map().len(), 2);
+    #[cfg(feature = "presentation-ui")]
+    {
+        let nara_ui::__private::UiAuthoringCanvasProjection::Ready(canvas) = projection.canvas()
+        else {
+            panic!(
+                "a valid primary surface must compile one UI Canvas candidate: {:?}",
+                projection.canvas()
+            );
+        };
+        let initial_canvas_generation = ui_frame.canvas_generation().unwrap();
+        assert_eq!(canvas.logical_size().width(), 960.0);
+        assert_eq!(canvas.logical_size().height(), 540.0);
+        assert!(canvas.facts().iter().any(|fact| fact.entity() == &button));
+        let candidate = editor.take_editor_ui_preview_candidate().unwrap();
+        assert_eq!(candidate.document(), prefab_document);
+        assert_eq!(candidate.revision(), ui_frame.revision());
+        assert_eq!(candidate.geometry_generation(), initial_canvas_generation);
+        assert_eq!(candidate.canvas(), canvas);
+
+        let recovery_frame = editor.drive_editor_frame(Duration::ZERO);
+        let recovered_ui = editor.current_ui_authoring_frame().unwrap();
+        let recovered_generation = recovered_ui.canvas_generation().unwrap();
+        assert!(recovered_generation > initial_canvas_generation);
+        assert_eq!(
+            editor
+                .take_editor_ui_preview_candidate()
+                .unwrap()
+                .geometry_generation(),
+            recovered_generation
+        );
+        frame = recovery_frame;
+    }
     let button_node = projection
         .hierarchy()
         .iter()
@@ -1353,6 +1407,8 @@ requested = ["runtime-2d", "runtime-ui"]
 
     let second_preview_frame = editor.drive_editor_frame(Duration::ZERO);
     let second_ui = editor.current_ui_authoring_frame().unwrap();
+    #[cfg(feature = "presentation-ui")]
+    assert!(second_ui.canvas_generation().unwrap() > first_ui.canvas_generation().unwrap());
     assert!(matches!(
         second_ui
             .projection()
@@ -3491,6 +3547,43 @@ fn ui_node_record(
                 ("stacking_context", ComponentValue::Bool(false)),
             ]),
         )]),
+    )
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+fn ui_visual_record(image: Option<&str>) -> SceneComponentRecord {
+    let brush = |red: f64, green: f64, blue: f64, alpha: f64, image: Option<&str>| {
+        ComponentValue::map([
+            (
+                "kind",
+                ComponentValue::String(if image.is_some() { "image" } else { "solid" }.to_owned()),
+            ),
+            ("red", ComponentValue::f64(red).unwrap()),
+            ("green", ComponentValue::f64(green).unwrap()),
+            ("blue", ComponentValue::f64(blue).unwrap()),
+            ("alpha", ComponentValue::f64(alpha).unwrap()),
+            (
+                "reference",
+                ComponentValue::String(image.unwrap_or_default().to_owned()),
+            ),
+        ])
+    };
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([
+            ("background", brush(0.2, 0.4, 0.8, 1.0, image)),
+            ("border_width", ComponentValue::f64(0.0).unwrap()),
+            ("border_brush", brush(0.0, 0.0, 0.0, 0.0, None)),
+            (
+                "radii",
+                ComponentValue::map([
+                    ("top_left", ComponentValue::f64(0.0).unwrap()),
+                    ("top_right", ComponentValue::f64(0.0).unwrap()),
+                    ("bottom_right", ComponentValue::f64(0.0).unwrap()),
+                    ("bottom_left", ComponentValue::f64(0.0).unwrap()),
+                ]),
+            ),
+        ]),
     )
 }
 
