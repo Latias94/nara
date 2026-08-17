@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "3e52076b6dbde3e0fd8f93b54e5aeb78742afd062742f52942962c9ca8458840"
+source_fingerprint: "fd438211083e18e24b909dba41f3b20fa49c8b96c0cb8f0cf027d17eafe45d31"
 ---
 
 # Current State
@@ -12,15 +12,15 @@ source_fingerprint: "3e52076b6dbde3e0fd8f93b54e5aeb78742afd062742f52942962c9ca84
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `3e52076b6dbde3e0fd8f93b54e5aeb78742afd062742f52942962c9ca8458840`
-- Immutable records: 481
+- Source fingerprint: `fd438211083e18e24b909dba41f3b20fa49c8b96c0cb8f0cf027d17eafe45d31`
+- Immutable records: 483
 - Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
-- [Editor Game View v1: EGV-U4](registry/2026-08/2026-08-17T045406Z-editor-game-view-v1-codex-root-c395dd3580764f73aa0baa7c5e9e4062.md): `active` (editor-game-view-v1-codex-root; producer `codex-root`)
+- [Editor Game View v1: EGV-U4 corrected baseline](registry/2026-08/2026-08-17T050444Z-editor-game-view-v1-codex-root-65473bf028ac4971b67c4eb1843600ac.md): `active` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
@@ -34,6 +34,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EGV-U3 Game View recovery edge correction](verification/2026-08/2026-08-17T050443Z-egv-u3-game-view-recovery-edge-correction-19bb2be731ab47a5919901a62d7f1a9d.md) - Rebinds EGV-U3 to the correction that makes inactive-lifecycle resize non-fatal and resets GPU recovery only after an exact viewport composite.
 - **Verification Evidence**: [EGV-U3 single Scene and Game viewport presentation](verification/2026-08/2026-08-17T045406Z-egv-u3-single-scene-and-game-viewport-presentation-c793ec2941d64f75be7e2607699a9e79.md) - Verifies mutually exclusive Scene and Game viewport ownership, exact Game composite completion, bounded successor scheduling, resize, and safe GPU recovery.
 - **Verification Evidence**: [EGV-U2 managed Game View runtime placement](verification/2026-08/2026-08-17T014819Z-egv-u2-managed-game-view-runtime-placement-4012c0efb4d046c78031b9ad6d30a2c3.md) - Verifies pre-required-slot Editor Play placement, coordinated unpublished Runtime and target activation, and exact move-only Game candidate ownership.
 - **Verification Evidence**: [EGV-U1 Game View presentation authority](verification/2026-08/2026-08-16T172400Z-egv-u1-game-view-presentation-authority-ee246fd4862d4f0fb06423f9f6bbd9a0.md) - Verifies inactive viewport admission, logical-window Runtime UI mapping, exact external outcome rendezvous, source handoff, and final composite authority.
@@ -45,7 +46,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EFI-U3 revision-bound egui Adapter and fixed panel model](verification/2026-08/2026-08-15T214835Z-efi-u3-revision-bound-egui-adapter-and-fixed-panel-model-87a848bea2894fd1ba91db03c224f9e2.md) - Verifies the exact-frame egui Adapter, revision-bound transient drafts, ordered actions, fixed panel model, and exact persistence retry identity.
 - **Verification Evidence**: [EFI-U2 coherent Editor frame and ordered Host dispatch](verification/2026-08/2026-08-15T204901Z-efi-u2-coherent-editor-frame-and-ordered-host-dispatch-cef874a6d30f450b936f21dc11931bed.md) - Verifies one immutable post-drive Editor frame, exact ordered Host dispatch, durable stale-action diagnostics, and preserved Play, persistence, and independent consumer behavior.
 - **Verification Evidence**: [EFI-U1 corrected proving commit](verification/2026-08/2026-08-15T204900Z-efi-u1-corrected-proving-commit-5c4a026fa6e548bdb7a5ade915b23e94.md) - Rebinds prior EFI-U1 evidence to commit 8f3cc19 after correcting unshared clock-skewed commit dates; behavioral evidence is unchanged.
-- **Verification Evidence**: [EFI-U1 exact bounded authoring conformance](verification/2026-08/2026-08-15T185031Z-efi-u1-exact-bounded-authoring-conformance-b8d1206722cd47a1931e34c05258c221.md) - Verifies exact document and revision authority, single-owner selection, canonical Scene Tree projection, bounded branch-aware history, and receipt-bound clean-state recovery.
 
 # Integration Notes
 

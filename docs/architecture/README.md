@@ -10,8 +10,8 @@ an index, not another source of architecture decisions.
    gaps.
 3. [Editor Game View v1](../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md) is the sole
    active implementation plan. EGV-U4 is the only active unit under registration
-   `c395dd3580764f73aa0baa7c5e9e4062`; EGV-U3 is verified at `67c9638` with record
-   `c793ec2941d64f75be7e2607699a9e79`, while EGV-U5 remains inactive and dependency-ordered.
+   `65473bf028ac4971b67c4eb1843600ac`; EGV-U3 is corrected at `4ad3bd2` with record
+   `19bb2be731ab47a5919901a62d7f1a9d`, while EGV-U5 remains inactive and dependency-ordered.
    The completed Editor Scene Composition and Scene View, Editor Authoring
    Loop, Fresh Project, Capability Directory Publication, Runtime UI, and focused correction plans
    remain immutable lineage evidence; the
