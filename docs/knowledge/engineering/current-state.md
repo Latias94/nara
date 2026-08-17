@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "01b51d4fdea3d0cb35914ef124e3495a6f6fed0f345dae9c427da2784530c5c6"
+source_fingerprint: "0531349956825dbbe731604811e740ae286d988565ae0bed6f085f2068c55f01"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "01b51d4fdea3d0cb35914ef124e3495a6f6fed0f345dae9c427da278453
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `01b51d4fdea3d0cb35914ef124e3495a6f6fed0f345dae9c427da2784530c5c6`
-- Immutable records: 488
+- Source fingerprint: `0531349956825dbbe731604811e740ae286d988565ae0bed6f085f2068c55f01`
+- Immutable records: 490
 - Active lane heads: 1
 
 # Active Registrations
@@ -22,7 +22,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
-- [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T123302Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fdc10a41bc044ad5b3a93ed662abf4d8.md): `active` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
+- [Editor UI Prefab Authoring and Canvas v1](registry/2026-08/2026-08-17T145954Z-editor-ui-prefab-authoring-canvas-v1-codex-root-a234ba7c987f4e22b2e5756269470b3d.md): `active` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -35,6 +35,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EUA-U1 Prefab document, workspace, and persistence authority](verification/2026-08/2026-08-17T145954Z-eua-u1-prefab-document-workspace-and-persistence-authority-e6b43a9f24ed42deb3c8d19a03a55cdf.md) - Verifies true path-bound UI Prefab document ownership, exact anchor navigation, kind/source-bound persistence, and Scene regression coverage.
 - **Verification Evidence**: [EGV-U5 embedded Game View product conformance](verification/2026-08/2026-08-17T100847Z-egv-u5-embedded-game-view-product-conformance-9d0b0a17beef4c39bea70a8d6f025455.md) - Verifies the generic starter trajectory, compiled Reference Game native Game View canary, bounded lifecycle recovery, and final in-process authority closure.
 - **Verification Evidence**: [EGV-U4 exact Game input and Play control transaction](verification/2026-08/2026-08-17T061259Z-egv-u4-exact-game-input-and-play-control-transaction-426e925f3fa14241b4c85ee8213c1e2a.md) - Verifies exact visible-generation Game input capture, balanced cleanup, visible Play controls, bounded Running cadence, and presentation-joined fixed Step behavior.
 - **Verification Evidence**: [EGV-U3 Game View recovery edge correction](verification/2026-08/2026-08-17T050443Z-egv-u3-game-view-recovery-edge-correction-19bb2be731ab47a5919901a62d7f1a9d.md) - Rebinds EGV-U3 to the correction that makes inactive-lifecycle resize non-fatal and resets GPU recovery only after an exact viewport composite.
@@ -46,7 +47,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [ESV-U1 Editor Scene View execution contract](verification/2026-08/2026-08-16T084916Z-esv-u1-editor-scene-view-execution-contract-1de9903b1b7b4623a0633b2a6565e0b0.md) - Verifies the private one-device Editor image-to-window execution, exact composite receipt, target retirement, and whole-owner replacement boundary.
 - **Verification Evidence**: [EFI-U5 Editor authoring-loop conformance](verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md) - Verifies one published starter edit through the private Editor, project check, generated headless product, and accepted source-carrying export.
 - **Verification Evidence**: [EFI-U4 private native Editor application](verification/2026-08/2026-08-15T223500Z-efi-u4-private-native-editor-application-26373f31c4664b89b0d33eed4bef93db.md) - Verifies the private native nara-editor package, exact frame/action integration, bounded failure feedback, dirty-close arbitration, and one real Windows WGPU window canary.
-- **Verification Evidence**: [EFI-U3 revision-bound egui Adapter and fixed panel model](verification/2026-08/2026-08-15T214835Z-efi-u3-revision-bound-egui-adapter-and-fixed-panel-model-87a848bea2894fd1ba91db03c224f9e2.md) - Verifies the exact-frame egui Adapter, revision-bound transient drafts, ordered actions, fixed panel model, and exact persistence retry identity.
 
 # Integration Notes
 
