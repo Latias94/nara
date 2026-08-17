@@ -13,6 +13,7 @@ use nara_tasks::{
 use nara_window::{PresentMode, WindowMode};
 use serde::{Deserialize, Serialize};
 
+use crate::MAX_PROJECT_UI_LOGICAL_EXTENT;
 use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::defaults::*;
 use crate::effective::{
@@ -73,6 +74,104 @@ impl Default for ProjectPathsManifest {
 pub struct ProjectStartupManifest {
     #[serde(default)]
     pub default_scene: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectUiManifest {
+    #[serde(default)]
+    pub primary_surface: Option<ProjectUiSurfaceManifest>,
+}
+
+impl ProjectUiManifest {
+    pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        if let Some(surface) = self.primary_surface {
+            surface.validate_into(diagnostics, &format!("{prefix}.primary_surface"));
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectUiSurfaceManifest {
+    pub logical_width: u32,
+    pub logical_height: u32,
+    #[serde(default)]
+    pub safe_area: ProjectUiSafeAreaManifest,
+}
+
+impl ProjectUiSurfaceManifest {
+    pub(crate) fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        validate_ui_extent(
+            diagnostics,
+            &format!("{prefix}.logical_width"),
+            self.logical_width,
+        );
+        validate_ui_extent(
+            diagnostics,
+            &format!("{prefix}.logical_height"),
+            self.logical_height,
+        );
+
+        let horizontal = u64::from(self.safe_area.left) + u64::from(self.safe_area.right);
+        if horizontal >= u64::from(self.logical_width) {
+            let diagnostic = error(
+                "project.ui.invalid-horizontal-safe-area",
+                "Primary UI safe-area horizontal insets must leave positive content width",
+            );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.safe_area"));
+            let diagnostic = with_public_u64(diagnostic, "inset_total", horizontal);
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "logical_extent",
+                u64::from(self.logical_width),
+            ));
+        }
+
+        let vertical = u64::from(self.safe_area.top) + u64::from(self.safe_area.bottom);
+        if vertical >= u64::from(self.logical_height) {
+            let diagnostic = error(
+                "project.ui.invalid-vertical-safe-area",
+                "Primary UI safe-area vertical insets must leave positive content height",
+            );
+            let diagnostic = with_field_path(diagnostic, &format!("{prefix}.safe_area"));
+            let diagnostic = with_public_u64(diagnostic, "inset_total", vertical);
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "logical_extent",
+                u64::from(self.logical_height),
+            ));
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectUiSafeAreaManifest {
+    #[serde(default)]
+    pub left: u32,
+    #[serde(default)]
+    pub top: u32,
+    #[serde(default)]
+    pub right: u32,
+    #[serde(default)]
+    pub bottom: u32,
+}
+
+fn validate_ui_extent(diagnostics: &mut DiagnosticReport, field: &str, extent: u32) {
+    if extent == 0 || extent > MAX_PROJECT_UI_LOGICAL_EXTENT {
+        let diagnostic = error(
+            "project.ui.invalid-logical-extent",
+            "Primary UI logical extent must be positive and within its hard limit",
+        );
+        let diagnostic = with_field_path(diagnostic, field);
+        let diagnostic = with_public_u64(diagnostic, "actual", u64::from(extent));
+        diagnostics.push(with_public_u64(
+            diagnostic,
+            "limit",
+            u64::from(MAX_PROJECT_UI_LOGICAL_EXTENT),
+        ));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]

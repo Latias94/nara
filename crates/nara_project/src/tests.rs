@@ -72,6 +72,78 @@ fn minimal_manifest_parses_and_resolves_validated_defaults() {
 }
 
 #[test]
+fn primary_ui_surface_is_optional_bounded_and_profile_owned() {
+    let load = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "UI Surface"
+
+[ui.primary_surface]
+logical_width = 960
+logical_height = 540
+
+[ui.primary_surface.safe_area]
+left = 10
+top = 12
+right = 10
+bottom = 12
+
+[profiles.editor.ui.primary_surface]
+logical_width = 1280
+logical_height = 720
+"#,
+    );
+    assert!(!load.has_errors(), "{:?}", load.diagnostics);
+    let manifest = load.manifest.unwrap();
+    let base = manifest.resolve_profile(None).unwrap();
+    let editor = manifest.resolve_profile(Some("editor")).unwrap();
+    assert_eq!(
+        base.ui.primary_surface,
+        Some(EffectivePrimaryUiSurface {
+            logical_width: 960,
+            logical_height: 540,
+            safe_area: EffectiveUiSafeArea {
+                left: 10,
+                top: 12,
+                right: 10,
+                bottom: 12,
+            },
+        })
+    );
+    assert_eq!(editor.ui.primary_surface.unwrap().logical_width, 1_280);
+    assert_eq!(editor.ui.primary_surface.unwrap().logical_height, 720);
+
+    let absent = ProjectManifest::parse_toml_str(MINIMAL_MANIFEST)
+        .manifest
+        .unwrap()
+        .resolve_profile(None)
+        .unwrap();
+    assert!(absent.ui.primary_surface.is_none());
+
+    let invalid = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "Invalid UI Surface"
+
+[ui.primary_surface]
+logical_width = 0
+logical_height = 100
+
+[ui.primary_surface.safe_area]
+left = 60
+right = 40
+"#,
+    );
+    let codes = diagnostic_codes(&invalid);
+    assert!(codes.contains(&"project.ui.invalid-logical-extent"));
+    assert!(codes.contains(&"project.ui.invalid-horizontal-safe-area"));
+}
+
+#[test]
 fn complete_v1_fixture_lowers_every_runtime_and_task_field() {
     let load = ProjectManifest::parse_toml_str(COMPLETE_MANIFEST);
     assert!(!load.has_errors(), "{:?}", load.diagnostics);

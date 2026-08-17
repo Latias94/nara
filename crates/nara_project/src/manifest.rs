@@ -13,7 +13,7 @@ use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
 use crate::sections::{
     ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest,
     ProjectPathsManifest, ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest,
-    ProjectTasksManifest, ProjectWindowManifest,
+    ProjectTasksManifest, ProjectUiManifest, ProjectWindowManifest,
 };
 use crate::validation::{
     error, validate_path_field, validate_profile_name, with_field_path, with_profile_identifier,
@@ -76,6 +76,8 @@ pub struct ProjectManifest {
     pub runtime: ProjectRuntimeManifest,
     #[serde(default)]
     pub tasks: ProjectTasksManifest,
+    #[serde(default)]
+    pub ui: ProjectUiManifest,
     #[serde(default)]
     pub window: ProjectWindowManifest,
     #[serde(default)]
@@ -224,6 +226,7 @@ impl ProjectManifest {
             .validate_into(&mut diagnostics, "capabilities");
         self.runtime.validate_into(&mut diagnostics, "runtime");
         self.tasks.validate_into(&mut diagnostics, "tasks");
+        self.ui.validate_into(&mut diagnostics, "ui");
         self.window.validate_into(&mut diagnostics, "window");
         self.input.validate_into(&mut diagnostics, "input");
         self.diagnostics

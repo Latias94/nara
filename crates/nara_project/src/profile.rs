@@ -10,13 +10,13 @@ use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::effective::{
     EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectPaths,
     EffectiveProjectSettings, EffectiveRuntimeSettings, EffectiveStartupSettings,
-    EffectiveTaskSettings, EffectiveWindowSettings,
+    EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings,
 };
 use crate::path::{ProjectPath, ProjectPathError};
 use crate::sections::{
     ProjectCapabilitiesManifest, ProjectFixedCatchUpPolicy, ProjectPresentMode,
-    ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowMode,
-    runtime_diagnostics_settings,
+    ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest,
+    ProjectUiSurfaceManifest, ProjectWindowMode, runtime_diagnostics_settings,
 };
 use crate::validation::{
     duration_from_positive_seconds, error, validate_duration_seconds, validate_fixed_step_limits,
@@ -37,6 +37,8 @@ pub struct ProjectProfileOverlay {
     pub runtime: ProjectRuntimePatch,
     #[serde(default)]
     pub tasks: ProjectTasksPatch,
+    #[serde(default)]
+    pub ui: ProjectUiPatch,
     #[serde(default)]
     pub window: ProjectWindowPatch,
     #[serde(default)]
@@ -62,6 +64,7 @@ impl ProjectProfileOverlay {
             .validate_into(diagnostics, &format!("{prefix}.runtime"));
         self.tasks
             .validate_into(diagnostics, &format!("{prefix}.tasks"), base_tasks);
+        self.ui.validate_into(diagnostics, &format!("{prefix}.ui"));
         self.window
             .validate_into(diagnostics, &format!("{prefix}.window"));
         self.input
@@ -83,10 +86,46 @@ impl ProjectProfileOverlay {
             settings.runtime_preset = preset;
         }
         self.tasks.apply_to(&mut settings.tasks)?;
+        self.ui.apply_to(&mut settings.ui);
         self.window.apply_to(&mut settings.window);
         self.input.apply_to(&mut settings.input)?;
         self.diagnostics.apply_to(&mut settings.diagnostics)?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectUiPatch {
+    #[serde(default)]
+    pub primary_surface: Option<ProjectUiSurfaceManifest>,
+    #[serde(default)]
+    pub clear_primary_surface: bool,
+}
+
+impl ProjectUiPatch {
+    fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        if let Some(surface) = self.primary_surface {
+            surface.validate_into(diagnostics, &format!("{prefix}.primary_surface"));
+        }
+        if self.clear_primary_surface && self.primary_surface.is_some() {
+            diagnostics.push(with_field_path(
+                error(
+                    "project.ui.conflicting-primary-surface-patch",
+                    "UI profile patch cannot both clear and replace the primary surface",
+                ),
+                &format!("{prefix}.primary_surface"),
+            ));
+        }
+    }
+
+    fn apply_to(&self, ui: &mut EffectiveUiSettings) {
+        if self.clear_primary_surface {
+            ui.primary_surface = None;
+        }
+        if let Some(surface) = self.primary_surface {
+            ui.primary_surface = Some(surface.into());
+        }
     }
 }
 

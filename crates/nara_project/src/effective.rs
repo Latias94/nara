@@ -8,7 +8,10 @@ use crate::capability::{ProductCapabilitySet, RuntimePreset};
 use crate::manifest::ProjectManifest;
 use crate::path::ProjectPath;
 use crate::profile::ProjectProfileError;
-use crate::sections::{ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest};
+use crate::sections::{
+    ProjectPathsManifest, ProjectProfileKind, ProjectStartupManifest, ProjectUiManifest,
+    ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest,
+};
 
 #[derive(Debug, Clone, PartialEq, Resource)]
 pub struct EffectiveProjectSettings {
@@ -21,6 +24,7 @@ pub struct EffectiveProjectSettings {
     pub startup: EffectiveStartupSettings,
     pub runtime: EffectiveRuntimeSettings,
     pub tasks: EffectiveTaskSettings,
+    pub ui: EffectiveUiSettings,
     pub window: EffectiveWindowSettings,
     pub input: EffectiveInputSettings,
     pub diagnostics: EffectiveDiagnosticsSettings,
@@ -42,6 +46,7 @@ impl EffectiveProjectSettings {
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
             runtime: manifest.runtime.lower()?,
             tasks: manifest.tasks.lower()?,
+            ui: EffectiveUiSettings::from_manifest(manifest.ui.clone()),
             window: manifest.window.clone().lower(),
             input: manifest.input.clone().lower()?,
             diagnostics: manifest.diagnostics.lower()?,
@@ -93,6 +98,55 @@ impl EffectiveProjectSettings {
             self.window.enabled = false;
             self.runtime
                 .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectiveUiSettings {
+    pub primary_surface: Option<EffectivePrimaryUiSurface>,
+}
+
+impl EffectiveUiSettings {
+    fn from_manifest(ui: ProjectUiManifest) -> Self {
+        Self {
+            primary_surface: ui.primary_surface.map(EffectivePrimaryUiSurface::from),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectivePrimaryUiSurface {
+    pub logical_width: u32,
+    pub logical_height: u32,
+    pub safe_area: EffectiveUiSafeArea,
+}
+
+impl From<ProjectUiSurfaceManifest> for EffectivePrimaryUiSurface {
+    fn from(surface: ProjectUiSurfaceManifest) -> Self {
+        Self {
+            logical_width: surface.logical_width,
+            logical_height: surface.logical_height,
+            safe_area: surface.safe_area.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EffectiveUiSafeArea {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+impl From<ProjectUiSafeAreaManifest> for EffectiveUiSafeArea {
+    fn from(safe_area: ProjectUiSafeAreaManifest) -> Self {
+        Self {
+            left: safe_area.left,
+            top: safe_area.top,
+            right: safe_area.right,
+            bottom: safe_area.bottom,
         }
     }
 }

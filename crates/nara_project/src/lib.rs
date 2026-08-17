@@ -9,6 +9,8 @@ pub const DEFAULT_MANIFEST_BYTE_LIMIT: u64 = 256 * 1024;
 pub const MAX_PROJECT_FIXED_STEPS_PER_FRAME: u32 = 256;
 /// Maximum retained fixed debt, equal to 64 frames at the project step ceiling.
 pub const MAX_PROJECT_FIXED_DEBT_STEPS: u32 = MAX_PROJECT_FIXED_STEPS_PER_FRAME * 64;
+/// Maximum authored logical width or height for the primary UI surface.
+pub const MAX_PROJECT_UI_LOGICAL_EXTENT: u32 = 65_536;
 
 mod capability;
 mod defaults;
@@ -21,9 +23,10 @@ mod validation;
 
 pub use capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 pub use effective::{
-    EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectInfo,
-    EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
-    EffectiveStartupSettings, EffectiveTaskSettings, EffectiveWindowSettings,
+    EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectivePrimaryUiSurface,
+    EffectiveProjectInfo, EffectiveProjectPaths, EffectiveProjectSettings,
+    EffectiveRuntimeSettings, EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea,
+    EffectiveUiSettings, EffectiveWindowSettings,
 };
 pub use manifest::{
     ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError,
@@ -32,29 +35,33 @@ pub use path::{ProjectPath, ProjectPathError};
 pub use profile::{
     ProjectCapabilitiesPatch, ProjectDiagnosticsPatch, ProjectInputPatch, ProjectPathsPatch,
     ProjectProfileError, ProjectProfileOverlay, ProjectRuntimePatch, ProjectStartupPatch,
-    ProjectTaskPoolPatch, ProjectTaskShutdownPatch, ProjectTasksPatch, ProjectWindowPatch,
+    ProjectTaskPoolPatch, ProjectTaskShutdownPatch, ProjectTasksPatch, ProjectUiPatch,
+    ProjectWindowPatch,
 };
 pub use sections::{
     ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy,
     ProjectInfo, ProjectInputManifest, ProjectPathsManifest, ProjectPresentMode,
     ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
-    ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectWindowManifest, ProjectWindowMode,
+    ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectUiManifest,
+    ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest, ProjectWindowMode,
 };
 
 pub mod prelude {
     pub use crate::{
         CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveDiagnosticsSettings,
-        EffectiveInputSettings, EffectiveProjectInfo, EffectiveProjectPaths,
-        EffectiveProjectSettings, EffectiveRuntimeSettings, EffectiveStartupSettings,
-        EffectiveTaskSettings, EffectiveWindowSettings, MAX_PROJECT_FIXED_DEBT_STEPS,
-        MAX_PROJECT_FIXED_STEPS_PER_FRAME, ProductCapability, ProductCapabilitySet,
+        EffectiveInputSettings, EffectivePrimaryUiSurface, EffectiveProjectInfo,
+        EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
+        EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
+        EffectiveWindowSettings, MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
+        MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability, ProductCapabilitySet,
         ProjectCapabilitiesManifest, ProjectCapabilitiesPatch, ProjectDiagnosticsManifest,
         ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
         ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
         ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
         ProjectProfileKind, ProjectProfileOverlay, ProjectRuntimeManifest, ProjectStartupManifest,
         ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
-        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectWindowManifest,
+        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
+        ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
         ProjectWindowMode, RuntimePreset,
     };
 }
