@@ -8,9 +8,10 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The [Editor UI Prefab Authoring and Canvas v1](../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
-   is the sole active implementation plan at EUA-U5, registered by
-   `464b807c1f924e35a900c1be8d2569c3`. EUA-U1 through EUA-U4 are verified at
+3. No implementation plan is active. The completed
+   [Editor UI Prefab Authoring and Canvas v1](../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
+   closes at `ed9f1cd` with conformance record `cf11b0c7d23a44e7b127b41199ee4ee7`
+   and completed registration `fcbd471b11774b599cd190ead6827654`. Its prior units remain verified at
    `dc7ea07`, `16b0d30`, `bca3e62`, and `155d147` with evidence
    `e6b43a9f24ed42deb3c8d19a03a55cdf`, `19920c861d394a4fb43db6f60e4cf2a5`,
    `45077ece034c42569c6a460a562ab0b1`, and `984fe0030b4843c2a1165a9e812955f0`.

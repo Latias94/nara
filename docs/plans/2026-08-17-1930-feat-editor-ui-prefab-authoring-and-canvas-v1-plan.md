@@ -7,9 +7,10 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 origin: STRATEGY.md
 execution: code
-execution_state: active
-active_unit: EUA-U5
-activation_record: 464b807c1f924e35a900c1be8d2569c3
+execution_state: completed
+completion_commit: ed9f1cd
+completion_record: cf11b0c7d23a44e7b127b41199ee4ee7
+completion_registration: fcbd471b11774b599cd190ead6827654
 depends_on: docs/plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md
 plan_id: editor-ui-prefab-authoring-canvas-2026-08
 unit_namespace: EUA
@@ -594,17 +595,17 @@ matrix is required.
 
 ### Global
 
-- [ ] A path-bound UI Prefab opens as a true Prefab document with exact source, revision, history, selection, dirty state, and receipt-backed persistence.
-- [ ] Existing Scene authoring, Scene View, Game View, Play isolation, and project workflow contracts remain valid without compatibility layers or a second authority.
-- [ ] UI Hierarchy, typed Inspector, Canvas paint/pick, and overlays consume one root-private exact-revision `EditorUiAuthoringFrame`, one `nara_ui` projection payload, and one workspace selection owner without reversing crate dependencies.
-- [ ] Nara UI, not egui layout, renders the accepted unsaved Prefab; Canvas input is enabled only by the matching final Editor composite receipt.
-- [ ] Absolute pixel move/resize uses Begin/Preview/Commit/Cancel, creates one Undo record on Commit, zero on Cancel, and never rewrites flex/auto/percent resolved bounds.
-- [ ] Save/Reopen uses the canonical Prefab writer and Host receipt; successful refresh publishes a successor immutable project-content generation, while failure retains last-good content and blocks dishonest Play/Restart.
-- [ ] Runtime UI and Editor Canvas consume the same project-owned primary UI authored extent/safe-area profile; no Reference Game constant or project-window fallback supplies Canvas geometry.
-- [ ] Successor refresh verifies the accepted Save digest, charges one aggregate budget host, and never retains more than two distinct project-content generations.
-- [ ] Explicit Game Restart consumes the same saved Prefab source proven by the serial trajectory; no live edit or automatic runtime write-back was added.
-- [ ] No Asset Browser, structural UI composition, instance override editor, Binding DSL, plugin registry, public Canvas/viewport framework, RenderGraph, docking, multi-window system, or toolkit convergence claim entered v1.
-- [ ] ADR 0113, implementation status, OQ links, one completion record, and one completed engineering-memory registration agree on the final reviewed scope.
+- [x] A path-bound UI Prefab opens as a true Prefab document with exact source, revision, history, selection, dirty state, and receipt-backed persistence.
+- [x] Existing Scene authoring, Scene View, Game View, Play isolation, and project workflow contracts remain valid without compatibility layers or a second authority.
+- [x] UI Hierarchy, typed Inspector, Canvas paint/pick, and overlays consume one root-private exact-revision `EditorUiAuthoringFrame`, one `nara_ui` projection payload, and one workspace selection owner without reversing crate dependencies.
+- [x] Nara UI, not egui layout, renders the accepted unsaved Prefab; Canvas input is enabled only by the matching final Editor composite receipt.
+- [x] Absolute pixel move/resize uses Begin/Preview/Commit/Cancel, creates one Undo record on Commit, zero on Cancel, and never rewrites flex/auto/percent resolved bounds.
+- [x] Save/Reopen uses the canonical Prefab writer and Host receipt; successful refresh publishes a successor immutable project-content generation, while failure retains last-good content and blocks dishonest Play/Restart.
+- [x] Runtime UI and Editor Canvas consume the same project-owned primary UI authored extent/safe-area profile; no Reference Game constant or project-window fallback supplies Canvas geometry.
+- [x] Successor refresh verifies the accepted Save digest, charges one aggregate budget host, and never retains more than two distinct project-content generations.
+- [x] Explicit Game Restart consumes the same saved Prefab source proven by the serial trajectory; no live edit or automatic runtime write-back was added.
+- [x] No Asset Browser, structural UI composition, instance override editor, Binding DSL, plugin registry, public Canvas/viewport framework, RenderGraph, docking, multi-window system, or toolkit convergence claim entered v1.
+- [x] ADR 0113, implementation status, OQ links, one completion record, and one completed engineering-memory registration agree on the final reviewed scope.
 
 ### Per-unit
 

@@ -1,7 +1,7 @@
 # nara Architecture Open Questions
 
 **Status**: Living Draft
-**Updated**: 2026-08-16
+**Updated**: 2026-08-18
 
 This document owns open architecture questions and stable redirects for recently resolved question
 identities. Accepted decisions belong in ADRs; implementation evidence belongs in
@@ -265,7 +265,11 @@ flowchart LR
 - **Owner**: `nara_ui_kernel`, `nara_ui_widgets`, and a separate Editor UI adapter
 - **Trigger**: The shared kernel and widget modules have text/IME, navigation, focus, scroll,
   accessibility semantics, and the capabilities required by one complete existing egui panel.
-- **Related ADRs**: 0015, 0025, 0041, 0102, 0104
+- **Related ADRs**: 0015, 0025, 0041, 0102, 0104, 0107, 0113
+- **Evidence**: Completed EUA-U1 through EUA-U5 (`ed9f1cd`, conformance record
+  `cf11b0c7d23a44e7b127b41199ee4ee7`) prove that egui and Nara UI Canvas can share one immutable
+  authoring frame and ordered action seam. They do not provide a complete Nara UI Editor panel and
+  therefore do not trigger toolkit convergence.
 - **Question**: Which complete panel should prove the separate Editor adapter, session-state, and
   tooling-command boundary first, and which later heterogeneous workloads (a virtualized
   hierarchy/table, viewport, timeline, or graph) are required before deciding whether the shared

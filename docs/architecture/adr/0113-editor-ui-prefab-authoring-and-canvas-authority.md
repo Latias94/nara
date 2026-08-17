@@ -3,8 +3,9 @@
 **Status**: Accepted
 **Date**: 2026-08-17
 **Last Revised**: 2026-08-18
-**Amended**: 2026-08-18 to make the exact U2 authoring projection, rather than a synthetic preview
-World, the single Canvas source projection authority
+**Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
+authority and to separate receipt-backed Prefab persistence from immutable project-content
+generation publication
 **Owner**: `nara_scene`, `nara_tooling`, project Host, and the private Editor execution owner
 **Refines**: [ADR 0026](0026-editor-command-patch-and-undo-model.md), [ADR 0047](0047-editor-workspace-and-scene-document-state.md), [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md), [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md), and [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 **Refined By**: None
@@ -93,6 +94,25 @@ visible document revision, target generation, texture registration, device epoch
 generation. A candidate, offscreen submission, stale receipt, or image-only success cannot select
 or mutate a Prefab.
 
+### 5. Saved source and project content publish as separate generations
+
+An accepted Prefab Save receipt advances the document's saved checkpoint, but does not mutate or
+replace the current `ProjectContentSnapshot`. The project Host uses the receipt's exact normalized
+Prefab path and published digest to load and validate a complete successor content closure through
+ordinary capabilities. Only a successful full load may atomically replace the Editor snapshot and
+its Scene/UI preview owners with a non-reused content generation.
+
+The current Editor snapshot, every immutable Runtime snapshot, and a successor candidate share one
+content budget host. At most two distinct content revisions may remain retained. A third-generation
+attempt rejects before publication and releases all candidate charges. Source mismatch, invalid
+content, capacity rejection, or preview replacement failure leaves the saved file honest, retains
+the last-good snapshot, and publishes typed `RefreshPending` or `Stale` Editor facts.
+
+A running Runtime never observes the replacement in place. Dirty Prefab content and pending or
+stale project content mark it out of date. Stop remains available, while new Play/Restart requires
+clean Prefab source and current project content. After a successful refresh, an explicit Restart or
+fresh Play start binds the successor snapshot.
+
 ## Alternatives Considered
 
 ### Instantiate Prefab into a synthetic Scene
@@ -139,6 +159,8 @@ heterogeneous document consumer exists.
 | Selection authority | One workspace selection owner per open document | tooling/API review and tests |
 | Surface authority | Runtime and Canvas consume one effective project profile | project lowering tests |
 | Canvas input safety | Candidate/stale/retired facts never select or mutate | private Canvas transaction tests |
+| Content publication | Save digest mismatch or a third retained revision never replaces last-good content | project-content and Editor Host refresh tests |
+| Runtime freshness | A running Runtime remains immutable and only explicit Restart consumes the successor snapshot | Reference Game Editor trajectory |
 
 ## Risks and Mitigations
 
@@ -148,10 +170,13 @@ heterogeneous document consumer exists.
 | Save receipt is applied to the wrong document kind | Critical | Bind checkpoints and persistence lanes to closed document kind and source identity. |
 | Editor window silently becomes UI resolution authority | High | Store one validated profile in effective project settings and derive target transforms at each consumer. |
 | Unsaved Canvas preview mutates Runtime or persistence state | Critical | Compile a private candidate from the exact authoring projection and require the final composite receipt for input authority. |
+| Save succeeds but successor content cannot publish | High | Keep persistence and content freshness separate, retain last-good previews, expose typed remediation, and block new Play/Restart. |
 | Early generic abstractions freeze the wrong toolkit boundary | Medium | Keep the authoring frame/action seam private or narrow until a second consumer proves the need. |
 
 ## Implementation Evidence
 
-This ADR is accepted for EUA-U1 through EUA-U5. Implementation status remains `partial` until the
-focused Prefab session, workspace, persistence, authoring frame, private Canvas, and Save-to-Restart
-trajectory have current code and verification anchors.
+EUA-U1 through EUA-U5 are implemented at `dc7ea07`, `16b0d30`, `bca3e62`, `155d147`, and
+`ed9f1cd`. The final conformance record is
+`docs/knowledge/engineering/verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md`.
+It proves the focused Prefab session, workspace, persistence, authoring frame, private Canvas,
+bounded immutable content generations, and same-source Save-to-Restart trajectory.
