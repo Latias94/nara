@@ -690,8 +690,9 @@ flowchart LR
   observations that can be projected onto a connection; they do not expose `World`, native handles,
   or transport types. This question does not currently select IPC, wire encoding, process topology,
   authentication, or a public universal runtime-session trait. ADR 0112 selects only the first
-  private in-process Game View placement; the second placement or measured failure remains the
-  trigger for this question.
+  private in-process Game View placement. EGV-U5 proves that placement with both the generic
+  starter and one compiled first-party game, but it adds no second placement or transport; the
+  second placement or a measured failure remains the trigger for this question.
 
 ## OQ-040: Editor-to-Play Live Edit
 
@@ -708,7 +709,8 @@ flowchart LR
   best-effort operation whose result distinguishes at least `Applied`, `Stale`, `Unsupported`,
   `Overwritten`, and `Faulted`; projection failure never rolls back a successful document commit.
   This question does not select a wire format, retained runtime override layer, arbitrary Rust-state
-  migration, or edit-while-playing merge algorithm. ADR 0112 keeps Restart as the first Game View's
+  migration, or edit-while-playing merge algorithm. EGV-U5 proves visible out-of-date feedback and
+  a fresh Restart after Paused authoring; ADR 0112 therefore keeps Restart as the first Game View's
   ordinary freshness path and does not close this question.
 
 ## OQ-041: Tooling Observation and Remote Command Session

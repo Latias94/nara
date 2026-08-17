@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-16
+**Last Revised**: 2026-08-17
 **Owner**: Editor Host, executable Runtime owner, Runtime UI presentation, `nara_render`, and
 `nara_render_wgpu`
 **Refines**: [ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md),
@@ -13,6 +14,10 @@
 [ADR 0084](0084-executable-runtime-ownership-and-isolation.md), and
 [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md)
 **Implementation Plan**: [Editor Game View v1](../../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md), EGV-U1 through EGV-U5
+**Initial Implementation**: `8942bbb` (`feat(editor): establish game view presentation authority`)
+**Completed Implementation**: `b5697f3` (`feat(editor): prove embedded Game View workflow`)
+**Implementation Evidence**: [EGV-U1 Game View presentation authority](../../knowledge/engineering/verification/2026-08/2026-08-16T172400Z-egv-u1-game-view-presentation-authority-ee246fd4862d4f0fb06423f9f6bbd9a0.md),
+[EGV-U5 embedded Game View product conformance](../../knowledge/engineering/verification/2026-08/2026-08-17T100847Z-egv-u5-embedded-game-view-product-conformance-9d0b0a17beef4c39bea70a8d6f025455.md)
 
 ## Context
 
@@ -214,4 +219,3 @@ placement narrow, failure-atomic and removable if later evidence selects a diffe
 | Image submission is mistaken for visible authority | Critical | Commit UI/input only from the exact Editor-window composite receipt. |
 | Logical window is rewritten into a public image endpoint | High | Keep Camera/UI/input identity logical-window based and map only inside private WGPU execution. |
 | Fixed bridge grows into a general scheduler | High | Admit only one mutually exclusive Scene/Game source; require a new consumer and ADR for broader topology. |
-

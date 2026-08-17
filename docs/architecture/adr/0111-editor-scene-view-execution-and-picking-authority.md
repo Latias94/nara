@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-16
+**Last Revised**: 2026-08-17
 **Owner**: Editor Host, `nara_render`, and `nara_render_wgpu`
 **Refines**: [ADR 0017](0017-render-graph-policy.md),
 [ADR 0040](0040-render-resource-lifetime-and-submitter-ownership.md),
@@ -127,7 +128,8 @@ and makes device recovery split across unrelated owners.
 
 Rejected for Scene View. Edit preview is derived from the accepted document and is not a runtime.
 Independent devices also prevent cheap, exact sampling of the Scene target in the Editor window.
-Future Game View placement remains a separate decision.
+Game View placement remains a separate decision; ADR 0112 now selects its first private
+in-process form without changing this Scene View rejection.
 
 ### Add a public RenderGraph or generic multi-target scheduler
 

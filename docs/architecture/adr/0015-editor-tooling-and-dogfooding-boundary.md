@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-08-15
+**Last Revised**: 2026-08-17
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
@@ -12,9 +12,10 @@ Placement and Runtime Projection;
 Installation
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
-**Implementation Plan**: [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
+**Implementation Plans**: [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md); [Editor Game View v1](../../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md)
 **Implementation Evidence**: [EFI-U5 Editor authoring-loop
-conformance](../../knowledge/engineering/verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md)
+conformance](../../knowledge/engineering/verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md),
+[EGV-U5 embedded Game View product conformance](../../knowledge/engineering/verification/2026-08/2026-08-17T100847Z-egv-u5-embedded-game-view-product-conformance-9d0b0a17beef4c39bea70a8d6f025455.md)
 
 ## ADR 0095 Refinement
 
