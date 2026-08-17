@@ -256,21 +256,7 @@ impl EditorGameViewCanaryHost {
             return Err(self.timeout_error(observation, active_start));
         }
 
-        if let Some(ui_authoring) = self.ui_authoring.as_mut()
-            && !ui_authoring.is_complete()
-        {
-            let advance =
-                ui_authoring.advance(frame, ui_authoring_frame, ui_observation, ui_presenter)?;
-            if !advance.complete || !advance.actions.is_empty() {
-                return Ok(EditorGameViewCanaryAdvance {
-                    actions: advance.actions,
-                    exit: false,
-                });
-            }
-        }
-
         let mut actions = Vec::new();
-        let mut exit = false;
         match self.stage {
             EditorGameViewCanaryStage::Start => {
                 let scene = frame.workspace().active_scene.as_ref().ok_or_else(|| {
@@ -440,12 +426,30 @@ impl EditorGameViewCanaryHost {
             EditorGameViewCanaryStage::AwaitingStop => {
                 if frame.play().state() == EditorPlayState::Empty {
                     self.stage = EditorGameViewCanaryStage::Complete;
-                    exit = true;
                 }
             }
-            EditorGameViewCanaryStage::Complete => exit = true,
+            EditorGameViewCanaryStage::Complete => {}
         }
-        Ok(EditorGameViewCanaryAdvance { actions, exit })
+
+        if self.stage == EditorGameViewCanaryStage::Complete
+            && let Some(ui_authoring) = self.ui_authoring.as_mut()
+            && !ui_authoring.is_complete()
+        {
+            actions.extend(ui_authoring.advance(
+                frame,
+                ui_authoring_frame,
+                ui_observation,
+                ui_presenter,
+            )?);
+            return Ok(EditorGameViewCanaryAdvance {
+                actions,
+                exit: false,
+            });
+        }
+        Ok(EditorGameViewCanaryAdvance {
+            actions,
+            exit: self.stage == EditorGameViewCanaryStage::Complete,
+        })
     }
 
     pub(super) const fn viewport_extent_override(&self) -> Option<Extent2d> {

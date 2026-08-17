@@ -128,6 +128,7 @@ pub struct EditorUiAuthoringCanaryEvidence {
     previewed: EditorUiAuthoringCanaryFrame,
     committed: EditorUiAuthoringCanaryFrame,
     undo_depth: usize,
+    stale_pick_rejected: bool,
 }
 
 impl EditorUiAuthoringCanaryEvidence {
@@ -149,6 +150,11 @@ impl EditorUiAuthoringCanaryEvidence {
     #[must_use]
     pub const fn undo_depth(&self) -> usize {
         self.undo_depth
+    }
+
+    #[must_use]
+    pub const fn stale_pick_rejected(&self) -> bool {
+        self.stale_pick_rejected
     }
 }
 
@@ -172,11 +178,8 @@ pub(super) struct EditorUiAuthoringCanaryHost {
     previewed: Option<EditorUiAuthoringCanaryFrame>,
     committed: Option<EditorUiAuthoringCanaryFrame>,
     undo_depth: Option<usize>,
-}
-
-pub(super) struct EditorUiAuthoringCanaryAdvance {
-    pub(super) actions: Vec<EditorAction>,
-    pub(super) complete: bool,
+    initial_pick: Option<EditorUiCanvasPickRequest>,
+    stale_pick_rejected: bool,
 }
 
 impl EditorUiAuthoringCanaryHost {
@@ -189,6 +192,8 @@ impl EditorUiAuthoringCanaryHost {
             previewed: None,
             committed: None,
             undo_depth: None,
+            initial_pick: None,
+            stale_pick_rejected: false,
         }
     }
 
@@ -198,7 +203,7 @@ impl EditorUiAuthoringCanaryHost {
         authoring: Option<&EditorUiAuthoringFrame>,
         observation: Option<&EditorUiCanvasPresentedObservation<'_>>,
         presenter: &EditorUiCanvasPresenter,
-    ) -> Result<EditorUiAuthoringCanaryAdvance, EditorRunError> {
+    ) -> Result<Vec<EditorAction>, EditorRunError> {
         let mut actions = Vec::new();
         match self.stage {
             EditorUiAuthoringCanaryStage::OpenSource => {
@@ -226,10 +231,7 @@ impl EditorUiAuthoringCanaryHost {
             EditorUiAuthoringCanaryStage::AwaitCanvas => {
                 let Some((authoring, observation)) = exact_authoring_canvas(authoring, observation)
                 else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 if observation.fact_count() == 0 {
                     return Err(EditorRunError::Platform(
@@ -244,22 +246,22 @@ impl EditorUiAuthoringCanaryHost {
                             self.request.canvas_entity.as_str()
                         ))
                     })?;
-                let selected = presenter
-                    .resolve_pick(EditorUiCanvasPickRequest {
-                        stamp: observation.stamp(),
-                        uv,
-                    })
-                    .map_err(|()| {
-                        EditorRunError::Platform(
-                            "the UI authoring canary lost its exact Canvas receipt".to_owned(),
-                        )
-                    })?;
+                let request = EditorUiCanvasPickRequest {
+                    stamp: observation.stamp(),
+                    uv,
+                };
+                let selected = presenter.resolve_pick(request).map_err(|()| {
+                    EditorRunError::Platform(
+                        "the UI authoring canary lost its exact Canvas receipt".to_owned(),
+                    )
+                })?;
                 if selected.as_ref() != Some(&self.request.canvas_entity) {
                     return Err(EditorRunError::Platform(format!(
                         "the UI authoring canary picked {selected:?} instead of {}",
                         self.request.canvas_entity.as_str()
                     )));
                 }
+                self.initial_pick = Some(request);
                 actions.push(EditorAction::Navigate(
                     EditorNavigationAction::SelectEntity {
                         document: authoring.document(),
@@ -271,16 +273,10 @@ impl EditorUiAuthoringCanaryHost {
             EditorUiAuthoringCanaryStage::AwaitSelection => {
                 let Some((authoring, observation)) = exact_authoring_canvas(authoring, observation)
                 else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 if authoring.selection().top_entity() != Some(&self.request.canvas_entity) {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 }
                 self.selected = Some(EditorUiAuthoringCanaryFrame::from_observation(
                     observation,
@@ -300,24 +296,15 @@ impl EditorUiAuthoringCanaryHost {
             EditorUiAuthoringCanaryStage::AwaitGestureBegin => {
                 let Some((authoring, observation)) = exact_authoring_canvas(authoring, observation)
                 else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 let Some(gesture) = authoring.gesture() else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 if gesture.stamp().preview_generation() != 0
                     || observation.stamp().gesture() != Some(gesture.stamp())
                 {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 }
                 let edit = authoring
                     .lower_direct_edit(&UiAuthoringDirectEdit::MoveBy {
@@ -334,24 +321,15 @@ impl EditorUiAuthoringCanaryHost {
             EditorUiAuthoringCanaryStage::AwaitPreview => {
                 let Some((authoring, observation)) = exact_authoring_canvas(authoring, observation)
                 else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 let Some(gesture) = authoring.gesture() else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 if gesture.stamp().preview_generation() == 0
                     || observation.stamp().gesture() != Some(gesture.stamp())
                 {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 }
                 let previewed = EditorUiAuthoringCanaryFrame::from_observation(
                     observation,
@@ -383,10 +361,7 @@ impl EditorUiAuthoringCanaryHost {
             EditorUiAuthoringCanaryStage::AwaitCommit => {
                 let Some((authoring, observation)) = exact_authoring_canvas(authoring, observation)
                 else {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 };
                 let selected = self.selected.ok_or_else(|| {
                     EditorRunError::Platform(
@@ -394,15 +369,45 @@ impl EditorUiAuthoringCanaryHost {
                     )
                 })?;
                 if authoring.gesture().is_some() || authoring.revision() == selected.revision() {
-                    return Ok(EditorUiAuthoringCanaryAdvance {
-                        actions,
-                        complete: false,
-                    });
+                    return Ok(actions);
                 }
                 let committed = EditorUiAuthoringCanaryFrame::from_observation(
                     observation,
                     &self.request.canvas_entity,
                 )?;
+                let initial_pick = self.initial_pick.ok_or_else(|| {
+                    EditorRunError::Platform(
+                        "the UI authoring canary lost its initial Canvas pick".to_owned(),
+                    )
+                })?;
+                if presenter.resolve_pick(initial_pick).is_ok() {
+                    return Err(EditorRunError::Platform(
+                        "the committed Canvas accepted a stale pick receipt".to_owned(),
+                    ));
+                }
+                let current_uv = observation
+                    .entity_center_uv(&self.request.canvas_entity)
+                    .ok_or_else(|| {
+                        EditorRunError::Platform(
+                            "the committed Canvas lost its selected node mapping".to_owned(),
+                        )
+                    })?;
+                let recovered = presenter
+                    .resolve_pick(EditorUiCanvasPickRequest {
+                        stamp: observation.stamp(),
+                        uv: current_uv,
+                    })
+                    .map_err(|()| {
+                        EditorRunError::Platform(
+                            "the committed Canvas did not recover exact pick authority".to_owned(),
+                        )
+                    })?;
+                if recovered.as_ref() != Some(&self.request.canvas_entity) {
+                    return Err(EditorRunError::Platform(format!(
+                        "the committed Canvas recovered the wrong node {recovered:?}"
+                    )));
+                }
+                self.stale_pick_rejected = true;
                 let previewed = self.previewed.ok_or_else(|| {
                     EditorRunError::Platform(
                         "the UI authoring canary lost its previewed Canvas frame".to_owned(),
@@ -449,10 +454,7 @@ impl EditorUiAuthoringCanaryHost {
             }
             EditorUiAuthoringCanaryStage::Complete => {}
         }
-        Ok(EditorUiAuthoringCanaryAdvance {
-            actions,
-            complete: self.stage == EditorUiAuthoringCanaryStage::Complete,
-        })
+        Ok(actions)
     }
 
     pub(super) fn is_complete(&self) -> bool {
@@ -479,6 +481,7 @@ impl EditorUiAuthoringCanaryHost {
             undo_depth: self
                 .undo_depth
                 .expect("completed UI canary retains history"),
+            stale_pick_rejected: self.stale_pick_rejected,
         })
     }
 }

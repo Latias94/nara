@@ -178,6 +178,43 @@ fn shared_budget_host_contention_rejects_without_retry_or_partial_publication() 
 }
 
 #[test]
+fn shared_budget_host_retains_at_most_two_distinct_content_generations() {
+    let limits = ProjectContentLimits::default();
+    let budget_host = ProjectContentBudgetHost::new(limits);
+    let project = TestProject::with_prefab_startup();
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::with_budget_host(root, limits, budget_host.clone()).unwrap();
+
+    let first = loader.load(&candidate, &plan).unwrap();
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("enemy-second")),
+    ]));
+    let second = loader.load(&candidate, &plan).unwrap();
+    assert_ne!(first.revision(), second.revision());
+    assert_eq!(budget_host.snapshot().active_generations(), 2);
+
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("enemy-third")),
+    ]));
+    let rejected = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(
+        rejected.kind(),
+        ProjectContentErrorKind::GenerationCapacityExceeded
+    );
+    assert_eq!(budget_host.snapshot().active_generations(), 2);
+
+    drop(first);
+    let third = loader.load(&candidate, &plan).unwrap();
+    assert_ne!(second.revision(), third.revision());
+    assert_eq!(budget_host.snapshot().active_generations(), 2);
+    assert_eq!(budget_host.snapshot().generation_high_water(), 2);
+
+    drop(second);
+    drop(third);
+    assert_no_active_charges(budget_host.snapshot());
+}
+
+#[test]
 fn duplicate_dependency_edges_share_unique_prefab_and_image_work() {
     let project = TestProject::with_prefab_startup();
     duplicate_prefab_edges(&project);
@@ -221,6 +258,7 @@ fn successful_high_water_with_limits(
 
 fn assert_no_active_charges(snapshot: ProjectContentBudgetSnapshot) {
     assert_eq!(snapshot.active_reservations(), 0);
+    assert_eq!(snapshot.active_generations(), 0);
     for kind in ProjectContentBudgetKind::ALL.iter().copied() {
         assert_eq!(snapshot.active(kind), 0, "{kind:?} charge leaked");
     }

@@ -1,11 +1,15 @@
 #![allow(dead_code)]
 
 use std::{
-    env, fs, io,
+    env, fs,
+    fs::File,
+    io,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use nara::fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -44,6 +48,15 @@ impl ReferenceProjectCopy {
     #[must_use]
     pub fn file(&self, relative: impl AsRef<Path>) -> PathBuf {
         self.path.join(relative)
+    }
+
+    #[must_use]
+    pub fn capability(&self) -> DirectoryCapability {
+        DirectoryCapability::from_host_handle(
+            host_directory(&self.path),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+        )
+        .expect("reference project capability must bind its guarded temporary root")
     }
 }
 
@@ -93,4 +106,27 @@ fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn host_directory(path: &Path) -> File {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x1 | 0x2 | 0x4;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+
+        fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ_WRITE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(path)
+            .expect("reference project directory handle must open")
+    }
+
+    #[cfg(unix)]
+    {
+        File::open(path).expect("reference project directory handle must open")
+    }
 }

@@ -1,6 +1,7 @@
 use std::{fmt, sync::Arc, time::Duration};
 
 mod actions;
+mod content_refresh;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
 mod model;
@@ -36,7 +37,7 @@ use nara_app::{
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Mut, Resource, World};
-use nara_fs::{DirectoryCapability, RelativePath};
+use nara_fs::{ContentDigest, DirectoryCapability, RelativePath};
 use nara_reflect::{
     ComponentCapability, ComponentRegistry, component_registry,
     report_component_registry_authority_fault,
@@ -52,8 +53,9 @@ use nara_tooling::{
     EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
     EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
     EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-    EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
-    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
+    EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
+    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorWorkspace,
+    EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
     SceneApplyChangesRequest,
@@ -65,7 +67,9 @@ use crate::project_host::composition::{
     editor_play_runtime_plugins_with_recipe, resolve_project_runtime_request,
     runtime_host_policy_contribution,
 };
-use crate::project_host::{ProjectContentLoader, ingest_project_manifest};
+use crate::project_host::{
+    ProjectContentLoader, ProjectSettingsCandidate, ingest_project_manifest,
+};
 
 use super::{
     PROJECT_MANIFEST, ProjectHost, RuntimePlan, RuntimePluginOverlay, runtime_plan_failure_report,
@@ -396,6 +400,15 @@ enum PendingSave {
     Prefab(crate::project_host::persistence::PrefabSaveCandidate),
 }
 
+#[derive(Clone)]
+struct PendingProjectContentRefresh {
+    document: EditorDocumentId,
+    revision: nara_scene::SceneAuthoringRevision,
+    prefab: nara_asset::AssetPath,
+    saved_digest: nara_tooling::EditorDocumentDigest,
+    expected_digest: ContentDigest,
+}
+
 #[derive(Clone, Copy)]
 enum PersistenceLane {
     Scene,
@@ -533,7 +546,13 @@ pub struct EditorProjectSession {
     scene_title: String,
     source_document: EditorDocumentId,
     plan: RuntimePlan,
+    content_candidate: ProjectSettingsCandidate,
+    content_loader: ProjectContentLoader,
     snapshot: crate::project_host::ProjectContentSnapshot,
+    project_content: EditorProjectContentView,
+    next_project_content_generation: u64,
+    pending_content_refresh: Option<PendingProjectContentRefresh>,
+    failed_content_refresh: Option<PendingProjectContentRefresh>,
     prefab_root: DirectoryCapability,
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
@@ -717,7 +736,15 @@ impl EditorProjectSession {
             scene_title: startup.as_str().to_owned(),
             source_document: document,
             plan,
+            content_candidate: candidate,
+            content_loader: loader,
             snapshot,
+            project_content: EditorProjectContentView::Current {
+                generation: EditorProjectContentGeneration::new(1),
+            },
+            next_project_content_generation: 2,
+            pending_content_refresh: None,
+            failed_content_refresh: None,
             prefab_root,
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             game_view_config,
@@ -1253,6 +1280,22 @@ impl EditorProjectSession {
             .with_running_world(|world| component_registry(world)?.snapshot().ok())
             .ok()
             .flatten()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn test_project_content_revision(
+        &self,
+    ) -> crate::project_host::ProjectContentRevision {
+        self.snapshot.revision()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn test_project_content_budget_snapshot(
+        &self,
+    ) -> crate::project_host::ProjectContentBudgetSnapshot {
+        self.content_loader.budget_snapshot()
     }
 
     #[must_use]
@@ -1909,6 +1952,13 @@ impl EditorProjectSession {
         requested_revision: nara_scene::SceneAuthoringRevision,
         operation: EditorPlayOperation,
     ) -> EditorRuntimeOwnerState {
+        if !self.play_source_is_current() {
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation,
+                reason: EditorPlayRejection::RuntimeOutOfDate,
+            });
+            return EditorRuntimeOwnerState::Empty;
+        }
         let Some(slot) = self.workspace.scene(document) else {
             self.play_result = Some(EditorPlayOperationResult::Rejected {
                 operation,

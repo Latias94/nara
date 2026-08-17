@@ -53,7 +53,8 @@ use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
     EditorAtomicFieldEdit, EditorDocumentMutation, EditorFieldWrite, EditorGestureAction,
     EditorGestureCancelReason, EditorGestureOutcome, EditorNavigationAction,
-    EditorPersistenceAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorPersistenceAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
+    EditorWorkspaceIntent, EditorWorkspaceIntentAction,
 };
 #[cfg(feature = "tooling")]
 use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWorkspaceCommand};
@@ -924,30 +925,115 @@ logical_height = 540
             .is_dirty()
     );
 
-    let saved_revision = saved_frame
+    let last_good_content = editor.test_project_content_revision();
+    assert!(matches!(
+        saved_frame.project_content(),
+        EditorProjectContentView::RefreshPending {
+            document,
+            revision,
+            ..
+        } if document == prefab_document && revision == edited_revision
+    ));
+    let accepted_source = fs::read(project.root.join("prefabs/reference-ui.prefab.json")).unwrap();
+    let mut externally_changed = accepted_source.clone();
+    externally_changed.extend_from_slice(b"\n");
+    fs::write(
+        project.root.join("prefabs/reference-ui.prefab.json"),
+        externally_changed,
+    )
+    .unwrap();
+
+    let stale_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        stale_frame.project_content(),
+        EditorProjectContentView::Stale {
+            failure: EditorProjectContentRefreshFailure::SavedSourceChanged,
+            ..
+        }
+    ));
+    assert_eq!(editor.test_project_content_revision(), last_good_content);
+    assert_eq!(
+        editor
+            .test_project_content_budget_snapshot()
+            .active_generations(),
+        1
+    );
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::Play),
+        nara_tooling::EditorPlayRequestResult::Rejected(
+            nara_tooling::EditorPlayRejection::RuntimeOutOfDate,
+        )
+    );
+
+    fs::write(
+        project.root.join("prefabs/reference-ui.prefab.json"),
+        accepted_source,
+    )
+    .unwrap();
+    let reconcile = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            stale_frame.revision(),
+            [
+                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
+                EditorAction::Persistence(EditorPersistenceAction::Reopen {
+                    target: stale_frame.reopen_target(),
+                }),
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(
+        reconcile.outcomes()[0],
+        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+    ));
+    assert!(matches!(
+        reconcile.outcomes()[1],
+        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+    ));
+    let reconciled_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        reconciled_frame.project_content(),
+        EditorProjectContentView::RefreshPending { .. }
+    ));
+    let acknowledged = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            reconciled_frame.revision(),
+            [EditorAction::Persistence(
+                EditorPersistenceAction::AcknowledgeResult,
+            )],
+        ))
+        .unwrap();
+    assert!(matches!(
+        acknowledged.outcomes()[0],
+        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+    ));
+    let refreshed_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        refreshed_frame.project_content(),
+        EditorProjectContentView::Current { generation } if generation.get() == 2
+    ));
+    let budget = editor.test_project_content_budget_snapshot();
+    assert_eq!(budget.active_generations(), 1);
+    assert_eq!(budget.generation_high_water(), 2);
+
+    let saved_revision = refreshed_frame
         .workspace()
         .document(prefab_document)
         .unwrap()
         .revision;
     let successor_edit = editor
         .dispatch_editor_actions(EditorActionBatch::new(
-            saved_frame.revision(),
-            [
-                EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
-                EditorAction::Mutate(EditorDocumentMutation::ApplyPrefabPatch {
+            refreshed_frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyPrefabPatch {
                     document: prefab_document,
                     base_revision: saved_revision,
                     patch: transform_x_patch("retry", 24.0),
-                }),
-            ],
+                },
+            )],
         ))
         .unwrap();
     assert!(matches!(
-        successor_edit.outcomes()[0],
-        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
-    ));
-    assert!(matches!(
-        &successor_edit.outcomes()[1],
+        &successor_edit.outcomes()[0],
         EditorActionOutcome::Workspace(report) if report.applied
     ));
 

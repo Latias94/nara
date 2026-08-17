@@ -33,6 +33,8 @@ impl EditorProjectSession {
         real_delta: Duration,
         drive_runtime: bool,
     ) -> Arc<EditorFrameModel> {
+        self.resume_content_refresh_after_runtime_retirement();
+        self.advance_project_content_refresh();
         if let Some(operation) = self.pending_persistence.take() {
             self.persistence_result = Some(match operation {
                 PendingPersistence::Save(save) => self.complete_save(save),
@@ -96,6 +98,7 @@ impl EditorProjectSession {
         EditorProjectView::new(
             self.play_view(),
             self.persistence_view(),
+            self.project_content,
             self.workspace_intent_view(),
         )
         .with_inspector_results(

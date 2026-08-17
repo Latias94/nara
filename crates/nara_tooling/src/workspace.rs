@@ -432,6 +432,13 @@ impl EditorWorkspace {
     }
 
     #[must_use]
+    pub fn has_dirty_prefab(&self) -> bool {
+        self.documents
+            .values()
+            .any(|slot| slot.kind() == EditorDocumentKind::Prefab && slot.is_dirty())
+    }
+
+    #[must_use]
     pub fn document_revision(&self, document: EditorDocumentId) -> Option<SceneAuthoringRevision> {
         self.documents
             .get(&document)

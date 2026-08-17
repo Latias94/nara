@@ -275,6 +275,11 @@ impl EditorFrameModel {
     }
 
     #[must_use]
+    pub const fn project_content(&self) -> crate::EditorProjectContentView {
+        self.project.project_content()
+    }
+
+    #[must_use]
     pub const fn workspace_intent(&self) -> crate::EditorWorkspaceIntentView {
         self.project.workspace_intent()
     }
@@ -431,6 +436,7 @@ pub enum EditorAction {
     Navigate(EditorNavigationAction),
     Mutate(EditorDocumentMutation),
     Persistence(EditorPersistenceAction),
+    ProjectContent(crate::EditorProjectContentAction),
     WorkspaceIntent(EditorWorkspaceIntentAction),
     Play(EditorPlayAction),
     ReportFieldValidation(EditorFieldValidationFailure),
@@ -609,6 +615,7 @@ fn inspector_field_target(
 pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
     Persistence(EditorPersistenceRequestResult),
+    ProjectContent(crate::EditorProjectContentRefreshRequestResult),
     WorkspaceIntent(EditorWorkspaceIntentRequestResult),
     Play(EditorPlayRequestResult),
     Gesture(EditorGestureOutcome),

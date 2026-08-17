@@ -1,6 +1,6 @@
 use super::*;
 
-use nara_asset::AssetRef;
+use nara_asset::{AssetPath, AssetRef};
 use nara_scene::SceneEntityId;
 use nara_tooling::EditorDocumentSourceBinding;
 
@@ -223,6 +223,7 @@ impl EditorProjectSession {
         }
 
         if matches!(command, EditorPersistenceCommand::Reopen { .. })
+            && self.workspace.document_kind(requested_document) != Some(EditorDocumentKind::Prefab)
             && (!matches!(self.runtime_owner, EditorRuntimeOwnerState::Empty)
                 || self.runtime_host.has_cleanup_owner())
         {
@@ -390,6 +391,9 @@ impl EditorProjectSession {
                     };
                 }
                 self.last_persistence_receipt = Some(evidence);
+                if matches!(lane, PersistenceLane::Prefab) {
+                    self.schedule_prefab_content_refresh(evidence);
+                }
                 EditorPersistenceResult::Saved {
                     document: evidence.document(),
                     revision: evidence.revision(),
@@ -593,6 +597,22 @@ impl EditorProjectSession {
                 if let Some(host) = self.prefab_persistence.as_mut() {
                     host.commit_reopen(identity, content_digest);
                 }
+                let path = AssetPath::new(
+                    self.workspace
+                        .prefab(document)
+                        .expect("a reopened Prefab remains in its exact workspace slot")
+                        .source_binding()
+                        .locator()
+                        .to_owned(),
+                )
+                .expect("a Host-normalized Prefab source remains a valid asset path");
+                self.schedule_reopened_prefab_content_refresh(
+                    document,
+                    revision,
+                    path,
+                    digest,
+                    content_digest,
+                );
                 EditorPersistenceResult::Opened {
                     document,
                     revision,

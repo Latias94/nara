@@ -5,6 +5,115 @@ use nara_scene::SceneAuthoringRevision;
 use crate::{EditorApplyChangesResult, EditorPlayView, EditorRuntimeEditResult};
 use crate::{EditorDocumentDigest, EditorDocumentId};
 
+/// Monotonic Host publication identity for one immutable project-content snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EditorProjectContentGeneration(u64);
+
+impl EditorProjectContentGeneration {
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn new(generation: u64) -> Self {
+        Self(generation)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// Typed reason why saved source has not become the current project-content snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorProjectContentRefreshFailure {
+    SavedSourceChanged,
+    InvalidContent,
+    HostUnavailable,
+    CapacityExceeded,
+    RuntimeRetirementRequired,
+    PreviewRejected,
+}
+
+impl EditorProjectContentRefreshFailure {
+    #[must_use]
+    pub const fn retryable(self) -> bool {
+        matches!(
+            self,
+            Self::InvalidContent | Self::HostUnavailable | Self::PreviewRejected
+        )
+    }
+}
+
+/// Project-content freshness is independent from document persistence and Runtime lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorProjectContentView {
+    Current {
+        generation: EditorProjectContentGeneration,
+    },
+    RefreshPending {
+        current_generation: EditorProjectContentGeneration,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        saved_digest: EditorDocumentDigest,
+    },
+    Stale {
+        current_generation: EditorProjectContentGeneration,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+        saved_digest: EditorDocumentDigest,
+        failure: EditorProjectContentRefreshFailure,
+    },
+}
+
+impl EditorProjectContentView {
+    #[must_use]
+    pub const fn current_generation(self) -> EditorProjectContentGeneration {
+        match self {
+            Self::Current { generation } => generation,
+            Self::RefreshPending {
+                current_generation, ..
+            }
+            | Self::Stale {
+                current_generation, ..
+            } => current_generation,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_current(self) -> bool {
+        matches!(self, Self::Current { .. })
+    }
+
+    #[must_use]
+    pub const fn retryable(self) -> bool {
+        matches!(
+            self,
+            Self::Stale {
+                failure,
+                ..
+            } if failure.retryable()
+        )
+    }
+}
+
+/// Explicit remediation for a saved but stale project-content generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorProjectContentAction {
+    RetryRefresh,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorProjectContentRefreshRejection {
+    RefreshPending,
+    ContentAlreadyCurrent,
+    RetryNotAvailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorProjectContentRefreshRequestResult {
+    Accepted,
+    Rejected(EditorProjectContentRefreshRejection),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPersistenceCommand {
     Save { document: Option<EditorDocumentId> },
@@ -219,6 +328,7 @@ impl EditorWorkspaceIntentView {
 pub struct EditorProjectView {
     play: EditorPlayView,
     persistence: EditorPersistenceView,
+    project_content: EditorProjectContentView,
     workspace_intent: EditorWorkspaceIntentView,
     runtime_edit_result: Option<EditorRuntimeEditResult>,
     apply_changes_result: Option<EditorApplyChangesResult>,
@@ -229,11 +339,13 @@ impl EditorProjectView {
     pub const fn new(
         play: EditorPlayView,
         persistence: EditorPersistenceView,
+        project_content: EditorProjectContentView,
         workspace_intent: EditorWorkspaceIntentView,
     ) -> Self {
         Self {
             play,
             persistence,
+            project_content,
             workspace_intent,
             runtime_edit_result: None,
             apply_changes_result: None,
@@ -248,6 +360,11 @@ impl EditorProjectView {
     #[must_use]
     pub const fn persistence(&self) -> EditorPersistenceView {
         self.persistence
+    }
+
+    #[must_use]
+    pub const fn project_content(&self) -> EditorProjectContentView {
+        self.project_content
     }
 
     #[must_use]

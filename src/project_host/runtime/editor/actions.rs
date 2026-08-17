@@ -98,6 +98,9 @@ impl EditorProjectSession {
             EditorAction::Navigate(action) => self.dispatch_navigation(frame, action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(frame, action),
             EditorAction::Persistence(action) => self.dispatch_persistence(frame, action),
+            EditorAction::ProjectContent(action) => {
+                EditorActionOutcome::ProjectContent(self.request_project_content_refresh(action))
+            }
             EditorAction::WorkspaceIntent(action) => self.dispatch_workspace_intent(frame, action),
             EditorAction::Play(action) => self.dispatch_play(frame, action),
             EditorAction::ReportFieldValidation(failure) => {
@@ -241,6 +244,7 @@ impl EditorProjectSession {
                 ));
             }
             EditorActionOutcome::Persistence(_)
+            | EditorActionOutcome::ProjectContent(_)
             | EditorActionOutcome::WorkspaceIntent(_)
             | EditorActionOutcome::Play(_)
             | EditorActionOutcome::Gesture(_)

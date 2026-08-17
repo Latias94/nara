@@ -260,6 +260,16 @@ impl EditorPreviewSession {
         }
     }
 
+    pub(super) fn rebuild_for_project(
+        &self,
+        project: ProjectContentSnapshot,
+        registry: &ComponentRegistrySnapshot,
+    ) -> Result<Self, DiagnosticReport> {
+        let mut replacement = Self::new(project, registry)?;
+        replacement.set_extent(self.extent);
+        Ok(replacement)
+    }
+
     pub(super) fn drive(
         &mut self,
         source: Option<EditorPreviewSource>,

@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     error::Error,
     fmt::{self, Display, Formatter},
     sync::{Arc, Mutex},
@@ -7,6 +8,10 @@ use std::{
 use nara_core::{ByteLimit, ItemLimit};
 use nara_image::ImageImportLimits;
 use nara_scene::{PrefabExpansionLimits, SceneFileLimits};
+
+use super::ProjectContentRevision;
+
+pub(super) const MAX_RETAINED_CONTENT_GENERATIONS: usize = 2;
 
 macro_rules! define_project_content_budget_kinds {
     (
@@ -236,6 +241,8 @@ pub struct ProjectContentBudgetSnapshot {
     aggregate_active_bytes: usize,
     aggregate_high_water_bytes: usize,
     active_reservations: usize,
+    active_generations: usize,
+    generation_high_water: usize,
 }
 
 impl ProjectContentBudgetSnapshot {
@@ -259,6 +266,21 @@ impl ProjectContentBudgetSnapshot {
     pub const fn active_reservations(self) -> usize {
         self.active_reservations
     }
+
+    #[must_use]
+    pub const fn active_generations(self) -> usize {
+        self.active_generations
+    }
+
+    #[must_use]
+    pub const fn generation_high_water(self) -> usize {
+        self.generation_high_water
+    }
+
+    #[must_use]
+    pub const fn generation_limit(self) -> usize {
+        MAX_RETAINED_CONTENT_GENERATIONS
+    }
 }
 
 #[derive(Clone)]
@@ -277,6 +299,8 @@ struct BudgetState {
     high_water: [usize; TRACKED_KIND_COUNT],
     aggregate_high_water_bytes: usize,
     active_reservations: usize,
+    active_generations: BTreeMap<ProjectContentRevision, usize>,
+    generation_high_water: usize,
 }
 
 impl ProjectContentBudgetHost {
@@ -309,6 +333,57 @@ impl ProjectContentBudgetHost {
                 .expect("admitted project content byte charges cannot overflow"),
             aggregate_high_water_bytes: state.aggregate_high_water_bytes,
             active_reservations: state.active_reservations,
+            active_generations: state.active_generations.len(),
+            generation_high_water: state.generation_high_water,
+        }
+    }
+
+    pub(super) fn retain_generation(
+        &self,
+        revision: ProjectContentRevision,
+    ) -> Result<ProjectContentGenerationLease, ProjectContentGenerationCapacityError> {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if !state.active_generations.contains_key(&revision)
+            && state.active_generations.len() >= MAX_RETAINED_CONTENT_GENERATIONS
+        {
+            return Err(ProjectContentGenerationCapacityError {
+                active: state.active_generations.len(),
+                limit: MAX_RETAINED_CONTENT_GENERATIONS,
+            });
+        }
+        let retained = state.active_generations.entry(revision).or_default();
+        *retained = retained
+            .checked_add(1)
+            .expect("project content generation owner count cannot overflow");
+        state.generation_high_water = state
+            .generation_high_water
+            .max(state.active_generations.len());
+        drop(state);
+        Ok(ProjectContentGenerationLease {
+            host: self.clone(),
+            revision,
+        })
+    }
+
+    fn release_generation(&self, revision: ProjectContentRevision) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let retained = state
+            .active_generations
+            .get_mut(&revision)
+            .expect("a retained project content generation must remain registered");
+        *retained = retained
+            .checked_sub(1)
+            .expect("project content generation owner count underflowed");
+        if *retained == 0 {
+            state.active_generations.remove(&revision);
         }
     }
 
@@ -428,6 +503,33 @@ impl std::fmt::Debug for ProjectContentBudgetHost {
             .field("limits", &self.inner.limits)
             .field("snapshot", &self.snapshot())
             .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ProjectContentGenerationCapacityError {
+    active: usize,
+    limit: usize,
+}
+
+impl ProjectContentGenerationCapacityError {
+    pub(super) const fn active(self) -> usize {
+        self.active
+    }
+
+    pub(super) const fn limit(self) -> usize {
+        self.limit
+    }
+}
+
+pub(super) struct ProjectContentGenerationLease {
+    host: ProjectContentBudgetHost,
+    revision: ProjectContentRevision,
+}
+
+impl Drop for ProjectContentGenerationLease {
+    fn drop(&mut self) {
+        self.host.release_generation(self.revision);
     }
 }
 

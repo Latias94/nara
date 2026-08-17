@@ -63,9 +63,13 @@ impl EditorProjectSession {
                 unreachable!("editor runtime state is not observed during a transition")
             }
         };
-        let out_of_date = source_revision
-            .zip(current_revision)
-            .is_some_and(|(source, current)| source != current);
+        let running_content_revision = self.runtime_host.running_content_revision();
+        let out_of_date = running_content_revision.is_some()
+            && (source_revision
+                .zip(current_revision)
+                .is_some_and(|(source, current)| source != current)
+                || running_content_revision != Some(self.snapshot.revision())
+                || !self.play_source_is_current());
         EditorPlayView::new(
             state,
             self.runtime_host.running_runtime_generation(),
@@ -100,6 +104,23 @@ impl EditorProjectSession {
             if !retry_matches_owner {
                 return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
             }
+        }
+
+        if matches!(
+            command,
+            EditorPlayCommand::Play | EditorPlayCommand::Restart
+        ) && !self.play_source_is_current()
+        {
+            let operation = match command {
+                EditorPlayCommand::Play => EditorPlayOperation::Play,
+                EditorPlayCommand::Restart => EditorPlayOperation::Restart,
+                _ => unreachable!(),
+            };
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation,
+                reason: EditorPlayRejection::RuntimeOutOfDate,
+            });
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate);
         }
 
         match command {
@@ -161,6 +182,13 @@ impl EditorProjectSession {
         {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
+        if !self.play_source_is_current() {
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation: EditorPlayOperation::Play,
+                reason: EditorPlayRejection::RuntimeOutOfDate,
+            });
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate);
+        }
         let Some(scene) = self.workspace.scene(document) else {
             self.play_result = Some(EditorPlayOperationResult::Rejected {
                 operation: EditorPlayOperation::Play,
@@ -184,5 +212,9 @@ impl EditorProjectSession {
             operation: EditorPlayOperation::Play,
         });
         EditorPlayRequestResult::Accepted
+    }
+
+    pub(super) fn play_source_is_current(&self) -> bool {
+        self.project_content.is_current() && !self.workspace.has_dirty_prefab()
     }
 }

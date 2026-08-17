@@ -374,6 +374,13 @@ impl ProjectHost {
         }
     }
 
+    fn running_content_revision(&self) -> Option<ProjectContentRevision> {
+        match &self.slot {
+            ProjectHostSlot::Running(published) => Some(published._snapshot.revision()),
+            ProjectHostSlot::Empty | ProjectHostSlot::Cleaning { .. } => None,
+        }
+    }
+
     fn with_running_world<R>(&self, operation: impl FnOnce(&World) -> R) -> Result<R, HostFault> {
         let ProjectHostSlot::Running(published) = &self.slot else {
             return Err(HostFault::new(single_error(

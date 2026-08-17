@@ -74,15 +74,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .into_iter()
             .any(|observed| observed.abs() > 0.01)
         || ui.undo_depth() != 1
+        || !ui.stale_pick_rejected()
         || ![
-        initial.runtime_ui_present(),
-        input_response.runtime_ui_present(),
-        paused.runtime_ui_present(),
-        stepped.runtime_ui_present(),
-        resized.runtime_ui_present(),
-    ]
-    .into_iter()
-    .all(|present| present)
+            initial.runtime_ui_present(),
+            input_response.runtime_ui_present(),
+            paused.runtime_ui_present(),
+            stepped.runtime_ui_present(),
+            resized.runtime_ui_present(),
+        ]
+        .into_iter()
+        .all(|present| present)
         || [
             initial.sprite_instances(),
             input_response.sprite_instances(),

@@ -172,6 +172,11 @@ impl EditorGameStartRequest {
     }
 
     #[must_use]
+    pub const fn content_revision(self) -> ProjectContentRevision {
+        self.content_revision
+    }
+
+    #[must_use]
     pub const fn runtime_generation(self) -> RuntimeGeneration {
         self.runtime_generation
     }

@@ -7,6 +7,7 @@ use nara_tooling::{
     EditorDocumentMutation, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
     EditorPersistenceOperation, EditorPersistenceRequestKind, EditorPersistenceResult,
     EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult, EditorPlayState,
+    EditorProjectContentAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
     EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
     EditorWorkspaceIntentResult,
 };
@@ -257,7 +258,10 @@ fn render_toolbar(
         )
         && no_workspace_intent
         && persistence_idle;
-    let persistence_available = play_idle && no_workspace_intent && persistence_idle;
+    let prefab_active =
+        active_document.is_some_and(|document| document.kind == EditorDocumentKind::Prefab);
+    let persistence_available =
+        (play_idle || prefab_active) && no_workspace_intent && persistence_idle;
     let play_pending = matches!(
         frame.play().result(),
         Some(EditorPlayOperationResult::Pending { .. })
@@ -375,6 +379,12 @@ fn render_play_controls(
     let state = frame.play().state();
     let can_request =
         no_workspace_intent && frame.persistence().operation() == EditorPersistenceOperation::Idle;
+    let content_ready = frame.project_content().is_current()
+        && !frame
+            .workspace()
+            .documents
+            .iter()
+            .any(|document| document.kind == EditorDocumentKind::Prefab && document.dirty);
     ui.label(RichText::new(play_state_label(state)).weak());
     let mut push = |enabled: bool,
                     allow_while_pending: bool,
@@ -393,7 +403,7 @@ fn render_play_controls(
         EditorPlayState::Empty => {
             if let Some(scene) = scene {
                 push(
-                    true,
+                    content_ready,
                     false,
                     "Play",
                     EditorPlayAction::Play {
@@ -411,20 +421,20 @@ fn render_play_controls(
         EditorPlayState::Running => {
             push(true, false, "Pause", EditorPlayAction::Pause);
             push(true, false, "Stop", EditorPlayAction::Stop);
-            push(true, false, "Restart", EditorPlayAction::Restart);
+            push(content_ready, false, "Restart", EditorPlayAction::Restart);
         }
         EditorPlayState::Paused => {
             push(true, false, "Resume", EditorPlayAction::Resume);
             push(true, false, "Step", EditorPlayAction::StepFixedTick);
             push(true, false, "Stop", EditorPlayAction::Stop);
-            push(true, false, "Restart", EditorPlayAction::Restart);
+            push(content_ready, false, "Restart", EditorPlayAction::Restart);
         }
         EditorPlayState::Stepping => {
             push(true, true, "Stop", EditorPlayAction::Stop);
         }
         EditorPlayState::Faulted => {
             push(true, false, "Stop", EditorPlayAction::Stop);
-            push(true, false, "Restart", EditorPlayAction::Restart);
+            push(content_ready, false, "Restart", EditorPlayAction::Restart);
         }
         EditorPlayState::RetirementIncomplete => {
             push(
@@ -675,6 +685,27 @@ fn render_editor_status(
     actions: &mut Vec<EditorAction>,
 ) -> bool {
     let mut rendered = false;
+    match frame.project_content() {
+        EditorProjectContentView::Current { .. } => {}
+        EditorProjectContentView::RefreshPending { .. } => {
+            rendered = true;
+            ui.label(RichText::new("Saved source; refreshing project content").weak());
+        }
+        EditorProjectContentView::Stale { failure, .. } => {
+            rendered = true;
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(project_content_failure_label(failure))
+                        .color(ui.visuals().warn_fg_color),
+                );
+                if failure.retryable() && toolbar_button(ui, true, "Retry refresh") {
+                    actions.push(EditorAction::ProjectContent(
+                        EditorProjectContentAction::RetryRefresh,
+                    ));
+                }
+            });
+        }
+    }
     if let Some(operation) = persistence_operation_label(frame.persistence().operation()) {
         rendered = true;
         ui.label(RichText::new(operation).weak());
@@ -717,7 +748,7 @@ fn render_editor_status(
         EditorPlayState::Paused => {
             rendered = true;
             let message = if frame.play().is_out_of_date() {
-                "Game View is out of date; Restart applies accepted Scene edits"
+                "Game View is out of date; save and refresh content before Restart"
             } else {
                 "Play is paused; Scene authoring remains isolated from this Runtime"
             };
@@ -732,6 +763,29 @@ fn render_editor_status(
         }
     }
     rendered
+}
+
+fn project_content_failure_label(failure: EditorProjectContentRefreshFailure) -> &'static str {
+    match failure {
+        EditorProjectContentRefreshFailure::SavedSourceChanged => {
+            "Saved source changed before project refresh; Reopen to reconcile"
+        }
+        EditorProjectContentRefreshFailure::InvalidContent => {
+            "Saved source is invalid for project content"
+        }
+        EditorProjectContentRefreshFailure::HostUnavailable => {
+            "Project content source is temporarily unavailable"
+        }
+        EditorProjectContentRefreshFailure::CapacityExceeded => {
+            "Project content exceeds the configured capacity"
+        }
+        EditorProjectContentRefreshFailure::RuntimeRetirementRequired => {
+            "Stop the older Game Runtime before refreshing this content generation"
+        }
+        EditorProjectContentRefreshFailure::PreviewRejected => {
+            "Project content loaded, but the Editor preview replacement failed"
+        }
+    }
 }
 
 fn render_diagnostic_report(

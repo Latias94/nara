@@ -38,7 +38,9 @@ pub use persistence::{
     EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceFailureStage,
     EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
     EditorPersistenceRequestResult, EditorPersistenceResult, EditorPersistenceView,
-    EditorProjectView, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+    EditorProjectContentAction, EditorProjectContentGeneration, EditorProjectContentRefreshFailure,
+    EditorProjectContentRefreshRejection, EditorProjectContentRefreshRequestResult,
+    EditorProjectContentView, EditorProjectView, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
     EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
 };

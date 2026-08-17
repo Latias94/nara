@@ -49,8 +49,8 @@ use crate::scene_retention::{
 };
 use crate::startup_scene::StartupSceneSource;
 
-use budget::BudgetTicket;
 pub(crate) use budget::ProjectContentLease;
+use budget::{BudgetTicket, ProjectContentGenerationLease};
 pub use budget::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentLimits,
@@ -65,7 +65,7 @@ pub use closure::{
 const RELATIVE_OPEN_HANDLE_PEAK: usize = 2;
 const RETAINED_DIRECTORY_HANDLES: usize = 1;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProjectContentRevision([u8; 32]);
 
 impl ProjectContentRevision {
@@ -139,6 +139,7 @@ struct ProjectContentSnapshotInner {
     expanded_startup_scene_provenance: Arc<SceneEntityProvenanceMap>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
+    _generation_lease: ProjectContentGenerationLease,
     _runtime_lease: ProjectContentLease,
 }
 
@@ -338,6 +339,7 @@ pub enum ProjectContentErrorKind {
     AllocationFailed,
     UnsupportedHierarchySemantics,
     SchemaMismatch,
+    GenerationCapacityExceeded,
 }
 
 #[derive(Clone, PartialEq)]
@@ -527,6 +529,9 @@ impl Display for ProjectContentError {
             ProjectContentErrorKind::SchemaMismatch => {
                 "project schema validation authority changed"
             }
+            ProjectContentErrorKind::GenerationCapacityExceeded => {
+                "project content generation capacity was exceeded"
+            }
         })
     }
 }
@@ -590,7 +595,7 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, None)
+        self.load_inner(candidate, plan, None, None)
     }
 
     pub(crate) fn load_with_expected_startup_scene_digest(
@@ -599,7 +604,26 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         expected_startup_scene_digest: ContentDigest,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, Some(expected_startup_scene_digest))
+        self.load_inner(candidate, plan, Some(expected_startup_scene_digest), None)
+    }
+
+    pub(crate) fn load_with_expected_prefab_digest(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        path: AssetPath,
+        digest: ContentDigest,
+    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.load_inner(
+            candidate,
+            plan,
+            None,
+            Some(ExpectedPrefabSource {
+                path,
+                digest,
+                observed: false,
+            }),
+        )
     }
 
     fn load_inner(
@@ -607,6 +631,7 @@ impl ProjectContentLoader {
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         expected_startup_scene_digest: Option<ContentDigest>,
+        expected_prefab: Option<ExpectedPrefabSource>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
         let validation = plan.schema_validation();
@@ -614,6 +639,7 @@ impl ProjectContentLoader {
             self,
             validation,
             expected_startup_scene_digest,
+            expected_prefab,
             candidate.manifest_digest(),
         )?;
         context.load(candidate)
@@ -687,9 +713,16 @@ struct LoadContext<'a> {
     budget: Option<BudgetTicket>,
     source_upgrade_required: bool,
     expected_startup_scene_digest: Option<ContentDigest>,
+    expected_prefab: Option<ExpectedPrefabSource>,
     startup_closure: Option<StartupContentClosureBuilder>,
     startup_closure_work_bytes: usize,
     asset_database: ProjectAssetDatabase,
+}
+
+struct ExpectedPrefabSource {
+    path: AssetPath,
+    digest: ContentDigest,
+    observed: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -703,6 +736,7 @@ impl<'a> LoadContext<'a> {
         loader: &'a ProjectContentLoader,
         validation: &'a SchemaValidationInput,
         expected_startup_scene_digest: Option<ContentDigest>,
+        expected_prefab: Option<ExpectedPrefabSource>,
         manifest_digest: ContentDigest,
     ) -> Result<Self, ProjectContentError> {
         let startup_closure_work_bytes = startup_closure_entry_work_bytes("nara.toml".len())?;
@@ -719,6 +753,7 @@ impl<'a> LoadContext<'a> {
             budget: Some(budget),
             source_upgrade_required: false,
             expected_startup_scene_digest,
+            expected_prefab,
             startup_closure: Some(StartupContentClosureBuilder::new(manifest_digest)?),
             startup_closure_work_bytes,
             asset_database: ProjectAssetDatabase::default(),
@@ -775,6 +810,17 @@ impl<'a> LoadContext<'a> {
 
         let loaded_prefabs =
             self.load_prefab_closure(&prefabs, &settings.paths.prefabs, &startup_scene)?;
+        if let Some(expected) = &self.expected_prefab
+            && !expected.observed
+        {
+            return Err(ProjectContentError::with_identifier(
+                ProjectContentErrorKind::HostAuthorityRejected,
+                "project.content.saved-prefab-outside-closure",
+                "Saved Prefab is no longer a member of the startup content closure",
+                "prefab",
+                expected.path.as_str(),
+            ));
+        }
         let resolver = LoadedPrefabResolver::new(&loaded_prefabs);
         let expansion_work = prefab_expansion_work_plan(self.loader.limits.prefab_expansion())?;
         let work_before = self.reserve_work(expansion_work)?;
@@ -878,6 +924,34 @@ impl<'a> LoadContext<'a> {
         }
         let startup_closure =
             startup_closure.publish(self.loader.root.share(), startup_closure_lease);
+        let generation_lease = self
+            .loader
+            .budget_host
+            .retain_generation(revision)
+            .map_err(|error| {
+                let diagnostic = attach_field(
+                    attach_field(
+                        diagnostic(
+                            "project.content.generation-capacity-exceeded",
+                            "Project content retains too many distinct generations; retire an older Runtime or snapshot before retrying",
+                        ),
+                        DiagnosticField::public_u64(
+                            field_key("active_generations"),
+                            u64::try_from(error.active()).unwrap_or(u64::MAX),
+                        ),
+                    ),
+                    DiagnosticField::public_u64(
+                        field_key("generation_limit"),
+                        u64::try_from(error.limit()).unwrap_or(u64::MAX),
+                    ),
+                );
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(diagnostic);
+                ProjectContentError::with_report(
+                    ProjectContentErrorKind::GenerationCapacityExceeded,
+                    diagnostics,
+                )
+            })?;
 
         Ok(ProjectContentSnapshot {
             inner: Arc::new(ProjectContentSnapshotInner {
@@ -889,6 +963,7 @@ impl<'a> LoadContext<'a> {
                 expanded_startup_scene_provenance,
                 prefabs,
                 images,
+                _generation_lease: generation_lease,
                 _runtime_lease: runtime_lease,
             }),
         })
@@ -1047,6 +1122,20 @@ impl<'a> LoadContext<'a> {
             path.as_str(),
             self.loader.limits.scene_file().encoded_bytes().get(),
         )?;
+        if let Some(expected) = self.expected_prefab.as_mut()
+            && expected.path == *path
+        {
+            expected.observed = true;
+            if expected.digest != digest {
+                return Err(ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::HostAuthorityRejected,
+                    "project.content.saved-prefab-source-changed",
+                    "Saved Prefab bytes do not match the accepted persistence receipt",
+                    "prefab",
+                    path.as_str(),
+                ));
+            }
+        }
         self.record_member(
             StartupContentMemberKind::Prefab,
             prefab_root,

@@ -16,8 +16,9 @@ use nara_tooling::{
     EditorFrameModel, EditorNavigationAction, EditorPersistenceAction, EditorPersistenceRejection,
     EditorPersistenceRequestKind, EditorPersistenceResult, EditorPersistenceView, EditorPlayAction,
     EditorPlayOperation, EditorPlayOperationResult, EditorPlayState, EditorPlayView,
-    EditorProjectView, EditorReopenTarget, EditorSceneModel, EditorSceneTabModel,
-    EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorProjectContentAction, EditorProjectContentGeneration, EditorProjectContentRefreshFailure,
+    EditorProjectContentView, EditorProjectView, EditorReopenTarget, EditorSceneModel,
+    EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentView, EditorWorkspaceModel,
     SceneCompositionCommand, SceneCompositionComponentKind, SceneCompositionEntityKind,
     SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorEntityRow,
@@ -91,6 +92,7 @@ fn fixed_toolbar_emits_exact_frame_bound_authoring_actions() {
         EditorProjectView::new(
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
+            current_project_content(),
             EditorWorkspaceIntentView::default(),
         ),
         DiagnosticReport::default(),
@@ -543,6 +545,7 @@ fn host_field_feedback_is_rendered_only_for_the_matching_field() {
         EditorProjectView::new(
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
+            current_project_content(),
             EditorWorkspaceIntentView::default(),
         ),
         DiagnosticReport::default(),
@@ -588,6 +591,7 @@ fn diagnostics_and_persistence_failure_remain_visible_and_dismissible() {
                 reason: EditorPersistenceRejection::TargetChanged,
             }),
         ),
+        current_project_content(),
         EditorWorkspaceIntentView::default(),
     );
     let frame = frame(Some(scene), project, diagnostics);
@@ -625,6 +629,45 @@ fn diagnostics_and_persistence_failure_remain_visible_and_dismissible() {
 }
 
 #[test]
+fn stale_project_content_emits_one_typed_retry_action() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        true,
+    );
+    let content = EditorProjectContentView::Stale {
+        current_generation: EditorProjectContentGeneration::new(1),
+        document: scene.document,
+        revision: scene.revision,
+        saved_digest: nara_tooling::EditorDocumentDigest::new(8, [7; 32]),
+        failure: EditorProjectContentRefreshFailure::InvalidContent,
+    };
+    let frame = frame(
+        Some(scene.clone()),
+        EditorProjectView::new(
+            play_view(Some(&scene)),
+            EditorPersistenceView::default(),
+            content,
+            EditorWorkspaceIntentView::default(),
+        ),
+        DiagnosticReport::default(),
+    );
+
+    let batch = click_control(&mut EguiEditorPanel::new(), &frame, "Retry refresh");
+
+    assert_eq!(
+        batch,
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::ProjectContent(
+                EditorProjectContentAction::RetryRefresh,
+            )],
+        )
+    );
+}
+
+#[test]
 fn dirty_close_dialog_returns_only_the_typed_decision_action() {
     let scene = scene_model(
         revision(),
@@ -635,6 +678,7 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
     let project = EditorProjectView::new(
         play_view(Some(&scene)),
         EditorPersistenceView::default(),
+        current_project_content(),
         EditorWorkspaceIntentView::new(
             Some(EditorWorkspaceIntent::CloseDocument {
                 document: scene.document,
@@ -736,6 +780,7 @@ fn default_frame(scene: Option<EditorSceneModel>) -> EditorFrameModel {
         EditorProjectView::new(
             play,
             EditorPersistenceView::default(),
+            current_project_content(),
             EditorWorkspaceIntentView::default(),
         ),
         DiagnosticReport::default(),
@@ -791,6 +836,7 @@ fn frame_with_active_prefab(
         EditorProjectView::new(
             EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
             EditorPersistenceView::default(),
+            current_project_content(),
             EditorWorkspaceIntentView::default(),
         ),
         DiagnosticReport::default(),
@@ -951,6 +997,7 @@ fn frame_with_play_state_and_result(
                 result,
             ),
             EditorPersistenceView::default(),
+            current_project_content(),
             EditorWorkspaceIntentView::default(),
         ),
         DiagnosticReport::default(),
@@ -963,6 +1010,12 @@ fn frame(
     diagnostics: DiagnosticReport,
 ) -> EditorFrameModel {
     frame_with_feedback(scene, project, diagnostics, None)
+}
+
+fn current_project_content() -> EditorProjectContentView {
+    EditorProjectContentView::Current {
+        generation: EditorProjectContentGeneration::new(1),
+    }
 }
 
 fn frame_with_feedback(
