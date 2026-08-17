@@ -88,6 +88,33 @@ pub mod __private {
         Ok(RenderImagePacket { image, extent })
     }
 
+    /// Maps one managed Runtime logical-window packet into the private Editor image target.
+    ///
+    /// The extracted view deliberately retains its logical window target so sprite/UI lowering
+    /// continues to use the Runtime's existing target semantics. Only the backend execution target
+    /// becomes the private image owned by the Editor.
+    pub fn map_editor_game_view_packet(
+        mut packet: RenderFramePacket,
+        target: RenderImagePacket,
+    ) -> Result<RenderFramePacket, RenderFramePacketError> {
+        let RenderFrameTarget::Window(window) = packet.target else {
+            return Err(RenderFramePacketError::EditorGameViewRequiresWindowTarget);
+        };
+        let logical_extent = Extent2d::new(
+            window.resolution.physical_width,
+            window.resolution.physical_height,
+        )
+        .ok_or(RenderFramePacketError::ImageTargetHasZeroExtent)?;
+        if target.extent != logical_extent {
+            return Err(RenderFramePacketError::EditorGameViewTargetExtentMismatch {
+                logical: logical_extent,
+                image: target.extent,
+            });
+        }
+        packet.target = RenderFrameTarget::Image(target);
+        Ok(packet)
+    }
+
     /// Assembles the closed first-party draw order without exposing topology construction.
     pub fn assemble_first_party_draws<T>(mut content: Vec<T>, ui: Vec<T>) -> Vec<T> {
         content.extend(ui);
@@ -414,6 +441,12 @@ pub enum RenderFramePacketError {
     ImageTargetHasZeroExtent,
     #[error("an Editor preview render packet must target an image")]
     EditorPreviewRequiresImageTarget,
+    #[error("an Editor Game View render packet must originate from a logical window target")]
+    EditorGameViewRequiresWindowTarget,
+    #[error(
+        "the Editor Game View image extent {image:?} does not match logical window extent {logical:?}"
+    )]
+    EditorGameViewTargetExtentMismatch { logical: Extent2d, image: Extent2d },
     #[error("render target window {window_id:?} is not the admitted window")]
     TargetWindowMismatch { window_id: WindowId },
     #[error("the render viewport lies outside window {window_id:?}")]
@@ -1254,6 +1287,49 @@ mod tests {
             RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
         ));
         assert_eq!(packet.view(), &test_extracted_view());
+    }
+
+    #[test]
+    fn editor_game_view_mapping_changes_only_the_execution_target() {
+        let generation = test_runtime_generation();
+        let window = Window::default();
+        let mut views = ExtractedViews::default();
+        views.push(test_extracted_view());
+        let packet =
+            build_render_frame_packet(generation, 9, Some(WindowId::PRIMARY), [&window], &views)
+                .unwrap()
+                .unwrap();
+        let target = RenderImagePacket {
+            image: Handle::new(AssetId::from_raw(23)),
+            extent: Extent2d {
+                width: 1280,
+                height: 720,
+            },
+        };
+
+        let mapped = __private::map_editor_game_view_packet(packet, target).unwrap();
+
+        assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
+        assert_eq!(mapped.view().target, RenderTarget::PrimaryWindow);
+        assert_eq!(mapped.view().viewport, test_extracted_view().viewport);
+
+        let packet =
+            build_render_frame_packet(generation, 10, Some(WindowId::PRIMARY), [&window], &views)
+                .unwrap()
+                .unwrap();
+        assert!(matches!(
+            __private::map_editor_game_view_packet(
+                packet,
+                RenderImagePacket {
+                    image: target.image,
+                    extent: Extent2d {
+                        width: 640,
+                        height: 360,
+                    },
+                },
+            ),
+            Err(RenderFramePacketError::EditorGameViewTargetExtentMismatch { .. })
+        ));
     }
 
     #[test]

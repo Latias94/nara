@@ -31,7 +31,7 @@ use nara::{
         advanced::{RuntimeProbe, open_editor_with_probe},
     },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
-    render::Camera2d,
+    render::{Camera2d, Extent2d},
     scene::{
         SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, SceneEntitySource,
         ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -881,6 +881,34 @@ resizable = true
     first
         .complete_game_view_candidate(EditorGameViewCompletion::without_ui(candidate_identity))
         .expect("the exact candidate completion returns its bridge authority");
+    let resized_extent = Extent2d::new(640, 360).unwrap();
+    assert!(first.resize_game_view(resized_extent).unwrap());
+    let resized_request = first.active_game_start_request().unwrap();
+    assert_eq!(resized_request.geometry_generation(), 2);
+    assert_eq!(
+        resized_request.logical_window().resolution.physical_width,
+        resized_extent.width
+    );
+    assert_eq!(
+        resized_request.logical_window().resolution.physical_height,
+        resized_extent.height
+    );
+    first.drive_editor_frame(Duration::ZERO);
+    let resized_candidate = first
+        .take_game_view_candidate()
+        .unwrap()
+        .expect("the resized logical Game window publishes one successor candidate");
+    assert_eq!(resized_candidate.identity().start(), resized_request);
+    let resized_identity = resized_candidate.identity();
+    first
+        .complete_game_view_candidate(EditorGameViewCompletion::without_ui(resized_identity))
+        .unwrap();
+
+    first.drive_editor_frame(Duration::ZERO);
+    first
+        .set_game_view_source_active(false, "the Scene viewport became active")
+        .expect("Scene handoff drains the buffered Game candidate exactly once");
+    assert!(first.take_game_view_candidate().unwrap().is_none());
     assert_eq!(
         editor_driver::request_play(&mut first, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted

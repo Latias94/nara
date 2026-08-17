@@ -85,6 +85,11 @@ impl WgpuEditorExecutionError {
     pub const fn is_deferred(&self) -> bool {
         matches!(self, Self::Backend(error) if error.is_deferred())
     }
+
+    #[must_use]
+    pub const fn is_content_rejected(&self) -> bool {
+        matches!(self, Self::Backend(error) if error.is_content_rejection())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,6 +257,36 @@ impl WgpuEditorUiSubmission {
             WgpuUiCompletion::Superseded { successor, message },
         )
     }
+
+    fn failed(self, error: &WgpuEditorExecutionError) -> Vec<UiCompletedBackendOutcome> {
+        if error.is_deferred() {
+            return self.deferred(error.to_string());
+        }
+        if error.is_content_rejected() {
+            return self.content_rejected(error.to_string());
+        }
+        let domain = match error {
+            WgpuEditorExecutionError::Backend(error) => {
+                crate::frame::classify_ui_backend_fault(error)
+            }
+            WgpuEditorExecutionError::WindowTarget(_)
+            | WgpuEditorExecutionError::StaleImageSubmission
+            | WgpuEditorExecutionError::ViewportTargetAlreadyActive
+            | WgpuEditorExecutionError::ViewportTargetUnavailable
+            | WgpuEditorExecutionError::StaleViewportReservation => {
+                UiPresentationBackendFaultDomain::Target
+            }
+            WgpuEditorExecutionError::ExpectedImageTarget
+            | WgpuEditorExecutionError::TargetGenerationExhausted
+            | WgpuEditorExecutionError::SourceHandoffGenerationExhausted
+            | WgpuEditorExecutionError::PresentationGenerationExhausted
+            | WgpuEditorExecutionError::InvalidTextureRegistrationGeneration
+            | WgpuEditorExecutionError::ToolkitPaint { .. } => {
+                UiPresentationBackendFaultDomain::Attempt
+            }
+        };
+        self.backend_fault(None, domain, error.to_string())
+    }
 }
 
 /// One submitted viewport image retaining the Runtime UI completion authority until composite.
@@ -303,6 +338,11 @@ impl WgpuEditorUiImageSubmission {
     ) -> Vec<UiCompletedBackendOutcome> {
         self.ui.superseded(successor, message)
     }
+
+    #[must_use]
+    pub fn failed(self, error: &WgpuEditorExecutionError) -> Vec<UiCompletedBackendOutcome> {
+        self.ui.failed(error)
+    }
 }
 
 /// Failed image submission retaining the exact Runtime UI authority for terminal completion.
@@ -324,6 +364,12 @@ impl WgpuEditorUiSubmitFailure {
     #[must_use]
     pub fn into_parts(self) -> (WgpuEditorExecutionError, WgpuEditorUiSubmission) {
         (self.error, self.ui)
+    }
+
+    #[must_use]
+    pub fn complete(self) -> (WgpuEditorExecutionError, Vec<UiCompletedBackendOutcome>) {
+        let outcomes = self.ui.failed(&self.error);
+        (self.error, outcomes)
     }
 }
 
@@ -585,6 +631,19 @@ impl WgpuEditorExecution {
         })
     }
 
+    #[cfg(feature = "ui-submitter")]
+    #[must_use]
+    pub fn reject_editor_ui_frame(
+        ui_frame: UiBackendPresentationFrame,
+        message: impl Into<String>,
+    ) -> Vec<UiCompletedBackendOutcome> {
+        let (_, submissions) = ui_frame.into_parts();
+        WgpuEditorUiSubmission {
+            state: WgpuUiSubmissionState::Prepared(submissions),
+        }
+        .content_rejected(message.into())
+    }
+
     #[must_use]
     pub const fn backend_instance_id(&self) -> u64 {
         self.backend.instance_id()
@@ -806,6 +865,10 @@ impl WgpuEditorExecution {
         } else {
             None
         };
+        #[cfg(feature = "ui-submitter")]
+        if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
+            ui.bind_backend(backend_generation)?;
+        }
         let draw = self.backend.prepare_submitter_draw(
             EDITOR_IMAGE_FORMAT,
             packet.view().target,
@@ -813,10 +876,6 @@ impl WgpuEditorExecution {
             &payload,
             packet.frame_index(),
         )?;
-        #[cfg(feature = "ui-submitter")]
-        if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
-            ui.bind_backend(backend_generation)?;
-        }
         let viewport_target = self
             .viewport_target
             .as_ref()
@@ -1262,12 +1321,11 @@ mod tests {
 
         let (outcomes, mut deferred) = editor_ui_submission(32);
         deferred.bind_backend(backend_generation).unwrap();
+        let upload_deferred = WgpuEditorExecutionError::Backend(WgpuRenderError::UploadDeferred {
+            message: "shared upload budget exhausted".to_owned(),
+        });
         assert!(matches!(
-            publish_editor_ui_outcomes(
-                outcomes,
-                deferred.deferred("window present deferred".to_owned())
-            )
-            .remove(0),
+            publish_editor_ui_outcomes(outcomes, deferred.failed(&upload_deferred)).remove(0),
             UiPresentationOutcome::Deferred { .. }
         ));
 

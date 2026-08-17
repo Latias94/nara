@@ -274,7 +274,7 @@ fn clamp_view_uv(mut view: Rect) -> Rect {
     view
 }
 
-fn fitted_image_rect(outer: Rect, extent: [u32; 2]) -> Rect {
+pub(crate) fn fitted_image_rect(outer: Rect, extent: [u32; 2]) -> Rect {
     let source = Vec2::new(extent[0] as f32, extent[1] as f32);
     if source.x <= 0.0 || source.y <= 0.0 {
         return outer;

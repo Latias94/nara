@@ -699,6 +699,18 @@ impl EditorProjectSession {
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
+    #[must_use]
+    pub fn active_game_start_request(&self) -> Option<EditorGameStartRequest> {
+        match self.runtime_owner {
+            EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } => Some(game.start),
+            _ => None,
+        }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
     pub fn prepare_game_start_activation(
         &mut self,
         expected: EditorGameStartRequest,
@@ -876,6 +888,94 @@ impl EditorProjectSession {
             }
             Err(completion) => Err(completion),
         }
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn set_game_view_source_active(
+        &mut self,
+        active: bool,
+        retirement_message: &'static str,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        if !matches!(
+            self.runtime_owner,
+            EditorRuntimeOwnerState::Active {
+                game: Some(ActiveEditorGameView {
+                    in_flight: None,
+                    ..
+                }),
+                ..
+            }
+        ) {
+            return Err(EditorGameViewBridgeFailure::CandidateBusy);
+        }
+        let runtime = self
+            .runtime_host
+            .running_runtime_mut()
+            .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+        game_view::set_capture_enabled(runtime, false)?;
+
+        if let Some(candidate) = self.take_game_view_candidate()? {
+            let completion = candidate.content_rejected(retirement_message);
+            self.complete_game_view_candidate(completion)
+                .map_err(|_| EditorGameViewBridgeFailure::CompletionAuthorityMismatch)?;
+        }
+
+        if active {
+            let runtime = self
+                .runtime_host
+                .running_runtime_mut()
+                .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+            game_view::set_capture_enabled(runtime, true)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn resize_game_view(
+        &mut self,
+        extent: Extent2d,
+    ) -> Result<bool, EditorGameViewBridgeFailure> {
+        let start = match self.runtime_owner {
+            EditorRuntimeOwnerState::Active {
+                game: Some(game), ..
+            } if game.in_flight.is_none() => game.start,
+            EditorRuntimeOwnerState::Active { game: Some(_), .. } => {
+                return Err(EditorGameViewBridgeFailure::CandidateBusy);
+            }
+            _ => return Err(EditorGameViewBridgeFailure::RuntimeUnavailable),
+        };
+        if !start.resizable() {
+            return Ok(false);
+        }
+        let logical = start.logical_window().resolution;
+        if logical.physical_width == extent.width && logical.physical_height == extent.height {
+            return Ok(false);
+        }
+
+        self.set_game_view_source_active(false, "the Game View geometry was superseded")?;
+        let resized = start.resized(extent)?;
+        {
+            let runtime = self
+                .runtime_host
+                .running_runtime_mut()
+                .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+            game_view::reconfigure(runtime, resized.capture_config())?;
+        }
+        let EditorRuntimeOwnerState::Active {
+            game: Some(game), ..
+        } = &mut self.runtime_owner
+        else {
+            unreachable!("a resized Game View retains its active Runtime owner")
+        };
+        game.start = resized;
+        let runtime = self
+            .runtime_host
+            .running_runtime_mut()
+            .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+        game_view::set_capture_enabled(runtime, true)?;
+        Ok(true)
     }
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -1418,9 +1518,29 @@ impl EditorProjectSession {
         if self.pending_control.is_some() {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
+        let mut game_capture_suspended = false;
         if retires_runtime {
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+            if matches!(
+                self.runtime_owner,
+                EditorRuntimeOwnerState::Active { game: Some(_), .. }
+            ) {
+                if self
+                    .set_game_view_source_active(false, "the Play Runtime is retiring")
+                    .is_err()
+                {
+                    return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+                }
+                game_capture_suspended = true;
+            }
+            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             if self.game_view_retirement_blocked() {
+                if game_capture_suspended {
+                    let _ = self.set_game_view_source_active(
+                        true,
+                        "the blocked Play retirement did not supersede Game View",
+                    );
+                }
                 return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
             }
             self.cancel_pending_runtime_edit();
@@ -1433,6 +1553,15 @@ impl EditorProjectSession {
                 EditorPlayRequestResult::Accepted
             }
             Err(fault) => {
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                if game_capture_suspended {
+                    let _ = self.set_game_view_source_active(
+                        true,
+                        "the rejected Play retirement did not supersede Game View",
+                    );
+                }
+                #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
+                let _ = game_capture_suspended;
                 let _ = self.diagnostics.extend(fault.diagnostics);
                 self.play_result = Some(EditorPlayOperationResult::Rejected {
                     operation,

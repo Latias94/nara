@@ -24,10 +24,36 @@ use nara_tooling::{
 };
 
 use crate::{
+    EguiCentralViewportInput, EguiEditorViewport, EguiEditorViewportIntent, EguiSceneEditorOutput,
     EguiSceneEditorPanel,
     editor::{test_control_rect, test_diagnostic_codes, test_inline_field_feedback},
     fields::parse_editable_value,
 };
+
+#[test]
+fn scene_tab_emits_one_typed_shell_intent() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    );
+    let running = frame_with_play_state(scene.clone(), EditorPlayState::Running);
+    let mut panel = EguiSceneEditorPanel::new();
+    let context = egui::Context::default();
+
+    let output = click_viewport_control(
+        &context,
+        &mut panel,
+        &running,
+        EguiEditorViewport::Game,
+        "Scene tab",
+    );
+    let (actions, _, intent) = output.into_parts();
+
+    assert!(actions.into_actions().is_empty());
+    assert_eq!(intent, Some(EguiEditorViewportIntent::SelectScene));
+}
 
 #[test]
 fn parses_only_the_scalar_values_supported_by_the_v1_inspector() {
@@ -170,6 +196,34 @@ fn composition_controls_emit_exact_revision_bound_actions() {
                 command: SceneCompositionCommand::AddComponent {
                     entity: SceneEntityId::new("player").unwrap(),
                     component: SceneCompositionComponentKind::Sprite,
+                },
+            })]
+        )
+    );
+}
+
+#[test]
+fn faulted_play_keeps_scene_authoring_available_after_handoff() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        true,
+    );
+    let frame = frame_with_play_state(scene.clone(), EditorPlayState::Faulted);
+
+    let batch = click_control(&mut EguiSceneEditorPanel::new(), &frame, "Add Root");
+
+    assert_eq!(
+        batch,
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+                document: scene.document,
+                base_revision: scene.revision,
+                command: SceneCompositionCommand::CreateEntity {
+                    kind: SceneCompositionEntityKind::ColoredSprite,
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
                 },
             })]
         )
@@ -495,6 +549,19 @@ fn default_frame(scene: Option<EditorSceneModel>) -> EditorFrameModel {
     )
 }
 
+fn frame_with_play_state(scene: EditorSceneModel, state: EditorPlayState) -> EditorFrameModel {
+    let revision = scene.revision;
+    frame(
+        Some(scene),
+        EditorProjectView::new(
+            EditorPlayView::new(state, Some(7), Some(revision), Some(revision), false, None),
+            EditorPersistenceView::default(),
+            EditorWorkspaceIntentView::default(),
+        ),
+        DiagnosticReport::default(),
+    )
+}
+
 fn frame(
     scene: Option<EditorSceneModel>,
     project: EditorProjectView,
@@ -594,6 +661,46 @@ fn click_control(
     render_editor_frame(&context, panel, frame, released)
 }
 
+fn click_viewport_control(
+    context: &egui::Context,
+    panel: &mut EguiSceneEditorPanel,
+    frame: &EditorFrameModel,
+    selected: EguiEditorViewport,
+    label: &str,
+) -> EguiSceneEditorOutput {
+    let _ =
+        render_editor_viewport_frame(context, panel, frame, egui::RawInput::default(), selected);
+    let _ =
+        render_editor_viewport_frame(context, panel, frame, egui::RawInput::default(), selected);
+    let position = test_control_rect(label)
+        .unwrap_or_else(|| panic!("control {label} was not rendered"))
+        .center();
+
+    let mut pressed = egui::RawInput::default();
+    pressed.events = vec![
+        egui::Event::PointerMoved(position),
+        egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::default(),
+        },
+    ];
+    let _ = render_editor_viewport_frame(context, panel, frame, pressed, selected);
+
+    let mut released = egui::RawInput::default();
+    released.events = vec![
+        egui::Event::PointerMoved(position),
+        egui::Event::PointerButton {
+            pos: position,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::default(),
+        },
+    ];
+    render_editor_viewport_frame(context, panel, frame, released, selected)
+}
+
 fn render_editor_frame(
     context: &egui::Context,
     panel: &mut EguiSceneEditorPanel,
@@ -617,4 +724,28 @@ fn render_editor_frame_at(
     });
     output.drop_without_applying_deltas();
     response.expect("the Editor frame should render the fixed panel")
+}
+
+fn render_editor_viewport_frame(
+    context: &egui::Context,
+    panel: &mut EguiSceneEditorPanel,
+    frame: &EditorFrameModel,
+    mut input: egui::RawInput,
+    selected: EguiEditorViewport,
+) -> EguiSceneEditorOutput {
+    input.screen_rect = Some(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(1280.0, 720.0),
+    ));
+    let mut response = None;
+    let output = context.run_ui(input, |ui| {
+        response = Some(panel.show_with_viewport(
+            ui,
+            frame,
+            EguiCentralViewportInput::unavailable(),
+            selected,
+        ));
+    });
+    output.drop_without_applying_deltas();
+    response.expect("the Editor frame should render the fixed viewport panel")
 }

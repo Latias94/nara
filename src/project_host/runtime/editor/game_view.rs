@@ -7,8 +7,8 @@ use nara_ecs::{Mut, Resource, World};
 use nara_project::{ProductCapability, ProductCapabilitySet};
 use nara_reflect::SchemaCompositionFingerprint;
 use nara_render::{
-    ExtractedViews, RenderFrame, RenderFramePacket, RenderFramePacketError, RenderFrameTarget,
-    RenderWindowPacket, build_render_frame_packet,
+    Extent2d, ExtractedViews, RenderFrame, RenderFramePacket, RenderFramePacketError,
+    RenderFrameTarget, RenderWindowPacket, build_render_frame_packet,
 };
 use nara_scene::SceneAuthoringRevision;
 #[cfg(feature = "presentation-2d")]
@@ -20,7 +20,7 @@ use nara_ui_render::__private::{
 };
 #[cfg(feature = "presentation-ui")]
 use nara_ui_render::UiPresentationIntegrationError;
-use nara_window::{PresentMode, PrimaryWindowId, Window};
+use nara_window::{PresentMode, PrimaryWindowId, Window, WindowEvent, push_window_event};
 use thiserror::Error;
 
 use crate::project_host::{ProjectContentRevision, ProjectSettingsLineage};
@@ -195,6 +195,28 @@ impl EditorGameStartRequest {
     pub const fn captures_runtime_ui(self) -> bool {
         self.capture.ui
     }
+
+    pub(super) fn resized(self, extent: Extent2d) -> Result<Self, EditorGameViewBridgeFailure> {
+        if !self.resizable() {
+            return Ok(self);
+        }
+        let geometry_generation = self
+            .geometry_generation
+            .checked_add(1)
+            .ok_or(EditorGameViewBridgeFailure::GeometryGenerationExhausted)?;
+        let mut capture = self.capture;
+        capture.logical_window.resolution.physical_width = extent.width;
+        capture.logical_window.resolution.physical_height = extent.height;
+        Ok(Self {
+            capture,
+            geometry_generation,
+            ..self
+        })
+    }
+
+    pub(super) const fn capture_config(self) -> EditorGameViewCaptureConfig {
+        self.capture
+    }
 }
 
 /// Move-only authorization for the coordinated native-target and Runtime start commit.
@@ -333,6 +355,28 @@ impl EditorGameViewCandidate {
             ui_frame: self.ui_frame,
         }
     }
+
+    #[must_use]
+    pub fn content_rejected(self, message: impl Into<String>) -> EditorGameViewCompletion {
+        let message = message.into();
+        #[cfg(not(feature = "presentation-ui"))]
+        let _ = &message;
+        EditorGameViewCompletion {
+            identity: self.identity,
+            #[cfg(feature = "presentation-ui")]
+            outcomes: self
+                .ui_frame
+                .map(|frame| {
+                    frame
+                        .into_parts()
+                        .1
+                        .into_iter()
+                        .map(|submission| submission.content_rejected(message.clone()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
 }
 
 #[doc(hidden)]
@@ -367,6 +411,24 @@ impl EditorGameViewCandidateParts {
     #[must_use]
     pub fn take_ui_frame(&mut self) -> Option<UiBackendPresentationFrame> {
         self.ui_frame.take()
+    }
+
+    #[cfg(all(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[must_use]
+    pub fn into_submission_parts(
+        self,
+    ) -> (
+        EditorGameViewCandidateIdentity,
+        RenderFramePacket,
+        Option<SpriteBatches>,
+        Option<UiBackendPresentationFrame>,
+    ) {
+        (
+            self.identity,
+            self.packet,
+            self.sprite_batches,
+            self.ui_frame,
+        )
     }
 }
 
@@ -410,6 +472,8 @@ pub enum EditorGameViewBridgeFailure {
     CandidateBusy,
     #[error("the Game View candidate sequence was exhausted")]
     CandidateSequenceExhausted,
+    #[error("the Game View geometry generation was exhausted")]
+    GeometryGenerationExhausted,
     #[error("the Runtime candidate does not match the configured logical Game window")]
     CandidateSourceMismatch,
     #[error("the Game View completion does not match the in-flight candidate")]
@@ -449,6 +513,7 @@ enum EditorGameViewBridgeSlot {
 #[derive(Debug, Resource)]
 struct EditorGameViewBridge {
     config: EditorGameViewCaptureConfig,
+    capture_enabled: bool,
     next_sequence: u64,
     slot: EditorGameViewBridgeSlot,
     failure: Option<EditorGameViewBridgeFailure>,
@@ -458,6 +523,7 @@ impl EditorGameViewBridge {
     const fn new(config: EditorGameViewCaptureConfig) -> Self {
         Self {
             config,
+            capture_enabled: true,
             next_sequence: 1,
             slot: EditorGameViewBridgeSlot::Empty,
             failure: None,
@@ -465,6 +531,10 @@ impl EditorGameViewBridge {
     }
 
     fn can_capture(&self) -> bool {
+        self.capture_enabled && matches!(self.slot, EditorGameViewBridgeSlot::Empty)
+    }
+
+    fn is_idle(&self) -> bool {
         matches!(self.slot, EditorGameViewBridgeSlot::Empty)
     }
 
@@ -530,11 +600,28 @@ impl EditorGameViewBridge {
         ));
         self.slot = EditorGameViewBridgeSlot::Empty;
     }
+
+    fn set_capture_enabled(&mut self, enabled: bool) {
+        self.capture_enabled = enabled;
+    }
+
+    fn reconfigure(
+        &mut self,
+        config: EditorGameViewCaptureConfig,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        if !self.is_idle() {
+            return Err(EditorGameViewBridgeFailure::CandidateBusy);
+        }
+        self.config = config;
+        Ok(())
+    }
 }
 
 enum EditorGameViewBridgeInput {
     TakeCandidate,
     RetirementBlocked,
+    SetCaptureEnabled(bool),
+    Reconfigure(EditorGameViewCaptureConfig),
     Complete(EditorGameViewCompletion),
 }
 
@@ -543,6 +630,7 @@ enum EditorGameViewBridgeOutput {
     Pending,
     Busy,
     RetirementBlocked(bool),
+    Updated(Result<(), EditorGameViewBridgeFailure>),
     Completed(Result<(), EditorGameViewCompletion>),
     Failed(EditorGameViewBridgeFailure),
 }
@@ -554,9 +642,22 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
     fn accepts_driver_input(state: RuntimeState, input: &Self::Input) -> bool {
         match input {
             EditorGameViewBridgeInput::TakeCandidate => {
-                matches!(state, RuntimeState::Running | RuntimeState::Paused)
+                matches!(
+                    state,
+                    RuntimeState::Running
+                        | RuntimeState::Paused
+                        | RuntimeState::Faulted
+                        | RuntimeState::Stopping
+                        | RuntimeState::CloseIncomplete
+                )
             }
             EditorGameViewBridgeInput::RetirementBlocked => !matches!(state, RuntimeState::Stopped),
+            EditorGameViewBridgeInput::SetCaptureEnabled(_) => {
+                !matches!(state, RuntimeState::Stopped)
+            }
+            EditorGameViewBridgeInput::Reconfigure(_) => {
+                matches!(state, RuntimeState::Running | RuntimeState::Paused)
+            }
             EditorGameViewBridgeInput::Complete(_) => matches!(
                 state,
                 RuntimeState::Running
@@ -572,7 +673,14 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
         match input {
             EditorGameViewBridgeInput::TakeCandidate => self.take_candidate(),
             EditorGameViewBridgeInput::RetirementBlocked => {
-                EditorGameViewBridgeOutput::RetirementBlocked(!self.can_capture())
+                EditorGameViewBridgeOutput::RetirementBlocked(!self.is_idle())
+            }
+            EditorGameViewBridgeInput::SetCaptureEnabled(enabled) => {
+                self.set_capture_enabled(enabled);
+                EditorGameViewBridgeOutput::Updated(Ok(()))
+            }
+            EditorGameViewBridgeInput::Reconfigure(config) => {
+                EditorGameViewBridgeOutput::Updated(self.reconfigure(config))
             }
             EditorGameViewBridgeInput::Complete(completion) => {
                 EditorGameViewBridgeOutput::Completed(Err(completion))
@@ -627,6 +735,19 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
 
                         bridge.finish_completion(runtime_identity);
                         EditorGameViewBridgeOutput::Completed(Ok(()))
+                    }
+                    EditorGameViewBridgeInput::Reconfigure(config) => {
+                        let result = bridge.reconfigure(config);
+                        if result.is_ok() {
+                            push_window_event(
+                                world,
+                                WindowEvent::Resized {
+                                    window_id: config.logical_window.id,
+                                    resolution: config.logical_window.resolution,
+                                },
+                            );
+                        }
+                        EditorGameViewBridgeOutput::Updated(result)
                     }
                     input => bridge.apply_driver_input(input),
                 }
@@ -755,8 +876,59 @@ pub(super) fn take_candidate(
         EditorGameViewBridgeOutput::Busy => Err(EditorGameViewBridgeFailure::CandidateBusy),
         EditorGameViewBridgeOutput::Failed(failure) => Err(failure),
         EditorGameViewBridgeOutput::Completed(_)
+        | EditorGameViewBridgeOutput::Updated(_)
         | EditorGameViewBridgeOutput::RetirementBlocked(_) => {
             unreachable!("taking a Game View candidate cannot complete one")
+        }
+    }
+}
+
+pub(super) fn set_capture_enabled(
+    runtime: &mut nara_app::RuntimeInstance,
+    enabled: bool,
+) -> Result<(), EditorGameViewBridgeFailure> {
+    let output = runtime
+        .with_driver_scope(|scope| {
+            scope.__apply_port::<EditorGameViewBridge>(
+                EditorGameViewBridgeInput::SetCaptureEnabled(enabled),
+            )
+        })
+        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?
+        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+    match output {
+        EditorGameViewBridgeOutput::Updated(result) => result,
+        EditorGameViewBridgeOutput::Candidate(_)
+        | EditorGameViewBridgeOutput::Pending
+        | EditorGameViewBridgeOutput::Busy
+        | EditorGameViewBridgeOutput::RetirementBlocked(_)
+        | EditorGameViewBridgeOutput::Completed(_)
+        | EditorGameViewBridgeOutput::Failed(_) => {
+            unreachable!("the typed capture-state port returns an update outcome")
+        }
+    }
+}
+
+pub(super) fn reconfigure(
+    runtime: &mut nara_app::RuntimeInstance,
+    config: EditorGameViewCaptureConfig,
+) -> Result<(), EditorGameViewBridgeFailure> {
+    let output = runtime
+        .with_driver_scope(|scope| {
+            scope.__apply_port::<EditorGameViewBridge>(EditorGameViewBridgeInput::Reconfigure(
+                config,
+            ))
+        })
+        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?
+        .map_err(|_| EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+    match output {
+        EditorGameViewBridgeOutput::Updated(result) => result,
+        EditorGameViewBridgeOutput::Candidate(_)
+        | EditorGameViewBridgeOutput::Pending
+        | EditorGameViewBridgeOutput::Busy
+        | EditorGameViewBridgeOutput::RetirementBlocked(_)
+        | EditorGameViewBridgeOutput::Completed(_)
+        | EditorGameViewBridgeOutput::Failed(_) => {
+            unreachable!("the typed Game View reconfiguration port returns an update outcome")
         }
     }
 }
@@ -790,6 +962,12 @@ pub(super) fn complete_candidate(
             Err((_, EditorGameViewBridgeInput::RetirementBlocked)) => {
                 unreachable!("the owned completion path cannot issue a status request")
             }
+            Err((_, EditorGameViewBridgeInput::SetCaptureEnabled(_))) => {
+                unreachable!("the owned completion path cannot change capture state")
+            }
+            Err((_, EditorGameViewBridgeInput::Reconfigure(_))) => {
+                unreachable!("the owned completion path cannot reconfigure Game View")
+            }
         }
     });
     match output {
@@ -801,6 +979,7 @@ pub(super) fn complete_candidate(
             | EditorGameViewBridgeOutput::Pending
             | EditorGameViewBridgeOutput::Busy
             | EditorGameViewBridgeOutput::RetirementBlocked(_)
+            | EditorGameViewBridgeOutput::Updated(_)
             | EditorGameViewBridgeOutput::Failed(_),
         )) => unreachable!("the typed completion port returns a completion outcome"),
     }

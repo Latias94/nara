@@ -6,11 +6,16 @@
 
 mod editor;
 mod fields;
+mod game_view;
 mod inspector;
 mod scene_view;
 
 #[cfg(test)]
 mod tests;
 
-pub use editor::{EguiSceneEditorOutput, EguiSceneEditorPanel};
+pub use editor::{
+    EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorViewport,
+    EguiEditorViewportIntent, EguiSceneEditorOutput, EguiSceneEditorPanel,
+};
+pub use game_view::{EguiGameViewInput, EguiGameViewOutput};
 pub use scene_view::{EguiSceneViewInput, EguiSceneViewOutput};

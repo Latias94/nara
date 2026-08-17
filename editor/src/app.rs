@@ -19,7 +19,9 @@ use nara::{
         EditorAction, EditorActionBatch, EditorFrameModel, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
     },
-    tooling_egui::{EguiSceneEditorOutput, EguiSceneEditorPanel, EguiSceneViewInput},
+    tooling_egui::{
+        EguiCentralViewportInput, EguiEditorViewport, EguiSceneEditorOutput, EguiSceneEditorPanel,
+    },
 };
 use thiserror::Error;
 
@@ -149,21 +151,27 @@ impl EditorApplication {
 
     #[must_use]
     pub fn show(&mut self, root: &mut egui::Ui) -> EditorActionBatch {
-        self.show_with_scene_view(root, EguiSceneViewInput::unavailable())
-            .into_parts()
-            .0
+        self.show_with_viewport(
+            root,
+            EguiCentralViewportInput::unavailable(),
+            EguiEditorViewport::Scene,
+        )
+        .into_parts()
+        .0
     }
 
     #[must_use]
-    pub fn show_with_scene_view(
+    pub fn show_with_viewport(
         &mut self,
         root: &mut egui::Ui,
-        scene_view: EguiSceneViewInput,
+        viewport: EguiCentralViewportInput,
+        selected_viewport: EguiEditorViewport,
     ) -> EguiSceneEditorOutput {
         let frame = self.session.current_frame();
         egui::Frame::central_panel(root.style())
             .show(root, |ui| {
-                self.panel.show_with_scene_view(ui, &frame, scene_view)
+                self.panel
+                    .show_with_viewport(ui, &frame, viewport, selected_viewport)
             })
             .inner
     }
@@ -200,6 +208,12 @@ impl EditorApplication {
     }
 
     #[doc(hidden)]
+    #[must_use]
+    pub fn active_game_start_request(&self) -> Option<EditorGameStartRequest> {
+        self.session.active_game_start_request()
+    }
+
+    #[doc(hidden)]
     pub fn prepare_game_start_activation(
         &mut self,
         expected: EditorGameStartRequest,
@@ -233,6 +247,24 @@ impl EditorApplication {
         completion: EditorGameViewCompletion,
     ) -> Result<(), EditorGameViewCompletion> {
         self.session.complete_game_view_candidate(completion)
+    }
+
+    #[doc(hidden)]
+    pub fn set_game_view_source_active(
+        &mut self,
+        active: bool,
+        retirement_message: &'static str,
+    ) -> Result<(), EditorGameViewBridgeFailure> {
+        self.session
+            .set_game_view_source_active(active, retirement_message)
+    }
+
+    #[doc(hidden)]
+    pub fn resize_game_view(
+        &mut self,
+        extent: Extent2d,
+    ) -> Result<bool, EditorGameViewBridgeFailure> {
+        self.session.resize_game_view(extent)
     }
 
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {
