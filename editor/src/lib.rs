@@ -8,5 +8,6 @@ pub use app::{
 };
 pub use platform::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
-    EditorRunError, run, run_game_view_canary_with_intent, run_with_intent,
+    EditorRunError, EditorUiAuthoringCanaryEvidence, EditorUiAuthoringCanaryFrame,
+    EditorUiAuthoringCanaryRequest, run, run_game_view_canary_with_intent, run_with_intent,
 };

@@ -2719,6 +2719,7 @@ dependencies = [
  "nara_reflect",
  "nara_scene",
  "nara_tooling",
+ "nara_ui",
 ]
 
 [[package]]

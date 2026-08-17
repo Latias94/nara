@@ -18,12 +18,12 @@ use nara::{
         WgpuEditorUiImageSubmission, WgpuEditorViewportIdentity,
         WgpuEditorViewportTargetActivation, WgpuSubmittedImageReceipt,
     },
-    scene::SceneAuthoringRevision,
+    scene::{SceneAuthoringRevision, SceneEntityId},
     sprite_render::SpriteBatches,
     tooling::{
         EditorAction, EditorActionBatch, EditorDocumentId, EditorFrameModel, EditorGestureStamp,
     },
-    tooling_egui::{EguiGameViewInput, EguiSceneViewInput},
+    tooling_egui::{EguiGameViewInput, EguiSceneViewInput, EguiUiCanvasInput},
 };
 
 use super::{EditorApplication, EditorEguiRenderer, EditorRunError, platform_gpu_error};
@@ -403,8 +403,67 @@ impl EditorUiCanvasPickStamp {
         self.identity.document
     }
 
+    pub(super) const fn revision(self) -> SceneAuthoringRevision {
+        self.identity.revision
+    }
+
+    pub(super) const fn gesture(self) -> Option<EditorGestureStamp> {
+        self.identity.gesture
+    }
+
+    pub(super) const fn receipt(self) -> WgpuEditorCompositeReceipt {
+        self.receipt
+    }
+
     fn matches_current(self, current: Option<EditorUiCanvasIdentity>) -> bool {
         current == Some(self.identity)
+    }
+}
+
+pub(super) struct EditorUiCanvasPresentedObservation<'a> {
+    stamp: EditorUiCanvasPickStamp,
+    canvas: &'a nara::ui::__private::UiAuthoringCanvasReady,
+}
+
+impl EditorUiCanvasPresentedObservation<'_> {
+    pub(super) const fn stamp(&self) -> EditorUiCanvasPickStamp {
+        self.stamp
+    }
+
+    pub(super) fn fact_count(&self) -> usize {
+        self.canvas.facts().len()
+    }
+
+    pub(super) fn entity_origin(&self, entity: &SceneEntityId) -> Option<[f32; 2]> {
+        let fact = self
+            .canvas
+            .facts()
+            .iter()
+            .find(|fact| fact.entity() == entity && fact.visible())?;
+        let origin = fact.rect().origin();
+        Some([origin.x(), origin.y()])
+    }
+
+    pub(super) fn entity_center_uv(&self, entity: &SceneEntityId) -> Option<[f32; 2]> {
+        let fact = self
+            .canvas
+            .facts()
+            .iter()
+            .find(|fact| fact.entity() == entity && fact.visible())?;
+        let rect = fact.rect();
+        let center = [
+            (rect.origin().x() + rect.max().x()) * 0.5,
+            (rect.origin().y() + rect.max().y()) * 0.5,
+        ];
+        let transform = self.canvas.content_transform();
+        let physical = transform.physical_surface_size();
+        let content_origin = transform.physical_content_origin();
+        let scale = transform.content_scale_factor();
+        let uv = [
+            (content_origin.x() + center[0] * scale) / physical.width(),
+            (content_origin.y() + center[1] * scale) / physical.height(),
+        ];
+        is_normalized_viewport_uv(uv).then_some(uv)
     }
 }
 
@@ -477,31 +536,31 @@ impl EditorUiCanvasPresenter {
         slot: &EditorViewportSlot,
         prepared: Option<&PreparedEditorUiCanvas>,
         current: Option<EditorUiCanvasIdentity>,
-    ) -> EguiSceneViewInput {
+    ) -> EguiUiCanvasInput {
         if let Some(prepared) = prepared {
             let extent = prepared.submission.target().extent();
-            return EguiSceneViewInput::previewing(
+            return EguiUiCanvasInput::previewing(
                 prepared.texture_id,
                 [extent.width, extent.height],
             );
         }
         let Some(presented) = self.presented.as_ref() else {
-            return EguiSceneViewInput::unavailable();
+            return EguiUiCanvasInput::unavailable();
         };
         let Some(binding) = slot.ui_prefab_binding(
             presented.stamp.identity.document,
             presented.stamp.identity.revision,
         ) else {
-            return EguiSceneViewInput::unavailable();
+            return EguiUiCanvasInput::unavailable();
         };
         if !binding.matches_presented(presented.stamp.receipt) {
-            return EguiSceneViewInput::unavailable();
+            return EguiUiCanvasInput::unavailable();
         }
         let extent = presented.stamp.receipt.image().target().extent();
         if presented.stamp.matches_current(current) {
-            EguiSceneViewInput::presented(binding.texture_id, [extent.width, extent.height])
+            EguiUiCanvasInput::presented(binding.texture_id, [extent.width, extent.height])
         } else {
-            EguiSceneViewInput::previewing(binding.texture_id, [extent.width, extent.height])
+            EguiUiCanvasInput::previewing(binding.texture_id, [extent.width, extent.height])
         }
     }
 
@@ -521,6 +580,19 @@ impl EditorUiCanvasPresenter {
         binding
             .matches_presented(presented.stamp.receipt)
             .then_some(presented.stamp)
+    }
+
+    pub(super) fn presented_observation(
+        &self,
+        slot: &EditorViewportSlot,
+        current: Option<EditorUiCanvasIdentity>,
+    ) -> Option<EditorUiCanvasPresentedObservation<'_>> {
+        let stamp = self.pick_stamp(slot, current)?;
+        let presented = self.presented.as_ref()?;
+        (presented.stamp == stamp).then_some(EditorUiCanvasPresentedObservation {
+            stamp,
+            canvas: &presented.canvas,
+        })
     }
 
     pub(super) fn resolve_pick(

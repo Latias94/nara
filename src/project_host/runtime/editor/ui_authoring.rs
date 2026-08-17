@@ -7,8 +7,9 @@ use nara_tooling::{
     EditorGestureCancelReason, EditorGestureStamp, EditorGestureView, EditorSelectionSet,
 };
 use nara_ui::__private::{
-    UiAuthoringCommitPolicy, UiAuthoringEditError, UiAuthoringFieldKey, UiAuthoringFieldValue,
-    UiAuthoringProjection, UiAuthoringProjectionError, project_prefab_authoring,
+    UiAuthoringCommitPolicy, UiAuthoringDirectEdit, UiAuthoringEditError, UiAuthoringFieldKey,
+    UiAuthoringFieldValue, UiAuthoringProjection, UiAuthoringProjectionError,
+    project_prefab_authoring,
 };
 use thiserror::Error;
 
@@ -101,18 +102,60 @@ impl EditorUiAuthoringFrame {
         projection
             .validate_field_patch(key, descriptor.commit_policy(), &patch)
             .map_err(EditorUiAuthoringEditError::InvalidValue)?;
-        if patch.operations.len() != descriptor.members().len() {
-            return Err(EditorUiAuthoringEditError::DescriptorMismatch);
-        }
+        self.atomic_edit_from_patch(key, &patch)
+    }
+
+    /// Binds one closed two-dimensional manipulation to this exact document revision.
+    ///
+    /// Canonical position and size member fields remain owned by the UI authoring projection.
+    pub fn lower_direct_edit(
+        &self,
+        edit: &UiAuthoringDirectEdit,
+    ) -> Result<EditorAtomicFieldEdit, EditorUiAuthoringEditError> {
+        let projection = self
+            .projection()
+            .map_err(EditorUiAuthoringEditError::ProjectionUnavailable)?;
+        let (key, patch) = projection
+            .lower_direct_edit(edit)
+            .map_err(EditorUiAuthoringEditError::InvalidValue)?;
+        projection
+            .validate_direct_patch(&key, &patch)
+            .map_err(EditorUiAuthoringEditError::InvalidValue)?;
+        self.atomic_edit_from_patch(&key, &patch)
+    }
+
+    fn atomic_edit_from_patch(
+        &self,
+        key: &UiAuthoringFieldKey,
+        patch: &nara_scene::ScenePatchDocument,
+    ) -> Result<EditorAtomicFieldEdit, EditorUiAuthoringEditError> {
+        let projection = self
+            .projection()
+            .map_err(EditorUiAuthoringEditError::ProjectionUnavailable)?;
+        let descriptor = projection
+            .field(key)
+            .ok_or(EditorUiAuthoringEditError::FieldNotInFrame)?;
         let writes = patch
             .operations
             .iter()
-            .zip(descriptor.members())
-            .map(|(operation, member)| {
-                let nara_scene::ScenePatchOperation::SetField { value, .. } = operation else {
+            .map(|operation| {
+                let nara_scene::ScenePatchOperation::SetField {
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    value,
+                } = operation
+                else {
                     return Err(EditorUiAuthoringEditError::DescriptorMismatch);
                 };
-                EditorFieldWrite::new(member.field().clone(), member.value_kind(), value.clone())
+                if entity != key.entity()
+                    || component != key.component()
+                    || *component_version != descriptor.component_version()
+                {
+                    return Err(EditorUiAuthoringEditError::DescriptorMismatch);
+                }
+                EditorFieldWrite::new(field.clone(), value.kind(), value.clone())
                     .map_err(EditorUiAuthoringEditError::AtomicEdit)
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -142,11 +185,22 @@ impl EditorUiAuthoringFrame {
             target.field().clone(),
         );
         self.projection().ok().is_some_and(|projection| {
-            projection.field(&key).is_some_and(|descriptor| {
+            let version_matches = projection.field(&key).is_some_and(|descriptor| {
                 descriptor.component_version() == target.component_version()
-            }) && projection
-                .validate_field_patch(&key, commit_policy, &edit.to_patch())
-                .is_ok()
+            });
+            if !version_matches {
+                return false;
+            }
+            let patch = edit.to_patch();
+            match commit_policy {
+                UiAuthoringCommitPolicy::Discrete => projection
+                    .validate_field_patch(&key, commit_policy, &patch)
+                    .is_ok(),
+                UiAuthoringCommitPolicy::Continuous => projection
+                    .validate_field_patch(&key, commit_policy, &patch)
+                    .or_else(|_| projection.validate_direct_patch(&key, &patch))
+                    .is_ok(),
+            }
         })
     }
 }

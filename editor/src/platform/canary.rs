@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use nara::{
     input::KeyCode,
-    project_host::EditorGameStartRequest,
+    project_host::{EditorGameStartRequest, EditorUiAuthoringFrame},
     render::Extent2d,
     tooling::{
         EditorAction, EditorFrameModel, EditorPlayAction, EditorPlayOperation,
@@ -12,17 +12,26 @@ use nara::{
 use winit::window::Window;
 
 use super::{
-    EditorRunError, game_input::EditorGameInputRouter, viewport::EditorGamePresentedObservation,
+    EditorRunError,
+    game_input::EditorGameInputRouter,
+    ui_canary::{
+        EditorUiAuthoringCanaryEvidence, EditorUiAuthoringCanaryHost,
+        EditorUiAuthoringCanaryRequest,
+    },
+    viewport::{
+        EditorGamePresentedObservation, EditorUiCanvasPresentedObservation, EditorUiCanvasPresenter,
+    },
 };
 
-const CANARY_DEADLINE: Duration = Duration::from_secs(20);
+const CANARY_DEADLINE: Duration = Duration::from_secs(35);
 
 /// Product-provided facts for one bounded first-party Game View native canary.
 #[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct EditorGameViewCanaryRequest {
     tracked_sprite_sort_key: i32,
     input_key: KeyCode,
+    ui_authoring: Option<EditorUiAuthoringCanaryRequest>,
 }
 
 impl EditorGameViewCanaryRequest {
@@ -31,7 +40,14 @@ impl EditorGameViewCanaryRequest {
         Self {
             tracked_sprite_sort_key,
             input_key,
+            ui_authoring: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_ui_authoring(mut self, request: EditorUiAuthoringCanaryRequest) -> Self {
+        self.ui_authoring = Some(request);
+        self
     }
 }
 
@@ -114,6 +130,7 @@ impl EditorGameViewCanaryFrame {
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditorGameViewCanaryEvidence {
+    ui_authoring: Option<EditorUiAuthoringCanaryEvidence>,
     initial: EditorGameViewCanaryFrame,
     input_response: EditorGameViewCanaryFrame,
     paused: EditorGameViewCanaryFrame,
@@ -124,6 +141,11 @@ pub struct EditorGameViewCanaryEvidence {
 }
 
 impl EditorGameViewCanaryEvidence {
+    #[must_use]
+    pub const fn ui_authoring(&self) -> Option<&EditorUiAuthoringCanaryEvidence> {
+        self.ui_authoring.as_ref()
+    }
+
     #[must_use]
     pub const fn initial(&self) -> EditorGameViewCanaryFrame {
         self.initial
@@ -175,6 +197,7 @@ enum EditorGameViewCanaryStage {
 
 pub(super) struct EditorGameViewCanaryHost {
     request: EditorGameViewCanaryRequest,
+    ui_authoring: Option<EditorUiAuthoringCanaryHost>,
     stage: EditorGameViewCanaryStage,
     deadline: Instant,
     initial: Option<EditorGameViewCanaryFrame>,
@@ -190,14 +213,19 @@ pub(super) struct EditorGameViewCanaryHost {
 }
 
 pub(super) struct EditorGameViewCanaryAdvance {
-    pub(super) action: Option<EditorAction>,
+    pub(super) actions: Vec<EditorAction>,
     pub(super) exit: bool,
 }
 
 impl EditorGameViewCanaryHost {
     pub(super) fn new(request: EditorGameViewCanaryRequest) -> Self {
+        let ui_authoring = request
+            .ui_authoring
+            .clone()
+            .map(EditorUiAuthoringCanaryHost::new);
         Self {
             request,
+            ui_authoring,
             stage: EditorGameViewCanaryStage::Start,
             deadline: Instant::now() + CANARY_DEADLINE,
             initial: None,
@@ -218,6 +246,9 @@ impl EditorGameViewCanaryHost {
         frame: &EditorFrameModel,
         observation: Option<&EditorGamePresentedObservation<'_>>,
         active_start: Option<EditorGameStartRequest>,
+        ui_authoring_frame: Option<&EditorUiAuthoringFrame>,
+        ui_observation: Option<&EditorUiCanvasPresentedObservation<'_>>,
+        ui_presenter: &EditorUiCanvasPresenter,
         input: &mut EditorGameInputRouter,
         window: &Window,
     ) -> Result<EditorGameViewCanaryAdvance, EditorRunError> {
@@ -225,7 +256,20 @@ impl EditorGameViewCanaryHost {
             return Err(self.timeout_error(observation, active_start));
         }
 
-        let mut action = None;
+        if let Some(ui_authoring) = self.ui_authoring.as_mut()
+            && !ui_authoring.is_complete()
+        {
+            let advance =
+                ui_authoring.advance(frame, ui_authoring_frame, ui_observation, ui_presenter)?;
+            if !advance.complete || !advance.actions.is_empty() {
+                return Ok(EditorGameViewCanaryAdvance {
+                    actions: advance.actions,
+                    exit: false,
+                });
+            }
+        }
+
+        let mut actions = Vec::new();
         let mut exit = false;
         match self.stage {
             EditorGameViewCanaryStage::Start => {
@@ -234,7 +278,7 @@ impl EditorGameViewCanaryHost {
                         "the Game View canary requires one active startup Scene".to_owned(),
                     )
                 })?;
-                action = Some(EditorAction::Play(EditorPlayAction::Play {
+                actions.push(EditorAction::Play(EditorPlayAction::Play {
                     document: scene.document,
                     base_revision: scene.revision,
                 }));
@@ -247,7 +291,7 @@ impl EditorGameViewCanaryHost {
                     self.require_combined_product(observation)?;
                     if observation.runtime_ui_blocks_unhandled_input() {
                         return Ok(EditorGameViewCanaryAdvance {
-                            action: None,
+                            actions,
                             exit: false,
                         });
                     }
@@ -292,7 +336,7 @@ impl EditorGameViewCanaryHost {
                         self.input_response =
                             Some(EditorGameViewCanaryFrame::from_observation(observation));
                         self.input_delta_x = Some(delta_x);
-                        action = Some(EditorAction::Play(EditorPlayAction::Pause));
+                        actions.push(EditorAction::Play(EditorPlayAction::Pause));
                         self.stage = EditorGameViewCanaryStage::AwaitingPause;
                     }
                 }
@@ -383,13 +427,13 @@ impl EditorGameViewCanaryHost {
                     let center = self.require_tracked_center(observation)?;
                     self.resized = Some(EditorGameViewCanaryFrame::from_observation(observation));
                     self.step_baseline_center_x = Some(center.x);
-                    action = Some(EditorAction::Play(EditorPlayAction::StepFixedTick));
+                    actions.push(EditorAction::Play(EditorPlayAction::StepFixedTick));
                     self.stage = EditorGameViewCanaryStage::AwaitingStep;
                 }
             }
             EditorGameViewCanaryStage::AwaitingStopRequest => {
                 if frame.play().state() == EditorPlayState::Paused {
-                    action = Some(EditorAction::Play(EditorPlayAction::Stop));
+                    actions.push(EditorAction::Play(EditorPlayAction::Stop));
                     self.stage = EditorGameViewCanaryStage::AwaitingStop;
                 }
             }
@@ -401,7 +445,7 @@ impl EditorGameViewCanaryHost {
             }
             EditorGameViewCanaryStage::Complete => exit = true,
         }
-        Ok(EditorGameViewCanaryAdvance { action, exit })
+        Ok(EditorGameViewCanaryAdvance { actions, exit })
     }
 
     pub(super) const fn viewport_extent_override(&self) -> Option<Extent2d> {
@@ -428,8 +472,13 @@ impl EditorGameViewCanaryHost {
                 observation.runtime_frame_index(),
             )
         });
+        let ui_stage = self
+            .ui_authoring
+            .as_ref()
+            .filter(|ui| !ui.is_complete())
+            .map(|ui| format!("{:?}", ui.stage()));
         EditorRunError::Platform(format!(
-            "the bounded Game View canary timed out in {:?}; active geometry={active_geometry:?}, last composite={observed:?}",
+            "the bounded Editor canary timed out in {:?}; UI stage={ui_stage:?}, active geometry={active_geometry:?}, last composite={observed:?}",
             self.stage,
         ))
     }
@@ -441,7 +490,12 @@ impl EditorGameViewCanaryHost {
                 self.stage
             )));
         }
+        let ui_authoring = self
+            .ui_authoring
+            .map(EditorUiAuthoringCanaryHost::finish)
+            .transpose()?;
         Ok(EditorGameViewCanaryEvidence {
+            ui_authoring,
             initial: self
                 .initial
                 .expect("a completed canary retains initial facts"),

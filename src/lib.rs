@@ -414,7 +414,7 @@ pub mod tooling_prelude {
         SceneInspectorState, WorldIdentitySnapshot,
     };
     #[cfg(feature = "tooling-egui")]
-    pub use nara_tooling_egui::EguiSceneEditorPanel;
+    pub use nara_tooling_egui::EguiEditorPanel;
 }
 
 #[cfg(feature = "runtime-core")]

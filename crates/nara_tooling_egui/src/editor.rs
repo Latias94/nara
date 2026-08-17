@@ -3,22 +3,27 @@ use egui::{
 };
 use nara_diagnostic::{DiagnosticReport, DiagnosticSeverity};
 use nara_tooling::{
-    EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation, EditorFrameModel,
-    EditorPersistenceAction, EditorPersistenceOperation, EditorPersistenceRequestKind,
-    EditorPersistenceResult, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
-    EditorPlayState, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-    EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
+    EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind,
+    EditorDocumentMutation, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
+    EditorPersistenceOperation, EditorPersistenceRequestKind, EditorPersistenceResult,
+    EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult, EditorPlayState,
+    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+    EditorWorkspaceIntentResult,
 };
 
 use crate::{
     game_view::{EguiGameViewInput, EguiGameViewOutput, EguiGameViewPanel},
     inspector::EguiSceneInspectorPanel,
     scene_view::{EguiSceneViewInput, EguiSceneViewOutput, EguiSceneViewPanel},
+    ui_authoring::{
+        EguiUiAuthoringInput, EguiUiAuthoringPanel, EguiUiCanvasInput, EguiUiCanvasOutput,
+        EguiUiCanvasPanel,
+    },
 };
 
 const MIN_EDITOR_WIDTH: f32 = 720.0;
 const MIN_EDITOR_HEIGHT: f32 = 520.0;
-// Keep the fixed columns usable on a high-DPI laptop window. The Scene View receives the
+// Keep the fixed columns usable on a high-DPI laptop window. The Authoring view receives the
 // remaining width, while the tree and inspector retain enough room for their bounded controls.
 const TREE_PANEL_WIDTH: f32 = 180.0;
 const SCENE_PANEL_WIDTH: f32 = 240.0;
@@ -43,9 +48,11 @@ thread_local! {
 /// The state is limited to transient field buffers and toolkit interaction state. All durable
 /// facts come from the supplied frame and all mutations leave as one ordered action batch.
 #[derive(Debug, Default)]
-pub struct EguiSceneEditorPanel {
+pub struct EguiEditorPanel {
     inspector: EguiSceneInspectorPanel,
     scene_view: EguiSceneViewPanel,
+    ui_authoring: EguiUiAuthoringPanel,
+    ui_canvas: EguiUiCanvasPanel,
     game_view: EguiGameViewPanel,
 }
 
@@ -53,28 +60,39 @@ pub struct EguiSceneEditorPanel {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum EguiEditorViewport {
     #[default]
-    Scene,
+    Authoring,
     Game,
 }
 
 /// One transient central-viewport tab request emitted by the egui Adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EguiEditorViewportIntent {
-    SelectScene,
+    SelectAuthoring,
     SelectGame,
 }
 
-/// Scene and Game texture facts supplied for one central viewport redraw.
+/// Authoring and Game texture facts supplied for one central viewport redraw.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EguiCentralViewportInput {
     scene: EguiSceneViewInput,
+    ui_canvas: EguiUiCanvasInput,
     game: EguiGameViewInput,
 }
 
 impl EguiCentralViewportInput {
     #[must_use]
     pub const fn new(scene: EguiSceneViewInput, game: EguiGameViewInput) -> Self {
-        Self { scene, game }
+        Self {
+            scene,
+            ui_canvas: EguiUiCanvasInput::unavailable(),
+            game,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_ui_canvas(mut self, ui_canvas: EguiUiCanvasInput) -> Self {
+        self.ui_canvas = ui_canvas;
+        self
     }
 
     #[must_use]
@@ -90,18 +108,19 @@ impl EguiCentralViewportInput {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EguiCentralViewportOutput {
     Scene(EguiSceneViewOutput),
+    UiCanvas(EguiUiCanvasOutput),
     Game(EguiGameViewOutput),
 }
 
-/// One ordered Editor action batch plus transient Scene View interaction from the same redraw.
+/// One ordered Editor action batch plus transient viewport interaction from the same redraw.
 #[derive(Debug)]
-pub struct EguiSceneEditorOutput {
+pub struct EguiEditorOutput {
     actions: EditorActionBatch,
     viewport: EguiCentralViewportOutput,
     viewport_intent: Option<EguiEditorViewportIntent>,
 }
 
-impl EguiSceneEditorOutput {
+impl EguiEditorOutput {
     #[must_use]
     pub fn into_parts(
         self,
@@ -114,7 +133,7 @@ impl EguiSceneEditorOutput {
     }
 }
 
-impl EguiSceneEditorPanel {
+impl EguiEditorPanel {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -126,7 +145,7 @@ impl EguiSceneEditorPanel {
             ui,
             frame,
             EguiCentralViewportInput::unavailable(),
-            EguiEditorViewport::Scene,
+            EguiEditorViewport::Authoring,
         )
         .actions
     }
@@ -138,12 +157,28 @@ impl EguiSceneEditorPanel {
         frame: &EditorFrameModel,
         viewport: EguiCentralViewportInput,
         selected_viewport: EguiEditorViewport,
-    ) -> EguiSceneEditorOutput {
+    ) -> EguiEditorOutput {
+        self.show_with_authoring(ui, frame, None, viewport, selected_viewport)
+    }
+
+    /// Renders one exact UI authoring frame through the first-party egui Adapter.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn show_with_authoring(
+        &mut self,
+        ui: &mut Ui,
+        frame: &EditorFrameModel,
+        mut ui_authoring: Option<EguiUiAuthoringInput<'_>>,
+        viewport: EguiCentralViewportInput,
+        selected_viewport: EguiEditorViewport,
+    ) -> EguiEditorOutput {
         #[cfg(test)]
         clear_test_observations();
 
         let scene = frame.workspace().active_scene.as_ref();
         self.inspector.synchronize_scene(scene);
+        self.ui_authoring.synchronize(ui_authoring.as_ref());
+        self.ui_canvas.synchronize(ui_authoring.as_ref());
         let mut actions = Vec::new();
 
         ui.set_min_size(Vec2::new(MIN_EDITOR_WIDTH, MIN_EDITOR_HEIGHT));
@@ -154,7 +189,10 @@ impl EguiSceneEditorPanel {
             scene,
             &mut self.inspector,
             &mut self.scene_view,
+            &mut self.ui_authoring,
+            &mut self.ui_canvas,
             &mut self.game_view,
+            ui_authoring.as_mut(),
             viewport,
             selected_viewport,
             frame,
@@ -164,7 +202,7 @@ impl EguiSceneEditorPanel {
         render_diagnostics(ui, frame, &mut actions);
         render_dirty_close_dialog(ui, frame, &mut actions);
 
-        EguiSceneEditorOutput {
+        EguiEditorOutput {
             actions: EditorActionBatch::new(frame.revision(), actions),
             viewport,
             viewport_intent,
@@ -184,16 +222,20 @@ fn render_toolbar(
     actions: &mut Vec<EditorAction>,
 ) {
     let scene = frame.workspace().active_scene.as_ref();
+    let active_document = frame
+        .workspace()
+        .active_document
+        .and_then(|document| frame.workspace().document(document));
     let persistence = frame.persistence();
     let no_workspace_intent = frame.workspace_intent().intent().is_none();
     let play_state = frame.play().state();
     let play_idle = play_state == EditorPlayState::Empty;
     let persistence_idle = persistence.operation() == EditorPersistenceOperation::Idle;
-    let save_retryable = scene.is_some_and(|scene| {
+    let save_retryable = active_document.is_some_and(|document| {
         persistence_result_allows_request(
             persistence.result(),
             EditorPersistenceRequestKind::Save,
-            scene.document,
+            document.document,
         )
     });
     let reopen_document = match frame.reopen_target() {
@@ -205,13 +247,15 @@ fn render_toolbar(
         EditorPersistenceRequestKind::Reopen,
         reopen_document,
     );
-    let mutation_available = matches!(
-        (play_state, selected_viewport),
-        (
-            EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-            EguiEditorViewport::Scene
+    let mutation_available = active_document.is_some()
+        && matches!(
+            (play_state, selected_viewport),
+            (
+                EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
+                EguiEditorViewport::Authoring
+            )
         )
-    ) && no_workspace_intent
+        && no_workspace_intent
         && persistence_idle;
     let persistence_available = play_idle && no_workspace_intent && persistence_idle;
     let play_pending = matches!(
@@ -220,12 +264,51 @@ fn render_toolbar(
     );
 
     ui.horizontal(|ui| {
-        let title = scene.map_or("No active scene", |scene| scene.title.as_str());
+        let title =
+            active_document.map_or("No active document", |document| document.title.as_str());
         ui.label(RichText::new(title).strong());
-        if scene.is_some_and(|scene| scene.dirty) {
+        if active_document.is_some_and(|document| document.dirty) {
             ui.label(RichText::new("Modified").color(ui.visuals().warn_fg_color));
         }
+        if active_document.is_some_and(|document| document.kind == EditorDocumentKind::Prefab)
+            && let Some(scene) = frame
+                .workspace()
+                .documents
+                .iter()
+                .find(|document| document.kind == EditorDocumentKind::Scene)
+            && toolbar_button(ui, no_workspace_intent, "Back to Scene")
+        {
+            actions.push(EditorAction::Navigate(
+                EditorNavigationAction::SetActiveDocument {
+                    document: scene.document,
+                },
+            ));
+        }
     });
+
+    if frame.workspace().documents.len() > 1 {
+        ScrollArea::horizontal()
+            .id_salt("nara_editor_document_tabs")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    for document in &frame.workspace().documents {
+                        let mut label = document.title.clone();
+                        if document.dirty {
+                            label.push_str(" *");
+                        }
+                        if ui.selectable_label(document.active, label).clicked() && !document.active
+                        {
+                            actions.push(EditorAction::Navigate(
+                                EditorNavigationAction::SetActiveDocument {
+                                    document: document.document,
+                                },
+                            ));
+                        }
+                    }
+                });
+            });
+    }
 
     ScrollArea::horizontal()
         .id_salt("nara_editor_toolbar")
@@ -233,16 +316,17 @@ fn render_toolbar(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 render_play_controls(ui, frame, scene, no_workspace_intent, play_pending, actions);
-                let history = scene.map(|scene| scene.editor.inspector.history);
+                let history = active_document.map(|document| document.history);
                 if toolbar_button(
                     ui,
                     mutation_available && history.is_some_and(|history| history.undo_depth > 0),
                     "Undo",
                 ) {
-                    let scene = scene.expect("Undo is enabled only for an active scene");
+                    let document =
+                        active_document.expect("Undo is enabled only for an active document");
                     actions.push(EditorAction::Mutate(EditorDocumentMutation::Undo {
-                        document: scene.document,
-                        base_revision: scene.revision,
+                        document: document.document,
+                        base_revision: document.revision,
                     }));
                 }
                 if toolbar_button(
@@ -250,23 +334,25 @@ fn render_toolbar(
                     mutation_available && history.is_some_and(|history| history.redo_depth > 0),
                     "Redo",
                 ) {
-                    let scene = scene.expect("Redo is enabled only for an active scene");
+                    let document =
+                        active_document.expect("Redo is enabled only for an active document");
                     actions.push(EditorAction::Mutate(EditorDocumentMutation::Redo {
-                        document: scene.document,
-                        base_revision: scene.revision,
+                        document: document.document,
+                        base_revision: document.revision,
                     }));
                 }
                 if toolbar_button(
                     ui,
                     persistence_available
                         && save_retryable
-                        && scene.is_some_and(|scene| scene.dirty),
+                        && active_document.is_some_and(|document| document.dirty),
                     "Save",
                 ) {
-                    let scene = scene.expect("Save is enabled only for an active scene");
+                    let document =
+                        active_document.expect("Save is enabled only for an active document");
                     actions.push(EditorAction::Persistence(EditorPersistenceAction::Save {
-                        document: scene.document,
-                        base_revision: scene.revision,
+                        document: document.document,
+                        base_revision: document.revision,
                     }));
                 }
                 if toolbar_button(ui, persistence_available && reopen_retryable, "Reopen") {
@@ -397,7 +483,10 @@ fn render_authoring_content(
     scene: Option<&nara_tooling::EditorSceneModel>,
     inspector: &mut EguiSceneInspectorPanel,
     scene_view_panel: &mut EguiSceneViewPanel,
+    ui_authoring_panel: &mut EguiUiAuthoringPanel,
+    ui_canvas_panel: &mut EguiUiCanvasPanel,
     game_view_panel: &mut EguiGameViewPanel,
+    mut ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
     viewport: EguiCentralViewportInput,
     selected_viewport: EguiEditorViewport,
     frame: &EditorFrameModel,
@@ -409,7 +498,7 @@ fn render_authoring_content(
         (frame.play().state(), selected_viewport),
         (
             EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-            EguiEditorViewport::Scene
+            EguiEditorViewport::Authoring
         )
     ) && frame.workspace_intent().intent().is_none()
         && frame.persistence().operation() == EditorPersistenceOperation::Idle;
@@ -437,7 +526,11 @@ fn render_authoring_content(
         .max_height(content_height)
         .auto_shrink([false, false])
         .show(&mut tree_ui, |ui| {
-            inspector.show_tree(ui, scene, editing_enabled, actions)
+            if let Some(authoring) = ui_authoring.as_deref_mut() {
+                ui_authoring_panel.show_hierarchy(ui, authoring, actions);
+            } else {
+                inspector.show_tree(ui, scene, editing_enabled, actions);
+            }
         });
 
     let mut scene_ui = fixed_column(ui, "nara_editor_scene_view_column", scene_rect);
@@ -445,11 +538,20 @@ fn render_authoring_content(
         render_viewport_tabs(&mut scene_ui, frame.play().state(), selected_viewport);
     let viewport_size = scene_ui.available_size().max(Vec2::splat(1.0));
     let viewport = match selected_viewport {
-        EguiEditorViewport::Scene => EguiCentralViewportOutput::Scene(scene_view_panel.show(
-            &mut scene_ui,
-            viewport.scene,
-            viewport_size,
-        )),
+        EguiEditorViewport::Authoring => match ui_authoring.as_deref_mut() {
+            Some(authoring) => EguiCentralViewportOutput::UiCanvas(ui_canvas_panel.show(
+                &mut scene_ui,
+                viewport.ui_canvas,
+                authoring,
+                viewport_size,
+                actions,
+            )),
+            None => EguiCentralViewportOutput::Scene(scene_view_panel.show(
+                &mut scene_ui,
+                viewport.scene,
+                viewport_size,
+            )),
+        },
         EguiEditorViewport::Game => EguiCentralViewportOutput::Game(game_view_panel.show(
             &mut scene_ui,
             viewport.game.with_modal_active(
@@ -466,7 +568,17 @@ fn render_authoring_content(
         .max_height(content_height)
         .auto_shrink([false, false])
         .show(&mut inspector_ui, |ui| {
-            inspector.show_inspector(ui, scene, frame.field_feedback(), editing_enabled, actions)
+            if let Some(authoring) = ui_authoring.as_deref_mut() {
+                ui_authoring_panel.show_inspector(ui, authoring, editing_enabled, actions);
+            } else {
+                inspector.show_inspector(
+                    ui,
+                    scene,
+                    frame.field_feedback(),
+                    editing_enabled,
+                    actions,
+                );
+            }
         });
 
     let separator = ui.visuals().widgets.noninteractive.bg_stroke;
@@ -490,11 +602,12 @@ fn render_viewport_tabs(
 ) -> Option<EguiEditorViewportIntent> {
     let mut intent = None;
     ui.horizontal(|ui| {
-        let scene = ui.add(Button::new("Scene").selected(selected == EguiEditorViewport::Scene));
+        let authoring =
+            ui.add(Button::new("Authoring").selected(selected == EguiEditorViewport::Authoring));
         #[cfg(test)]
-        record_test_control("Scene tab", scene.rect);
-        if scene.clicked() && selected != EguiEditorViewport::Scene {
-            intent = Some(EguiEditorViewportIntent::SelectScene);
+        record_test_control("Authoring tab", authoring.rect);
+        if authoring.clicked() && selected != EguiEditorViewport::Authoring {
+            intent = Some(EguiEditorViewportIntent::SelectAuthoring);
         }
 
         let game_enabled = play_state != EditorPlayState::Empty;

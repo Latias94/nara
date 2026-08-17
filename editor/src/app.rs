@@ -21,7 +21,8 @@ use nara::{
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
     },
     tooling_egui::{
-        EguiCentralViewportInput, EguiEditorViewport, EguiSceneEditorOutput, EguiSceneEditorPanel,
+        EguiCentralViewportInput, EguiEditorOutput, EguiEditorPanel, EguiEditorViewport,
+        EguiUiAuthoringInput,
     },
 };
 use thiserror::Error;
@@ -146,7 +147,7 @@ impl EditorApplicationDispatch {
 /// Product-local orchestration around one Host-owned Editor session and one egui Adapter.
 pub struct EditorApplication {
     session: EditorProjectSession,
-    panel: EguiSceneEditorPanel,
+    panel: EguiEditorPanel,
 }
 
 impl std::fmt::Debug for EditorApplication {
@@ -177,7 +178,7 @@ impl EditorApplication {
         let session = EditorProjectSession::open(project_root, intent)?;
         Ok(Self {
             session,
-            panel: EguiSceneEditorPanel::new(),
+            panel: EguiEditorPanel::new(),
         })
     }
 
@@ -191,7 +192,7 @@ impl EditorApplication {
         self.show_with_viewport(
             root,
             EguiCentralViewportInput::unavailable(),
-            EguiEditorViewport::Scene,
+            EguiEditorViewport::Authoring,
         )
         .into_parts()
         .0
@@ -203,12 +204,42 @@ impl EditorApplication {
         root: &mut egui::Ui,
         viewport: EguiCentralViewportInput,
         selected_viewport: EguiEditorViewport,
-    ) -> EguiSceneEditorOutput {
+    ) -> EguiEditorOutput {
         let frame = self.session.current_frame();
+        let ui_authoring = self.session.current_ui_authoring_frame();
         egui::Frame::central_panel(root.style())
             .show(root, |ui| {
+                let mut lower_field =
+                    |key: &nara::ui::__private::UiAuthoringFieldKey,
+                     value: nara::ui::__private::UiAuthoringFieldValue| {
+                        ui_authoring
+                            .as_ref()
+                            .expect("the lowering callback exists only with a UI authoring frame")
+                            .lower_field_edit(key, value)
+                            .map_err(|error| error.to_string())
+                    };
+                let mut lower_direct = |edit: &nara::ui::__private::UiAuthoringDirectEdit| {
+                    ui_authoring
+                        .as_ref()
+                        .expect("the lowering callback exists only with a UI authoring frame")
+                        .lower_direct_edit(edit)
+                        .map_err(|error| error.to_string())
+                };
+                let authoring = ui_authoring.as_ref().and_then(|authoring| {
+                    (authoring.editor_frame() == frame.revision()).then(|| {
+                        EguiUiAuthoringInput::new(
+                            authoring.document(),
+                            authoring.revision(),
+                            authoring.selection(),
+                            authoring.gesture(),
+                            authoring.projection(),
+                            &mut lower_field,
+                            &mut lower_direct,
+                        )
+                    })
+                });
                 self.panel
-                    .show_with_viewport(ui, &frame, viewport, selected_viewport)
+                    .show_with_authoring(ui, &frame, authoring, viewport, selected_viewport)
             })
             .inner
     }

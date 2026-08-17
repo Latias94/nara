@@ -452,6 +452,8 @@ pub enum UiAuthoringEditError {
     DescriptorMismatch,
     #[error("the proposed edit does not match the descriptor commit policy")]
     CommitPolicyMismatch,
+    #[error("direct manipulation is read-only: {0:?}")]
+    DirectManipulationReadOnly(UiDirectManipulationReadOnlyReason),
     #[error("the proposed edit makes the complete UI component invalid")]
     InvalidComponentValue,
     #[error("the proposed component value could not be represented")]
@@ -518,11 +520,49 @@ pub enum UiDirectManipulationCapability {
     ReadOnly(UiDirectManipulationReadOnlyReason),
 }
 
+/// Closed two-dimensional delta relative to the exact current authoring projection.
+#[derive(Debug, Clone, PartialEq)]
+pub enum UiAuthoringDirectEdit {
+    /// Moves an absolute pixel-positioned node in authored logical units.
+    MoveBy {
+        entity: SceneEntityId,
+        delta: [f64; 2],
+    },
+    /// Resizes the bottom-right corner of an absolute pixel-sized node.
+    ResizeBy {
+        entity: SceneEntityId,
+        delta: [f64; 2],
+    },
+}
+
 /// Move and resize admission derived only from authored layout fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiAuthoringGizmoCapabilities {
     move_node: UiDirectManipulationCapability,
     resize_node: UiDirectManipulationCapability,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiDirectGeometryKind {
+    Move,
+    Resize,
+}
+
+impl UiDirectGeometryKind {
+    const fn primary_fields(self) -> [&'static str; 2] {
+        match self {
+            Self::Move => ["style.left.kind", "style.top.kind"],
+            Self::Resize => ["style.width.kind", "style.height.kind"],
+        }
+    }
+
+    fn from_primary_field(field: &str) -> Option<Self> {
+        match field {
+            "style.left.kind" => Some(Self::Move),
+            "style.width.kind" => Some(Self::Resize),
+            _ => None,
+        }
+    }
 }
 
 impl UiAuthoringGizmoCapabilities {
@@ -803,7 +843,7 @@ impl UiAuthoringProjection {
             .map(|index| &self.fields[index])
     }
 
-    /// Revalidates one exact field patch against descriptor, direct-manipulation, and codec facts.
+    /// Revalidates one exact field patch against descriptor and codec facts.
     pub fn validate_field_patch(
         &self,
         key: &UiAuthoringFieldKey,
@@ -813,14 +853,141 @@ impl UiAuthoringProjection {
         let descriptor = self
             .field(key)
             .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
-        let policy_matches = descriptor.commit_policy == commit_policy
-            || (commit_policy == UiAuthoringCommitPolicy::Continuous
-                && self.supports_direct_gesture(key));
-        if !policy_matches {
+        if descriptor.commit_policy != commit_policy {
             return Err(UiAuthoringEditError::CommitPolicyMismatch);
         }
         descriptor.validate_patch(patch)?;
+        self.validate_component_patch(key, patch)
+    }
 
+    /// Lowers one closed two-dimensional manipulation without exposing canonical fields.
+    pub fn lower_direct_edit(
+        &self,
+        edit: &UiAuthoringDirectEdit,
+    ) -> Result<(UiAuthoringFieldKey, ScenePatchDocument), UiAuthoringEditError> {
+        let (entity, kind, delta) = match edit {
+            UiAuthoringDirectEdit::MoveBy { entity, delta } => {
+                (entity, UiDirectGeometryKind::Move, *delta)
+            }
+            UiAuthoringDirectEdit::ResizeBy { entity, delta } => {
+                (entity, UiDirectGeometryKind::Resize, *delta)
+            }
+        };
+        let descriptors = self.direct_geometry_descriptors(entity, kind)?;
+        let mut values = [0.0; 2];
+        for (index, descriptor) in descriptors.into_iter().enumerate() {
+            values[index] = direct_descriptor_pixel_value(descriptor)? + delta[index];
+        }
+        self.lower_direct_geometry(entity, kind, values)
+    }
+
+    /// Revalidates an exact direct-manipulation patch against current authored geometry facts.
+    pub fn validate_direct_patch(
+        &self,
+        key: &UiAuthoringFieldKey,
+        patch: &ScenePatchDocument,
+    ) -> Result<(), UiAuthoringEditError> {
+        let kind = UiDirectGeometryKind::from_primary_field(key.primary_field.as_str())
+            .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
+        if key.component != UiAuthoringComponentKind::Node.component_type() {
+            return Err(UiAuthoringEditError::DescriptorMismatch);
+        }
+        let descriptors = self.direct_geometry_descriptors(&key.entity, kind)?;
+        let expected_operations = descriptors
+            .iter()
+            .map(|descriptor| descriptor.members.len())
+            .sum::<usize>();
+        if patch.operations.len() != expected_operations {
+            return Err(UiAuthoringEditError::DescriptorMismatch);
+        }
+
+        let mut offset = 0;
+        let mut values = [0.0; 2];
+        for (index, descriptor) in descriptors.into_iter().enumerate() {
+            let end = offset + descriptor.members.len();
+            let descriptor_patch =
+                ScenePatchDocument::new(patch.operations[offset..end].iter().cloned());
+            descriptor.validate_patch(&descriptor_patch)?;
+            values[index] = direct_pixel_value(descriptor, &descriptor_patch)?;
+            offset = end;
+        }
+
+        let (canonical_key, canonical_patch) =
+            self.lower_direct_geometry(&key.entity, kind, values)?;
+        if canonical_key != *key || canonical_patch != *patch {
+            return Err(UiAuthoringEditError::DescriptorMismatch);
+        }
+        Ok(())
+    }
+
+    fn lower_direct_geometry(
+        &self,
+        entity: &SceneEntityId,
+        kind: UiDirectGeometryKind,
+        values: [f64; 2],
+    ) -> Result<(UiAuthoringFieldKey, ScenePatchDocument), UiAuthoringEditError> {
+        let descriptors = self.direct_geometry_descriptors(entity, kind)?;
+        let operations = descriptors
+            .iter()
+            .zip(values)
+            .map(|(descriptor, value)| {
+                descriptor.lower_edit(UiAuthoringFieldValue::Dimension {
+                    kind: UiAuthoringDimensionKind::Pixels,
+                    value,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flat_map(|patch| patch.operations)
+            .collect::<Vec<_>>();
+        let key = descriptors[0].key.clone();
+        let patch = ScenePatchDocument::new(operations);
+        self.validate_component_patch(&key, &patch)?;
+        Ok((key, patch))
+    }
+
+    fn direct_geometry_descriptors(
+        &self,
+        entity: &SceneEntityId,
+        kind: UiDirectGeometryKind,
+    ) -> Result<[&UiAuthoringFieldDescriptor; 2], UiAuthoringEditError> {
+        let node = self
+            .hierarchy
+            .iter()
+            .find(|node| node.entity == *entity)
+            .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
+        let capability = match kind {
+            UiDirectGeometryKind::Move => node.gizmos.move_node(),
+            UiDirectGeometryKind::Resize => node.gizmos.resize_node(),
+        };
+        if let UiDirectManipulationCapability::ReadOnly(reason) = capability {
+            return Err(UiAuthoringEditError::DirectManipulationReadOnly(reason));
+        }
+
+        let component = UiAuthoringComponentKind::Node.component_type();
+        let [first, second] = kind.primary_fields();
+        let first = self
+            .field(&UiAuthoringFieldKey::new(
+                entity.clone(),
+                component.clone(),
+                ComponentFieldId::new(first),
+            ))
+            .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
+        let second = self
+            .field(&UiAuthoringFieldKey::new(
+                entity.clone(),
+                component,
+                ComponentFieldId::new(second),
+            ))
+            .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
+        Ok([first, second])
+    }
+
+    fn validate_component_patch(
+        &self,
+        key: &UiAuthoringFieldKey,
+        patch: &ScenePatchDocument,
+    ) -> Result<(), UiAuthoringEditError> {
         let record = self
             .components
             .get(&(key.entity.clone(), key.component.clone()))
@@ -830,14 +997,27 @@ impl UiAuthoringProjection {
             .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
         let mut candidate = record.value.clone();
         for operation in &patch.operations {
-            let ScenePatchOperation::SetField { field, value, .. } = operation else {
+            let ScenePatchOperation::SetField {
+                entity,
+                component,
+                component_version,
+                field,
+                value,
+            } = operation
+            else {
                 return Err(UiAuthoringEditError::DescriptorMismatch);
             };
+            if entity != &key.entity || component != &key.component {
+                return Err(UiAuthoringEditError::DescriptorMismatch);
+            }
             let field = schema
                 .fields
                 .iter()
                 .find(|candidate| candidate.id == *field)
                 .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
+            if *component_version != schema.version || value.kind() != field.value_kind {
+                return Err(UiAuthoringEditError::DescriptorMismatch);
+            }
             candidate
                 .replace_path(&field.path, value.clone())
                 .map_err(|_| UiAuthoringEditError::DescriptorMismatch)?;
@@ -846,29 +1026,44 @@ impl UiAuthoringProjection {
             .map_err(|_| UiAuthoringEditError::InvalidComponentValue)
     }
 
-    fn supports_direct_gesture(&self, key: &UiAuthoringFieldKey) -> bool {
-        if key.component != UiAuthoringComponentKind::Node.component_type() {
-            return false;
-        }
-        let capability = self
-            .hierarchy
-            .iter()
-            .find(|node| node.entity == key.entity)
-            .map(|node| match key.primary_field.as_str() {
-                "style.left.kind" | "style.top.kind" => node.gizmos.move_node(),
-                "style.width.kind" | "style.height.kind" => node.gizmos.resize_node(),
-                _ => UiDirectManipulationCapability::ReadOnly(
-                    UiDirectManipulationReadOnlyReason::MissingAuthoredField,
-                ),
-            });
-        capability == Some(UiDirectManipulationCapability::Editable)
-    }
-
     /// Rebinds only the transient Canvas outcome; durable source facts remain unchanged.
     #[must_use]
     pub fn with_canvas(mut self, canvas: UiAuthoringCanvasProjection) -> Self {
         self.canvas = canvas;
         self
+    }
+}
+
+fn direct_pixel_value(
+    descriptor: &UiAuthoringFieldDescriptor,
+    patch: &ScenePatchDocument,
+) -> Result<f64, UiAuthoringEditError> {
+    let values = patch
+        .operations
+        .iter()
+        .map(|operation| match operation {
+            ScenePatchOperation::SetField { value, .. } => Ok(value.clone()),
+            _ => Err(UiAuthoringEditError::DescriptorMismatch),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    match parse_descriptor_value(&descriptor.kind, &values) {
+        Some(UiAuthoringFieldValue::Dimension {
+            kind: UiAuthoringDimensionKind::Pixels,
+            value,
+        }) => Ok(value),
+        _ => Err(UiAuthoringEditError::DescriptorMismatch),
+    }
+}
+
+fn direct_descriptor_pixel_value(
+    descriptor: &UiAuthoringFieldDescriptor,
+) -> Result<f64, UiAuthoringEditError> {
+    match descriptor.value() {
+        UiAuthoringFieldValue::Dimension {
+            kind: UiAuthoringDimensionKind::Pixels,
+            value,
+        } => Ok(*value),
+        _ => Err(UiAuthoringEditError::DescriptorMismatch),
     }
 }
 
@@ -2028,7 +2223,7 @@ mod tests {
                 UiAuthoringCommitPolicy::Continuous,
                 &canonical,
             ),
-            Ok(())
+            Err(UiAuthoringEditError::CommitPolicyMismatch)
         );
 
         let partial = ScenePatchDocument::new([canonical.operations[0].clone()]);
@@ -2066,6 +2261,33 @@ mod tests {
             ),
             Err(UiAuthoringEditError::InvalidComponentValue)
         );
+    }
+
+    #[test]
+    fn direct_move_lowers_and_revalidates_one_canonical_two_axis_patch() {
+        let projection = project_prefab_authoring(&ui_prefab("absolute", ("px", 180.0)))
+            .expect("valid UI Prefab must project");
+        let edit = UiAuthoringDirectEdit::MoveBy {
+            entity: id("button"),
+            delta: [22.0, 44.0],
+        };
+        let (key, patch) = projection
+            .lower_direct_edit(&edit)
+            .expect("absolute pixel position must admit direct move");
+
+        assert_eq!(key.primary_field().as_str(), "style.left.kind");
+        assert_eq!(patch.operations.len(), 4);
+        assert!(matches!(
+            &patch.operations[1],
+            ScenePatchOperation::SetField { field, value, .. }
+                if field.as_str() == "style.left.value" && value.as_f64() == Some(32.0)
+        ));
+        assert!(matches!(
+            &patch.operations[3],
+            ScenePatchOperation::SetField { field, value, .. }
+                if field.as_str() == "style.top.value" && value.as_f64() == Some(64.0)
+        ));
+        assert_eq!(projection.validate_direct_patch(&key, &patch), Ok(()));
     }
 
     #[test]
@@ -2204,6 +2426,15 @@ mod tests {
             UiDirectManipulationCapability::ReadOnly(
                 UiDirectManipulationReadOnlyReason::PercentDimension
             )
+        );
+        assert_eq!(
+            percent.lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+                entity: id("button"),
+                delta: [60.0, 24.0],
+            }),
+            Err(UiAuthoringEditError::DirectManipulationReadOnly(
+                UiDirectManipulationReadOnlyReason::PercentDimension
+            ))
         );
     }
 }

@@ -11,8 +11,9 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    PrefabAuthoringSession, PrefabDocument, SceneAuthoringContentState, SceneAuthoringRevision,
-    SceneAuthoringSession, SceneDocument, SceneEntityId, ScenePatchDocument, ScenePatchReport,
+    PrefabAuthoringSession, PrefabDocument, SceneAuthoringContentState,
+    SceneAuthoringHistoryStatus, SceneAuthoringRevision, SceneAuthoringSession, SceneDocument,
+    SceneEntityId, ScenePatchDocument, ScenePatchReport,
 };
 
 use crate::composition::{
@@ -279,6 +280,13 @@ impl EditorDocumentSlot {
         match self {
             Self::Scene(slot) => slot.is_dirty(),
             Self::Prefab(slot) => slot.is_dirty(),
+        }
+    }
+
+    fn history_status(&self) -> SceneAuthoringHistoryStatus {
+        match self {
+            Self::Scene(slot) => slot.session.history_status(),
+            Self::Prefab(slot) => slot.session.history_status(),
         }
     }
 
@@ -679,6 +687,7 @@ impl EditorWorkspace {
                     dirty: slot.is_dirty(),
                     revision: slot.revision(),
                     saved_revision: slot.saved_revision(),
+                    history: slot.history_status(),
                     source_binding: slot.source_binding().cloned(),
                     external_reload: slot.external_reload(),
                     active: Some(*document) == self.active_document,
@@ -1851,6 +1860,7 @@ pub struct EditorDocumentTabModel {
     pub dirty: bool,
     pub revision: SceneAuthoringRevision,
     pub saved_revision: SceneAuthoringRevision,
+    pub history: SceneAuthoringHistoryStatus,
     pub source_binding: Option<EditorDocumentSourceBinding>,
     pub external_reload: EditorExternalReloadState,
     pub active: bool,
@@ -2710,6 +2720,17 @@ mod tests {
         assert!(applied.applied, "{:?}", applied.diagnostics);
         let accepted_revision = workspace.prefab(prefab).unwrap().revision();
         assert!(workspace.prefab(prefab).unwrap().is_dirty());
+        assert_eq!(
+            workspace
+                .model(&registry, None)
+                .document(prefab)
+                .unwrap()
+                .history,
+            SceneAuthoringHistoryStatus {
+                undo_depth: 1,
+                redo_depth: 0,
+            }
+        );
 
         let scene_only = workspace.apply_command(
             &registry,
@@ -2754,6 +2775,17 @@ mod tests {
         );
         assert!(undo.applied);
         assert!(!workspace.prefab(prefab).unwrap().is_dirty());
+        assert_eq!(
+            workspace
+                .model(&registry, None)
+                .document(prefab)
+                .unwrap()
+                .history,
+            SceneAuthoringHistoryStatus {
+                undo_depth: 0,
+                redo_depth: 1,
+            }
+        );
 
         let undo_revision = workspace.prefab(prefab).unwrap().revision();
         let redo = workspace.apply_command(

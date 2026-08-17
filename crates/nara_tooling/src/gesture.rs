@@ -196,6 +196,7 @@ pub enum EditorGestureCancelReason {
     TargetRemoved,
     StaleRevision,
     TargetRetired,
+    CanvasTransformChanged,
     InvalidPreview,
 }
 

@@ -434,7 +434,20 @@ impl EguiSceneInspectorPanel {
             ui.label(format!("Parent: {}", parent.as_str()));
         }
         if view.has_prefab {
-            ui.label("Prefab instance");
+            let open = ui
+                .add_enabled(editing_enabled, Button::new("Open Prefab Source"))
+                .on_hover_text("Open the exact Prefab source document");
+            #[cfg(test)]
+            crate::editor::record_test_control("Open Prefab Source", open.rect);
+            if open.clicked() {
+                actions.push(EditorAction::Navigate(
+                    EditorNavigationAction::OpenPrefabSource {
+                        document: scene.document,
+                        base_revision: scene.revision,
+                        entity: view.id.clone(),
+                    },
+                ));
+            }
         }
         self.show_component_toolbar(ui, scene, view, editing_enabled, actions);
         if view.components.is_empty() {
