@@ -3,15 +3,15 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::{ComponentFieldId, ComponentTypeId, ComponentValueKind};
+use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValueKind};
 use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePatchDocument};
 
 use crate::{
-    EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentId,
-    EditorPersistenceRequestResult, EditorPlayRequestResult, EditorProjectView,
-    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorWorkspaceCommandReport,
-    EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult, EditorWorkspaceModel,
-    SceneApplyChangesRequest, SceneCompositionCommand, SceneInspectorCommand,
+    EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentId, EditorGestureAction,
+    EditorGestureOutcome, EditorPersistenceRequestResult, EditorPlayRequestResult,
+    EditorProjectView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
+    EditorWorkspaceCommandReport, EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult,
+    EditorWorkspaceModel, SceneApplyChangesRequest, SceneCompositionCommand, SceneInspectorCommand,
 };
 
 static NEXT_EDITOR_FRAME_SOURCE: AtomicU64 = AtomicU64::new(0);
@@ -98,6 +98,7 @@ pub struct EditorFieldTarget {
     base_revision: SceneAuthoringRevision,
     entity: SceneEntityId,
     component: ComponentTypeId,
+    component_version: ComponentSchemaVersion,
     field: ComponentFieldId,
 }
 
@@ -108,6 +109,7 @@ impl EditorFieldTarget {
         base_revision: SceneAuthoringRevision,
         entity: SceneEntityId,
         component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         field: ComponentFieldId,
     ) -> Self {
         Self {
@@ -115,6 +117,7 @@ impl EditorFieldTarget {
             base_revision,
             entity,
             component,
+            component_version,
             field,
         }
     }
@@ -129,6 +132,26 @@ impl EditorFieldTarget {
         self.base_revision
     }
 
+    #[must_use]
+    pub const fn entity(&self) -> &SceneEntityId {
+        &self.entity
+    }
+
+    #[must_use]
+    pub const fn component(&self) -> &ComponentTypeId {
+        &self.component
+    }
+
+    #[must_use]
+    pub const fn component_version(&self) -> ComponentSchemaVersion {
+        self.component_version
+    }
+
+    #[must_use]
+    pub const fn field(&self) -> &ComponentFieldId {
+        &self.field
+    }
+
     /// Compares durable field identity while intentionally ignoring the source revision.
     ///
     /// This lets a stale-action message attach to the corresponding field in the successor frame;
@@ -138,6 +161,7 @@ impl EditorFieldTarget {
         self.document == other.document
             && self.entity == other.entity
             && self.component == other.component
+            && self.component_version == other.component_version
             && self.field == other.field
     }
 }
@@ -316,6 +340,9 @@ pub enum EditorDocumentMutation {
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     },
+    ApplyPrefabFieldEdit {
+        edit: crate::EditorAtomicFieldEdit,
+    },
     ComposeScene {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
@@ -341,6 +368,7 @@ impl EditorDocumentMutation {
             | Self::ComposeScene { document, .. }
             | Self::Undo { document, .. }
             | Self::Redo { document, .. } => *document,
+            Self::ApplyPrefabFieldEdit { edit } => edit.target().document(),
         }
     }
 
@@ -353,6 +381,7 @@ impl EditorDocumentMutation {
             | Self::ComposeScene { base_revision, .. }
             | Self::Undo { base_revision, .. }
             | Self::Redo { base_revision, .. } => *base_revision,
+            Self::ApplyPrefabFieldEdit { edit } => edit.target().base_revision(),
         }
     }
 }
@@ -405,6 +434,7 @@ pub enum EditorAction {
     WorkspaceIntent(EditorWorkspaceIntentAction),
     Play(EditorPlayAction),
     ReportFieldValidation(EditorFieldValidationFailure),
+    Gesture(EditorGestureAction),
     RuntimeEdit {
         document: EditorDocumentId,
         request: EditorRuntimeEditRequest,
@@ -430,6 +460,7 @@ impl EditorAction {
                 | EditorReopenTarget::ClosedSource { document } => *document,
             }),
             Self::ApplyChanges { document, .. } => Some(*document),
+            Self::Gesture(action) => action.revision_advancing_document(),
             _ => None,
         }
     }
@@ -444,6 +475,10 @@ impl EditorAction {
                 command,
             }) => inspector_field_target(*document, *base_revision, command),
             Self::ReportFieldValidation(failure) => Some(failure.target().clone()),
+            Self::Mutate(EditorDocumentMutation::ApplyPrefabFieldEdit { edit }) => {
+                Some(edit.target().clone())
+            }
+            Self::Gesture(action) => action.field_target().cloned(),
             _ => None,
         }
     }
@@ -507,6 +542,9 @@ pub enum EditorActionRejection {
     MutationAlreadySubmitted {
         document: EditorDocumentId,
     },
+    FieldContractMismatch {
+        document: EditorDocumentId,
+    },
     RuntimeGenerationChanged {
         expected: u64,
         actual: Option<u64>,
@@ -532,25 +570,28 @@ fn inspector_field_target(
     base_revision: SceneAuthoringRevision,
     command: &SceneInspectorCommand,
 ) -> Option<EditorFieldTarget> {
-    let (entity, component, field) = match command {
+    let (entity, component, component_version, field) = match command {
         SceneInspectorCommand::SetField {
             entity,
             component,
+            component_version,
             field,
             ..
         }
         | SceneInspectorCommand::RemoveField {
             entity,
             component,
+            component_version,
             field,
             ..
         }
         | SceneInspectorCommand::SetAssetRefField {
             entity,
             component,
+            component_version,
             field,
             ..
-        } => (entity, component, field),
+        } => (entity, component, *component_version, field),
         SceneInspectorCommand::MoveEntity { .. } => return None,
     };
     Some(EditorFieldTarget::new(
@@ -558,6 +599,7 @@ fn inspector_field_target(
         base_revision,
         entity.clone(),
         component.clone(),
+        component_version,
         field.clone(),
     ))
 }
@@ -569,6 +611,7 @@ pub enum EditorActionOutcome {
     Persistence(EditorPersistenceRequestResult),
     WorkspaceIntent(EditorWorkspaceIntentRequestResult),
     Play(EditorPlayRequestResult),
+    Gesture(EditorGestureOutcome),
     RuntimeEdit(Result<(), EditorRuntimeEditRejection>),
     ApplyChanges(Result<(), EditorApplyChangesRejection>),
     Acknowledged(EditorActionAcknowledgement),

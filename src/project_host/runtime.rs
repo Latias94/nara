@@ -67,6 +67,8 @@ pub use editor::{
 pub use editor::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(feature = "tooling")]
 pub use editor::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+pub use editor::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 
 struct RuntimeStartAttempt {
     owner: Arc<HostStartClaim>,

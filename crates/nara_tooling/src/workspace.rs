@@ -22,6 +22,7 @@ use crate::diagnostic;
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
 use crate::play::{SceneEditorModel, SceneEditorState};
 use crate::snapshot::WorldIdentitySnapshot;
+use crate::{EditorAtomicFieldEdit, EditorFieldTarget};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EditorDocumentId(u64);
@@ -459,6 +460,30 @@ impl EditorWorkspace {
     #[must_use]
     pub fn active_prefab(&self) -> Option<&EditorPrefabSlot> {
         self.active_document.and_then(|id| self.prefab(id))
+    }
+
+    /// Checks that an Adapter-provided baseline exactly matches the accepted Prefab revision.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __prefab_field_edit_matches(
+        &self,
+        registry: &ComponentRegistry,
+        edit: &EditorAtomicFieldEdit,
+    ) -> bool {
+        edit.writes().iter().all(|write| {
+            prefab_field_value(self, registry, edit.target(), write.field()) == Some(write.value())
+        })
+    }
+
+    /// Checks whether an exact revision-bound Prefab field still exists.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __prefab_field_target_exists(
+        &self,
+        registry: &ComponentRegistry,
+        target: &EditorFieldTarget,
+    ) -> bool {
+        prefab_field_value(self, registry, target, target.field()).is_some()
     }
 
     fn apply_persistence_checkpoint(
@@ -2122,6 +2147,37 @@ fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool
 
 fn prefab_has_entity(document: &PrefabDocument, entity: &SceneEntityId) -> bool {
     document.entities.iter().any(|record| record.id == *entity)
+}
+
+fn prefab_field_value<'a>(
+    workspace: &'a EditorWorkspace,
+    registry: &'a ComponentRegistry,
+    target: &EditorFieldTarget,
+    field: &nara_reflect::ComponentFieldId,
+) -> Option<&'a nara_reflect::ComponentValue> {
+    let slot = workspace.prefab(target.document())?;
+    if slot.revision() != target.base_revision() {
+        return None;
+    }
+    let entity = slot
+        .session()
+        .document()
+        .entities
+        .iter()
+        .find(|entity| &entity.id == target.entity())?;
+    let component = entity.components.get(target.component())?;
+    if component.version != target.component_version() {
+        return None;
+    }
+    let schema = registry.schema(target.component())?;
+    if schema.version() != target.component_version() {
+        return None;
+    }
+    let field = schema
+        .fields()
+        .iter()
+        .find(|candidate| candidate.id() == field)?;
+    component.value.get_path(&field.path).ok()
 }
 
 #[cfg(test)]

@@ -3,6 +3,7 @@
 mod composition;
 mod diagnostic;
 mod frame;
+mod gesture;
 mod inspector;
 mod persistence;
 mod play;
@@ -20,6 +21,13 @@ pub use frame::{
     EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure, EditorFrameModel,
     EditorFrameRevision, EditorNavigationAction, EditorPersistenceAction, EditorPlayAction,
     EditorReopenTarget, EditorWorkspaceIntentAction,
+};
+#[doc(hidden)]
+pub use gesture::EditorGestureController;
+pub use gesture::{
+    EditorAtomicFieldEdit, EditorAtomicFieldEditError, EditorFieldWrite, EditorGestureAction,
+    EditorGestureCancelReason, EditorGestureId, EditorGestureOutcome, EditorGestureRejection,
+    EditorGestureStamp, EditorGestureView, MAX_EDITOR_ATOMIC_FIELD_WRITES,
 };
 pub use inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,

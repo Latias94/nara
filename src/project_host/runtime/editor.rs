@@ -8,6 +8,8 @@ mod persistence;
 mod play;
 #[cfg(feature = "presentation-2d")]
 mod preview;
+#[cfg(feature = "runtime-ui")]
+mod ui_authoring;
 
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
@@ -18,6 +20,10 @@ pub use game_view::{
 };
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
+#[cfg(feature = "runtime-ui")]
+use ui_authoring::EditorUiAuthoringProjectionCache;
+#[cfg(feature = "runtime-ui")]
+pub use ui_authoring::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 
 use nara_app::{
     __RuntimeDriverPort, App, CoreStage, Plugin, PluginCategory, PluginDeclaration,
@@ -31,21 +37,22 @@ use nara_reflect::{
     ComponentCapability, ComponentRegistry, component_registry,
     report_component_registry_authority_fault,
 };
-#[cfg(feature = "presentation-2d")]
+#[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 use nara_render::Extent2d;
 use nara_scene::SceneEntitySource;
 use nara_tooling::{
     __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorDocumentKind,
-    EditorFieldFeedback, EditorFrameClock, EditorFrameModel, EditorPersistenceAuthority,
-    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
-    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
-    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
-    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
-    EditorPlayState, EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
-    EditorRuntimeEditResult, EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport,
-    EditorWorkspaceIntent, EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection,
-    EditorWorkspaceIntentRequestResult, EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
-    SceneApplyChangesComponentStatus, SceneApplyChangesRequest,
+    EditorFieldFeedback, EditorFrameClock, EditorFrameModel, EditorGestureCancelReason,
+    EditorGestureController, EditorPersistenceAuthority, EditorPersistenceCommand,
+    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
+    EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
+    EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
+    EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
+    EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
+    EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
+    EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
+    SceneApplyChangesRequest,
 };
 use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
@@ -549,6 +556,12 @@ pub struct EditorProjectSession {
     workspace_intent_result: Option<EditorWorkspaceIntentResult>,
     frame_clock: EditorFrameClock,
     published_frame: Option<PublishedEditorFrame>,
+    gestures: EditorGestureController,
+    last_gesture_cancellation: Option<EditorGestureCancelReason>,
+    #[cfg(feature = "runtime-ui")]
+    ui_authoring_frame: Option<Arc<EditorUiAuthoringFrame>>,
+    #[cfg(feature = "runtime-ui")]
+    ui_authoring_projection_cache: Option<EditorUiAuthoringProjectionCache>,
 }
 
 impl fmt::Debug for EditorProjectSession {
@@ -716,6 +729,12 @@ impl EditorProjectSession {
             workspace_intent_result: None,
             frame_clock: EditorFrameClock::new(),
             published_frame: None,
+            gestures: EditorGestureController::default(),
+            last_gesture_cancellation: None,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_frame: None,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_projection_cache: None,
         };
         session.publish_editor_frame();
         Ok(session)

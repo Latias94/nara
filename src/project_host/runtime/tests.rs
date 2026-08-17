@@ -38,6 +38,7 @@ use nara_identity::{EntityLookup, WorldIdentityDomain};
 use nara_reflect::ComponentFieldId;
 use nara_reflect::{
     ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind,
 };
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_scene::{PrefabDocument, PrefabInstance};
@@ -49,9 +50,10 @@ use nara_tasks::{
 };
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_tooling::{
-    EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
-    EditorNavigationAction, EditorPersistenceAction, EditorWorkspaceIntent,
-    EditorWorkspaceIntentAction,
+    EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
+    EditorAtomicFieldEdit, EditorDocumentMutation, EditorFieldWrite, EditorGestureAction,
+    EditorGestureCancelReason, EditorGestureOutcome, EditorNavigationAction,
+    EditorPersistenceAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
 };
 #[cfg(feature = "tooling")]
 use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWorkspaceCommand};
@@ -1040,6 +1042,645 @@ requested = ["runtime-2d", "runtime-ui"]
             intent: EditorWorkspaceIntent::Exit,
         })
     ));
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[test]
+fn editor_ui_authoring_frame_and_continuous_gesture_share_one_exact_prefab_revision() {
+    use nara_ui::__private::{
+        UiAuthoringDimensionKind, UiAuthoringFieldKind, UiAuthoringFieldValue,
+        UiDirectManipulationCapability,
+    };
+
+    let project = TestProject::new("editor-ui-authoring-frame");
+    fs::write(
+        project.root.join("nara.toml"),
+        r#"schema_version = 1
+
+[project]
+name = "Editor UI Authoring Frame"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-ui"]
+"#,
+    )
+    .unwrap();
+
+    let root = nara_identity::SceneEntityId::new("ui-root").unwrap();
+    let button = nara_identity::SceneEntityId::new("retry").unwrap();
+    let anchor = nara_identity::SceneEntityId::new("ui-anchor").unwrap();
+    let prefab = PrefabDocument::new(
+        [root.clone()],
+        [
+            SceneEntityRecord::new(root.clone())
+                .with_children([button.clone()])
+                .with_component(
+                    ComponentTypeId::new("nara.ui.UiRoot"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::map([("layer", ComponentValue::String("base".to_owned()))]),
+                    ),
+                )
+                .with_component(
+                    ComponentTypeId::new("nara.ui.UiNode"),
+                    ui_node_record("flow", "percent", 1.0, "percent", 1.0),
+                ),
+            SceneEntityRecord::new(button.clone())
+                .with_component(
+                    ComponentTypeId::new("nara.ui.UiNode"),
+                    ui_node_record("absolute", "px", 180.0, "px", 48.0),
+                )
+                .with_component(
+                    ComponentTypeId::new("nara.ui.UiButton"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::map([
+                            ("label", ComponentValue::String("Retry".to_owned())),
+                            (
+                                "action",
+                                ComponentValue::String("reference-game.retry".to_owned()),
+                            ),
+                            ("enabled", ComponentValue::Bool(true)),
+                            ("logical_text_size", ComponentValue::f64(20.0).unwrap()),
+                        ]),
+                    ),
+                ),
+        ],
+    );
+    fs::write(
+        project.root.join("prefabs/reference-ui.prefab.json"),
+        prefab.to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut anchor_record = SceneEntityRecord::new(anchor.clone());
+    anchor_record.prefab = Some(PrefabInstance {
+        source: AssetRef::path("reference-ui.prefab.json").unwrap(),
+        overrides: ScenePatchDocument::default(),
+    });
+    fs::write(
+        project.root.join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([anchor_record])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut editor = super::editor::EditorProjectSession::open(
+        project.writable_capability(),
+        super::editor::EditorProjectIntent::new(),
+    )
+    .unwrap();
+    let scene_document = editor.workspace().active_document().unwrap();
+    let scene_frame = editor.current_frame();
+    let scene_revision = scene_frame
+        .workspace()
+        .document(scene_document)
+        .unwrap()
+        .revision;
+    let opened = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            scene_frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: scene_document,
+                    entity: Some(anchor.clone()),
+                }),
+                EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                    document: scene_document,
+                    base_revision: scene_revision,
+                    entity: anchor,
+                }),
+            ],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Workspace(opened) = &opened.outcomes()[1] else {
+        panic!("opening the UI Prefab must publish a workspace document");
+    };
+    assert!(opened.applied, "{:?}", opened.diagnostics);
+    let prefab_document = opened.opened_document.unwrap();
+
+    let mut frame = editor.drive_editor_frame(Duration::ZERO);
+    let ui_frame = editor.current_ui_authoring_frame().unwrap();
+    assert_eq!(ui_frame.editor_frame(), frame.revision());
+    assert_eq!(ui_frame.document(), prefab_document);
+    assert_eq!(
+        ui_frame.revision(),
+        frame
+            .workspace()
+            .document(prefab_document)
+            .unwrap()
+            .revision
+    );
+    let projection = ui_frame.projection().unwrap();
+    assert_eq!(projection.hierarchy().len(), 2);
+    assert_eq!(projection.source_map().len(), 2);
+    let button_node = projection
+        .hierarchy()
+        .iter()
+        .find(|node| node.entity() == &button)
+        .unwrap();
+    assert_eq!(
+        button_node.gizmos().move_node(),
+        UiDirectManipulationCapability::Editable
+    );
+    assert_eq!(
+        button_node.gizmos().resize_node(),
+        UiDirectManipulationCapability::Editable
+    );
+    let width_key = projection
+        .fields()
+        .iter()
+        .find(|field| {
+            field.key().entity() == &button
+                && field.key().primary_field().as_str() == "style.width.kind"
+                && matches!(field.kind(), UiAuthoringFieldKind::Dimension)
+        })
+        .unwrap()
+        .key()
+        .clone();
+    let label = projection
+        .fields()
+        .iter()
+        .find(|field| {
+            field.key().entity() == &button && field.key().primary_field().as_str() == "label"
+        })
+        .unwrap();
+    let accepted_label = ui_frame
+        .lower_field_edit(label.key(), label.value().clone())
+        .unwrap();
+    let forged_label = EditorAtomicFieldEdit::new(
+        accepted_label.target().clone(),
+        [EditorFieldWrite::new(
+            ComponentFieldId::new("label"),
+            ComponentValueKind::String,
+            ComponentValue::String(String::new()),
+        )
+        .unwrap()],
+    )
+    .unwrap();
+    let rejected_revision = editor
+        .workspace()
+        .prefab(prefab_document)
+        .unwrap()
+        .revision();
+    let rejected_history = editor
+        .workspace()
+        .prefab(prefab_document)
+        .unwrap()
+        .session()
+        .history_status();
+    let rejected = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyPrefabFieldEdit { edit: forged_label },
+            )],
+        ))
+        .unwrap();
+    assert!(matches!(
+        rejected.outcomes()[0],
+        EditorActionOutcome::Rejected(EditorActionRejection::FieldContractMismatch {
+            document
+        }) if document == prefab_document
+    ));
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .revision(),
+        rejected_revision
+    );
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .session()
+            .history_status(),
+        rejected_history
+    );
+    frame = editor.drive_editor_frame(Duration::ZERO);
+
+    let baseline = ui_frame
+        .lower_field_edit(
+            &width_key,
+            projection.field(&width_key).unwrap().value().clone(),
+        )
+        .unwrap();
+    let begin = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: prefab_document,
+                    entity: Some(button.clone()),
+                }),
+                EditorAction::Gesture(EditorGestureAction::Begin { baseline }),
+            ],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Gesture(EditorGestureOutcome::Began(gesture)) = &begin.outcomes()[1]
+    else {
+        panic!("the exact accepted baseline must begin one gesture");
+    };
+    let gesture_id = gesture.stamp().id();
+    let revision_before = editor
+        .workspace()
+        .prefab(prefab_document)
+        .unwrap()
+        .revision();
+    let history_before = editor
+        .workspace()
+        .prefab(prefab_document)
+        .unwrap()
+        .session()
+        .history_status();
+
+    let first_preview_frame = editor.drive_editor_frame(Duration::ZERO);
+    let first_ui = editor.current_ui_authoring_frame().unwrap();
+    assert_eq!(first_ui.selection().top_entity(), Some(&button));
+    let first_preview = first_ui
+        .lower_field_edit(
+            &width_key,
+            UiAuthoringFieldValue::Dimension {
+                kind: UiAuthoringDimensionKind::Pixels,
+                value: 220.0,
+            },
+        )
+        .unwrap();
+    let previewed = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            first_preview_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Preview {
+                gesture: gesture_id,
+                edit: first_preview,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        previewed.outcomes()[0],
+        EditorActionOutcome::Gesture(EditorGestureOutcome::Previewed(_))
+    ));
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .revision(),
+        revision_before
+    );
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .session()
+            .history_status(),
+        history_before
+    );
+
+    let second_preview_frame = editor.drive_editor_frame(Duration::ZERO);
+    let second_ui = editor.current_ui_authoring_frame().unwrap();
+    assert!(matches!(
+        second_ui
+            .projection()
+            .unwrap()
+            .field(&width_key)
+            .unwrap()
+            .value(),
+        UiAuthoringFieldValue::Dimension { value, .. } if *value == 220.0
+    ));
+    let second_preview = second_ui
+        .lower_field_edit(
+            &width_key,
+            UiAuthoringFieldValue::Dimension {
+                kind: UiAuthoringDimensionKind::Pixels,
+                value: 230.0,
+            },
+        )
+        .unwrap();
+    let _ = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            second_preview_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Preview {
+                gesture: gesture_id,
+                edit: second_preview,
+            })],
+        ))
+        .unwrap();
+
+    let commit_frame = editor.drive_editor_frame(Duration::ZERO);
+    let commit_ui = editor.current_ui_authoring_frame().unwrap();
+    let committed = commit_ui
+        .lower_field_edit(
+            &width_key,
+            UiAuthoringFieldValue::Dimension {
+                kind: UiAuthoringDimensionKind::Pixels,
+                value: 240.0,
+            },
+        )
+        .unwrap();
+    let commit = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            commit_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Commit {
+                gesture: gesture_id,
+                edit: committed,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &commit.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let slot = editor.workspace().prefab(prefab_document).unwrap();
+    assert_eq!(
+        slot.revision().generation(),
+        revision_before.generation() + 1
+    );
+    assert_eq!(slot.session().history_status().undo_depth, 1);
+
+    let accepted_frame = editor.drive_editor_frame(Duration::ZERO);
+    let accepted_ui = editor.current_ui_authoring_frame().unwrap();
+    let accepted_width = accepted_ui
+        .projection()
+        .unwrap()
+        .field(&width_key)
+        .unwrap()
+        .value()
+        .clone();
+    let cancel_baseline = accepted_ui
+        .lower_field_edit(&width_key, accepted_width)
+        .unwrap();
+    let began = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            accepted_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Begin {
+                baseline: cancel_baseline,
+            })],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Gesture(EditorGestureOutcome::Began(cancel_gesture)) =
+        &began.outcomes()[0]
+    else {
+        panic!("a successor gesture must begin");
+    };
+    let cancel_id = cancel_gesture.stamp().id();
+    let cancel_preview_frame = editor.drive_editor_frame(Duration::ZERO);
+    let cancel_ui = editor.current_ui_authoring_frame().unwrap();
+    let cancel_preview = cancel_ui
+        .lower_field_edit(
+            &width_key,
+            UiAuthoringFieldValue::Dimension {
+                kind: UiAuthoringDimensionKind::Pixels,
+                value: 260.0,
+            },
+        )
+        .unwrap();
+    let _ = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            cancel_preview_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Preview {
+                gesture: cancel_id,
+                edit: cancel_preview,
+            })],
+        ))
+        .unwrap();
+    let cancel_frame = editor.drive_editor_frame(Duration::ZERO);
+    let cancelled = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            cancel_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Cancel {
+                gesture: cancel_id,
+                reason: EditorGestureCancelReason::Escape,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        cancelled.outcomes()[0],
+        EditorActionOutcome::Gesture(EditorGestureOutcome::Cancelled(
+            EditorGestureCancelReason::Escape
+        ))
+    ));
+    let restored_frame = editor.drive_editor_frame(Duration::ZERO);
+    let restored = editor.current_ui_authoring_frame().unwrap();
+    assert_eq!(restored.editor_frame(), restored_frame.revision());
+    assert_eq!(
+        restored.last_gesture_cancellation(),
+        Some(EditorGestureCancelReason::Escape)
+    );
+    assert!(matches!(
+        restored
+            .projection()
+            .unwrap()
+            .field(&width_key)
+            .unwrap()
+            .value(),
+        UiAuthoringFieldValue::Dimension { value, .. } if *value == 240.0
+    ));
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .session()
+            .history_status()
+            .undo_depth,
+        1
+    );
+
+    let stale_baseline = restored
+        .lower_field_edit(
+            &width_key,
+            restored
+                .projection()
+                .unwrap()
+                .field(&width_key)
+                .unwrap()
+                .value()
+                .clone(),
+        )
+        .unwrap();
+    let successor_edit = restored
+        .lower_field_edit(
+            &width_key,
+            UiAuthoringFieldValue::Dimension {
+                kind: UiAuthoringDimensionKind::Pixels,
+                value: 250.0,
+            },
+        )
+        .unwrap();
+    let stale = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            restored_frame.revision(),
+            [
+                EditorAction::Gesture(EditorGestureAction::Begin {
+                    baseline: stale_baseline.clone(),
+                }),
+                EditorAction::Mutate(EditorDocumentMutation::ApplyPrefabFieldEdit {
+                    edit: successor_edit,
+                }),
+            ],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Gesture(EditorGestureOutcome::Began(stale_gesture)) =
+        &stale.outcomes()[0]
+    else {
+        panic!("the stale-gesture probe must begin from an accepted frame");
+    };
+    assert!(matches!(
+        &stale.outcomes()[1],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let stale_gesture_id = stale_gesture.stamp().id();
+    let stale_frame = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor
+            .current_ui_authoring_frame()
+            .unwrap()
+            .last_gesture_cancellation(),
+        Some(EditorGestureCancelReason::StaleRevision)
+    );
+    let stale_retry = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            stale_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Preview {
+                gesture: stale_gesture_id,
+                edit: stale_baseline,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        stale_retry.outcomes()[0],
+        EditorActionOutcome::Rejected(_)
+    ));
+
+    let handoff_frame = editor.drive_editor_frame(Duration::ZERO);
+    let handoff_ui = editor.current_ui_authoring_frame().unwrap();
+    let handoff_baseline = handoff_ui
+        .lower_field_edit(
+            &width_key,
+            handoff_ui
+                .projection()
+                .unwrap()
+                .field(&width_key)
+                .unwrap()
+                .value()
+                .clone(),
+        )
+        .unwrap();
+    let began = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            handoff_frame.revision(),
+            [EditorAction::Gesture(EditorGestureAction::Begin {
+                baseline: handoff_baseline,
+            })],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Gesture(EditorGestureOutcome::Began(handoff_gesture)) =
+        &began.outcomes()[0]
+    else {
+        panic!("handoff probe must begin from the current Prefab");
+    };
+    let handoff_id = handoff_gesture.stamp().id();
+    let handoff_commit_frame = editor.drive_editor_frame(Duration::ZERO);
+    let handoff_commit = editor
+        .current_ui_authoring_frame()
+        .unwrap()
+        .lower_field_edit(
+            &width_key,
+            UiAuthoringFieldValue::Dimension {
+                kind: UiAuthoringDimensionKind::Pixels,
+                value: 275.0,
+            },
+        )
+        .unwrap();
+    let handoff_revision = editor
+        .workspace()
+        .prefab(prefab_document)
+        .unwrap()
+        .revision();
+    let handoff_history = editor
+        .workspace()
+        .prefab(prefab_document)
+        .unwrap()
+        .session()
+        .history_status();
+    let handoff = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            handoff_commit_frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                    document: scene_document,
+                }),
+                EditorAction::Gesture(EditorGestureAction::Commit {
+                    gesture: handoff_id,
+                    edit: handoff_commit,
+                }),
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &handoff.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    assert!(matches!(
+        handoff.outcomes()[1],
+        EditorActionOutcome::Gesture(EditorGestureOutcome::Rejected(_))
+    ));
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .revision(),
+        handoff_revision
+    );
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .session()
+            .history_status(),
+        handoff_history
+    );
+
+    let scene_frame = editor.drive_editor_frame(Duration::ZERO);
+    let returned = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            scene_frame.revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::SetActiveDocument {
+                    document: prefab_document,
+                },
+            )],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &returned.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let _ = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        editor
+            .current_ui_authoring_frame()
+            .unwrap()
+            .last_gesture_cancellation(),
+        Some(EditorGestureCancelReason::SourceHandoff)
+    );
 }
 
 #[cfg(feature = "tooling")]
@@ -2793,6 +3434,63 @@ fn identity_transform_record() -> SceneComponentRecord {
                 ]),
             ),
         ]),
+    )
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+fn ui_node_record(
+    position_mode: &str,
+    width_kind: &str,
+    width_value: f64,
+    height_kind: &str,
+    height_value: f64,
+) -> SceneComponentRecord {
+    let dimension = |kind: &str, value: f64| {
+        ComponentValue::map([
+            ("kind", ComponentValue::String(kind.to_owned())),
+            ("value", ComponentValue::f64(value).unwrap()),
+        ])
+    };
+    SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([(
+            "style",
+            ComponentValue::map([
+                (
+                    "position_mode",
+                    ComponentValue::String(position_mode.to_owned()),
+                ),
+                (
+                    "flex_direction",
+                    ComponentValue::String("column".to_owned()),
+                ),
+                ("align_items", ComponentValue::String("stretch".to_owned())),
+                (
+                    "justify_content",
+                    ComponentValue::String("start".to_owned()),
+                ),
+                ("gap", ComponentValue::f64(0.0).unwrap()),
+                (
+                    "padding",
+                    ComponentValue::map([
+                        ("left", ComponentValue::f64(0.0).unwrap()),
+                        ("right", ComponentValue::f64(0.0).unwrap()),
+                        ("top", ComponentValue::f64(0.0).unwrap()),
+                        ("bottom", ComponentValue::f64(0.0).unwrap()),
+                    ]),
+                ),
+                ("flex_grow", ComponentValue::f64(0.0).unwrap()),
+                ("flex_shrink", ComponentValue::f64(1.0).unwrap()),
+                ("width", dimension(width_kind, width_value)),
+                ("height", dimension(height_kind, height_value)),
+                ("left", dimension("px", 10.0)),
+                ("top", dimension("px", 20.0)),
+                ("z_index", ComponentValue::I64(0)),
+                ("visible", ComponentValue::Bool(true)),
+                ("overflow", ComponentValue::String("visible".to_owned())),
+                ("stacking_context", ComponentValue::Bool(false)),
+            ]),
+        )]),
     )
 }
 

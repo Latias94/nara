@@ -64,5 +64,13 @@ pub use runtime::{
 pub use runtime::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 pub use runtime::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "tooling",
+    feature = "runtime-ui"
+))]
+#[doc(hidden)]
+pub use runtime::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub use runtime::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRunReport};

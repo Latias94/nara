@@ -55,6 +55,8 @@ impl EditorProjectSession {
     }
 
     pub(super) fn publish_editor_frame(&mut self) -> Arc<EditorFrameModel> {
+        #[cfg(feature = "runtime-ui")]
+        self.reconcile_editor_gesture();
         #[cfg(feature = "presentation-2d")]
         let preview_world = self.preview.world_snapshot();
         #[cfg(not(feature = "presentation-2d"))]
@@ -81,6 +83,8 @@ impl EditorProjectSession {
             reopen_target,
             self.field_feedback.clone(),
         ));
+        #[cfg(feature = "runtime-ui")]
+        self.publish_ui_authoring_frame(frame.revision());
         self.published_frame = Some(PublishedEditorFrame {
             model: Arc::clone(&frame),
             dispatched: false,

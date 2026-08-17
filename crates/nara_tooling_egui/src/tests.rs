@@ -391,6 +391,7 @@ fn host_field_feedback_is_rendered_only_for_the_matching_field() {
             scene.revision,
             SceneEntityId::new("player").unwrap(),
             ComponentTypeId::new("nara.test.Transform"),
+            ComponentSchemaVersion::ONE,
             ComponentFieldId::new("x"),
         ),
         EditorFieldFeedbackReason::StaleAction,

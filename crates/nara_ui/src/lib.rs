@@ -4,6 +4,7 @@
 extern crate nara_ecs as bevy_ecs;
 
 mod authoring;
+mod authoring_model;
 mod codec;
 mod interaction;
 mod runtime;
@@ -122,6 +123,18 @@ impl Plugin for UiPlugin {
 /// First-party Host presentation seams that are not ordinary runtime UI API.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::authoring_model::{
+        UiAuthoringCanvasFact, UiAuthoringCanvasProjection, UiAuthoringCanvasReady,
+        UiAuthoringCanvasUnavailableReason, UiAuthoringCommitPolicy, UiAuthoringComponentKind,
+        UiAuthoringDiagnostic, UiAuthoringDiagnosticReason, UiAuthoringDimensionKind,
+        UiAuthoringEditError, UiAuthoringEditability, UiAuthoringFieldDescriptor,
+        UiAuthoringFieldGroup, UiAuthoringFieldKey, UiAuthoringFieldKind, UiAuthoringFieldMember,
+        UiAuthoringFieldValue, UiAuthoringGizmoCapabilities, UiAuthoringHierarchyNode,
+        UiAuthoringProjection, UiAuthoringProjectionError, UiAuthoringReadOnlyReason,
+        UiAuthoringScalarMetadata, UiAuthoringSourceMapEntry, UiBrushAuthoringKind,
+        UiDirectManipulationCapability, UiDirectManipulationReadOnlyReason,
+        project_prefab_authoring,
+    };
     pub use crate::codec::prefab_contains_ui_root;
     pub use crate::runtime::{
         UiDeferredPresentationAuthority, UiDeferredPresentationRetry,

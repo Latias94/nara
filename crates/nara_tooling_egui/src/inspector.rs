@@ -32,6 +32,7 @@ struct EguiInspectorFieldKey {
     revision: SceneAuthoringRevision,
     entity: SceneEntityId,
     component: ComponentTypeId,
+    component_version: ComponentSchemaVersion,
     field: ComponentFieldId,
 }
 
@@ -40,6 +41,7 @@ impl EguiInspectorFieldKey {
         scene: &EditorSceneModel,
         entity: &SceneEntityId,
         component: &ComponentTypeId,
+        component_version: ComponentSchemaVersion,
         field: &ComponentFieldId,
     ) -> Self {
         Self {
@@ -47,6 +49,7 @@ impl EguiInspectorFieldKey {
             revision: scene.revision,
             entity: entity.clone(),
             component: component.clone(),
+            component_version,
             field: field.clone(),
         }
     }
@@ -57,6 +60,7 @@ impl EguiInspectorFieldKey {
             self.revision,
             self.entity.clone(),
             self.component.clone(),
+            self.component_version,
             self.field.clone(),
         )
     }
@@ -491,6 +495,7 @@ impl EguiSceneInspectorPanel {
                             scene,
                             entity,
                             &component.component,
+                            component.schema_version,
                             &field.id,
                         ),
                         component_version: component.schema_version,
@@ -699,7 +704,13 @@ impl EguiSceneInspectorPanel {
         field: ComponentFieldId,
     ) {
         self.synchronize_scene(Some(scene));
-        let key = EguiInspectorFieldKey::new(scene, &entity, &component, &field);
+        let key = EguiInspectorFieldKey::new(
+            scene,
+            &entity,
+            &component,
+            ComponentSchemaVersion::ONE,
+            &field,
+        );
         self.field_drafts.insert(
             key,
             FieldDraft {

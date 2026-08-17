@@ -187,6 +187,7 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
         selected_scene.revision,
         entity.clone(),
         component.component.clone(),
+        component.schema_version,
         field.id.clone(),
     );
     let failure = EditorFieldValidationFailure::new(target.clone(), ComponentValueKind::F64);

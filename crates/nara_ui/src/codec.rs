@@ -113,6 +113,26 @@ pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {
     }
 }
 
+pub(crate) fn validate_ui_component_value(
+    id: &ComponentTypeId,
+    value: &ComponentValue,
+) -> Result<(), ComponentCodecError> {
+    match id.as_str() {
+        UI_ROOT_ID => decode_root(value).map(drop),
+        UI_NODE_ID => decode_node(value).map(drop),
+        UI_VISUAL_ID => decode_visual(value).map(drop),
+        UI_TEXT_ID => decode_text(value).map(drop),
+        UI_BUTTON_ID => decode_button(value).map(drop),
+        UI_BUTTON_VISUALS_ID => decode_button_visuals(value).map(drop),
+        UI_SEMANTICS_ID => decode_semantics(value).map(drop),
+        UI_THEME_ID => decode_theme(value).map(drop),
+        _ => Err(ComponentCodecError::invalid_field(
+            "component",
+            "a first-party persistent UI component",
+        )),
+    }
+}
+
 fn decode_root(value: &ComponentValue) -> Result<UiRoot, ComponentCodecError> {
     expect_fields(value, "UiRoot", &["layer"])?;
     Ok(UiRoot::new(read_layer(value.field("layer")?, "layer")?))
