@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-18
+* **Work Registration**: [Editor UI Prefab Structural Composition v1: EUSC-U2](registry/2026-08/2026-08-18T023409Z-editor-ui-prefab-structural-composition-v1-codex-root-7d7909f021ad48a7806020146ca69f6f.md) - Activates the closed UI catalog and exact source-local placement fact unit after verified Prefab structural patch authority.
+* **Verification Evidence**: [EUSC-U1 ordered Prefab structural patch authority](verification/2026-08/2026-08-18T023352Z-eusc-u1-ordered-prefab-structural-patch-authority-8386ed22067743af8cfb1f88b3ffd314.md) - Verifies failure-atomic ordered Prefab entity structure, inverse history, canonical order, and continued component-structure rejection.
 * **Work Registration**: [Editor UI Prefab Structural Composition v1: EUSC-U1](registry/2026-08/2026-08-18T020927Z-editor-ui-prefab-structural-composition-v1-codex-root-21e04043485446999ebe56db277c87bb.md) - Activates the first implementation unit for failure-atomic ordered Prefab structural patches.
 
 ## 2026-08-17
@@ -143,5 +145,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [UIF-U1 presentation reconciliation correction](verification/2026-08/2026-08-08T142032Z-uif-u1-presentation-reconciliation-correction-055102d378e94c819ef419be51d29159.md) - Closes candidate/session generation splits, remove/reinsert resurrection, release backpressure, and staged reconciliation ownership.
 * **Work Registration**: [UI Foundation correction: UIF-U1 presentation reconciliation reopened](registry/2026-08/2026-08-08T114225Z-engine-foundation-contract-completion-codex-root-f2c14c24f0db45639dd4ae460129c852.md) - Closes remove/reinsert state resurrection and makes required lifecycle reconciliation precede input rejection.
 * **Work Registration**: [UI Foundation correction: UIF-U2 root envelopes active](registry/2026-08/2026-08-08T113539Z-engine-foundation-contract-completion-codex-root-43dccd4631f7494a94ffeb7f67271798.md) - Makes root-local admission and last-good visual fallback independent while rebinding current order, layer, and modal safety.
-* **Verification Evidence**: [UIF-U1 atomic presented-session interaction](verification/2026-08/2026-08-08T113450Z-uif-u1-atomic-presented-session-interaction-d13d3f5c4c68440fa5ddacb88ee64eab.md) - Verifies closed dispatch outcomes, atomic reconciliation, invalidation-safe pointer routing, committed focus semantics, and disabled-focus identity.
-* **Work Registration**: [UI Foundation correction: UIF-U1 atomic presented-session interaction active](registry/2026-08/2026-08-08T105208Z-engine-foundation-contract-completion-codex-root-31aad28a16ce4c0391a1a0c75cd0fb87.md) - Closes rejected-transaction atomicity, lifecycle reconciliation, geometry-generation routing, committed semantics, and disabled-focus identity before root compilation work.

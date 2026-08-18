@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "86b15130a325cec46a55dd7a82ef239ac3d6ec26148627f35e8b9b89ebf08319"
+source_fingerprint: "935f60c6ad8a1ab87b170c216ce7fa9c15f224cfd7d0498437634fa5728fa68f"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "86b15130a325cec46a55dd7a82ef239ac3d6ec26148627f35e8b9b89ebf
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `86b15130a325cec46a55dd7a82ef239ac3d6ec26148627f35e8b9b89ebf08319`
-- Immutable records: 499
+- Source fingerprint: `935f60c6ad8a1ab87b170c216ce7fa9c15f224cfd7d0498437634fa5728fa68f`
+- Immutable records: 501
 - Active lane heads: 1
 
 # Active Registrations
@@ -23,7 +23,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
-- [Editor UI Prefab Structural Composition v1: EUSC-U1](registry/2026-08/2026-08-18T020927Z-editor-ui-prefab-structural-composition-v1-codex-root-21e04043485446999ebe56db277c87bb.md): `active` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
+- [Editor UI Prefab Structural Composition v1: EUSC-U2](registry/2026-08/2026-08-18T023409Z-editor-ui-prefab-structural-composition-v1-codex-root-7d7909f021ad48a7806020146ca69f6f.md): `active` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -36,6 +36,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EUSC-U1 ordered Prefab structural patch authority](verification/2026-08/2026-08-18T023352Z-eusc-u1-ordered-prefab-structural-patch-authority-8386ed22067743af8cfb1f88b3ffd314.md) - Verifies failure-atomic ordered Prefab entity structure, inverse history, canonical order, and continued component-structure rejection.
 - **Verification Evidence**: [EUA-U5 saved Prefab content refresh and Runtime restart conformance](verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md) - Verifies receipt-bound Prefab Save, immutable successor project-content publication, bounded generations, stale-source containment, explicit Restart, and one same-source Reference Game trajectory.
 - **Verification Evidence**: [EUA-U4 egui UI authoring and native Canvas conformance](verification/2026-08/2026-08-17T221427Z-eua-u4-egui-ui-authoring-and-native-canvas-conformance-984fe0030b4843c2a1165a9e812955f0.md) - Verifies exact Prefab source navigation, typed egui authoring, atomic Canvas gestures, generic document history, and one bounded native Editor canary.
 - **Verification Evidence**: [EUA-U3 exact-generation UI Canvas conformance](verification/2026-08/2026-08-17T205912Z-eua-u3-exact-generation-ui-canvas-conformance-45077ece034c42569c6a460a562ab0b1.md) - Verifies exact U2 projection reuse, project-owned Canvas environment, resource-complete WGPU image presentation, composite-receipt pick authority, and bounded recovery.
@@ -47,7 +48,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EGV-U3 single Scene and Game viewport presentation](verification/2026-08/2026-08-17T045406Z-egv-u3-single-scene-and-game-viewport-presentation-c793ec2941d64f75be7e2607699a9e79.md) - Verifies mutually exclusive Scene and Game viewport ownership, exact Game composite completion, bounded successor scheduling, resize, and safe GPU recovery.
 - **Verification Evidence**: [EGV-U2 managed Game View runtime placement](verification/2026-08/2026-08-17T014819Z-egv-u2-managed-game-view-runtime-placement-4012c0efb4d046c78031b9ad6d30a2c3.md) - Verifies pre-required-slot Editor Play placement, coordinated unpublished Runtime and target activation, and exact move-only Game candidate ownership.
 - **Verification Evidence**: [EGV-U1 Game View presentation authority](verification/2026-08/2026-08-16T172400Z-egv-u1-game-view-presentation-authority-ee246fd4862d4f0fb06423f9f6bbd9a0.md) - Verifies inactive viewport admission, logical-window Runtime UI mapping, exact external outcome rendezvous, source handoff, and final composite authority.
-- **Verification Evidence**: [ESV-U3 through ESV-U5 Scene View product conformance](verification/2026-08/2026-08-16T121124Z-esv-u3-through-esv-u5-scene-view-product-conformance-b8ad1393f7f945b3984d9847b37cc7ba.md) - Verifies edit-world preview publication, presented-generation Scene View picking, real Editor controls, source round-trip, downstream check/run/export, and bounded GPU owner recovery.
 
 # Integration Notes
 
