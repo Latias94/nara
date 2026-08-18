@@ -20,10 +20,10 @@ use nara_tooling::{
     EditorProjectContentView, EditorProjectView, EditorReopenTarget, EditorSceneModel,
     EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentView, EditorWorkspaceModel,
-    SceneCompositionCommand, SceneCompositionComponentKind, SceneCompositionEntityKind,
-    SceneEditorModel, SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorEntityRow,
-    SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
-    SceneInspectorModel,
+    PrefabCompositionCommand, SceneCompositionCommand, SceneCompositionComponentKind,
+    SceneCompositionEntityKind, SceneEditorModel, SceneInspectorCommand,
+    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
+    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
 };
 
 use crate::{
@@ -351,6 +351,282 @@ fn typed_ui_boolean_control_emits_one_exact_prefab_edit() {
             )]
         )
     );
+}
+
+#[test]
+fn ui_structure_create_emits_the_exact_intent_and_frame_lowered_action() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    );
+    let prefab = EditorDocumentId::from_raw(2);
+    let prefab_revision = revision();
+    let frame = frame_with_active_prefab(scene, prefab, prefab_revision);
+    let projection = test_ui_projection();
+    let selection = EditorSelectionSet::default();
+    let mut panel = EguiEditorPanel::new();
+    let context = egui::Context::default();
+    let placement = projection.structure_placement_candidates(None).unwrap()[0]
+        .placement()
+        .clone();
+    let expected_intent = nara_ui::__private::UiStructureIntent::Create {
+        parameters: nara_ui::__private::UiCreateParameters::Text {
+            content: "Text".to_owned(),
+        },
+        placement: placement.clone(),
+    };
+    let returned_mutation = EditorDocumentMutation::ComposePrefab {
+        document: prefab,
+        base_revision: prefab_revision,
+        command: PrefabCompositionCommand::MoveEntity {
+            entity: SceneEntityId::new("button").unwrap(),
+            to: placement,
+        },
+    };
+    let mut observed_intents = Vec::new();
+    let mut lower_structure = |intent: &nara_ui::__private::UiStructureIntent| {
+        observed_intents.push(intent.clone());
+        Ok(returned_mutation.clone())
+    };
+
+    assert!(
+        click_ui_authoring_control_with_structure_lowering(
+            &context,
+            &mut panel,
+            &frame,
+            prefab,
+            prefab_revision,
+            &selection,
+            &projection,
+            "ui-structure-add",
+            &mut lower_structure,
+        )
+        .into_actions()
+        .is_empty()
+    );
+    assert!(
+        click_ui_authoring_control_with_structure_lowering(
+            &context,
+            &mut panel,
+            &frame,
+            prefab,
+            prefab_revision,
+            &selection,
+            &projection,
+            "ui-structure-kind:Text",
+            &mut lower_structure,
+        )
+        .into_actions()
+        .is_empty()
+    );
+
+    let batch = click_ui_authoring_control_with_structure_lowering(
+        &context,
+        &mut panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        "ui-structure-create-submit",
+        &mut lower_structure,
+    );
+    drop(lower_structure);
+    assert_eq!(observed_intents, [expected_intent]);
+    assert_eq!(
+        batch,
+        EditorActionBatch::new(frame.revision(), [EditorAction::Mutate(returned_mutation)])
+    );
+}
+
+#[test]
+fn ui_structure_delete_requires_confirmation_and_closes_stale_or_cancelled_state() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    );
+    let prefab = EditorDocumentId::from_raw(2);
+    let prefab_revision = revision();
+    let frame = frame_with_active_prefab(scene.clone(), prefab, prefab_revision);
+    let projection = test_ui_projection();
+    let mut selection = EditorSelectionSet::default();
+    let button = SceneEntityId::new("button").unwrap();
+    selection.select_entity(Some(button.clone()));
+    let context = egui::Context::default();
+    let mut panel = EguiEditorPanel::new();
+    let returned_mutation = EditorDocumentMutation::ComposePrefab {
+        document: prefab,
+        base_revision: prefab_revision,
+        command: PrefabCompositionCommand::RemoveEntity {
+            entity: button.clone(),
+        },
+    };
+    let mut observed_intents = Vec::new();
+    let mut lower_structure = |intent: &nara_ui::__private::UiStructureIntent| {
+        observed_intents.push(intent.clone());
+        Ok(returned_mutation.clone())
+    };
+
+    assert!(
+        click_ui_authoring_control_with_structure_lowering(
+            &context,
+            &mut panel,
+            &frame,
+            prefab,
+            prefab_revision,
+            &selection,
+            &projection,
+            "ui-structure-delete",
+            &mut lower_structure,
+        )
+        .into_actions()
+        .is_empty()
+    );
+    let confirmed = click_ui_authoring_control_with_structure_lowering(
+        &context,
+        &mut panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        "ui-structure-delete-confirm",
+        &mut lower_structure,
+    );
+    drop(lower_structure);
+    assert_eq!(
+        observed_intents,
+        [nara_ui::__private::UiStructureIntent::Delete {
+            target: button.clone(),
+        }]
+    );
+    assert_eq!(
+        confirmed,
+        EditorActionBatch::new(frame.revision(), [EditorAction::Mutate(returned_mutation)])
+    );
+
+    let mut stale_panel = EguiEditorPanel::new();
+    let _ = click_ui_authoring_control(
+        &context,
+        &mut stale_panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        "ui-structure-delete",
+    );
+    let successor_revision = revision();
+    let successor = frame_with_active_prefab(scene, prefab, successor_revision);
+    assert!(
+        render_ui_authoring_frame(
+            &context,
+            &mut stale_panel,
+            &successor,
+            prefab,
+            successor_revision,
+            &selection,
+            &projection,
+            egui::RawInput::default(),
+        )
+        .into_actions()
+        .is_empty()
+    );
+    assert!(test_control_rect("ui-structure-delete-confirm").is_none());
+
+    let mut cancelled_panel = EguiEditorPanel::new();
+    let _ = click_ui_authoring_control(
+        &context,
+        &mut cancelled_panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        "ui-structure-add",
+    );
+    let mut escape = egui::RawInput::default();
+    escape.events.push(egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    let cancelled = render_ui_authoring_frame(
+        &context,
+        &mut cancelled_panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        escape,
+    );
+    assert!(cancelled.into_actions().is_empty());
+    assert!(test_control_rect("ui-structure-create-submit").is_none());
+
+    let _ = render_ui_authoring_frame(
+        &context,
+        &mut cancelled_panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        egui::RawInput::default(),
+    );
+    let add_focus = context
+        .memory(|memory| memory.focused())
+        .expect("Escape should restore hierarchy command focus");
+    let mut enter = egui::RawInput::default();
+    enter.events.push(egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    let keyboard_opened = render_ui_authoring_frame(
+        &context,
+        &mut cancelled_panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        enter,
+    );
+    assert!(keyboard_opened.into_actions().is_empty());
+    assert!(test_control_rect("ui-structure-create-submit").is_some());
+    let form_focus = context
+        .memory(|memory| memory.focused())
+        .expect("the create form should focus its first control");
+    assert_ne!(form_focus, add_focus);
+
+    let mut tab = egui::RawInput::default();
+    tab.events.push(egui::Event::Key {
+        key: egui::Key::Tab,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    let _ = render_ui_authoring_frame(
+        &context,
+        &mut cancelled_panel,
+        &frame,
+        prefab,
+        prefab_revision,
+        &selection,
+        &projection,
+        tab,
+    );
+    assert_ne!(context.memory(|memory| memory.focused()), Some(form_focus));
 }
 
 #[test]
@@ -1097,8 +1373,14 @@ fn click_control(
     label: &str,
 ) -> EditorActionBatch {
     let context = egui::Context::default();
-    let _ = render_editor_frame(&context, panel, frame, egui::RawInput::default());
-    let _ = render_editor_frame(&context, panel, frame, egui::RawInput::default());
+    click_recorded_control(label, |input| {
+        render_editor_frame(&context, panel, frame, input)
+    })
+}
+
+fn click_recorded_control<T>(label: &str, mut render: impl FnMut(egui::RawInput) -> T) -> T {
+    let _ = render(egui::RawInput::default());
+    let _ = render(egui::RawInput::default());
     let position = test_control_rect(label)
         .unwrap_or_else(|| panic!("control {label} was not rendered"))
         .center();
@@ -1113,7 +1395,7 @@ fn click_control(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = render_editor_frame(&context, panel, frame, pressed);
+    let _ = render(pressed);
 
     let mut released = egui::RawInput::default();
     released.events = vec![
@@ -1125,7 +1407,7 @@ fn click_control(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    render_editor_frame(&context, panel, frame, released)
+    render(released)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1139,40 +1421,49 @@ fn click_ui_authoring_control(
     projection: &nara_ui::__private::UiAuthoringProjection,
     label: &str,
 ) -> EditorActionBatch {
-    let render = |panel: &mut EguiEditorPanel, input| {
-        render_ui_authoring_frame(
-            context, panel, frame, document, revision, selection, projection, input,
-        )
+    let mut lower_structure = |_intent: &nara_ui::__private::UiStructureIntent| {
+        panic!("this Adapter interaction must not lower a structure intent")
     };
-    let _ = render(panel, egui::RawInput::default());
-    let _ = render(panel, egui::RawInput::default());
-    let position = test_control_rect(label)
-        .unwrap_or_else(|| panic!("control {label} was not rendered"))
-        .center();
+    click_ui_authoring_control_with_structure_lowering(
+        context,
+        panel,
+        frame,
+        document,
+        revision,
+        selection,
+        projection,
+        label,
+        &mut lower_structure,
+    )
+}
 
-    let mut pressed = egui::RawInput::default();
-    pressed.events = vec![
-        egui::Event::PointerMoved(position),
-        egui::Event::PointerButton {
-            pos: position,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::default(),
-        },
-    ];
-    let _ = render(panel, pressed);
-
-    let mut released = egui::RawInput::default();
-    released.events = vec![
-        egui::Event::PointerMoved(position),
-        egui::Event::PointerButton {
-            pos: position,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::default(),
-        },
-    ];
-    render(panel, released)
+#[allow(clippy::too_many_arguments)]
+fn click_ui_authoring_control_with_structure_lowering(
+    context: &egui::Context,
+    panel: &mut EguiEditorPanel,
+    frame: &EditorFrameModel,
+    document: EditorDocumentId,
+    revision: nara_scene::SceneAuthoringRevision,
+    selection: &EditorSelectionSet,
+    projection: &nara_ui::__private::UiAuthoringProjection,
+    label: &str,
+    lower_structure: &mut dyn FnMut(
+        &nara_ui::__private::UiStructureIntent,
+    ) -> Result<EditorDocumentMutation, String>,
+) -> EditorActionBatch {
+    click_recorded_control(label, |input| {
+        render_ui_authoring_frame_with_structure_lowering(
+            context,
+            panel,
+            frame,
+            document,
+            revision,
+            selection,
+            projection,
+            input,
+            lower_structure,
+        )
+    })
 }
 
 fn click_viewport_control(
@@ -1182,37 +1473,9 @@ fn click_viewport_control(
     selected: EguiEditorViewport,
     label: &str,
 ) -> EguiEditorOutput {
-    let _ =
-        render_editor_viewport_frame(context, panel, frame, egui::RawInput::default(), selected);
-    let _ =
-        render_editor_viewport_frame(context, panel, frame, egui::RawInput::default(), selected);
-    let position = test_control_rect(label)
-        .unwrap_or_else(|| panic!("control {label} was not rendered"))
-        .center();
-
-    let mut pressed = egui::RawInput::default();
-    pressed.events = vec![
-        egui::Event::PointerMoved(position),
-        egui::Event::PointerButton {
-            pos: position,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::default(),
-        },
-    ];
-    let _ = render_editor_viewport_frame(context, panel, frame, pressed, selected);
-
-    let mut released = egui::RawInput::default();
-    released.events = vec![
-        egui::Event::PointerMoved(position),
-        egui::Event::PointerButton {
-            pos: position,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::default(),
-        },
-    ];
-    render_editor_viewport_frame(context, panel, frame, released, selected)
+    click_recorded_control(label, |input| {
+        render_editor_viewport_frame(context, panel, frame, input, selected)
+    })
 }
 
 fn render_editor_frame(
@@ -1249,7 +1512,37 @@ fn render_ui_authoring_frame(
     revision: nara_scene::SceneAuthoringRevision,
     selection: &EditorSelectionSet,
     projection: &nara_ui::__private::UiAuthoringProjection,
+    input: egui::RawInput,
+) -> EditorActionBatch {
+    let mut lower_structure = |_intent: &nara_ui::__private::UiStructureIntent| {
+        panic!("this Adapter frame must not lower a structure intent")
+    };
+    render_ui_authoring_frame_with_structure_lowering(
+        context,
+        panel,
+        frame,
+        document,
+        revision,
+        selection,
+        projection,
+        input,
+        &mut lower_structure,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_ui_authoring_frame_with_structure_lowering(
+    context: &egui::Context,
+    panel: &mut EguiEditorPanel,
+    frame: &EditorFrameModel,
+    document: EditorDocumentId,
+    revision: nara_scene::SceneAuthoringRevision,
+    selection: &EditorSelectionSet,
+    projection: &nara_ui::__private::UiAuthoringProjection,
     mut input: egui::RawInput,
+    lower_structure: &mut dyn FnMut(
+        &nara_ui::__private::UiStructureIntent,
+    ) -> Result<EditorDocumentMutation, String>,
 ) -> EditorActionBatch {
     input.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
@@ -1264,14 +1557,22 @@ fn render_ui_authoring_frame(
      -> Result<EditorAtomicFieldEdit, String> {
         panic!("hierarchy selection must not lower a direct edit")
     };
+    let image_choices = nara_ui::__private::UiImageChoiceSet::new(
+        nara_ui::__private::UiImageChoiceGeneration::new(1),
+        [],
+    )
+    .unwrap();
     let authoring = EguiUiAuthoringInput::new(
         document,
         revision,
         selection,
         None,
         Ok(projection),
+        image_choices.generation(),
+        Ok(&image_choices),
         &mut lower_field,
         &mut lower_direct,
+        lower_structure,
     );
     let mut authoring = Some(authoring);
     let mut response = None;

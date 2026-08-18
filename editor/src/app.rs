@@ -225,6 +225,13 @@ impl EditorApplication {
                         .lower_direct_edit(edit)
                         .map_err(|error| error.to_string())
                 };
+                let mut lower_structure = |intent: &nara::ui::__private::UiStructureIntent| {
+                    ui_authoring
+                        .as_ref()
+                        .expect("the lowering callback exists only with a UI authoring frame")
+                        .lower_structure_intent(intent)
+                        .map_err(|error| error.to_string())
+                };
                 let authoring = ui_authoring.as_ref().and_then(|authoring| {
                     (authoring.editor_frame() == frame.revision()).then(|| {
                         EguiUiAuthoringInput::new(
@@ -233,8 +240,11 @@ impl EditorApplication {
                             authoring.selection(),
                             authoring.gesture(),
                             authoring.projection(),
+                            authoring.image_choice_generation(),
+                            authoring.image_choices(),
                             &mut lower_field,
                             &mut lower_direct,
+                            &mut lower_structure,
                         )
                     })
                 });
@@ -291,8 +301,15 @@ impl EditorApplication {
         }
         let batch = EditorActionBatch::new(frame_revision, actions);
         dispatch.actions_observed = match self.session.dispatch_editor_actions(batch) {
-            Ok(report) => !report.outcomes().is_empty(),
-            Err(_) => true,
+            Ok(report) => {
+                let observed = !report.outcomes().is_empty();
+                self.panel.observe_action_report(&report);
+                observed
+            }
+            Err(rejection) => {
+                self.panel.observe_action_rejection(rejection);
+                true
+            }
         };
         dispatch
     }

@@ -1,21 +1,27 @@
 use std::collections::HashMap;
 
 use egui::{
-    Align2, Color32, ComboBox, DragValue, FontId, PointerButton, Pos2, Rect, RichText, Sense,
-    Stroke, TextEdit, TextureId, Ui, Vec2,
+    Align2, Button, Color32, ComboBox, DragValue, FontId, PointerButton, Pos2, Rect, RichText,
+    Sense, Stroke, TextEdit, TextureId, Ui, Vec2,
 };
-use nara_scene::{SceneAuthoringRevision, SceneEntityId};
+use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePlacementAnchor};
 use nara_tooling::{
-    EditorAction, EditorAtomicFieldEdit, EditorDocumentId, EditorDocumentMutation,
-    EditorGestureAction, EditorGestureCancelReason, EditorGestureView, EditorNavigationAction,
-    EditorSelectionSet,
+    EditorAction, EditorActionBatchReport, EditorActionOutcome, EditorActionRejection,
+    EditorAtomicFieldEdit, EditorDocumentId, EditorDocumentMutation, EditorGestureAction,
+    EditorGestureCancelReason, EditorGestureView, EditorNavigationAction, EditorSelectionSet,
+    PrefabCompositionOutcome,
 };
 use nara_ui::__private::{
     UiAuthoringCanvasProjection, UiAuthoringCommitPolicy, UiAuthoringDirectEdit,
     UiAuthoringEditability, UiAuthoringFieldDescriptor, UiAuthoringFieldGroup, UiAuthoringFieldKey,
     UiAuthoringFieldKind, UiAuthoringFieldValue, UiAuthoringProjection, UiAuthoringProjectionError,
-    UiAuthoringReadOnlyReason, UiBrushAuthoringKind, UiDirectManipulationCapability,
+    UiAuthoringReadOnlyReason, UiAuthoringStructuralCapability,
+    UiAuthoringStructuralReadOnlyReason, UiBrushAuthoringKind, UiCatalogNodeKind,
+    UiCreateParameters, UiDirectManipulationCapability, UiImageChoiceGeneration,
+    UiImageChoiceSelection, UiImageChoiceSet, UiPlacementCandidate, UiStructureIntent,
+    UiStructureRejection,
 };
+use nara_ui::UiActionId;
 
 use crate::scene_view::fitted_image_rect;
 
@@ -28,6 +34,8 @@ pub struct EguiUiAuthoringInput<'a> {
     selection: &'a EditorSelectionSet,
     gesture: Option<&'a EditorGestureView>,
     projection: Result<&'a UiAuthoringProjection, UiAuthoringProjectionError>,
+    image_choice_generation: UiImageChoiceGeneration,
+    image_choices: Result<&'a UiImageChoiceSet, UiStructureRejection>,
     lower_field_edit: &'a mut dyn for<'key> FnMut(
         &'key UiAuthoringFieldKey,
         UiAuthoringFieldValue,
@@ -35,6 +43,10 @@ pub struct EguiUiAuthoringInput<'a> {
     lower_direct_edit: &'a mut dyn for<'edit> FnMut(
         &'edit UiAuthoringDirectEdit,
     ) -> Result<EditorAtomicFieldEdit, String>,
+    lower_structure_intent:
+        &'a mut dyn for<'intent> FnMut(
+            &'intent UiStructureIntent,
+        ) -> Result<EditorDocumentMutation, String>,
 }
 
 impl<'a> EguiUiAuthoringInput<'a> {
@@ -47,6 +59,8 @@ impl<'a> EguiUiAuthoringInput<'a> {
         selection: &'a EditorSelectionSet,
         gesture: Option<&'a EditorGestureView>,
         projection: Result<&'a UiAuthoringProjection, UiAuthoringProjectionError>,
+        image_choice_generation: UiImageChoiceGeneration,
+        image_choices: Result<&'a UiImageChoiceSet, UiStructureRejection>,
         lower_field_edit: &'a mut dyn for<'key> FnMut(
             &'key UiAuthoringFieldKey,
             UiAuthoringFieldValue,
@@ -56,6 +70,12 @@ impl<'a> EguiUiAuthoringInput<'a> {
             &'edit UiAuthoringDirectEdit,
         )
             -> Result<EditorAtomicFieldEdit, String>,
+        lower_structure_intent: &'a mut dyn for<'intent> FnMut(
+            &'intent UiStructureIntent,
+        ) -> Result<
+            EditorDocumentMutation,
+            String,
+        >,
     ) -> Self {
         Self {
             document,
@@ -63,8 +83,11 @@ impl<'a> EguiUiAuthoringInput<'a> {
             selection,
             gesture,
             projection,
+            image_choice_generation,
+            image_choices,
             lower_field_edit,
             lower_direct_edit,
+            lower_structure_intent,
         }
     }
 
@@ -78,6 +101,14 @@ impl<'a> EguiUiAuthoringInput<'a> {
 
     fn projection(&self) -> Result<&UiAuthoringProjection, UiAuthoringProjectionError> {
         self.projection
+    }
+
+    fn image_choice_generation(&self) -> UiImageChoiceGeneration {
+        self.image_choice_generation
+    }
+
+    fn image_choices(&self) -> Result<&UiImageChoiceSet, UiStructureRejection> {
+        self.image_choices
     }
 
     fn selected_entity(&self) -> Option<&SceneEntityId> {
@@ -101,6 +132,13 @@ impl<'a> EguiUiAuthoringInput<'a> {
         edit: &UiAuthoringDirectEdit,
     ) -> Result<EditorAtomicFieldEdit, String> {
         (self.lower_direct_edit)(edit)
+    }
+
+    fn lower_structure_intent(
+        &mut self,
+        intent: &UiStructureIntent,
+    ) -> Result<EditorDocumentMutation, String> {
+        (self.lower_structure_intent)(intent)
     }
 }
 
@@ -237,6 +275,103 @@ struct EguiUiContinuousDraft {
 struct EguiUiAuthoringScope {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
+    image_choice_generation: UiImageChoiceGeneration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EguiUiStructureDialog {
+    Create(EguiUiCreateDraft),
+    Move(EguiUiMoveDraft),
+    Delete(EguiUiDeleteDraft),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EguiUiCreateDraft {
+    kind: UiCatalogNodeKind,
+    placement: ScenePlacement,
+    text: String,
+    image: Option<UiImageChoiceSelection>,
+    button_label: String,
+    button_action: String,
+    focus: EguiUiCreateFocus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EguiUiCreateField {
+    Placement,
+    Text,
+    Image,
+    ButtonLabel,
+    ButtonAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EguiUiCreateFocus {
+    Initial,
+    Settled,
+    Invalid(EguiUiCreateField),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EguiUiCreateValidation {
+    field: EguiUiCreateField,
+    message: String,
+}
+
+impl EguiUiCreateDraft {
+    fn new(placement: ScenePlacement) -> Self {
+        Self {
+            kind: UiCatalogNodeKind::Container,
+            placement,
+            text: "Text".to_owned(),
+            image: None,
+            button_label: "Button".to_owned(),
+            button_action: String::new(),
+            focus: EguiUiCreateFocus::Initial,
+        }
+    }
+
+    fn parameters(&self) -> Result<UiCreateParameters, EguiUiCreateValidation> {
+        match self.kind {
+            UiCatalogNodeKind::Container => Ok(UiCreateParameters::Container),
+            UiCatalogNodeKind::Text => Ok(UiCreateParameters::Text {
+                content: self.text.clone(),
+            }),
+            UiCatalogNodeKind::Image => Ok(UiCreateParameters::Image {
+                selection: self.image.clone(),
+            }),
+            UiCatalogNodeKind::Button => {
+                let action =
+                    UiActionId::new(self.button_action.trim().to_owned()).map_err(|error| {
+                        EguiUiCreateValidation {
+                            field: EguiUiCreateField::ButtonAction,
+                            message: error.to_string(),
+                        }
+                    })?;
+                Ok(UiCreateParameters::Button {
+                    label: self.button_label.clone(),
+                    action: Some(action),
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EguiUiMoveDraft {
+    target: SceneEntityId,
+    placement: ScenePlacement,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EguiUiDeleteDraft {
+    target: SceneEntityId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EguiUiStructureFocus {
+    Hierarchy,
+    Entity(SceneEntityId),
 }
 
 #[derive(Debug, Default)]
@@ -245,6 +380,10 @@ pub(crate) struct EguiUiAuthoringPanel {
     text_drafts: HashMap<EguiUiFieldDraftKey, EguiUiTextDraft>,
     field_errors: HashMap<EguiUiFieldDraftKey, String>,
     continuous: Option<EguiUiContinuousDraft>,
+    structure_dialog: Option<EguiUiStructureDialog>,
+    structure_error: Option<String>,
+    structure_pending_action: Option<usize>,
+    structure_focus: Option<EguiUiStructureFocus>,
 }
 
 impl EguiUiAuthoringPanel {
@@ -252,49 +391,326 @@ impl EguiUiAuthoringPanel {
         let next = input.map(|input| EguiUiAuthoringScope {
             document: input.document(),
             revision: input.revision(),
+            image_choice_generation: input.image_choice_generation(),
         });
         if self.scope != next {
+            if self.structure_dialog.is_some() || self.structure_pending_action.is_some() {
+                self.structure_focus = Some(EguiUiStructureFocus::Hierarchy);
+            }
             self.scope = next;
             self.text_drafts.clear();
             self.field_errors.clear();
             self.continuous = None;
+            self.structure_dialog = None;
+            self.structure_error = None;
+            self.structure_pending_action = None;
         }
+    }
+
+    pub(crate) fn observe_action_report(&mut self, report: &EditorActionBatchReport) {
+        let Some(action_index) = self.structure_pending_action else {
+            return;
+        };
+        match report.outcomes().get(action_index) {
+            Some(EditorActionOutcome::Workspace(report)) => {
+                if let Some(outcome) = &report.prefab_composition_outcome {
+                    self.accept_structure_outcome(outcome);
+                    return;
+                }
+            }
+            Some(EditorActionOutcome::Rejected(rejection)) => {
+                self.reject_structure_action(*rejection);
+                return;
+            }
+            _ => {}
+        }
+        self.structure_pending_action = None;
+        self.structure_error = Some("The structure change was not applied".to_owned());
+    }
+
+    pub(crate) fn observe_action_rejection(&mut self, rejection: EditorActionRejection) {
+        if self.structure_pending_action.is_some() {
+            self.reject_structure_action(rejection);
+        }
+    }
+
+    fn accept_structure_outcome(&mut self, outcome: &PrefabCompositionOutcome) {
+        self.structure_focus = Some(match outcome {
+            PrefabCompositionOutcome::Created { entity }
+            | PrefabCompositionOutcome::Moved { entity }
+            | PrefabCompositionOutcome::NoOp { entity } => {
+                EguiUiStructureFocus::Entity(entity.clone())
+            }
+            PrefabCompositionOutcome::Removed {
+                selection: Some(entity),
+                ..
+            } => EguiUiStructureFocus::Entity(entity.clone()),
+            PrefabCompositionOutcome::Removed {
+                selection: None, ..
+            } => EguiUiStructureFocus::Hierarchy,
+        });
+        self.structure_dialog = None;
+        self.structure_error = None;
+        self.structure_pending_action = None;
+    }
+
+    fn reject_structure_action(&mut self, rejection: EditorActionRejection) {
+        self.structure_pending_action = None;
+        self.structure_error = Some(structure_action_rejection_label(rejection).to_owned());
     }
 
     pub(crate) fn show_hierarchy(
         &mut self,
         ui: &mut Ui,
-        input: &EguiUiAuthoringInput<'_>,
+        input: &mut EguiUiAuthoringInput<'_>,
+        editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
         ui.heading("UI Hierarchy");
-        let Ok(projection) = input.projection() else {
-            ui.label(RichText::new("UI source is unavailable").weak());
-            return;
-        };
-        for node in projection.hierarchy() {
-            ui.horizontal(|ui| {
-                ui.add_space(f32::from(node.depth()) * 16.0);
-                let selected = input
-                    .selection
-                    .entities()
-                    .any(|entity| entity == node.entity());
-                let response = ui.selectable_label(selected, node.entity().as_str());
-                #[cfg(test)]
-                crate::editor::record_test_control(
-                    format!("ui-node:{}", node.entity().as_str()),
-                    response.rect,
-                );
-                if response.clicked() {
-                    actions.push(EditorAction::Navigate(
-                        EditorNavigationAction::SelectEntity {
-                            document: input.document(),
-                            entity: Some(node.entity().clone()),
-                        },
-                    ));
+        let requested_intent = {
+            let Ok(projection) = input.projection() else {
+                if self.structure_dialog.take().is_some() {
+                    self.structure_focus = Some(EguiUiStructureFocus::Hierarchy);
+                }
+                self.structure_pending_action = None;
+                ui.label(RichText::new("UI source is unavailable").weak());
+                return;
+            };
+            if let Some(EguiUiStructureFocus::Entity(entity)) = &self.structure_focus
+                && !projection
+                    .hierarchy()
+                    .iter()
+                    .any(|node| node.entity() == entity)
+            {
+                self.structure_focus = Some(EguiUiStructureFocus::Hierarchy);
+            }
+            let selected = input.selected_entity().and_then(|selected| {
+                projection
+                    .hierarchy()
+                    .iter()
+                    .find(|node| node.entity() == selected)
+            });
+            let structure_editable = selected.is_some_and(|node| {
+                node.structural_capability() == UiAuthoringStructuralCapability::Editable
+            });
+
+            ui.horizontal_wrapped(|ui| {
+                let add = ui
+                    .add_enabled(
+                        editing_enabled && self.structure_pending_action.is_none(),
+                        Button::new("+ Add"),
+                    )
+                    .on_hover_text("Add one closed-catalog UI node");
+                record_structure_control("ui-structure-add", &add);
+                if matches!(self.structure_focus, Some(EguiUiStructureFocus::Hierarchy))
+                    && add.enabled()
+                {
+                    add.request_focus();
+                    self.structure_focus = None;
+                }
+                if add.clicked() {
+                    match projection.structure_placement_candidates(None) {
+                        Ok(candidates) if !candidates.is_empty() => {
+                            self.structure_dialog = Some(EguiUiStructureDialog::Create(
+                                EguiUiCreateDraft::new(candidates[0].placement().clone()),
+                            ));
+                            self.structure_error = None;
+                        }
+                        Ok(_) => {
+                            self.structure_error =
+                                Some("No exact source-local placement is available".to_owned());
+                        }
+                        Err(error) => self.structure_error = Some(error.to_string()),
+                    }
+                }
+
+                let structural_reason =
+                    selected.and_then(|node| match node.structural_capability() {
+                        UiAuthoringStructuralCapability::Editable => None,
+                        UiAuthoringStructuralCapability::ReadOnly(reason) => {
+                            Some(structural_read_only_label(reason))
+                        }
+                    });
+                let move_node = ui
+                    .add_enabled(
+                        editing_enabled
+                            && structure_editable
+                            && self.structure_pending_action.is_none(),
+                        Button::new("\u{2195} Move"),
+                    )
+                    .on_hover_text("Move or reparent the selected UI subtree")
+                    .on_disabled_hover_text(
+                        structural_reason.unwrap_or("Select an editable UI node"),
+                    );
+                record_structure_control("ui-structure-move", &move_node);
+                if move_node.clicked()
+                    && let Some(selected) = selected
+                {
+                    match projection.structure_placement_candidates(Some(selected.entity())) {
+                        Ok(candidates) if !candidates.is_empty() => {
+                            let placement = candidates
+                                .iter()
+                                .find(|candidate| candidate.is_current())
+                                .unwrap_or(&candidates[0])
+                                .placement()
+                                .clone();
+                            self.structure_dialog =
+                                Some(EguiUiStructureDialog::Move(EguiUiMoveDraft {
+                                    target: selected.entity().clone(),
+                                    placement,
+                                }));
+                            self.structure_error = None;
+                        }
+                        Ok(_) => {
+                            self.structure_error =
+                                Some("No exact move target is available".to_owned());
+                        }
+                        Err(error) => self.structure_error = Some(error.to_string()),
+                    }
+                }
+
+                let delete = ui
+                    .add_enabled(
+                        editing_enabled
+                            && structure_editable
+                            && self.structure_pending_action.is_none(),
+                        Button::new("\u{2715} Delete"),
+                    )
+                    .on_hover_text("Delete the selected source-local UI subtree")
+                    .on_disabled_hover_text(
+                        structural_reason.unwrap_or("Select an editable UI node"),
+                    );
+                record_structure_control("ui-structure-delete", &delete);
+                if delete.clicked()
+                    && let Some(selected) = selected
+                {
+                    self.structure_dialog =
+                        Some(EguiUiStructureDialog::Delete(EguiUiDeleteDraft {
+                            target: selected.entity().clone(),
+                        }));
+                    self.structure_error = None;
                 }
             });
+
+            let requested =
+                self.show_structure_dialog(ui, projection, input.image_choices(), editing_enabled);
+
+            ui.separator();
+            for node in projection.hierarchy() {
+                ui.horizontal(|ui| {
+                    ui.add_space(f32::from(node.depth()) * 16.0);
+                    let selected = input
+                        .selection
+                        .entities()
+                        .any(|entity| entity == node.entity());
+                    let response = ui
+                        .selectable_label(selected, node.display_label())
+                        .on_hover_ui(|ui| {
+                            ui.label(format!("{} - {}", node.kind().label(), node.display_path()));
+                        });
+                    #[cfg(test)]
+                    record_structure_control(
+                        &format!("ui-node:{}", node.entity().as_str()),
+                        &response,
+                    );
+                    if matches!(
+                        self.structure_focus.as_ref(),
+                        Some(EguiUiStructureFocus::Entity(entity)) if entity == node.entity()
+                    ) {
+                        response.request_focus();
+                        self.structure_focus = None;
+                    }
+                    if response.clicked() {
+                        actions.push(EditorAction::Navigate(
+                            EditorNavigationAction::SelectEntity {
+                                document: input.document(),
+                                entity: Some(node.entity().clone()),
+                            },
+                        ));
+                    }
+                });
+            }
+            requested
+        };
+
+        if let Some(intent) = requested_intent {
+            match input.lower_structure_intent(&intent) {
+                Ok(mutation) => {
+                    self.structure_error = None;
+                    self.structure_pending_action = Some(actions.len());
+                    actions.push(EditorAction::Mutate(mutation));
+                }
+                Err(error) => {
+                    self.structure_error = Some(error);
+                    self.structure_pending_action = None;
+                }
+            }
         }
+    }
+
+    fn show_structure_dialog(
+        &mut self,
+        ui: &mut Ui,
+        projection: &UiAuthoringProjection,
+        image_choices: Result<&UiImageChoiceSet, UiStructureRejection>,
+        editing_enabled: bool,
+    ) -> Option<UiStructureIntent> {
+        let Some(mut dialog) = self.structure_dialog.take() else {
+            if let Some(error) = &self.structure_error {
+                ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
+            }
+            return None;
+        };
+        if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.structure_error = None;
+            self.structure_pending_action = None;
+            self.structure_focus = Some(EguiUiStructureFocus::Hierarchy);
+            return None;
+        }
+
+        ui.separator();
+        let EguiUiStructureDialogResponse {
+            cancelled,
+            changed,
+            intent,
+        } = match &mut dialog {
+            EguiUiStructureDialog::Create(draft) => show_create_dialog(
+                ui,
+                draft,
+                projection,
+                image_choices,
+                editing_enabled && self.structure_pending_action.is_none(),
+            ),
+            EguiUiStructureDialog::Move(draft) => show_move_dialog(
+                ui,
+                draft,
+                projection,
+                editing_enabled && self.structure_pending_action.is_none(),
+            ),
+            EguiUiStructureDialog::Delete(draft) => show_delete_dialog(
+                ui,
+                draft,
+                projection,
+                editing_enabled && self.structure_pending_action.is_none(),
+            ),
+        };
+        if changed {
+            self.structure_error = None;
+        }
+        if let Some(error) = &self.structure_error {
+            ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
+        }
+        if self.structure_pending_action.is_some() {
+            ui.label(RichText::new("Applying structure change").weak());
+        }
+        if cancelled {
+            self.structure_error = None;
+            self.structure_focus = Some(EguiUiStructureFocus::Hierarchy);
+            return None;
+        } else {
+            self.structure_dialog = Some(dialog);
+        }
+        intent
     }
 
     pub(crate) fn show_inspector(
@@ -480,6 +896,509 @@ impl EguiUiAuthoringPanel {
             }
         }
     }
+}
+
+struct EguiUiStructureDialogResponse {
+    cancelled: bool,
+    changed: bool,
+    intent: Option<UiStructureIntent>,
+}
+
+fn show_create_dialog(
+    ui: &mut Ui,
+    draft: &mut EguiUiCreateDraft,
+    projection: &UiAuthoringProjection,
+    image_choices: Result<&UiImageChoiceSet, UiStructureRejection>,
+    enabled: bool,
+) -> EguiUiStructureDialogResponse {
+    ui.label(RichText::new("Add UI node").strong());
+    ui.label(RichText::new("Kind").weak());
+    let previous_kind = draft.kind;
+    ui.horizontal_wrapped(|ui| {
+        for kind in UiCatalogNodeKind::ALL {
+            let response = ui.add_enabled(
+                enabled,
+                Button::new(kind.label()).selected(draft.kind == kind),
+            );
+            #[cfg(test)]
+            record_structure_control(&format!("ui-structure-kind:{}", kind.label()), &response);
+            if response.clicked() {
+                draft.kind = kind;
+            }
+        }
+    });
+    let mut changed = draft.kind != previous_kind;
+    if changed {
+        draft.focus = EguiUiCreateFocus::Initial;
+    }
+
+    let candidates = projection.structure_placement_candidates(None);
+    let (placement_valid, placement_response) = match &candidates {
+        Ok(candidates) => {
+            let (valid, placement_changed, response) = show_placement_control(
+                ui,
+                "ui-structure-create-placement",
+                &mut draft.placement,
+                candidates,
+                enabled,
+            );
+            changed |= placement_changed;
+            (valid, Some(response))
+        }
+        Err(error) => {
+            ui.label(RichText::new(error.to_string()).color(ui.visuals().error_fg_color));
+            (false, None)
+        }
+    };
+
+    let intent = draft
+        .parameters()
+        .map(|parameters| UiStructureIntent::Create {
+            parameters,
+            placement: draft.placement.clone(),
+        });
+    let validation = match &intent {
+        Err(validation) => Some(validation.clone()),
+        Ok(intent) => projection
+            .prepare_structure(intent, image_choices.ok())
+            .err()
+            .map(|error| create_validation_for_rejection(draft.kind, error)),
+    };
+    if validation.is_none() && matches!(draft.focus, EguiUiCreateFocus::Invalid(_)) {
+        draft.focus = EguiUiCreateFocus::Settled;
+    }
+    let should_focus_invalid = validation
+        .as_ref()
+        .is_some_and(|validation| match draft.focus {
+            EguiUiCreateFocus::Initial => false,
+            EguiUiCreateFocus::Settled => true,
+            EguiUiCreateFocus::Invalid(field) => field != validation.field,
+        });
+
+    let mut initial_focus_applied = false;
+    let mut invalid_focus_applied = false;
+    if let Some(response) = &placement_response {
+        invalid_focus_applied |= show_create_validation_for_field(
+            ui,
+            validation.as_ref(),
+            EguiUiCreateField::Placement,
+            response,
+            should_focus_invalid,
+        );
+    }
+    match draft.kind {
+        UiCatalogNodeKind::Container => {
+            if matches!(draft.focus, EguiUiCreateFocus::Initial)
+                && let Some(response) = &placement_response
+            {
+                response.request_focus();
+                initial_focus_applied = true;
+            }
+        }
+        UiCatalogNodeKind::Text => {
+            let label = ui.label(RichText::new("Text").weak());
+            let response = ui
+                .add_enabled(enabled, TextEdit::singleline(&mut draft.text))
+                .labelled_by(label.id);
+            record_structure_control("ui-structure-create-text", &response);
+            if matches!(draft.focus, EguiUiCreateFocus::Initial) {
+                response.request_focus();
+                initial_focus_applied = true;
+            }
+            changed |= response.changed();
+            invalid_focus_applied |= show_create_validation_for_field(
+                ui,
+                validation.as_ref(),
+                EguiUiCreateField::Text,
+                &response,
+                should_focus_invalid,
+            );
+        }
+        UiCatalogNodeKind::Image => match image_choices {
+            Ok(choices) if !choices.choices().is_empty() => {
+                let label = ui.label(RichText::new("Image").weak());
+                let selected = draft
+                    .image
+                    .as_ref()
+                    .map_or("Select image", UiImageChoiceSelection::project_path);
+                let response = ComboBox::from_id_salt("ui-structure-create-image")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        for choice in choices.choices() {
+                            let selected = draft.image.as_ref().is_some_and(|selection| {
+                                selection.generation() == choices.generation()
+                                    && selection.source_identity() == choice.source_identity()
+                                    && selection.project_path() == choice.project_path()
+                            });
+                            if ui
+                                .selectable_label(selected, choice.project_path())
+                                .clicked()
+                            {
+                                draft.image = Some(choice.selection(choices.generation()));
+                                changed = true;
+                            }
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                record_structure_control("ui-structure-create-image", &response);
+                if matches!(draft.focus, EguiUiCreateFocus::Initial) {
+                    response.request_focus();
+                    initial_focus_applied = true;
+                }
+                invalid_focus_applied |= show_create_validation_for_field(
+                    ui,
+                    validation.as_ref(),
+                    EguiUiCreateField::Image,
+                    &response,
+                    should_focus_invalid,
+                );
+            }
+            Ok(_) => {
+                ui.label(RichText::new("No project images are available").weak());
+                show_create_validation_message(ui, validation.as_ref(), EguiUiCreateField::Image);
+            }
+            Err(error) => {
+                ui.label(RichText::new(error.to_string()).color(ui.visuals().error_fg_color));
+            }
+        },
+        UiCatalogNodeKind::Button => {
+            let label_name = ui.label(RichText::new("Label").weak());
+            let label = ui
+                .add_enabled(enabled, TextEdit::singleline(&mut draft.button_label))
+                .labelled_by(label_name.id);
+            record_structure_control("ui-structure-create-button-label", &label);
+            if matches!(draft.focus, EguiUiCreateFocus::Initial) {
+                label.request_focus();
+                initial_focus_applied = true;
+            }
+            changed |= label.changed();
+            invalid_focus_applied |= show_create_validation_for_field(
+                ui,
+                validation.as_ref(),
+                EguiUiCreateField::ButtonLabel,
+                &label,
+                should_focus_invalid,
+            );
+            let action_name = ui.label(RichText::new("Action").weak());
+            let action = ui
+                .add_enabled(enabled, TextEdit::singleline(&mut draft.button_action))
+                .labelled_by(action_name.id);
+            record_structure_control("ui-structure-create-button-action", &action);
+            changed |= action.changed();
+            invalid_focus_applied |= show_create_validation_for_field(
+                ui,
+                validation.as_ref(),
+                EguiUiCreateField::ButtonAction,
+                &action,
+                should_focus_invalid,
+            );
+        }
+    }
+    if initial_focus_applied {
+        draft.focus = EguiUiCreateFocus::Settled;
+    }
+    if invalid_focus_applied && let Some(validation) = &validation {
+        draft.focus = EguiUiCreateFocus::Invalid(validation.field);
+    }
+
+    let mut cancelled = false;
+    let mut request = None;
+    ui.horizontal(|ui| {
+        let create = ui.add_enabled(
+            placement_valid && validation.is_none() && enabled,
+            Button::new("Create UI node"),
+        );
+        record_structure_control("ui-structure-create-submit", &create);
+        if create.clicked() {
+            request = intent.clone().ok();
+        }
+        let cancel = ui.add_enabled(enabled, Button::new("Cancel"));
+        record_structure_control("ui-structure-cancel", &cancel);
+        cancelled = cancel.clicked();
+    });
+    EguiUiStructureDialogResponse {
+        cancelled,
+        changed,
+        intent: request,
+    }
+}
+
+fn create_validation_for_rejection(
+    kind: UiCatalogNodeKind,
+    rejection: UiStructureRejection,
+) -> EguiUiCreateValidation {
+    let field = match rejection {
+        UiStructureRejection::ImageChoiceRequired
+        | UiStructureRejection::StaleImageChoice
+        | UiStructureRejection::ImageChoiceUnavailable
+        | UiStructureRejection::InvalidImageChoiceFact
+        | UiStructureRejection::ImageChoiceLimitExceeded
+        | UiStructureRejection::DuplicateImageChoice => EguiUiCreateField::Image,
+        UiStructureRejection::ButtonActionRequired => EguiUiCreateField::ButtonAction,
+        UiStructureRejection::ButtonLabelRequired => EguiUiCreateField::ButtonLabel,
+        UiStructureRejection::CreateTextLimitExceeded => EguiUiCreateField::Text,
+        UiStructureRejection::InvalidRecipe => match kind {
+            UiCatalogNodeKind::Container => EguiUiCreateField::Placement,
+            UiCatalogNodeKind::Text => EguiUiCreateField::Text,
+            UiCatalogNodeKind::Image => EguiUiCreateField::Image,
+            UiCatalogNodeKind::Button => EguiUiCreateField::ButtonLabel,
+        },
+        UiStructureRejection::TargetNotProjected
+        | UiStructureRejection::ProtectedRoot
+        | UiStructureRejection::OmittedSourceDescendant
+        | UiStructureRejection::NestedUiRoot
+        | UiStructureRejection::ParentNotProjected
+        | UiStructureRejection::DescendantParent
+        | UiStructureRejection::InvalidPlacementOwner
+        | UiStructureRejection::InvalidSiblingAnchor => EguiUiCreateField::Placement,
+    };
+    EguiUiCreateValidation {
+        field,
+        message: rejection.to_string(),
+    }
+}
+
+fn show_create_validation_for_field(
+    ui: &mut Ui,
+    validation: Option<&EguiUiCreateValidation>,
+    field: EguiUiCreateField,
+    response: &egui::Response,
+    request_focus: bool,
+) -> bool {
+    if !show_create_validation_message(ui, validation, field) {
+        return false;
+    }
+    if request_focus {
+        response.request_focus();
+        return true;
+    }
+    false
+}
+
+fn show_create_validation_message(
+    ui: &mut Ui,
+    validation: Option<&EguiUiCreateValidation>,
+    field: EguiUiCreateField,
+) -> bool {
+    let Some(validation) = validation.filter(|validation| validation.field == field) else {
+        return false;
+    };
+    ui.label(RichText::new(&validation.message).color(ui.visuals().error_fg_color));
+    true
+}
+
+fn show_move_dialog(
+    ui: &mut Ui,
+    draft: &mut EguiUiMoveDraft,
+    projection: &UiAuthoringProjection,
+    enabled: bool,
+) -> EguiUiStructureDialogResponse {
+    ui.label(RichText::new("Move UI subtree").strong());
+    if let Some(node) = projection
+        .hierarchy()
+        .iter()
+        .find(|node| node.entity() == &draft.target)
+    {
+        ui.label(node.display_path());
+    }
+    let candidates = projection.structure_placement_candidates(Some(&draft.target));
+    let (placement_valid, changed) = match &candidates {
+        Ok(candidates) => {
+            let (valid, changed, _) = show_placement_control(
+                ui,
+                "ui-structure-move-placement",
+                &mut draft.placement,
+                candidates,
+                enabled,
+            );
+            (valid, changed)
+        }
+        Err(error) => {
+            ui.label(RichText::new(error.to_string()).color(ui.visuals().error_fg_color));
+            (false, false)
+        }
+    };
+    let mut cancelled = false;
+    let mut request = None;
+    ui.horizontal(|ui| {
+        let apply = ui.add_enabled(placement_valid && enabled, Button::new("Apply move"));
+        record_structure_control("ui-structure-move-submit", &apply);
+        if apply.clicked() {
+            request = Some(UiStructureIntent::Move {
+                target: draft.target.clone(),
+                placement: draft.placement.clone(),
+            });
+        }
+        let cancel = ui.add_enabled(enabled, Button::new("Cancel"));
+        record_structure_control("ui-structure-cancel", &cancel);
+        cancelled = cancel.clicked();
+    });
+    EguiUiStructureDialogResponse {
+        cancelled,
+        changed,
+        intent: request,
+    }
+}
+
+fn show_delete_dialog(
+    ui: &mut Ui,
+    draft: &EguiUiDeleteDraft,
+    projection: &UiAuthoringProjection,
+    enabled: bool,
+) -> EguiUiStructureDialogResponse {
+    ui.label(RichText::new("Delete UI subtree").strong());
+    let target = projection
+        .hierarchy()
+        .iter()
+        .find(|node| node.entity() == &draft.target);
+    let valid = target.is_some()
+        && projection
+            .prepare_structure(
+                &UiStructureIntent::Delete {
+                    target: draft.target.clone(),
+                },
+                None,
+            )
+            .is_ok();
+    if let Some(target) = target {
+        ui.label(format!(
+            "Delete {} and its complete source-local subtree?",
+            target.display_path()
+        ));
+    } else {
+        ui.label(
+            RichText::new("The selected source subtree is no longer available")
+                .color(ui.visuals().error_fg_color),
+        );
+    }
+    ui.label(RichText::new("Undo remains available after deletion.").weak());
+    let mut cancelled = false;
+    let mut request = None;
+    ui.horizontal(|ui| {
+        let delete = ui.add_enabled(valid && enabled, Button::new("Delete subtree"));
+        record_structure_control("ui-structure-delete-confirm", &delete);
+        if delete.clicked() {
+            request = Some(UiStructureIntent::Delete {
+                target: draft.target.clone(),
+            });
+        }
+        let cancel = ui.add_enabled(enabled, Button::new("Cancel"));
+        record_structure_control("ui-structure-cancel", &cancel);
+        cancelled = cancel.clicked();
+    });
+    EguiUiStructureDialogResponse {
+        cancelled,
+        changed: false,
+        intent: request,
+    }
+}
+
+fn show_placement_control(
+    ui: &mut Ui,
+    id: &'static str,
+    placement: &mut ScenePlacement,
+    candidates: &[UiPlacementCandidate],
+    enabled: bool,
+) -> (bool, bool, egui::Response) {
+    let label = ui.label(RichText::new("Placement").weak());
+    let before = placement.clone();
+    let selected = candidates
+        .iter()
+        .find(|candidate| candidate.placement() == placement)
+        .map_or_else(|| "Placement unavailable".to_owned(), placement_label);
+    let response = ui
+        .add_enabled_ui(enabled, |ui| {
+            ComboBox::from_id_salt(id)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for candidate in candidates {
+                        ui.selectable_value(
+                            placement,
+                            candidate.placement().clone(),
+                            placement_label(candidate),
+                        );
+                    }
+                })
+                .response
+        })
+        .inner
+        .labelled_by(label.id);
+    record_structure_control(id, &response);
+    (
+        candidates
+            .iter()
+            .any(|candidate| candidate.placement() == placement),
+        *placement != before,
+        response,
+    )
+}
+
+fn placement_label(candidate: &UiPlacementCandidate) -> String {
+    let anchor = match &candidate.placement().anchor {
+        ScenePlacementAnchor::First => "first".to_owned(),
+        ScenePlacementAnchor::Last => "last".to_owned(),
+        ScenePlacementAnchor::Before { sibling } => format!("before {}", sibling.as_str()),
+        ScenePlacementAnchor::After { sibling } => format!("after {}", sibling.as_str()),
+    };
+    format!(
+        "{} / {}{}",
+        candidate.parent().as_str(),
+        anchor,
+        if candidate.is_current() {
+            " (current)"
+        } else {
+            ""
+        }
+    )
+}
+
+fn structural_read_only_label(reason: UiAuthoringStructuralReadOnlyReason) -> &'static str {
+    match reason {
+        UiAuthoringStructuralReadOnlyReason::ProtectedRoot => {
+            "The authored UI root cannot be moved or deleted"
+        }
+        UiAuthoringStructuralReadOnlyReason::OmittedSourceDescendant => {
+            "The complete source subtree is not authorable in this view"
+        }
+        UiAuthoringStructuralReadOnlyReason::NestedUiRoot => {
+            "The source subtree contains a protected nested UI root"
+        }
+    }
+}
+
+fn structure_action_rejection_label(rejection: EditorActionRejection) -> &'static str {
+    match rejection {
+        EditorActionRejection::NoPublishedFrame
+        | EditorActionRejection::StaleFrame { .. }
+        | EditorActionRejection::FrameAlreadyDispatched { .. } => {
+            "The Editor frame changed before the structure change was applied"
+        }
+        EditorActionRejection::DocumentNotInFrame { .. }
+        | EditorActionRejection::StaleDocumentFact { .. }
+        | EditorActionRejection::ActiveDocumentChanged { .. } => {
+            "The active Prefab source changed; review the current hierarchy and try again"
+        }
+        EditorActionRejection::MutationAlreadySubmitted { .. } => {
+            "Another document mutation already used this Editor frame"
+        }
+        EditorActionRejection::StructureContractMismatch { .. } => {
+            "The structure request no longer matches the current UI source facts"
+        }
+        EditorActionRejection::FieldContractMismatch { .. }
+        | EditorActionRejection::RuntimeGenerationChanged { .. }
+        | EditorActionRejection::RuntimeDocumentChanged { .. }
+        | EditorActionRejection::InvalidReopenTarget => {
+            "The structure change was rejected by the current Editor authority"
+        }
+    }
+}
+
+fn record_structure_control(id: &str, response: &egui::Response) {
+    #[cfg(test)]
+    crate::editor::record_test_control(id.to_owned(), response.rect);
+    #[cfg(not(test))]
+    let _ = (id, response);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -734,6 +1653,7 @@ impl EguiUiCanvasPanel {
         let next = input.map(|input| EguiUiAuthoringScope {
             document: input.document(),
             revision: input.revision(),
+            image_choice_generation: input.image_choice_generation(),
         });
         if self.scope != next {
             self.scope = next;

@@ -3,13 +3,13 @@ use egui::{
 };
 use nara_diagnostic::{DiagnosticReport, DiagnosticSeverity};
 use nara_tooling::{
-    EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentKind,
-    EditorDocumentMutation, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
-    EditorPersistenceOperation, EditorPersistenceRequestKind, EditorPersistenceResult,
-    EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult, EditorPlayState,
-    EditorProjectContentAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
-    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
-    EditorWorkspaceIntentResult,
+    EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionRejection,
+    EditorCloseDecision, EditorDocumentKind, EditorDocumentMutation, EditorFrameModel,
+    EditorNavigationAction, EditorPersistenceAction, EditorPersistenceOperation,
+    EditorPersistenceRequestKind, EditorPersistenceResult, EditorPlayAction, EditorPlayOperation,
+    EditorPlayOperationResult, EditorPlayState, EditorProjectContentAction,
+    EditorProjectContentRefreshFailure, EditorProjectContentView, EditorWorkspaceIntent,
+    EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
 };
 
 use crate::{
@@ -208,6 +208,18 @@ impl EguiEditorPanel {
             viewport,
             viewport_intent,
         }
+    }
+
+    /// Applies Host-owned action outcomes to transient Adapter focus and form state.
+    #[doc(hidden)]
+    pub fn observe_action_report(&mut self, report: &EditorActionBatchReport) {
+        self.ui_authoring.observe_action_report(report);
+    }
+
+    /// Closes or reopens transient structure state after a batch-level Host rejection.
+    #[doc(hidden)]
+    pub fn observe_action_rejection(&mut self, rejection: EditorActionRejection) {
+        self.ui_authoring.observe_action_rejection(rejection);
     }
 
     #[cfg(test)]
@@ -537,7 +549,7 @@ fn render_authoring_content(
         .auto_shrink([false, false])
         .show(&mut tree_ui, |ui| {
             if let Some(authoring) = ui_authoring.as_deref_mut() {
-                ui_authoring_panel.show_hierarchy(ui, authoring, actions);
+                ui_authoring_panel.show_hierarchy(ui, authoring, editing_enabled, actions);
             } else {
                 inspector.show_tree(ui, scene, editing_enabled, actions);
             }
