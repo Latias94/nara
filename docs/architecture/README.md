@@ -8,13 +8,14 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
-   is the sole active implementation plan at EUSC-U5 under registration
-   `9123772c74da4f56a63d86ddcd742c9c`. EUSC-U1 is complete at `fb66b84` with verification
-   `8386ed22067743af8cfb1f88b3ffd314`; EUSC-U2 is complete at `4a6cd14` with verification
-   `7c4c0f3ba8924f7f84668341aa0011ad`; EUSC-U3 is complete at `278b986` with verification
-   `14822e4a808f412b8216eb02401eaca8`; EUSC-U4 is complete at `9540deb` with verification
-   `af32c829b365491e84fe0af17c46d6eb`. The completed
+3. No implementation plan is active. The completed
+   [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
+   closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and
+   completed registration `5edbf5a02be34aa8bdf7f88e45981dab`. Its prior units remain verified at
+   `fb66b84`, `4a6cd14`, `278b986`, and `9540deb` with evidence
+   `8386ed22067743af8cfb1f88b3ffd314`, `7c4c0f3ba8924f7f84668341aa0011ad`,
+   `14822e4a808f412b8216eb02401eaca8`, and `af32c829b365491e84fe0af17c46d6eb`.
+   The completed
    [Editor UI Prefab Authoring and Canvas v1](../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
    closes at `ed9f1cd` with conformance record `cf11b0c7d23a44e7b127b41199ee4ee7`
    and completed registration `fcbd471b11774b599cd190ead6827654`. Its prior units remain verified at

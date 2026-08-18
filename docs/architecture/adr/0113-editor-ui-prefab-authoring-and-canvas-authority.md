@@ -5,7 +5,8 @@
 **Last Revised**: 2026-08-18
 **Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
 authority, separate receipt-backed Prefab persistence from immutable project-content generation
-publication, and admit source-local ordered entity structure through ordinary Prefab history
+publication, admit source-local ordered entity structure through ordinary Prefab history, and close
+first-party UI structural composition through exact frame-lowered transactions
 **Owner**: `nara_scene`, `nara_tooling`, project Host, and the private Editor execution owner
 **Refines**: [ADR 0026](0026-editor-command-patch-and-undo-model.md), [ADR 0047](0047-editor-workspace-and-scene-document-state.md), [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md), [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md), and [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 **Refined By**: None
@@ -123,6 +124,30 @@ stale project content mark it out of date. Stop remains available, while new Pla
 clean Prefab source and current project content. After a successful refresh, an explicit Restart or
 fresh Play start binds the successor snapshot.
 
+### 6. UI structural composition is closed, source-local, and receipt-gated
+
+`nara_ui` owns one closed first-party composition catalog for Container, Text, Image, and Button.
+Each catalog entry lowers to a complete source recipe; adapters cannot assemble partial component
+sets, invent schema fields, or allocate persistent entity identities. Placement choices come from
+the complete ordered Prefab source topology, exclude protected roots, descendants, cycles, and
+hidden mixed-content subtrees, and retain exact parent and sibling-anchor preconditions.
+
+The current `EditorUiAuthoringFrame` is the only lowering authority. `nara_tooling` allocates the
+stable identity and atomically publishes the accepted Prefab patch, one history record, revision,
+selection, and content state. egui and any later adapter submit the returned document- and
+revision-bound mutation unchanged; they do not build raw structure patches or repair stale
+placements.
+
+Persistent UI brushes distinguish semantic role and image forms. Image brushes store a canonical
+asset reference, and the accepted predecessor migration rewrites legacy brush data before normal
+authoring. The ordinary project-content loader discovers that reference even when the new UI node
+is the image's only startup-closure dependency. Save, content refresh, Reopen, and explicit Runtime
+Restart therefore consume the same canonical source instead of an Editor-only cache.
+
+Every accepted structural publication retires the predecessor authoring frame and Canvas input
+authority. Preview resumes from the successor source revision, and selection or manipulation is
+restored only after the matching final Editor composite receipt is presented.
+
 ## Alternatives Considered
 
 ### Instantiate Prefab into a synthetic Scene
@@ -171,6 +196,9 @@ heterogeneous document consumer exists.
 | Canvas input safety | Candidate/stale/retired facts never select or mutate | private Canvas transaction tests |
 | Content publication | Save digest mismatch or a third retained revision never replaces last-good content | project-content and Editor Host refresh tests |
 | Runtime freshness | A running Runtime remains immutable and only explicit Restart consumes the successor snapshot | Reference Game Editor trajectory |
+| Structural composition | Create, move, and subtree delete publish one exact Prefab transaction and one history record | Scene, tooling, Adapter, and Reference Game trajectory tests |
+| Structural Canvas safety | A predecessor receipt cannot pick after structure publication; the exact successor can | Native Editor UI Canvas canary |
+| Image dependency retention | A migrated image brush remains in the startup closure when the created UI node is its sole reference | Reference Game Save/Reopen/Restart trajectory |
 
 ## Risks and Mitigations
 
@@ -182,6 +210,8 @@ heterogeneous document consumer exists.
 | Unsaved Canvas preview mutates Runtime or persistence state | Critical | Compile a private candidate from the exact authoring projection and require the final composite receipt for input authority. |
 | Save succeeds but successor content cannot publish | High | Keep persistence and content freshness separate, retain last-good previews, expose typed remediation, and block new Play/Restart. |
 | Early generic abstractions freeze the wrong toolkit boundary | Medium | Keep the authoring frame/action seam private or narrow until a second consumer proves the need. |
+| A closed catalog becomes a premature plugin registry | Medium | Keep the four complete recipes first-party and private; require a focused successor before extensibility. |
+| Structural edits leave stale Canvas authority alive | Critical | Retire the predecessor frame on publication and require the exact successor composite receipt. |
 
 ## Implementation Evidence
 
@@ -190,3 +220,10 @@ EUA-U1 through EUA-U5 are implemented at `dc7ea07`, `16b0d30`, `bca3e62`, `155d1
 `docs/knowledge/engineering/verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md`.
 It proves the focused Prefab session, workspace, persistence, authoring frame, private Canvas,
 bounded immutable content generations, and same-source Save-to-Restart trajectory.
+
+EUSC-U1 through EUSC-U5 are implemented at `fb66b84`, `4a6cd14`, `278b986`, `9540deb`, and
+`993a793`. The final conformance record is
+`docs/knowledge/engineering/verification/2026-08/2026-08-18T072626Z-eusc-u5-persisted-ui-structure-and-native-canvas-conformance-436c589870ba4f3c83548d349caa6d4c.md`.
+It proves failure-atomic ordered Prefab structure, the closed four-kind catalog and semantic brush
+migration, exact Host and Adapter transactions, one real persisted source-to-Runtime trajectory,
+and one exact native Canvas successor presentation.

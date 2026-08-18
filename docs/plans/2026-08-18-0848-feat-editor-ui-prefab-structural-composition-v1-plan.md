@@ -7,6 +7,10 @@ artifact_readiness: implementation-ready
 product_contract_source: ce-plan-bootstrap
 origin: STRATEGY.md
 execution: code
+execution_state: completed
+completion_commit: 993a793
+completion_record: 436c589870ba4f3c83548d349caa6d4c
+completion_registration: 5edbf5a02be34aa8bdf7f88e45981dab
 depends_on: docs/plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md
 plan_id: editor-ui-prefab-structural-composition-2026-08
 unit_namespace: EUSC
@@ -808,35 +812,35 @@ modes, GPUs, DPIs, or platforms.
 
 ### Global
 
-- A user can create Container/Text/Image/Button nodes in the current real UI Prefab, explicitly
+- [x] A user can create Container/Text/Image/Button nodes in the current real UI Prefab, explicitly
   choose parent/order, move/reparent/reorder an existing node, and delete a non-root subtree.
-- All successful structure changes are exact-document/revision, failure-atomic, one-record history
+- [x] All successful structure changes are exact-document/revision, failure-atomic, one-record history
   transactions with deterministic stable IDs and correct selection.
-- Protected root, source-local identity, cycle, exact anchor, image choice, schema, and history
+- [x] Protected root, source-local identity, cycle, exact anchor, image choice, schema, and history
   policies fail closed without consuming IDs or invalidating unchanged authority.
-- Persistent image brushes use semantic asset references that survive canonical migration and remain
+- [x] Persistent image brushes use semantic asset references that survive canonical migration and remain
   discoverable when the UI node is their only project-content dependency; hidden mixed-content
   subtrees are rejected rather than silently edited.
-- Old Canvas pick/source facts become inert immediately after accepted structure change; only an
+- [x] Old Canvas pick/source facts become inert immediately after accepted structure change; only an
   exact successor composite receipt restores Canvas input.
-- Save/Reopen/content refresh/explicit Restart consumes the same structural source through ordinary
+- [x] Save/Reopen/content refresh/explicit Restart consumes the same structural source through ordinary
   product owners.
-- egui and a non-egui driver use the same frame-lowering/action path. No toolkit, agent, plugin, or
+- [x] egui and a non-egui driver use the same frame-lowering/action path. No toolkit, agent, plugin, or
   generic catalog framework becomes document authority.
-- No new crate, GPU owner, RenderGraph, docking system, Binding DSL, nested override layer, or
+- [x] No new crate, GPU owner, RenderGraph, docking system, Binding DSL, nested override layer, or
   drag-and-drop framework is introduced.
-- Focused gates and one native canary pass; no Cartesian test matrix is added.
+- [x] Focused gates and one native canary pass; no Cartesian test matrix is added.
 
 ### Per-unit
 
-- EUSC-U1 closes only after Prefab structural patch/inverse/history failure atomicity is proven.
-- EUSC-U2 closes only after all four complete recipes and exact placement/source-local rejection
+- **EUSC-U1:** Prefab structural patch/inverse/history failure atomicity is proven.
+- **EUSC-U2:** all four complete recipes and exact placement/source-local rejection
   are owned by `nara_ui`.
-- EUSC-U3 closes only after allocator/document/history/selection publication and Canvas invalidation
+- **EUSC-U3:** allocator/document/history/selection publication and Canvas invalidation
   are exact and stale-safe.
-- EUSC-U4 closes only after the product Adapter can perform the bounded workflow and the non-egui
+- **EUSC-U4:** the product Adapter performs the bounded workflow and the non-egui
   parity driver shares the same seam.
-- EUSC-U5 closes only after real source persistence/Restart and one native Canvas path are recorded
+- **EUSC-U5:** real source persistence/Restart and one native Canvas path are recorded
   against a reviewed commit and authority indexes agree.
 
 ## Sources and References
