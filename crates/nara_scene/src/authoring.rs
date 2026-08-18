@@ -511,10 +511,11 @@ pub struct SceneAuthoringSession {
 
 /// Authoring owner for one canonical Prefab source.
 ///
-/// A Prefab session deliberately keeps the nominal `PrefabDocument` as its source authority. Field
-/// operations mutate an unpublished Prefab clone directly; Scene projection is used only for
-/// semantic validation and never becomes authoring or persistence state. This preserves source
-/// kind, root order, and the Scene/Prefab workspace boundary.
+/// A Prefab session deliberately keeps the nominal `PrefabDocument` as its source authority.
+/// Supported ordered entity and field operations mutate an unpublished Prefab clone directly;
+/// component-structure edits remain closed. Scene projection is used only for semantic validation
+/// and never becomes authoring or persistence state. This preserves source kind, root order, and
+/// the Scene/Prefab workspace boundary.
 #[derive(Debug)]
 pub struct PrefabAuthoringSession {
     document: PrefabDocument,

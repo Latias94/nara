@@ -4,12 +4,12 @@
 **Date**: 2026-08-17
 **Last Revised**: 2026-08-18
 **Amended**: 2026-08-18 to make the exact U2 authoring projection the single Canvas source
-authority and to separate receipt-backed Prefab persistence from immutable project-content
-generation publication
+authority, separate receipt-backed Prefab persistence from immutable project-content generation
+publication, and admit source-local ordered entity structure through ordinary Prefab history
 **Owner**: `nara_scene`, `nara_tooling`, project Host, and the private Editor execution owner
 **Refines**: [ADR 0026](0026-editor-command-patch-and-undo-model.md), [ADR 0047](0047-editor-workspace-and-scene-document-state.md), [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md), [ADR 0107](0107-shared-ui-foundation-and-independent-product-layers.md), and [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
 **Refined By**: None
-**Implementation Plan**: [Editor UI Prefab Authoring and Canvas v1](../../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md), EUA-U1 through EUA-U5
+**Implementation Plan**: [Editor UI Prefab Authoring and Canvas v1](../../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md), EUA-U1 through EUA-U5; [Editor UI Prefab Structural Composition v1](../../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md), EUSC-U1 through EUSC-U5
 
 ## Context
 
@@ -38,6 +38,16 @@ Each open document has a closed kind (`Scene` or `Prefab`), an editor document i
 binding, a monotonic authoring revision, an opaque content-state identity, a saved checkpoint, a
 selection set, and an external-reload state. Mutation, Undo, and Redo require the exact document
 identity and base revision. Navigation actions do not invent a revision.
+
+Source-local Prefab structure uses the same ordered `ScenePatchDocument` transaction and history
+authority as other Prefab edits. Prefab authoring admits complete `AddEntity`, `RemoveEntity`,
+`RestoreEntity`, and `MoveEntity` operations with exact stable placement preconditions while
+continuing to reject independent `AddComponent`, `RemoveComponent`, and `ReplaceComponent`
+operations. Each accepted transaction validates and canonicalizes an unpublished Prefab candidate,
+admits its inverse and history cost, and only then publishes the document, monotonic revision, and
+branch-safe content state together. Scene and Prefab retain nominal public document types; only
+private ordered-record mechanics are shared, and no Prefab-to-Scene mutation roundtrip is an
+authoring boundary.
 
 ```mermaid
 stateDiagram-v2

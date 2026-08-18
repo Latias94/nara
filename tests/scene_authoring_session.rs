@@ -143,18 +143,189 @@ fn prefab_authoring_session_keeps_prefab_source_kind_and_history_identity() {
     assert!(session.redo(&registry).applied);
     assert_eq!(session.history_status().undo_depth, 1);
     assert_eq!(session.document().roots, vec![retry]);
+}
 
-    let before = session.document().clone();
+#[test]
+fn prefab_authoring_session_applies_ordered_structure_and_roundtrips_history() {
+    let registry = scene_registry();
+    let root = scene_id("root");
+    let existing = scene_id("existing");
+    let loose = scene_id("loose");
+    let added = scene_id("added");
+    let root_owner = ScenePlacementOwner::Parent {
+        parent: root.clone(),
+    };
+    let original = PrefabDocument::new(
+        [root.clone(), loose.clone()],
+        [
+            SceneEntityRecord::new(root.clone()).with_children([existing.clone()]),
+            SceneEntityRecord::new(existing.clone()),
+            SceneEntityRecord::new(loose.clone()),
+        ],
+    );
+    let mut session = PrefabAuthoringSession::new(original.clone());
+    let initial_revision = session.revision();
+    let initial_content_state = session.content_state();
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(added.clone()),
+            placement: ScenePlacement::after(root_owner.clone(), existing.clone()),
+        },
+        ScenePatchOperation::MoveEntity {
+            entity: loose.clone(),
+            from: ScenePlacement::after(ScenePlacementOwner::Root, root.clone()),
+            to: ScenePlacement::after(root_owner.clone(), added.clone()),
+        },
+        ScenePatchOperation::RemoveEntity {
+            entity: existing.clone(),
+            from: ScenePlacement::first(root_owner),
+        },
+    ]);
+
+    let report = session.apply_patch(&patch, &registry);
+
+    assert!(report.applied, "{:?}", report.diagnostics);
+    assert!(report.inverse.as_ref().unwrap().operations.iter().any(
+        |operation| matches!(operation, ScenePatchOperation::RestoreEntity { entity, .. } if entity.id == existing)
+    ));
+    assert_eq!(session.document().roots, [root.clone()]);
+    assert_eq!(
+        session
+            .document()
+            .entities
+            .iter()
+            .find(|entity| entity.id == root)
+            .unwrap()
+            .children,
+        [added.clone(), loose.clone()]
+    );
+    assert!(
+        session
+            .document()
+            .entities
+            .windows(2)
+            .all(|records| records[0].id < records[1].id)
+    );
+    let changed = session.document().clone();
+    let changed_content_state = session.content_state();
+    assert_ne!(changed_content_state, initial_content_state);
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(
+        session.revision().generation(),
+        initial_revision.generation() + 1
+    );
+
+    let undo = session.undo(&registry);
+
+    assert!(undo.applied, "{:?}", undo.diagnostics);
+    assert_eq!(session.document(), &original);
+    assert_eq!(session.content_state(), initial_content_state);
+    assert_eq!(session.history_status().redo_depth, 1);
+    assert_eq!(
+        session.revision().generation(),
+        initial_revision.generation() + 2
+    );
+
+    let redo = session.redo(&registry);
+
+    assert!(redo.applied, "{:?}", redo.diagnostics);
+    assert_eq!(session.document(), &changed);
+    assert_eq!(session.content_state(), changed_content_state);
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(
+        session.revision().generation(),
+        initial_revision.generation() + 3
+    );
+    assert_eq!(session.revision().source_id(), initial_revision.source_id());
+}
+
+#[test]
+fn prefab_structural_cycle_rejects_without_publishing_partial_state() {
+    let registry = scene_registry();
+    let root = scene_id("root");
+    let child = scene_id("child");
+    let temporary = scene_id("temporary");
+    let original = PrefabDocument::new(
+        [root.clone()],
+        [
+            SceneEntityRecord::new(root.clone()).with_children([child.clone()]),
+            SceneEntityRecord::new(child.clone()),
+        ],
+    );
+    let mut session = PrefabAuthoringSession::new(original.clone());
     let revision = session.revision();
-    let unsupported = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
-        entity: SceneEntityRecord::new(scene_id("extra")),
-        placement: ScenePlacement::last(ScenePlacementOwner::Root),
-    }]);
-    let rejected = session.apply_patch(&unsupported, &registry);
+    let content_state = session.content_state();
+    let history = session.history_status();
+    let usage = session.history_usage();
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(temporary),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        },
+        ScenePatchOperation::MoveEntity {
+            entity: root.clone(),
+            from: ScenePlacement::first(ScenePlacementOwner::Root),
+            to: ScenePlacement::last(ScenePlacementOwner::Parent { parent: child }),
+        },
+    ]);
 
-    assert!(!rejected.applied);
-    assert_eq!(session.document(), &before);
+    let report = session.apply_patch(&patch, &registry);
+
+    assert!(!report.applied);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == "scene.patch-placement-cycle" })
+    );
+    assert_eq!(session.document(), &original);
     assert_eq!(session.revision(), revision);
+    assert_eq!(session.content_state(), content_state);
+    assert_eq!(session.history_status(), history);
+    assert_eq!(session.history_usage(), usage);
+}
+
+#[test]
+fn prefab_authoring_keeps_component_structure_closed() {
+    let registry = scene_registry();
+    let entity = scene_id("entity");
+    let original = PrefabDocument::from_ordered_roots([labeled_entity(entity.clone(), "Label")]);
+    let operations = [
+        ScenePatchOperation::AddComponent {
+            entity: entity.clone(),
+            component: label_type_id(),
+            value: SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::map([("text", ComponentValue::String("Added".to_string()))]),
+            ),
+        },
+        ScenePatchOperation::RemoveComponent {
+            entity: entity.clone(),
+            component: label_type_id(),
+        },
+        ScenePatchOperation::ReplaceComponent {
+            entity,
+            component: label_type_id(),
+            value: SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::map([("text", ComponentValue::String("Replacement".to_string()))]),
+            ),
+        },
+    ];
+
+    for operation in operations {
+        let mut session = PrefabAuthoringSession::new(original.clone());
+        let revision = session.revision();
+        let report = session.apply_patch(&ScenePatchDocument::new([operation]), &registry);
+
+        assert!(!report.applied);
+        assert!(report.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "scene.prefab-authoring-component-operation-unsupported"
+        }));
+        assert_eq!(session.document(), &original);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_usage().records, 0);
+    }
 }
 
 #[test]

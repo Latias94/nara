@@ -258,72 +258,8 @@ impl ScenePatchDocument {
         let mut scratch = document.clone();
         let mut inverse_groups = Vec::<Vec<ScenePatchOperation>>::new();
         for (operation_index, operation) in self.operations.iter().enumerate() {
-            let inverse = match operation {
-                ScenePatchOperation::SetField {
-                    entity,
-                    component,
-                    component_version,
-                    field,
-                    value,
-                } => set_field(
-                    &mut scratch,
-                    FieldPatchTarget::new(
-                        registry,
-                        entity,
-                        component,
-                        component_version,
-                        field,
-                        operation_index,
-                    ),
-                    value.clone(),
-                ),
-                ScenePatchOperation::RemoveField {
-                    entity,
-                    component,
-                    component_version,
-                    field,
-                } => remove_field(
-                    &mut scratch,
-                    registry,
-                    entity,
-                    component,
-                    component_version,
-                    field,
-                    operation_index,
-                ),
-                ScenePatchOperation::SetAssetRefField {
-                    entity,
-                    component,
-                    component_version,
-                    field,
-                    asset_ref,
-                } => set_asset_ref_field(
-                    &mut scratch,
-                    FieldPatchTarget::new(
-                        registry,
-                        entity,
-                        component,
-                        component_version,
-                        field,
-                        operation_index,
-                    ),
-                    asset_ref,
-                ),
-                ScenePatchOperation::AddEntity { .. }
-                | ScenePatchOperation::RemoveEntity { .. }
-                | ScenePatchOperation::RestoreEntity { .. }
-                | ScenePatchOperation::AddComponent { .. }
-                | ScenePatchOperation::RemoveComponent { .. }
-                | ScenePatchOperation::ReplaceComponent { .. }
-                | ScenePatchOperation::MoveEntity { .. } => Err(patch_diagnostic(
-                    operation_index,
-                    "scene.prefab-authoring-structural-operation-unsupported",
-                    "Prefab authoring v1 accepts existing component field edits only",
-                    None,
-                    None,
-                    None,
-                )),
-            };
+            let inverse =
+                apply_prefab_operation(&mut scratch, registry, operation, operation_index);
             let inverse = match inverse {
                 Ok(inverse) => inverse,
                 Err(diagnostic) => {
@@ -1276,6 +1212,27 @@ impl<'a> FieldPatchTarget<'a> {
     }
 }
 
+fn apply_prefab_operation(
+    document: &mut PrefabDocument,
+    registry: &ComponentRegistry,
+    operation: &ScenePatchOperation,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    match operation {
+        ScenePatchOperation::AddComponent { .. }
+        | ScenePatchOperation::RemoveComponent { .. }
+        | ScenePatchOperation::ReplaceComponent { .. } => Err(patch_diagnostic(
+            operation_index,
+            "scene.prefab-authoring-component-operation-unsupported",
+            "Prefab authoring accepts complete entity operations and field edits, not component structure edits",
+            None,
+            None,
+            None,
+        )),
+        _ => apply_non_component_operation(document, registry, operation, operation_index),
+    }
+}
+
 fn apply_operation(
     document: &mut SceneDocument,
     registry: &ComponentRegistry,
@@ -1283,24 +1240,6 @@ fn apply_operation(
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     match operation {
-        ScenePatchOperation::AddEntity { entity, placement } => {
-            add_entity(document, registry, entity, placement, operation_index)
-        }
-        ScenePatchOperation::RemoveEntity { entity, from } => {
-            remove_entity(document, registry, entity, from, operation_index)
-        }
-        ScenePatchOperation::RestoreEntity {
-            entity,
-            descendants,
-            placement,
-        } => restore_entity(
-            document,
-            registry,
-            entity,
-            descendants,
-            placement,
-            operation_index,
-        ),
         ScenePatchOperation::AddComponent {
             entity,
             component,
@@ -1328,6 +1267,45 @@ fn apply_operation(
             value,
             operation_index,
         ),
+        _ => apply_non_component_operation(document, registry, operation, operation_index),
+    }
+}
+
+fn apply_non_component_operation<D: EntityDocument>(
+    document: &mut D,
+    registry: &ComponentRegistry,
+    operation: &ScenePatchOperation,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    match operation {
+        ScenePatchOperation::AddEntity { entity, placement } => {
+            add_entity(document, registry, entity, placement, operation_index)
+        }
+        ScenePatchOperation::RemoveEntity { entity, from } => {
+            remove_entity(document, registry, entity, from, operation_index)
+        }
+        ScenePatchOperation::RestoreEntity {
+            entity,
+            descendants,
+            placement,
+        } => restore_entity(
+            document,
+            registry,
+            entity,
+            descendants,
+            placement,
+            operation_index,
+        ),
+        ScenePatchOperation::AddComponent { .. }
+        | ScenePatchOperation::RemoveComponent { .. }
+        | ScenePatchOperation::ReplaceComponent { .. } => Err(patch_diagnostic(
+            operation_index,
+            "scene.patch-component-operation-routing-failed",
+            "Component structure operation did not pass through its document policy",
+            None,
+            None,
+            None,
+        )),
         ScenePatchOperation::SetField {
             entity,
             component,
@@ -1628,8 +1606,8 @@ fn replace_owned_component(
     Ok(())
 }
 
-fn add_entity(
-    document: &mut SceneDocument,
+fn add_entity<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityRecord,
     placement: &ScenePlacement,
@@ -1637,7 +1615,7 @@ fn add_entity(
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     prepare_entity_insertion(document, registry, entity, placement, operation_index)?;
     let insertion = resolve_insertion(document, &entity.id, placement, false, operation_index)?;
-    document.entities.push(entity.clone());
+    document.entities_mut().push(entity.clone());
     insert_placed_entity(document, &entity.id, insertion);
     Ok(vec![ScenePatchOperation::RemoveEntity {
         entity: entity.id.clone(),
@@ -1645,8 +1623,8 @@ fn add_entity(
     }])
 }
 
-fn remove_entity(
-    document: &mut SceneDocument,
+fn remove_entity<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     from: &ScenePlacement,
@@ -1665,8 +1643,8 @@ fn remove_entity(
     }])
 }
 
-fn restore_entity(
-    document: &mut SceneDocument,
+fn restore_entity<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityRecord,
     descendants: &[SceneEntityRecord],
@@ -1682,8 +1660,8 @@ fn restore_entity(
         operation_index,
     )?;
     let insertion = resolve_insertion(document, &entity.id, placement, false, operation_index)?;
-    document.entities.push(entity.clone());
-    document.entities.extend(descendants.iter().cloned());
+    document.entities_mut().push(entity.clone());
+    document.entities_mut().extend(descendants.iter().cloned());
     insert_placed_entity(document, &entity.id, insertion);
     Ok(vec![ScenePatchOperation::RemoveEntity {
         entity: entity.id.clone(),
@@ -1980,8 +1958,8 @@ fn remove_field_value<D: EntityDocument>(
     Ok(previous)
 }
 
-fn move_entity(
-    document: &mut SceneDocument,
+fn move_entity<D: EntityDocument>(
+    document: &mut D,
     entity: &SceneEntityId,
     from: &ScenePlacement,
     to: &ScenePlacement,
@@ -2008,8 +1986,8 @@ fn move_entity(
     }])
 }
 
-fn move_entity_without_inverse(
-    document: &mut SceneDocument,
+fn move_entity_without_inverse<D: EntityDocument>(
+    document: &mut D,
     entity: &SceneEntityId,
     from: &ScenePlacement,
     to: &ScenePlacement,
@@ -2038,8 +2016,8 @@ struct ResolvedInsertion {
     index: usize,
 }
 
-fn prepare_entity_insertion(
-    document: &SceneDocument,
+fn prepare_entity_insertion<D: EntityDocument + ?Sized>(
+    document: &D,
     registry: &ComponentRegistry,
     entity: &SceneEntityRecord,
     placement: &ScenePlacement,
@@ -2071,8 +2049,8 @@ fn prepare_entity_insertion(
     validate_placement_owner(document, &entity.id, placement, operation_index)
 }
 
-fn prepare_subtree_removal(
-    document: &SceneDocument,
+fn prepare_subtree_removal<D: EntityDocument + ?Sized>(
+    document: &D,
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     from: &ScenePlacement,
@@ -2108,7 +2086,7 @@ fn prepare_subtree_removal(
         }
         let record_index = find_entity(document, &id)
             .expect("validated subtree entity must remain in the source document");
-        let record = &document.entities[record_index];
+        let record = &document.entities()[record_index];
         for component in record.components.keys() {
             require_whole_component_edit(registry, &id, component, operation_index)?;
         }
@@ -2118,8 +2096,8 @@ fn prepare_subtree_removal(
     Ok(removed)
 }
 
-fn prepare_entity_restoration(
-    document: &SceneDocument,
+fn prepare_entity_restoration<D: EntityDocument + ?Sized>(
+    document: &D,
     registry: &ComponentRegistry,
     entity: &SceneEntityRecord,
     descendants: &[SceneEntityRecord],
@@ -2155,22 +2133,27 @@ fn prepare_entity_restoration(
     validate_placement_owner(document, &entity.id, placement, operation_index)
 }
 
-fn remove_subtree_records(document: &mut SceneDocument, removed: &[SceneEntityRecord]) {
+fn remove_subtree_records<D: EntityDocument + ?Sized>(
+    document: &mut D,
+    removed: &[SceneEntityRecord],
+) {
     let removed_ids = removed
         .iter()
         .map(|record| record.id.clone())
         .collect::<BTreeSet<_>>();
     document
-        .entities
+        .entities_mut()
         .retain(|record| !removed_ids.contains(&record.id));
-    document.roots.retain(|root| !removed_ids.contains(root));
-    for record in &mut document.entities {
+    document
+        .roots_mut()
+        .retain(|root| !removed_ids.contains(root));
+    for record in document.entities_mut() {
         record.children.retain(|child| !removed_ids.contains(child));
     }
 }
 
-fn validate_placement_owner(
-    document: &SceneDocument,
+fn validate_placement_owner<D: EntityDocument + ?Sized>(
+    document: &D,
     entity: &SceneEntityId,
     placement: &ScenePlacement,
     operation_index: usize,
@@ -2211,8 +2194,8 @@ fn validate_placement_owner(
     Ok(())
 }
 
-fn resolve_insertion(
-    document: &SceneDocument,
+fn resolve_insertion<D: EntityDocument + ?Sized>(
+    document: &D,
     entity: &SceneEntityId,
     placement: &ScenePlacement,
     remove_entity_first: bool,
@@ -2273,8 +2256,8 @@ fn resolve_insertion(
     })
 }
 
-fn placement_for_entity(
-    document: &SceneDocument,
+fn placement_for_entity<D: EntityDocument + ?Sized>(
+    document: &D,
     entity: &SceneEntityId,
 ) -> Option<ScenePlacement> {
     let owner = placement_owner(document, entity)?;
@@ -2290,8 +2273,8 @@ fn placement_for_entity(
     Some(ScenePlacement { owner, anchor })
 }
 
-fn placement_matches(
-    document: &SceneDocument,
+fn placement_matches<D: EntityDocument + ?Sized>(
+    document: &D,
     entity: &SceneEntityId,
     placement: &ScenePlacement,
 ) -> bool {
@@ -2317,14 +2300,14 @@ fn placement_matches(
     }
 }
 
-fn placement_owner(
-    document: &SceneDocument,
+fn placement_owner<D: EntityDocument + ?Sized>(
+    document: &D,
     entity: &SceneEntityId,
 ) -> Option<ScenePlacementOwner> {
-    if document.roots.contains(entity) {
+    if document.roots().contains(entity) {
         return Some(ScenePlacementOwner::Root);
     }
-    document.entities.iter().find_map(|record| {
+    document.entities().iter().find_map(|record| {
         record
             .children
             .contains(entity)
@@ -2334,28 +2317,32 @@ fn placement_owner(
     })
 }
 
-fn siblings_for_owner(
-    document: &SceneDocument,
+fn siblings_for_owner<D: EntityDocument + ?Sized>(
+    document: &D,
     owner: &ScenePlacementOwner,
 ) -> Option<Vec<SceneEntityId>> {
     match owner {
-        ScenePlacementOwner::Root => Some(document.roots.clone()),
+        ScenePlacementOwner::Root => Some(document.roots().to_vec()),
         ScenePlacementOwner::Parent { parent } => document
-            .entities
+            .entities()
             .iter()
             .find(|record| &record.id == parent)
             .map(|record| record.children.clone()),
     }
 }
 
-fn descendant_of(
-    document: &SceneDocument,
+fn descendant_of<D: EntityDocument + ?Sized>(
+    document: &D,
     candidate: &SceneEntityId,
     ancestor: &SceneEntityId,
 ) -> bool {
     let mut pending = vec![ancestor.clone()];
     while let Some(parent) = pending.pop() {
-        let Some(record) = document.entities.iter().find(|record| record.id == parent) else {
+        let Some(record) = document
+            .entities()
+            .iter()
+            .find(|record| record.id == parent)
+        else {
             continue;
         };
         if record.children.contains(candidate) {
@@ -2366,23 +2353,23 @@ fn descendant_of(
     false
 }
 
-fn detach_entity(document: &mut SceneDocument, entity: &SceneEntityId) {
-    document.roots.retain(|root| root != entity);
-    for record in &mut document.entities {
+fn detach_entity<D: EntityDocument + ?Sized>(document: &mut D, entity: &SceneEntityId) {
+    document.roots_mut().retain(|root| root != entity);
+    for record in document.entities_mut() {
         record.children.retain(|child| child != entity);
     }
 }
 
-fn insert_placed_entity(
-    document: &mut SceneDocument,
+fn insert_placed_entity<D: EntityDocument + ?Sized>(
+    document: &mut D,
     entity: &SceneEntityId,
     insertion: ResolvedInsertion,
 ) {
     match insertion.owner {
-        ScenePlacementOwner::Root => document.roots.insert(insertion.index, entity.clone()),
+        ScenePlacementOwner::Root => document.roots_mut().insert(insertion.index, entity.clone()),
         ScenePlacementOwner::Parent { parent } => {
             let record = document
-                .entities
+                .entities_mut()
                 .iter_mut()
                 .find(|record| record.id == parent)
                 .expect("resolved placement owner must remain in the unpublished document");
@@ -2507,11 +2494,21 @@ fn set_asset_ref_field_without_inverse<D: EntityDocument>(
 }
 
 trait EntityDocument {
+    fn roots(&self) -> &[SceneEntityId];
+    fn roots_mut(&mut self) -> &mut Vec<SceneEntityId>;
     fn entities(&self) -> &[SceneEntityRecord];
     fn entities_mut(&mut self) -> &mut Vec<SceneEntityRecord>;
 }
 
 impl EntityDocument for SceneDocument {
+    fn roots(&self) -> &[SceneEntityId] {
+        &self.roots
+    }
+
+    fn roots_mut(&mut self) -> &mut Vec<SceneEntityId> {
+        &mut self.roots
+    }
+
     fn entities(&self) -> &[SceneEntityRecord] {
         &self.entities
     }
@@ -2522,6 +2519,14 @@ impl EntityDocument for SceneDocument {
 }
 
 impl EntityDocument for PrefabDocument {
+    fn roots(&self) -> &[SceneEntityId] {
+        &self.roots
+    }
+
+    fn roots_mut(&mut self) -> &mut Vec<SceneEntityId> {
+        &mut self.roots
+    }
+
     fn entities(&self) -> &[SceneEntityRecord] {
         &self.entities
     }
