@@ -11,7 +11,9 @@ mod snapshot;
 mod workspace;
 
 pub use composition::{
-    SceneCompositionCommand, SceneCompositionComponentKind, SceneCompositionEntityKind,
+    PrefabCompositionCommand, PrefabCompositionDraftError, PrefabCompositionEntityDraft,
+    PrefabCompositionOutcome, SceneCompositionCommand, SceneCompositionComponentKind,
+    SceneCompositionEntityKind,
 };
 #[doc(hidden)]
 pub use frame::EditorFrameClock;

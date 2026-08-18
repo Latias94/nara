@@ -17,7 +17,9 @@ use nara_scene::{
 };
 
 use crate::composition::{
-    SceneCompositionCommand, SceneCompositionSelection, prepare_scene_composition,
+    PrefabCompositionCommand, PrefabCompositionOutcome, PrefabCompositionSelection,
+    SceneCompositionCommand, SceneCompositionSelection, prepare_prefab_composition,
+    prepare_scene_composition,
 };
 use crate::diagnostic;
 use crate::inspector::{SceneInspectorCommand, SceneInspectorCommandReport};
@@ -657,6 +659,11 @@ impl EditorWorkspace {
                 base_revision,
                 command,
             } => self.apply_scene_composition(registry, document, base_revision, command),
+            EditorWorkspaceCommand::ComposePrefab {
+                document,
+                base_revision,
+                command,
+            } => self.apply_prefab_composition(registry, document, base_revision, command),
             EditorWorkspaceCommand::Undo {
                 document,
                 base_revision,
@@ -906,6 +913,69 @@ impl EditorWorkspace {
             if let Some((_, next_ordinal)) = allocation {
                 slot.next_entity_ordinal = next_ordinal;
             }
+        }
+        report
+    }
+
+    fn apply_prefab_composition(
+        &mut self,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: PrefabCompositionCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_prefab_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let allocation = if command.allocates_entity() {
+            match slot.next_entity_candidate() {
+                Ok(candidate) => Some(candidate),
+                Err(entry) => {
+                    let mut report = report_for_prefab_slot(document, active_document, slot);
+                    report.applied = false;
+                    report.diagnostics.push(entry);
+                    return report;
+                }
+            }
+        } else {
+            None
+        };
+        let prepared = match prepare_prefab_composition(
+            slot.session.document(),
+            slot.selection.top_entity(),
+            allocation.as_ref().map(|(entity, _)| entity.clone()),
+            command,
+        ) {
+            Ok(prepared) => prepared,
+            Err(entry) => {
+                let mut report = report_for_prefab_slot(document, active_document, slot);
+                report.applied = false;
+                report.diagnostics.push(entry);
+                return report;
+            }
+        };
+        let Some(patch) = prepared.patch() else {
+            let mut report = report_for_prefab_slot(document, active_document, slot);
+            report.applied = false;
+            report.prefab_composition_outcome = Some(prepared.outcome().clone());
+            return report;
+        };
+        let patch_report = slot.session.apply_patch(patch, registry);
+        let mut report =
+            report_for_prefab_patch_slot(document, active_document, slot, patch_report);
+        if report.applied {
+            match prepared.selection() {
+                PrefabCompositionSelection::Preserve => {}
+                PrefabCompositionSelection::Select(entity) => {
+                    slot.selection.select_entity(entity.clone());
+                }
+            }
+            if let Some((_, next_ordinal)) = allocation {
+                slot.next_entity_ordinal = next_ordinal;
+            }
+            report.prefab_composition_outcome = Some(prepared.outcome().clone());
         }
         report
     }
@@ -1222,6 +1292,7 @@ impl EditorWorkspace {
         slot.saved_content_state = slot.session.content_state();
         slot.saved_digest = Some(digest);
         slot.external_reload = EditorExternalReloadState::Clean;
+        slot.next_entity_ordinal = Some(1);
         Ok(EditorWorkspaceCommandReport {
             applied: true,
             document: Some(document),
@@ -1406,6 +1477,7 @@ pub struct EditorPrefabSlot {
     saved_content_state: SceneAuthoringContentState,
     saved_digest: Option<EditorDocumentDigest>,
     external_reload: EditorExternalReloadState,
+    next_entity_ordinal: Option<u64>,
 }
 
 impl EditorPrefabSlot {
@@ -1425,6 +1497,7 @@ impl EditorPrefabSlot {
             saved_content_state,
             saved_digest: None,
             external_reload: EditorExternalReloadState::Clean,
+            next_entity_ordinal: Some(1),
         }
     }
 
@@ -1477,6 +1550,31 @@ impl EditorPrefabSlot {
     #[must_use]
     pub fn external_reload(&self) -> EditorExternalReloadState {
         self.external_reload
+    }
+
+    fn next_entity_candidate(
+        &self,
+    ) -> Result<(SceneEntityId, Option<u64>), nara_diagnostic::Diagnostic> {
+        let mut ordinal = self.next_entity_ordinal.ok_or_else(|| {
+            diagnostic::error(
+                "tooling.prefab-composition-entity-id-exhausted",
+                "Prefab composition cannot allocate another stable entity identity",
+            )
+        })?;
+        loop {
+            let entity = SceneEntityId::new(format!("editor_prefab_entity_{ordinal}"))
+                .expect("editor-generated Prefab entity identifiers must be valid");
+            let next = ordinal.checked_add(1);
+            if !prefab_has_entity(self.session.document(), &entity) {
+                return Ok((entity, next));
+            }
+            ordinal = next.ok_or_else(|| {
+                diagnostic::error(
+                    "tooling.prefab-composition-entity-id-exhausted",
+                    "Prefab composition cannot allocate another stable entity identity",
+                )
+            })?;
+        }
     }
 
     fn apply_persistence_checkpoint(
@@ -1748,6 +1846,11 @@ pub enum EditorWorkspaceCommand {
         base_revision: SceneAuthoringRevision,
         command: SceneCompositionCommand,
     },
+    ComposePrefab {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: PrefabCompositionCommand,
+    },
     Undo {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
@@ -1771,6 +1874,7 @@ pub struct EditorWorkspaceCommandReport {
     pub revision: Option<SceneAuthoringRevision>,
     pub inspector_report: Option<SceneInspectorCommandReport>,
     pub patch_report: Option<ScenePatchReport>,
+    pub prefab_composition_outcome: Option<PrefabCompositionOutcome>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -1915,6 +2019,22 @@ fn report_for_slot(
     document: EditorDocumentId,
     active_document: Option<EditorDocumentId>,
     slot: &EditorSceneSlot,
+) -> EditorWorkspaceCommandReport {
+    EditorWorkspaceCommandReport {
+        applied: true,
+        document: Some(document),
+        active_document,
+        dirty: Some(slot.is_dirty()),
+        revision: Some(slot.revision()),
+        diagnostics: DiagnosticReport::default(),
+        ..EditorWorkspaceCommandReport::default()
+    }
+}
+
+fn report_for_prefab_slot(
+    document: EditorDocumentId,
+    active_document: Option<EditorDocumentId>,
+    slot: &EditorPrefabSlot,
 ) -> EditorWorkspaceCommandReport {
     EditorWorkspaceCommandReport {
         applied: true,
@@ -2210,7 +2330,10 @@ mod tests {
         ScenePlacement, ScenePlacementOwner,
     };
 
-    use crate::{SceneCompositionComponentKind, SceneCompositionEntityKind};
+    use crate::{
+        PrefabCompositionCommand, PrefabCompositionEntityDraft, PrefabCompositionOutcome,
+        SceneCompositionComponentKind, SceneCompositionEntityKind,
+    };
 
     #[test]
     fn composition_commands_form_one_ordered_atomic_authoring_trajectory() {
@@ -2425,6 +2548,242 @@ mod tests {
         assert_eq!(slot.revision(), current_revision);
         assert_eq!(slot.session().history_status(), current_history);
         assert_eq!(slot.selection().top_entity(), Some(&allocated));
+    }
+
+    #[test]
+    fn prefab_composition_allocates_only_for_successful_exact_mutations() {
+        let registry = frozen_empty_registry();
+        let existing = entity_id("editor_prefab_entity_1");
+        let mut workspace = EditorWorkspace::new();
+        let document = open_prefab(
+            &mut workspace,
+            "composition",
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(existing)]),
+        );
+        let initial_revision = workspace.prefab(document).unwrap().revision();
+        let draft = PrefabCompositionEntityDraft::new(BTreeMap::new()).unwrap();
+
+        let created = compose_prefab(
+            &mut workspace,
+            &registry,
+            document,
+            PrefabCompositionCommand::CreateEntity {
+                draft: draft.clone(),
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+        );
+        let first = entity_id("editor_prefab_entity_2");
+        assert!(created.applied);
+        assert_eq!(
+            created.prefab_composition_outcome,
+            Some(PrefabCompositionOutcome::Created {
+                entity: first.clone()
+            })
+        );
+        assert_eq!(
+            workspace.prefab(document).unwrap().selection().top_entity(),
+            Some(&first)
+        );
+
+        let after_first = workspace.prefab(document).unwrap().revision();
+        let history_after_first = workspace
+            .prefab(document)
+            .unwrap()
+            .session()
+            .history_status();
+        let rejected = compose_prefab(
+            &mut workspace,
+            &registry,
+            document,
+            PrefabCompositionCommand::CreateEntity {
+                draft: draft.clone(),
+                placement: ScenePlacement::last(ScenePlacementOwner::Parent {
+                    parent: entity_id("missing-parent"),
+                }),
+            },
+        );
+        assert!(!rejected.applied);
+        let stale = workspace.apply_command(
+            &registry,
+            EditorWorkspaceCommand::ComposePrefab {
+                document,
+                base_revision: initial_revision,
+                command: PrefabCompositionCommand::CreateEntity {
+                    draft: draft.clone(),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                },
+            },
+        );
+        assert!(!stale.applied);
+        let slot = workspace.prefab(document).unwrap();
+        assert_eq!(slot.revision(), after_first);
+        assert_eq!(slot.session().history_status(), history_after_first);
+        assert_eq!(slot.selection().top_entity(), Some(&first));
+
+        let second = compose_prefab(
+            &mut workspace,
+            &registry,
+            document,
+            PrefabCompositionCommand::CreateEntity {
+                draft,
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+        );
+        assert_eq!(
+            second.prefab_composition_outcome,
+            Some(PrefabCompositionOutcome::Created {
+                entity: entity_id("editor_prefab_entity_3")
+            })
+        );
+    }
+
+    #[test]
+    fn prefab_composition_move_delete_no_op_and_history_preserve_selection_contract() {
+        let registry = frozen_empty_registry();
+        let root = entity_id("root");
+        let first = entity_id("first");
+        let child = entity_id("first/child");
+        let second = entity_id("second");
+        let original = PrefabDocument::new(
+            [root.clone()],
+            [
+                SceneEntityRecord::new(root.clone()).with_children([first.clone(), second.clone()]),
+                SceneEntityRecord::new(first.clone()).with_children([child.clone()]),
+                SceneEntityRecord::new(child.clone()),
+                SceneEntityRecord::new(second.clone()),
+            ],
+        );
+        let mut workspace = EditorWorkspace::new();
+        let document = open_prefab(&mut workspace, "composition", original.clone());
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::SelectEntity {
+                        document,
+                        entity: Some(second.clone()),
+                    },
+                )
+                .applied
+        );
+
+        let moved = compose_prefab(
+            &mut workspace,
+            &registry,
+            document,
+            PrefabCompositionCommand::MoveEntity {
+                entity: second.clone(),
+                to: ScenePlacement::first(ScenePlacementOwner::Parent {
+                    parent: root.clone(),
+                }),
+            },
+        );
+        assert!(moved.applied);
+        assert_eq!(
+            workspace.prefab(document).unwrap().selection().top_entity(),
+            Some(&second)
+        );
+        let move_revision = workspace.prefab(document).unwrap().revision();
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::Undo {
+                        document,
+                        base_revision: move_revision,
+                    },
+                )
+                .applied
+        );
+        assert_eq!(
+            workspace.prefab(document).unwrap().session().document(),
+            &original
+        );
+
+        let revision_before_no_op = workspace.prefab(document).unwrap().revision();
+        let history_before_no_op = workspace
+            .prefab(document)
+            .unwrap()
+            .session()
+            .history_status();
+        let no_op = compose_prefab(
+            &mut workspace,
+            &registry,
+            document,
+            PrefabCompositionCommand::MoveEntity {
+                entity: second.clone(),
+                to: ScenePlacement::after(
+                    ScenePlacementOwner::Parent {
+                        parent: root.clone(),
+                    },
+                    first.clone(),
+                ),
+            },
+        );
+        assert!(!no_op.applied);
+        assert_eq!(
+            no_op.prefab_composition_outcome,
+            Some(PrefabCompositionOutcome::NoOp {
+                entity: second.clone()
+            })
+        );
+        assert_eq!(
+            workspace.prefab(document).unwrap().revision(),
+            revision_before_no_op
+        );
+        assert_eq!(
+            workspace
+                .prefab(document)
+                .unwrap()
+                .session()
+                .history_status(),
+            history_before_no_op
+        );
+
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::SelectEntity {
+                        document,
+                        entity: Some(child),
+                    },
+                )
+                .applied
+        );
+        let removed = compose_prefab(
+            &mut workspace,
+            &registry,
+            document,
+            PrefabCompositionCommand::RemoveEntity {
+                entity: first.clone(),
+            },
+        );
+        assert!(removed.applied);
+        assert_eq!(
+            workspace.prefab(document).unwrap().selection().top_entity(),
+            Some(&root)
+        );
+        let delete_revision = workspace.prefab(document).unwrap().revision();
+        assert!(
+            workspace
+                .apply_command(
+                    &registry,
+                    EditorWorkspaceCommand::Undo {
+                        document,
+                        base_revision: delete_revision,
+                    },
+                )
+                .applied
+        );
+        assert_eq!(
+            workspace.prefab(document).unwrap().session().document(),
+            &original
+        );
+        assert_eq!(
+            workspace.prefab(document).unwrap().selection().top_entity(),
+            Some(&root)
+        );
     }
 
     #[test]
@@ -3352,6 +3711,23 @@ mod tests {
         )
     }
 
+    fn compose_prefab(
+        workspace: &mut EditorWorkspace,
+        registry: &ComponentRegistry,
+        document: EditorDocumentId,
+        command: PrefabCompositionCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let base_revision = workspace.prefab(document).unwrap().revision();
+        workspace.apply_command(
+            registry,
+            EditorWorkspaceCommand::ComposePrefab {
+                document,
+                base_revision,
+                command,
+            },
+        )
+    }
+
     fn undo(
         workspace: &mut EditorWorkspace,
         registry: &ComponentRegistry,
@@ -3403,6 +3779,22 @@ mod tests {
     ) -> EditorDocumentId {
         workspace
             .open_scene_session(title.to_owned(), SceneAuthoringSession::new(document))
+            .unwrap()
+            .opened_document
+            .unwrap()
+    }
+
+    fn open_prefab(
+        workspace: &mut EditorWorkspace,
+        title: &str,
+        document: PrefabDocument,
+    ) -> EditorDocumentId {
+        workspace
+            .open_prefab_session(
+                title.to_owned(),
+                EditorDocumentSourceBinding::new(format!("prefabs/{title}.prefab.json")),
+                PrefabAuthoringSession::new(document),
+            )
             .unwrap()
             .opened_document
             .unwrap()

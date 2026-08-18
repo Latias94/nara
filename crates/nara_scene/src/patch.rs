@@ -679,6 +679,22 @@ impl ScenePlacement {
     pub fn current(document: &SceneDocument, entity: &SceneEntityId) -> Option<Self> {
         placement_for_entity(document, entity)
     }
+
+    /// Returns the entity's current stable placement in a validated Prefab source.
+    #[must_use]
+    pub fn current_prefab(document: &PrefabDocument, entity: &SceneEntityId) -> Option<Self> {
+        placement_for_entity(document, entity)
+    }
+
+    /// Reports whether this placement names the entity's exact current Prefab position.
+    #[must_use]
+    pub fn matches_current_prefab(
+        &self,
+        document: &PrefabDocument,
+        entity: &SceneEntityId,
+    ) -> bool {
+        placement_matches(document, entity, self)
+    }
 }
 
 enum PatchTreeNode<'a> {

@@ -2,15 +2,17 @@ use std::sync::Arc;
 
 use nara_scene::{PrefabAuthoringSession, SceneAuthoringRevision};
 use nara_tooling::{
-    EditorAtomicFieldEdit, EditorAtomicFieldEditError, EditorDocumentId,
+    EditorAtomicFieldEdit, EditorAtomicFieldEditError, EditorDocumentId, EditorDocumentMutation,
     EditorDocumentSourceBinding, EditorFieldTarget, EditorFieldWrite, EditorFrameRevision,
     EditorGestureCancelReason, EditorGestureStamp, EditorGestureView,
-    EditorProjectContentGeneration, EditorSelectionSet,
+    EditorProjectContentGeneration, EditorSelectionSet, PrefabCompositionCommand,
+    PrefabCompositionDraftError, PrefabCompositionEntityDraft,
 };
 use nara_ui::__private::{
     UiAuthoringCommitPolicy, UiAuthoringDirectEdit, UiAuthoringEditError, UiAuthoringFieldKey,
     UiAuthoringFieldValue, UiAuthoringProjection, UiAuthoringProjectionError, UiImageChoice,
-    UiImageChoiceGeneration, UiImageChoiceSet, UiStructureRejection, project_prefab_authoring,
+    UiImageChoiceGeneration, UiImageChoiceSet, UiPreparedStructure, UiStructureIntent,
+    UiStructureRejection, project_prefab_authoring,
 };
 use thiserror::Error;
 
@@ -180,6 +182,59 @@ impl EditorUiAuthoringFrame {
         self.atomic_edit_from_patch(&key, &patch)
     }
 
+    /// Lowers one current closed-catalog intent into an exact-revision tooling mutation.
+    pub fn lower_structure_intent(
+        &self,
+        intent: &UiStructureIntent,
+    ) -> Result<EditorDocumentMutation, EditorUiAuthoringEditError> {
+        let projection = self
+            .projection()
+            .map_err(EditorUiAuthoringEditError::ProjectionUnavailable)?;
+        let image_choices = match intent {
+            UiStructureIntent::Create {
+                parameters: nara_ui::__private::UiCreateParameters::Image { .. },
+                ..
+            } => Some(
+                self.image_choices()
+                    .map_err(EditorUiAuthoringEditError::InvalidStructure)?,
+            ),
+            _ => self.image_choices().ok(),
+        };
+        let prepared = projection
+            .prepare_structure(intent, image_choices)
+            .map_err(EditorUiAuthoringEditError::InvalidStructure)?;
+        let command = match prepared {
+            UiPreparedStructure::Create { recipe, placement } => {
+                let draft = PrefabCompositionEntityDraft::new(recipe.components().clone())
+                    .map_err(EditorUiAuthoringEditError::StructureDraft)?;
+                PrefabCompositionCommand::CreateEntity { draft, placement }
+            }
+            UiPreparedStructure::Move { target, placement } => {
+                PrefabCompositionCommand::MoveEntity {
+                    entity: target,
+                    to: placement,
+                }
+            }
+            UiPreparedStructure::Delete { target } => {
+                PrefabCompositionCommand::RemoveEntity { entity: target }
+            }
+            UiPreparedStructure::NoOp { target } => {
+                let UiStructureIntent::Move { placement, .. } = intent else {
+                    return Err(EditorUiAuthoringEditError::DescriptorMismatch);
+                };
+                PrefabCompositionCommand::MoveEntity {
+                    entity: target,
+                    to: placement.clone(),
+                }
+            }
+        };
+        Ok(EditorDocumentMutation::ComposePrefab {
+            document: self.document,
+            base_revision: self.revision,
+            command,
+        })
+    }
+
     fn atomic_edit_from_patch(
         &self,
         key: &UiAuthoringFieldKey,
@@ -259,6 +314,40 @@ impl EditorUiAuthoringFrame {
             }
         })
     }
+
+    pub(super) fn admits_structure_command(&self, command: &PrefabCompositionCommand) -> bool {
+        let Ok(projection) = self.projection() else {
+            return false;
+        };
+        match command {
+            PrefabCompositionCommand::CreateEntity { draft, placement } => projection
+                .revalidate_create_recipe(draft.components(), placement, self.image_choices().ok())
+                .is_ok(),
+            PrefabCompositionCommand::MoveEntity { entity, to } => match projection
+                .prepare_structure(
+                    &UiStructureIntent::Move {
+                        target: entity.clone(),
+                        placement: to.clone(),
+                    },
+                    None,
+                ) {
+                Ok(UiPreparedStructure::Move { target, placement }) => {
+                    target == *entity && placement == *to
+                }
+                Ok(UiPreparedStructure::NoOp { target }) => target == *entity,
+                _ => false,
+            },
+            PrefabCompositionCommand::RemoveEntity { entity } => matches!(
+                projection.prepare_structure(
+                    &UiStructureIntent::Delete {
+                        target: entity.clone(),
+                    },
+                    None,
+                ),
+                Ok(UiPreparedStructure::Delete { target }) if target == *entity
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -273,6 +362,10 @@ pub enum EditorUiAuthoringEditError {
     DescriptorMismatch,
     #[error("the bounded tooling edit rejected the UI descriptor output: {0}")]
     AtomicEdit(EditorAtomicFieldEditError),
+    #[error("the UI structure intent is invalid: {0}")]
+    InvalidStructure(UiStructureRejection),
+    #[error("the bounded Prefab composition draft is invalid: {0}")]
+    StructureDraft(PrefabCompositionDraftError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +389,23 @@ impl EditorProjectSession {
     #[must_use]
     pub fn current_ui_authoring_frame(&self) -> Option<Arc<EditorUiAuthoringFrame>> {
         self.ui_authoring_frame.as_ref().map(Arc::clone)
+    }
+
+    pub(super) fn retire_ui_authoring_after_structure_publication(
+        &mut self,
+        document: EditorDocumentId,
+    ) {
+        if !self
+            .ui_authoring_frame
+            .as_ref()
+            .is_some_and(|frame| frame.document() == document)
+        {
+            return;
+        }
+        self.ui_authoring_frame = None;
+        self.ui_authoring_projection_cache = None;
+        #[cfg(feature = "presentation-ui")]
+        self.ui_preview.retire();
     }
 
     pub(super) fn reconcile_editor_gesture(&mut self) {

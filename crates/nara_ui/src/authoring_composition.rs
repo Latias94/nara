@@ -242,6 +242,17 @@ impl UiImageChoiceSet {
             })
             .ok_or(UiStructureRejection::ImageChoiceUnavailable)
     }
+
+    fn selection_for_project_path(
+        &self,
+        project_path: &str,
+    ) -> Result<UiImageChoiceSelection, UiStructureRejection> {
+        self.choices
+            .iter()
+            .find(|choice| choice.project_path == project_path)
+            .map(|choice| choice.selection(self.generation))
+            .ok_or(UiStructureRejection::ImageChoiceUnavailable)
+    }
 }
 
 fn validate_image_fact(value: &str) -> Result<(), UiStructureRejection> {
@@ -509,6 +520,34 @@ impl UiAuthoringProjection {
         }
     }
 
+    /// Revalidates an ID-free entity draft against the current closed catalog and placement facts.
+    ///
+    /// This is the Host-side admission path for toolkit-neutral commands. It reconstructs the
+    /// catalog parameters from the draft, rebuilds the owner-defined recipe, and requires exact
+    /// component equality before any Editor identity is allocated.
+    pub fn revalidate_create_recipe(
+        &self,
+        components: &BTreeMap<ComponentTypeId, SceneComponentRecord>,
+        placement: &ScenePlacement,
+        image_choices: Option<&UiImageChoiceSet>,
+    ) -> Result<(), UiStructureRejection> {
+        let parameters = create_parameters_from_recipe(components, image_choices)?;
+        let prepared = self.prepare_structure(
+            &UiStructureIntent::Create {
+                parameters,
+                placement: placement.clone(),
+            },
+            image_choices,
+        )?;
+        let UiPreparedStructure::Create { recipe, .. } = prepared else {
+            return Err(UiStructureRejection::InvalidRecipe);
+        };
+        if recipe.components() != components {
+            return Err(UiStructureRejection::InvalidRecipe);
+        }
+        Ok(())
+    }
+
     fn require_structurally_editable(
         &self,
         target: &SceneEntityId,
@@ -751,6 +790,55 @@ fn build_recipe(
         kind: parameters.kind(),
         components: Arc::new(components),
     })
+}
+
+fn create_parameters_from_recipe(
+    components: &BTreeMap<ComponentTypeId, SceneComponentRecord>,
+    image_choices: Option<&UiImageChoiceSet>,
+) -> Result<UiCreateParameters, UiStructureRejection> {
+    let kind = UiCatalogNodeKind::ALL
+        .into_iter()
+        .find(|kind| validate_recipe_bundle(*kind, components).is_ok())
+        .ok_or(UiStructureRejection::InvalidRecipe)?;
+    match kind {
+        UiCatalogNodeKind::Container => Ok(UiCreateParameters::Container),
+        UiCatalogNodeKind::Text => {
+            let text = components
+                .get(&UiAuthoringComponentKind::Text.component_type())
+                .and_then(|record| codec::decode_text(&record.value).ok())
+                .ok_or(UiStructureRejection::InvalidRecipe)?;
+            Ok(UiCreateParameters::Text {
+                content: text.kernel().content().to_string(),
+            })
+        }
+        UiCatalogNodeKind::Image => {
+            let visual = components
+                .get(&UiAuthoringComponentKind::Visual.component_type())
+                .and_then(|record| codec::decode_visual(&record.value).ok())
+                .ok_or(UiStructureRejection::InvalidRecipe)?;
+            let visual = visual.kernel();
+            let image_path = match visual.background() {
+                Some(UiBrush::Image { image, .. }) => image.as_str(),
+                _ => return Err(UiStructureRejection::InvalidRecipe),
+            };
+            let selection = image_choices
+                .ok_or(UiStructureRejection::ImageChoiceRequired)?
+                .selection_for_project_path(image_path)?;
+            Ok(UiCreateParameters::Image {
+                selection: Some(selection),
+            })
+        }
+        UiCatalogNodeKind::Button => {
+            let button = components
+                .get(&UiAuthoringComponentKind::Button.component_type())
+                .and_then(|record| codec::decode_button(&record.value).ok())
+                .ok_or(UiStructureRejection::InvalidRecipe)?;
+            Ok(UiCreateParameters::Button {
+                label: button.label().to_string(),
+                action: Some(button.action().clone()),
+            })
+        }
+    }
 }
 
 fn default_node_style(width: f32, height: f32) -> UiStyle {

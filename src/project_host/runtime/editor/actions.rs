@@ -166,10 +166,26 @@ impl EditorProjectSession {
             return EditorActionOutcome::Workspace(report);
         }
         let document = action.document();
-        if frame.workspace().document(document).is_none() {
+        let Some(frame_document) = frame.workspace().document(document) else {
             return EditorActionOutcome::Rejected(EditorActionRejection::DocumentNotInFrame {
                 document,
             });
+        };
+        if matches!(&action, EditorNavigationAction::SelectEntity { .. }) {
+            let actual = self.workspace.active_document();
+            if actual != Some(document) {
+                return EditorActionOutcome::Rejected(
+                    EditorActionRejection::ActiveDocumentChanged {
+                        expected: document,
+                        actual,
+                    },
+                );
+            }
+            if let Err(rejection) =
+                self.verify_document_fact(frame, document, frame_document.revision)
+            {
+                return EditorActionOutcome::Rejected(rejection);
+            }
         }
         let command = match action {
             EditorNavigationAction::OpenPrefabSource { .. } => unreachable!(),
@@ -271,6 +287,15 @@ impl EditorProjectSession {
                 document,
             });
         }
+        if let EditorDocumentMutation::ComposePrefab { command, .. } = &action
+            && !self.ui_authoring_structure_matches(frame, document, base_revision, command)
+        {
+            return EditorActionOutcome::Rejected(
+                EditorActionRejection::StructureContractMismatch { document },
+            );
+        }
+        let publishes_prefab_structure =
+            matches!(&action, EditorDocumentMutation::ComposePrefab { .. });
         let command = match action {
             EditorDocumentMutation::ApplyInspectorCommand {
                 document,
@@ -315,6 +340,15 @@ impl EditorProjectSession {
                 base_revision,
                 command,
             },
+            EditorDocumentMutation::ComposePrefab {
+                document,
+                base_revision,
+                command,
+            } => EditorWorkspaceCommand::ComposePrefab {
+                document,
+                base_revision,
+                command,
+            },
             EditorDocumentMutation::Undo {
                 document,
                 base_revision,
@@ -331,6 +365,17 @@ impl EditorProjectSession {
             },
         };
         let report = self.apply_workspace_command(command);
+        if publishes_prefab_structure && report.applied {
+            if self
+                .gestures
+                .active()
+                .is_some_and(|gesture| gesture.baseline().target().document() == document)
+            {
+                let _ = self.cancel_editor_gesture(EditorGestureCancelReason::StaleRevision);
+            }
+            #[cfg(feature = "runtime-ui")]
+            self.retire_ui_authoring_after_structure_publication(document);
+        }
         let _ = self.diagnostics.extend(report.diagnostics.clone());
         EditorActionOutcome::Workspace(report)
     }
@@ -631,13 +676,38 @@ impl EditorProjectSession {
                 }
             };
             self.ui_authoring_frame.as_deref().is_some_and(|authoring| {
-                authoring.editor_frame() == frame.revision()
+                self.workspace.active_document() == Some(edit.target().document())
+                    && authoring.editor_frame() == frame.revision()
                     && authoring.admits_field_edit(edit, policy)
             })
         }
         #[cfg(not(feature = "runtime-ui"))]
         {
             let _ = (frame, edit, mode);
+            false
+        }
+    }
+
+    fn ui_authoring_structure_matches(
+        &self,
+        frame: &EditorFrameModel,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: &nara_tooling::PrefabCompositionCommand,
+    ) -> bool {
+        #[cfg(feature = "runtime-ui")]
+        {
+            self.ui_authoring_frame.as_deref().is_some_and(|authoring| {
+                self.workspace.active_document() == Some(document)
+                    && authoring.editor_frame() == frame.revision()
+                    && authoring.document() == document
+                    && authoring.revision() == base_revision
+                    && authoring.admits_structure_command(command)
+            })
+        }
+        #[cfg(not(feature = "runtime-ui"))]
+        {
+            let _ = (frame, document, base_revision, command);
             false
         }
     }
@@ -710,6 +780,10 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
             "editor.action.stale-document",
             "Editor action targets an obsolete document revision",
         ),
+        EditorActionRejection::ActiveDocumentChanged { .. } => (
+            "editor.action.active-document-changed",
+            "Editor action targets a document that is no longer active",
+        ),
         EditorActionRejection::MutationAlreadySubmitted { .. } => (
             "editor.action.duplicate-mutation",
             "Editor frame already submitted a mutation for this document",
@@ -717,6 +791,10 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
         EditorActionRejection::FieldContractMismatch { .. } => (
             "editor.action.field-contract-mismatch",
             "Editor field edit does not match its published descriptor",
+        ),
+        EditorActionRejection::StructureContractMismatch { .. } => (
+            "editor.action.structure-contract-mismatch",
+            "Editor structure edit does not match its published UI authoring frame",
         ),
         EditorActionRejection::RuntimeGenerationChanged { .. } => (
             "editor.action.stale-runtime-generation",
@@ -738,7 +816,8 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
     match rejection {
         EditorActionRejection::DocumentNotInFrame { document }
         | EditorActionRejection::MutationAlreadySubmitted { document }
-        | EditorActionRejection::FieldContractMismatch { document } => {
+        | EditorActionRejection::FieldContractMismatch { document }
+        | EditorActionRejection::StructureContractMismatch { document } => {
             diagnostic = with_public_u64(diagnostic, "document", document.raw());
         }
         EditorActionRejection::StaleDocumentFact {
@@ -758,6 +837,12 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
                     "actual_revision_generation",
                     actual.generation(),
                 );
+            }
+        }
+        EditorActionRejection::ActiveDocumentChanged { expected, actual } => {
+            diagnostic = with_public_u64(diagnostic, "expected_document", expected.raw());
+            if let Some(actual) = actual {
+                diagnostic = with_public_u64(diagnostic, "actual_document", actual.raw());
             }
         }
         EditorActionRejection::RuntimeGenerationChanged { expected, actual } => {

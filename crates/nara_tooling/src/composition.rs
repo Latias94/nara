@@ -1,18 +1,26 @@
-use std::collections::BTreeSet;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt::{self, Display, Formatter},
+    sync::Arc,
+};
 
 use nara_diagnostic::Diagnostic;
 use nara_reflect::{
     ComponentCapability, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
 };
 use nara_scene::{
-    SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-    ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
+    ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
 };
 
 use crate::diagnostic;
 
 const TRANSFORM_COMPONENT: &str = "nara.transform.Transform2d";
 const SPRITE_COMPONENT: &str = "nara.sprite.Sprite";
+const MAX_PREFAB_COMPOSITION_COMPONENTS: usize = 4;
+const MAX_PREFAB_COMPOSITION_VALUE_NODES: usize = 512;
+const MAX_PREFAB_COMPOSITION_LOGICAL_BYTES: usize = 16 * 1024;
 
 /// The bounded entity drafts admitted by the first Scene Composition product slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,6 +189,239 @@ pub(crate) fn prepare_scene_composition(
             })
         }
     }
+}
+
+/// Bounded component records for one new Prefab entity before identity allocation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrefabCompositionEntityDraft {
+    components: Arc<BTreeMap<ComponentTypeId, SceneComponentRecord>>,
+}
+
+impl PrefabCompositionEntityDraft {
+    pub fn new(
+        components: BTreeMap<ComponentTypeId, SceneComponentRecord>,
+    ) -> Result<Self, PrefabCompositionDraftError> {
+        if components.len() > MAX_PREFAB_COMPOSITION_COMPONENTS {
+            return Err(PrefabCompositionDraftError::ComponentLimitExceeded);
+        }
+        let mut value_nodes = 0usize;
+        let mut logical_bytes = 0usize;
+        for (component, record) in &components {
+            let cost = record.value.cost();
+            value_nodes = value_nodes.saturating_add(cost.nodes());
+            logical_bytes = logical_bytes
+                .saturating_add(component.as_str().len())
+                .saturating_add(cost.logical_bytes());
+        }
+        if value_nodes > MAX_PREFAB_COMPOSITION_VALUE_NODES {
+            return Err(PrefabCompositionDraftError::ValueNodeLimitExceeded);
+        }
+        if logical_bytes > MAX_PREFAB_COMPOSITION_LOGICAL_BYTES {
+            return Err(PrefabCompositionDraftError::LogicalByteLimitExceeded);
+        }
+        Ok(Self {
+            components: Arc::new(components),
+        })
+    }
+
+    #[must_use]
+    pub fn components(&self) -> &BTreeMap<ComponentTypeId, SceneComponentRecord> {
+        &self.components
+    }
+}
+
+/// Why an ID-free Prefab entity draft exceeded the Editor composition envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrefabCompositionDraftError {
+    ComponentLimitExceeded,
+    ValueNodeLimitExceeded,
+    LogicalByteLimitExceeded,
+}
+
+impl Display for PrefabCompositionDraftError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::ComponentLimitExceeded => "prefab composition component limit exceeded",
+            Self::ValueNodeLimitExceeded => "prefab composition value-node limit exceeded",
+            Self::LogicalByteLimitExceeded => "prefab composition logical-byte limit exceeded",
+        })
+    }
+}
+
+impl Error for PrefabCompositionDraftError {}
+
+/// UI-neutral structural command for one persistent Prefab source.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PrefabCompositionCommand {
+    CreateEntity {
+        draft: PrefabCompositionEntityDraft,
+        placement: ScenePlacement,
+    },
+    MoveEntity {
+        entity: SceneEntityId,
+        to: ScenePlacement,
+    },
+    RemoveEntity {
+        entity: SceneEntityId,
+    },
+}
+
+impl PrefabCompositionCommand {
+    pub(crate) const fn allocates_entity(&self) -> bool {
+        matches!(self, Self::CreateEntity { .. })
+    }
+}
+
+/// Exact structural result used by the Adapter to restore hierarchy focus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrefabCompositionOutcome {
+    Created {
+        entity: SceneEntityId,
+    },
+    Moved {
+        entity: SceneEntityId,
+    },
+    Removed {
+        entity: SceneEntityId,
+        selection: Option<SceneEntityId>,
+    },
+    NoOp {
+        entity: SceneEntityId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PrefabCompositionSelection {
+    Preserve,
+    Select(Option<SceneEntityId>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PreparedPrefabComposition {
+    patch: Option<ScenePatchDocument>,
+    selection: PrefabCompositionSelection,
+    outcome: PrefabCompositionOutcome,
+}
+
+impl PreparedPrefabComposition {
+    pub(crate) const fn patch(&self) -> Option<&ScenePatchDocument> {
+        self.patch.as_ref()
+    }
+
+    pub(crate) const fn selection(&self) -> &PrefabCompositionSelection {
+        &self.selection
+    }
+
+    pub(crate) const fn outcome(&self) -> &PrefabCompositionOutcome {
+        &self.outcome
+    }
+}
+
+pub(crate) fn prepare_prefab_composition(
+    document: &PrefabDocument,
+    selected: Option<&SceneEntityId>,
+    allocated_entity: Option<SceneEntityId>,
+    command: PrefabCompositionCommand,
+) -> Result<PreparedPrefabComposition, Diagnostic> {
+    match command {
+        PrefabCompositionCommand::CreateEntity { draft, placement } => {
+            let entity_id = allocated_entity.ok_or_else(prefab_entity_id_exhausted)?;
+            let mut entity = SceneEntityRecord::new(entity_id.clone());
+            entity.components = draft.components().clone();
+            Ok(PreparedPrefabComposition {
+                patch: Some(ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity,
+                    placement,
+                }])),
+                selection: PrefabCompositionSelection::Select(Some(entity_id.clone())),
+                outcome: PrefabCompositionOutcome::Created { entity: entity_id },
+            })
+        }
+        PrefabCompositionCommand::MoveEntity { entity, to } => {
+            let from = ScenePlacement::current_prefab(document, &entity)
+                .ok_or_else(|| missing_prefab_entity(&entity))?;
+            if to.matches_current_prefab(document, &entity) {
+                return Ok(PreparedPrefabComposition {
+                    patch: None,
+                    selection: PrefabCompositionSelection::Preserve,
+                    outcome: PrefabCompositionOutcome::NoOp { entity },
+                });
+            }
+            Ok(PreparedPrefabComposition {
+                patch: Some(ScenePatchDocument::new([ScenePatchOperation::MoveEntity {
+                    entity: entity.clone(),
+                    from,
+                    to,
+                }])),
+                selection: PrefabCompositionSelection::Preserve,
+                outcome: PrefabCompositionOutcome::Moved { entity },
+            })
+        }
+        PrefabCompositionCommand::RemoveEntity { entity } => {
+            let from = ScenePlacement::current_prefab(document, &entity)
+                .ok_or_else(|| missing_prefab_entity(&entity))?;
+            let replacement_selection = selected
+                .filter(|selected| prefab_subtree_contains(document, &entity, selected))
+                .map(|_| match &from.owner {
+                    ScenePlacementOwner::Root => None,
+                    ScenePlacementOwner::Parent { parent } => Some(parent.clone()),
+                });
+            let selection = replacement_selection
+                .clone()
+                .unwrap_or_else(|| selected.cloned());
+            Ok(PreparedPrefabComposition {
+                patch: Some(ScenePatchDocument::new([
+                    ScenePatchOperation::RemoveEntity {
+                        entity: entity.clone(),
+                        from,
+                    },
+                ])),
+                selection: replacement_selection.map_or(
+                    PrefabCompositionSelection::Preserve,
+                    PrefabCompositionSelection::Select,
+                ),
+                outcome: PrefabCompositionOutcome::Removed { entity, selection },
+            })
+        }
+    }
+}
+
+fn prefab_subtree_contains(
+    document: &PrefabDocument,
+    root: &SceneEntityId,
+    candidate: &SceneEntityId,
+) -> bool {
+    let mut pending = vec![root];
+    let mut visited = BTreeSet::new();
+    while let Some(entity) = pending.pop() {
+        if entity == candidate {
+            return true;
+        }
+        if !visited.insert(entity.clone()) {
+            continue;
+        }
+        if let Some(record) = document.entities.iter().find(|record| record.id == *entity) {
+            pending.extend(record.children.iter());
+        }
+    }
+    false
+}
+
+fn missing_prefab_entity(entity: &SceneEntityId) -> Diagnostic {
+    diagnostic::with_entity(
+        diagnostic::error(
+            "tooling.prefab-composition-missing-entity",
+            "Prefab composition targets an entity that is not in the document",
+        ),
+        entity,
+    )
+}
+
+fn prefab_entity_id_exhausted() -> Diagnostic {
+    diagnostic::error(
+        "tooling.prefab-composition-entity-id-exhausted",
+        "Prefab composition cannot allocate another stable entity identity",
+    )
 }
 
 fn component_draft(

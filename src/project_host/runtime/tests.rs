@@ -1803,6 +1803,173 @@ logical_height = 540
             .last_gesture_cancellation(),
         Some(EditorGestureCancelReason::SourceHandoff)
     );
+
+    let structure_frame = editor.current_frame();
+    let structure_ui = editor.current_ui_authoring_frame().unwrap();
+    let retained_canvas_generation = structure_ui.canvas_generation();
+    let stale_delete = structure_ui
+        .lower_structure_intent(&nara_ui::__private::UiStructureIntent::Delete {
+            target: button.clone(),
+        })
+        .unwrap();
+    let structure_baseline = structure_ui
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [0.0, 0.0],
+        })
+        .unwrap();
+    let forged_draft =
+        nara_tooling::PrefabCompositionEntityDraft::new(std::collections::BTreeMap::new()).unwrap();
+    let cross_document_create = structure_ui
+        .lower_structure_intent(&nara_ui::__private::UiStructureIntent::Create {
+            parameters: nara_ui::__private::UiCreateParameters::Container,
+            placement: ScenePlacement::last(ScenePlacementOwner::Parent {
+                parent: root.clone(),
+            }),
+        })
+        .unwrap();
+    let EditorDocumentMutation::ComposePrefab {
+        command: cross_document_command,
+        ..
+    } = cross_document_create
+    else {
+        panic!("a catalog create intent must lower to Prefab composition");
+    };
+    let scene_revision = structure_frame
+        .workspace()
+        .document(scene_document)
+        .unwrap()
+        .revision;
+    let rejected_structure = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            structure_frame.revision(),
+            [
+                EditorAction::Gesture(EditorGestureAction::Begin {
+                    baseline: structure_baseline,
+                }),
+                EditorAction::Mutate(EditorDocumentMutation::ComposePrefab {
+                    document: prefab_document,
+                    base_revision: structure_ui.revision(),
+                    command: nara_tooling::PrefabCompositionCommand::CreateEntity {
+                        draft: forged_draft,
+                        placement: ScenePlacement::last(ScenePlacementOwner::Parent {
+                            parent: root.clone(),
+                        }),
+                    },
+                }),
+                EditorAction::Mutate(EditorDocumentMutation::ComposePrefab {
+                    document: scene_document,
+                    base_revision: scene_revision,
+                    command: cross_document_command,
+                }),
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(
+        rejected_structure.outcomes()[0],
+        EditorActionOutcome::Gesture(EditorGestureOutcome::Began(_))
+    ));
+    assert!(matches!(
+        rejected_structure.outcomes()[1],
+        EditorActionOutcome::Rejected(EditorActionRejection::StructureContractMismatch {
+            document
+        }) if document == prefab_document
+    ));
+    assert!(matches!(
+        rejected_structure.outcomes()[2],
+        EditorActionOutcome::Rejected(EditorActionRejection::StructureContractMismatch {
+            document
+        }) if document == scene_document
+    ));
+    let retained_ui = editor.current_ui_authoring_frame().unwrap();
+    assert!(Arc::ptr_eq(&structure_ui, &retained_ui));
+    assert_eq!(retained_ui.canvas_generation(), retained_canvas_generation);
+
+    let retained_frame = editor.drive_editor_frame(Duration::ZERO);
+    let retained_ui = editor.current_ui_authoring_frame().unwrap();
+    assert!(retained_ui.gesture().is_some());
+    let create = retained_ui
+        .lower_structure_intent(&nara_ui::__private::UiStructureIntent::Create {
+            parameters: nara_ui::__private::UiCreateParameters::Container,
+            placement: ScenePlacement::last(ScenePlacementOwner::Parent { parent: root }),
+        })
+        .unwrap();
+    let created_batch = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            retained_frame.revision(),
+            [
+                EditorAction::Mutate(create),
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: prefab_document,
+                    entity: Some(button),
+                }),
+            ],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Workspace(created) = &created_batch.outcomes()[0] else {
+        panic!("a frame-lowered structure intent must reach the workspace");
+    };
+    assert!(created.applied, "{:?}", created.diagnostics);
+    assert_eq!(
+        created.prefab_composition_outcome,
+        Some(nara_tooling::PrefabCompositionOutcome::Created {
+            entity: nara_identity::SceneEntityId::new("editor_prefab_entity_1").unwrap(),
+        })
+    );
+    assert!(matches!(
+        &created_batch.outcomes()[1],
+        EditorActionOutcome::Rejected(EditorActionRejection::StaleDocumentFact {
+            document,
+            ..
+        }) if *document == prefab_document
+    ));
+    assert!(editor.current_ui_authoring_frame().is_none());
+    #[cfg(feature = "presentation-ui")]
+    assert!(editor.take_editor_ui_preview_candidate().is_none());
+
+    let successor_frame = editor.drive_editor_frame(Duration::ZERO);
+    let successor_ui = editor.current_ui_authoring_frame().unwrap();
+    assert_eq!(
+        successor_ui.last_gesture_cancellation(),
+        Some(EditorGestureCancelReason::StaleRevision)
+    );
+    assert_eq!(
+        successor_ui.selection().top_entity(),
+        Some(&nara_identity::SceneEntityId::new("editor_prefab_entity_1").unwrap())
+    );
+    let stale = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            successor_frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SetActiveDocument {
+                    document: scene_document,
+                }),
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: prefab_document,
+                    entity: successor_ui.selection().top_entity().cloned(),
+                }),
+                EditorAction::Mutate(stale_delete),
+            ],
+        ))
+        .unwrap();
+    assert!(matches!(
+        stale.outcomes()[0],
+        EditorActionOutcome::Workspace(ref report) if report.applied
+    ));
+    assert!(matches!(
+        stale.outcomes()[1],
+        EditorActionOutcome::Rejected(EditorActionRejection::ActiveDocumentChanged {
+            expected,
+            actual: Some(actual),
+        }) if expected == prefab_document && actual == scene_document
+    ));
+    assert!(matches!(
+        stale.outcomes()[2],
+        EditorActionOutcome::Rejected(EditorActionRejection::StaleDocumentFact {
+            document,
+            ..
+        }) if document == prefab_document
+    ));
 }
 
 #[cfg(feature = "tooling")]
@@ -2127,9 +2294,9 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
     let (snapshot, plan, loader) =
         project.snapshot_plan_and_loader_with_limits(ProjectContentLimits::default());
     let budget_host = loader.budget_host();
-    let baseline = budget_host
-        .snapshot()
-        .active(ProjectContentBudgetKind::RetainedBytes);
+    let baseline_snapshot = budget_host.snapshot();
+    let baseline = baseline_snapshot.active(ProjectContentBudgetKind::RetainedBytes);
+    let baseline_reservations = baseline_snapshot.active_reservations();
 
     let source = snapshot
         .prepare_editor_startup_scene(
@@ -2144,13 +2311,20 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
             .active(ProjectContentBudgetKind::RetainedBytes),
         baseline + source_charge
     );
-    assert_eq!(budget_host.snapshot().active_reservations(), 2);
+    assert_eq!(
+        budget_host.snapshot().active_reservations(),
+        baseline_reservations + 1
+    );
     drop(source);
     assert_eq!(
         budget_host
             .snapshot()
             .active(ProjectContentBudgetKind::RetainedBytes),
         baseline
+    );
+    assert_eq!(
+        budget_host.snapshot().active_reservations(),
+        baseline_reservations
     );
     drop(snapshot);
     assert_eq!(
@@ -2196,6 +2370,7 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
         .unwrap();
     let (snapshot, plan, loader) = project.snapshot_plan_and_loader_with_limits(rejected_limits);
     let rejected_budget = loader.budget_host();
+    let rejected_baseline_reservations = rejected_budget.snapshot().active_reservations();
     let result = snapshot.prepare_editor_startup_scene(
         snapshot.expanded_startup_scene(),
         plan.schema_validation().registry(),
@@ -2207,7 +2382,10 @@ fn editor_startup_source_has_an_exact_independent_retained_budget_lease() {
             .active(ProjectContentBudgetKind::RetainedBytes),
         baseline
     );
-    assert_eq!(rejected_budget.snapshot().active_reservations(), 1);
+    assert_eq!(
+        rejected_budget.snapshot().active_reservations(),
+        rejected_baseline_reservations
+    );
     drop(snapshot);
     assert_eq!(
         rejected_budget
@@ -2268,6 +2446,7 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
     let loader = ProjectContentLoader::new(root).unwrap();
     let budget_host = loader.budget_host();
     let snapshot = loader.load(&candidate, &plan).unwrap();
+    let baseline_reservations = budget_host.snapshot().active_reservations();
     let source = snapshot
         .prepare_editor_startup_scene(
             snapshot.expanded_startup_scene(),
@@ -2275,7 +2454,10 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
         )
         .unwrap();
     let editor_source_charge = source.retained_bytes();
-    assert_eq!(budget_host.snapshot().active_reservations(), 2);
+    assert_eq!(
+        budget_host.snapshot().active_reservations(),
+        baseline_reservations + 1
+    );
     drop(loader);
 
     let mut host = ProjectHost::new(RuntimeClosePolicy::new(Duration::ZERO));

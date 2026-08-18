@@ -85,6 +85,15 @@ pub fn apply_workspace_command(
             base_revision,
             command,
         }),
+        EditorWorkspaceCommand::ComposePrefab {
+            document,
+            base_revision,
+            command,
+        } => EditorAction::Mutate(EditorDocumentMutation::ComposePrefab {
+            document,
+            base_revision,
+            command,
+        }),
         EditorWorkspaceCommand::Undo {
             document,
             base_revision,

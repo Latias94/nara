@@ -11,7 +11,8 @@ use crate::{
     EditorGestureOutcome, EditorPersistenceRequestResult, EditorPlayRequestResult,
     EditorProjectView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
     EditorWorkspaceCommandReport, EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult,
-    EditorWorkspaceModel, SceneApplyChangesRequest, SceneCompositionCommand, SceneInspectorCommand,
+    EditorWorkspaceModel, PrefabCompositionCommand, SceneApplyChangesRequest,
+    SceneCompositionCommand, SceneInspectorCommand,
 };
 
 static NEXT_EDITOR_FRAME_SOURCE: AtomicU64 = AtomicU64::new(0);
@@ -353,6 +354,11 @@ pub enum EditorDocumentMutation {
         base_revision: SceneAuthoringRevision,
         command: SceneCompositionCommand,
     },
+    ComposePrefab {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: PrefabCompositionCommand,
+    },
     Undo {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
@@ -371,6 +377,7 @@ impl EditorDocumentMutation {
             | Self::ApplyScenePatch { document, .. }
             | Self::ApplyPrefabPatch { document, .. }
             | Self::ComposeScene { document, .. }
+            | Self::ComposePrefab { document, .. }
             | Self::Undo { document, .. }
             | Self::Redo { document, .. } => *document,
             Self::ApplyPrefabFieldEdit { edit } => edit.target().document(),
@@ -384,6 +391,7 @@ impl EditorDocumentMutation {
             | Self::ApplyScenePatch { base_revision, .. }
             | Self::ApplyPrefabPatch { base_revision, .. }
             | Self::ComposeScene { base_revision, .. }
+            | Self::ComposePrefab { base_revision, .. }
             | Self::Undo { base_revision, .. }
             | Self::Redo { base_revision, .. } => *base_revision,
             Self::ApplyPrefabFieldEdit { edit } => edit.target().base_revision(),
@@ -545,10 +553,17 @@ pub enum EditorActionRejection {
         expected: SceneAuthoringRevision,
         actual: Option<SceneAuthoringRevision>,
     },
+    ActiveDocumentChanged {
+        expected: EditorDocumentId,
+        actual: Option<EditorDocumentId>,
+    },
     MutationAlreadySubmitted {
         document: EditorDocumentId,
     },
     FieldContractMismatch {
+        document: EditorDocumentId,
+    },
+    StructureContractMismatch {
         document: EditorDocumentId,
     },
     RuntimeGenerationChanged {
