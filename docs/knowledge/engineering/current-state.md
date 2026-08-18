@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6aad2094d1c5d758c245095cacfe89d6152aed4486f816af3b03e251d70a9038"
+source_fingerprint: "ba9d3f37fdc98c9b824bbbaeb1e477ab6e1a6586bc154feae97170f7bc93d4fa"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "6aad2094d1c5d758c245095cacfe89d6152aed4486f816af3b03e251d70
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6aad2094d1c5d758c245095cacfe89d6152aed4486f816af3b03e251d70a9038`
-- Immutable records: 503
+- Source fingerprint: `ba9d3f37fdc98c9b824bbbaeb1e477ab6e1a6586bc154feae97170f7bc93d4fa`
+- Immutable records: 506
 - Active lane heads: 1
 
 # Active Registrations
@@ -23,7 +23,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
-- [Editor UI Prefab Structural Composition v1: EUSC-U3](registry/2026-08/2026-08-18T041239Z-editor-ui-prefab-structural-composition-v1-codex-root-d3757e93b47149fab2207cbccdb5211d.md): `active` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
+- [Editor UI Prefab Structural Composition v1: EUSC-U4](registry/2026-08/2026-08-18T050523Z-editor-ui-prefab-structural-composition-v1-codex-root-1487d370933c4451978f2e3c186c846a.md): `active` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
@@ -36,6 +36,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Memory Event**: [verification: Completed EUSC-U3 at 278b986 with exact active-document and revision-bound Prefa](logs/2026-08/2026-08-18T050540Z-verification-completed-eusc-u3-at-278b986-with-exact-active-document-and-revision-bound-prefa-db1f09bcec8846cd9a5acfe20f7f620c.md) - Completed EUSC-U3 at 278b986 with exact active-document and revision-bound Prefab composition, failure-atomic allocation/history/selection p
+- **Verification Evidence**: [EUSC-U3 exact Prefab composition transaction](verification/2026-08/2026-08-18T050411Z-eusc-u3-exact-prefab-composition-transaction-14822e4a808f412b8216eb02401eaca8.md) - Verifies exact document and revision-bound Prefab structural transactions, failure-atomic ID allocation, history and selection publication, Host revalidation, gesture cancellation, and Canvas retirement.
 - **Verification Evidence**: [EUSC-U2 closed UI catalog and exact placement facts](verification/2026-08/2026-08-18T041119Z-eusc-u2-closed-ui-catalog-and-exact-placement-facts-7c4c0f3ba8924f7f84668341aa0011ad.md) - Verifies closed Container/Text/Image/Button recipes, exact source-local structure preflight, semantic brush schema migration, and generation-bound project image choices.
 - **Verification Evidence**: [EUSC-U1 ordered Prefab structural patch authority](verification/2026-08/2026-08-18T023352Z-eusc-u1-ordered-prefab-structural-patch-authority-8386ed22067743af8cfb1f88b3ffd314.md) - Verifies failure-atomic ordered Prefab entity structure, inverse history, canonical order, and continued component-structure rejection.
 - **Verification Evidence**: [EUA-U5 saved Prefab content refresh and Runtime restart conformance](verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md) - Verifies receipt-bound Prefab Save, immutable successor project-content publication, bounded generations, stale-source containment, explicit Restart, and one same-source Reference Game trajectory.
@@ -46,8 +48,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EGV-U5 embedded Game View product conformance](verification/2026-08/2026-08-17T100847Z-egv-u5-embedded-game-view-product-conformance-9d0b0a17beef4c39bea70a8d6f025455.md) - Verifies the generic starter trajectory, compiled Reference Game native Game View canary, bounded lifecycle recovery, and final in-process authority closure.
 - **Verification Evidence**: [EGV-U4 exact Game input and Play control transaction](verification/2026-08/2026-08-17T061259Z-egv-u4-exact-game-input-and-play-control-transaction-426e925f3fa14241b4c85ee8213c1e2a.md) - Verifies exact visible-generation Game input capture, balanced cleanup, visible Play controls, bounded Running cadence, and presentation-joined fixed Step behavior.
 - **Verification Evidence**: [EGV-U3 Game View recovery edge correction](verification/2026-08/2026-08-17T050443Z-egv-u3-game-view-recovery-edge-correction-19bb2be731ab47a5919901a62d7f1a9d.md) - Rebinds EGV-U3 to the correction that makes inactive-lifecycle resize non-fatal and resets GPU recovery only after an exact viewport composite.
-- **Verification Evidence**: [EGV-U3 single Scene and Game viewport presentation](verification/2026-08/2026-08-17T045406Z-egv-u3-single-scene-and-game-viewport-presentation-c793ec2941d64f75be7e2607699a9e79.md) - Verifies mutually exclusive Scene and Game viewport ownership, exact Game composite completion, bounded successor scheduling, resize, and safe GPU recovery.
-- **Verification Evidence**: [EGV-U2 managed Game View runtime placement](verification/2026-08/2026-08-17T014819Z-egv-u2-managed-game-view-runtime-placement-4012c0efb4d046c78031b9ad6d30a2c3.md) - Verifies pre-required-slot Editor Play placement, coordinated unpublished Runtime and target activation, and exact move-only Game candidate ownership.
 
 # Integration Notes
 
