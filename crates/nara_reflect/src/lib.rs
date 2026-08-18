@@ -5,6 +5,8 @@ pub use bevy_reflect::prelude::*;
 
 mod asset_reference;
 mod authoring;
+#[cfg(feature = "serde")]
+mod authoring_bundle;
 mod codec;
 mod entity_reference;
 #[cfg(feature = "serde")]
@@ -22,6 +24,11 @@ pub use asset_reference::{
     DeclaredAssetReference, DeclaredAssetReferenceError, collect_declared_asset_references,
 };
 pub use authoring::PersistentComponentProvider;
+#[cfg(feature = "serde")]
+pub use authoring_bundle::{
+    AuthoringSchemaBundle, AuthoringSchemaBundleError, AuthoringSchemaBundleLimits,
+    AuthoringSchemaBundleOwner,
+};
 pub use codec::{
     ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
 };
@@ -54,7 +61,8 @@ pub use provider::{
     ComponentSchemaOwnerFingerprint, ComponentSchemaOwnerId, ComponentSchemaProviderBindingId,
     ComponentSchemaProviderDefinition, ComponentSchemaProviderReceipt,
     ComponentSchemaProviderSource, ComponentSchemaProviderSourceError,
-    ExecutableRegistryFingerprint, SchemaCompositionFingerprint,
+    ExecutableRegistryFingerprint, PersistentComponentSchemaOwnerId,
+    PersistentComponentSchemaOwnerIdError, SchemaCompositionFingerprint,
 };
 pub use registry::{
     ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,

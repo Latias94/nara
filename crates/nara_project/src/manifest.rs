@@ -11,9 +11,9 @@ use crate::effective::EffectiveProjectSettings;
 use crate::path::ProjectPath;
 use crate::profile::{ProjectProfileError, ProjectProfileOverlay};
 use crate::sections::{
-    ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo, ProjectInputManifest,
-    ProjectPathsManifest, ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest,
-    ProjectTasksManifest, ProjectUiManifest, ProjectWindowManifest,
+    ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectInfo,
+    ProjectInputManifest, ProjectPathsManifest, ProjectProfileKind, ProjectRuntimeManifest,
+    ProjectStartupManifest, ProjectTasksManifest, ProjectUiManifest, ProjectWindowManifest,
 };
 use crate::validation::{
     error, validate_path_field, validate_profile_name, with_field_path, with_profile_identifier,
@@ -68,6 +68,8 @@ pub struct ProjectManifest {
     pub project: ProjectInfo,
     #[serde(default)]
     pub paths: ProjectPathsManifest,
+    #[serde(default)]
+    pub authoring: ProjectAuthoringManifest,
     #[serde(default)]
     pub startup: ProjectStartupManifest,
     #[serde(default)]
@@ -217,6 +219,10 @@ impl ProjectManifest {
             "paths.import_cache",
             &self.paths.import_cache,
         );
+
+        if let Some(schema_bundle) = &self.authoring.schema_bundle {
+            validate_path_field(&mut diagnostics, "authoring.schema_bundle", schema_bundle);
+        }
 
         if let Some(scene) = &self.startup.default_scene {
             validate_path_field(&mut diagnostics, "startup.default_scene", scene);

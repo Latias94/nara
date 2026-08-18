@@ -1,0 +1,101 @@
+use std::sync::Arc;
+
+use nara_core::ByteLimit;
+use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FsError, RelativePath};
+use nara_project::ProjectPath;
+use nara_reflect::{
+    AuthoringSchemaBundle, AuthoringSchemaBundleLimits, SchemaCompositionFingerprint,
+};
+
+use super::{AuthoringSchemaAdmissionBudget, AuthoringSchemaAdmissionError};
+
+pub(super) struct AdmittedAuthoringSchemaBundle {
+    path: ProjectPath,
+    capability: FileCapability,
+    bytes: Arc<[u8]>,
+    digest: ContentDigest,
+    bundle: Arc<AuthoringSchemaBundle>,
+}
+
+impl AdmittedAuthoringSchemaBundle {
+    pub(super) const fn path(&self) -> &ProjectPath {
+        &self.path
+    }
+
+    pub(super) const fn capability(&self) -> &FileCapability {
+        &self.capability
+    }
+
+    pub(super) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(super) const fn digest(&self) -> ContentDigest {
+        self.digest
+    }
+
+    pub(super) fn bundle(&self) -> &AuthoringSchemaBundle {
+        &self.bundle
+    }
+
+    pub(super) fn fingerprint(&self) -> SchemaCompositionFingerprint {
+        self.bundle.fingerprint()
+    }
+}
+
+pub(super) fn admit_bundle(
+    project_root: &DirectoryCapability,
+    path: ProjectPath,
+    budget: &mut AuthoringSchemaAdmissionBudget,
+) -> Result<AdmittedAuthoringSchemaBundle, AuthoringSchemaAdmissionError> {
+    let relative_path =
+        RelativePath::new(path.as_str()).map_err(AuthoringSchemaAdmissionError::BundlePath)?;
+    let capability = project_root
+        .open_file(&relative_path)
+        .map_err(AuthoringSchemaAdmissionError::BundleHost)?;
+
+    let bundle_limits = AuthoringSchemaBundleLimits::default();
+    let aggregate_maximum = budget.maximum();
+    let (read_limit, aggregate_limited) = budget.read_limit(bundle_limits.encoded_bytes().get())?;
+    let bytes = capability
+        .read_to_end_bounded(u64::try_from(read_limit).unwrap_or(u64::MAX))
+        .map_err(|error| {
+            map_bundle_read_error(error, aggregate_limited, read_limit, aggregate_maximum)
+        })?;
+    let digest = ContentDigest::of_bytes(&bytes);
+    let bundle = AuthoringSchemaBundle::from_json_bytes_with_limits(
+        &bytes,
+        bundle_limits.with_encoded_bytes(
+            ByteLimit::new(read_limit).expect("an admitted bundle read limit is non-zero"),
+        ),
+    )
+    .map_err(AuthoringSchemaAdmissionError::BundleInvalid)?;
+    budget.charge_bundle(bytes.len())?;
+
+    Ok(AdmittedAuthoringSchemaBundle {
+        path,
+        capability,
+        bytes: Arc::from(bytes),
+        digest,
+        bundle: Arc::new(bundle),
+    })
+}
+
+fn map_bundle_read_error(
+    error: FsError,
+    aggregate_limited: bool,
+    read_limit: usize,
+    aggregate_maximum: usize,
+) -> AuthoringSchemaAdmissionError {
+    match error {
+        FsError::ByteLimitExceeded { .. } if aggregate_limited => {
+            AuthoringSchemaAdmissionError::AggregateEncodedBytesExceeded {
+                maximum: aggregate_maximum,
+            }
+        }
+        FsError::ByteLimitExceeded { .. } => AuthoringSchemaAdmissionError::BundleTooLarge {
+            maximum: read_limit,
+        },
+        error => AuthoringSchemaAdmissionError::BundleHost(error),
+    }
+}

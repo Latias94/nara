@@ -54,6 +54,7 @@ fn minimal_manifest_parses_and_resolves_validated_defaults() {
     assert_eq!(settings.project.name, "Test Game");
     assert_eq!(settings.paths.assets.as_str(), "assets");
     assert_eq!(settings.paths.import_cache.as_str(), ".nara/import-cache");
+    assert!(settings.authoring_schema_bundle.is_none());
     assert_eq!(settings.runtime_preset, RuntimePreset::Minimal);
     assert!(settings.requested_capabilities.is_empty());
     assert_eq!(
@@ -69,6 +70,73 @@ fn minimal_manifest_parses_and_resolves_validated_defaults() {
         FixedCatchUpPolicy::DiscardExcess
     );
     assert!(settings.window.to_window().is_some());
+}
+
+#[test]
+fn authoring_schema_bundle_is_project_wide_and_canonical() {
+    let source = r#"
+schema_version = 1
+
+[project]
+name = "Authoring Bundle"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
+[profiles.dev.startup]
+default_scene = "scenes/dev.scene.json"
+"#;
+    let manifest = ProjectManifest::parse_toml_str(source).manifest.unwrap();
+    let base = manifest.resolve_profile(None).unwrap();
+    let dev = manifest.resolve_profile(Some("dev")).unwrap();
+
+    assert_eq!(
+        base.authoring_schema_bundle.as_ref().unwrap().as_str(),
+        "schema/authoring.bundle.json"
+    );
+    assert_eq!(dev.authoring_schema_bundle, base.authoring_schema_bundle);
+
+    let encoded = manifest.to_canonical_toml_bytes().unwrap();
+    let loaded = ProjectManifest::parse_toml_bytes(&encoded);
+    assert!(!loaded.has_errors(), "{:?}", loaded.diagnostics);
+    assert_eq!(loaded.manifest.unwrap(), manifest);
+}
+
+#[test]
+fn authoring_schema_bundle_rejects_an_invalid_project_path() {
+    let load = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "Invalid Authoring Bundle"
+
+[authoring]
+schema_bundle = "../outside.bundle.json"
+"#,
+    );
+
+    assert!(load.has_errors());
+    assert!(diagnostic_codes(&load).contains(&"project.path.invalid"));
+    assert!(load.manifest.unwrap().resolve_profile(None).is_err());
+}
+
+#[test]
+fn profile_cannot_override_the_project_wide_authoring_bundle() {
+    let load = ProjectManifest::parse_toml_str(
+        r#"
+schema_version = 1
+
+[project]
+name = "Profile Authoring Override"
+
+[profiles.dev.authoring]
+schema_bundle = "schema/dev.bundle.json"
+"#,
+    );
+
+    assert!(load.manifest.is_none());
+    assert!(diagnostic_codes(&load).contains(&"project.manifest.parse"));
 }
 
 #[test]

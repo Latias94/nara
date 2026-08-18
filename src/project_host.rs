@@ -1,6 +1,13 @@
 mod composition;
 mod ingest;
 
+#[cfg(feature = "serde")]
+#[allow(
+    dead_code,
+    reason = "the root-private schema receipt is consumed by the generic authoring decoder"
+)]
+mod authoring;
+
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) mod check;
 

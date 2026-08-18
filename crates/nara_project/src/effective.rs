@@ -21,6 +21,8 @@ pub struct EffectiveProjectSettings {
     pub runtime_preset: RuntimePreset,
     pub requested_capabilities: ProductCapabilitySet,
     pub paths: EffectiveProjectPaths,
+    /// Project-wide authoring schema bundle source. Profiles cannot replace this path.
+    pub authoring_schema_bundle: Option<ProjectPath>,
     pub startup: EffectiveStartupSettings,
     pub runtime: EffectiveRuntimeSettings,
     pub tasks: EffectiveTaskSettings,
@@ -43,6 +45,13 @@ impl EffectiveProjectSettings {
             runtime_preset: manifest.runtime.preset,
             requested_capabilities: manifest.capabilities.lower(),
             paths: EffectiveProjectPaths::from_manifest(manifest.paths.clone())?,
+            authoring_schema_bundle: manifest
+                .authoring
+                .schema_bundle
+                .clone()
+                .map(ProjectPath::new)
+                .transpose()
+                .map_err(ProjectProfileError::InvalidProjectPath)?,
             startup: EffectiveStartupSettings::from_manifest(manifest.startup.clone())?,
             runtime: manifest.runtime.lower()?,
             tasks: manifest.tasks.lower()?,

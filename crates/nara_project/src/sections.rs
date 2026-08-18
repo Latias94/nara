@@ -69,6 +69,14 @@ impl Default for ProjectPathsManifest {
     }
 }
 
+/// Project-wide source declaration for non-executable authoring data.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectAuthoringManifest {
+    #[serde(default)]
+    pub schema_bundle: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectStartupManifest {

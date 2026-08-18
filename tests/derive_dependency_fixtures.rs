@@ -66,6 +66,56 @@ fn reference_game_depends_only_on_the_public_root_package() {
 }
 
 #[test]
+fn standalone_editor_has_no_project_crate_dependency() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = repository.join("editor").join("Cargo.toml");
+    let output = Command::new(cargo_executable())
+        .current_dir(repository)
+        .args(["metadata", "--manifest-path"])
+        .arg(&manifest)
+        .args(["--locked", "--no-deps", "--format-version", "1"])
+        .env("CARGO_TERM_COLOR", "never")
+        .output()
+        .expect("failed to read standalone editor Cargo metadata");
+
+    assert!(
+        output.status.success(),
+        "standalone editor metadata failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("Cargo metadata must be valid JSON");
+    let package = metadata["packages"]
+        .as_array()
+        .and_then(|packages| {
+            packages
+                .iter()
+                .find(|package| package["name"] == "nara-editor")
+        })
+        .expect("standalone editor metadata must contain the editor package");
+    assert_eq!(package["name"], "nara-editor");
+
+    for dependency in package["dependencies"]
+        .as_array()
+        .expect("package dependencies must be an array")
+        .iter()
+        .filter(|dependency| dependency["kind"].is_null())
+    {
+        let Some(path) = dependency["path"].as_str() else {
+            continue;
+        };
+        assert_eq!(dependency["name"], "nara", "{dependency:#?}");
+        assert_eq!(
+            Path::new(path).canonicalize().unwrap(),
+            repository.canonicalize().unwrap(),
+            "the standalone editor may depend only on the public root package"
+        );
+    }
+}
+
+#[test]
 fn canonical_project_fixtures_are_checked_out_with_lf() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let fixture_paths = [

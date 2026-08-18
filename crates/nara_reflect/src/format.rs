@@ -19,13 +19,13 @@ use crate::{
 
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ComponentSchemaCatalogWire {
-    generation: u64,
+pub(crate) struct ComponentSchemaCatalogWire {
+    pub(crate) generation: u64,
     #[serde(default)]
-    predecessor: Option<CatalogFingerprint>,
-    components: Vec<ComponentSchema>,
+    pub(crate) predecessor: Option<CatalogFingerprint>,
+    pub(crate) components: Vec<ComponentSchema>,
     #[serde(default)]
-    type_tombstones: Vec<ComponentTypeId>,
+    pub(crate) type_tombstones: Vec<ComponentTypeId>,
 }
 
 impl From<ComponentSchemaCatalogWire> for ComponentSchemaCatalog {
@@ -477,15 +477,16 @@ fn finish_catalog(
     predecessor: Option<&ComponentSchemaCatalog>,
     limits: ComponentCatalogFileLimits,
 ) -> Result<ComponentSchemaCatalog, ComponentCatalogFileError> {
-    validate_budget(&catalog, limits)?;
+    let mut counts = ComponentCatalogCounts::default();
+    accumulate_catalog_budget(&catalog, limits, &mut counts)?;
     prepare_catalog_candidate(catalog, predecessor).map_err(ComponentCatalogFileError::Catalog)
 }
 
-fn validate_budget(
+pub(crate) fn accumulate_catalog_budget(
     catalog: &ComponentSchemaCatalog,
     limits: ComponentCatalogFileLimits,
+    counts: &mut ComponentCatalogCounts,
 ) -> Result<(), ComponentCatalogFileBudgetError> {
-    let mut counts = CatalogCounts::default();
     for schema in &catalog.components {
         increase(
             &mut counts.components,
@@ -538,7 +539,7 @@ fn validate_budget(
 }
 
 #[derive(Default)]
-struct CatalogCounts {
+pub(crate) struct ComponentCatalogCounts {
     components: usize,
     fields: usize,
     aliases: usize,
@@ -546,7 +547,7 @@ struct CatalogCounts {
     diagnostic_sources: usize,
 }
 
-impl CatalogCounts {
+impl ComponentCatalogCounts {
     fn observe_diagnostic_source(
         &mut self,
         limits: ComponentCatalogFileLimits,

@@ -39,10 +39,10 @@ pub use profile::{
     ProjectWindowPatch,
 };
 pub use sections::{
-    ProjectCapabilitiesManifest, ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy,
-    ProjectInfo, ProjectInputManifest, ProjectPathsManifest, ProjectPresentMode,
-    ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
-    ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectUiManifest,
+    ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest,
+    ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectPathsManifest,
+    ProjectPresentMode, ProjectProfileKind, ProjectRuntimeManifest, ProjectStartupManifest,
+    ProjectTaskPoolManifest, ProjectTaskShutdownManifest, ProjectTasksManifest, ProjectUiManifest,
     ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest, ProjectWindowMode,
 };
 
@@ -54,14 +54,15 @@ pub mod prelude {
         EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
         EffectiveWindowSettings, MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
         MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability, ProductCapabilitySet,
-        ProjectCapabilitiesManifest, ProjectCapabilitiesPatch, ProjectDiagnosticsManifest,
-        ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
-        ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
-        ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
-        ProjectProfileKind, ProjectProfileOverlay, ProjectRuntimeManifest, ProjectStartupManifest,
-        ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
-        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
-        ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
+        ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectCapabilitiesPatch,
+        ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
+        ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
+        ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
+        ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
+        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
+        ProjectTaskPoolPatch, ProjectTaskShutdownManifest, ProjectTaskShutdownPatch,
+        ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest, ProjectUiPatch,
+        ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
         ProjectWindowMode, RuntimePreset,
     };
 }

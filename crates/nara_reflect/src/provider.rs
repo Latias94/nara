@@ -47,15 +47,7 @@ impl ComponentSchemaOwnerId {
     }
 
     pub(crate) fn is_valid(self) -> bool {
-        let value = self.as_str();
-        value.len() <= Self::MAX_BYTES
-            && value
-                .bytes()
-                .next()
-                .is_some_and(|byte| byte.is_ascii_alphanumeric())
-            && value
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+        validate_component_schema_owner_id(self.as_str()).is_ok()
     }
 }
 
@@ -63,6 +55,122 @@ impl fmt::Display for ComponentSchemaOwnerId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
     }
+}
+
+/// Owned persistent-file identity of one durable component-schema owner.
+///
+/// This type carries data loaded from bounded files. It never converts file input into the
+/// `&'static str` storage used by trusted executable providers.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PersistentComponentSchemaOwnerId(String);
+
+impl PersistentComponentSchemaOwnerId {
+    pub const MAX_BYTES: usize = ComponentSchemaOwnerId::MAX_BYTES;
+
+    pub fn try_new(id: impl Into<String>) -> Result<Self, PersistentComponentSchemaOwnerIdError> {
+        let id = id.into();
+        validate_component_schema_owner_id(&id)?;
+        Ok(Self(id))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Compares this file identity with one trusted executable owner after validating both forms.
+    ///
+    /// This is the only bridge between owned file identity and static provider identity. It
+    /// performs an exact string comparison and neither interns nor leaks the owned string.
+    pub fn matches_executable(
+        &self,
+        executable: ComponentSchemaOwnerId,
+    ) -> Result<bool, PersistentComponentSchemaOwnerIdError> {
+        validate_component_schema_owner_id(self.as_str())?;
+        validate_component_schema_owner_id(executable.as_str())?;
+        Ok(self.as_str() == executable.as_str())
+    }
+}
+
+impl fmt::Display for PersistentComponentSchemaOwnerId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// Validation failure for an owned persistent component-schema owner identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PersistentComponentSchemaOwnerIdError {
+    Empty,
+    TooLong { length: usize, maximum: usize },
+    InvalidStart(char),
+    InvalidCharacter { index: usize, character: char },
+}
+
+impl fmt::Display for PersistentComponentSchemaOwnerIdError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("component schema owner ID is empty"),
+            Self::TooLong { length, maximum } => write!(
+                formatter,
+                "component schema owner ID has {length} bytes, maximum is {maximum}"
+            ),
+            Self::InvalidStart(character) => write!(
+                formatter,
+                "component schema owner ID must start with an ASCII letter or digit, found '{character}'"
+            ),
+            Self::InvalidCharacter { index, character } => write!(
+                formatter,
+                "component schema owner ID contains invalid character '{character}' at byte {index}"
+            ),
+        }
+    }
+}
+
+impl Error for PersistentComponentSchemaOwnerIdError {}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for PersistentComponentSchemaOwnerId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PersistentComponentSchemaOwnerId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = <String as serde::Deserialize>::deserialize(deserializer)?;
+        Self::try_new(id).map_err(serde::de::Error::custom)
+    }
+}
+
+fn validate_component_schema_owner_id(
+    value: &str,
+) -> Result<(), PersistentComponentSchemaOwnerIdError> {
+    let Some(first) = value.chars().next() else {
+        return Err(PersistentComponentSchemaOwnerIdError::Empty);
+    };
+    if value.len() > ComponentSchemaOwnerId::MAX_BYTES {
+        return Err(PersistentComponentSchemaOwnerIdError::TooLong {
+            length: value.len(),
+            maximum: ComponentSchemaOwnerId::MAX_BYTES,
+        });
+    }
+    if !first.is_ascii_alphanumeric() {
+        return Err(PersistentComponentSchemaOwnerIdError::InvalidStart(first));
+    }
+    if let Some((index, character)) = value.char_indices().find(|(_, character)| {
+        !character.is_ascii_alphanumeric() && !matches!(character, '_' | '-' | '.')
+    }) {
+        return Err(PersistentComponentSchemaOwnerIdError::InvalidCharacter { index, character });
+    }
+    Ok(())
 }
 
 /// Bounded error identity returned by a trusted compiled schema source.
@@ -561,6 +669,29 @@ impl SchemaCompositionFingerprint {
         }
         Self(*hasher.finalize().as_bytes())
     }
+
+    pub(crate) fn from_persistent_owner_catalogs<'a>(
+        owners: impl IntoIterator<Item = (&'a PersistentComponentSchemaOwnerId, CatalogFingerprint)>,
+    ) -> Self {
+        let mut owners = owners
+            .into_iter()
+            .map(|(owner, catalog)| {
+                (
+                    owner.as_str(),
+                    owner_fingerprint_from_str(owner.as_str(), catalog),
+                )
+            })
+            .collect::<Vec<_>>();
+        owners.sort_by_key(|(owner, _)| *owner);
+        let mut hasher = blake3::Hasher::new();
+        feed_bytes(&mut hasher, b"nara.schema-composition-fingerprint.v1");
+        feed_len(&mut hasher, owners.len());
+        for (owner, fingerprint) in owners {
+            feed_str(&mut hasher, owner);
+            feed_bytes(&mut hasher, fingerprint.0.as_slice());
+        }
+        Self(*hasher.finalize().as_bytes())
+    }
 }
 
 impl ExecutableRegistryFingerprint {
@@ -594,9 +725,16 @@ fn owner_fingerprint(
     owner: ComponentSchemaOwnerId,
     catalog: CatalogFingerprint,
 ) -> ComponentSchemaOwnerFingerprint {
+    owner_fingerprint_from_str(owner.as_str(), catalog)
+}
+
+fn owner_fingerprint_from_str(
+    owner: &str,
+    catalog: CatalogFingerprint,
+) -> ComponentSchemaOwnerFingerprint {
     let mut hasher = blake3::Hasher::new();
     feed_bytes(&mut hasher, b"nara.component-schema-owner-fingerprint.v1");
-    feed_str(&mut hasher, owner.as_str());
+    feed_str(&mut hasher, owner);
     feed_bytes(&mut hasher, catalog.as_bytes());
     ComponentSchemaOwnerFingerprint(*hasher.finalize().as_bytes())
 }
