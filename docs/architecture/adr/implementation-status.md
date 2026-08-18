@@ -3,8 +3,10 @@
 **Status**: Active
 **Last Verified**: 2026-08-18 @ `ed9f1cd`
 
-This ledger tracks implementation evidence independently from ADR decision acceptance. No
-implementation plan is active. The completed
+This ledger tracks implementation evidence independently from ADR decision acceptance. The
+[Editor UI Prefab Structural Composition v1](../../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
+is the sole active implementation plan at EUSC-U1 under registration
+`21e04043485446999ebe56db277c87bb`. The completed
 [Editor UI Prefab Authoring and Canvas v1](../../plans/2026-08-17-1930-feat-editor-ui-prefab-authoring-and-canvas-v1-plan.md)
 closes at `ed9f1cd` with conformance record `cf11b0c7d23a44e7b127b41199ee4ee7` and
 completed registration `fcbd471b11774b599cd190ead6827654`. Its prior units remain verified at

@@ -4,6 +4,9 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-18
+* **Work Registration**: [Editor UI Prefab Structural Composition v1: EUSC-U1](registry/2026-08/2026-08-18T020927Z-editor-ui-prefab-structural-composition-v1-codex-root-21e04043485446999ebe56db277c87bb.md) - Activates the first implementation unit for failure-atomic ordered Prefab structural patches.
+
 ## 2026-08-17
 * **Work Registration**: [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md) - Completed registration for the five-unit Editor UI Prefab authoring and Canvas plan.
 * **Verification Evidence**: [EUA-U5 saved Prefab content refresh and Runtime restart conformance](verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md) - Verifies receipt-bound Prefab Save, immutable successor project-content publication, bounded generations, stale-source containment, explicit Restart, and one same-source Reference Game trajectory.
@@ -142,4 +145,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [UI Foundation correction: UIF-U2 root envelopes active](registry/2026-08/2026-08-08T113539Z-engine-foundation-contract-completion-codex-root-43dccd4631f7494a94ffeb7f67271798.md) - Makes root-local admission and last-good visual fallback independent while rebinding current order, layer, and modal safety.
 * **Verification Evidence**: [UIF-U1 atomic presented-session interaction](verification/2026-08/2026-08-08T113450Z-uif-u1-atomic-presented-session-interaction-d13d3f5c4c68440fa5ddacb88ee64eab.md) - Verifies closed dispatch outcomes, atomic reconciliation, invalidation-safe pointer routing, committed focus semantics, and disabled-focus identity.
 * **Work Registration**: [UI Foundation correction: UIF-U1 atomic presented-session interaction active](registry/2026-08/2026-08-08T105208Z-engine-foundation-contract-completion-codex-root-31aad28a16ce4c0391a1a0c75cd0fb87.md) - Closes rejected-transaction atomicity, lifecycle reconciliation, geometry-generation routing, committed semantics, and disabled-focus identity before root compilation work.
-* **Verification Evidence**: [UIF-U0 UI Foundation authority and contract rebaseline](verification/2026-08/2026-08-08T105134Z-uif-u0-ui-foundation-authority-and-contract-rebaseline-7425f7e748a543dc9bab48bbf84d0e11.md) - Records the superseded NUI authority, focused ADR set, split product successors, and closed pre-implementation contract baseline.
