@@ -141,9 +141,11 @@ existing generic value grammar, canonical writer, budgets, and patch semantics.
 - R8. A new root-private Authoring Project Module consumes the manifest and bundle without
   constructing `RuntimePlan`, `ComponentRegistry`, executable registry, plugin plan, or ECS
   `World`. It may reuse bounded envelope/value/catalog readers but not runtime admission or
-  publication types. Its one lifecycle is `PreparedAuthoringProject` -> bounded source candidates ->
-  `AuthoringProjectCandidate` -> atomically published `AuthoringProjectReceipt`; only the receipt may
-  create `EditorProjectSession`.
+  publication types. Admission has two nominal stages: SGE-U1 publishes an immutable
+  `AuthoringSchemaReceipt` for the exact manifest and bundle basis; after generic persistent decode
+  exists, SGE-U2 consumes that receipt and publishes bounded source candidates as an
+  `AuthoringProjectCandidate` and then an atomic `AuthoringProjectReceipt`. Only the final project
+  receipt may create `EditorProjectSession`.
 - R9. v1 opens the manifest-selected startup Scene and its explicit Scene/Prefab/UI and declared
   asset-reference closure. It may also reopen an already known explicit source path. It does not
   call ambient `std::fs::read_dir`, recursively scan project directories, or claim a full Asset
@@ -463,15 +465,14 @@ flowchart LR
     U5[SGE-U5 product proof and closure]
 
     U1 --> U2
-    U1 --> U3
-    U2 --> U4
+    U2 --> U3
     U3 --> U4
     U4 --> U5
 ```
 
-U2 and U3 are technically independent after U1 but should execute serially in this checkout because
-they converge on `EditorProjectSession` and application tests. U4 cannot claim generic product
-success until both the authoring and shell boundaries exist.
+U2 owns generic source decode and the final Authoring Project receipt, so U3 consumes U2 rather than
+constructing a partial session from the schema-only basis. U4 cannot claim generic product success
+until both the authoring and shell boundaries exist.
 
 ### System-Wide Impact
 
@@ -565,15 +566,15 @@ root-private Authoring Project transaction and receipt without constructing Runt
    paths, unsupported envelope, and all configured limits.
 3. Add a project-wide authoring bundle declaration to the manifest. Validate it as one project-
    relative file path under the existing root capability. Do not make it profile-overridable.
-4. Prepare `PreparedAuthoringProject` with exact root, manifest, bundle, digest, owner, composition,
-   attempt-generation, and one aggregate closure budget. Resolve every dependency through the exact
-   root capability, deduplicate/cycle-check by capability-relative identity, and retain reads/digests
-   from admitted handles rather than reopening validated names.
-5. Publish one immutable `AuthoringProjectSnapshot` inside `AuthoringProjectCandidate`. The snapshot
-   owns startup Scene, Prefab/UI/asset closure, source digests/provenance, prepared authoring assets,
-   readiness, Adapter compatibility receipts, unavailable-record manifests, and budget usage. Atomic
-   candidate publication creates `AuthoringProjectReceipt`; session and preview owners consume that
-   receipt/snapshot rather than `ProjectContentSnapshot`.
+4. Prepare the schema basis with exact root, manifest, bundle, digest, owner, composition,
+   attempt-generation, and one aggregate admission budget. Resolve the manifest and bundle through
+   the exact root capability and retain their admitted handles, identities, bytes, and digests rather
+   than reopening validated names.
+5. Publish one immutable `AuthoringSchemaReceipt` containing that exact data-only basis. It carries
+   no decoded Scene/Prefab candidate, Adapter compatibility receipt, unavailable-record manifest, or
+   prepared asset. SGE-U2 consumes it after generic persistent decode exists and is the sole unit that
+   may publish the complete `AuthoringProjectSnapshot`, `AuthoringProjectCandidate`, and
+   `AuthoringProjectReceipt`.
 6. Keep the Module free of `ProductRecipe`, `PluginPlan`, `ComponentRegistry`, `RuntimePlan`, native
    provider callbacks, `World`, and project-content publication.
 7. Add a compile/boundary assertion that production `nara-editor` does not depend on Reference Game
@@ -584,15 +585,15 @@ root-private Authoring Project transaction and receipt without constructing Runt
 - one canonical multi-owner encode/decode/fingerprint round trip including a generation-greater-than-
   one owner with its immediate predecessor;
 - one table-driven rejection test covering duplicate owner and divergent component ownership;
-- one Host admission test proving exact root/manifest/bundle/source-handle binding, snapshot
+- one Host admission test proving exact root/manifest/bundle handle binding, schema-receipt
   publication, and zero Runtime types;
 - one spoofed built-in owner bundle that cannot activate a first-party Adapter receipt;
-- one cyclic/fan-out closure aggregate-budget rejection and one unsupported bundle envelope negative,
+- one aggregate manifest-plus-bundle budget rejection and one unsupported bundle envelope negative,
   not a format x limit matrix.
 
 **Exit**:
 
-- an exact data-only Authoring Project receipt can be prepared from a project root;
+- an exact data-only Authoring schema receipt can be prepared from a project root;
 - no project executable or native schema provider is loaded;
 - bundle mismatch is diagnosable and mutation-free.
 
@@ -616,24 +617,32 @@ those records semantically, and gate edits without weakening Runtime spawn.
    exact `SceneComponentRecord` grammar and document topology; then classify each record against the
    immutable authoring bundle and Host-issued first-party authoring Adapter receipts. Bundle identity
    alone cannot activate a typed Adapter.
-2. Publish one nominal authoring candidate containing the unchanged `SceneDocument` or
+2. Consume the exact `AuthoringSchemaReceipt`, traverse the startup Scene and explicit
+   Scene/Prefab/UI and declared asset-reference closure through its retained root capability, and
+   enforce the open-attempt-wide unique-file, edge, depth, path, handle, encoded/decoded byte,
+   decode-work, diagnostic, and retained-candidate budgets from R9. Deduplicate and cycle-check by
+   capability-relative identity while keeping canonical traversal order independent of hash-map
+   iteration.
+3. Publish one nominal authoring candidate containing the unchanged `SceneDocument` or
    `PrefabDocument`, document readiness, bounded record issues, and the canonical unavailable-record
    manifest. Do not add a generic public document trait or opaque byte container.
-3. Reuse ADR 0090's closed readiness names and diagnostics. Keep raw values out of diagnostic and
+4. Reuse ADR 0090's closed readiness names and diagnostics. Keep raw values out of diagnostic and
    observation payloads.
-4. Install readiness in the existing workspace slot. Inspector/domain projections expose an exact
+5. Install readiness in the existing workspace slot. Inspector/domain projections expose an exact
    read-only reason for unavailable records; existing available first-party fields continue through
    current typed commands.
-5. Before a degraded document mutation publishes, prove it belongs to the preservation-safe scalar
+6. Before a degraded document mutation publishes, prove it belongs to the preservation-safe scalar
    whitelist, changes no topology/identity/reference/dependency/lineage fact, and leaves the complete
    unavailable-record manifest identical. Rejection changes no revision, content state, history,
    selection, dirty state, or preview.
-6. Permit canonical Save/Reopen of unchanged unavailable records through existing Host persistence.
+7. Permit canonical Save/Reopen of unchanged unavailable records through existing Host persistence.
    Keep the document Degraded and preserve the exact unavailable-record manifest across the receipt.
-7. Rebind Inspector, persistence refresh, Scene View, UI Canvas, prepared images, and Prefab closure
+8. Publish the complete immutable `AuthoringProjectSnapshot`, `AuthoringProjectCandidate`, and
+   `AuthoringProjectReceipt` only after the bounded closure is admitted. Rebind Inspector,
+   persistence refresh, Scene View, UI Canvas, prepared images, and Prefab closure
    to the immutable `AuthoringProjectSnapshot`. Unavailable components are excluded from typed
    preview projection with an explicit reason but remain untouched in source and persistence.
-8. Keep runtime materialization strict. Existing provider-capable `SceneSpawner`,
+9. Keep runtime materialization strict. Existing provider-capable `SceneSpawner`,
    `ProjectContentLoader`, Check/Cook/Export, and trusted Runtime plans reject every non-Available
    required record before mutation.
 
@@ -643,6 +652,7 @@ those records semantically, and gate edits without weakening Runtime spawn.
   Save/Reopen preserve the exact unavailable-record manifest;
 - one Prefab fixture with an UnknownSchema record: read-only projection and semantic round trip;
 - one future/unknown value-tag fixture: Rejected, no document publication or overwrite;
+- one cyclic or fan-out closure aggregate-budget rejection with no partial project receipt;
 - one shared strict runtime test proving both degraded fixtures fail before World mutation;
 - no record-state x document-kind Cartesian matrix.
 
