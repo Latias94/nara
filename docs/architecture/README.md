@@ -9,11 +9,13 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
-   plan is active only at SGE-U2 under
-   [registration `c07b1c82b53047ab96593b744aa90fc4`](../knowledge/engineering/registry/2026-08/2026-08-18T164600Z-standalone-generic-editor-open-recovery-codex-root-c07b1c82b53047ab96593b744aa90fc4.md),
-   against baseline `0882599`. SGE-U1 has implemented the bounded data-only authoring schema
-   bundle and root-private Authoring Project admission. SGE-U2 owns lossless degraded Scene and
-   Prefab document authority; SGE-U3 through SGE-U5 and all successor Editor lanes remain inactive.
+   plan is active only at SGE-U3 under
+   [registration `c594e9bffb8d4edf88b8dee3f6f57791`](../knowledge/engineering/registry/2026-08/2026-08-18T214000Z-standalone-generic-editor-open-recovery-sge-u3.md),
+   against baseline `52b834f`. SGE-U1 has implemented the bounded data-only authoring schema
+   bundle and root-private admission; SGE-U2 has implemented lossless degraded Scene and Prefab
+   document authority plus the complete bounded Authoring Project receipt. SGE-U3 owns the
+   shell-first project lifecycle and explicit Runtime-unavailable boundary; SGE-U4, SGE-U5, and all
+   successor Editor lanes remain inactive.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
    closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and
