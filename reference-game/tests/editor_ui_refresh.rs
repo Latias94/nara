@@ -2,8 +2,11 @@
 
 #[path = "support/reference_project_copy.rs"]
 mod reference_project_copy;
+#[path = "support/project_content_fixture.rs"]
+mod project_content_fixture;
 
 use std::{
+    fs,
     sync::{
         Mutex,
         mpsc::{self, Receiver, SyncSender},
@@ -13,19 +16,31 @@ use std::{
 
 use nara::{
     app::{CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
-    prelude::{App, Resource, World},
+    prelude::{App, Assets, Children, ImageAsset, Parent, Resource, World},
     project_host::{EditorProjectIntent, EditorProjectSession},
-    reflect::ComponentFieldId,
-    scene::SceneEntityId,
+    reflect::{
+        ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    },
+    scene::{
+        PrefabDocument, SceneEntityId, SceneEntitySource,
+    },
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentKind,
         EditorDocumentMutation, EditorGestureAction, EditorGestureOutcome, EditorNavigationAction,
         EditorPersistenceAction, EditorPersistenceRequestResult, EditorPersistenceResult,
         EditorPlayAction, EditorPlayRequestResult, EditorPlayState, EditorProjectContentView,
+        PrefabCompositionOutcome,
     },
-    ui::__private::{UiAuthoringCanvasProjection, UiAuthoringDirectEdit, UiAuthoringFieldValue},
+    ui::{
+        UiColor, UiImageId, UiNode, UiVisual,
+        __private::{
+            UiAuthoringCanvasProjection, UiAuthoringDirectEdit, UiAuthoringFieldValue,
+            UiAuthoringHierarchyKind, UiBrushAuthoringKind, UiCreateParameters, UiStructureIntent,
+        },
+    },
 };
 use nara_reference_game::{REFERENCE_RUNTIME_UI_PLUGIN_ID, ReferenceUiObservation, wave_recipe};
+use project_content_fixture::try_load_project_content_from_path;
 use reference_project_copy::ReferenceProjectCopy;
 
 const EDITED_RETRY_ACTION: &str = "reference-game.retry-saved";
@@ -40,10 +55,40 @@ const UI_REFRESH_PROBE_DECLARATION: PluginDeclaration =
 
 static UI_REFRESH_PROBE_SENDER: Mutex<Option<SyncSender<ReferenceUiObservation>>> =
     Mutex::new(None);
+static UI_REFRESH_EXPECTED_SOURCE: Mutex<Option<SceneEntityId>> = Mutex::new(None);
 
 #[test]
 fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     let project = ReferenceProjectCopy::new("editor-ui-refresh");
+    seed_legacy_modal_image(&project);
+    let migrated_content = try_load_project_content_from_path(project.path())
+        .expect("the legacy image brush must migrate through the ordinary loader");
+    assert!(migrated_content
+        .snapshot
+        .images()
+        .iter()
+        .any(|image| image.path().as_str() == "textures/player.png"));
+    assert!(migrated_content.snapshot.source_upgrade_required());
+    let migrated_prefab = migrated_content
+        .snapshot
+        .prefabs()
+        .iter()
+        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .expect("the migrated reference UI Prefab must remain in the source closure");
+    let migrated_visual = migrated_prefab
+        .document()
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "modal-dim")
+        .and_then(|entity| entity.components.get(&ComponentTypeId::new("nara.ui.UiVisual")))
+        .expect("the migrated modal visual must remain present");
+    assert_eq!(migrated_visual.version, ComponentSchemaVersion::new(2).unwrap());
+    drop(migrated_content);
+    let stale_expected = UI_REFRESH_EXPECTED_SOURCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    assert!(stale_expected.is_none());
     let (sender, receiver) = mpsc::sync_channel(4);
     let replaced = UI_REFRESH_PROBE_SENDER
         .lock()
@@ -135,6 +180,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .expect("the opened UI Prefab must become active");
     let prefab_tab = prefab_frame.workspace().document(prefab_document).unwrap();
     assert_eq!(prefab_tab.kind, EditorDocumentKind::Prefab);
+    assert!(prefab_tab.dirty);
     let retry = SceneEntityId::new("retry-button").unwrap();
     let ui_frame = editor
         .current_ui_authoring_frame()
@@ -146,9 +192,156 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     assert_eq!(canvas.logical_size().width(), 960.0);
     assert_eq!(canvas.logical_size().height(), 540.0);
     assert!(canvas.facts().iter().any(|fact| fact.entity() == &retry));
+    let migrated_brush = projection
+        .fields()
+        .iter()
+        .find(|field| {
+            field.key().entity().as_str() == "modal-dim"
+                && field.key().primary_field().as_str() == "background.kind"
+        })
+        .expect("the migrated modal must expose one semantic brush descriptor");
+    assert!(matches!(
+        migrated_brush.value(),
+        UiAuthoringFieldValue::Brush {
+            kind: UiBrushAuthoringKind::Image,
+            reference,
+            ..
+        } if reference == "textures/player.png"
+    ));
     let initial_authored_width = retry_authored_width(&editor, &retry);
 
-    let action_descriptor = projection
+    let ui_root = SceneEntityId::new("terminal-overlay").unwrap();
+    let image_selection = ui_frame
+        .image_choices()
+        .expect("the current project image catalog must be available")
+        .choices()
+        .iter()
+        .find(|choice| choice.project_path() == "textures/player.png")
+        .expect("the otherwise unreferenced player image must be a current project choice")
+        .selection(ui_frame.image_choice_generation());
+    let create_placement = projection
+        .structure_placement_candidates(None)
+        .expect("the current UI source must expose exact placements")
+        .into_iter()
+        .filter(|candidate| candidate.parent() == &ui_root)
+        .last()
+        .expect("the primary HUD root must accept one exact child placement")
+        .placement()
+        .clone();
+    let create_mutation = ui_frame
+        .lower_structure_intent(&UiStructureIntent::Create {
+            parameters: UiCreateParameters::Image {
+                selection: Some(image_selection),
+            },
+            placement: create_placement,
+        })
+        .expect("the exact current Image recipe must lower through the Host frame");
+    let created = match dispatch(
+        &mut editor,
+        &prefab_frame,
+        EditorAction::Mutate(create_mutation),
+    ) {
+        EditorActionOutcome::Workspace(report) => match report.prefab_composition_outcome {
+            Some(PrefabCompositionOutcome::Created { entity }) => entity,
+            other => panic!("expected one created UI image, got {other:?}"),
+        },
+        other => panic!("expected one workspace create outcome, got {other:?}"),
+    };
+    let replaced_source = UI_REFRESH_EXPECTED_SOURCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .replace(created.clone());
+    assert!(replaced_source.is_none());
+
+    let created_frame = editor.drive_editor_frame(Duration::ZERO);
+    let created_order = ui_child_order(&editor, &ui_root);
+    assert_eq!(
+        created_order,
+        vec![
+            SceneEntityId::new("modal-dim").unwrap(),
+            SceneEntityId::new("terminal-panel").unwrap(),
+            created.clone(),
+        ]
+    );
+    let move_mutation = {
+        let frame = editor
+            .current_ui_authoring_frame()
+            .expect("the created Image must publish a successor authoring frame");
+        let placement = frame
+            .projection()
+            .unwrap()
+            .structure_placement_candidates(Some(&created))
+            .unwrap()
+            .into_iter()
+            .find(|candidate| {
+                candidate.parent() == &ui_root
+                    && matches!(
+                        &candidate.placement().anchor,
+                        nara::scene::ScenePlacementAnchor::After { sibling }
+                            if sibling.as_str() == "modal-dim"
+                    )
+            })
+            .expect("the created Image must have one explicit alternate order")
+            .placement()
+            .clone();
+        frame
+            .lower_structure_intent(&UiStructureIntent::Move {
+                target: created.clone(),
+                placement,
+            })
+            .expect("the exact alternate placement must lower through the Host frame")
+    };
+    assert!(matches!(
+        dispatch(
+            &mut editor,
+            &created_frame,
+            EditorAction::Mutate(move_mutation),
+        ),
+        EditorActionOutcome::Workspace(report)
+            if matches!(
+                &report.prefab_composition_outcome,
+                Some(PrefabCompositionOutcome::Moved { entity }) if entity == &created
+            )
+    ));
+    let moved = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        ui_child_order(&editor, &ui_root),
+        vec![
+            SceneEntityId::new("modal-dim").unwrap(),
+            created.clone(),
+            SceneEntityId::new("terminal-panel").unwrap(),
+        ]
+    );
+
+    let delete_frame = editor.current_ui_authoring_frame().unwrap();
+    let delete_mutation = delete_frame
+        .lower_structure_intent(&UiStructureIntent::Delete {
+            target: SceneEntityId::new("modal-dim").unwrap(),
+        })
+        .expect("the migrated modal must be deletable as a source-local subtree");
+    assert!(matches!(
+        dispatch(
+            &mut editor,
+            &moved,
+            EditorAction::Mutate(delete_mutation),
+        ),
+        EditorActionOutcome::Workspace(report)
+            if matches!(
+                &report.prefab_composition_outcome,
+                Some(PrefabCompositionOutcome::Removed { entity, .. })
+                    if entity.as_str() == "modal-dim"
+            )
+    ));
+    let structure_deleted = editor.drive_editor_frame(Duration::ZERO);
+    assert_eq!(
+        ui_child_order(&editor, &ui_root),
+        vec![created.clone(), SceneEntityId::new("terminal-panel").unwrap()]
+    );
+
+    let action_ui = editor.current_ui_authoring_frame().unwrap();
+    let action_descriptor = action_ui
+        .projection()
+        .unwrap()
         .fields()
         .iter()
         .find(|field| {
@@ -156,7 +349,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
                 && field.key().primary_field() == &ComponentFieldId::new("action")
         })
         .expect("the Retry action must be a typed UI authoring field");
-    let action_edit = ui_frame
+    let action_edit = action_ui
         .lower_field_edit(
             action_descriptor.key(),
             UiAuthoringFieldValue::Action(EDITED_RETRY_ACTION.to_owned()),
@@ -165,7 +358,7 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     assert!(matches!(
         dispatch(
             &mut editor,
-            &prefab_frame,
+            &structure_deleted,
             EditorAction::Mutate(EditorDocumentMutation::ApplyPrefabFieldEdit {
                 edit: action_edit,
             }),
@@ -336,6 +529,19 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             if generation > initial_content_generation
     ));
     assert!(refreshed.play().is_out_of_date());
+    let refreshed_ui = editor
+        .current_ui_authoring_frame()
+        .expect("content refresh must republish the active UI source");
+    assert_eq!(
+        refreshed_ui
+            .image_choices()
+            .unwrap()
+            .choices()
+            .iter()
+            .filter(|choice| choice.project_path() == "textures/player.png")
+            .count(),
+        1
+    );
 
     assert!(matches!(
         dispatch(
@@ -354,6 +560,38 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             if document == prefab_document && digest == saved_digest
     ));
     assert!(reopened.project_content().is_current());
+    assert!(!reopened.workspace().document(prefab_document).unwrap().dirty);
+    let reopened_ui = editor
+        .current_ui_authoring_frame()
+        .expect("the reopened Prefab must publish its saved structure");
+    let reopened_projection = reopened_ui.projection().unwrap();
+    assert!(reopened_projection.hierarchy().iter().any(|node| {
+        node.entity() == &created && node.kind() == UiAuthoringHierarchyKind::Image
+    }));
+    assert!(!reopened_projection
+        .hierarchy()
+        .iter()
+        .any(|node| node.entity().as_str() == "modal-dim"));
+    assert_eq!(
+        ui_child_order(&editor, &ui_root),
+        vec![created.clone(), SceneEntityId::new("terminal-panel").unwrap()]
+    );
+    let image_brush = reopened_projection
+        .fields()
+        .iter()
+        .find(|field| {
+            field.key().entity() == &created
+                && field.key().primary_field().as_str() == "background.kind"
+        })
+        .expect("the reopened Image must retain one semantic brush descriptor");
+    assert!(matches!(
+        image_brush.value(),
+        UiAuthoringFieldValue::Brush {
+            kind: UiBrushAuthoringKind::Image,
+            reference,
+            ..
+        } if reference == "textures/player.png"
+    ));
     assert!(matches!(
         dispatch(
             &mut editor,
@@ -401,6 +639,13 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
     assert!(sender.is_some());
+    assert_eq!(
+        UI_REFRESH_EXPECTED_SOURCE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take(),
+        Some(created)
+    );
 }
 
 #[derive(Debug, Default)]
@@ -437,6 +682,13 @@ fn observe_runtime_ui(world: &mut World) {
     if world.resource::<EditorUiRefreshProbe>().reported {
         return;
     }
+    let expected_source = UI_REFRESH_EXPECTED_SOURCE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if expected_source.is_some_and(|expected| !runtime_structure_is_current(world, &expected)) {
+        return;
+    }
     let Some(observation) = ReferenceUiObservation::from_authoring_world(world) else {
         return;
     };
@@ -446,6 +698,75 @@ fn observe_runtime_ui(world: &mut World) {
         .try_send(observation)
         .expect("the bounded UI refresh observation channel must have capacity");
     probe.reported = true;
+}
+
+fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool {
+    let Some(created) = world.iter_entities().find(|entity| {
+        entity.get::<SceneEntitySource>().is_some_and(|source| {
+            source.source_entity_id == *expected
+                && source
+                    .projection_path
+                    .as_ref()
+                    .and_then(|path| path.source_chain().last())
+                    .is_some_and(|step| {
+                        step.source_document()
+                            .as_path()
+                            .is_some_and(|path| path.as_str() == "reference-ui.prefab.json")
+                    })
+        }) && entity.contains::<UiNode>()
+            && entity.contains::<UiVisual>()
+    }) else {
+        return false;
+    };
+    let expected_visual = UiVisual::image(
+        UiImageId::new("textures/player.png").unwrap(),
+        UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+    );
+    if created.get::<UiVisual>() != Some(&expected_visual) {
+        return false;
+    }
+    let Some(parent_id) = created.get::<Parent>().map(Parent::parent) else {
+        return false;
+    };
+    let Ok(parent) = world.get_entity(parent_id) else {
+        return false;
+    };
+    if !parent.get::<SceneEntitySource>().is_some_and(|source| {
+        source.source_entity_id.as_str() == "terminal-overlay"
+    }) {
+        return false;
+    }
+    let Some(children) = parent.get::<Children>() else {
+        return false;
+    };
+    let child_sources = children
+        .iter()
+        .filter_map(|child| {
+            world
+                .get_entity(child)
+                .ok()?
+                .get::<SceneEntitySource>()
+                .map(|source| source.source_entity_id.clone())
+        })
+        .collect::<Vec<_>>();
+    if child_sources
+        != [
+            expected.clone(),
+            SceneEntityId::new("terminal-panel").unwrap(),
+        ]
+        || world.iter_entities().any(|entity| {
+            entity.get::<SceneEntitySource>().is_some_and(|source| {
+                source.source_entity_id.as_str() == "modal-dim"
+            })
+        })
+    {
+        return false;
+    }
+    world.get_resource::<Assets<ImageAsset>>().is_some_and(|images| {
+        images
+            .iter()
+            .any(|(_, image)| image.source().path().as_str() == "textures/player.png")
+    })
 }
 
 fn dispatch(
@@ -513,4 +834,101 @@ fn retry_authored_width(editor: &EditorProjectSession, retry: &SceneEntityId) ->
         UiAuthoringFieldValue::Dimension { value, .. } => *value,
         other => panic!("expected a dimension width, got {other:?}"),
     }
+}
+
+fn seed_legacy_modal_image(project: &ReferenceProjectCopy) {
+    let loaded = try_load_project_content_from_path(project.path())
+        .expect("the temporary reference project must load before the source edit");
+    assert!(!loaded
+        .snapshot
+        .images()
+        .iter()
+        .any(|image| image.path().as_str() == "textures/player.png"));
+    let source = loaded
+        .snapshot
+        .prefabs()
+        .iter()
+        .find(|prefab| prefab.path().as_str() == "reference-ui.prefab.json")
+        .expect("the reference UI Prefab must be available for the source edit");
+    let mut prefab = source.document().clone();
+    let visual_id = ComponentTypeId::new("nara.ui.UiVisual");
+    let modal = prefab
+        .entities
+        .iter_mut()
+        .find(|entity| entity.id.as_str() == "modal-dim")
+        .expect("the reference modal source entity must exist");
+    let visual = modal
+        .components
+        .get_mut(&visual_id)
+        .expect("the reference modal must own a visual component");
+    let border_width = visual
+        .value
+        .get("border_width")
+        .cloned()
+        .expect("the visual border width must be present");
+    let radii = visual
+        .value
+        .get("radii")
+        .cloned()
+        .expect("the visual radii must be present");
+    visual.version = ComponentSchemaVersion::ONE;
+    visual.value = ComponentValue::map([
+        (
+            "background",
+            legacy_brush("image", [0.0, 0.0, 0.0, 0.65], "textures/player.png"),
+        ),
+        ("border_width", border_width),
+        (
+            "border_brush",
+            legacy_brush("solid", [0.0, 0.0, 0.0, 0.0], ""),
+        ),
+        ("radii", radii),
+    ]);
+    let encoded = PrefabDocument::new(prefab.roots, prefab.entities)
+        .to_json_string()
+        .expect("the legacy source edit must use the canonical Prefab writer");
+    fs::write(
+        project.file("prefabs/reference-ui.prefab.json"),
+        format!("{encoded}\n"),
+    )
+    .expect("the guarded source copy must accept the canonical Prefab edit");
+}
+
+fn legacy_brush(kind: &str, color: [f64; 4], reference: &str) -> ComponentValue {
+    ComponentValue::map([
+        ("kind", ComponentValue::String(kind.to_owned())),
+        (
+            "red",
+            ComponentValue::f64(color[0]).expect("legacy red channel must be finite"),
+        ),
+        (
+            "green",
+            ComponentValue::f64(color[1]).expect("legacy green channel must be finite"),
+        ),
+        (
+            "blue",
+            ComponentValue::f64(color[2]).expect("legacy blue channel must be finite"),
+        ),
+        (
+            "alpha",
+            ComponentValue::f64(color[3]).expect("legacy alpha channel must be finite"),
+        ),
+        ("reference", ComponentValue::String(reference.to_owned())),
+    ])
+}
+
+fn ui_child_order(
+    editor: &EditorProjectSession,
+    parent: &SceneEntityId,
+) -> Vec<SceneEntityId> {
+    editor
+        .current_ui_authoring_frame()
+        .expect("the UI Prefab remains the active authoring source")
+        .projection()
+        .unwrap()
+        .hierarchy()
+        .iter()
+        .filter(|node| node.parent() == Some(parent))
+        .map(|node| node.entity().clone())
+        .collect()
 }

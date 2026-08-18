@@ -28,6 +28,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .with_ui_authoring(EditorUiAuthoringCanaryRequest::new(
                 SceneEntityId::new("reference-ui")?,
                 SceneEntityId::new("autofire-status")?,
+                SceneEntityId::new("reference-hud")?,
                 UI_MOVE_DELTA,
             )),
     )?;
@@ -37,6 +38,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let selected_ui = ui.selected();
     let previewed_ui = ui.previewed();
     let committed_ui = ui.committed();
+    let structured_ui = ui.structured();
     let initial = evidence.initial();
     let input_response = evidence.input_response();
     let paused = evidence.paused();
@@ -55,17 +57,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || selected_ui.extent().contains(&0)
         || selected_ui.document() != previewed_ui.document()
         || selected_ui.document() != committed_ui.document()
+        || selected_ui.document() != structured_ui.document()
         || selected_ui.revision() != previewed_ui.revision()
         || committed_ui.revision() == selected_ui.revision()
+        || structured_ui.revision().source_id() != committed_ui.revision().source_id()
+        || structured_ui.revision().generation()
+            != committed_ui.revision().generation().checked_add(1).ok_or(
+                "the native UI authoring revision generation exhausted",
+            )?
         || selected_ui.gesture().is_some()
         || previewed_ui
             .gesture()
             .is_none_or(|gesture| gesture.preview_generation() == 0)
         || committed_ui.gesture().is_some()
+        || structured_ui.gesture().is_some()
         || previewed_ui.editor_frame_index() <= selected_ui.editor_frame_index()
         || committed_ui.editor_frame_index() <= previewed_ui.editor_frame_index()
+        || structured_ui.editor_frame_index() <= committed_ui.editor_frame_index()
         || previewed_ui.presentation_generation() <= selected_ui.presentation_generation()
         || committed_ui.presentation_generation() <= previewed_ui.presentation_generation()
+        || structured_ui.presentation_generation() <= committed_ui.presentation_generation()
         || preview_delta
             .into_iter()
             .zip(UI_MOVE_DELTA)
@@ -73,8 +84,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || committed_delta
             .into_iter()
             .any(|observed| observed.abs() > 0.01)
-        || ui.undo_depth() != 1
+        || structured_ui.fact_count() != committed_ui.fact_count().saturating_add(1)
+        || ui.created_entity() == &SceneEntityId::new("autofire-status")?
+        || ui.undo_depth() != 2
         || !ui.stale_pick_rejected()
+        || !ui.structural_stale_pick_rejected()
         || ![
             initial.runtime_ui_present(),
             input_response.runtime_ui_present(),
@@ -109,9 +123,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         concat!(
-            "{{\"schema\":\"nara-reference-game.editor-game-view-v1\",",
+            "{{\"schema\":\"nara-reference-game.editor-game-view-v2\",",
             "\"ui_document\":{},\"ui_selected_frame\":{},",
             "\"ui_preview_frame\":{},\"ui_committed_frame\":{},",
+            "\"ui_structured_frame\":{},\"ui_created_entity\":\"{}\",",
             "\"ui_fact_count\":{},\"ui_move_delta\":[{},{}],\"ui_undo_depth\":{},",
             "\"runtime_generation\":{},\"initial_frame\":{},",
             "\"input_frame\":{},\"paused_frame\":{},\"stepped_frame\":{},",
@@ -123,7 +138,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         selected_ui.editor_frame_index(),
         previewed_ui.editor_frame_index(),
         committed_ui.editor_frame_index(),
-        committed_ui.fact_count(),
+        structured_ui.editor_frame_index(),
+        ui.created_entity().as_str(),
+        structured_ui.fact_count(),
         UI_MOVE_DELTA[0],
         UI_MOVE_DELTA[1],
         ui.undo_depth(),

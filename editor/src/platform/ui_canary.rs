@@ -5,7 +5,7 @@ use nara::{
         EditorAction, EditorDocumentId, EditorGestureAction, EditorGestureStamp,
         EditorNavigationAction,
     },
-    ui::__private::UiAuthoringDirectEdit,
+    ui::__private::{UiAuthoringDirectEdit, UiCreateParameters, UiStructureIntent},
 };
 
 use super::{
@@ -21,6 +21,7 @@ use super::{
 pub struct EditorUiAuthoringCanaryRequest {
     scene_anchor: SceneEntityId,
     canvas_entity: SceneEntityId,
+    structure_parent: SceneEntityId,
     move_delta: [f64; 2],
 }
 
@@ -29,11 +30,13 @@ impl EditorUiAuthoringCanaryRequest {
     pub fn new(
         scene_anchor: SceneEntityId,
         canvas_entity: SceneEntityId,
+        structure_parent: SceneEntityId,
         move_delta: [f64; 2],
     ) -> Self {
         Self {
             scene_anchor,
             canvas_entity,
+            structure_parent,
             move_delta,
         }
     }
@@ -127,8 +130,11 @@ pub struct EditorUiAuthoringCanaryEvidence {
     selected: EditorUiAuthoringCanaryFrame,
     previewed: EditorUiAuthoringCanaryFrame,
     committed: EditorUiAuthoringCanaryFrame,
+    structured: EditorUiAuthoringCanaryFrame,
+    created_entity: SceneEntityId,
     undo_depth: usize,
     stale_pick_rejected: bool,
+    structural_stale_pick_rejected: bool,
 }
 
 impl EditorUiAuthoringCanaryEvidence {
@@ -148,6 +154,16 @@ impl EditorUiAuthoringCanaryEvidence {
     }
 
     #[must_use]
+    pub const fn structured(&self) -> EditorUiAuthoringCanaryFrame {
+        self.structured
+    }
+
+    #[must_use]
+    pub const fn created_entity(&self) -> &SceneEntityId {
+        &self.created_entity
+    }
+
+    #[must_use]
     pub const fn undo_depth(&self) -> usize {
         self.undo_depth
     }
@@ -155,6 +171,11 @@ impl EditorUiAuthoringCanaryEvidence {
     #[must_use]
     pub const fn stale_pick_rejected(&self) -> bool {
         self.stale_pick_rejected
+    }
+
+    #[must_use]
+    pub const fn structural_stale_pick_rejected(&self) -> bool {
+        self.structural_stale_pick_rejected
     }
 }
 
@@ -166,6 +187,7 @@ enum EditorUiAuthoringCanaryStage {
     AwaitGestureBegin,
     AwaitPreview,
     AwaitCommit,
+    AwaitStructurePresentation,
     RestoreScene,
     Complete,
 }
@@ -177,9 +199,13 @@ pub(super) struct EditorUiAuthoringCanaryHost {
     selected: Option<EditorUiAuthoringCanaryFrame>,
     previewed: Option<EditorUiAuthoringCanaryFrame>,
     committed: Option<EditorUiAuthoringCanaryFrame>,
+    structured: Option<EditorUiAuthoringCanaryFrame>,
+    created_entity: Option<SceneEntityId>,
     undo_depth: Option<usize>,
     initial_pick: Option<EditorUiCanvasPickRequest>,
+    pre_structure_pick: Option<EditorUiCanvasPickRequest>,
     stale_pick_rejected: bool,
+    structural_stale_pick_rejected: bool,
 }
 
 impl EditorUiAuthoringCanaryHost {
@@ -191,9 +217,13 @@ impl EditorUiAuthoringCanaryHost {
             selected: None,
             previewed: None,
             committed: None,
+            structured: None,
+            created_entity: None,
             undo_depth: None,
             initial_pick: None,
+            pre_structure_pick: None,
             stale_pick_rejected: false,
+            structural_stale_pick_rejected: false,
         }
     }
 
@@ -428,8 +458,140 @@ impl EditorUiAuthoringCanaryHost {
                         document.history
                     )));
                 }
-                self.undo_depth = Some(document.history.undo_depth);
                 self.committed = Some(committed);
+                self.pre_structure_pick = Some(EditorUiCanvasPickRequest {
+                    stamp: observation.stamp(),
+                    uv: current_uv,
+                });
+                let placement = authoring
+                    .projection()
+                    .map_err(|error| EditorRunError::Platform(error.to_string()))?
+                    .structure_placement_candidates(None)
+                    .map_err(|error| EditorRunError::Platform(error.to_string()))?
+                    .into_iter()
+                    .filter(|candidate| candidate.parent() == &self.request.structure_parent)
+                    .last()
+                    .ok_or_else(|| {
+                        EditorRunError::Platform(format!(
+                            "the UI authoring canary found no final placement under {}",
+                            self.request.structure_parent.as_str()
+                        ))
+                    })?
+                    .placement()
+                    .clone();
+                let mutation = authoring
+                    .lower_structure_intent(&UiStructureIntent::Create {
+                        parameters: UiCreateParameters::Text {
+                            content: "Native canary".to_owned(),
+                        },
+                        placement,
+                    })
+                    .map_err(|error| EditorRunError::Platform(error.to_string()))?;
+                actions.push(EditorAction::Mutate(mutation));
+                self.stage = EditorUiAuthoringCanaryStage::AwaitStructurePresentation;
+            }
+            EditorUiAuthoringCanaryStage::AwaitStructurePresentation => {
+                let Some((authoring, observation)) = exact_authoring_canvas(authoring, observation)
+                else {
+                    return Ok(actions);
+                };
+                let committed = self.committed.ok_or_else(|| {
+                    EditorRunError::Platform(
+                        "the UI authoring canary lost its committed Canvas frame".to_owned(),
+                    )
+                })?;
+                if authoring.revision() == committed.revision() {
+                    return Ok(actions);
+                }
+                if authoring.revision().source_id() != committed.revision().source_id()
+                    || authoring.revision().generation()
+                        != committed
+                            .revision()
+                            .generation()
+                            .checked_add(1)
+                            .ok_or_else(|| {
+                                EditorRunError::Platform(
+                                    "the UI authoring revision generation exhausted".to_owned(),
+                                )
+                            })?
+                {
+                    return Err(EditorRunError::Platform(format!(
+                        "the structural Canvas advanced from {:?} to unexpected revision {:?}",
+                        committed.revision(),
+                        authoring.revision()
+                    )));
+                }
+                let created = authoring
+                    .selection()
+                    .top_entity()
+                    .filter(|entity| *entity != &self.request.canvas_entity)
+                    .cloned()
+                    .ok_or_else(|| {
+                        EditorRunError::Platform(
+                            "the structural transaction did not select its allocated entity"
+                                .to_owned(),
+                        )
+                    })?;
+                let structured =
+                    EditorUiAuthoringCanaryFrame::from_observation(observation, &created)?;
+                if structured.fact_count() != committed.fact_count().saturating_add(1)
+                    || structured.editor_frame_index() <= committed.editor_frame_index()
+                    || structured.presentation_generation() <= committed.presentation_generation()
+                {
+                    return Err(EditorRunError::Platform(format!(
+                        "the structural successor Canvas facts were incomplete: committed={committed:?}, structured={structured:?}"
+                    )));
+                }
+                let stale_pick = self.pre_structure_pick.ok_or_else(|| {
+                    EditorRunError::Platform(
+                        "the UI authoring canary lost its pre-structure pick receipt".to_owned(),
+                    )
+                })?;
+                if presenter.resolve_pick(stale_pick).is_ok() {
+                    return Err(EditorRunError::Platform(
+                        "the structural successor accepted its predecessor pick receipt".to_owned(),
+                    ));
+                }
+                let current_uv = observation.entity_center_uv(&created).ok_or_else(|| {
+                    EditorRunError::Platform(
+                        "the structural successor did not map its created node".to_owned(),
+                    )
+                })?;
+                let picked = presenter
+                    .resolve_pick(EditorUiCanvasPickRequest {
+                        stamp: observation.stamp(),
+                        uv: current_uv,
+                    })
+                    .map_err(|()| {
+                        EditorRunError::Platform(
+                            "the structural successor lost exact pick authority".to_owned(),
+                        )
+                    })?;
+                if picked.as_ref() != Some(&created) {
+                    return Err(EditorRunError::Platform(format!(
+                        "the structural successor picked {picked:?} instead of {}",
+                        created.as_str()
+                    )));
+                }
+                let document = frame
+                    .workspace()
+                    .document(authoring.document())
+                    .ok_or_else(|| {
+                        EditorRunError::Platform(
+                            "the structurally edited Prefab disappeared from the workspace"
+                                .to_owned(),
+                        )
+                    })?;
+                if document.history.undo_depth != 2 || document.history.redo_depth != 0 {
+                    return Err(EditorRunError::Platform(format!(
+                        "the UI structure transaction produced history {:?}",
+                        document.history
+                    )));
+                }
+                self.undo_depth = Some(document.history.undo_depth);
+                self.created_entity = Some(created);
+                self.structured = Some(structured);
+                self.structural_stale_pick_rejected = true;
                 actions.push(EditorAction::Navigate(
                     EditorNavigationAction::SetActiveDocument {
                         document: self.scene_document.ok_or_else(|| {
@@ -478,10 +640,17 @@ impl EditorUiAuthoringCanaryHost {
                 .expect("completed UI canary retains selection"),
             previewed: self.previewed.expect("completed UI canary retains preview"),
             committed: self.committed.expect("completed UI canary retains commit"),
+            structured: self
+                .structured
+                .expect("completed UI canary retains structural presentation"),
+            created_entity: self
+                .created_entity
+                .expect("completed UI canary retains the allocated entity"),
             undo_depth: self
                 .undo_depth
                 .expect("completed UI canary retains history"),
             stale_pick_rejected: self.stale_pick_rejected,
+            structural_stale_pick_rejected: self.structural_stale_pick_rejected,
         })
     }
 }
