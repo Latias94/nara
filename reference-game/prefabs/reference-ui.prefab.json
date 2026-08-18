@@ -147,7 +147,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -170,6 +170,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -178,7 +181,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "primary_text"
                     }
@@ -344,7 +347,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -363,6 +366,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -371,7 +377,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "positive"
                     }
@@ -392,6 +398,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "solid"
@@ -400,7 +409,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": ""
                     }
@@ -571,7 +580,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -594,6 +603,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -602,7 +614,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "primary_text"
                     }
@@ -771,7 +783,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -790,6 +802,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -798,7 +813,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "panel"
                     }
@@ -819,6 +834,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "solid"
@@ -827,7 +845,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": ""
                     }
@@ -998,7 +1016,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -1021,6 +1039,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -1029,7 +1050,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "secondary_text"
                     }
@@ -1195,7 +1216,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -1214,6 +1235,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -1222,7 +1246,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "surface"
                     }
@@ -1243,6 +1267,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "solid"
@@ -1251,7 +1278,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": ""
                     }
@@ -1422,7 +1449,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -1445,6 +1472,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -1453,7 +1483,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "primary_text"
                     }
@@ -1619,7 +1649,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -1642,6 +1672,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -1650,7 +1683,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "warning"
                     }
@@ -1871,7 +1904,7 @@
                         },
                         "blue": {
                           "type": "f64",
-                          "value": 0.23000000417232513
+                          "value": 0.2300000041723251
                         },
                         "green": {
                           "type": "f64",
@@ -1938,7 +1971,7 @@
                         },
                         "green": {
                           "type": "f64",
-                          "value": 0.11999999731779099
+                          "value": 0.119999997317791
                         },
                         "red": {
                           "type": "f64",
@@ -1976,11 +2009,11 @@
                         },
                         "blue": {
                           "type": "f64",
-                          "value": 0.9700000286102295
+                          "value": 0.9700000286102296
                         },
                         "green": {
                           "type": "f64",
-                          "value": 0.9599999785423279
+                          "value": 0.959999978542328
                         },
                         "red": {
                           "type": "f64",
@@ -2269,7 +2302,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -2288,6 +2321,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -2296,7 +2332,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "panel"
                     }
@@ -2317,6 +2353,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "solid"
@@ -2325,7 +2364,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": ""
                     }
@@ -2496,7 +2535,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -2519,6 +2558,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -2527,7 +2569,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "primary_text"
                     }
@@ -2693,7 +2735,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -2716,6 +2758,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -2724,7 +2769,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "primary_text"
                     }
@@ -3046,7 +3091,7 @@
             }
           },
           "nara.ui.UiVisual": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -3065,6 +3110,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -3073,7 +3121,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "panel"
                     }
@@ -3094,6 +3142,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -3102,7 +3153,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "warning"
                     }
@@ -3273,7 +3324,7 @@
             }
           },
           "nara.ui.UiText": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
@@ -3296,6 +3347,9 @@
                       "type": "f64",
                       "value": 0.0
                     },
+                    "image": {
+                      "type": "null"
+                    },
                     "kind": {
                       "type": "string",
                       "value": "role"
@@ -3304,7 +3358,7 @@
                       "type": "f64",
                       "value": 0.0
                     },
-                    "reference": {
+                    "role": {
                       "type": "string",
                       "value": "primary_text"
                     }

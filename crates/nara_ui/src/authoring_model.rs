@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, OnceLock},
 };
 
+use nara_asset::AssetRef;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion,
     ComponentTypeId, ComponentValue, ComponentValueKind,
@@ -16,7 +17,13 @@ use nara_scene::{
 use nara_ui_kernel::{UiPoint, UiRect, UiSize, UiSurfaceContentTransform};
 use thiserror::Error;
 
-use crate::codec;
+use crate::{
+    authoring_composition::{
+        UiAuthoringHierarchyKind, UiAuthoringStructuralCapability, decorate_authoring_hierarchy,
+        hierarchy_kind,
+    },
+    codec,
+};
 
 const MAX_AUTHORING_NODES: usize = 4_096;
 const MAX_AUTHORING_FIELDS: usize = 32_768;
@@ -249,6 +256,7 @@ pub enum UiAuthoringFieldValue {
 pub struct UiAuthoringFieldMember {
     field: ComponentFieldId,
     value_kind: ComponentValueKind,
+    optional: bool,
     value: ComponentValue,
 }
 
@@ -261,6 +269,11 @@ impl UiAuthoringFieldMember {
     #[must_use]
     pub const fn value_kind(&self) -> ComponentValueKind {
         self.value_kind
+    }
+
+    #[must_use]
+    pub const fn is_optional(&self) -> bool {
+        self.optional
     }
 
     #[must_use]
@@ -420,7 +433,8 @@ impl UiAuthoringFieldDescriptor {
                     || component != &self.key.component
                     || *component_version != self.component_version
                     || field != &member.field
-                    || value.kind() != member.value_kind
+                    || (value.kind() != member.value_kind
+                        && !(member.optional && matches!(value, ComponentValue::Null)))
                 {
                     return Err(UiAuthoringEditError::DescriptorMismatch);
                 }
@@ -467,6 +481,10 @@ pub struct UiAuthoringHierarchyNode {
     parent: Option<SceneEntityId>,
     depth: u16,
     structural_order: u32,
+    kind: UiAuthoringHierarchyKind,
+    display_label: String,
+    display_path: String,
+    structural_capability: UiAuthoringStructuralCapability,
     components: Vec<UiAuthoringComponentKind>,
     gizmos: UiAuthoringGizmoCapabilities,
 }
@@ -493,6 +511,26 @@ impl UiAuthoringHierarchyNode {
     }
 
     #[must_use]
+    pub const fn kind(&self) -> UiAuthoringHierarchyKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub fn display_label(&self) -> &str {
+        &self.display_label
+    }
+
+    #[must_use]
+    pub fn display_path(&self) -> &str {
+        &self.display_path
+    }
+
+    #[must_use]
+    pub const fn structural_capability(&self) -> UiAuthoringStructuralCapability {
+        self.structural_capability
+    }
+
+    #[must_use]
     pub fn components(&self) -> &[UiAuthoringComponentKind] {
         &self.components
     }
@@ -500,6 +538,17 @@ impl UiAuthoringHierarchyNode {
     #[must_use]
     pub const fn gizmos(&self) -> UiAuthoringGizmoCapabilities {
         self.gizmos
+    }
+
+    pub(crate) fn set_composition_facts(
+        &mut self,
+        display_label: String,
+        display_path: String,
+        structural_capability: UiAuthoringStructuralCapability,
+    ) {
+        self.display_label = display_label;
+        self.display_path = display_path;
+        self.structural_capability = structural_capability;
     }
 }
 
@@ -789,10 +838,21 @@ pub enum UiAuthoringDiagnosticReason {
     CanvasCompilationRejected,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UiAuthoringSourceTopologyNode {
+    pub(crate) entity: SceneEntityId,
+    pub(crate) parent: Option<SceneEntityId>,
+    pub(crate) children: Vec<SceneEntityId>,
+    pub(crate) structural_order: u32,
+    pub(crate) contains_ui_root: bool,
+    pub(crate) projected: bool,
+}
+
 /// Immutable authoring projection over exactly one persistent Prefab document.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiAuthoringProjection {
     hierarchy: Arc<[UiAuthoringHierarchyNode]>,
+    source_topology: Arc<[UiAuthoringSourceTopologyNode]>,
     fields: Arc<[UiAuthoringFieldDescriptor]>,
     components: Arc<BTreeMap<(SceneEntityId, ComponentTypeId), SceneComponentRecord>>,
     source_map: Arc<[UiAuthoringSourceMapEntry]>,
@@ -824,6 +884,15 @@ impl UiAuthoringProjection {
     #[must_use]
     pub fn diagnostics(&self) -> &[UiAuthoringDiagnostic] {
         &self.diagnostics
+    }
+
+    pub(crate) fn source_node(
+        &self,
+        entity: &SceneEntityId,
+    ) -> Option<&UiAuthoringSourceTopologyNode> {
+        self.source_topology
+            .iter()
+            .find(|candidate| candidate.entity == *entity)
     }
 
     pub(crate) fn component_record(
@@ -1015,7 +1084,10 @@ impl UiAuthoringProjection {
                 .iter()
                 .find(|candidate| candidate.id == *field)
                 .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
-            if *component_version != schema.version || value.kind() != field.value_kind {
+            if *component_version != schema.version
+                || (value.kind() != field.value_kind
+                    && (field.required || !matches!(value, ComponentValue::Null)))
+            {
                 return Err(UiAuthoringEditError::DescriptorMismatch);
             }
             candidate
@@ -1094,6 +1166,11 @@ pub fn project_prefab_authoring(
         .map(|entity| (&entity.id, entity))
         .collect::<BTreeMap<_, _>>();
     let ordered = ordered_entities(prefab, &entities)?;
+    let source_topology = source_topology(&ordered, &entities)?;
+    let source_orders = source_topology
+        .iter()
+        .map(|node| (node.entity.clone(), node.structural_order))
+        .collect::<BTreeMap<_, _>>();
     let root_type = UiAuthoringComponentKind::Root.component_type();
     let roots = ordered
         .iter()
@@ -1113,9 +1190,9 @@ pub fn project_prefab_authoring(
 
     let mut projection = ProjectionBuilder::default();
     for root in roots {
-        projection.project_root(root, &entities, authoring_schemas())?;
+        projection.project_root(root, &entities, &source_orders, authoring_schemas())?;
     }
-    projection.finish()
+    projection.finish(source_topology)
 }
 
 fn authoring_schemas() -> &'static BTreeMap<ComponentTypeId, ComponentSchema> {
@@ -1144,9 +1221,10 @@ impl ProjectionBuilder {
         &mut self,
         root: &SceneEntityRecord,
         entities: &BTreeMap<&SceneEntityId, &SceneEntityRecord>,
+        source_orders: &BTreeMap<SceneEntityId, u32>,
         schemas: &BTreeMap<ComponentTypeId, ComponentSchema>,
     ) -> Result<(), UiAuthoringProjectionError> {
-        self.project_node(root, None, 0, entities, schemas)
+        self.project_node(root, None, 0, entities, source_orders, schemas)
     }
 
     fn project_node(
@@ -1155,6 +1233,7 @@ impl ProjectionBuilder {
         parent: Option<&SceneEntityId>,
         depth: usize,
         entities: &BTreeMap<&SceneEntityId, &SceneEntityRecord>,
+        source_orders: &BTreeMap<SceneEntityId, u32>,
         schemas: &BTreeMap<ComponentTypeId, ComponentSchema>,
     ) -> Result<(), UiAuthoringProjectionError> {
         if depth > MAX_AUTHORING_DEPTH || self.hierarchy.len() == MAX_AUTHORING_NODES {
@@ -1163,8 +1242,9 @@ impl ProjectionBuilder {
         if !self.projected.insert(entity.id.clone()) {
             return Err(UiAuthoringProjectionError::InvalidHierarchy);
         }
-        let structural_order = u32::try_from(self.hierarchy.len())
-            .map_err(|_| UiAuthoringProjectionError::HierarchyLimitExceeded)?;
+        let structural_order = *source_orders
+            .get(&entity.id)
+            .ok_or(UiAuthoringProjectionError::MissingEntity)?;
         let components = entity
             .components
             .keys()
@@ -1177,6 +1257,10 @@ impl ProjectionBuilder {
             depth: u16::try_from(depth)
                 .map_err(|_| UiAuthoringProjectionError::HierarchyLimitExceeded)?,
             structural_order,
+            kind: hierarchy_kind(entity),
+            display_label: String::new(),
+            display_path: String::new(),
+            structural_capability: UiAuthoringStructuralCapability::available(),
             components,
             gizmos,
         });
@@ -1203,7 +1287,14 @@ impl ProjectionBuilder {
             {
                 continue;
             }
-            self.project_node(child, Some(&entity.id), depth + 1, entities, schemas)?;
+            self.project_node(
+                child,
+                Some(&entity.id),
+                depth + 1,
+                entities,
+                source_orders,
+                schemas,
+            )?;
         }
         Ok(())
     }
@@ -1260,10 +1351,18 @@ impl ProjectionBuilder {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<UiAuthoringProjection, UiAuthoringProjectionError> {
+    fn finish(
+        mut self,
+        mut source_topology: Vec<UiAuthoringSourceTopologyNode>,
+    ) -> Result<UiAuthoringProjection, UiAuthoringProjectionError> {
         self.fields.sort_by(|left, right| left.key.cmp(&right.key));
+        for source in &mut source_topology {
+            source.projected = self.projected.contains(&source.entity);
+        }
+        decorate_authoring_hierarchy(&mut self.hierarchy, &source_topology);
         Ok(UiAuthoringProjection {
             hierarchy: self.hierarchy.into(),
+            source_topology: source_topology.into(),
             fields: self.fields.into(),
             components: Arc::new(self.components),
             source_map: self.source_map.into(),
@@ -1305,6 +1404,40 @@ fn ordered_entities<'a>(
         return Err(UiAuthoringProjectionError::InvalidHierarchy);
     }
     Ok(ordered)
+}
+
+fn source_topology(
+    ordered: &[&SceneEntityRecord],
+    entities: &BTreeMap<&SceneEntityId, &SceneEntityRecord>,
+) -> Result<Vec<UiAuthoringSourceTopologyNode>, UiAuthoringProjectionError> {
+    let mut parents = BTreeMap::<SceneEntityId, SceneEntityId>::new();
+    for entity in ordered {
+        for child in &entity.children {
+            if !entities.contains_key(child) {
+                return Err(UiAuthoringProjectionError::MissingEntity);
+            }
+            if parents.insert(child.clone(), entity.id.clone()).is_some() {
+                return Err(UiAuthoringProjectionError::InvalidHierarchy);
+            }
+        }
+    }
+    ordered
+        .iter()
+        .enumerate()
+        .map(|(order, entity)| {
+            Ok(UiAuthoringSourceTopologyNode {
+                entity: entity.id.clone(),
+                parent: parents.get(&entity.id).cloned(),
+                children: entity.children.clone(),
+                structural_order: u32::try_from(order)
+                    .map_err(|_| UiAuthoringProjectionError::HierarchyLimitExceeded)?,
+                contains_ui_root: entity
+                    .components
+                    .contains_key(&UiAuthoringComponentKind::Root.component_type()),
+                projected: false,
+            })
+        })
+        .collect()
 }
 
 fn component_kind(component: &ComponentTypeId) -> Option<UiAuthoringComponentKind> {
@@ -1384,7 +1517,7 @@ fn composite_members<'a>(
 }
 
 fn brush_member_ids(prefix: &str) -> Vec<String> {
-    ["kind", "red", "green", "blue", "alpha", "reference"]
+    ["kind", "red", "green", "blue", "alpha", "role", "image"]
         .into_iter()
         .map(|field| format!("{prefix}.{field}"))
         .collect()
@@ -1419,6 +1552,7 @@ fn build_descriptor(
                 .map(|value| UiAuthoringFieldMember {
                     field: field.id.clone(),
                     value_kind: field.value_kind,
+                    optional: !field.required,
                     value,
                 })
         })
@@ -1482,7 +1616,7 @@ fn descriptor_metadata(
             editability: UiAuthoringEditability::Editable,
         };
     }
-    if member_count == 6 && field.ends_with(".kind") {
+    if member_count == 7 && field.ends_with(".kind") {
         return DescriptorMetadata {
             label: brush_label(field),
             group: UiAuthoringFieldGroup::Appearance,
@@ -1819,13 +1953,31 @@ fn parse_descriptor_value(
                 "image" => UiBrushAuthoringKind::Image,
                 _ => return None,
             };
+            let role = values.get(5)?.as_str()?;
+            let image = values.get(6)?;
+            let reference = match kind {
+                UiBrushAuthoringKind::Solid
+                    if role.is_empty() && matches!(image, ComponentValue::Null) =>
+                {
+                    String::new()
+                }
+                UiBrushAuthoringKind::Role if matches!(image, ComponentValue::Null) => {
+                    role.to_owned()
+                }
+                UiBrushAuthoringKind::Image if role.is_empty() => {
+                    project_asset_path(image)?.to_owned()
+                }
+                UiBrushAuthoringKind::Solid
+                | UiBrushAuthoringKind::Role
+                | UiBrushAuthoringKind::Image => return None,
+            };
             Some(UiAuthoringFieldValue::Brush {
                 kind,
                 red: values.get(1)?.as_f64()?,
                 green: values.get(2)?.as_f64()?,
                 blue: values.get(3)?.as_f64()?,
                 alpha: values.get(4)?.as_f64()?,
-                reference: values.get(5)?.as_str()?.to_owned(),
+                reference,
             })
         }
         UiAuthoringFieldKind::ReadOnly => Some(UiAuthoringFieldValue::Raw(values.to_vec())),
@@ -1902,28 +2054,57 @@ fn lower_descriptor_values(
                 reference,
             },
         ) => {
-            let (kind, red, green, blue, alpha, reference) = match kind {
-                UiBrushAuthoringKind::Solid if reference.is_empty() => {
-                    ("solid", red, green, blue, alpha, reference)
-                }
+            let (kind, red, green, blue, alpha, role, image) = match kind {
+                UiBrushAuthoringKind::Solid if reference.is_empty() => (
+                    "solid",
+                    red,
+                    green,
+                    blue,
+                    alpha,
+                    String::new(),
+                    ComponentValue::Null,
+                ),
                 UiBrushAuthoringKind::Role
                     if color_role_choices().contains(&reference.as_str()) =>
                 {
-                    ("role", 0.0, 0.0, 0.0, 0.0, reference)
+                    ("role", 0.0, 0.0, 0.0, 0.0, reference, ComponentValue::Null)
                 }
-                UiBrushAuthoringKind::Image if !reference.is_empty() => {
-                    ("image", red, green, blue, alpha, reference)
+                UiBrushAuthoringKind::Image => {
+                    let asset_ref =
+                        AssetRef::path(reference).map_err(|_| UiAuthoringEditError::OutOfRange)?;
+                    (
+                        "image",
+                        red,
+                        green,
+                        blue,
+                        alpha,
+                        String::new(),
+                        codec::asset_ref_value(&asset_ref),
+                    )
                 }
                 _ => return Err(UiAuthoringEditError::OutOfRange),
             };
             let mut values = vec![ComponentValue::String(kind.to_owned())];
             values.extend(lower_color(red, green, blue, alpha)?);
-            values.push(ComponentValue::String(reference));
+            values.push(ComponentValue::String(role));
+            values.push(image);
             Ok(values)
         }
         (UiAuthoringFieldKind::ReadOnly, _) => Err(UiAuthoringEditError::KindMismatch),
         _ => Err(UiAuthoringEditError::KindMismatch),
     }
+}
+
+fn project_asset_path(value: &ComponentValue) -> Option<&str> {
+    let ComponentValue::Map(fields) = value else {
+        return None;
+    };
+    if fields.len() != 2 || fields.get("kind")?.as_str()? != "path" {
+        return None;
+    }
+    let path = fields.get("value")?.as_str()?;
+    AssetRef::path(path.to_owned()).ok()?;
+    Some(path)
 }
 
 fn lower_color(

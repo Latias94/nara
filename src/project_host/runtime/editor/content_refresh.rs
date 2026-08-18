@@ -221,6 +221,9 @@ impl EditorProjectSession {
             ));
             return;
         };
+        #[cfg(feature = "runtime-ui")]
+        let replacement_ui_authoring_image_choices =
+            super::ui_authoring::EditorUiImageChoices::from_snapshot(&successor, generation);
 
         self.snapshot = successor;
         #[cfg(feature = "presentation-2d")]
@@ -235,6 +238,7 @@ impl EditorProjectSession {
         {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
+            self.ui_authoring_image_choices = replacement_ui_authoring_image_choices;
         }
         self.next_project_content_generation = next_generation;
         self.project_content = EditorProjectContentView::Current { generation };

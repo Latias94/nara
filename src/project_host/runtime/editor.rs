@@ -24,9 +24,9 @@ pub use game_view::{
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(feature = "runtime-ui")]
-use ui_authoring::EditorUiAuthoringProjectionCache;
-#[cfg(feature = "runtime-ui")]
 pub use ui_authoring::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
+#[cfg(feature = "runtime-ui")]
+use ui_authoring::{EditorUiAuthoringProjectionCache, EditorUiImageChoices};
 #[cfg(feature = "presentation-ui")]
 pub use ui_preview::EditorUiPreviewCandidate;
 
@@ -585,6 +585,8 @@ pub struct EditorProjectSession {
     ui_authoring_frame: Option<Arc<EditorUiAuthoringFrame>>,
     #[cfg(feature = "runtime-ui")]
     ui_authoring_projection_cache: Option<EditorUiAuthoringProjectionCache>,
+    #[cfg(feature = "runtime-ui")]
+    ui_authoring_image_choices: EditorUiImageChoices,
     #[cfg(feature = "presentation-ui")]
     ui_preview: ui_preview::EditorUiPreviewSession,
 }
@@ -675,6 +677,10 @@ impl EditorProjectSession {
             .map_err(|error| EditorProjectOpenError {
                 diagnostics: error.diagnostics().clone(),
             })?;
+        let initial_content_generation = EditorProjectContentGeneration::new(1);
+        #[cfg(feature = "runtime-ui")]
+        let ui_authoring_image_choices =
+            EditorUiImageChoices::from_snapshot(&snapshot, initial_content_generation);
         #[cfg(feature = "presentation-ui")]
         let ui_preview = ui_preview::EditorUiPreviewSession::new(&snapshot).map_err(|_error| {
             EditorProjectOpenError {
@@ -740,7 +746,7 @@ impl EditorProjectSession {
             content_loader: loader,
             snapshot,
             project_content: EditorProjectContentView::Current {
-                generation: EditorProjectContentGeneration::new(1),
+                generation: initial_content_generation,
             },
             next_project_content_generation: 2,
             pending_content_refresh: None,
@@ -777,6 +783,8 @@ impl EditorProjectSession {
             ui_authoring_frame: None,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_projection_cache: None,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_image_choices,
             #[cfg(feature = "presentation-ui")]
             ui_preview,
         };

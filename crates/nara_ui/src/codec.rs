@@ -1,7 +1,9 @@
+use nara_asset::AssetRef;
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
     ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentValueKind,
 };
 use nara_scene::PrefabDocument;
 use nara_ui_kernel::{
@@ -22,8 +24,11 @@ const UI_SEMANTICS_ID: &str = "nara.ui.UiSemantics";
 const UI_THEME_ID: &str = "nara.ui.UiTheme";
 
 const DIMENSION_FIELDS: &[&str] = &["kind", "value"];
-const BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "reference"];
+const LEGACY_BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "reference"];
+const BRUSH_FIELDS: &[&str] = &["kind", "red", "green", "blue", "alpha", "role", "image"];
 const COLOR_FIELDS: &[&str] = &["red", "green", "blue", "alpha"];
+
+const UI_SCHEMA_VERSION_TWO: ComponentSchemaVersion = ComponentSchemaVersion(2);
 
 pub fn register_ui_components(
     registry: &mut ComponentRegistry,
@@ -69,6 +74,18 @@ pub fn register_ui_components(
         decode_theme,
         encode_theme,
     )?;
+    registry.register_component_migration(
+        &ComponentTypeId::new(UI_VISUAL_ID),
+        ComponentSchemaVersion::ONE,
+        UI_SCHEMA_VERSION_TWO,
+        migrate_legacy_visual,
+    )?;
+    registry.register_component_migration(
+        &ComponentTypeId::new(UI_TEXT_ID),
+        ComponentSchemaVersion::ONE,
+        UI_SCHEMA_VERSION_TWO,
+        migrate_legacy_text,
+    )?;
     Ok(())
 }
 
@@ -97,20 +114,37 @@ pub fn prefab_contains_ui_root(document: &PrefabDocument) -> bool {
         .any(|entity| entity.components.contains_key(&root))
 }
 
-pub(crate) fn ui_schema_catalog() -> nara_reflect::ComponentSchemaCatalog {
-    nara_reflect::ComponentSchemaCatalog {
+pub(crate) fn ui_schema_predecessor_catalog() -> ComponentSchemaCatalog {
+    ComponentSchemaCatalog {
         components: vec![
             ui_root_schema(),
             ui_node_schema(),
-            ui_visual_schema(),
-            ui_text_schema(),
+            legacy_ui_visual_schema(),
+            legacy_ui_text_schema(),
             ui_button_schema(),
             ui_button_visuals_schema(),
             ui_semantics_schema(),
             ui_theme_schema(),
         ],
-        ..nara_reflect::ComponentSchemaCatalog::default()
+        ..ComponentSchemaCatalog::default()
     }
+}
+
+pub(crate) fn ui_schema_catalog() -> ComponentSchemaCatalog {
+    let predecessor = ui_schema_predecessor_catalog();
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the fixed generation-one UI catalog always has a successor");
+    current.components = vec![
+        ui_root_schema(),
+        ui_node_schema(),
+        ui_visual_schema(),
+        ui_text_schema(),
+        ui_button_schema(),
+        ui_button_visuals_schema(),
+        ui_semantics_schema(),
+        ui_theme_schema(),
+    ];
+    current
 }
 
 pub(crate) fn validate_ui_component_value(
@@ -130,6 +164,15 @@ pub(crate) fn validate_ui_component_value(
             "component",
             "a first-party persistent UI component",
         )),
+    }
+}
+
+pub(crate) fn ui_component_schema_version(id: &ComponentTypeId) -> Option<ComponentSchemaVersion> {
+    match id.as_str() {
+        UI_VISUAL_ID | UI_TEXT_ID => Some(UI_SCHEMA_VERSION_TWO),
+        UI_ROOT_ID | UI_NODE_ID | UI_BUTTON_ID | UI_BUTTON_VISUALS_ID | UI_SEMANTICS_ID
+        | UI_THEME_ID => Some(ComponentSchemaVersion::ONE),
+        _ => None,
     }
 }
 
@@ -230,7 +273,7 @@ pub(crate) fn decode_text(value: &ComponentValue) -> Result<UiText, ComponentCod
     Ok(text)
 }
 
-fn encode_text(text: &UiText) -> Result<ComponentValue, ComponentCodecError> {
+pub(crate) fn encode_text(text: &UiText) -> Result<ComponentValue, ComponentCodecError> {
     let text = text.kernel();
     Ok(ComponentValue::map([
         (
@@ -275,7 +318,7 @@ pub(crate) fn decode_button(value: &ComponentValue) -> Result<UiButton, Componen
     Ok(button.with_enabled(read_bool(value.field("enabled")?, "enabled")?))
 }
 
-fn encode_button(button: &UiButton) -> Result<ComponentValue, ComponentCodecError> {
+pub(crate) fn encode_button(button: &UiButton) -> Result<ComponentValue, ComponentCodecError> {
     Ok(ComponentValue::map([
         ("label", ComponentValue::String(button.label().to_string())),
         (
@@ -331,7 +374,9 @@ pub(crate) fn decode_button_visuals(
     Ok(visuals.with_disabled(disabled_background, disabled_text))
 }
 
-fn encode_button_visuals(visuals: &UiButtonVisuals) -> Result<ComponentValue, ComponentCodecError> {
+pub(crate) fn encode_button_visuals(
+    visuals: &UiButtonVisuals,
+) -> Result<ComponentValue, ComponentCodecError> {
     Ok(ComponentValue::map([
         (
             "normal_text",
@@ -652,20 +697,44 @@ fn read_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentC
     expect_fields(value, field, BRUSH_FIELDS)?;
     let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
     let color = read_flat_color(value, field)?;
-    let reference = read_string(value.field("reference")?, &format!("{field}.reference"))?;
+    let role = read_string(value.field("role")?, &format!("{field}.role"))?;
+    let image = read_optional_asset_ref(value.field("image").ok(), &format!("{field}.image"))?;
     match kind.as_str() {
-        "solid" if reference.is_empty() => Ok(UiBrush::Solid(color)),
-        "role" => Ok(UiBrush::Role(read_color_role_name(
-            &reference,
-            &format!("{field}.reference"),
+        "solid" if role.is_empty() && image.is_none() => Ok(UiBrush::Solid(color)),
+        "role" if image.is_none() => Ok(UiBrush::Role(read_color_role_name(
+            &role,
+            &format!("{field}.role"),
         )?)),
-        "image" => Ok(UiBrush::Image {
-            image: UiImageId::new(reference).map_err(|error| codec_message(error.to_string()))?,
-            tint: color,
-        }),
+        "image" if role.is_empty() => {
+            let asset_ref = image.ok_or_else(|| {
+                ComponentCodecError::invalid_field(
+                    format!("{field}.image"),
+                    "a project-relative path asset reference",
+                )
+            })?;
+            let AssetRef::Path(path) = asset_ref else {
+                return Err(ComponentCodecError::invalid_field(
+                    format!("{field}.image.kind"),
+                    "path",
+                ));
+            };
+            Ok(UiBrush::Image {
+                image: UiImageId::new(path.as_str())
+                    .map_err(|error| codec_message(error.to_string()))?,
+                tint: color,
+            })
+        }
         "solid" => Err(ComponentCodecError::invalid_field(
-            format!("{field}.reference"),
-            "an empty string for a solid brush",
+            format!("{field}.role"),
+            "an empty role and no image for a solid brush",
+        )),
+        "role" => Err(ComponentCodecError::invalid_field(
+            format!("{field}.image"),
+            "no image for a role brush",
+        )),
+        "image" => Err(ComponentCodecError::invalid_field(
+            format!("{field}.role"),
+            "an empty role for an image brush",
         )),
         _ => Err(ComponentCodecError::invalid_field(
             format!("{field}.kind"),
@@ -675,14 +744,24 @@ fn read_brush(value: &ComponentValue, field: &str) -> Result<UiBrush, ComponentC
 }
 
 fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
-    let (kind, color, reference) = match brush {
-        UiBrush::Solid(color) => ("solid", *color, String::new()),
+    let (kind, color, role, image) = match brush {
+        UiBrush::Solid(color) => ("solid", *color, String::new(), ComponentValue::Null),
         UiBrush::Role(role) => (
             "role",
             UiColor::rgba(0.0, 0.0, 0.0, 0.0),
             color_role_name(*role).to_string(),
+            ComponentValue::Null,
         ),
-        UiBrush::Image { image, tint } => ("image", *tint, image.as_str().to_string()),
+        UiBrush::Image { image, tint } => {
+            let asset_ref = AssetRef::path(image.as_str()).map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    "image.value",
+                    image.as_str(),
+                    error.to_string(),
+                )
+            })?;
+            ("image", *tint, String::new(), asset_ref_value(&asset_ref))
+        }
     };
     let [red, green, blue, alpha] = color.components();
     Ok(ComponentValue::map([
@@ -691,8 +770,157 @@ fn brush_value(brush: &UiBrush) -> Result<ComponentValue, ComponentCodecError> {
         ("green", float_value(green)?),
         ("blue", float_value(blue)?),
         ("alpha", float_value(alpha)?),
-        ("reference", ComponentValue::String(reference)),
+        ("role", ComponentValue::String(role)),
+        ("image", image),
     ]))
+}
+
+fn read_optional_asset_ref(
+    value: Option<&ComponentValue>,
+    field: &str,
+) -> Result<Option<AssetRef>, ComponentCodecError> {
+    match value {
+        None | Some(ComponentValue::Null) => Ok(None),
+        Some(value) => read_asset_ref(value, field).map(Some),
+    }
+}
+
+fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, ComponentCodecError> {
+    expect_fields(value, field, &["kind", "value"])?;
+    let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
+    let reference = read_string(value.field("value")?, &format!("{field}.value"))?;
+    match kind.as_str() {
+        "path" => AssetRef::path(reference.clone()).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(
+                format!("{field}.value"),
+                reference,
+                error.to_string(),
+            )
+        }),
+        "stable_id" => AssetRef::stable_id(&reference).map_err(|error| {
+            ComponentCodecError::invalid_asset_ref(
+                format!("{field}.value"),
+                reference,
+                error.to_string(),
+            )
+        }),
+        _ => Err(ComponentCodecError::invalid_field(
+            format!("{field}.kind"),
+            "path or stable_id",
+        )),
+    }
+}
+
+pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
+    match asset_ref {
+        AssetRef::Path(path) => ComponentValue::map([
+            ("kind", ComponentValue::String("path".to_owned())),
+            ("value", ComponentValue::String(path.as_str().to_owned())),
+        ]),
+        AssetRef::StableId(id) => ComponentValue::map([
+            ("kind", ComponentValue::String("stable_id".to_owned())),
+            ("value", ComponentValue::String(id.to_string())),
+        ]),
+    }
+}
+
+fn migrate_legacy_visual(mut value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
+    expect_fields(
+        &value,
+        "UiVisual",
+        &["background", "border_width", "border_brush", "radii"],
+    )?;
+    migrate_legacy_brush_at(&mut value, "background")?;
+    migrate_legacy_brush_at(&mut value, "border_brush")?;
+    decode_visual(&value)?;
+    Ok(value)
+}
+
+fn migrate_legacy_text(mut value: ComponentValue) -> Result<ComponentValue, ComponentCodecError> {
+    expect_fields(
+        &value,
+        "UiText",
+        &[
+            "content",
+            "logical_size",
+            "brush",
+            "alignment",
+            "overflow",
+            "has_semantic_text",
+            "semantic_text",
+        ],
+    )?;
+    migrate_legacy_brush_at(&mut value, "brush")?;
+    decode_text(&value)?;
+    Ok(value)
+}
+
+fn migrate_legacy_brush_at(
+    value: &mut ComponentValue,
+    field: &str,
+) -> Result<(), ComponentCodecError> {
+    let ComponentValue::Map(fields) = value else {
+        return Err(ComponentCodecError::invalid_field(
+            "component",
+            "a component map",
+        ));
+    };
+    let legacy = fields.get(field).ok_or_else(|| {
+        ComponentCodecError::invalid_field(field, "a required legacy brush field")
+    })?;
+    let migrated = migrate_legacy_brush(legacy, field)?;
+    fields.insert(field.to_owned(), migrated);
+    Ok(())
+}
+
+fn migrate_legacy_brush(
+    value: &ComponentValue,
+    field: &str,
+) -> Result<ComponentValue, ComponentCodecError> {
+    expect_fields(value, field, LEGACY_BRUSH_FIELDS)?;
+    let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
+    let color = read_flat_color(value, field)?;
+    let reference = read_string(value.field("reference")?, &format!("{field}.reference"))?;
+    let brush = match kind.as_str() {
+        "solid" if reference.is_empty() => UiBrush::Solid(color),
+        "role" => UiBrush::Role(read_color_role_name(
+            &reference,
+            &format!("{field}.reference"),
+        )?),
+        "image" => {
+            let AssetRef::Path(path) = AssetRef::path(reference.clone()).map_err(|error| {
+                ComponentCodecError::invalid_asset_ref(
+                    format!("{field}.reference"),
+                    reference.clone(),
+                    error.to_string(),
+                )
+            })?
+            else {
+                return Err(ComponentCodecError::invalid_field(
+                    format!("{field}.reference"),
+                    "a project-relative path",
+                ));
+            };
+            UiBrush::Image {
+                image: UiImageId::new(path.as_str())
+                    .map_err(|error| codec_message(error.to_string()))?,
+                tint: color,
+            }
+        }
+        "solid" => {
+            return Err(ComponentCodecError::invalid_field(
+                format!("{field}.reference"),
+                "an empty string for a solid brush",
+            ));
+        }
+        _ => {
+            return Err(ComponentCodecError::invalid_field(
+                format!("{field}.kind"),
+                "solid, role, or image",
+            ));
+        }
+    };
+    brush_value(&brush)
 }
 
 fn read_radii(value: &ComponentValue) -> Result<UiCornerRadii, ComponentCodecError> {
@@ -1081,7 +1309,11 @@ fn ui_visual_schema() -> ComponentSchema {
     for name in ["top_left", "top_right", "bottom_right", "bottom_left"] {
         fields.push(field(&format!("radii.{name}"), ComponentValueKind::F64));
     }
-    schema(UI_VISUAL_ID, "UI visual", &fields)
+    schema_with_version(UI_VISUAL_ID, "UI visual", UI_SCHEMA_VERSION_TWO, &fields)
+        .with_field_tombstones([
+            ComponentFieldId::new("background.reference"),
+            ComponentFieldId::new("border_brush.reference"),
+        ])
 }
 
 fn ui_text_schema() -> ComponentSchema {
@@ -1094,6 +1326,31 @@ fn ui_text_schema() -> ComponentSchema {
         field("semantic_text", ComponentValueKind::String),
     ];
     add_brush_fields(&mut fields, "brush");
+    schema_with_version(UI_TEXT_ID, "UI text", UI_SCHEMA_VERSION_TWO, &fields)
+        .with_field_tombstones([ComponentFieldId::new("brush.reference")])
+}
+
+fn legacy_ui_visual_schema() -> ComponentSchema {
+    let mut fields = Vec::new();
+    add_legacy_brush_fields(&mut fields, "background");
+    fields.push(field("border_width", ComponentValueKind::F64));
+    add_legacy_brush_fields(&mut fields, "border_brush");
+    for name in ["top_left", "top_right", "bottom_right", "bottom_left"] {
+        fields.push(field(&format!("radii.{name}"), ComponentValueKind::F64));
+    }
+    schema(UI_VISUAL_ID, "UI visual", &fields)
+}
+
+fn legacy_ui_text_schema() -> ComponentSchema {
+    let mut fields = vec![
+        field("content", ComponentValueKind::String),
+        field("logical_size", ComponentValueKind::F64),
+        field("alignment", ComponentValueKind::String),
+        field("overflow", ComponentValueKind::String),
+        field("has_semantic_text", ComponentValueKind::Bool),
+        field("semantic_text", ComponentValueKind::String),
+    ];
+    add_legacy_brush_fields(&mut fields, "brush");
     schema(UI_TEXT_ID, "UI text", &fields)
 }
 
@@ -1172,7 +1429,16 @@ fn ui_theme_schema() -> ComponentSchema {
 }
 
 fn schema(id: &str, alias: &str, fields: &[ComponentFieldSchema]) -> ComponentSchema {
-    ComponentSchema::new(ComponentTypeId::new(id), alias, ComponentSchemaVersion::ONE)
+    schema_with_version(id, alias, ComponentSchemaVersion::ONE, fields)
+}
+
+fn schema_with_version(
+    id: &str,
+    alias: &str,
+    version: ComponentSchemaVersion,
+    fields: &[ComponentFieldSchema],
+) -> ComponentSchema {
+    ComponentSchema::new(ComponentTypeId::new(id), alias, version)
         .with_capabilities(ComponentCapability::SCENE_AUTHORING)
         .with_fields(fields.iter().cloned())
 }
@@ -1188,7 +1454,32 @@ fn field(path: &str, kind: ComponentValueKind) -> ComponentFieldSchema {
 }
 
 fn add_brush_fields(fields: &mut Vec<ComponentFieldSchema>, prefix: &str) {
-    for name in BRUSH_FIELDS {
+    for name in ["kind", "red", "green", "blue", "alpha", "role"] {
+        let kind = if matches!(name, "red" | "green" | "blue" | "alpha") {
+            ComponentValueKind::F64
+        } else {
+            ComponentValueKind::String
+        };
+        fields.push(field(&format!("{prefix}.{name}"), kind));
+    }
+    fields.push(
+        ComponentFieldSchema::optional(
+            ComponentFieldId::new(format!("{prefix}.image")),
+            format!("{prefix}.image"),
+            ComponentFieldPath::from_fields([prefix, "image"]),
+            ComponentValueKind::AssetRef,
+        )
+        .with_capabilities([
+            ComponentCapability::Scene,
+            ComponentCapability::Inspect,
+            ComponentCapability::Edit,
+            ComponentCapability::AssetRef,
+        ]),
+    );
+}
+
+fn add_legacy_brush_fields(fields: &mut Vec<ComponentFieldSchema>, prefix: &str) {
+    for name in LEGACY_BRUSH_FIELDS {
         let kind = if matches!(*name, "red" | "green" | "blue" | "alpha") {
             ComponentValueKind::F64
         } else {

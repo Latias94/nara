@@ -4,6 +4,7 @@
 extern crate nara_ecs as bevy_ecs;
 
 mod authoring;
+mod authoring_composition;
 mod authoring_model;
 mod canvas;
 mod codec;
@@ -50,11 +51,14 @@ pub const UI_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinition =
     nara_reflect::ComponentSchemaProviderDefinition::with_validation(
         UI_SCHEMA_OWNER_ID,
         UI_SCHEMA_PROVIDER_ID,
-        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 1),
+        nara_reflect::ComponentSchemaProviderBindingId::new("nara.ui.components.native", 2)
+            .with_codec_version(2)
+            .with_migration_version(2),
         ui_schema_catalog,
         crate::codec::validate_ui_components,
         register_ui_components,
-    );
+    )
+    .with_predecessor(ui_schema_predecessor_catalog);
 const UI_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara_input::INPUT_PLUGIN_ID,
@@ -71,6 +75,11 @@ pub const UI_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
 fn ui_schema_catalog()
 -> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
     Ok(crate::codec::ui_schema_catalog())
+}
+
+fn ui_schema_predecessor_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    Ok(crate::codec::ui_schema_predecessor_catalog())
 }
 
 impl Plugin for UiPlugin {
@@ -124,6 +133,12 @@ impl Plugin for UiPlugin {
 /// First-party Host presentation seams that are not ordinary runtime UI API.
 #[doc(hidden)]
 pub mod __private {
+    pub use crate::authoring_composition::{
+        UiAuthoringHierarchyKind, UiAuthoringStructuralCapability,
+        UiAuthoringStructuralReadOnlyReason, UiCatalogNodeKind, UiCreateParameters, UiEntityRecipe,
+        UiImageChoice, UiImageChoiceGeneration, UiImageChoiceSelection, UiImageChoiceSet,
+        UiPlacementCandidate, UiPreparedStructure, UiStructureIntent, UiStructureRejection,
+    };
     pub use crate::authoring_model::{
         UiAuthoringCanvasFact, UiAuthoringCanvasProjection, UiAuthoringCanvasReady,
         UiAuthoringCanvasUnavailableReason, UiAuthoringCommitPolicy, UiAuthoringComponentKind,

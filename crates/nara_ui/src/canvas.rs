@@ -393,10 +393,16 @@ fn decode_record<T>(
     record: &SceneComponentRecord,
     decode: fn(&ComponentValue) -> Result<T, ComponentCodecError>,
 ) -> Result<T, UiAuthoringCanvasCompileError> {
-    if record.version != ComponentSchemaVersion::ONE {
+    let expected = codec::ui_component_schema_version(&component).ok_or_else(|| {
+        UiAuthoringCanvasCompileError::MissingComponentSchema {
+            component: component.clone(),
+        }
+    })?;
+    if record.version != expected {
         return Err(UiAuthoringCanvasCompileError::ComponentVersionMismatch {
             entity: entity.clone(),
             component,
+            expected,
             actual: record.version,
         });
     }
@@ -426,12 +432,15 @@ pub enum UiAuthoringCanvasCompileError {
         entity: SceneEntityId,
         component: ComponentTypeId,
     },
+    #[error("the UI Canvas has no current schema for component {component}")]
+    MissingComponentSchema { component: ComponentTypeId },
     #[error(
-        "UI entity {entity} component {component} has version {actual:?}; version 1 is required"
+        "UI entity {entity} component {component} has version {actual:?}; version {expected:?} is required"
     )]
     ComponentVersionMismatch {
         entity: SceneEntityId,
         component: ComponentTypeId,
+        expected: ComponentSchemaVersion,
         actual: ComponentSchemaVersion,
     },
     #[error("UI entity {entity} component {component} could not be decoded")]
@@ -467,7 +476,6 @@ pub enum UiAuthoringCanvasCompileError {
 
 #[cfg(test)]
 mod tests {
-    use nara_reflect::ComponentSchemaVersion;
     use nara_scene::{PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord};
     use nara_ui_kernel::{
         UiColor, UiPoint, UiRect, UiSafeAreaInsets, UiSize, UiStyle, UiSurfaceContentTransform,
@@ -479,16 +487,18 @@ mod tests {
         SceneEntityId::new(value).unwrap()
     }
 
-    fn record(value: ComponentValue) -> SceneComponentRecord {
-        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value)
-    }
-
     fn insert(
         entity: SceneEntityRecord,
         kind: UiAuthoringComponentKind,
         value: Result<ComponentValue, ComponentCodecError>,
     ) -> SceneEntityRecord {
-        entity.with_component(kind.component_type(), record(value.unwrap()))
+        let component = kind.component_type();
+        let version = codec::ui_component_schema_version(&component)
+            .expect("first-party Canvas component must have a current schema");
+        entity.with_component(
+            component,
+            SceneComponentRecord::new(version, value.unwrap()),
+        )
     }
 
     #[test]

@@ -326,16 +326,24 @@ fn schema_catalog_is_canonical_closed_and_requires_every_field() {
         ]
     );
     assert!(catalog.type_tombstones.is_empty());
+    assert_eq!(catalog.generation(), 2);
+    assert!(catalog.predecessor().is_some());
     for schema in &catalog.components {
-        assert_eq!(schema.version(), ComponentSchemaVersion::ONE);
-        assert!(schema.field_tombstones().is_empty());
-        assert!(!schema.fields().is_empty());
-        assert!(
-            schema
-                .fields()
-                .iter()
-                .all(|field| field.required && field.default_value.is_none())
+        let brush_bearing = matches!(schema.id().as_str(), "nara.ui.UiVisual" | "nara.ui.UiText");
+        assert_eq!(
+            schema.version(),
+            if brush_bearing {
+                ComponentSchemaVersion(2)
+            } else {
+                ComponentSchemaVersion::ONE
+            }
         );
+        assert_eq!(schema.field_tombstones().is_empty(), !brush_bearing);
+        assert!(!schema.fields().is_empty());
+        assert!(schema.fields().iter().all(|field| {
+            field.required == !field.id().as_str().ends_with(".image")
+                && field.default_value.is_none()
+        }));
     }
 
     let registry = frozen_ui_registry();
@@ -348,6 +356,85 @@ fn schema_catalog_is_canonical_closed_and_requires_every_field() {
         registry
             .schema(&ComponentTypeId::new("nara.ui.UiInteractionState"))
             .is_none()
+    );
+}
+
+#[test]
+fn legacy_brush_migrations_preserve_roles_and_expose_image_asset_references() {
+    fn legacy_brush(kind: &str, reference: &str) -> ComponentValue {
+        ComponentValue::map([
+            ("kind", ComponentValue::String(kind.to_owned())),
+            ("red", ComponentValue::f64(1.0).unwrap()),
+            ("green", ComponentValue::f64(1.0).unwrap()),
+            ("blue", ComponentValue::f64(1.0).unwrap()),
+            ("alpha", ComponentValue::f64(1.0).unwrap()),
+            ("reference", ComponentValue::String(reference.to_owned())),
+        ])
+    }
+
+    let registry = frozen_ui_registry();
+    let visual_id = ComponentTypeId::new("nara.ui.UiVisual");
+    let legacy_visual = ComponentValue::map([
+        ("background", legacy_brush("image", "assets/ui/panel.png")),
+        ("border_width", ComponentValue::f64(0.0).unwrap()),
+        ("border_brush", legacy_brush("solid", "")),
+        (
+            "radii",
+            ComponentValue::map([
+                ("top_left", ComponentValue::f64(0.0).unwrap()),
+                ("top_right", ComponentValue::f64(0.0).unwrap()),
+                ("bottom_right", ComponentValue::f64(0.0).unwrap()),
+                ("bottom_left", ComponentValue::f64(0.0).unwrap()),
+            ]),
+        ),
+    ]);
+    let migrated_visual = registry
+        .migrate_component_value(&visual_id, ComponentSchemaVersion::ONE, &legacy_visual)
+        .expect("legacy visual must migrate");
+    assert_eq!(migrated_visual.version, ComponentSchemaVersion(2));
+    let references = nara_reflect::collect_declared_asset_references(
+        &registry,
+        &visual_id,
+        migrated_visual.version,
+        &migrated_visual.value,
+    )
+    .expect("migrated image brush must expose its semantic asset reference");
+    assert_eq!(references.len(), 1);
+    assert_eq!(
+        references[0].asset_ref(),
+        &AssetRef::path("assets/ui/panel.png").unwrap()
+    );
+
+    let text_id = ComponentTypeId::new("nara.ui.UiText");
+    let legacy_text = ComponentValue::map([
+        ("content", ComponentValue::String("Text".to_owned())),
+        ("logical_size", ComponentValue::f64(16.0).unwrap()),
+        ("brush", legacy_brush("role", "primary_text")),
+        ("alignment", ComponentValue::String("start".to_owned())),
+        ("overflow", ComponentValue::String("clip".to_owned())),
+        ("has_semantic_text", ComponentValue::Bool(false)),
+        ("semantic_text", ComponentValue::String(String::new())),
+    ]);
+    let migrated_text = registry
+        .migrate_component_value(&text_id, ComponentSchemaVersion::ONE, &legacy_text)
+        .expect("legacy text must migrate");
+    assert_eq!(
+        migrated_text
+            .value
+            .field("brush")
+            .unwrap()
+            .field_str("role")
+            .unwrap(),
+        "primary_text"
+    );
+    assert_eq!(
+        migrated_text
+            .value
+            .field("brush")
+            .unwrap()
+            .field("image")
+            .unwrap(),
+        &ComponentValue::Null
     );
 }
 

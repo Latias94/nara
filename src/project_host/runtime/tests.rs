@@ -1138,8 +1138,8 @@ logical_height = 540
 #[test]
 fn editor_ui_authoring_frame_and_continuous_gesture_share_one_exact_prefab_revision() {
     use nara_ui::__private::{
-        UiAuthoringDimensionKind, UiAuthoringFieldKind, UiAuthoringFieldValue,
-        UiDirectManipulationCapability,
+        UiAuthoringDimensionKind, UiAuthoringDirectEdit, UiAuthoringFieldKind,
+        UiAuthoringFieldValue, UiDirectManipulationCapability,
     };
 
     let project = TestProject::with_image("editor-ui-authoring-frame");
@@ -1290,6 +1290,14 @@ logical_height = 540
             .unwrap()
             .revision
     );
+    assert_eq!(ui_frame.image_choice_generation().get(), 1);
+    let image_choices = ui_frame.image_choices().unwrap().choices();
+    assert_eq!(image_choices.len(), 1);
+    assert_eq!(
+        image_choices[0].source_identity(),
+        "3c7c5be4-fd4e-4b65-b8d4-c671f5982186"
+    );
+    assert_eq!(image_choices[0].project_path(), "textures/player.png");
     let projection = ui_frame.projection().unwrap();
     assert_eq!(projection.hierarchy().len(), 2);
     assert_eq!(projection.source_map().len(), 2);
@@ -1414,10 +1422,10 @@ logical_height = 540
     frame = editor.drive_editor_frame(Duration::ZERO);
 
     let baseline = ui_frame
-        .lower_field_edit(
-            &width_key,
-            projection.field(&width_key).unwrap().value().clone(),
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [0.0, 0.0],
+        })
         .unwrap();
     let begin = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1433,7 +1441,10 @@ logical_height = 540
         .unwrap();
     let EditorActionOutcome::Gesture(EditorGestureOutcome::Began(gesture)) = &begin.outcomes()[1]
     else {
-        panic!("the exact accepted baseline must begin one gesture");
+        panic!(
+            "the exact accepted baseline must begin one gesture: {:?}",
+            begin.outcomes()[1]
+        );
     };
     let gesture_id = gesture.stamp().id();
     let revision_before = editor
@@ -1452,13 +1463,10 @@ logical_height = 540
     let first_ui = editor.current_ui_authoring_frame().unwrap();
     assert_eq!(first_ui.selection().top_entity(), Some(&button));
     let first_preview = first_ui
-        .lower_field_edit(
-            &width_key,
-            UiAuthoringFieldValue::Dimension {
-                kind: UiAuthoringDimensionKind::Pixels,
-                value: 220.0,
-            },
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [40.0, 0.0],
+        })
         .unwrap();
     let previewed = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1505,13 +1513,10 @@ logical_height = 540
         UiAuthoringFieldValue::Dimension { value, .. } if *value == 220.0
     ));
     let second_preview = second_ui
-        .lower_field_edit(
-            &width_key,
-            UiAuthoringFieldValue::Dimension {
-                kind: UiAuthoringDimensionKind::Pixels,
-                value: 230.0,
-            },
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [10.0, 0.0],
+        })
         .unwrap();
     let _ = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1526,13 +1531,10 @@ logical_height = 540
     let commit_frame = editor.drive_editor_frame(Duration::ZERO);
     let commit_ui = editor.current_ui_authoring_frame().unwrap();
     let committed = commit_ui
-        .lower_field_edit(
-            &width_key,
-            UiAuthoringFieldValue::Dimension {
-                kind: UiAuthoringDimensionKind::Pixels,
-                value: 240.0,
-            },
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [10.0, 0.0],
+        })
         .unwrap();
     let commit = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1556,15 +1558,11 @@ logical_height = 540
 
     let accepted_frame = editor.drive_editor_frame(Duration::ZERO);
     let accepted_ui = editor.current_ui_authoring_frame().unwrap();
-    let accepted_width = accepted_ui
-        .projection()
-        .unwrap()
-        .field(&width_key)
-        .unwrap()
-        .value()
-        .clone();
     let cancel_baseline = accepted_ui
-        .lower_field_edit(&width_key, accepted_width)
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [0.0, 0.0],
+        })
         .unwrap();
     let began = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1583,13 +1581,10 @@ logical_height = 540
     let cancel_preview_frame = editor.drive_editor_frame(Duration::ZERO);
     let cancel_ui = editor.current_ui_authoring_frame().unwrap();
     let cancel_preview = cancel_ui
-        .lower_field_edit(
-            &width_key,
-            UiAuthoringFieldValue::Dimension {
-                kind: UiAuthoringDimensionKind::Pixels,
-                value: 260.0,
-            },
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [20.0, 0.0],
+        })
         .unwrap();
     let _ = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1644,16 +1639,10 @@ logical_height = 540
     );
 
     let stale_baseline = restored
-        .lower_field_edit(
-            &width_key,
-            restored
-                .projection()
-                .unwrap()
-                .field(&width_key)
-                .unwrap()
-                .value()
-                .clone(),
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [0.0, 0.0],
+        })
         .unwrap();
     let successor_edit = restored
         .lower_field_edit(
@@ -1712,16 +1701,10 @@ logical_height = 540
     let handoff_frame = editor.drive_editor_frame(Duration::ZERO);
     let handoff_ui = editor.current_ui_authoring_frame().unwrap();
     let handoff_baseline = handoff_ui
-        .lower_field_edit(
-            &width_key,
-            handoff_ui
-                .projection()
-                .unwrap()
-                .field(&width_key)
-                .unwrap()
-                .value()
-                .clone(),
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [0.0, 0.0],
+        })
         .unwrap();
     let began = editor
         .dispatch_editor_actions(EditorActionBatch::new(
@@ -1741,13 +1724,10 @@ logical_height = 540
     let handoff_commit = editor
         .current_ui_authoring_frame()
         .unwrap()
-        .lower_field_edit(
-            &width_key,
-            UiAuthoringFieldValue::Dimension {
-                kind: UiAuthoringDimensionKind::Pixels,
-                value: 275.0,
-            },
-        )
+        .lower_direct_edit(&UiAuthoringDirectEdit::ResizeBy {
+            entity: button.clone(),
+            delta: [25.0, 0.0],
+        })
         .unwrap();
     let handoff_revision = editor
         .workspace()
@@ -3648,14 +3628,20 @@ fn ui_visual_record(image: Option<&str>) -> SceneComponentRecord {
             ("green", ComponentValue::f64(green).unwrap()),
             ("blue", ComponentValue::f64(blue).unwrap()),
             ("alpha", ComponentValue::f64(alpha).unwrap()),
+            ("role", ComponentValue::String(String::new())),
             (
-                "reference",
-                ComponentValue::String(image.unwrap_or_default().to_owned()),
+                "image",
+                image.map_or(ComponentValue::Null, |path| {
+                    ComponentValue::map([
+                        ("kind", ComponentValue::String("path".to_owned())),
+                        ("value", ComponentValue::String(path.to_owned())),
+                    ])
+                }),
             ),
         ])
     };
     SceneComponentRecord::new(
-        ComponentSchemaVersion::ONE,
+        ComponentSchemaVersion::new(2).unwrap(),
         ComponentValue::map([
             ("background", brush(0.2, 0.4, 0.8, 1.0, image)),
             ("border_width", ComponentValue::f64(0.0).unwrap()),

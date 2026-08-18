@@ -8,7 +8,7 @@ use std::sync::Arc;
 use nara::project_host::{
     ProjectContentBudgetKind, ProjectContentLoader, StartupContentMemberKind,
 };
-use nara::scene::{PrefabDocument, SceneEntityRecord};
+use nara::scene::{PrefabDocument, SceneComponentRecord, SceneEntityRecord};
 use project_content_fixture::{TestProject, scene_id};
 
 struct EscapeOwner;
@@ -163,4 +163,103 @@ fn source_changes_publish_a_distinct_revision_without_mutating_old_consumers() {
     assert_eq!(loader.budget_snapshot().active_reservations(), 2);
     drop(second);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+}
+
+#[cfg(feature = "runtime-ui")]
+#[test]
+fn ui_visual_asset_reference_alone_enters_the_startup_content_closure() {
+    use std::fs;
+
+    use nara::{
+        ecs::World,
+        reflect::{ComponentRegistry, ComponentTypeId},
+        ui::{UiColor, UiImageId, UiLayer, UiNode, UiRoot, UiStyle, UiVisual},
+    };
+
+    let project = TestProject::with_prefab_startup();
+    fs::write(
+        project.path().join("nara.toml"),
+        r#"schema_version = 1
+
+[project]
+name = "UI Content Test"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-ui"]
+"#,
+    )
+    .unwrap();
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let registry = plan.schema_validation().registry();
+    let mut world = World::new();
+    let root_source = world
+        .spawn((UiRoot::new(UiLayer::Base), UiNode::new(UiStyle::fill())))
+        .id();
+    let image_source = world
+        .spawn((
+            UiNode::new(UiStyle::absolute(24.0, 16.0, 128.0, 128.0)),
+            UiVisual::image(
+                UiImageId::new("textures/player.png").unwrap(),
+                UiColor::rgba(1.0, 1.0, 1.0, 1.0),
+            ),
+        ))
+        .id();
+    let root_id = scene_id("ui-root");
+    let image_id = scene_id("ui-image");
+    let root_record = SceneEntityRecord::new(root_id.clone())
+        .with_children([image_id.clone()])
+        .with_component(
+            ComponentTypeId::new("nara.ui.UiRoot"),
+            encoded_component(registry, &world, root_source, "nara.ui.UiRoot"),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.ui.UiNode"),
+            encoded_component(registry, &world, root_source, "nara.ui.UiNode"),
+        );
+    let image_record = SceneEntityRecord::new(image_id)
+        .with_component(
+            ComponentTypeId::new("nara.ui.UiNode"),
+            encoded_component(registry, &world, image_source, "nara.ui.UiNode"),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.ui.UiVisual"),
+            encoded_component(registry, &world, image_source, "nara.ui.UiVisual"),
+        );
+    project.write_prefab_source(&PrefabDocument::new([root_id], [root_record, image_record]));
+
+    let snapshot = ProjectContentLoader::new(root)
+        .unwrap()
+        .load(&candidate, &plan)
+        .unwrap();
+    assert_eq!(snapshot.images().len(), 1);
+    assert_eq!(snapshot.images()[0].path().as_str(), "textures/player.png");
+    let members = snapshot.startup_content_closure();
+    assert!(members.members().iter().any(|member| {
+        member.kind() == StartupContentMemberKind::AssetSource
+            && member.path().as_str() == "assets/textures/player.png"
+    }));
+
+    fn encoded_component(
+        registry: &ComponentRegistry,
+        world: &World,
+        entity: nara::ecs::Entity,
+        component: &str,
+    ) -> SceneComponentRecord {
+        let component = ComponentTypeId::new(component);
+        let schema = registry.schema(&component).unwrap();
+        let value = registry
+            .encode_component(&component, world, entity)
+            .expect("the selected runtime plan registers the UI component codec")
+            .expect("the first-party UI component must encode")
+            .expect("the fixture entity contains the selected UI component");
+        SceneComponentRecord::new(schema.version, value)
+    }
 }

@@ -4,16 +4,58 @@ use nara_scene::{PrefabAuthoringSession, SceneAuthoringRevision};
 use nara_tooling::{
     EditorAtomicFieldEdit, EditorAtomicFieldEditError, EditorDocumentId,
     EditorDocumentSourceBinding, EditorFieldTarget, EditorFieldWrite, EditorFrameRevision,
-    EditorGestureCancelReason, EditorGestureStamp, EditorGestureView, EditorSelectionSet,
+    EditorGestureCancelReason, EditorGestureStamp, EditorGestureView,
+    EditorProjectContentGeneration, EditorSelectionSet,
 };
 use nara_ui::__private::{
     UiAuthoringCommitPolicy, UiAuthoringDirectEdit, UiAuthoringEditError, UiAuthoringFieldKey,
-    UiAuthoringFieldValue, UiAuthoringProjection, UiAuthoringProjectionError,
-    project_prefab_authoring,
+    UiAuthoringFieldValue, UiAuthoringProjection, UiAuthoringProjectionError, UiImageChoice,
+    UiImageChoiceGeneration, UiImageChoiceSet, UiStructureRejection, project_prefab_authoring,
 };
 use thiserror::Error;
 
 use super::EditorProjectSession;
+use crate::project_host::ProjectContentSnapshot;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EditorUiImageChoices {
+    generation: UiImageChoiceGeneration,
+    choices: Result<Arc<UiImageChoiceSet>, UiStructureRejection>,
+}
+
+impl EditorUiImageChoices {
+    pub(super) fn from_snapshot(
+        snapshot: &ProjectContentSnapshot,
+        generation: EditorProjectContentGeneration,
+    ) -> Self {
+        let generation = UiImageChoiceGeneration::new(generation.get());
+        let choices = snapshot
+            .images()
+            .iter()
+            .map(|content| {
+                let source = content.image().source();
+                UiImageChoice::new(source.stable_id().to_string(), source.path().as_str())
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .and_then(|choices| UiImageChoiceSet::new(generation, choices))
+            .map(Arc::new);
+        Self {
+            generation,
+            choices,
+        }
+    }
+
+    const fn generation(&self) -> UiImageChoiceGeneration {
+        self.generation
+    }
+
+    fn choices(&self) -> Result<&UiImageChoiceSet, UiStructureRejection> {
+        match &self.choices {
+            Ok(choices) => Ok(choices.as_ref()),
+            Err(error) => Err(*error),
+        }
+    }
+}
 
 /// Root-private immutable UI authoring frame shared by current and future Editor Adapters.
 ///
@@ -29,6 +71,7 @@ pub struct EditorUiAuthoringFrame {
     gesture: Option<EditorGestureView>,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
     canvas_generation: Option<u64>,
+    image_choices: EditorUiImageChoices,
     projection: Result<Arc<UiAuthoringProjection>, UiAuthoringProjectionError>,
 }
 
@@ -73,6 +116,19 @@ impl EditorUiAuthoringFrame {
     #[must_use]
     pub const fn canvas_generation(&self) -> Option<u64> {
         self.canvas_generation
+    }
+
+    /// Returns the exact project-content generation owning the current image catalog.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn image_choice_generation(&self) -> UiImageChoiceGeneration {
+        self.image_choices.generation()
+    }
+
+    /// Returns the current bounded image catalog or its typed Host projection failure.
+    #[doc(hidden)]
+    pub fn image_choices(&self) -> Result<&UiImageChoiceSet, UiStructureRejection> {
+        self.image_choices.choices()
     }
 
     #[must_use]
@@ -224,6 +280,7 @@ pub(super) struct EditorUiAuthoringProjectionKey {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     gesture: Option<EditorGestureStamp>,
+    image_choice_generation: UiImageChoiceGeneration,
 }
 
 #[derive(Debug, Clone)]
@@ -327,6 +384,7 @@ impl EditorProjectSession {
             document,
             revision,
             gesture: gesture.as_ref().map(EditorGestureView::stamp),
+            image_choice_generation: self.ui_authoring_image_choices.generation(),
         };
         let projection = match self
             .ui_authoring_projection_cache
@@ -382,6 +440,7 @@ impl EditorProjectSession {
             gesture,
             last_gesture_cancellation: self.last_gesture_cancellation.take(),
             canvas_generation,
+            image_choices: self.ui_authoring_image_choices.clone(),
             projection,
         }));
     }
