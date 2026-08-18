@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "585f441e8780a0550c5df2332ce2e49eb5be895c677198d76266ab76ab4d907e"
+source_fingerprint: "b5a7fbaa4ab60c0e317a059615433da22809bcf7ed484be11d1ec4224156d43f"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "585f441e8780a0550c5df2332ce2e49eb5be895c677198d76266ab76ab4
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `585f441e8780a0550c5df2332ce2e49eb5be895c677198d76266ab76ab4d907e`
-- Immutable records: 516
+- Source fingerprint: `b5a7fbaa4ab60c0e317a059615433da22809bcf7ed484be11d1ec4224156d43f`
+- Immutable records: 518
 - Active lane heads: 1
 
 # Active Registrations
@@ -33,10 +33,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md): `completed` (reference-game-foundation-rgf-u19-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
-- [Standalone Generic Editor: SGE-U1 active](registry/2026-08/2026-08-18T163909Z-standalone-generic-editor-open-recovery-codex-root-22188a28c9ad431c8e9e968056d41d73.md): `active` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
+- [Standalone Generic Editor: SGE-U2 active](registry/2026-08/2026-08-18T164600Z-standalone-generic-editor-open-recovery-codex-root-c07b1c82b53047ab96593b744aa90fc4.md): `active` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [SGE-U1 data-only authoring schema admission](verification/2026-08/2026-08-18T164500Z-sge-u1-data-only-authoring-admission-c644e7a78e6d489c9237382f282dfd67.md) - Verifies the bounded data-only schema bundle, project manifest declaration, and exact root-private Authoring Project admission receipt.
 - **Session Handoff**: [Standalone generic editor planning handoff](sessions/2026-08/2026-08-18T145315Z-standalone-generic-editor-planning-handoff-38e6c41f99ff4d3ca971707ca25fab56.md) - Reviewed handoff for the accepted standalone generic Editor boundary and implementation-ready Generic Open/Recovery plan; no implementation unit is active.
 - **Engineering Research**: [Standalone generic editor product model](standalone-generic-editor-product-model-research.md) - Cross-engine and repository-grounded research for a Unity-, Unreal-, and Godot-class Nara Editor product model.
 - **Memory Event**: [verification: Completed EUSC-U5 at 993a793 with persisted UI structure, Runtime restart, and e](logs/2026-08/2026-08-18T073313Z-verification-completed-eusc-u5-at-993a793-with-persisted-ui-structure-runtime-restart-and-e-f4ec7a687d604565aded68a407d7a855.md) - Completed EUSC-U5 at 993a793 with persisted UI structure, Runtime restart, and exact native Canvas successor evidence; no successor is activ
@@ -48,7 +49,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EUSC-U2 closed UI catalog and exact placement facts](verification/2026-08/2026-08-18T041119Z-eusc-u2-closed-ui-catalog-and-exact-placement-facts-7c4c0f3ba8924f7f84668341aa0011ad.md) - Verifies closed Container/Text/Image/Button recipes, exact source-local structure preflight, semantic brush schema migration, and generation-bound project image choices.
 - **Verification Evidence**: [EUSC-U1 ordered Prefab structural patch authority](verification/2026-08/2026-08-18T023352Z-eusc-u1-ordered-prefab-structural-patch-authority-8386ed22067743af8cfb1f88b3ffd314.md) - Verifies failure-atomic ordered Prefab entity structure, inverse history, canonical order, and continued component-structure rejection.
 - **Verification Evidence**: [EUA-U5 saved Prefab content refresh and Runtime restart conformance](verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md) - Verifies receipt-bound Prefab Save, immutable successor project-content publication, bounded generations, stale-source containment, explicit Restart, and one same-source Reference Game trajectory.
-- **Verification Evidence**: [EUA-U4 egui UI authoring and native Canvas conformance](verification/2026-08/2026-08-17T221427Z-eua-u4-egui-ui-authoring-and-native-canvas-conformance-984fe0030b4843c2a1165a9e812955f0.md) - Verifies exact Prefab source navigation, typed egui authoring, atomic Canvas gestures, generic document history, and one bounded native Editor canary.
 
 # Integration Notes
 
