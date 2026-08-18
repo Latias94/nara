@@ -170,7 +170,7 @@ fn declared_asset_reference_traversal_uses_schema_paths_only() {
         ]);
     registry
         .register_persistent_component_with_codec::<AssetCarrier, _, _>(
-            schema,
+            schema.clone(),
             |_| Ok(AssetCarrier),
             |_| Ok(ComponentValue::Null),
         )
@@ -198,8 +198,12 @@ fn declared_asset_reference_traversal_uses_schema_paths_only() {
     let references =
         collect_declared_asset_references(&registry, &id, ComponentSchemaVersion::ONE, &value)
             .unwrap();
+    let data_only_references =
+        collect_declared_asset_references_from_schema(&schema, ComponentSchemaVersion::ONE, &value)
+            .unwrap();
 
     assert_eq!(references.len(), 1);
+    assert_eq!(data_only_references, references);
     assert_eq!(references[0].field_id().as_str(), "image");
     assert_eq!(references[0].asset_ref(), &declared);
 

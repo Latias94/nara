@@ -9,6 +9,7 @@ use nara_reflect::{
     ComponentValueKind,
 };
 use nara_scene::{
+    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, AuthoringScalarEdit,
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
 };
@@ -42,7 +43,17 @@ impl SceneInspectorState {
         selected_entity: Option<&SceneEntityId>,
         world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneInspectorModel {
-        build_inspector_model(session, registry, selected_entity, world_snapshot)
+        build_inspector_model(session, Some(registry), selected_entity, world_snapshot)
+    }
+
+    /// Projects one generically published authoring Scene without consulting a Runtime registry.
+    #[must_use]
+    pub fn authoring_model_with_selection(
+        &self,
+        session: &SceneAuthoringSession,
+        selected_entity: Option<&SceneEntityId>,
+    ) -> SceneInspectorModel {
+        build_inspector_model(session, None, selected_entity, None)
     }
 
     pub fn apply_command(
@@ -66,6 +77,79 @@ impl SceneInspectorState {
         self.apply_command_with_patch_apply(session, registry, command, |session, patch| {
             session.apply_patch_with_asset_database(patch, registry, database)
         })
+    }
+
+    /// Applies the only Inspector mutation admitted for a generically published authoring
+    /// document. The session reclassifies the candidate and proves preservation before commit.
+    pub fn apply_authoring_command(
+        &self,
+        session: &mut SceneAuthoringSession,
+        command: SceneInspectorCommand,
+    ) -> SceneInspectorCommandReport {
+        if !matches!(&command, SceneInspectorCommand::SetField { .. }) {
+            return inspector_authoring_command_error_report();
+        }
+        let entity = command.target_entity().clone();
+        if !document_has_entity(session.document(), &entity) {
+            return inspector_entity_error_report(
+                "tooling.inspector-missing-entity",
+                "inspector command targets an entity that is not in the authoring document",
+                &entity,
+            );
+        }
+        let patch = match command.to_patch(session.document()) {
+            Ok(patch) => patch,
+            Err(diagnostic) => {
+                let mut diagnostics = DiagnosticReport::default();
+                diagnostics.push(diagnostic);
+                return SceneInspectorCommandReport {
+                    applied: false,
+                    patch: None,
+                    patch_report: None,
+                    diagnostics,
+                };
+            }
+        };
+        let SceneInspectorCommand::SetField {
+            entity,
+            component,
+            component_version,
+            field,
+            value,
+        } = command
+        else {
+            unreachable!("the authoring command kind was checked before conversion")
+        };
+        let Some(record) = session
+            .document()
+            .entities
+            .iter()
+            .find(|record| record.id == entity)
+            .and_then(|record| record.components.get(&component))
+        else {
+            return inspector_authoring_component_error_report(
+                "tooling.inspector-authoring-component-missing",
+                "inspector scalar command targets a component that is not in the authoring document",
+                &entity,
+                &component,
+            );
+        };
+        if record.version != component_version {
+            return inspector_authoring_component_error_report(
+                "tooling.inspector-authoring-version-mismatch",
+                "inspector scalar command does not match the persistent component version",
+                &entity,
+                &component,
+            );
+        }
+        let patch_report = session
+            .apply_authoring_scalar_edit(AuthoringScalarEdit::new(entity, component, field, value));
+        SceneInspectorCommandReport {
+            applied: patch_report.applied,
+            patch: Some(patch),
+            patch_report: Some(patch_report.clone()),
+            diagnostics: patch_report.diagnostics,
+        }
     }
 
     fn apply_command_with_patch_apply(
@@ -142,8 +226,60 @@ pub struct SceneInspectorComponentView {
     pub component: ComponentTypeId,
     pub document_version: ComponentSchemaVersion,
     pub schema_version: ComponentSchemaVersion,
+    pub access: SceneInspectorComponentAccess,
     pub capabilities: BTreeSet<ComponentCapability>,
     pub fields: Vec<SceneInspectorFieldView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SceneInspectorComponentAccess {
+    read_only_reason: Option<SceneInspectorReadOnlyReason>,
+}
+
+impl SceneInspectorComponentAccess {
+    #[must_use]
+    pub const fn editable() -> Self {
+        Self {
+            read_only_reason: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn read_only(reason: SceneInspectorReadOnlyReason) -> Self {
+        Self {
+            read_only_reason: Some(reason),
+        }
+    }
+
+    #[must_use]
+    pub const fn is_editable(self) -> bool {
+        self.read_only_reason.is_none()
+    }
+
+    #[must_use]
+    pub const fn read_only_reason(self) -> Option<SceneInspectorReadOnlyReason> {
+        self.read_only_reason
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneInspectorReadOnlyReason {
+    KnownUnbound,
+    UnknownSchema,
+    Unmigratable,
+    FutureSchema,
+}
+
+impl SceneInspectorReadOnlyReason {
+    fn from_record_readiness(readiness: AuthoringRecordReadiness) -> Option<Self> {
+        match readiness {
+            AuthoringRecordReadiness::Available => None,
+            AuthoringRecordReadiness::KnownUnbound => Some(Self::KnownUnbound),
+            AuthoringRecordReadiness::UnknownSchema => Some(Self::UnknownSchema),
+            AuthoringRecordReadiness::Unmigratable => Some(Self::Unmigratable),
+            AuthoringRecordReadiness::FutureSchema => Some(Self::FutureSchema),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -334,18 +470,26 @@ pub struct SceneInspectorCommandReport {
 
 fn build_inspector_model(
     session: &SceneAuthoringSession,
-    registry: &ComponentRegistry,
+    registry: Option<&ComponentRegistry>,
     selected_entity: Option<&SceneEntityId>,
     world_snapshot: Option<&WorldIdentitySnapshot>,
 ) -> SceneInspectorModel {
     let mut diagnostics = DiagnosticReport::default();
-    if !registry.is_frozen() {
+    if registry.is_some_and(|registry| !registry.is_frozen()) {
         diagnostics.push(diagnostic::error(
             "tooling.inspector-registry-not-frozen",
             "inspector requires a frozen component registry",
         ));
     }
     let document = session.document();
+    let authoring_record_facts =
+        DirectAuthoringRecordFactIndex::new(session.authoring_record_facts().unwrap_or_default());
+    if registry.is_none() && session.authoring_readiness().is_none() {
+        diagnostics.push(diagnostic::error(
+            "tooling.inspector-authoring-publication-required",
+            "registry-free inspector projection requires a published authoring document",
+        ));
+    }
     let entity_by_id = document
         .entities
         .iter()
@@ -363,7 +507,11 @@ fn build_inspector_model(
                 id: entity.id.clone(),
                 parent: parent.cloned(),
                 depth,
-                inspectable_component_count: inspectable_component_count(entity, registry),
+                inspectable_component_count: inspectable_component_count(
+                    entity,
+                    registry,
+                    &authoring_record_facts,
+                ),
                 has_prefab: entity.prefab.is_some(),
                 selected,
                 live_locator: session
@@ -378,6 +526,7 @@ fn build_inspector_model(
             entity,
             parent,
             registry,
+            &authoring_record_facts,
             &mut diagnostics,
         )),
         (Some(id), None) => {
@@ -406,17 +555,21 @@ fn build_inspector_model(
 
 fn inspectable_component_count(
     entity: &nara_scene::SceneEntityRecord,
-    registry: &ComponentRegistry,
+    registry: Option<&ComponentRegistry>,
+    authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
 ) -> usize {
-    if !registry.is_frozen() {
-        return 0;
-    }
     entity
         .components
         .keys()
         .filter(|component_id| {
+            if let Some(fact) = authoring_record_facts.get(&entity.id, component_id) {
+                if !fact.readiness().is_available() || registry.is_none() {
+                    return true;
+                }
+            }
             registry
-                .schema(component_id)
+                .filter(|registry| registry.is_frozen())
+                .and_then(|registry| registry.schema(component_id))
                 .is_some_and(|schema| schema.has_capability(ComponentCapability::Inspect))
         })
         .count()
@@ -425,22 +578,27 @@ fn inspectable_component_count(
 fn build_entity_view(
     entity: &nara_scene::SceneEntityRecord,
     parent: Option<&SceneEntityId>,
-    registry: &ComponentRegistry,
+    registry: Option<&ComponentRegistry>,
+    authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
     diagnostics: &mut DiagnosticReport,
 ) -> SceneInspectorEntityView {
-    if !registry.is_frozen() {
-        return SceneInspectorEntityView {
-            id: entity.id.clone(),
-            parent: parent.cloned(),
-            has_prefab: entity.prefab.is_some(),
-            components: Vec::new(),
-        };
-    }
-
     let components = entity
         .components
         .iter()
         .filter_map(|(component_id, component)| {
+            if let Some(fact) = authoring_record_facts.get(&entity.id, component_id) {
+                if !fact.readiness().is_available() {
+                    return Some(build_unavailable_component_view(
+                        component_id,
+                        component,
+                        fact,
+                    ));
+                }
+                if registry.is_none() {
+                    return Some(build_authoring_component_view(component_id, component));
+                }
+            }
+            let registry = registry.filter(|registry| registry.is_frozen())?;
             let Some(schema) = registry.schema(component_id) else {
                 diagnostics.push(diagnostic::with_component(
                     diagnostic::with_entity(
@@ -534,8 +692,70 @@ fn build_component_view(
         component: component_id.clone(),
         document_version: component.version,
         schema_version: schema.version,
+        access: SceneInspectorComponentAccess::editable(),
         capabilities: schema.capabilities.clone(),
         fields: build_field_views(schema, current_value),
+    }
+}
+
+fn build_unavailable_component_view(
+    component_id: &ComponentTypeId,
+    component: &SceneComponentRecord,
+    fact: &AuthoringRecordFact,
+) -> SceneInspectorComponentView {
+    SceneInspectorComponentView {
+        component: component_id.clone(),
+        document_version: component.version,
+        schema_version: component.version,
+        access: SceneInspectorComponentAccess::read_only(
+            SceneInspectorReadOnlyReason::from_record_readiness(fact.readiness())
+                .expect("unavailable authoring facts cannot be Available"),
+        ),
+        capabilities: BTreeSet::new(),
+        fields: Vec::new(),
+    }
+}
+
+fn build_authoring_component_view(
+    component_id: &ComponentTypeId,
+    component: &SceneComponentRecord,
+) -> SceneInspectorComponentView {
+    SceneInspectorComponentView {
+        component: component_id.clone(),
+        document_version: component.version,
+        schema_version: component.version,
+        access: SceneInspectorComponentAccess::editable(),
+        capabilities: BTreeSet::new(),
+        fields: Vec::new(),
+    }
+}
+
+struct DirectAuthoringRecordFactIndex<'facts> {
+    facts: HashMap<(&'facts str, &'facts str), &'facts AuthoringRecordFact>,
+}
+
+impl<'facts> DirectAuthoringRecordFactIndex<'facts> {
+    fn new(facts: &'facts [AuthoringRecordFact]) -> Self {
+        let facts = facts
+            .iter()
+            .filter_map(|fact| {
+                let AuthoringRecordLocation::EntityComponent { entity } = fact.location() else {
+                    return None;
+                };
+                Some(((entity.as_str(), fact.component().as_str()), fact))
+            })
+            .collect();
+        Self { facts }
+    }
+
+    fn get(
+        &self,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+    ) -> Option<&'facts AuthoringRecordFact> {
+        self.facts
+            .get(&(entity.as_str(), component.as_str()))
+            .copied()
     }
 }
 
@@ -624,6 +844,39 @@ fn inspector_entity_error_report(
     diagnostics.push(diagnostic::with_entity(
         diagnostic::error(code, summary),
         entity,
+    ));
+    SceneInspectorCommandReport {
+        applied: false,
+        patch: None,
+        patch_report: None,
+        diagnostics,
+    }
+}
+
+fn inspector_authoring_command_error_report() -> SceneInspectorCommandReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic::error(
+        "tooling.inspector-authoring-command-unsupported",
+        "generically published authoring documents only accept preservation-safe scalar writes",
+    ));
+    SceneInspectorCommandReport {
+        applied: false,
+        patch: None,
+        patch_report: None,
+        diagnostics,
+    }
+}
+
+fn inspector_authoring_component_error_report(
+    code: &'static str,
+    summary: &'static str,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+) -> SceneInspectorCommandReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic::with_component(
+        diagnostic::with_entity(diagnostic::error(code, summary), entity),
+        component,
     ));
     SceneInspectorCommandReport {
         applied: false,

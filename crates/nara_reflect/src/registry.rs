@@ -544,6 +544,7 @@ struct RegistryData {
     build_mode: RegistryBuildMode,
     contributions: BTreeMap<ComponentSchemaOwnerId, ComponentSchemaContributionReceipt>,
     provider_owners: BTreeMap<nara_app::PluginSchemaProviderId, ComponentSchemaOwnerId>,
+    component_owners: BTreeMap<ComponentTypeId, ComponentSchemaOwnerId>,
     type_registry: TypeRegistry,
     rust_type_ids: HashMap<TypeId, ComponentTypeId>,
     bindings: BTreeMap<ComponentTypeId, NativeComponentBinding>,
@@ -587,6 +588,7 @@ impl RegistryData {
             build_mode: RegistryBuildMode::Undecided,
             contributions: BTreeMap::new(),
             provider_owners: BTreeMap::new(),
+            component_owners: BTreeMap::new(),
             type_registry: TypeRegistry::default(),
             rust_type_ids: HashMap::new(),
             bindings: BTreeMap::new(),
@@ -694,6 +696,14 @@ impl ComponentRegistrySnapshot {
             .contributions
             .get(&owner)
             .map(|receipt| receipt.owner())
+    }
+
+    #[must_use]
+    pub fn component_schema_owner(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<ComponentSchemaOwnerId> {
+        self.0.component_owners.get(component).copied()
     }
 
     #[must_use]
@@ -812,6 +822,14 @@ impl ComponentRegistry {
         };
         data.build_mode = publish_mode;
         data.catalog = catalog;
+        if let Some(owner) = data.raw_owner {
+            data.component_owners.extend(
+                data.catalog
+                    .components
+                    .iter()
+                    .map(|schema| (schema.id().clone(), owner)),
+            );
+        }
         data.type_index = type_index;
         data.field_index = field_index;
         data.path_indexes = path_indexes;
@@ -1292,6 +1310,18 @@ impl ComponentRegistry {
         }
     }
 
+    #[must_use]
+    pub fn component_schema_owner(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<ComponentSchemaOwnerId> {
+        match &self.state {
+            RegistryState::Frozen(data) => data.component_owners.get(component).copied(),
+            RegistryState::Building(_) => None,
+            RegistryState::Transitioning => unreachable!(),
+        }
+    }
+
     pub fn schemas(
         &self,
     ) -> Result<impl Iterator<Item = &ComponentSchema>, ComponentRegistryError> {
@@ -1716,6 +1746,7 @@ fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) 
         build_mode: _,
         contributions,
         provider_owners,
+        component_owners,
         type_registry,
         rust_type_ids,
         bindings,
@@ -1735,6 +1766,7 @@ fn merge_owner_candidate(aggregate: &mut RegistryData, candidate: RegistryData) 
     for receipt in contributions.into_values() {
         insert_contribution(aggregate, receipt);
     }
+    aggregate.component_owners.extend(component_owners);
     for registration in type_registry.iter().cloned() {
         aggregate.type_registry.add_registration(registration);
     }

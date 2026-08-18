@@ -104,6 +104,19 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
     preflight_scene_with_context_options(document, registry, context, true, Some(operation_index))
 }
 
+pub(crate) fn validate_scene_structure(document: &SceneDocument) -> DiagnosticReport {
+    validate_scene_structure_with_operation(document, None).1
+}
+
+fn validate_scene_structure_with_operation(
+    document: &SceneDocument,
+    operation_index: Option<usize>,
+) -> (Option<ValidatedScenePlacement>, DiagnosticReport) {
+    let mut diagnostics = DiagnosticReport::default();
+    let placement = validate_scene_placement(document, &mut diagnostics, operation_index);
+    (placement, diagnostics)
+}
+
 fn preflight_scene_with_context_options(
     document: &SceneDocument,
     registry: &ComponentRegistry,
@@ -111,8 +124,8 @@ fn preflight_scene_with_context_options(
     allow_prefab_instances: bool,
     operation_index: Option<usize>,
 ) -> PreparedScene {
-    let mut diagnostics = DiagnosticReport::default();
-    let placement = validate_scene_placement(document, &mut diagnostics, operation_index);
+    let (placement, mut diagnostics) =
+        validate_scene_structure_with_operation(document, operation_index);
     if !registry.is_frozen() {
         diagnostics.push(diagnostic_error(
             "scene.component-registry-not-frozen",
@@ -192,6 +205,30 @@ fn preflight_scene_with_context_options(
                 );
                 continue;
             };
+            if let Some(declared_owner) = component.owner() {
+                let owner_matches = registry
+                    .component_schema_owner(component_id)
+                    .is_some_and(|owner| declared_owner.matches_executable(owner).unwrap_or(false));
+                if !owner_matches {
+                    push_with_operation_index(
+                        &mut diagnostics,
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.component-owner-mismatch",
+                                    "Persistent component owner does not match the executable schema owner",
+                                ),
+                                "entity-id",
+                                entity.id.as_str(),
+                            ),
+                            "component-id",
+                            component_id.as_str(),
+                        ),
+                        operation_index,
+                    );
+                    continue;
+                }
+            }
             if !schema.has_capability(nara_reflect::ComponentCapability::Scene) {
                 push_with_operation_index(
                     &mut diagnostics,

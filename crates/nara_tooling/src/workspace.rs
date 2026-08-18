@@ -11,9 +11,11 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    PrefabAuthoringSession, PrefabDocument, SceneAuthoringContentState,
-    SceneAuthoringHistoryStatus, SceneAuthoringRevision, SceneAuthoringSession, SceneDocument,
-    SceneEntityId, ScenePatchDocument, ScenePatchReport,
+    AuthoringDocumentReadiness, AuthoringRecordFact, AuthoringScalarEdit, PrefabAuthoringSession,
+    PrefabDocument, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    SceneAuthoringContentState, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
+    SceneAuthoringSession, SceneDocument, SceneEntityId, ScenePatchDocument, ScenePatchReport,
+    UnavailableRecordManifest,
 };
 
 use crate::composition::{
@@ -306,6 +308,13 @@ impl EditorDocumentSlot {
         }
     }
 
+    fn authoring_readiness(&self) -> Option<AuthoringDocumentReadiness> {
+        match self {
+            Self::Scene(slot) => slot.authoring_readiness(),
+            Self::Prefab(slot) => slot.authoring_readiness(),
+        }
+    }
+
     fn selection_mut(&mut self) -> &mut EditorSelectionSet {
         match self {
             Self::Scene(slot) => &mut slot.selection,
@@ -559,6 +568,15 @@ impl EditorWorkspace {
         title: impl Into<String>,
         session: SceneAuthoringSession,
     ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
+        self.open_scene_session_with_source_binding(title, None, session)
+    }
+
+    fn open_scene_session_with_source_binding(
+        &mut self,
+        title: impl Into<String>,
+        source_binding: Option<EditorDocumentSourceBinding>,
+        session: SceneAuthoringSession,
+    ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
         if session.live_instance().is_some() {
             let context = WorkspaceDocumentContext {
                 active: self.active_document,
@@ -576,7 +594,7 @@ impl EditorWorkspace {
         }
 
         let document_id = self.allocate_document_id();
-        let slot = EditorSceneSlot::from_session(title, session);
+        let slot = EditorSceneSlot::from_session(title, source_binding, session);
         self.documents
             .insert(document_id, EditorDocumentSlot::Scene(slot));
         self.active_document = Some(document_id);
@@ -597,6 +615,21 @@ impl EditorWorkspace {
             diagnostics: DiagnosticReport::default(),
             ..EditorWorkspaceCommandReport::default()
         })
+    }
+
+    /// Publishes one structurally admitted Scene document without introducing a second owner for
+    /// document, history, or selection state.
+    pub fn open_authoring_scene_document(
+        &mut self,
+        title: impl Into<String>,
+        source_binding: EditorDocumentSourceBinding,
+        published: PublishedAuthoringSceneDocument,
+    ) -> Result<EditorWorkspaceCommandReport, EditorSceneSessionPublicationError> {
+        self.open_scene_session_with_source_binding(
+            title,
+            Some(source_binding),
+            SceneAuthoringSession::from_published_authoring_document(published),
+        )
     }
 
     pub fn open_prefab_session(
@@ -624,6 +657,20 @@ impl EditorWorkspace {
             diagnostics: DiagnosticReport::default(),
             ..EditorWorkspaceCommandReport::default()
         })
+    }
+
+    /// Publishes one structurally admitted Prefab document into the existing Prefab session slot.
+    pub fn open_authoring_prefab_document(
+        &mut self,
+        title: impl Into<String>,
+        source_binding: EditorDocumentSourceBinding,
+        published: PublishedAuthoringPrefabDocument,
+    ) -> Result<EditorWorkspaceCommandReport, EditorPrefabSessionPublicationError> {
+        self.open_prefab_session(
+            title,
+            source_binding,
+            PrefabAuthoringSession::from_published_authoring_document(published),
+        )
     }
 
     pub fn apply_command(
@@ -654,6 +701,11 @@ impl EditorWorkspace {
                 base_revision,
                 patch,
             } => self.apply_prefab_patch(registry, document, base_revision, patch),
+            EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+                document,
+                base_revision,
+                edit,
+            } => self.apply_authoring_scalar_edit(document, base_revision, edit),
             EditorWorkspaceCommand::ComposeScene {
                 document,
                 base_revision,
@@ -678,6 +730,66 @@ impl EditorWorkspace {
         }
     }
 
+    /// Applies the closed command vocabulary for generically published authoring documents.
+    ///
+    /// This path never constructs or consults a Runtime component registry. Raw patches and
+    /// composition commands are rejected before they can reach a document session.
+    pub fn apply_authoring_command(
+        &mut self,
+        command: EditorWorkspaceCommand,
+    ) -> EditorWorkspaceCommandReport {
+        match command {
+            EditorWorkspaceCommand::CloseDocument { document } => {
+                if let Err(report) = self.require_authoring_document(document) {
+                    return report;
+                }
+                self.close_document(document)
+            }
+            EditorWorkspaceCommand::SetActiveDocument { document } => {
+                if let Err(report) = self.require_authoring_document(document) {
+                    return report;
+                }
+                self.set_active_document(document)
+            }
+            EditorWorkspaceCommand::SelectEntity { document, entity } => {
+                if let Err(report) = self.require_authoring_document(document) {
+                    return report;
+                }
+                self.select_entity(document, entity)
+            }
+            EditorWorkspaceCommand::ApplyInspectorCommand {
+                document,
+                base_revision,
+                command,
+            } => self.apply_authoring_inspector_command(document, base_revision, command),
+            EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+                document,
+                base_revision,
+                edit,
+            } => self.apply_authoring_scalar_edit(document, base_revision, edit),
+            EditorWorkspaceCommand::Undo {
+                document,
+                base_revision,
+            } => self.undo_authoring(document, base_revision),
+            EditorWorkspaceCommand::Redo {
+                document,
+                base_revision,
+            } => self.redo_authoring(document, base_revision),
+            EditorWorkspaceCommand::MarkExternalChanged { document } => {
+                if let Err(report) = self.require_authoring_document(document) {
+                    return report;
+                }
+                self.mark_external_changed(document)
+            }
+            EditorWorkspaceCommand::ApplyScenePatch { document, .. }
+            | EditorWorkspaceCommand::ApplyPrefabPatch { document, .. }
+            | EditorWorkspaceCommand::ComposeScene { document, .. }
+            | EditorWorkspaceCommand::ComposePrefab { document, .. } => {
+                authoring_command_error_report(self.active_document, document)
+            }
+        }
+    }
+
     #[must_use]
     pub fn model(
         &self,
@@ -689,6 +801,24 @@ impl EditorWorkspace {
                 .map(|slot| slot.model(document, registry, edit_world_snapshot))
         });
 
+        self.model_with_active_scene(active_scene)
+    }
+
+    /// Projects generically published authoring documents without a Runtime registry.
+    #[must_use]
+    pub fn authoring_model(&self) -> EditorWorkspaceModel {
+        let active_scene = self.active_document.and_then(|document| {
+            self.scene(document)
+                .map(|slot| slot.authoring_model(document))
+        });
+
+        self.model_with_active_scene(active_scene)
+    }
+
+    fn model_with_active_scene(
+        &self,
+        active_scene: Option<EditorSceneModel>,
+    ) -> EditorWorkspaceModel {
         EditorWorkspaceModel {
             active_document: self.active_document,
             documents: self
@@ -702,6 +832,7 @@ impl EditorWorkspace {
                     revision: slot.revision(),
                     saved_revision: slot.saved_revision(),
                     history: slot.history_status(),
+                    authoring_readiness: slot.authoring_readiness(),
                     source_binding: slot.source_binding().cloned(),
                     external_reload: slot.external_reload(),
                     active: Some(*document) == self.active_document,
@@ -816,9 +947,39 @@ impl EditorWorkspace {
                 Ok(exact) => exact,
                 Err(report) => return report,
             };
-        let inspector_report =
+        let inspector_report = if slot.authoring_readiness().is_some() {
             slot.editor
-                .apply_inspector_command(&mut slot.session, registry, command);
+                .inspector()
+                .apply_authoring_command(&mut slot.session, command)
+        } else {
+            slot.editor
+                .apply_inspector_command(&mut slot.session, registry, command)
+        };
+        if inspector_report.applied {
+            slot.selection.retain_existing(slot.session.document());
+        }
+        let mut report = report_for_slot(document, active_document, slot);
+        report.applied = inspector_report.applied;
+        report.inspector_report = Some(inspector_report.clone());
+        let _ = report.diagnostics.extend(inspector_report.diagnostics);
+        report
+    }
+
+    fn apply_authoring_inspector_command(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        command: SceneInspectorCommand,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_authoring_scene_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let inspector_report = slot
+            .editor
+            .inspector()
+            .apply_authoring_command(&mut slot.session, command);
         if inspector_report.applied {
             slot.selection.retain_existing(slot.session.document());
         }
@@ -859,6 +1020,58 @@ impl EditorWorkspace {
             };
         let patch_report = slot.session.apply_patch(&patch, registry);
         report_for_prefab_patch_slot(document, active_document, slot, patch_report)
+    }
+
+    fn apply_authoring_scalar_edit(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        edit: AuthoringScalarEdit,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_scalar_edit(edit),
+            EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_scalar_edit(edit),
+        };
+        report_for_document_patch(document, active_document, slot, patch_report)
+    }
+
+    fn undo_authoring(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.undo_authoring(),
+            EditorDocumentSlot::Prefab(slot) => slot.session.undo_authoring(),
+        };
+        report_for_document_patch(document, active_document, slot, patch_report)
+    }
+
+    fn redo_authoring(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.redo_authoring(),
+            EditorDocumentSlot::Prefab(slot) => slot.session.redo_authoring(),
+        };
+        report_for_document_patch(document, active_document, slot, patch_report)
     }
 
     fn apply_scene_composition(
@@ -1036,6 +1249,53 @@ impl EditorWorkspace {
             ));
         }
         Ok((active_document, slot))
+    }
+
+    fn resolve_exact_authoring_document_mutation_slot(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<(Option<EditorDocumentId>, &mut EditorDocumentSlot), EditorWorkspaceCommandReport>
+    {
+        let active_document = self.active_document;
+        let (resolved_active, slot) =
+            self.resolve_exact_document_mutation_slot(document, base_revision)?;
+        if slot.authoring_readiness().is_none() {
+            return Err(authoring_document_error_report(active_document, document));
+        }
+        Ok((resolved_active, slot))
+    }
+
+    fn resolve_exact_authoring_scene_mutation_slot(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+    ) -> Result<(Option<EditorDocumentId>, &mut EditorSceneSlot), EditorWorkspaceCommandReport>
+    {
+        let active_document = self.active_document;
+        let (resolved_active, slot) =
+            self.resolve_exact_scene_mutation_slot(document, base_revision)?;
+        if slot.authoring_readiness().is_none() {
+            return Err(authoring_document_error_report(active_document, document));
+        }
+        Ok((resolved_active, slot))
+    }
+
+    fn require_authoring_document(
+        &self,
+        document: EditorDocumentId,
+    ) -> Result<(), EditorWorkspaceCommandReport> {
+        let context = WorkspaceDocumentContext::new(self.active_document, Some(document));
+        let Some(slot) = self.documents.get(&document) else {
+            return Err(workspace_document_error_report(context, document));
+        };
+        if slot.authoring_readiness().is_none() {
+            return Err(authoring_document_error_report(
+                self.active_document,
+                document,
+            ));
+        }
+        Ok(())
     }
 
     fn resolve_exact_scene_mutation_slot(
@@ -1325,12 +1585,16 @@ pub struct EditorSceneSlot {
 }
 
 impl EditorSceneSlot {
-    fn from_session(title: impl Into<String>, session: SceneAuthoringSession) -> Self {
+    fn from_session(
+        title: impl Into<String>,
+        source_binding: Option<EditorDocumentSourceBinding>,
+        session: SceneAuthoringSession,
+    ) -> Self {
         let saved_revision = session.revision();
         let saved_content_state = session.content_state();
         Self {
             title: title.into(),
-            source_binding: None,
+            source_binding,
             session,
             editor: SceneEditorState::new(),
             selection: EditorSelectionSet::default(),
@@ -1398,6 +1662,21 @@ impl EditorSceneSlot {
         self.external_reload
     }
 
+    #[must_use]
+    pub fn authoring_readiness(&self) -> Option<AuthoringDocumentReadiness> {
+        self.session.authoring_readiness()
+    }
+
+    #[must_use]
+    pub fn authoring_record_facts(&self) -> Option<&[AuthoringRecordFact]> {
+        self.session.authoring_record_facts()
+    }
+
+    #[must_use]
+    pub fn unavailable_record_manifest(&self) -> Option<&UnavailableRecordManifest> {
+        self.session.unavailable_record_manifest()
+    }
+
     fn next_entity_candidate(
         &self,
     ) -> Result<(SceneEntityId, Option<u64>), nara_diagnostic::Diagnostic> {
@@ -1454,6 +1733,26 @@ impl EditorSceneSlot {
             self.selection.top_entity(),
             edit_world_snapshot,
         );
+        EditorSceneModel {
+            document,
+            title: self.title.clone(),
+            dirty: self.is_dirty(),
+            revision: self.session.revision(),
+            saved_revision: self.saved_revision,
+            external_reload: self.external_reload,
+            selection: self.selection.clone(),
+            editor,
+        }
+    }
+
+    fn authoring_model(&self, document: EditorDocumentId) -> EditorSceneModel {
+        let editor = SceneEditorModel {
+            inspector: self
+                .editor
+                .inspector()
+                .authoring_model_with_selection(&self.session, self.selection.top_entity()),
+            diagnostics: DiagnosticReport::default(),
+        };
         EditorSceneModel {
             document,
             title: self.title.clone(),
@@ -1550,6 +1849,21 @@ impl EditorPrefabSlot {
     #[must_use]
     pub fn external_reload(&self) -> EditorExternalReloadState {
         self.external_reload
+    }
+
+    #[must_use]
+    pub fn authoring_readiness(&self) -> Option<AuthoringDocumentReadiness> {
+        self.session.authoring_readiness()
+    }
+
+    #[must_use]
+    pub fn authoring_record_facts(&self) -> Option<&[AuthoringRecordFact]> {
+        self.session.authoring_record_facts()
+    }
+
+    #[must_use]
+    pub fn unavailable_record_manifest(&self) -> Option<&UnavailableRecordManifest> {
+        self.session.unavailable_record_manifest()
     }
 
     fn next_entity_candidate(
@@ -1841,6 +2155,11 @@ pub enum EditorWorkspaceCommand {
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     },
+    ApplyAuthoringScalarEdit {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        edit: AuthoringScalarEdit,
+    },
     ComposeScene {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
@@ -1972,6 +2291,7 @@ pub struct EditorDocumentTabModel {
     pub revision: SceneAuthoringRevision,
     pub saved_revision: SceneAuthoringRevision,
     pub history: SceneAuthoringHistoryStatus,
+    pub authoring_readiness: Option<AuthoringDocumentReadiness>,
     pub source_binding: Option<EditorDocumentSourceBinding>,
     pub external_reload: EditorExternalReloadState,
     pub active: bool,
@@ -2142,6 +2462,28 @@ fn workspace_error_report(
         diagnostics,
         ..EditorWorkspaceCommandReport::default()
     }
+}
+
+fn authoring_document_error_report(
+    active_document: Option<EditorDocumentId>,
+    document: EditorDocumentId,
+) -> EditorWorkspaceCommandReport {
+    workspace_error_report(
+        WorkspaceDocumentContext::new(active_document, Some(document)),
+        "tooling.workspace-authoring-document-required",
+        "generic authoring commands require a published authoring document",
+    )
+}
+
+fn authoring_command_error_report(
+    active_document: Option<EditorDocumentId>,
+    document: EditorDocumentId,
+) -> EditorWorkspaceCommandReport {
+    workspace_error_report(
+        WorkspaceDocumentContext::new(active_document, Some(document)),
+        "tooling.workspace-authoring-command-unsupported",
+        "generic authoring does not accept raw patches or composition commands",
+    )
 }
 
 fn workspace_document_error_report(
@@ -2320,14 +2662,16 @@ fn prefab_field_value<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::AssetRef;
     use nara_diagnostic::DiagnosticValueRef;
     use nara_reflect::{
-        ComponentFieldId, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue,
+        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentRegistry,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
-        PrefabDocument, SceneComponentRecord, SceneEntityRecord, ScenePatchOperation,
-        ScenePlacement, ScenePlacementOwner,
+        AuthoringDocumentSource, PrefabDocument, SCENE_COMPONENTS_SCHEMA_OWNER_ID,
+        SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneComponentRecord, SceneDocumentCandidate,
+        SceneEntityRecord, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
     };
 
     use crate::{
@@ -3631,7 +3975,7 @@ mod tests {
         let registry = frozen_empty_registry();
         let mut session = SceneAuthoringSession::new(SceneDocument::default());
         let mut world = nara_ecs::World::new();
-        assert!(session.sync_world(&mut world, &registry).synced);
+        assert!(session.sync_world(&mut world, &registry).unwrap().synced);
         assert!(session.live_instance().is_some());
         let mut workspace = EditorWorkspace::new();
 
@@ -3646,6 +3990,212 @@ mod tests {
         );
         assert!(error.into_session().live_instance().is_some());
         assert!(workspace.is_empty());
+    }
+
+    #[test]
+    fn degraded_authoring_scalar_gate_preserves_manifest_and_is_failure_atomic() {
+        let resolved =
+            nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER)
+                .unwrap();
+        let owner =
+            PersistentComponentSchemaOwnerId::try_new(SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str())
+                .unwrap();
+        let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            owner.clone(),
+            resolved.current().catalog().clone(),
+            resolved
+                .predecessor()
+                .map(|record| record.catalog().clone()),
+        )])
+        .unwrap();
+        let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_trusted_provider(
+            resolved.contribution_receipt(),
+            "nara.scene.first-party-authoring-adapter",
+            1,
+            1,
+            [ComponentTypeId::new("nara.scene.Name")],
+        )
+        .unwrap();
+        let entity = entity_id("player");
+        let name = ComponentTypeId::new("nara.scene.Name");
+        let visibility = ComponentTypeId::new("nara.scene.Visibility");
+        let source =
+            AuthoringDocumentSource::new(AssetRef::path("scenes/degraded.scene.json").unwrap());
+        let published = SceneDocumentCandidate::decode_json_bytes(
+            SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity.clone())
+                .with_component(
+                    name.clone(),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::String("Player".to_owned()),
+                    )
+                    .with_owner(owner.clone()),
+                )
+                .with_component(
+                    visibility.clone(),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        ComponentValue::String("visible".to_owned()),
+                    )
+                    .with_owner(owner),
+                )])
+            .to_json_string()
+            .unwrap()
+            .as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(source, &bundle, &[adapter])
+        .unwrap()
+        .publish();
+        let expected_manifest = published.unavailable_manifest().clone();
+
+        let mut workspace = EditorWorkspace::new();
+        let document = workspace
+            .open_authoring_scene_document(
+                "degraded",
+                EditorDocumentSourceBinding::new("scenes/degraded.scene.json"),
+                published,
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        assert_eq!(
+            workspace
+                .authoring_model()
+                .document(document)
+                .unwrap()
+                .authoring_readiness,
+            Some(AuthoringDocumentReadiness::Degraded)
+        );
+        assert!(
+            workspace
+                .apply_authoring_command(EditorWorkspaceCommand::SelectEntity {
+                    document,
+                    entity: Some(entity.clone()),
+                })
+                .applied
+        );
+        let inspector = &workspace
+            .authoring_model()
+            .active_scene
+            .unwrap()
+            .editor
+            .inspector;
+        let visibility_view = inspector
+            .selected_entity_view
+            .as_ref()
+            .unwrap()
+            .components
+            .iter()
+            .find(|component| component.component == visibility)
+            .unwrap();
+        assert_eq!(
+            visibility_view.access.read_only_reason(),
+            Some(crate::SceneInspectorReadOnlyReason::KnownUnbound)
+        );
+        assert_eq!(
+            visibility_view.document_version,
+            ComponentSchemaVersion::ONE
+        );
+        assert!(visibility_view.fields.is_empty());
+
+        let edit_base_revision = workspace.document_revision(document).unwrap();
+        let edit =
+            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyInspectorCommand {
+                document,
+                base_revision: edit_base_revision,
+                command: SceneInspectorCommand::SetField {
+                    entity: entity.clone(),
+                    component: name.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("value"),
+                    value: ComponentValue::String("Renamed".to_owned()),
+                },
+            });
+        assert!(edit.applied, "{:#?}", edit.diagnostics);
+        assert_ne!(edit.revision, Some(edit_base_revision));
+
+        let undo = workspace.apply_authoring_command(EditorWorkspaceCommand::Undo {
+            document,
+            base_revision: edit.revision.unwrap(),
+        });
+        assert!(undo.applied, "{:#?}", undo.diagnostics);
+        assert_eq!(
+            workspace
+                .scene(document)
+                .unwrap()
+                .unavailable_record_manifest(),
+            Some(&expected_manifest)
+        );
+        let redo = workspace.apply_authoring_command(EditorWorkspaceCommand::Redo {
+            document,
+            base_revision: undo.revision.unwrap(),
+        });
+        assert!(redo.applied, "{:#?}", redo.diagnostics);
+        assert_eq!(
+            workspace
+                .scene(document)
+                .unwrap()
+                .unavailable_record_manifest(),
+            Some(&expected_manifest)
+        );
+
+        let slot = workspace.scene(document).unwrap();
+        let accepted_revision = slot.revision();
+        let accepted_content_state = slot.session().content_state();
+        let accepted_history = slot.session().history_status();
+        let accepted_selection = slot.selection().clone();
+        let accepted_document = slot.session().document().clone();
+        assert!(slot.is_dirty());
+        assert_eq!(accepted_history.undo_depth, 1);
+        assert_eq!(slot.unavailable_record_manifest(), Some(&expected_manifest));
+
+        let unavailable_edit =
+            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+                document,
+                base_revision: accepted_revision,
+                edit: AuthoringScalarEdit::new(
+                    entity.clone(),
+                    visibility,
+                    ComponentFieldId::new("value"),
+                    ComponentValue::String("hidden".to_owned()),
+                ),
+            });
+        assert!(!unavailable_edit.applied);
+        let raw_patch =
+            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
+                document,
+                base_revision: accepted_revision,
+                patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
+                    entity: entity.clone(),
+                    component: name,
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("value"),
+                    value: ComponentValue::String("Bypass".to_owned()),
+                }]),
+            });
+        assert!(!raw_patch.applied);
+        assert!(raw_patch.diagnostics.iter().any(|entry| {
+            entry.code().as_str() == "tooling.workspace-authoring-command-unsupported"
+        }));
+        let structure = workspace.apply_authoring_command(EditorWorkspaceCommand::ComposeScene {
+            document,
+            base_revision: accepted_revision,
+            command: SceneCompositionCommand::RemoveEntity { entity },
+        });
+        assert!(!structure.applied);
+        assert!(structure.diagnostics.iter().any(|entry| {
+            entry.code().as_str() == "tooling.workspace-authoring-command-unsupported"
+        }));
+
+        let slot = workspace.scene(document).unwrap();
+        assert_eq!(slot.revision(), accepted_revision);
+        assert_eq!(slot.session().content_state(), accepted_content_state);
+        assert_eq!(slot.session().history_status(), accepted_history);
+        assert_eq!(slot.selection(), &accepted_selection);
+        assert_eq!(slot.session().document(), &accepted_document);
+        assert!(slot.is_dirty());
+        assert_eq!(slot.unavailable_record_manifest(), Some(&expected_manifest));
     }
 
     fn diagnostic_field_value<'a>(

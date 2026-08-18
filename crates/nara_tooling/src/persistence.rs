@@ -155,6 +155,7 @@ pub enum EditorPersistenceRejection {
     UnsupportedGuarantee,
     RequiresReconcile,
     RuntimeActive,
+    PreservationMismatch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

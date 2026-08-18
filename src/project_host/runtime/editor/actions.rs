@@ -324,6 +324,15 @@ impl EditorProjectSession {
                 base_revision,
                 patch,
             },
+            EditorDocumentMutation::ApplyAuthoringScalarEdit {
+                document,
+                base_revision,
+                edit,
+            } => EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+                document,
+                base_revision,
+                edit,
+            },
             EditorDocumentMutation::ApplyPrefabFieldEdit { edit } => {
                 EditorWorkspaceCommand::ApplyPrefabPatch {
                     document: edit.target().document(),

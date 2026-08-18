@@ -7,7 +7,7 @@ use nara_asset::{AssetPathError, AssetRef, StableAssetIdError};
 
 use crate::{
     ComponentCapability, ComponentFieldId, ComponentFieldPathError, ComponentRegistry,
-    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +129,28 @@ pub fn collect_declared_asset_references(
             component: component.clone(),
         }
     })?;
+    if version != schema.version() {
+        return Err(DeclaredAssetReferenceError::SchemaVersionMismatch {
+            component: component.clone(),
+            expected: schema.version(),
+            actual: version,
+        });
+    }
+
+    collect_declared_asset_references_from_schema(schema, version, value)
+}
+
+/// Collects schema-declared asset references without requiring executable registry authority.
+///
+/// The caller must already own an immutable, authenticated schema catalog. This function only
+/// interprets the supplied data schema and generic component value; it does not grant native codec,
+/// migration, provider, or Runtime authority.
+pub fn collect_declared_asset_references_from_schema(
+    schema: &ComponentSchema,
+    version: ComponentSchemaVersion,
+    value: &ComponentValue,
+) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    let component = schema.id();
     if version != schema.version() {
         return Err(DeclaredAssetReferenceError::SchemaVersionMismatch {
             component: component.clone(),

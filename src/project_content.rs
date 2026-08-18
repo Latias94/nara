@@ -279,7 +279,9 @@ impl ProjectContentSnapshot {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
         };
-        session.sync_world_with_prefab_resolver(world, registry, &resolver)
+        session
+            .sync_world_with_prefab_resolver(world, registry, &resolver)
+            .expect("Editor preview materializers always retain native authority")
     }
 }
 

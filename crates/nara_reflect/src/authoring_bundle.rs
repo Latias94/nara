@@ -167,6 +167,31 @@ impl AuthoringSchemaBundle {
     }
 
     #[must_use]
+    pub fn owner(
+        &self,
+        owner_id: &PersistentComponentSchemaOwnerId,
+    ) -> Option<&AuthoringSchemaBundleOwner> {
+        self.owners
+            .binary_search_by(|owner| owner.owner_id().cmp(owner_id))
+            .ok()
+            .map(|index| &self.owners[index])
+    }
+
+    #[must_use]
+    pub fn owner_for_component(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<&AuthoringSchemaBundleOwner> {
+        self.owners.iter().find(|owner| {
+            owner
+                .current()
+                .components()
+                .binary_search_by(|schema| schema.id().cmp(component))
+                .is_ok()
+        })
+    }
+
+    #[must_use]
     pub const fn fingerprint(&self) -> SchemaCompositionFingerprint {
         self.fingerprint
     }

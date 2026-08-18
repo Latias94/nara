@@ -1,6 +1,8 @@
 //! Persistent scene documents, authoring operations, and runtime materialization.
 
 mod authoring;
+#[cfg(feature = "serde")]
+mod authoring_decode;
 mod diagnostics;
 mod document;
 mod export;
@@ -22,11 +24,25 @@ mod product_transaction_tests;
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "serde")]
+pub use authoring::AuthoringSessionReplacementError;
 pub use authoring::{
-    PrefabAuthoringSession, SceneAuthoringClearReport, SceneAuthoringContentState,
-    SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus, SceneAuthoringHistoryUsage,
-    SceneAuthoringRevision, SceneAuthoringSession, SceneAuthoringSourceId,
-    SceneAuthoringSyncReport,
+    AuthoringSessionAuthorityError, PrefabAuthoringSession, SceneAuthoringClearReport,
+    SceneAuthoringContentState, SceneAuthoringHistoryLimits, SceneAuthoringHistoryStatus,
+    SceneAuthoringHistoryUsage, SceneAuthoringRevision, SceneAuthoringSession,
+    SceneAuthoringSourceId, SceneAuthoringSyncReport,
+};
+#[cfg(feature = "serde")]
+pub use authoring_decode::{
+    AuthoringAdapterEvidence, AuthoringAdapterIdentity, AuthoringDocumentKind,
+    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
+    AuthoringPatchRecordSlot, AuthoringPatchTargetKind, AuthoringRecordFact,
+    AuthoringRecordLocation, AuthoringRecordOwnerClaim, AuthoringRecordReadiness,
+    AuthoringScalarEdit, AuthoringSessionReopenError, PrefabAuthoringDocumentCandidate,
+    PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    SceneAuthoringDocumentCandidate, UnavailableEntityReference, UnavailablePatchTarget,
+    UnavailableRecord, UnavailableRecordManifest, UnavailableRecordManifestEntry,
+    UnavailableValuePathSegment,
 };
 pub use document::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 pub use export::{
@@ -76,3 +92,9 @@ pub use spawn::{
     spawn_scene_with_asset_database, spawn_scene_with_prefab_resolver,
     spawn_scene_with_prefab_resolver_and_asset_database, spawn_scene_with_provenance,
 };
+
+#[doc(hidden)]
+#[cfg(feature = "serde")]
+pub mod __private {
+    pub use crate::authoring_decode::{AuthoringAdapterReceipt, AuthoringAdapterReceiptError};
+}

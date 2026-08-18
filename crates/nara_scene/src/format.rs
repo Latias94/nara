@@ -798,6 +798,10 @@ pub(crate) fn validate_patch_publication_shape(
 }
 
 impl SceneDocumentCandidate {
+    pub(crate) fn into_authoring_parts(self) -> (SceneDocument, SceneFileLimits) {
+        (self.document, self.limits)
+    }
+
     pub fn canonicalize(
         self,
         registry: &ComponentRegistry,
@@ -825,6 +829,10 @@ impl SceneDocumentCandidate {
 }
 
 impl PrefabDocumentCandidate {
+    pub(crate) fn into_authoring_parts(self) -> (PrefabDocument, SceneFileLimits) {
+        (self.document, self.limits)
+    }
+
     pub fn canonicalize(
         self,
         registry: &ComponentRegistry,

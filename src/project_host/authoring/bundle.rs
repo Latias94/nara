@@ -7,7 +7,7 @@ use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleLimits, SchemaCompositionFingerprint,
 };
 
-use super::{AuthoringSchemaAdmissionBudget, AuthoringSchemaAdmissionError};
+use super::{AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError};
 
 pub(super) struct AdmittedAuthoringSchemaBundle {
     path: ProjectPath,
@@ -46,13 +46,15 @@ impl AdmittedAuthoringSchemaBundle {
 pub(super) fn admit_bundle(
     project_root: &DirectoryCapability,
     path: ProjectPath,
-    budget: &mut AuthoringSchemaAdmissionBudget,
-) -> Result<AdmittedAuthoringSchemaBundle, AuthoringSchemaAdmissionError> {
+    budget: &mut AuthoringProjectAdmissionBudget,
+) -> Result<AdmittedAuthoringSchemaBundle, AuthoringProjectAdmissionError> {
+    budget.charge_reference(path.as_str().len(), 1, true)?;
     let relative_path =
-        RelativePath::new(path.as_str()).map_err(AuthoringSchemaAdmissionError::BundlePath)?;
+        RelativePath::new(path.as_str()).map_err(AuthoringProjectAdmissionError::BundlePath)?;
     let capability = project_root
         .open_file(&relative_path)
-        .map_err(AuthoringSchemaAdmissionError::BundleHost)?;
+        .map_err(AuthoringProjectAdmissionError::BundleHost)?;
+    budget.charge_open_file(2)?;
 
     let bundle_limits = AuthoringSchemaBundleLimits::default();
     let aggregate_maximum = budget.maximum();
@@ -69,8 +71,8 @@ pub(super) fn admit_bundle(
             ByteLimit::new(read_limit).expect("an admitted bundle read limit is non-zero"),
         ),
     )
-    .map_err(AuthoringSchemaAdmissionError::BundleInvalid)?;
-    budget.charge_bundle(bytes.len())?;
+    .map_err(AuthoringProjectAdmissionError::BundleInvalid)?;
+    budget.charge_bundle_bytes(bytes.len())?;
 
     Ok(AdmittedAuthoringSchemaBundle {
         path,
@@ -86,16 +88,16 @@ fn map_bundle_read_error(
     aggregate_limited: bool,
     read_limit: usize,
     aggregate_maximum: usize,
-) -> AuthoringSchemaAdmissionError {
+) -> AuthoringProjectAdmissionError {
     match error {
         FsError::ByteLimitExceeded { .. } if aggregate_limited => {
-            AuthoringSchemaAdmissionError::AggregateEncodedBytesExceeded {
+            AuthoringProjectAdmissionError::AggregateEncodedBytesExceeded {
                 maximum: aggregate_maximum,
             }
         }
-        FsError::ByteLimitExceeded { .. } => AuthoringSchemaAdmissionError::BundleTooLarge {
+        FsError::ByteLimitExceeded { .. } => AuthoringProjectAdmissionError::BundleTooLarge {
             maximum: read_limit,
         },
-        error => AuthoringSchemaAdmissionError::BundleHost(error),
+        error => AuthoringProjectAdmissionError::BundleHost(error),
     }
 }

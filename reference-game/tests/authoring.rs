@@ -595,7 +595,7 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     assert!(session.is_live_dirty());
 
     let mut world = World::new();
-    let sync_report = session.sync_world(&mut world, &registry);
+    let sync_report = session.sync_world(&mut world, &registry).unwrap();
     assert!(
         !sync_report.diagnostics.has_errors(),
         "{:#?}",

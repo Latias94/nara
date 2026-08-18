@@ -2304,7 +2304,7 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
         .with_component(position_type_id(), position_record(1))]));
     let mut world = World::new();
 
-    let first_sync = session.sync_world(&mut world, &registry);
+    let first_sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(first_sync.synced);
     let first = first_sync.live_instance.unwrap();
     let first_entity = match first.resolve(&world, &id) {
@@ -2312,11 +2312,13 @@ fn authoring_replacement_and_clear_publish_typed_tombstones() {
         lookup => panic!("first authoring instance did not resolve: {lookup:?}"),
     };
 
-    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        id.clone(),
-    )
-    .with_component(position_type_id(), position_record(2))]));
-    let second_sync = session.sync_world(&mut world, &registry);
+    session
+        .replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(2))]))
+        .unwrap();
+    let second_sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(second_sync.synced);
     assert_eq!(second_sync.removed_entities, 1);
     let second = second_sync.live_instance.unwrap();
@@ -2400,7 +2402,7 @@ fn hierarchy_aware_unload_detaches_external_descendants() {
     );
     let mut session = SceneAuthoringSession::new(document);
     let mut world = World::new();
-    let sync = session.sync_world(&mut world, &registry);
+    let sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(sync.synced);
     let live = sync.live_instance.unwrap();
     let scene_child = match live.resolve(&world, &child_id) {
@@ -2434,7 +2436,7 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
         )
         .with_component(position_type_id(), position_record(1))]));
 
-    let first_sync = session.sync_world(&mut world, &registry);
+    let first_sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(first_sync.synced);
     let first = first_sync.live_instance.unwrap();
     let first_entity = match first.resolve(&world, &id) {
@@ -2444,11 +2446,13 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
     let before_entities = world.iter_entities().count();
     let before_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        id.clone(),
-    )
-    .with_component(position_type_id(), position_record(2))]));
-    let failed = session.sync_world(&mut world, &registry);
+    session
+        .replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(2))]))
+        .unwrap();
+    let failed = session.sync_world(&mut world, &registry).unwrap();
 
     assert!(!failed.synced);
     assert!(failed.diagnostics.has_errors());
@@ -2735,7 +2739,7 @@ fn parented_transform_materializes_through_every_entry_point() {
 
     let mut authoring_world = World::new();
     let mut session = SceneAuthoringSession::new(document);
-    let authoring = session.sync_world(&mut authoring_world, &registry);
+    let authoring = session.sync_world(&mut authoring_world, &registry).unwrap();
     assert!(authoring.synced);
     assert!(!authoring.diagnostics.has_errors());
     let authoring_instance = authoring.live_instance.as_ref().unwrap();
@@ -2874,7 +2878,7 @@ fn children_remove_observer_rejects_authoring_unload_before_detach() {
     ));
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    let sync = session.sync_world(&mut world, &registry);
+    let sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(sync.synced);
     let live = sync.live_instance.unwrap();
     let root = match live.resolve(&world, &root_id) {
@@ -3024,7 +3028,7 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
 
-    let first_sync = session.sync_world(&mut world, &registry);
+    let first_sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(first_sync.synced);
     let first = first_sync.live_instance.unwrap();
     let first_entity = match first.resolve(&world, &id) {
@@ -3043,12 +3047,14 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
         .collect::<Vec<_>>();
     let baseline_stats = world.resource::<WorldIdentityDomain>().stats();
 
-    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        id.clone(),
-    )
-    .with_component(position_type_id(), position_record(2))]));
+    session
+        .replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            id.clone(),
+        )
+        .with_component(position_type_id(), position_record(2))]))
+        .unwrap();
     let baseline_revision = session.revision();
-    let failed = session.sync_world(&mut world, &registry);
+    let failed = session.sync_world(&mut world, &registry).unwrap();
 
     assert!(!failed.synced);
     assert!(failed.diagnostics.iter().any(|diagnostic| {
@@ -3097,7 +3103,7 @@ fn entity_component_observer_rejects_authoring_clear_before_retirement() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
 
-    let sync = session.sync_world(&mut world, &registry);
+    let sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(sync.synced);
     let live = sync.live_instance.unwrap();
     let entity = match live.resolve(&world, &id) {

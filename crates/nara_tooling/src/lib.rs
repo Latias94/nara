@@ -32,9 +32,10 @@ pub use gesture::{
     EditorGestureStamp, EditorGestureView, MAX_EDITOR_ATOMIC_FIELD_WRITES,
 };
 pub use inspector::{
-    SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentView,
-    SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
-    SceneInspectorFieldView, SceneInspectorModel, SceneInspectorState,
+    SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentAccess,
+    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
+    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
+    SceneInspectorReadOnlyReason, SceneInspectorState,
 };
 pub use persistence::{
     EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceFailureStage,

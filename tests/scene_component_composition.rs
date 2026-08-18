@@ -217,7 +217,7 @@ fn every_public_authoring_route_materializes_only_the_explicit_persistent_set() 
     }]);
     assert!(session.apply_patch(&patch, &registry).applied);
     let mut authoring_world = World::new();
-    let sync = session.sync_world(&mut authoring_world, &registry);
+    let sync = session.sync_world(&mut authoring_world, &registry).unwrap();
     assert!(sync.synced);
     let authoring_instance = sync.live_instance.as_ref().unwrap();
     let authoring_entity = match authoring_instance.resolve(&authoring_world, &id) {

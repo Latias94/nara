@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValueKind};
-use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePatchDocument};
+use nara_scene::{AuthoringScalarEdit, SceneAuthoringRevision, SceneEntityId, ScenePatchDocument};
 
 use crate::{
     EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentId, EditorGestureAction,
@@ -346,6 +346,11 @@ pub enum EditorDocumentMutation {
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     },
+    ApplyAuthoringScalarEdit {
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        edit: AuthoringScalarEdit,
+    },
     ApplyPrefabFieldEdit {
         edit: crate::EditorAtomicFieldEdit,
     },
@@ -376,6 +381,7 @@ impl EditorDocumentMutation {
             Self::ApplyInspectorCommand { document, .. }
             | Self::ApplyScenePatch { document, .. }
             | Self::ApplyPrefabPatch { document, .. }
+            | Self::ApplyAuthoringScalarEdit { document, .. }
             | Self::ComposeScene { document, .. }
             | Self::ComposePrefab { document, .. }
             | Self::Undo { document, .. }
@@ -390,6 +396,7 @@ impl EditorDocumentMutation {
             Self::ApplyInspectorCommand { base_revision, .. }
             | Self::ApplyScenePatch { base_revision, .. }
             | Self::ApplyPrefabPatch { base_revision, .. }
+            | Self::ApplyAuthoringScalarEdit { base_revision, .. }
             | Self::ComposeScene { base_revision, .. }
             | Self::ComposePrefab { base_revision, .. }
             | Self::Undo { base_revision, .. }

@@ -22,6 +22,7 @@ mod value;
 
 pub use asset_reference::{
     DeclaredAssetReference, DeclaredAssetReferenceError, collect_declared_asset_references,
+    collect_declared_asset_references_from_schema,
 };
 pub use authoring::PersistentComponentProvider;
 #[cfg(feature = "serde")]

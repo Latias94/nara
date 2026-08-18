@@ -355,14 +355,19 @@ impl EditorProjectSession {
     }
 
     pub(super) fn complete_save(&mut self, save: PendingSave) -> EditorPersistenceResult {
-        let (lane, document, outcome) = match save {
+        let (lane, document, refresh_runtime_content, outcome) = match save {
             PendingSave::Scene(save) => {
                 let document = save.checkpoint.document();
-                (
-                    PersistenceLane::Scene,
-                    document,
-                    self.persistence.save(save),
-                )
+                let outcome = if let Some(slot) = self
+                    .workspace
+                    .scene(document)
+                    .filter(|slot| slot.authoring_readiness().is_some())
+                {
+                    self.persistence.save_authoring(save, slot.session())
+                } else {
+                    self.persistence.save_native(save)
+                };
+                (PersistenceLane::Scene, document, false, outcome)
             }
             PendingSave::Prefab(save) => {
                 let document = save.checkpoint.document();
@@ -373,7 +378,22 @@ impl EditorProjectSession {
                         stage: EditorPersistenceFailureStage::OpenTarget,
                     };
                 };
-                (PersistenceLane::Prefab, document, host.save(save))
+                let refresh_runtime_content = host.publishes_runtime_content();
+                let outcome = if let Some(slot) = self
+                    .workspace
+                    .prefab(document)
+                    .filter(|slot| slot.authoring_readiness().is_some())
+                {
+                    host.save_authoring(save, slot.session())
+                } else {
+                    host.save_native(save)
+                };
+                (
+                    PersistenceLane::Prefab,
+                    document,
+                    refresh_runtime_content,
+                    outcome,
+                )
             }
         };
         match outcome {
@@ -391,7 +411,7 @@ impl EditorProjectSession {
                     };
                 }
                 self.last_persistence_receipt = Some(evidence);
-                if matches!(lane, PersistenceLane::Prefab) {
+                if refresh_runtime_content {
                     self.schedule_prefab_content_refresh(evidence);
                 }
                 EditorPersistenceResult::Saved {
@@ -448,10 +468,18 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         base_revision: Option<nara_scene::SceneAuthoringRevision>,
     ) -> EditorPersistenceResult {
-        match self
-            .persistence
-            .reopen(self.plan.schema_validation().registry())
-        {
+        let reopened = self
+            .workspace
+            .scene(document)
+            .filter(|slot| slot.authoring_readiness().is_some())
+            .map_or_else(
+                || {
+                    self.persistence
+                        .reopen_native(self.plan.schema_validation().registry())
+                },
+                |slot| self.persistence.reopen_authoring(slot.session()),
+            );
+        match reopened {
             SceneReopenOutcome::Opened(opened) => {
                 let OpenedSceneReopen {
                     session,
@@ -566,7 +594,16 @@ impl EditorProjectSession {
                 };
             }
         };
-        match host.reopen(self.plan.schema_validation().registry()) {
+        let refresh_runtime_content = host.publishes_runtime_content();
+        let reopened = self
+            .workspace
+            .prefab(document)
+            .filter(|slot| slot.authoring_readiness().is_some())
+            .map_or_else(
+                || host.reopen_native(self.plan.schema_validation().registry()),
+                |slot| host.reopen_authoring(slot.session()),
+            );
+        match reopened {
             PrefabReopenOutcome::Opened(opened) => {
                 let OpenedPrefabReopen {
                     session,
@@ -597,22 +634,24 @@ impl EditorProjectSession {
                 if let Some(host) = self.prefab_persistence.as_mut() {
                     host.commit_reopen(identity, content_digest);
                 }
-                let path = AssetPath::new(
-                    self.workspace
-                        .prefab(document)
-                        .expect("a reopened Prefab remains in its exact workspace slot")
-                        .source_binding()
-                        .locator()
-                        .to_owned(),
-                )
-                .expect("a Host-normalized Prefab source remains a valid asset path");
-                self.schedule_reopened_prefab_content_refresh(
-                    document,
-                    revision,
-                    path,
-                    digest,
-                    content_digest,
-                );
+                if refresh_runtime_content {
+                    let path = AssetPath::new(
+                        self.workspace
+                            .prefab(document)
+                            .expect("a reopened Prefab remains in its exact workspace slot")
+                            .source_binding()
+                            .locator()
+                            .to_owned(),
+                    )
+                    .expect("a Host-normalized Prefab source remains a valid asset path");
+                    self.schedule_reopened_prefab_content_refresh(
+                        document,
+                        revision,
+                        path,
+                        digest,
+                        content_digest,
+                    );
+                }
                 EditorPersistenceResult::Opened {
                     document,
                     revision,

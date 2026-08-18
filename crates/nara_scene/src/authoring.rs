@@ -1,5 +1,7 @@
 use std::{
     collections::VecDeque,
+    error::Error,
+    fmt::{self, Display, Formatter},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -500,6 +502,99 @@ pub struct SceneAuthoringClearReport {
     pub diagnostics: DiagnosticReport,
 }
 
+/// Rejection raised when a native session operation would discard published authoring authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoringSessionAuthorityError {
+    /// The session owns a published authoring document and cannot enter a native authority path.
+    PublishedAuthoringDocument,
+}
+
+impl Display for AuthoringSessionAuthorityError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PublishedAuthoringDocument => formatter.write_str(
+                "published authoring documents must retain their exact classification authority",
+            ),
+        }
+    }
+}
+
+impl Error for AuthoringSessionAuthorityError {}
+
+/// Failure to replace a session source through the native persistent-file publication path.
+#[cfg(feature = "serde")]
+#[derive(Debug)]
+pub enum AuthoringSessionReplacementError {
+    /// Replacement would discard the session's published authoring authority.
+    Authority(AuthoringSessionAuthorityError),
+    /// Native persistent-file publication rejected the replacement candidate.
+    Publication(crate::SceneFilePublicationError),
+}
+
+#[cfg(feature = "serde")]
+impl Display for AuthoringSessionReplacementError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Authority(error) => Display::fmt(error, formatter),
+            Self::Publication(error) => Display::fmt(error, formatter),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Error for AuthoringSessionReplacementError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Authority(error) => Some(error),
+            Self::Publication(error) => Some(error),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<AuthoringSessionAuthorityError> for AuthoringSessionReplacementError {
+    fn from(error: AuthoringSessionAuthorityError) -> Self {
+        Self::Authority(error)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl From<crate::SceneFilePublicationError> for AuthoringSessionReplacementError {
+    fn from(error: crate::SceneFilePublicationError) -> Self {
+        Self::Publication(error)
+    }
+}
+
+#[derive(Debug)]
+enum AuthoringSessionAuthority {
+    Native,
+    #[cfg(feature = "serde")]
+    Published(crate::authoring_decode::AuthoringDocumentState),
+}
+
+impl AuthoringSessionAuthority {
+    const fn require_native(&self) -> Result<(), AuthoringSessionAuthorityError> {
+        match self {
+            Self::Native => Ok(()),
+            #[cfg(feature = "serde")]
+            Self::Published(_) => Err(AuthoringSessionAuthorityError::PublishedAuthoringDocument),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    const fn published(&self) -> Option<&crate::authoring_decode::AuthoringDocumentState> {
+        match self {
+            Self::Native => None,
+            Self::Published(state) => Some(state),
+        }
+    }
+
+    #[cfg(feature = "serde")]
+    const fn is_published(&self) -> bool {
+        matches!(self, Self::Published(_))
+    }
+}
+
 #[derive(Debug)]
 pub struct SceneAuthoringSession {
     document: SceneDocument,
@@ -507,6 +602,7 @@ pub struct SceneAuthoringSession {
     live_instance: Option<SpawnedSceneInstance>,
     live_dirty: bool,
     source_upgrade_required: bool,
+    authority: AuthoringSessionAuthority,
 }
 
 /// Authoring owner for one canonical Prefab source.
@@ -521,6 +617,7 @@ pub struct PrefabAuthoringSession {
     document: PrefabDocument,
     history: AuthoringHistory,
     source_upgrade_required: bool,
+    authority: AuthoringSessionAuthority,
 }
 
 impl PrefabAuthoringSession {
@@ -546,7 +643,54 @@ impl PrefabAuthoringSession {
             document,
             history: AuthoringHistory::new(history_limits),
             source_upgrade_required,
+            authority: AuthoringSessionAuthority::Native,
         }
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn from_published_authoring_document(
+        published: crate::PublishedAuthoringPrefabDocument,
+    ) -> Self {
+        Self::from_published_authoring_document_with_history_limits(
+            published,
+            SceneAuthoringHistoryLimits::default(),
+        )
+    }
+
+    #[cfg(feature = "serde")]
+    fn from_published_authoring_document_with_history_limits(
+        published: crate::PublishedAuthoringPrefabDocument,
+        history_limits: SceneAuthoringHistoryLimits,
+    ) -> Self {
+        let (document, state) = published.into_parts();
+        Self {
+            document,
+            history: AuthoringHistory::new(history_limits),
+            source_upgrade_required: false,
+            authority: AuthoringSessionAuthority::Published(state),
+        }
+    }
+
+    /// Reopens a decoded Prefab with the exact authoring authority owned by this session.
+    ///
+    /// Sessions created through native publication have no authoring classification basis and
+    /// fail closed. A successful reopen starts a new authoring lineage while retaining the
+    /// session's history limits.
+    #[cfg(feature = "serde")]
+    pub fn try_reopen_authoring_candidate(
+        &self,
+        candidate: crate::PrefabDocumentCandidate,
+    ) -> Result<Self, crate::AuthoringSessionReopenError> {
+        let state = self
+            .authority
+            .published()
+            .ok_or(crate::AuthoringSessionReopenError::ClassificationBasisUnavailable)?;
+        let published = state.reopen_prefab_candidate(candidate)?;
+        Ok(Self::from_published_authoring_document_with_history_limits(
+            published,
+            self.history.limits(),
+        ))
     }
 
     #[cfg(feature = "serde")]
@@ -574,7 +718,7 @@ impl PrefabAuthoringSession {
             .instantiate()
             .validate_authoring_with_asset_database(registry, database);
         if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
+            return Err(crate::SceneFilePublicationError::new(diagnostics).into());
         }
         Ok(Self::new_with_source_state(
             document,
@@ -623,9 +767,48 @@ impl PrefabAuthoringSession {
         self.source_upgrade_required
     }
 
-    /// Replaces the source and starts a fresh authoring lineage.
-    pub fn replace_document(&mut self, document: PrefabDocument) {
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_readiness(&self) -> Option<crate::AuthoringDocumentReadiness> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::readiness)
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_record_facts(&self) -> Option<&[crate::AuthoringRecordFact]> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::record_facts)
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn unavailable_record_manifest(&self) -> Option<&crate::UnavailableRecordManifest> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::unavailable_manifest)
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_diagnostics(&self) -> Option<&nara_diagnostic::DiagnosticReport> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::diagnostics)
+    }
+
+    /// Replaces a native source and starts a fresh authoring lineage.
+    ///
+    /// Published authoring sessions reject this operation without changing document or history.
+    pub fn replace_document(
+        &mut self,
+        document: PrefabDocument,
+    ) -> Result<(), AuthoringSessionAuthorityError> {
+        self.authority.require_native()?;
         self.replace_document_with_source_state(document, false);
+        Ok(())
     }
 
     fn replace_document_with_source_state(
@@ -636,6 +819,7 @@ impl PrefabAuthoringSession {
         self.document = document;
         self.history.replace_source();
         self.source_upgrade_required = source_upgrade_required;
+        self.authority = AuthoringSessionAuthority::Native;
     }
 
     #[cfg(feature = "serde")]
@@ -643,7 +827,8 @@ impl PrefabAuthoringSession {
         &mut self,
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
-    ) -> Result<(), crate::SceneFilePublicationError> {
+    ) -> Result<(), AuthoringSessionReplacementError> {
+        self.authority.require_native()?;
         let published = candidate.publish(registry)?;
         let source_upgrade_required = published.source_upgrade_required();
         self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
@@ -656,13 +841,14 @@ impl PrefabAuthoringSession {
         candidate: crate::PrefabDocumentCandidate,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
-    ) -> Result<(), crate::SceneFilePublicationError> {
+    ) -> Result<(), AuthoringSessionReplacementError> {
+        self.authority.require_native()?;
         let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
         let diagnostics = document
             .instantiate()
             .validate_authoring_with_asset_database(registry, database);
         if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
+            return Err(crate::SceneFilePublicationError::new(diagnostics).into());
         }
         self.replace_document_with_source_state(document, source_upgrade_required);
         Ok(())
@@ -674,6 +860,10 @@ impl PrefabAuthoringSession {
         patch: &ScenePatchDocument,
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return admitted_document_patch_rejection();
+        }
         let prepared = patch
             .prepare_to_prefab(&self.document, registry)
             .map(crate::patch::PreparedPrefabPatch::into_parts);
@@ -688,6 +878,10 @@ impl PrefabAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return admitted_document_patch_rejection();
+        }
         let prepared = patch
             .prepare_to_prefab_with_asset_database(&self.document, registry, database)
             .map(crate::patch::PreparedPrefabPatch::into_parts);
@@ -695,8 +889,43 @@ impl PrefabAuthoringSession {
             .apply_forward(&mut self.document, patch, prepared)
     }
 
+    #[cfg(feature = "serde")]
+    pub fn apply_authoring_scalar_edit(
+        &mut self,
+        edit: crate::AuthoringScalarEdit,
+    ) -> ScenePatchReport {
+        let Some(state) = self.authority.published() else {
+            return authoring_scalar_edit_session_rejection();
+        };
+        let prepared = match crate::authoring_decode::prepare_prefab_authoring_scalar_edit(
+            &self.document,
+            state,
+            &edit,
+        ) {
+            Ok(prepared) => prepared,
+            Err(report) => return report,
+        };
+        let crate::authoring_decode::PreparedPrefabAuthoringScalarEdit {
+            document,
+            state,
+            patch,
+            report,
+        } = prepared;
+        let report = self
+            .history
+            .apply_forward(&mut self.document, &patch, Ok((document, report)));
+        if report.applied {
+            self.authority = AuthoringSessionAuthority::Published(state);
+        }
+        report
+    }
+
     /// Applies one history step while retaining the Prefab source kind.
     pub fn undo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Undo);
+        }
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Undo,
@@ -708,12 +937,25 @@ impl PrefabAuthoringSession {
         )
     }
 
+    /// Applies one history step through published authoring authority without a Runtime registry.
+    #[cfg(feature = "serde")]
+    pub fn undo_authoring(&mut self) -> ScenePatchReport {
+        if !self.authority.is_published() {
+            return authoring_history_session_rejection();
+        }
+        self.apply_authoring_history(HistoryDirection::Undo)
+    }
+
     /// Applies one history step with project asset validation.
     pub fn undo_with_asset_database(
         &mut self,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Undo);
+        }
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Undo,
@@ -727,6 +969,10 @@ impl PrefabAuthoringSession {
 
     /// Reapplies one history step while retaining the Prefab source kind.
     pub fn redo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Redo);
+        }
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Redo,
@@ -738,12 +984,25 @@ impl PrefabAuthoringSession {
         )
     }
 
+    /// Reapplies one history step through published authoring authority without a Runtime registry.
+    #[cfg(feature = "serde")]
+    pub fn redo_authoring(&mut self) -> ScenePatchReport {
+        if !self.authority.is_published() {
+            return authoring_history_session_rejection();
+        }
+        self.apply_authoring_history(HistoryDirection::Redo)
+    }
+
     /// Reapplies one history step with project asset validation.
     pub fn redo_with_asset_database(
         &mut self,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Redo);
+        }
         self.history.apply_history(
             &mut self.document,
             HistoryDirection::Redo,
@@ -753,6 +1012,30 @@ impl PrefabAuthoringSession {
                     .map(crate::patch::PreparedPrefabPatch::into_parts)
             },
         )
+    }
+
+    #[cfg(feature = "serde")]
+    fn apply_authoring_history(&mut self, direction: HistoryDirection) -> ScenePatchReport {
+        let state = self
+            .authority
+            .published()
+            .expect("an admitted authoring document owns classification state");
+        let mut next_state = None;
+        let report =
+            self.history
+                .apply_history(&mut self.document, direction, |patch, document| {
+                    let prepared = crate::authoring_decode::prepare_prefab_authoring_history_patch(
+                        document, state, patch,
+                    )?;
+                    next_state = Some(prepared.state);
+                    Ok((prepared.document, prepared.report))
+                });
+        if report.applied {
+            self.authority = AuthoringSessionAuthority::Published(
+                next_state.expect("accepted authoring history publishes classification state"),
+            );
+        }
+        report
     }
 
     /// Marks one content state as saved after the Host accepted a Prefab receipt.
@@ -791,7 +1074,56 @@ impl SceneAuthoringSession {
             live_instance: None,
             live_dirty: true,
             source_upgrade_required,
+            authority: AuthoringSessionAuthority::Native,
         }
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn from_published_authoring_document(
+        published: crate::PublishedAuthoringSceneDocument,
+    ) -> Self {
+        Self::from_published_authoring_document_with_history_limits(
+            published,
+            SceneAuthoringHistoryLimits::default(),
+        )
+    }
+
+    #[cfg(feature = "serde")]
+    fn from_published_authoring_document_with_history_limits(
+        published: crate::PublishedAuthoringSceneDocument,
+        history_limits: SceneAuthoringHistoryLimits,
+    ) -> Self {
+        let (document, state) = published.into_parts();
+        Self {
+            document,
+            history: AuthoringHistory::new(history_limits),
+            live_instance: None,
+            live_dirty: true,
+            source_upgrade_required: false,
+            authority: AuthoringSessionAuthority::Published(state),
+        }
+    }
+
+    /// Reopens a decoded Scene with the exact authoring authority owned by this session.
+    ///
+    /// Sessions created through native publication have no authoring classification basis and
+    /// fail closed. A successful reopen starts a new authoring lineage while retaining the
+    /// session's history limits; runtime registry publication is not consulted.
+    #[cfg(feature = "serde")]
+    pub fn try_reopen_authoring_candidate(
+        &self,
+        candidate: crate::SceneDocumentCandidate,
+    ) -> Result<Self, crate::AuthoringSessionReopenError> {
+        let state = self
+            .authority
+            .published()
+            .ok_or(crate::AuthoringSessionReopenError::ClassificationBasisUnavailable)?;
+        let published = state.reopen_scene_candidate(candidate)?;
+        Ok(Self::from_published_authoring_document_with_history_limits(
+            published,
+            self.history.limits(),
+        ))
     }
 
     #[cfg(feature = "serde")]
@@ -856,8 +1188,16 @@ impl SceneAuthoringSession {
         self.history.usage()
     }
 
-    pub fn replace_document(&mut self, document: SceneDocument) {
+    /// Replaces a native source and starts a fresh authoring lineage.
+    ///
+    /// Published authoring sessions reject this operation without changing document or history.
+    pub fn replace_document(
+        &mut self,
+        document: SceneDocument,
+    ) -> Result<(), AuthoringSessionAuthorityError> {
+        self.authority.require_native()?;
         self.replace_document_with_source_state(document, false);
+        Ok(())
     }
 
     fn replace_document_with_source_state(
@@ -869,6 +1209,7 @@ impl SceneAuthoringSession {
         self.history.replace_source();
         self.live_dirty = true;
         self.source_upgrade_required = source_upgrade_required;
+        self.authority = AuthoringSessionAuthority::Native;
     }
 
     #[cfg(feature = "serde")]
@@ -876,7 +1217,8 @@ impl SceneAuthoringSession {
         &mut self,
         candidate: crate::SceneDocumentCandidate,
         registry: &ComponentRegistry,
-    ) -> Result<(), crate::SceneFilePublicationError> {
+    ) -> Result<(), AuthoringSessionReplacementError> {
+        self.authority.require_native()?;
         let published = candidate.publish(registry)?;
         let source_upgrade_required = published.source_upgrade_required();
         self.replace_document_with_source_state(published.into_document(), source_upgrade_required);
@@ -889,11 +1231,12 @@ impl SceneAuthoringSession {
         candidate: crate::SceneDocumentCandidate,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
-    ) -> Result<(), crate::SceneFilePublicationError> {
+    ) -> Result<(), AuthoringSessionReplacementError> {
+        self.authority.require_native()?;
         let (document, source_upgrade_required) = candidate.into_canonical_document(registry)?;
         let diagnostics = document.validate_authoring_with_asset_database(registry, database);
         if diagnostics.has_errors() {
-            return Err(crate::SceneFilePublicationError::new(diagnostics));
+            return Err(crate::SceneFilePublicationError::new(diagnostics).into());
         }
         self.replace_document_with_source_state(document, source_upgrade_required);
         Ok(())
@@ -919,6 +1262,38 @@ impl SceneAuthoringSession {
         self.source_upgrade_required
     }
 
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_readiness(&self) -> Option<crate::AuthoringDocumentReadiness> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::readiness)
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_record_facts(&self) -> Option<&[crate::AuthoringRecordFact]> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::record_facts)
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn unavailable_record_manifest(&self) -> Option<&crate::UnavailableRecordManifest> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::unavailable_manifest)
+    }
+
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_diagnostics(&self) -> Option<&nara_diagnostic::DiagnosticReport> {
+        self.authority
+            .published()
+            .map(crate::authoring_decode::AuthoringDocumentState::diagnostics)
+    }
+
     #[doc(hidden)]
     pub fn acknowledge_source_saved(&mut self, state: SceneAuthoringContentState) -> bool {
         if !self.owns_content_state(state) {
@@ -933,6 +1308,10 @@ impl SceneAuthoringSession {
         patch: &ScenePatchDocument,
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return admitted_document_patch_rejection();
+        }
         self.apply_forward_patch_with(patch, patch.prepare_to_scene(&self.document, registry))
     }
 
@@ -942,10 +1321,46 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return admitted_document_patch_rejection();
+        }
         self.apply_forward_patch_with(
             patch,
             patch.prepare_to_scene_with_asset_database(&self.document, registry, database),
         )
+    }
+
+    #[cfg(feature = "serde")]
+    pub fn apply_authoring_scalar_edit(
+        &mut self,
+        edit: crate::AuthoringScalarEdit,
+    ) -> ScenePatchReport {
+        let Some(state) = self.authority.published() else {
+            return authoring_scalar_edit_session_rejection();
+        };
+        let prepared = match crate::authoring_decode::prepare_scene_authoring_scalar_edit(
+            &self.document,
+            state,
+            &edit,
+        ) {
+            Ok(prepared) => prepared,
+            Err(report) => return report,
+        };
+        let crate::authoring_decode::PreparedSceneAuthoringScalarEdit {
+            document,
+            state,
+            patch,
+            report,
+        } = prepared;
+        let report = self
+            .history
+            .apply_forward(&mut self.document, &patch, Ok((document, report)));
+        if report.applied {
+            self.authority = AuthoringSessionAuthority::Published(state);
+            self.live_dirty = true;
+        }
+        report
     }
 
     #[cfg(feature = "serde")]
@@ -954,6 +1369,9 @@ impl SceneAuthoringSession {
         candidate: crate::ScenePatchDocumentCandidate,
         registry: &ComponentRegistry,
     ) -> ScenePatchReport {
+        if self.authority.is_published() {
+            return admitted_document_patch_rejection();
+        }
         match candidate.into_canonical_document(registry) {
             Ok((patch, _)) => self.apply_patch(&patch, registry),
             Err(error) => crate::format::publication_error_patch_report(error),
@@ -967,6 +1385,9 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        if self.authority.is_published() {
+            return admitted_document_patch_rejection();
+        }
         match candidate.into_canonical_document(registry) {
             Ok((patch, _)) => self.apply_patch_with_asset_database(&patch, registry, database),
             Err(error) => crate::format::publication_error_patch_report(error),
@@ -974,9 +1395,22 @@ impl SceneAuthoringSession {
     }
 
     pub fn undo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Undo);
+        }
         self.apply_history_patch_with(HistoryDirection::Undo, |patch, document| {
             patch.prepare_to_scene(document, registry)
         })
+    }
+
+    /// Applies one history step through published authoring authority without a Runtime registry.
+    #[cfg(feature = "serde")]
+    pub fn undo_authoring(&mut self) -> ScenePatchReport {
+        if !self.authority.is_published() {
+            return authoring_history_session_rejection();
+        }
+        self.apply_authoring_history(HistoryDirection::Undo)
     }
 
     pub fn undo_with_asset_database(
@@ -984,15 +1418,32 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Undo);
+        }
         self.apply_history_patch_with(HistoryDirection::Undo, |patch, document| {
             patch.prepare_to_scene_with_asset_database(document, registry, database)
         })
     }
 
     pub fn redo(&mut self, registry: &ComponentRegistry) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Redo);
+        }
         self.apply_history_patch_with(HistoryDirection::Redo, |patch, document| {
             patch.prepare_to_scene(document, registry)
         })
+    }
+
+    /// Reapplies one history step through published authoring authority without a Runtime registry.
+    #[cfg(feature = "serde")]
+    pub fn redo_authoring(&mut self) -> ScenePatchReport {
+        if !self.authority.is_published() {
+            return authoring_history_session_rejection();
+        }
+        self.apply_authoring_history(HistoryDirection::Redo)
     }
 
     pub fn redo_with_asset_database(
@@ -1000,30 +1451,40 @@ impl SceneAuthoringSession {
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
     ) -> ScenePatchReport {
+        #[cfg(feature = "serde")]
+        if self.authority.is_published() {
+            return self.apply_authoring_history(HistoryDirection::Redo);
+        }
         self.apply_history_patch_with(HistoryDirection::Redo, |patch, document| {
             patch.prepare_to_scene_with_asset_database(document, registry, database)
         })
     }
 
+    /// Synchronizes a native-authority session into the World.
+    ///
+    /// Published authoring sessions are rejected before the World is inspected or mutated.
     pub fn sync_world(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
-    ) -> SceneAuthoringSyncReport {
+    ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
+        self.authority.require_native()?;
         let mut spawner = SceneSpawner::new();
         let report = match self.live_instance.as_ref() {
             Some(current) => spawner.replace(world, registry, &self.document, current),
             None => spawner.spawn(world, registry, &self.document),
         };
-        self.finish_world_sync(report)
+        Ok(self.finish_world_sync(report))
     }
 
+    /// Synchronizes a native-authority session with project asset validation.
     pub fn sync_world_with_asset_database(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         database: &ProjectAssetDatabase,
-    ) -> SceneAuthoringSyncReport {
+    ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
+        self.authority.require_native()?;
         let mut spawner = SceneSpawner::new();
         let report = match self.live_instance.as_ref() {
             Some(current) => spawner.replace_with_asset_database(
@@ -1035,15 +1496,17 @@ impl SceneAuthoringSession {
             ),
             None => spawner.spawn_with_asset_database(world, registry, &self.document, database),
         };
-        self.finish_world_sync(report)
+        Ok(self.finish_world_sync(report))
     }
 
+    /// Synchronizes a native-authority session with Prefab resolution.
     pub fn sync_world_with_prefab_resolver<R: PrefabSourceResolver + ?Sized>(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         resolver: &R,
-    ) -> SceneAuthoringSyncReport {
+    ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
+        self.authority.require_native()?;
         let mut spawner = SceneSpawner::new();
         let report = match self.live_instance.as_ref() {
             Some(current) => spawner.replace_with_prefab_resolver(
@@ -1055,16 +1518,18 @@ impl SceneAuthoringSession {
             ),
             None => spawner.spawn_with_prefab_resolver(world, registry, &self.document, resolver),
         };
-        self.finish_world_sync(report)
+        Ok(self.finish_world_sync(report))
     }
 
+    /// Synchronizes a native-authority session with Prefab and project asset resolution.
     pub fn sync_world_with_prefab_resolver_and_asset_database<R: PrefabSourceResolver + ?Sized>(
         &mut self,
         world: &mut World,
         registry: &ComponentRegistry,
         resolver: &R,
         database: &ProjectAssetDatabase,
-    ) -> SceneAuthoringSyncReport {
+    ) -> Result<SceneAuthoringSyncReport, AuthoringSessionAuthorityError> {
+        self.authority.require_native()?;
         let mut spawner = SceneSpawner::new();
         let report = match self.live_instance.as_ref() {
             Some(current) => spawner.replace_with_prefab_resolver_and_asset_database(
@@ -1083,7 +1548,7 @@ impl SceneAuthoringSession {
                 database,
             ),
         };
-        self.finish_world_sync(report)
+        Ok(self.finish_world_sync(report))
     }
 
     pub fn clear_live_world(&mut self, world: &mut World) -> SceneAuthoringClearReport {
@@ -1192,6 +1657,31 @@ impl SceneAuthoringSession {
         report
     }
 
+    #[cfg(feature = "serde")]
+    fn apply_authoring_history(&mut self, direction: HistoryDirection) -> ScenePatchReport {
+        let state = self
+            .authority
+            .published()
+            .expect("an admitted authoring document owns classification state");
+        let mut next_state = None;
+        let report =
+            self.history
+                .apply_history(&mut self.document, direction, |patch, document| {
+                    let prepared = crate::authoring_decode::prepare_scene_authoring_history_patch(
+                        document, state, patch,
+                    )?;
+                    next_state = Some(prepared.state);
+                    Ok((prepared.document, prepared.report))
+                });
+        if report.applied {
+            self.authority = AuthoringSessionAuthority::Published(
+                next_state.expect("accepted authoring history publishes classification state"),
+            );
+            self.live_dirty = true;
+        }
+        report
+    }
+
     fn finish_world_sync(&mut self, report: SceneSpawnReport) -> SceneAuthoringSyncReport {
         let removed_entities = report.retired_entities();
         let SceneSpawnReport {
@@ -1286,6 +1776,30 @@ fn history_error_report(code: &'static str, summary: &'static str) -> ScenePatch
         inverse: None,
         diagnostics,
     }
+}
+
+#[cfg(feature = "serde")]
+fn admitted_document_patch_rejection() -> ScenePatchReport {
+    history_error_report(
+        "scene.authoring-operation-not-admitted",
+        "Admitted authoring documents require a preservation-safe authoring command",
+    )
+}
+
+#[cfg(feature = "serde")]
+fn authoring_scalar_edit_session_rejection() -> ScenePatchReport {
+    history_error_report(
+        "scene.authoring-scalar-edit-session-unavailable",
+        "Authoring scalar edits require a document admitted through the authoring boundary",
+    )
+}
+
+#[cfg(feature = "serde")]
+fn authoring_history_session_rejection() -> ScenePatchReport {
+    history_error_report(
+        "scene.authoring-history-session-unavailable",
+        "Authoring history requires a document admitted through the authoring boundary",
+    )
 }
 
 fn reject_history_publication(

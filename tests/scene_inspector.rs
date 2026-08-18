@@ -34,7 +34,7 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
     let inspector = SceneInspectorState::new();
     let mut world = World::new();
     world.spawn_empty();
-    assert!(session.sync_world(&mut world, &registry).synced);
+    assert!(session.sync_world(&mut world, &registry).unwrap().synced);
     let snapshot = WorldIdentitySnapshot::capture_default(&world).unwrap();
 
     let model = inspector.model_with_selection(&session, &registry, Some(&player), Some(&snapshot));

@@ -401,7 +401,9 @@ fn apply_editor_preview_request(world: &mut World) {
     };
     if state.requested != Some(stamp) {
         match state.materializer.as_mut() {
-            Some(materializer) => materializer.replace_document(request.scene),
+            Some(materializer) => materializer
+                .replace_document(request.scene)
+                .expect("Editor preview materializers always retain native authority"),
             None => state.materializer = Some(SceneAuthoringSession::new(request.scene)),
         }
         state.requested = Some(stamp);

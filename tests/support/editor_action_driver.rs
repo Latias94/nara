@@ -58,6 +58,15 @@ pub fn apply_workspace_command(
             base_revision,
             command,
         }),
+        EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+            document,
+            base_revision,
+            edit,
+        } => EditorAction::Mutate(EditorDocumentMutation::ApplyAuthoringScalarEdit {
+            document,
+            base_revision,
+            edit,
+        }),
         EditorWorkspaceCommand::ApplyScenePatch {
             document,
             base_revision,

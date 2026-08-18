@@ -13,7 +13,7 @@ nara_ecs.workspace = true
 nara_fs.workspace = true
 nara_identity.workspace = true
 nara_reflect.workspace = true
-nara_scene.workspace = true
+nara_scene = { workspace = true, features = ["serde"] }
 
 [dev-dependencies]
 nara_sprite.workspace = true

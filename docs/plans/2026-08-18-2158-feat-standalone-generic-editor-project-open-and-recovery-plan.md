@@ -622,7 +622,10 @@ those records semantically, and gate edits without weakening Runtime spawn.
    enforce the open-attempt-wide unique-file, edge, depth, path, handle, encoded/decoded byte,
    decode-work, diagnostic, and retained-candidate budgets from R9. Deduplicate and cycle-check by
    capability-relative identity while keeping canonical traversal order independent of hash-map
-   iteration.
+   iteration. Path references are admitted through that capability; stable-ID references are
+   retained as bounded unresolved dependency facts and make the Authoring Project `Degraded` until
+   a later catalog/index lane can resolve them. U2 must not scan directories or guess a path for a
+   stable ID.
 3. Publish one nominal authoring candidate containing the unchanged `SceneDocument` or
    `PrefabDocument`, document readiness, bounded record issues, and the canonical unavailable-record
    manifest. Do not add a generic public document trait or opaque byte container.
@@ -638,10 +641,12 @@ those records semantically, and gate edits without weakening Runtime spawn.
 7. Permit canonical Save/Reopen of unchanged unavailable records through existing Host persistence.
    Keep the document Degraded and preserve the exact unavailable-record manifest across the receipt.
 8. Publish the complete immutable `AuthoringProjectSnapshot`, `AuthoringProjectCandidate`, and
-   `AuthoringProjectReceipt` only after the bounded closure is admitted. Rebind Inspector,
-   persistence refresh, Scene View, UI Canvas, prepared images, and Prefab closure
-   to the immutable `AuthoringProjectSnapshot`. Unavailable components are excluded from typed
-   preview projection with an explicit reason but remain untouched in source and persistence.
+   `AuthoringProjectReceipt` only after the bounded closure is admitted. Provide the root-private
+   source bindings required by workspace, persistence, Scene View, UI Canvas, prepared images, and
+   Prefab closure, but do not create a second Editor session in this unit. SGE-U3 is the sole unit
+   that consumes the receipt and installs those bindings into the shell-first Editor session.
+   Unavailable components are excluded from typed preview projection with an explicit reason but
+   remain untouched in source and persistence.
 9. Keep runtime materialization strict. Existing provider-capable `SceneSpawner`,
    `ProjectContentLoader`, Check/Cook/Export, and trusted Runtime plans reject every non-Available
    required record before mutation.

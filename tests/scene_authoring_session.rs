@@ -26,7 +26,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     let mut world = World::new();
     let runtime_entity = world.spawn_empty().id();
 
-    let first_sync = session.sync_world(&mut world, &registry);
+    let first_sync = session.sync_world(&mut world, &registry).unwrap();
 
     assert!(first_sync.synced);
     assert!(!first_sync.diagnostics.has_errors());
@@ -56,7 +56,7 @@ fn authoring_session_applies_patch_syncs_world_and_preserves_runtime_entities() 
     );
     assert_eq!(document_label(session.document(), &player), "Hero");
 
-    let second_sync = session.sync_world(&mut world, &registry);
+    let second_sync = session.sync_world(&mut world, &registry).unwrap();
 
     assert!(second_sync.synced);
     assert_eq!(second_sync.removed_entities, 1);
@@ -580,7 +580,7 @@ fn failed_authoring_patch_does_not_dirty_live_world_or_enter_history() {
             "Player",
         )]));
     let mut world = World::new();
-    let sync = session.sync_world(&mut world, &registry);
+    let sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(sync.synced);
     assert!(!session.is_live_dirty());
 
@@ -616,21 +616,23 @@ fn failed_world_sync_keeps_existing_live_projection() {
             "Player",
         )]));
     let mut world = World::new();
-    let sync = session.sync_world(&mut world, &registry);
+    let sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(sync.synced);
     let live_player = resolve_scene_entity(session.live_instance().unwrap(), &world, &player);
 
-    session.replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
-        player.clone(),
-    )
-    .with_component(
-        ComponentTypeId::new("nara.test.Unregistered"),
-        SceneComponentRecord::new(
-            ComponentSchemaVersion(1),
-            ComponentValue::String("invalid".to_string()),
-        ),
-    )]));
-    let failed_sync = session.sync_world(&mut world, &registry);
+    session
+        .replace_document(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            player.clone(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.test.Unregistered"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion(1),
+                ComponentValue::String("invalid".to_string()),
+            ),
+        )]))
+        .unwrap();
+    let failed_sync = session.sync_world(&mut world, &registry).unwrap();
 
     assert!(!failed_sync.synced);
     assert!(failed_sync.diagnostics.has_errors());
@@ -678,7 +680,7 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     let initial = session.revision();
     let mut world = World::new();
 
-    let sync = session.sync_world(&mut world, &registry);
+    let sync = session.sync_world(&mut world, &registry).unwrap();
     assert!(sync.synced);
     assert_eq!(session.revision(), initial);
 
@@ -710,10 +712,12 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
     assert!(session.live_instance().is_none());
     assert_eq!(session.revision(), after_patch);
 
-    session.replace_document(SceneDocument::from_ordered_roots([labeled_entity(
-        player.clone(),
-        "Replacement",
-    )]));
+    session
+        .replace_document(SceneDocument::from_ordered_roots([labeled_entity(
+            player.clone(),
+            "Replacement",
+        )]))
+        .unwrap();
     let after_replace = session.revision();
     assert_ne!(after_replace.source_id(), initial.source_id());
     assert_eq!(after_replace.generation(), 0);
@@ -725,7 +729,9 @@ fn authoring_revision_changes_only_for_successful_document_mutations() {
         }
     );
 
-    let failed_sync = session.sync_world(&mut world, &ComponentRegistry::new());
+    let failed_sync = session
+        .sync_world(&mut world, &ComponentRegistry::new())
+        .unwrap();
     assert!(!failed_sync.synced);
     assert_eq!(session.revision(), after_replace);
 }

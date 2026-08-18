@@ -229,7 +229,8 @@ fn migrate_component_record(
     budget.observe(&migrated.value)?;
     let changed = migrated.version != record.version || migrated.value != record.value;
     if changed {
-        *record = SceneComponentRecord::new(migrated.version, migrated.value);
+        record.version = migrated.version;
+        record.value = migrated.value;
     }
     Ok(changed)
 }

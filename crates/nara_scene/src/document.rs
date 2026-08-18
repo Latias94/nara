@@ -5,7 +5,7 @@ use nara_diagnostic::DiagnosticReport;
 use nara_identity::SceneEntityId;
 use nara_reflect::{
     ComponentDecodeContext, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue,
+    ComponentValue, PersistentComponentSchemaOwnerId,
 };
 
 use crate::{
@@ -155,6 +155,11 @@ impl SceneEntityRecord {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct SceneComponentRecord {
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub owner: Option<PersistentComponentSchemaOwnerId>,
     pub version: ComponentSchemaVersion,
     pub value: ComponentValue,
 }
@@ -162,6 +167,21 @@ pub struct SceneComponentRecord {
 impl SceneComponentRecord {
     #[must_use]
     pub fn new(version: ComponentSchemaVersion, value: ComponentValue) -> Self {
-        Self { version, value }
+        Self {
+            owner: None,
+            version,
+            value,
+        }
+    }
+
+    #[must_use]
+    pub fn with_owner(mut self, owner: PersistentComponentSchemaOwnerId) -> Self {
+        self.owner = Some(owner);
+        self
+    }
+
+    #[must_use]
+    pub const fn owner(&self) -> Option<&PersistentComponentSchemaOwnerId> {
+        self.owner.as_ref()
     }
 }
