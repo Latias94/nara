@@ -686,17 +686,20 @@ flowchart LR
 - **Trigger**: A child-process Play mode, crash-isolated preview, remote target, or a second
   production placement must preserve the current Editor Play semantics; or in-process placement
   causes a measured safety, reload, or lifecycle failure.
-- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093, 0112
-- **Question**: Which in-process, child-process, or hybrid placement owns Play, and what smallest
-  versioned local connection preserves control, observation, content/schema lineage, fault,
-  retirement, and restart semantics across that placement?
+- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093, 0112, 0114
+- **Question**: What smallest versioned local connection preserves control, observation,
+  content/schema/executable lineage, fault, retirement, crash, and restart semantics for the
+  supervised project process selected by ADR 0114, while leaving ADR 0112's trusted in-process
+  Adapter intact?
 - **Boundary**: Tooling models communicate through bounded generation-stamped commands and
   observations that can be projected onto a connection; they do not expose `World`, native handles,
-  or transport types. This question does not currently select IPC, wire encoding, process topology,
-  authentication, or a public universal runtime-session trait. ADR 0112 selects only the first
-  private in-process Game View placement. EGV-U5 proves that placement with both the generic
-  starter and one compiled first-party game, but it adds no second placement or transport; the
-  second placement or a measured failure remains the trigger for this question.
+  or transport types. ADR 0114 selects a supervised child process as the ordinary standalone
+  Editor execution boundary, but does not select IPC, wire encoding, authentication, frame
+  transport, remote equivalence, or a public universal runtime-session trait. ADR 0112's private
+  in-process Game View remains an explicitly trusted first-party Adapter.
+- **Accepted bounded decision**: ADR 0114 resolves ordinary product placement: project gameplay code
+  does not load into the long-lived generic Editor process. This question remains open for the
+  concrete local protocol and second-placement implementation.
 
 ## OQ-040: Editor-to-Play Live Edit
 
@@ -771,7 +774,7 @@ flowchart LR
 - **Owner**: `nara_reflect`, product composition, document owners, and authoring hosts
 - **Trigger**: An optional persistent plugin is disabled and later re-enabled, a document opens
   without one plugin, or a schema-owning package upgrades independently from the product recipe.
-- **Related ADRs**: 0011, 0035, 0045, 0046, 0079, 0081, 0090, 0095
+- **Related ADRs**: 0011, 0035, 0045, 0046, 0079, 0081, 0090, 0095, 0114
 - **Question**: What minimal records separate each schema owner's version/tombstone lineage from a
   recipe's composed catalog fingerprint, and how do Complete, KnownUnbound, UnknownSchema,
   dependency traversal, migration, reactivation, and runtime binding readiness compose?
@@ -781,8 +784,11 @@ flowchart LR
   closure, rename/delete, remap, flatten, cook, and export rather than guessing.
 - **Accepted bounded decision**: ADR 0098 selects explicit owner-local lineage plus an owner-aware
   active Runtime composition, while deliberately deferring an owner-aware package/lock wire format
-  and every degraded-authoring readiness state. This question remains open for those deferred
-  records and workflows.
+  and every degraded-authoring readiness state. ADR 0114 and SGE-U1 select one project-local,
+  data-only Authoring Schema Bundle with bounded persistent owner identities and exact composition
+  fingerprinting for Generic Open. This question remains open for independently installed package
+  provenance, lockfile ownership, profile-specific schema composition, and external package
+  reactivation.
 
 ## OQ-045: Plugin Package Contribution and Official Product Recipe Ergonomics
 
@@ -824,7 +830,7 @@ flowchart LR
 - **Owner**: scene/prefab/patch/schema format owners and authoring Hosts
 - **Trigger**: Missing-schema preservation, migration, canonical diffs, package exchange, or editor
   save/recovery demonstrates material duplicate cost or divergent semantics across JSON and RON.
-- **Related ADRs**: 0006, 0043, 0049, 0051, 0090, 0091
+- **Related ADRs**: 0006, 0043, 0049, 0051, 0090, 0091, 0114
 - **Question**: Should Nara stabilize one canonical source-authoring format and treat the other as an
   import/export representation? Which choice best supports deterministic canonicalization, human
   diffs, bounded parsing, unknown-record preservation, migration tooling, asset-store review, and
@@ -833,3 +839,7 @@ flowchart LR
   successor ADR decides the format contract. This question does not authorize dropping a readable
   format, rewriting project files, or maintaining two permanent canonical writers without measured
   workflow evidence and a migration plan.
+- **Accepted bounded decision**: ADR 0114 reuses the current understood generic value grammar and
+  canonical Scene/Prefab writer for semantic degraded-authoring preservation. It does not select one
+  global JSON/RON source format or promise lexical byte preservation, so the broader format question
+  remains open.

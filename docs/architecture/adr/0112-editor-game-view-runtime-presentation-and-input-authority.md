@@ -2,12 +2,13 @@
 
 **Status**: Accepted
 **Date**: 2026-08-16
-**Last Revised**: 2026-08-17
+**Last Revised**: 2026-08-18
 **Owner**: Editor Host, executable Runtime owner, Runtime UI presentation, `nara_render`, and
 `nara_render_wgpu`
 **Refines**: [ADR 0108](0108-ui-surface-presented-session-and-atomic-interaction.md),
 [ADR 0109](0109-root-local-ui-compilation-and-presentation-closure.md), and
 [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md)
+**Refined By**: [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 **Related**: [ADR 0034](0034-editor-play-mode-world-boundary.md),
 [ADR 0076](0076-play-runtime-debug-control-and-observation.md),
 [ADR 0082](0082-process-host-authority-and-runtime-construction-topology.md),
@@ -37,8 +38,10 @@ unpublished Runtime, while the native Editor GPU owner prepares the target and t
 registration. Publishing either side before the other is admitted would leave a runnable Runtime
 without its promised Game product or a target with no owning Runtime.
 
-This decision selects the first bounded in-process placement. It does not close OQ-039 for a child
-process, crash-isolated or remote placement, and it does not select live edit under OQ-040.
+This decision selects the first bounded in-process placement. ADR 0114 later retains that placement
+as an explicitly trusted first-party Adapter while selecting a supervised project process as the
+ordinary standalone Editor product boundary. OQ-039 remains open for the exact local transport,
+crash-isolated or remote placement contract, and OQ-040 continues to own live edit.
 
 ## Decision
 
@@ -158,10 +161,12 @@ to own the Runtime UI session transaction and logical-window content transform.
 
 ### Scope of OQ resolution
 
-OQ-039 remains open for the second concrete placement or measured failure of this in-process model.
-The selected first placement is a private typed bridge, not a public transport or universal runtime
-session Interface. OQ-040 remains open; accepted edits make the active Runtime out of date and
-require Restart unless the existing explicit, bounded Apply Changes path supports the exact edit.
+OQ-039 remains open for the exact second-placement transport and session protocol. ADR 0114 selects
+the supervised-process product boundary for ordinary standalone Editor execution, while this
+in-process placement remains a private typed trusted Adapter rather than a public transport or
+universal runtime session Interface. OQ-040 remains open; accepted edits make the active Runtime out
+of date and require Restart unless the existing explicit, bounded Apply Changes path supports the
+exact edit.
 
 ## Alternatives Considered
 

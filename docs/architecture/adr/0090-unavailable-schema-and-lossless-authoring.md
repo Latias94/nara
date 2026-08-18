@@ -1,7 +1,8 @@
 # ADR 0090: Unavailable Schema and Lossless Authoring
 
-**Status**: Proposed
+**Status**: Accepted
 **Date**: 2026-07-13
+**Accepted**: 2026-08-18
 **Owner**: `nara_reflect`, `nara_scene`, `nara_tooling`, and persistent document owners
 **Admission Trigger**: Scene/prefab fixtures with a missing provider, known schema without its
 required native or Adapter-specific runtime binding, missing migration, and future component schema
@@ -11,6 +12,7 @@ mutation
 for lexical byte/comment preservation proves semantic record preservation insufficient
 **Related**: ADR 0006, ADR 0011, ADR 0026, ADR 0034, ADR 0038, ADR 0043, ADR 0045, ADR 0047,
 ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084, ADR 0093, ADR 0095
+**Refined By**: [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
 
 ## Context
 
@@ -32,7 +34,7 @@ preserved safely because the current engine does not know how to delimit or migr
 
 ## Decision
 
-If accepted, Nara authoring will preserve a complete bounded semantic component record when the
+Nara authoring preserves a complete bounded semantic component record when the
 file envelope, document shape, and generic `ComponentValue` grammar are understood but its schema,
 migration, or required native/Adapter runtime binding is unavailable. Runtime admission remains
 strict and fail-closed.
@@ -70,8 +72,8 @@ Document readiness is `Rejected | Degraded | Complete`. Record readiness is:
 
 | State | Meaning |
 |---|---|
-| `Available` | Compatible catalog schema, migration path, and all required runtime bindings are present |
-| `KnownUnbound` | Catalog schema is known but its required native or Adapter-specific runtime binding is unavailable |
+| `Available` | Compatible catalog schema, migration path, and the exact binding required by the current admission product are present; Authoring and Runtime classify independently |
+| `KnownUnbound` | Catalog schema is known but its required native, authoring-Adapter, or other product-specific binding is unavailable |
 | `UnknownSchema` | Stable component ID/version has no current catalog declaration |
 | `Unmigratable` | Schema is known but no complete migration reaches the current version |
 | `FutureSchema` | Record schema version is newer than the current catalog declaration |
@@ -92,12 +94,14 @@ Unavailable preservation is permitted only when all of these are true:
 An unknown/future top-level format version, document operation, or value tag remains `Rejected`.
 Nara does not guess record boundaries or preserve arbitrary trailing bytes.
 
-"Lossless" means semantic record equality after canonical serialization: component ID (the owning
-map key), schema version, complete bounded `ComponentValue`, stable entity/asset references, and
-unknown fields that the current generic grammar can represent remain equal. Catalog fingerprint
-and lineage remain catalog-generation admission evidence under ADR 0081; version 1 does not add a
-per-record fingerprint. Preservation does not promise whitespace, comments, map spelling/order
-outside canonical rules, or byte-identical JSON/RON round trips.
+"Lossless" means equality of one canonical unavailable-record manifest after canonical
+serialization. The manifest records total unavailable-record cardinality and, for each record,
+source-document identity, owning entity or slot, semantic placement/order, component owner and ID,
+schema version, complete bounded `ComponentValue`, stable entity/asset references, and unknown
+fields representable by the current generic grammar. Catalog fingerprint and lineage remain
+catalog-generation admission evidence under ADR 0081; version 1 does not add a trusted per-record
+fingerprint. Preservation does not promise whitespace, comments, map spelling/order outside
+canonical rules, or byte-identical JSON/RON round trips.
 
 ### Authoring Operation Gates
 
@@ -116,8 +120,10 @@ outside canonical rules, or byte-identical JSON/RON round trips.
 | Asset rename/delete/GC/prune or dependency-closure publication | Allow only for `KnownUnbound` under an immutable last-known catalog that fully declares `asset_ref`; reject for `UnknownSchema` |
 | Cook/export/Play/runtime spawn | Reject unless every required record and binding is `Available` |
 
-An allowed unrelated edit must prove that unavailable record semantic digests and references do not
-change. Saving keeps the document `Degraded`; it does not silently declare it valid for runtime.
+An allowed unrelated edit must prove that the complete canonical unavailable-record manifest is
+identical before and after the unpublished candidate. Comparing only aggregate digests is
+insufficient because it can hide placement, ordering, duplication, or cardinality errors. Saving
+keeps the document `Degraded`; it does not silently declare it valid for runtime.
 
 Unavailable schema is also an asset/entity dependency barrier. `KnownUnbound` may perform schema-
 only reference traversal against an immutable, authenticated last-known owner catalog without
@@ -190,10 +196,10 @@ behavior for unknown data.
 **Pros**: Protects source data, permits proven unrelated edits, and keeps runtime/native binding
 strict.
 
-**Cons**: Requires explicit operation gating, degraded UX state, semantic-hash tests, and careful
+**Cons**: Requires explicit operation gating, degraded UX state, canonical-manifest tests, and careful
 prefab/reference handling.
 
-**Decision**: Proposed.
+**Decision**: Accepted.
 
 ## Success Metrics
 
@@ -202,7 +208,7 @@ prefab/reference handling.
 | Semantic preservation | Degraded open/save/reload keeps unavailable record ID/version/value/reference equality | Golden fixtures |
 | Precise classification | Missing native/Adapter binding, unknown schema, missing migration, and future schema return distinct states | Classification tests |
 | Runtime atomicity | Every unavailable class changes zero World/identity/asset scratch state on spawn failure | Fault tests |
-| Unrelated edit safety | Editing a known field changes zero unavailable record semantic digests | Patch integration test |
+| Unrelated edit safety | Editing a known field leaves the canonical unavailable-record manifest identical | Patch integration test |
 | Operation gating | Field edit/override/Apply Changes/unproven remap reject without revision or dirty-state change | Command tests |
 | Delete/undo | Explicit whole-record delete is one undo transaction and restores exact semantic data | Undo fixture |
 | Provider recovery | Installing compatible provider/migration reclassifies Complete and permits spawn without automatic source rewrite | Generation test |
@@ -216,7 +222,7 @@ prefab/reference handling.
 | Risk | Severity | Likelihood | Mitigation |
 |---|---|---:|---|
 | "Lossless" is mistaken for byte/comment preservation | Medium | High | Define semantic equality explicitly and keep lexical preservation out of version 1. |
-| Unrelated operation rewrites hidden references | Critical | Medium | Gate by proven interpretation-free closure and compare semantic digests before commit. |
+| Unrelated operation rewrites, moves, duplicates, or drops hidden records | Critical | Medium | Gate by a preservation-safe whitelist and compare the complete canonical unavailable-record manifest before commit. |
 | Degraded documents accidentally enter runtime | Critical | Medium | Separate authoring and runtime admission types; require Complete at spawn/build boundaries. |
 | Opaque payload becomes an allocation/privacy channel | High | Medium | Apply normal parse budgets and never emit payload data to diagnostics/observation. |
 | Missing provider triggers code download/execution | Critical | Low | Keep composition host-authorized and files non-authoritative for code installation. |
@@ -224,7 +230,7 @@ prefab/reference handling.
 
 ## Consequences
 
-If accepted:
+Therefore:
 
 - ADR 0043 continues to reject unknown top-level/document/value grammar while permitting bounded
   current-grammar records to enter degraded authoring;
@@ -236,11 +242,11 @@ If accepted:
   compiled native provider set changes, and otherwise follows the owning Adapter's admitted module
   activation contract; active type bindings are never mutated.
 
-This proposal does not define dynamic ECS components, schema sidecar generation, automatic package
+This decision does not define dynamic ECS components, schema sidecar generation, automatic package
 installation, lexical CST preservation, best-effort future-file parsing, or runtime placeholder
 behavior.
 
-## Admission Evidence
+## Implementation Evidence Required
 
 Acceptance requires all four unavailable classifications across scene and prefab golden fixtures,
 semantic save round trips, allowed/denied operation matrices, strict runtime preflight, provider

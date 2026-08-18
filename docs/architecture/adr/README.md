@@ -135,7 +135,7 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md): Asset Dependency, Import Product, and Artifact Publication Graph (Proposed)
 - [ADR 0088](0088-target-build-cook-package-and-runtime-content-catalog.md): Target Build, Cook, Package, and Runtime Content Catalog (Proposed)
 - [ADR 0089](0089-runtime-scene-instance-loading-activation-unload-and-travel.md): Runtime Scene Instance Loading, Activation, Unload, and Travel (Proposed)
-- [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring (Proposed)
+- [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md): Unavailable Schema and Lossless Authoring
 - [ADR 0091](0091-editor-persistence-recovery-and-concurrent-writer-policy.md): Editor Persistence, Recovery, and Concurrent Writer Policy (Proposed)
 - [ADR 0092](0092-sdr-color-space-alpha-and-output-encoding.md): SDR Color Space, Alpha, and Output Encoding
 - [ADR 0093](0093-rust-authoring-hot-iteration-and-optional-scripting-adapters.md): Rust Authoring, Hot Iteration, and Optional Scripting Adapters
@@ -159,3 +159,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md): Editor Scene View Execution and Picking Authority
 - [ADR 0112](0112-editor-game-view-runtime-presentation-and-input-authority.md): Editor Game View Runtime Presentation and Input Authority
 - [ADR 0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md): Editor UI Prefab Authoring and Canvas Authority
+- [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md): Standalone Generic Editor Authoring and Execution Boundary
