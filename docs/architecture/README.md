@@ -9,10 +9,11 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
-   plan is active at EPB-U0 under
-   [registration `45ef05245c1940fea17fa0ce398fb8a7`](../knowledge/engineering/registry/2026-08/2026-08-19T165525Z-editor-project-browser-source-index-v1-codex-root-45ef05245c1940fea17fa0ce398fb8a7.md).
-   It activates only the capability-bound, read-only, manual-refresh source-index successor on
-   Windows x86-64 local NTFS; later EPB units and all unrelated Editor successors remain inactive.
+   plan is active at EPB-U1 under
+   [registration `120048e91d4c4bd0a3fbfbce78564634`](../knowledge/engineering/registry/2026-08/2026-08-19T170252Z-editor-project-browser-source-index-v1-codex-root-120048e91d4c4bd0a3fbfbce78564634.md).
+   EPB-U0 established the durable boundary at `4275d93`; EPB-U1 now activates only the bounded
+   handle-relative enumeration primitive on Windows x86-64 local NTFS. Later EPB units and all
+   unrelated Editor successors remain inactive.
    The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with
    [verification `25fbee67d7ea41a9bc8406abe6e8b221`](../knowledge/engineering/verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md)
