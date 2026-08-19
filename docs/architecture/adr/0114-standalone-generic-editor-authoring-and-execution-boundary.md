@@ -18,7 +18,7 @@
 [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md),
 [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md), and
 [ADR 0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md)
-**Implementation Plan**: [Standalone Generic Editor Project Open and Recovery](../../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md), SGE-U1 through SGE-U5
+**Implementation Plans**: completed [Standalone Generic Editor Project Open and Recovery](../../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md), SGE-U1 through SGE-U5; active [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md), EPB-U0 through EPB-U5
 
 ## Context
 
@@ -189,9 +189,11 @@ stateDiagram-v2
 - A rejected project or startup document does not destroy a previously open last-good workspace.
 - Runtime readiness is an orthogonal frame fact, not another application state. In the first Generic
   Open/Recovery slice, ordinary Play and Run remain explicitly unavailable.
-- v1 may open the manifest-selected startup Scene and its explicit Scene/Prefab/UI dependency
-  closure. A project-wide Asset Browser requires a separately admitted, handle-bound
-  `nara_fs` directory-enumeration contract and is not implied by this ADR.
+- The completed Generic Open slice may open the manifest-selected startup Scene and its explicit
+  Scene/Prefab/UI dependency closure. The active Project Browser successor may add read-only,
+  manual-refresh discovery across manifest-declared source roots only after `nara_fs` publishes a
+  bounded handle-bound enumeration contract. The browser remains a non-executable Authoring
+  product and does not inherit Runtime closure authority.
 - Every admitted path is project-relative and opened through the same exact `DirectoryCapability`.
   One attempt-wide budget bounds unique files, edges, depth, path bytes, handles, encoded and decoded
   bytes, decode work, diagnostics, and retained candidates; cycles and duplicates are charged
@@ -281,8 +283,9 @@ child-process protocol.
 - Provider-capable Runtime, Check, Play, Run, Cook, and Export remain stricter than Editor Open. They
   may consume the same source but cannot consume a Degraded Authoring receipt as executable
   authority. The first Generic Open/Recovery slice does not claim an ordinary Runtime launch.
-- Full project browsing, importer execution, external Play transport, live edit, animation/shader
-  tools, docking, and executable Editor extensions remain focused successor work.
+- Capability-bound read-only project browsing is active under the focused EPB plan. Importer
+  execution, source mutation, external Play transport, live edit, animation/shader tools, docking,
+  and executable Editor extensions remain separate successor work.
 
 ## Success Metrics
 
@@ -305,7 +308,7 @@ child-process protocol.
 | "Degraded" becomes a permissive best-effort loader | Critical | Medium | Reuse ADR 0090's closed readiness states and operation matrix; reject unknown wire/document boundaries. |
 | Editor accidentally reports a project as runnable | Critical | Medium | Keep Authoring and Runtime receipt types nominally separate; require Complete native Runtime admission at execution boundaries. |
 | Generic Editor grows a second runtime composition system | High | Medium | Share value/schema codecs only; prohibit native registry, `World`, and executable plugin lowering in Authoring Project. |
-| Project Manager scope expands into an ambient Asset Browser | High | High | Limit v1 to manifest-selected and explicit dependency paths; require a separate handle-bound enumeration decision. |
+| Project Manager scope expands into an ambient Asset Browser | High | High | Admit only manifest-declared roots through `nara_fs` handle-bound enumeration; keep traversal budgets, immutable publication, and Open revalidation in the Host. |
 | Child-process direction triggers a speculative transport framework | High | Medium | Leave exact protocol under OQ-039 and require one external-window Play tracer before extracting shared transport. |
 | Declarative metadata becomes an embedded programming language | High | Medium | Keep contributions finite and Host-rendered; move executable behavior to capability-specific isolated extensions. |
 | Trusted in-process Adapter silently becomes the default again | High | Medium | Label it advanced/trusted, exclude it from generic Open, and prove Reference Game authoring through the ordinary binary. |
@@ -326,8 +329,9 @@ The decision is implemented only when one clean generic Editor binary:
    Host exists;
 6. exposes project and document recovery inside the shell instead of exiting the process.
 
-External process Play, extension hosting, and a project-wide Asset Browser require their own
-focused evidence and are not prerequisites for the first Generic Open and Recovery implementation.
+External process Play and extension hosting require their own focused evidence. Project-wide
+browsing is now active only under the separate EPB plan and does not retroactively broaden the
+completed Generic Open and Recovery implementation.
 
 ## Citations
 

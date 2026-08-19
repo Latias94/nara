@@ -662,8 +662,6 @@ last-good snapshot without coupling the Runtime closure or document authority.
 - `src/project_host/runtime/editor/model.rs`
 - `src/project_host/runtime/editor/open.rs`
 - `src/project_host/runtime/editor/persistence.rs`
-- `src/project_host/runtime/editor/content_refresh.rs` only if the new generation must be retired on
-  an existing source refresh
 - `src/project_host.rs` or `src/project_host/runtime.rs` only for the narrow frame projection seam
 - focused tests under `src/project_host/runtime/tests.rs` or a new `tests/editor_project_browser.rs`
 
@@ -674,6 +672,9 @@ last-good snapshot without coupling the Runtime closure or document authority.
   become visible unavailable facts, non-directory/unproven roots become scoped diagnostics, duplicate or
   ancestor/descendant roots are scanned once, and identity/canonical aliases fail the affected
   candidate rather than being guessed. Never reopen the root through an ambient path.
+- Keep v1 index freshness explicit: initial scan and manual Refresh are the only generation
+  triggers. Save and Runtime content refresh do not mutate or retire the source index; Open
+  revalidates selected facts, and a manual Refresh publishes the successor generation.
 - Use a FIFO frontier containing only relative directory paths and expected identities. The attempt
   owns at most one active enumeration session; each `advance` consumes a fixed item/work allowance,
   and each queued directory is reopened/revalidated before its session starts.

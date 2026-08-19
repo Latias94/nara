@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "00a7afe3683373c82fb6ab3058caf7f8fad3368a8c59307a0828549670f1dbbc"
+source_fingerprint: "3dd43f251853757cb84abe238cb193a81afca8ca9303736ced706a21d89cde82"
 ---
 
 # Current State
@@ -12,15 +12,16 @@ source_fingerprint: "00a7afe3683373c82fb6ab3058caf7f8fad3368a8c59307a0828549670f
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `00a7afe3683373c82fb6ab3058caf7f8fad3368a8c59307a0828549670f1dbbc`
-- Immutable records: 528
-- Active lane heads: 0
+- Source fingerprint: `3dd43f251853757cb84abe238cb193a81afca8ca9303736ced706a21d89cde82`
+- Immutable records: 529
+- Active lane heads: 1
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
+- [Editor Project Browser and Source Index v1: EPB-U0 active](registry/2026-08/2026-08-19T165525Z-editor-project-browser-source-index-v1-codex-root-45ef05245c1940fea17fa0ce398fb8a7.md): `active` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)

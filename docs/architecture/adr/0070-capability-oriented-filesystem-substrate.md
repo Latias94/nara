@@ -176,8 +176,16 @@ foundation capability:
 
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
-| Handle-bound directory enumeration | A concrete asset/indexing host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset` must not enumerate ambient paths. |
+| Handle-bound directory enumeration | The Editor/authoring source-index Host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset`, the project Host, and Editor adapters must not enumerate ambient paths. |
 | Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
+
+The [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
+plan activates the first reserved enumeration consumer. Its first hosted product claim is limited to
+Windows x86-64 on local NTFS with per-capability proof. Other Windows filesystems, remote shares,
+Linux, macOS, and other targets remain `Unproven` or `Unsupported` until their own implementation
+and hosted evidence exist. `nara_fs` owns only bounded handle-relative enumeration and scoped entry
+observations; root selection, traversal budgets, classification, immutable index publication, and
+document admission remain Host responsibilities.
 
 This deferral does not treat static `Unsupported` values as successful evidence. RGF-U3 is the
 first production consumer of bounded host-issued file authority for `nara.toml`. RGF-U12 now reuses

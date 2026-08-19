@@ -8,7 +8,12 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
+3. The [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
+   plan is active at EPB-U0 under
+   [registration `45ef05245c1940fea17fa0ce398fb8a7`](../knowledge/engineering/registry/2026-08/2026-08-19T165525Z-editor-project-browser-source-index-v1-codex-root-45ef05245c1940fea17fa0ce398fb8a7.md).
+   It activates only the capability-bound, read-only, manual-refresh source-index successor on
+   Windows x86-64 local NTFS; later EPB units and all unrelated Editor successors remain inactive.
+   The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with
    [verification `25fbee67d7ea41a9bc8406abe6e8b221`](../knowledge/engineering/verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md)
    and completed
@@ -16,8 +21,9 @@ an index, not another source of architecture decisions.
    SGE-U1 through SGE-U5 establish the bounded data-only schema basis, lossless degraded Scene and
    Prefab authority, shell-first lifecycle, strict selected-native Runtime agreement, modular
    generic authoring workspace, and one-window Project Manager/Open/Recovery product proof. No
-   successor Editor lane is active automatically; external Play, project-wide browsing, and
-   extension hosting remain separately trigger-gated.
+   successor Editor lane is active automatically; the EPB registration above is the explicit
+   project-browsing activation, while external Play and extension hosting remain separately
+   trigger-gated.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
    closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and
