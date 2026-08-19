@@ -9,10 +9,12 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
-   plan is active at EPB-U1 under
-   [registration `120048e91d4c4bd0a3fbfbce78564634`](../knowledge/engineering/registry/2026-08/2026-08-19T170252Z-editor-project-browser-source-index-v1-codex-root-120048e91d4c4bd0a3fbfbce78564634.md).
-   EPB-U0 established the durable boundary at `4275d93`; EPB-U1 now activates only the bounded
-   handle-relative enumeration primitive on Windows x86-64 local NTFS. Later EPB units and all
+   plan is active at EPB-U2 under
+   [registration `9537603b2b0d4c6a8fbc2328d514ac25`](../knowledge/engineering/registry/2026-08/2026-08-19T180100Z-editor-project-browser-source-index-v1-codex-root.md).
+   EPB-U0 established the durable boundary at `4275d93`; EPB-U1 implemented and verified bounded
+   handle-relative enumeration at `04914e1` with
+   [evidence `e4b844f6b2764741a2bff0a731925a80`](../knowledge/engineering/verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md).
+   EPB-U2 now activates only the Host-owned source-index transaction. Later EPB units and all
    unrelated Editor successors remain inactive.
    The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with

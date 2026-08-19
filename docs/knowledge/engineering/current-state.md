@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8efde0267bd45ed96ea1bad57b39658bc25862c1a539af595852fe6b5f175a5c"
+source_fingerprint: "b4873060a9d0dd06d987982c15c5b252fd2fc3c8e8ba1411eeb27000e453c3f8"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8efde0267bd45ed96ea1bad57b39658bc25862c1a539af595852fe6b5f1
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8efde0267bd45ed96ea1bad57b39658bc25862c1a539af595852fe6b5f175a5c`
-- Immutable records: 530
+- Source fingerprint: `b4873060a9d0dd06d987982c15c5b252fd2fc3c8e8ba1411eeb27000e453c3f8`
+- Immutable records: 532
 - Active lane heads: 1
 
 # Active Registrations
@@ -21,7 +21,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
-- [Editor Project Browser and Source Index v1: EPB-U1 active](registry/2026-08/2026-08-19T170252Z-editor-project-browser-source-index-v1-codex-root-120048e91d4c4bd0a3fbfbce78564634.md): `active` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
+- [Editor Project Browser and Source Index v1: EPB-U2 active](registry/2026-08/2026-08-19T180100Z-editor-project-browser-source-index-v1-codex-root.md): `active` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
@@ -38,6 +38,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EPB-U1 bounded handle directory enumeration](verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md) - Verifies bounded independent Windows directory enumeration and truthful unsupported platform behavior.
 - **Verification Evidence**: [SGE-U5 standalone generic Editor product closure](verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md) - Verifies the modular generic authoring workspace, lossless Recovery trajectory, and one-window native product canary.
 - **Verification Evidence**: [SGE-U4 exact export product agreement correction](verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md) - Verifies that Export binds both built products to the exact ordered startup closure before publication.
 - **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
@@ -49,7 +50,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [verification: Completed EUSC-U5 at 993a793 with persisted UI structure, Runtime restart, and e](logs/2026-08/2026-08-18T073313Z-verification-completed-eusc-u5-at-993a793-with-persisted-ui-structure-runtime-restart-and-e-f4ec7a687d604565aded68a407d7a855.md) - Completed EUSC-U5 at 993a793 with persisted UI structure, Runtime restart, and exact native Canvas successor evidence; no successor is activ
 - **Verification Evidence**: [EUSC-U5 persisted UI structure and native Canvas conformance](verification/2026-08/2026-08-18T072626Z-eusc-u5-persisted-ui-structure-and-native-canvas-conformance-436c589870ba4f3c83548d349caa6d4c.md) - Verifies one real source-local UI structure trajectory through migration, Editor composition, Save/Reopen, content refresh, Runtime restart, and one exact native Canvas successor presentation.
 - **Memory Event**: [verification: Completed EUSC-U4 at 9540deb; activated EUSC-U5 under registration 9123772c74da4](logs/2026-08/2026-08-18T061055Z-verification-completed-eusc-u4-at-9540deb-activated-eusc-u5-under-registration-9123772c74da4-543b9e40f8774296bb7c431df4e6050d.md) - Completed EUSC-U4 at 9540deb; activated EUSC-U5 under registration 9123772c74da4f56a63d86ddcd742c9c.
-- **Verification Evidence**: [EUSC-U4 egui structural authoring workflow](verification/2026-08/2026-08-18T060603Z-eusc-u4-egui-structural-authoring-workflow-af32c829b365491e84fe0af17c46d6eb.md) - Verifies the bounded egui Add, Move/Reparent, and Delete workflow, exact frame-lowered action parity, stale-state containment, keyboard accessibility, and Host-owned outcome focus.
 
 # Integration Notes
 
