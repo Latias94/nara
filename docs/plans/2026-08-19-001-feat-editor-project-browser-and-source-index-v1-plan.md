@@ -370,9 +370,9 @@ All questions below are explicitly deferred and do not block this implementation
   closure members.** Extract the existing bundle/Adapter-backed document decode/publication logic
   into a Host-private admission basis owned by the Authoring session. Each Open gets a fresh bounded
   per-document attempt and exact source identity; Runtime registry/plan and project Rust remain absent.
-- KTD13. **Normalize declared roots once, before traversal.** Convert effective manifest roots into a
-  canonical capability-relative trie carrying all logical roles. Missing roots become explicit
-  unavailable facts; non-directory/unproven roots become scoped diagnostics; duplicate and
+- KTD13. **Normalize declared roots once, before traversal.** Convert the small fixed set of
+  effective manifest roots into one ordered capability-relative root/role set. Missing roots become
+  explicit unavailable facts; non-directory/unproven roots become scoped diagnostics; duplicate and
   ancestor/descendant roots are scanned once. If paths that normalize to the same canonical/alias
   key resolve to different native identities, or if their canonical spelling is ambiguous, reject
   the affected candidate instead of guessing. Distinct declared roots normally have distinct
@@ -495,7 +495,7 @@ EditorProjectBrowserView (owned immutable Arc-backed frame value)
   selected_path
   path/kind filters and expanded paths
   bounded diagnostics
-  pending_work: None | Scan | Query | DocumentOpen
+  pending_work: None | Scan | Query
 
 SourceIndexDiagnosticView
   code / phase
@@ -664,16 +664,14 @@ last-good snapshot without coupling the Runtime closure or document authority.
 - `src/project_host/runtime/editor/persistence.rs`
 - `src/project_host/runtime/editor/content_refresh.rs` only if the new generation must be retired on
   an existing source refresh
-- `editor/src/app.rs` and `editor/src/platform.rs` only for the pending-work/redraw seam; these files
-  must not gain scan state or filesystem calls
 - `src/project_host.rs` or `src/project_host/runtime.rs` only for the narrow frame projection seam
 - focused tests under `src/project_host/runtime/tests.rs` or a new `tests/editor_project_browser.rs`
 
 **Approach:**
 
 - Construct the scan from the existing Authoring Project root capability and effective manifest
-  paths. Normalize roots once into a role-bearing capability-relative trie: missing roots become
-  visible unavailable facts, non-directory/unproven roots become scoped diagnostics, duplicate or
+  paths. Normalize roots once into an ordered role-bearing capability-relative set: missing roots
+  become visible unavailable facts, non-directory/unproven roots become scoped diagnostics, duplicate or
   ancestor/descendant roots are scanned once, and identity/canonical aliases fail the affected
   candidate rather than being guessed. Never reopen the root through an ambient path.
 - Use a FIFO frontier containing only relative directory paths and expected identities. The attempt
@@ -711,9 +709,9 @@ last-good snapshot without coupling the Runtime closure or document authority.
   ReadyWithDiagnostics; a native error that leaves a directory incomplete publishes nothing.
 - Runtime closure digest and Runtime/Export acceptance are unchanged by adding unreferenced files to
   the browser's declared roots.
-- A scan with pending work continues to advance under the native `ControlFlow::Wait` loop: the Host
-  exposes a narrow pending-work signal and app/platform schedule bounded follow-up redraws until the
-  attempt reaches a terminal state.
+- A scan with pending work exposes a narrow Host-owned progress signal that remains true until the
+  attempt reaches a terminal state. Native `ControlFlow::Wait` scheduling is verified when U4 wires
+  this signal into the frame/app/platform composition.
 
 **Verification:**
 
@@ -803,7 +801,7 @@ duplicating Host state or filesystem access.
 - `crates/nara_tooling_egui/src/tests.rs` or new focused browser tests
 - `src/project_host/runtime/editor/actions.rs`
 - `editor/src/app.rs` only for frame/action composition
-- `editor/src/platform.rs` only to consume the existing pending-work redraw signal
+- `editor/src/platform.rs` only to consume the unified scan/query pending-work redraw signal
 
 **Approach:**
 
@@ -817,6 +815,9 @@ duplicating Host state or filesystem access.
   revision; expose query work through the same pending-work signal used by scans so
   `ControlFlow::Wait` cannot strand a half-built projection. egui retains only widget transients and
   performs no filesystem reads or source sorting.
+- Compose the Host scan and tooling query signals once in the frame/app boundary; platform requests
+  bounded follow-up redraws only for Scan or Query work. Document Open and dirty-close decisions
+  remain in the existing workspace-intent state and never create a redraw spin.
 - Implement `EguiProjectBrowserPanel` as a separate module with a bounded tree/list, kind/status
   badges, search field, kind filter, Refresh button, and Open button. Use virtualized visible-row
   rendering with a hard per-frame row limit; do not instantiate controls for the full snapshot.
