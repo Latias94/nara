@@ -334,15 +334,16 @@ fn render_toolbar(
             document.document,
         )
     });
-    let reopen_document = match frame.reopen_target() {
-        nara_tooling::EditorReopenTarget::OpenDocument { document, .. }
-        | nara_tooling::EditorReopenTarget::ClosedSource { document } => document,
+    let reopen_retryable = match frame.reopen_target() {
+        nara_tooling::EditorReopenTarget::OpenDocument { document, .. } => {
+            persistence_result_allows_request(
+                persistence.result(),
+                EditorPersistenceRequestKind::Reopen,
+                document,
+            )
+        }
+        nara_tooling::EditorReopenTarget::Unavailable => false,
     };
-    let reopen_retryable = persistence_result_allows_request(
-        persistence.result(),
-        EditorPersistenceRequestKind::Reopen,
-        reopen_document,
-    );
     let mutation_available = active_document.is_some()
         && matches!(
             (play_state, selected_viewport),

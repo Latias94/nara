@@ -2,11 +2,15 @@
 
 mod adapter;
 mod bundle;
+mod document;
 mod project;
 mod source_index;
 
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use adapter::{first_party_authoring_adapters, first_party_authoring_preview_registry};
+pub(crate) use document::{
+    AdmittedAuthoringDocument, AuthoringDocumentAdmissionError, AuthoringDocumentKind,
+};
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
     AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,

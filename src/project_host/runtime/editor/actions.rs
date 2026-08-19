@@ -564,13 +564,10 @@ impl EditorProjectSession {
                         }
                         document
                     }
-                    EditorReopenTarget::ClosedSource { document } => {
-                        if self.workspace.document_kind(document).is_some() {
-                            return EditorActionOutcome::Rejected(
-                                EditorActionRejection::InvalidReopenTarget,
-                            );
-                        }
-                        document
+                    EditorReopenTarget::Unavailable => {
+                        return EditorActionOutcome::Rejected(
+                            EditorActionRejection::InvalidReopenTarget,
+                        );
                     }
                 };
                 let outcome = self.request_persistence(EditorPersistenceCommand::Reopen {

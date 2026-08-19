@@ -184,8 +184,10 @@ pub fn request_persistence(
             let target = frame.reopen_target();
             if let Some(document) = document {
                 let target_document = match target {
-                    nara::tooling::EditorReopenTarget::OpenDocument { document, .. }
-                    | nara::tooling::EditorReopenTarget::ClosedSource { document } => document,
+                    nara::tooling::EditorReopenTarget::OpenDocument { document, .. } => document,
+                    nara::tooling::EditorReopenTarget::Unavailable => {
+                        panic!("the requested document has no reopen target")
+                    }
                 };
                 assert_eq!(target_document, document);
             }

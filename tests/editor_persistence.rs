@@ -7,7 +7,10 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -21,7 +24,11 @@ use nara::{
         CapabilityRights, DirectoryCapability, ExpectedTarget, HostCapabilityOptions,
         RelativeComponent, TrustMode,
     },
-    project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
+    project_host::{
+        EditorProjectSession, TrustedCompiledEditorProjectIntent,
+        advanced::built_in_schema_providers,
+    },
+    reflect::AuthoringSchemaBundle,
     scene::{
         SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
         ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -42,6 +49,7 @@ use nara::{
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static BUILT_IN_AUTHORING_SCHEMA_BUNDLE: OnceLock<Box<[u8]>> = OnceLock::new();
 const ASYNC_DRIVER_TIMEOUT: Duration = Duration::from_secs(5);
 const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(1);
 
@@ -150,7 +158,7 @@ fn persistence_commit_rejects_content_changed_outside_the_temporary_capability()
 }
 
 #[test]
-fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_bytes() {
+fn save_advances_only_the_captured_revision_then_close_releases_the_lane() {
     let project = TestProject::new("save-reopen");
     let mut editor = EditorProjectSession::open_trusted_compiled(
         project.capability(),
@@ -321,21 +329,19 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
     );
     editor.drive_editor_frame(Duration::ZERO);
     assert!(editor.current_frame().workspace().scenes.is_empty());
-
     assert_eq!(
-        editor_driver::request_persistence(
-            &mut editor,
-            EditorPersistenceCommand::Reopen { document: None },
-        ),
-        EditorPersistenceRequestResult::Accepted
+        editor.current_frame().reopen_target(),
+        nara::tooling::EditorReopenTarget::Unavailable
     );
-    let reopened = editor
-        .drive_editor_frame(std::time::Duration::ZERO)
-        .persistence();
-    let reopened_document = match reopened.result() {
-        Some(EditorPersistenceResult::Opened { document, .. }) => document,
-        other => panic!("expected reopened document, got {other:?}"),
-    };
+
+    drop(editor);
+
+    let editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("a new Editor session should reopen the persisted source");
+    let reopened_document = editor.current_frame().workspace().active_document.unwrap();
     let reopened = current_scene_model(&editor, reopened_document);
     let ids = reopened
         .editor
@@ -1135,6 +1141,12 @@ impl TestProject {
         fs::create_dir_all(root.join("assets")).unwrap();
         fs::create_dir_all(root.join("scenes")).unwrap();
         fs::create_dir_all(root.join("prefabs")).unwrap();
+        fs::create_dir_all(root.join("schema")).unwrap();
+        fs::write(
+            root.join("schema/authoring.bundle.json"),
+            built_in_authoring_schema_bundle(),
+        )
+        .unwrap();
         fs::write(
             root.join("nara.toml"),
             format!(
@@ -1150,6 +1162,9 @@ prefabs = "prefabs"
 
 [startup]
 default_scene = "startup.scene.json"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
 preset = "local-headless"
@@ -1179,6 +1194,17 @@ requested = ["runtime-2d"]
     fn scene_path(&self) -> PathBuf {
         self.root.join("scenes/startup.scene.json")
     }
+}
+
+fn built_in_authoring_schema_bundle() -> &'static [u8] {
+    BUILT_IN_AUTHORING_SCHEMA_BUNDLE.get_or_init(|| {
+        AuthoringSchemaBundle::from_trusted_provider_definitions(built_in_schema_providers())
+            .unwrap()
+            .to_json_string()
+            .unwrap()
+            .into_bytes()
+            .into_boxed_slice()
+    })
 }
 
 impl Drop for TestProject {

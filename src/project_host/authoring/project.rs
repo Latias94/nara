@@ -22,16 +22,16 @@ use nara_scene::__private::{
     fork_published_authoring_scene_document,
 };
 use nara_scene::{
-    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
-    AuthoringRecordFact, PrefabDocument, PrefabDocumentCandidate, PublishedAuthoringPrefabDocument,
-    PublishedAuthoringSceneDocument, SceneDocument, SceneDocumentCandidate, SceneEntityRecord,
-    SceneFileLimits, SceneFormatError, ScenePatchDocument, ScenePatchOperation,
-    UnavailableRecordManifestEntry,
+    AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringRecordFact,
+    PrefabDocument, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
+    SceneDocument, SceneEntityRecord, SceneFileLimits, SceneFormatError, ScenePatchDocument,
+    ScenePatchOperation, UnavailableRecordManifestEntry,
 };
 
 use super::{
     AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
     AuthoringProjectAdmissionUsage, AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt,
+    document::{AuthoringDocumentDataError, admit_prefab_bytes, admit_scene_bytes},
     source_index::ProjectSourceIndexState,
 };
 
@@ -244,6 +244,7 @@ impl Debug for AuthoringPrefabSource {
 struct AuthoringProjectSnapshotInner {
     schema: AuthoringSchemaReceipt,
     adapters: Box<[AuthoringAdapterReceipt]>,
+    scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_source: Arc<AuthoringSourceFact>,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
@@ -402,6 +403,7 @@ impl AuthoringProjectReceipt {
             snapshot: AuthoringProjectSessionSnapshot {
                 schema: inner.schema,
                 adapters: inner.adapters,
+                scene_limits: inner.scene_limits,
                 readiness: inner.readiness,
                 startup_source: inner.startup_source,
                 startup_scene: inner.startup_scene,
@@ -451,6 +453,7 @@ pub(crate) struct AuthoringProjectSessionParts {
 pub(crate) struct AuthoringProjectSessionSnapshot {
     schema: AuthoringSchemaReceipt,
     adapters: Box<[AuthoringAdapterReceipt]>,
+    scene_limits: SceneFileLimits,
     readiness: AuthoringProjectReadiness,
     startup_source: Arc<AuthoringSourceFact>,
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
@@ -540,6 +543,20 @@ impl AuthoringProjectSessionSnapshot {
 
     pub(crate) fn request_source_index_refresh(&mut self) -> bool {
         self.source_index.request_refresh()
+    }
+
+    pub(crate) fn admit_indexed_document(
+        &self,
+        index: &super::ProjectSourceIndexSnapshot,
+        relative_path: &str,
+        expected_kind: super::AuthoringDocumentKind,
+    ) -> Result<super::AdmittedAuthoringDocument, super::AuthoringDocumentAdmissionError> {
+        super::document::AuthoringDocumentAdmissionBasis::new(
+            &self.schema,
+            &self.adapters,
+            self.scene_limits,
+        )
+        .admit(index, relative_path, expected_kind)
     }
 }
 
@@ -931,6 +948,7 @@ impl PreparedAuthoringProject {
             inner: AuthoringProjectSnapshotInner {
                 schema: self.schema,
                 adapters: self.adapters,
+                scene_limits: self.scene_limits,
                 readiness,
                 startup_source,
                 startup_scene,
@@ -1134,11 +1152,16 @@ fn admit_scene_document(
     let encoded_limit = ByteLimit::new(source.read_limit)
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
     let limits = scene_limits.with_encoded_bytes(encoded_limit);
-    let candidate = decode_scene_candidate(source, limits)?;
-    let candidate = candidate
-        .admit_authoring(document_source(source)?, bundle, adapters)
-        .map_err(|error| map_publication_error(source, error, budget))?;
-    let published = Arc::new(candidate.publish());
+    let published = Arc::new(
+        admit_scene_bytes(
+            source.source.project_path(),
+            &source.bytes,
+            limits,
+            bundle,
+            adapters,
+        )
+        .map_err(|error| map_document_data_error(source, error, budget))?,
+    );
     charge_published_document(
         PublishedDocumentCharge {
             source: &source.source,
@@ -1165,11 +1188,16 @@ fn admit_prefab_document(
     let encoded_limit = ByteLimit::new(source.read_limit)
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
     let limits = scene_limits.with_encoded_bytes(encoded_limit);
-    let candidate = decode_prefab_candidate(source, limits)?;
-    let candidate = candidate
-        .admit_authoring(document_source(source)?, bundle, adapters)
-        .map_err(|error| map_publication_error(source, error, budget))?;
-    let published = Arc::new(candidate.publish());
+    let published = Arc::new(
+        admit_prefab_bytes(
+            source.source.project_path(),
+            &source.bytes,
+            limits,
+            bundle,
+            adapters,
+        )
+        .map_err(|error| map_document_data_error(source, error, budget))?,
+    );
     charge_published_document(
         PublishedDocumentCharge {
             source: &source.source,
@@ -1185,84 +1213,44 @@ fn admit_prefab_document(
     Ok(published)
 }
 
-fn decode_scene_candidate(
+fn map_document_data_error(
     source: &ReadAuthoringSource,
-    limits: SceneFileLimits,
-) -> Result<SceneDocumentCandidate, AuthoringProjectSourceAdmissionError> {
-    let result = if source.source.project_path().as_str().ends_with(".ron") {
-        SceneDocumentCandidate::decode_ron_bytes_with_limits(&source.bytes, limits)
-    } else if source.source.project_path().as_str().ends_with(".json") {
-        SceneDocumentCandidate::decode_json_bytes_with_limits(&source.bytes, limits)
-    } else {
-        return Err(
-            AuthoringProjectSourceAdmissionError::UnsupportedSourceEncoding {
-                kind: AuthoringSourceKind::Scene,
-                path: source.source.project_path().clone(),
-            },
-        );
-    };
-    result.map_err(
-        |source_error| AuthoringProjectSourceAdmissionError::SourceFormat {
-            kind: AuthoringSourceKind::Scene,
-            path: source.source.project_path().clone(),
-            source: source_error,
-        },
-    )
-}
-
-fn decode_prefab_candidate(
-    source: &ReadAuthoringSource,
-    limits: SceneFileLimits,
-) -> Result<PrefabDocumentCandidate, AuthoringProjectSourceAdmissionError> {
-    let result = if source.source.project_path().as_str().ends_with(".ron") {
-        PrefabDocumentCandidate::decode_ron_bytes_with_limits(&source.bytes, limits)
-    } else if source.source.project_path().as_str().ends_with(".json") {
-        PrefabDocumentCandidate::decode_json_bytes_with_limits(&source.bytes, limits)
-    } else {
-        return Err(
-            AuthoringProjectSourceAdmissionError::UnsupportedSourceEncoding {
-                kind: AuthoringSourceKind::Prefab,
-                path: source.source.project_path().clone(),
-            },
-        );
-    };
-    result.map_err(
-        |source_error| AuthoringProjectSourceAdmissionError::SourceFormat {
-            kind: AuthoringSourceKind::Prefab,
-            path: source.source.project_path().clone(),
-            source: source_error,
-        },
-    )
-}
-
-fn document_source(
-    source: &ReadAuthoringSource,
-) -> Result<AuthoringDocumentSource, AuthoringProjectSourceAdmissionError> {
-    let path =
-        AssetPath::new(source.source.project_path().as_str().to_owned()).map_err(|error| {
-            AuthoringProjectSourceAdmissionError::DocumentSourcePath {
-                path: source.source.project_path().clone(),
-                source: error,
-            }
-        })?;
-    Ok(AuthoringDocumentSource::new(AssetRef::Path(path)))
-}
-
-fn map_publication_error(
-    source: &ReadAuthoringSource,
-    error: AuthoringDocumentPublicationError,
+    error: AuthoringDocumentDataError,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> AuthoringProjectSourceAdmissionError {
-    if let Err(budget_error) = budget.charge_diagnostics(
-        error.diagnostics().len(),
-        error.diagnostics().retained_bytes(),
-    ) {
-        return budget_error.into();
-    }
-    AuthoringProjectSourceAdmissionError::SourcePublication {
-        kind: source.source.kind(),
-        path: source.source.project_path().clone(),
-        source: error,
+    match error {
+        AuthoringDocumentDataError::UnsupportedEncoding => {
+            AuthoringProjectSourceAdmissionError::UnsupportedSourceEncoding {
+                kind: source.source.kind(),
+                path: source.source.project_path().clone(),
+            }
+        }
+        AuthoringDocumentDataError::Format(source_error) => {
+            AuthoringProjectSourceAdmissionError::SourceFormat {
+                kind: source.source.kind(),
+                path: source.source.project_path().clone(),
+                source: source_error,
+            }
+        }
+        AuthoringDocumentDataError::Source(source_error) => {
+            AuthoringProjectSourceAdmissionError::DocumentSourcePath {
+                path: source.source.project_path().clone(),
+                source: source_error,
+            }
+        }
+        AuthoringDocumentDataError::Publication(source_error) => {
+            if let Err(budget_error) = budget.charge_diagnostics(
+                source_error.diagnostics().len(),
+                source_error.diagnostics().retained_bytes(),
+            ) {
+                return budget_error.into();
+            }
+            AuthoringProjectSourceAdmissionError::SourcePublication {
+                kind: source.source.kind(),
+                path: source.source.project_path().clone(),
+                source: source_error,
+            }
+        }
     }
 }
 

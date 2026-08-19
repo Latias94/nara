@@ -83,12 +83,10 @@ impl Default for EditorFrameClock {
 /// Exact source target exposed for the next Reopen action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorReopenTarget {
+    Unavailable,
     OpenDocument {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
-    },
-    ClosedSource {
-        document: EditorDocumentId,
     },
 }
 
@@ -496,8 +494,8 @@ impl EditorAction {
         match self {
             Self::Mutate(mutation) => Some(mutation.document()),
             Self::Persistence(EditorPersistenceAction::Reopen { target }) => Some(match target {
-                EditorReopenTarget::OpenDocument { document, .. }
-                | EditorReopenTarget::ClosedSource { document } => *document,
+                EditorReopenTarget::OpenDocument { document, .. } => *document,
+                EditorReopenTarget::Unavailable => return None,
             }),
             Self::ApplyChanges { document, .. } => Some(*document),
             Self::Gesture(action) => action.revision_advancing_document(),

@@ -76,16 +76,17 @@ impl EditorProjectSession {
         };
         let project = self.editor_project_view();
         let diagnostics = self.diagnostics.clone();
-        let reopen_document = workspace.active_document.unwrap_or(self.source_document);
-        let reopen_target = match workspace.document(reopen_document) {
-            Some(document) => EditorReopenTarget::OpenDocument {
-                document: reopen_document,
-                base_revision: document.revision,
-            },
-            None => EditorReopenTarget::ClosedSource {
-                document: reopen_document,
-            },
-        };
+        let reopen_target = workspace
+            .active_document
+            .and_then(|document| {
+                workspace
+                    .document(document)
+                    .map(|facts| EditorReopenTarget::OpenDocument {
+                        document,
+                        base_revision: facts.revision,
+                    })
+            })
+            .unwrap_or(EditorReopenTarget::Unavailable);
         let frame = Arc::new(self.frame_clock.publish(
             workspace,
             project,

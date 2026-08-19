@@ -168,17 +168,15 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
         &mut application,
         EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AcknowledgeResult),
     );
-    let reopened = dispatch(
-        &mut application,
-        EditorAction::Persistence(EditorPersistenceAction::Reopen {
-            target: ready_to_reopen.reopen_target(),
-        }),
+    assert_eq!(
+        ready_to_reopen.reopen_target(),
+        nara::tooling::EditorReopenTarget::Unavailable
     );
-    let reopened_document = match reopened.persistence().result() {
-        Some(EditorPersistenceResult::Opened { document, .. }) => document,
-        other => panic!("expected the clean-room Scene to reopen, got {other:?}"),
-    };
-    assert_ne!(reopened_document, original_document);
+    drop(application);
+
+    let mut application = open_ordinary(project.root());
+    let reopened = current_frame(&application);
+    let reopened_document = reopened.workspace().active_document.unwrap();
     let reopened_scene = reopened.workspace().active_scene.as_ref().unwrap();
     assert!(!reopened_scene.dirty);
     assert_eq!(reopened_scene.revision, reopened_scene.saved_revision);

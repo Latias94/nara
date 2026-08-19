@@ -307,28 +307,35 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
             EditorPersistenceAction::AcknowledgeResult,
         )],
     );
-    dispatch(
+    let closed = dispatch(
         &mut application,
         [EditorAction::WorkspaceIntent(
             EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::CloseDocument { document }),
         )],
     );
+    assert!(closed.workspace().active_document.is_none());
     let closed = dispatch(
         &mut application,
         [EditorAction::WorkspaceIntent(
             EditorWorkspaceIntentAction::AcknowledgeResult,
         )],
     );
-    let reopened = dispatch(
-        &mut application,
-        [EditorAction::Persistence(EditorPersistenceAction::Reopen {
-            target: closed.reopen_target(),
-        })],
+    assert_eq!(
+        closed.reopen_target(),
+        nara::tooling::EditorReopenTarget::Unavailable
     );
-    let reopened_document = match reopened.persistence().result() {
-        Some(EditorPersistenceResult::Opened { document, .. }) => document,
-        other => panic!("expected the saved starter Scene to reopen, got {other:?}"),
-    };
+    drop(application);
+
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(&project),
+        TrustedCompiledEditorProjectIntent::new().with_profile("desktop"),
+    )
+    .expect("a new Editor session must reopen the saved starter Scene");
+    application.set_scene_preview_extent(Extent2d::new(960, 540));
+    let reopened_document = current_frame(&application)
+        .workspace()
+        .active_document
+        .unwrap();
     select_entity(&mut application, reopened_document, GAME_VIEW_PROBE_ENTITY);
     let reopened = current_frame(&application);
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
@@ -497,16 +504,22 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
             EditorWorkspaceIntentAction::AcknowledgeResult,
         )],
     );
-    let reopened = dispatch(
-        &mut application,
-        [EditorAction::Persistence(EditorPersistenceAction::Reopen {
-            target: ready_to_reopen.reopen_target(),
-        })],
+    assert_eq!(
+        ready_to_reopen.reopen_target(),
+        nara::tooling::EditorReopenTarget::Unavailable
     );
-    let reopened_document = match reopened.persistence().result() {
-        Some(EditorPersistenceResult::Opened { document, .. }) => document,
-        other => panic!("expected a reopened document, got {other:?}"),
-    };
+    drop(application);
+
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(&project),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("a new Editor session must reopen the saved starter Scene");
+    application.set_scene_preview_extent(Extent2d::new(960, 540));
+    let reopened_document = current_frame(&application)
+        .workspace()
+        .active_document
+        .unwrap();
     let mut harness = editor_harness(application);
     harness.get_by_label_contains(CREATED_ENTITY).click();
     harness.run();

@@ -1398,15 +1398,14 @@ fn frame_with_feedback(
     field_feedback: Option<EditorFieldFeedback>,
 ) -> EditorFrameModel {
     let active_document = scene.as_ref().map(|scene| scene.document);
-    let reopen_target = scene.as_ref().map_or(
-        EditorReopenTarget::ClosedSource {
-            document: EditorDocumentId::from_raw(1),
-        },
-        |scene| EditorReopenTarget::OpenDocument {
-            document: scene.document,
-            base_revision: scene.revision,
-        },
-    );
+    let reopen_target = scene
+        .as_ref()
+        .map_or(EditorReopenTarget::Unavailable, |scene| {
+            EditorReopenTarget::OpenDocument {
+                document: scene.document,
+                base_revision: scene.revision,
+            }
+        });
     let history = scene
         .as_ref()
         .map(|scene| scene.editor.inspector.history)

@@ -4,6 +4,7 @@ mod actions;
 #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
 mod authoring_preview;
 mod content_refresh;
+mod document_open;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
 mod model;
@@ -17,6 +18,7 @@ mod ui_authoring;
 #[cfg(feature = "presentation-ui")]
 mod ui_preview;
 
+pub(crate) use document_open::EditorDocumentOpenRequestResult;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
     EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartActivation,
@@ -631,6 +633,18 @@ impl AuthoringPrefabSourceObservation {
     }
 }
 
+struct EditorScenePersistenceLane {
+    project_path: Arc<str>,
+    document: EditorDocumentId,
+    host: ScenePersistenceHost,
+}
+
+struct EditorPrefabPersistenceLane {
+    project_path: Arc<str>,
+    document: EditorDocumentId,
+    host: PrefabPersistenceHost,
+}
+
 struct TrustedCompiledEditorLane {
     plan: RuntimePlan,
     content_candidate: ProjectSettingsCandidate,
@@ -657,15 +671,14 @@ struct TrustedCompiledEditorLane {
 pub struct EditorProjectSession {
     workspace: EditorWorkspace,
     persistence_authority: EditorPersistenceAuthority,
-    scene_title: String,
-    source_document: EditorDocumentId,
+    scene_lane: Option<EditorScenePersistenceLane>,
     execution: EditorExecutionLane,
     project_content: EditorProjectContentView,
     next_project_content_generation: u64,
     pending_content_refresh: Option<PendingProjectContentRefresh>,
     failed_content_refresh: Option<PendingProjectContentRefresh>,
-    persistence: ScenePersistenceHost,
-    prefab_persistence: Option<PrefabPersistenceHost>,
+    prefab_lane: Option<EditorPrefabPersistenceLane>,
+    pending_document_open: Option<document_open::PreparedAuthoringDocumentOpen>,
     authoring_prefab_source_observations:
         BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
     #[cfg(test)]
@@ -852,6 +865,11 @@ impl EditorProjectSession {
             .as_ref()
             .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
         let startup_title = startup.as_str().to_owned();
+        let startup_project_path: Arc<str> = Arc::from(format!(
+            "{}/{}",
+            settings.paths.scenes.as_str(),
+            startup.as_str()
+        ));
         let startup_source = parts.snapshot.startup_source();
         let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
             &scenes,
@@ -886,15 +904,18 @@ impl EditorProjectSession {
         let mut session = Self {
             workspace,
             persistence_authority,
-            scene_title: startup_title,
-            source_document: document,
+            scene_lane: Some(EditorScenePersistenceLane {
+                project_path: startup_project_path,
+                document,
+                host: persistence,
+            }),
             execution: EditorExecutionLane::Authoring(parts.snapshot),
             project_content: EditorProjectContentView::NotInstalled,
             next_project_content_generation: 1,
             pending_content_refresh: None,
             failed_content_refresh: None,
-            persistence,
-            prefab_persistence: None,
+            prefab_lane: None,
+            pending_document_open: None,
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -1035,6 +1056,11 @@ impl EditorProjectSession {
             .default_scene
             .as_ref()
             .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
+        let startup_project_path: Arc<str> = Arc::from(format!(
+            "{}/{}",
+            candidate.settings().paths.scenes.as_str(),
+            startup.as_str()
+        ));
         let opened = ScenePersistenceHost::open(
             &scenes,
             startup.as_str(),
@@ -1067,8 +1093,11 @@ impl EditorProjectSession {
         let mut session = Self {
             workspace,
             persistence_authority,
-            scene_title: startup.as_str().to_owned(),
-            source_document: document,
+            scene_lane: Some(EditorScenePersistenceLane {
+                project_path: startup_project_path,
+                document,
+                host: opened.host,
+            }),
             execution: EditorExecutionLane::TrustedCompiled(Box::new(TrustedCompiledEditorLane {
                 plan,
                 content_candidate: candidate,
@@ -1092,8 +1121,8 @@ impl EditorProjectSession {
             next_project_content_generation: 2,
             pending_content_refresh: None,
             failed_content_refresh: None,
-            persistence: opened.host,
-            prefab_persistence: None,
+            prefab_lane: None,
+            pending_document_open: None,
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -1618,47 +1647,51 @@ impl EditorProjectSession {
         let authoring = self.authoring_project().is_some();
         let mut projection_rejected = false;
         let mut projection_omitted = false;
-        let source_identity = self
-            .workspace
-            .scene(self.source_document)
-            .map(|slot| (self.source_document, slot.revision()));
+        let scene_document = self.scene_lane.as_ref().map(|lane| lane.document);
+        let source_identity = scene_document.and_then(|document| {
+            self.workspace
+                .scene(document)
+                .map(|slot| (document, slot.revision()))
+        });
         let requires_projection = source_identity.is_some_and(|(document, revision)| {
             self.preview.requires_source_projection(document, revision)
         });
-        let source = self.workspace.scene(self.source_document).and_then(|slot| {
-            let scene = if requires_projection {
-                let (scene, omissions) = if authoring {
-                    match authoring_preview::project_scene(
-                        self.source_document,
-                        slot.revision(),
-                        slot.session(),
-                    ) {
-                        Ok((scene, omissions)) => (scene, omissions),
-                        Err(_) => {
-                            projection_rejected = true;
-                            return None;
-                        }
-                    }
-                } else {
-                    (
-                        slot.session().document().clone(),
-                        authoring_preview::EditorAuthoringPreviewOmissions::empty(
-                            self.source_document,
+        let source = scene_document.and_then(|document| {
+            self.workspace.scene(document).and_then(|slot| {
+                let scene = if requires_projection {
+                    let (scene, omissions) = if authoring {
+                        match authoring_preview::project_scene(
+                            document,
                             slot.revision(),
-                        ),
-                    )
+                            slot.session(),
+                        ) {
+                            Ok((scene, omissions)) => (scene, omissions),
+                            Err(_) => {
+                                projection_rejected = true;
+                                return None;
+                            }
+                        }
+                    } else {
+                        (
+                            slot.session().document().clone(),
+                            authoring_preview::EditorAuthoringPreviewOmissions::empty(
+                                document,
+                                slot.revision(),
+                            ),
+                        )
+                    };
+                    projection_omitted = !omissions.is_empty();
+                    Some((scene, omissions))
+                } else {
+                    None
                 };
-                projection_omitted = !omissions.is_empty();
-                Some((scene, omissions))
-            } else {
-                None
-            };
-            Some(preview::EditorPreviewSource {
-                document: self.source_document,
-                revision: slot.revision(),
-                projection: scene.map(|(scene, omissions)| {
-                    preview::EditorPreviewProjection::new(scene, omissions)
-                }),
+                Some(preview::EditorPreviewSource {
+                    document,
+                    revision: slot.revision(),
+                    projection: scene.map(|(scene, omissions)| {
+                        preview::EditorPreviewProjection::new(scene, omissions)
+                    }),
+                })
             })
         });
         if projection_rejected {
@@ -1869,6 +1902,7 @@ impl EditorProjectSession {
 
         match decision {
             EditorCloseDecision::Cancel => {
+                self.cancel_pending_document_open();
                 self.workspace_intent_result =
                     Some(EditorWorkspaceIntentResult::Cancelled { intent });
             }
@@ -1897,6 +1931,14 @@ impl EditorProjectSession {
                     let EditorPersistenceRequestResult::Rejected(reason) = requested else {
                         unreachable!()
                     };
+                    if self.pending_document_open.is_some() {
+                        self.cancel_pending_document_open();
+                        self.workspace_intent_result =
+                            Some(EditorWorkspaceIntentResult::Cancelled { intent });
+                        return EditorWorkspaceIntentRequestResult::Rejected(
+                            EditorWorkspaceIntentRejection::PersistenceRejected(reason),
+                        );
+                    }
                     self.pending_workspace_intent = Some(pending);
                     return EditorWorkspaceIntentRequestResult::Rejected(
                         EditorWorkspaceIntentRejection::PersistenceRejected(reason),
@@ -2237,14 +2279,32 @@ impl EditorProjectSession {
         };
         match pending {
             PendingWorkspaceIntent::CloseDocument(pending) => {
-                let closing_prefab = self.workspace.document_kind(pending.document)
-                    == Some(EditorDocumentKind::Prefab);
+                let closing_kind = self.workspace.document_kind(pending.document);
                 let report = self.workspace.__discard_document(pending.document);
-                if report.applied && closing_prefab {
-                    self.prefab_persistence = None;
+                let applied = report.applied;
+                if report.applied {
+                    match closing_kind {
+                        Some(EditorDocumentKind::Scene)
+                            if self
+                                .scene_lane
+                                .as_ref()
+                                .is_some_and(|lane| lane.document == pending.document) =>
+                        {
+                            self.scene_lane = None;
+                        }
+                        Some(EditorDocumentKind::Prefab)
+                            if self
+                                .prefab_lane
+                                .as_ref()
+                                .is_some_and(|lane| lane.document == pending.document) =>
+                        {
+                            self.prefab_lane = None;
+                        }
+                        _ => {}
+                    }
                 }
                 let _ = self.diagnostics.extend(report.diagnostics);
-                self.workspace_intent_result = Some(if report.applied {
+                self.workspace_intent_result = Some(if applied {
                     EditorWorkspaceIntentResult::Applied {
                         intent: EditorWorkspaceIntent::CloseDocument {
                             document: pending.document,
@@ -2258,6 +2318,11 @@ impl EditorProjectSession {
                         reason: EditorWorkspaceIntentRejection::MissingDocument,
                     }
                 });
+                if applied {
+                    self.publish_pending_document_open();
+                } else {
+                    self.cancel_pending_document_open();
+                }
             }
             PendingWorkspaceIntent::Exit(mut pending) => {
                 pending.phase = EditorWorkspaceIntentPhase::Prepared;

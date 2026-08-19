@@ -34,17 +34,18 @@ use nara_fs::{
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+use nara_reflect::AuthoringSchemaBundleOwner;
+#[cfg(feature = "tooling")]
+use nara_reflect::ComponentFieldId;
 use nara_reflect::{
     AuthoringSchemaBundle, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
     ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
+#[cfg(feature = "tooling")]
+use nara_scene::{AuthoringScalarEdit, SCENE_COMPONENTS_SCHEMA_OWNER_ID};
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
-use nara_reflect::{AuthoringSchemaBundleOwner, ComponentFieldId};
-#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
-use nara_scene::{
-    AuthoringScalarEdit, PrefabDocument, PrefabInstance, SCENE_COMPONENTS_SCHEMA_OWNER_ID,
-    SCENE_COMPONENTS_SCHEMA_PROVIDER,
-};
+use nara_scene::{PrefabDocument, PrefabInstance, SCENE_COMPONENTS_SCHEMA_PROVIDER};
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 #[cfg(feature = "tooling")]
 use nara_scene::{ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
@@ -1299,6 +1300,533 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
     let second = editor.project_source_index_snapshot().unwrap();
     assert_eq!(second.generation().get(), 2);
     assert!(!Arc::ptr_eq(&first, &second));
+}
+
+#[cfg(feature = "tooling")]
+fn open_generic_editor_with_ready_index(
+    project: &TestProject,
+) -> super::editor::EditorProjectSession {
+    let mut host = super::editor::EditorProjectOpenHost::new();
+    let mut attempt = host.begin(project.writable_capability(), None);
+    let mut editor = loop {
+        match host.advance(attempt) {
+            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Opened(session) => break session,
+            super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
+                "the generic project should open before document admission: {:?}",
+                failure.diagnostics()
+            ),
+        }
+    };
+    for _ in 0..128 {
+        if !editor.project_source_index_work_pending() {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    assert!(!editor.project_source_index_work_pending());
+    assert!(matches!(
+        editor.project_source_index_kind(),
+        crate::project_host::authoring::ProjectSourceIndexStateKind::Ready
+            | crate::project_host::authoring::ProjectSourceIndexStateKind::ReadyWithDiagnostics
+    ));
+    assert!(editor.project_source_index_snapshot().is_some());
+    editor
+}
+
+#[cfg(feature = "tooling")]
+fn opened_document(
+    result: super::editor::EditorDocumentOpenRequestResult,
+) -> nara_tooling::EditorDocumentId {
+    match result {
+        super::editor::EditorDocumentOpenRequestResult::Activated { document }
+        | super::editor::EditorDocumentOpenRequestResult::Opened { document } => document,
+        other => panic!("the indexed document was not opened: {other:?}"),
+    }
+}
+
+#[cfg(feature = "tooling")]
+fn make_authoring_name_dirty(
+    editor: &mut super::editor::EditorProjectSession,
+    document: nara_tooling::EditorDocumentId,
+    value: &str,
+) {
+    let base_revision = editor
+        .workspace()
+        .scene(document)
+        .map(|slot| slot.revision())
+        .or_else(|| {
+            editor
+                .workspace()
+                .prefab(document)
+                .map(|slot| slot.revision())
+        })
+        .expect("the editable authoring document is open");
+    let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+        document,
+        base_revision,
+        edit: AuthoringScalarEdit::new(
+            nara_identity::SceneEntityId::new("editable-name").unwrap(),
+            ComponentTypeId::new("nara.scene.Name"),
+            ComponentFieldId::new("value"),
+            ComponentValue::String(value.to_owned()),
+        ),
+    });
+    assert!(report.applied, "{report:?}");
+}
+
+#[cfg(feature = "tooling")]
+fn editable_name_entity(initial_name: &str) -> SceneEntityRecord {
+    let owner =
+        PersistentComponentSchemaOwnerId::try_new(SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str())
+            .unwrap();
+    SceneEntityRecord::new(nara_identity::SceneEntityId::new("editable-name").unwrap())
+        .with_component(
+            ComponentTypeId::new("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String(initial_name.to_owned()),
+            )
+            .with_owner(owner),
+        )
+}
+
+#[cfg(feature = "tooling")]
+fn editable_authoring_scene(initial_name: &str) -> SceneDocument {
+    SceneDocument::from_ordered_roots([editable_name_entity(initial_name)])
+}
+
+#[cfg(feature = "tooling")]
+fn editable_authoring_prefab(initial_name: &str) -> nara_scene::PrefabDocument {
+    nara_scene::PrefabDocument::from_ordered_roots([editable_name_entity(initial_name)])
+}
+
+#[cfg(feature = "tooling")]
+fn scene_name_value(
+    editor: &super::editor::EditorProjectSession,
+    document: nara_tooling::EditorDocumentId,
+) -> String {
+    let component = editor
+        .workspace()
+        .scene(document)
+        .unwrap()
+        .session()
+        .document()
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "editable-name")
+        .unwrap()
+        .components
+        .get(&ComponentTypeId::new("nara.scene.Name"))
+        .unwrap();
+    match &component.value {
+        ComponentValue::String(value) => value.clone(),
+        value => panic!("the editable Name component has an unexpected value: {value:?}"),
+    }
+}
+
+#[cfg(feature = "tooling")]
+fn refresh_project_source_index(
+    editor: &mut super::editor::EditorProjectSession,
+) -> Arc<crate::project_host::authoring::ProjectSourceIndexSnapshot> {
+    assert!(editor.request_project_source_index_refresh());
+    for _ in 0..128 {
+        if !editor.project_source_index_work_pending() {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    assert!(!editor.project_source_index_work_pending());
+    assert!(matches!(
+        editor.project_source_index_kind(),
+        crate::project_host::authoring::ProjectSourceIndexStateKind::Ready
+            | crate::project_host::authoring::ProjectSourceIndexStateKind::ReadyWithDiagnostics
+    ));
+    editor.project_source_index_snapshot().unwrap()
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn generic_editor_opens_closure_external_scene_and_prefab_with_independent_lanes() {
+    let project = TestProject::new("generic-document-admission");
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            nara_identity::SceneEntityId::new("external-scene").unwrap(),
+        )])
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let unknown_owner =
+        PersistentComponentSchemaOwnerId::try_new("example.generic-editor.unknown").unwrap();
+    fs::write(
+        project.root.join("prefabs/external.prefab.json"),
+        nara_scene::PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            nara_identity::SceneEntityId::new("external-prefab").unwrap(),
+        )
+        .with_component(
+            ComponentTypeId::new("example.Unknown"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Bool(true))
+                .with_owner(unknown_owner),
+        )])
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let index = editor.project_source_index_snapshot().unwrap();
+    let opened_scene = editor.open_indexed_authoring_document(
+        Arc::clone(&index),
+        "scenes/external.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    );
+    let scene_document = match opened_scene {
+        super::editor::EditorDocumentOpenRequestResult::Opened { document } => document,
+        other => panic!("closure-external Scene was not opened: {other:?}"),
+    };
+    assert_eq!(editor.workspace().len(), 1);
+    assert_eq!(editor.workspace().active_document(), Some(scene_document));
+    assert_eq!(
+        editor
+            .workspace()
+            .scene(scene_document)
+            .unwrap()
+            .source_binding()
+            .unwrap()
+            .locator(),
+        "scenes/external.scene.json"
+    );
+    assert_eq!(
+        editor
+            .workspace()
+            .scene(scene_document)
+            .unwrap()
+            .authoring_readiness(),
+        Some(nara_scene::AuthoringDocumentReadiness::Complete)
+    );
+
+    let opened_prefab = editor.open_indexed_authoring_document(
+        index,
+        "prefabs/external.prefab.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+    );
+    let prefab_document = match opened_prefab {
+        super::editor::EditorDocumentOpenRequestResult::Opened { document } => document,
+        other => panic!("closure-external Prefab was not opened: {other:?}"),
+    };
+    assert_eq!(editor.workspace().len(), 2);
+    assert!(editor.workspace().scene(scene_document).is_some());
+    assert_eq!(editor.workspace().active_document(), Some(prefab_document));
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .source_binding()
+            .locator(),
+        "prefabs/external.prefab.json"
+    );
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(prefab_document)
+            .unwrap()
+            .authoring_readiness(),
+        Some(nara_scene::AuthoringDocumentReadiness::Degraded)
+    );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn indexed_document_admission_rejections_leave_the_workspace_unchanged() {
+    let project = TestProject::new("generic-document-rejection");
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(project.root.join("scenes/malformed.scene.json"), b"{").unwrap();
+    let oversized = File::create(project.root.join("scenes/oversized.scene.json")).unwrap();
+    oversized
+        .set_len((nara_scene::SceneFileLimits::default().encoded_bytes().get() + 1) as u64)
+        .unwrap();
+    drop(oversized);
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let index = editor.project_source_index_snapshot().unwrap();
+    let original_document = editor.workspace().active_document().unwrap();
+    let original_revision = editor
+        .workspace()
+        .scene(original_document)
+        .unwrap()
+        .revision();
+
+    let rejections = [
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/missing.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/external.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+        ),
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/malformed.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/oversized.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+    ];
+    assert_eq!(
+        rejections,
+        [
+            super::editor::EditorDocumentOpenRequestResult::Rejected {
+                code: "project.editor.document-index-member-missing"
+            },
+            super::editor::EditorDocumentOpenRequestResult::Rejected {
+                code: "project.editor.document-kind-mismatch"
+            },
+            super::editor::EditorDocumentOpenRequestResult::Rejected {
+                code: "project.editor.document-source-format-invalid"
+            },
+            super::editor::EditorDocumentOpenRequestResult::Rejected {
+                code: "project.editor.document-source-too-large"
+            },
+        ]
+    );
+
+    fs::remove_file(project.root.join("scenes/external.scene.json")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/external.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::Rejected {
+            code: "project.editor.document-source-identity-changed"
+        }
+    );
+    assert_eq!(editor.workspace().len(), 1);
+    assert_eq!(
+        editor.workspace().active_document(),
+        Some(original_document)
+    );
+    assert_eq!(
+        editor
+            .workspace()
+            .scene(original_document)
+            .unwrap()
+            .revision(),
+        original_revision
+    );
+
+    let refreshed = refresh_project_source_index(&mut editor);
+    assert!(!Arc::ptr_eq(&index, &refreshed));
+    assert_eq!(
+        editor.open_indexed_authoring_document(
+            index,
+            "scenes/external.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::Rejected {
+            code: "project.editor.document-index-stale"
+        }
+    );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn dirty_scene_retarget_uses_cancel_discard_and_save_before_publication() {
+    let project = TestProject::new("generic-scene-retarget");
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    for name in ["first", "second", "third"] {
+        fs::write(
+            project.root.join(format!("scenes/{name}.scene.json")),
+            editable_authoring_scene(name).to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let index = editor.project_source_index_snapshot().unwrap();
+    let first = opened_document(editor.open_indexed_authoring_document(
+        Arc::clone(&index),
+        "scenes/first.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    ));
+    assert!(editor.acknowledge_workspace_intent_result());
+    make_authoring_name_dirty(&mut editor, first, "cancel-retained");
+
+    assert_eq!(
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/second.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document: first }
+    );
+    assert_eq!(
+        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Cancel),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert_eq!(editor.workspace().active_document(), Some(first));
+    assert!(editor.workspace().scene(first).unwrap().is_dirty());
+    assert!(editor.acknowledge_workspace_intent_result());
+
+    assert!(matches!(
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "scenes/second.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == first
+    ));
+    assert_eq!(
+        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Discard),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let second = editor.workspace().active_document().unwrap();
+    assert_ne!(second, first);
+    assert!(editor.workspace().scene(second).is_some());
+    assert!(editor.acknowledge_workspace_intent_result());
+    make_authoring_name_dirty(&mut editor, second, "saved-before-retarget");
+
+    assert!(matches!(
+        editor.open_indexed_authoring_document(
+            index,
+            "scenes/third.scene.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Scene,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == second
+    ));
+    assert_eq!(
+        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Save),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    let third = editor.workspace().active_document().unwrap();
+    assert_ne!(third, second);
+    assert!(editor.workspace().scene(third).is_some());
+    assert!(
+        fs::read_to_string(project.root.join("scenes/second.scene.json"))
+            .unwrap()
+            .contains("saved-before-retarget")
+    );
+    assert!(editor.acknowledge_workspace_intent_result());
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::AcknowledgeResult),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+
+    let refreshed = refresh_project_source_index(&mut editor);
+    let reopened = opened_document(editor.open_indexed_authoring_document(
+        Arc::clone(&refreshed),
+        "scenes/second.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    ));
+    assert_eq!(scene_name_value(&editor, reopened), "saved-before-retarget");
+    assert!(editor.acknowledge_workspace_intent_result());
+
+    assert_eq!(
+        editor
+            .request_workspace_intent(EditorWorkspaceIntent::CloseDocument { document: reopened }),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(editor.workspace().is_empty());
+    assert_eq!(
+        editor.current_frame().reopen_target(),
+        nara_tooling::EditorReopenTarget::Unavailable
+    );
+    assert!(editor.acknowledge_workspace_intent_result());
+
+    let reopened_after_release = opened_document(editor.open_indexed_authoring_document(
+        refreshed,
+        "scenes/second.scene.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Scene,
+    ));
+    assert_eq!(
+        scene_name_value(&editor, reopened_after_release),
+        "saved-before-retarget"
+    );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard() {
+    let project = TestProject::new("generic-prefab-retarget");
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    for name in ["first", "second"] {
+        fs::write(
+            project.root.join(format!("prefabs/{name}.prefab.json")),
+            editable_authoring_prefab(name).to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let scene = editor.workspace().active_document().unwrap();
+    let index = editor.project_source_index_snapshot().unwrap();
+    let first = opened_document(editor.open_indexed_authoring_document(
+        Arc::clone(&index),
+        "prefabs/first.prefab.json",
+        crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+    ));
+    make_authoring_name_dirty(&mut editor, first, "cancel-retained");
+
+    assert_eq!(
+        editor.open_indexed_authoring_document(
+            Arc::clone(&index),
+            "prefabs/second.prefab.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document: first }
+    );
+    assert_eq!(
+        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Cancel),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert!(editor.workspace().scene(scene).is_some());
+    assert!(editor.workspace().prefab(first).unwrap().is_dirty());
+    assert_eq!(editor.workspace().active_document(), Some(first));
+    assert!(editor.acknowledge_workspace_intent_result());
+
+    assert!(matches!(
+        editor.open_indexed_authoring_document(
+            index,
+            "prefabs/second.prefab.json",
+            crate::project_host::authoring::AuthoringDocumentKind::Prefab,
+        ),
+        super::editor::EditorDocumentOpenRequestResult::AwaitingClose { document } if document == first
+    ));
+    assert_eq!(
+        editor.resolve_workspace_intent(nara_tooling::EditorCloseDecision::Discard),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    let second = editor.workspace().active_document().unwrap();
+    assert_ne!(second, first);
+    assert!(editor.workspace().scene(scene).is_some());
+    assert_eq!(
+        editor
+            .workspace()
+            .prefab(second)
+            .unwrap()
+            .source_binding()
+            .locator(),
+        "prefabs/second.prefab.json"
+    );
 }
 
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
