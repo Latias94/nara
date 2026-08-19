@@ -815,8 +815,8 @@ duplicating Host state or filesystem access.
   dispatcher in `runtime/editor/actions.rs`. Do not duplicate frame freshness, root identity, or
   index generation in every action.
 - Keep selection, path/kind filters, expanded paths, and the cached row projection in
-  `nara_tooling`. Rebuild a changed query in bounded batches keyed by snapshot generation/query
-  revision; expose query work through the same pending-work signal used by scans so
+  `nara_tooling`. Rebuild a changed query in bounded batches keyed by the current snapshot identity
+  and local query parameters; expose query work through the same pending-work signal used by scans so
   `ControlFlow::Wait` cannot strand a half-built projection. egui retains only widget transients and
   performs no filesystem reads or source sorting.
 - Compose the Host scan and tooling query signals once in the frame/app boundary; platform requests
@@ -838,7 +838,7 @@ duplicating Host state or filesystem access.
 - The same snapshot produces the same flattened rows and filter results regardless of input order.
 - Refresh and Open use the exact Host frame revision and contain no raw OS path or duplicate
   stale-generation fields. Selection, filters, and expansion remain tooling-local and are keyed to
-  the snapshot/query revision rather than entering the Host action batch.
+  the current snapshot and local query state rather than entering the Host action batch.
 - An Open submitted from an old frame batch is rejected as `StaleFrame` without changing active
   document, selection, dirty state, or persistence state.
 - A forged `.git`/`target`/unindexed relative path and a same-frame leaf replacement are rejected

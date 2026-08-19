@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-19
+* **Verification Evidence**: [EPB-U4 bounded Editor Project Browser](verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md) - Verifies UI-neutral source-index projection, bounded query and rendering work, exact frame-bound Refresh/Open ingress, and no filesystem authority in adapters.
+* **Work Registration**: [Editor Project Browser and Source Index v1: EPB-U5 active](registry/2026-08/2026-08-19T204830Z-editor-project-browser-source-index-v1-codex-root-2d72fcaec9574052a316cc3c357790f6.md) - Activates the standalone browse/open product trajectory after the bounded Project Browser UI was verified.
 * **Work Registration**: [Editor Project Browser and Source Index v1: EPB-U4 active](registry/2026-08/2026-08-19T192039Z-editor-project-browser-source-index-v1-codex-root-a958d458bd304a0688476ebf9540da04.md) - Activates the UI-neutral browser projection and egui Project Browser after indexed Authoring document admission was verified.
 * **Verification Evidence**: [EPB-U3 indexed Authoring document admission](verification/2026-08/2026-08-19T192016Z-epb-u3-indexed-authoring-document-admission-684770f357d14a0184e3cdbec4751355.md) - Verifies exact indexed Scene and Prefab admission, independent persistence lanes, and dirty replacement arbitration.
 * **Work Registration**: [Editor Project Browser and Source Index v1: EPB-U3 active](registry/2026-08/2026-08-19T182337Z-editor-project-browser-source-index-v1-codex-root-ae4a33089c7b41fd86c94ad7a95e6206.md) - Activates closure-external Authoring Scene and Prefab admission after the bounded Host source index was verified.
@@ -137,5 +139,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 
 ## 2026-08-12
 * **Verification Evidence**: [PCC-U1 concrete WGPU contribution split](verification/2026-08/2026-08-12T120000Z-pcc-u1-concrete-wgpu-contributions-55abac61d345418ca2dc60328bee6111.md) - Verifies that the base WGPU backend is feature-invariant and Sprite/UI submission is installed only as an explicit requested contribution.
-* **Work Registration**: [Product composition contribution correction: PCC-U1 active](registry/2026-08/2026-08-12T111403Z-engine-foundation-contract-completion-codex-root-ded726f9f9554c45a401fef2f5249576.md) - Pauses RUP-U3 after the all-features requested-subset reproduction and activates the focused WGPU/Winit product-contribution correction.
-* **Verification Evidence**: [Product composition requested-subset reproduction](verification/2026-08/2026-08-12T110921Z-product-composition-requested-subset-reproduction-4f2f32ff95af4504a2e224d0868ec7a0.md) - Reproduces the all-features compile-ceiling leak that changes a render-wgpu-only requested plugin closure.

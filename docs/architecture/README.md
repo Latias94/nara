@@ -9,8 +9,8 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
-   plan is active at EPB-U4 under
-   [registration `a958d458bd304a0688476ebf9540da04`](../knowledge/engineering/registry/2026-08/2026-08-19T192039Z-editor-project-browser-source-index-v1-codex-root-a958d458bd304a0688476ebf9540da04.md).
+   plan is active at EPB-U5 under
+   [registration `2d72fcaec9574052a316cc3c357790f6`](../knowledge/engineering/registry/2026-08/2026-08-19T204830Z-editor-project-browser-source-index-v1-codex-root-2d72fcaec9574052a316cc3c357790f6.md).
    EPB-U0 established the durable boundary at `4275d93`; EPB-U1 implemented and verified bounded
    handle-relative enumeration at `04914e1` with
    [evidence `e4b844f6b2764741a2bff0a731925a80`](../knowledge/engineering/verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md).
@@ -19,9 +19,11 @@ an index, not another source of architecture decisions.
    EPB-U3 implemented closure-external Authoring Scene/Prefab admission and independent path-bound
    persistence lanes at `fe0fa55` with
    [evidence `684770f357d14a0184e3cdbec4751355`](../knowledge/engineering/verification/2026-08/2026-08-19T192016Z-epb-u3-indexed-authoring-document-admission-684770f357d14a0184e3cdbec4751355.md).
-   EPB-U4 now activates only the UI-neutral browser projection, exact frame-bound Refresh/Open
-   ingress, bounded egui Project Browser, and unified pending-work composition. EPB-U5 and all
-   unrelated Editor successors remain inactive.
+   EPB-U4 implemented the UI-neutral browser projection, exact frame-bound Refresh/Open ingress,
+   bounded egui Project Browser, and unified pending-work composition at `cdd5892`, followed by the
+   bounded-allocation correction at `6fb84d0`, with
+   [evidence `495c3c9cb92b4f94aa0895dfbce04ebf`](../knowledge/engineering/verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md).
+   EPB-U5 is the sole active unit; all unrelated Editor successors remain inactive.
    The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with
    [verification `25fbee67d7ea41a9bc8406abe6e8b221`](../knowledge/engineering/verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md)
