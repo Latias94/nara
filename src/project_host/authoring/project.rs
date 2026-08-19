@@ -17,7 +17,10 @@ use nara_fs::{
 };
 use nara_project::{EffectiveProjectSettings, ProjectPath, ProjectPathError};
 use nara_reflect::AuthoringSchemaBundle;
-use nara_scene::__private::{AuthoringAdapterReceipt, fork_published_authoring_prefab_document};
+use nara_scene::__private::{
+    AuthoringAdapterReceipt, fork_published_authoring_prefab_document,
+    fork_published_authoring_scene_document,
+};
 use nara_scene::{
     AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringRecordFact, PrefabDocument, PrefabDocumentCandidate, PublishedAuthoringPrefabDocument,
@@ -391,14 +394,14 @@ impl AuthoringProjectReceipt {
     ) -> Result<AuthoringProjectSessionParts, AuthoringProjectReceiptUseError> {
         let inner = Arc::try_unwrap(self.snapshot.inner)
             .map_err(|_| AuthoringProjectReceiptUseError::SnapshotAliased)?;
-        let startup_scene = Arc::try_unwrap(inner.startup_scene)
-            .map_err(|_| AuthoringProjectReceiptUseError::StartupDocumentAliased)?;
+        let startup_scene = fork_published_authoring_scene_document(&inner.startup_scene);
         Ok(AuthoringProjectSessionParts {
             snapshot: AuthoringProjectSessionSnapshot {
                 schema: inner.schema,
                 adapters: inner.adapters,
                 readiness: inner.readiness,
                 startup_source: inner.startup_source,
+                startup_scene: inner.startup_scene,
                 prefabs: inner.prefabs,
                 assets: inner.assets,
                 unresolved_dependencies: inner.unresolved_dependencies,
@@ -422,7 +425,6 @@ impl Debug for AuthoringProjectReceipt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthoringProjectReceiptUseError {
     SnapshotAliased,
-    StartupDocumentAliased,
 }
 
 impl Display for AuthoringProjectReceiptUseError {
@@ -430,9 +432,6 @@ impl Display for AuthoringProjectReceiptUseError {
         formatter.write_str(match self {
             Self::SnapshotAliased => {
                 "authoring project receipt snapshot is still retained by another owner"
-            }
-            Self::StartupDocumentAliased => {
-                "authoring project startup document is still retained by another owner"
             }
         })
     }
@@ -450,6 +449,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     adapters: Box<[AuthoringAdapterReceipt]>,
     readiness: AuthoringProjectReadiness,
     startup_source: Arc<AuthoringSourceFact>,
+    startup_scene: Arc<PublishedAuthoringSceneDocument>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
@@ -484,6 +484,11 @@ impl AuthoringProjectSessionSnapshot {
     }
 
     #[must_use]
+    pub(crate) fn fork_startup_scene(&self) -> PublishedAuthoringSceneDocument {
+        fork_published_authoring_scene_document(&self.startup_scene)
+    }
+
+    #[must_use]
     pub(crate) fn prefab(&self, path: &AssetPath) -> Option<&AuthoringPrefabSource> {
         self.prefabs.iter().find(|prefab| prefab.path() == path)
     }
@@ -493,6 +498,10 @@ impl AuthoringProjectSessionSnapshot {
         self.prefab(path)
             .map(AuthoringPrefabSource::document)
             .map(fork_published_authoring_prefab_document)
+    }
+
+    pub(crate) fn asset_records(&self) -> impl Iterator<Item = &AssetRecord> {
+        self.assets.iter().map(AuthoringAssetSource::record)
     }
 
     #[must_use]
@@ -1097,13 +1106,15 @@ fn admit_scene_document(
         .map_err(|error| map_publication_error(source, error, budget))?;
     let published = Arc::new(candidate.publish());
     charge_published_document(
-        &source.source,
-        source.bytes.len(),
-        published.document(),
-        published.record_facts(),
-        published.unavailable_manifest().total_count(),
-        published.diagnostics(),
-        bundle_encoded_bytes,
+        PublishedDocumentCharge {
+            source: &source.source,
+            encoded_bytes: source.bytes.len(),
+            document: published.document(),
+            record_facts: published.record_facts(),
+            unavailable_records: published.unavailable_manifest().total_count(),
+            diagnostics: published.diagnostics(),
+            bundle_encoded_bytes,
+        },
         budget,
     )?;
     Ok(published)
@@ -1126,13 +1137,15 @@ fn admit_prefab_document(
         .map_err(|error| map_publication_error(source, error, budget))?;
     let published = Arc::new(candidate.publish());
     charge_published_document(
-        &source.source,
-        source.bytes.len(),
-        published.document(),
-        published.record_facts(),
-        published.unavailable_manifest().total_count(),
-        published.diagnostics(),
-        bundle_encoded_bytes,
+        PublishedDocumentCharge {
+            source: &source.source,
+            encoded_bytes: source.bytes.len(),
+            document: published.document(),
+            record_facts: published.record_facts(),
+            unavailable_records: published.unavailable_manifest().total_count(),
+            diagnostics: published.diagnostics(),
+            bundle_encoded_bytes,
+        },
         budget,
     )?;
     Ok(published)
@@ -1219,27 +1232,31 @@ fn map_publication_error(
     }
 }
 
-fn charge_published_document<D: AuthoringDocumentMetrics>(
-    source: &AuthoringSourceFact,
+struct PublishedDocumentCharge<'a, D> {
+    source: &'a AuthoringSourceFact,
     encoded_bytes: usize,
-    document: &D,
-    record_facts: &[AuthoringRecordFact],
+    document: &'a D,
+    record_facts: &'a [AuthoringRecordFact],
     unavailable_records: usize,
-    diagnostics: &nara_diagnostic::DiagnosticReport,
+    diagnostics: &'a nara_diagnostic::DiagnosticReport,
     bundle_encoded_bytes: usize,
+}
+
+fn charge_published_document<D: AuthoringDocumentMetrics>(
+    charge: PublishedDocumentCharge<'_, D>,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    let document_retained = document.retained_bytes()?;
+    let document_retained = charge.document.retained_bytes()?;
     let record_retained = checked_product(
-        record_facts.len(),
+        charge.record_facts.len(),
         size_of::<AuthoringRecordFact>() + AUTHORING_RECORD_RETAINED_OVERHEAD,
     )?;
-    let unavailable_retained = if unavailable_records == 0 {
+    let unavailable_retained = if charge.unavailable_records == 0 {
         0
     } else {
         checked_sum([
             checked_product(
-                unavailable_records,
+                charge.unavailable_records,
                 size_of::<UnavailableRecordManifestEntry>() + DEGRADED_ISSUE_RETAINED_BYTES,
             )?,
             // The manifest owns cloned values plus derived reference paths. Charging twice the
@@ -1248,10 +1265,13 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
             checked_product(document_retained, 2)?,
         ])?
     };
-    let basis_retained = checked_product(bundle_encoded_bytes, AUTHORING_BASIS_ENCODED_MULTIPLIER)?;
+    let basis_retained = checked_product(
+        charge.bundle_encoded_bytes,
+        AUTHORING_BASIS_ENCODED_MULTIPLIER,
+    )?;
     let source_retained = checked_sum([
         size_of::<AuthoringSourceFact>(),
-        source.project_path().as_str().len(),
+        charge.source.project_path().as_str().len(),
         size_of::<Arc<AuthoringSourceFact>>(),
     ])?;
     let retained_bytes = checked_sum([
@@ -1262,9 +1282,12 @@ fn charge_published_document<D: AuthoringDocumentMetrics>(
         source_retained,
         size_of::<Arc<D>>(),
     ])?;
-    let decode_work = document_retained.saturating_add(encoded_bytes);
+    let decode_work = document_retained.saturating_add(charge.encoded_bytes);
     budget.charge_source_bytes(0, document_retained, decode_work, retained_bytes)?;
-    budget.charge_diagnostics(diagnostics.len(), diagnostics.retained_bytes())?;
+    budget.charge_diagnostics(
+        charge.diagnostics.len(),
+        charge.diagnostics.retained_bytes(),
+    )?;
     Ok(())
 }
 

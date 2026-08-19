@@ -3,6 +3,8 @@
 mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_decode;
+#[cfg(feature = "serde")]
+mod authoring_preview;
 mod diagnostics;
 mod document;
 mod export;
@@ -98,6 +100,13 @@ pub use spawn::{
 pub mod __private {
     pub use crate::authoring_decode::{
         AuthoringAdapterReceipt, AuthoringAdapterReceiptError,
-        fork_published_authoring_prefab_document,
+        fork_published_authoring_prefab_document, fork_published_authoring_scene_document,
+    };
+    pub use crate::authoring_preview::{
+        AuthoringPrefabPreviewDocument, AuthoringPreviewOmission, AuthoringPreviewOmissionLocation,
+        AuthoringPreviewOmissionReason, AuthoringPreviewProjectionError,
+        AuthoringScenePreviewDocument, project_authoring_prefab_session_preview,
+        project_authoring_scene_session_preview, project_published_authoring_prefab_preview,
+        project_published_authoring_scene_preview,
     };
 }

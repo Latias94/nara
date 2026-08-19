@@ -30,4 +30,7 @@ pub use project_shell::{
     EguiProjectShellInput, EguiProjectShellOutput, EguiProjectShellPanel,
 };
 pub use scene_view::{EguiSceneViewInput, EguiSceneViewOutput};
-pub use ui_authoring::{EguiUiAuthoringInput, EguiUiCanvasInput, EguiUiCanvasOutput};
+pub use ui_authoring::{
+    EguiUiAuthoringImages, EguiUiAuthoringInput, EguiUiAuthoringMutations, EguiUiCanvasInput,
+    EguiUiCanvasOutput,
+};

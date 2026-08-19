@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 
 mod actions;
+#[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
+mod authoring_preview;
 mod content_refresh;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
@@ -50,7 +52,7 @@ use nara_reflect::{
 };
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 use nara_render::Extent2d;
-use nara_scene::SceneEntitySource;
+use nara_scene::{SceneEntitySource, UnavailableRecordManifest};
 use nara_tooling::{
     __export_apply_changes_from_world, EditorAuthoringReadiness, EditorCloseDecision,
     EditorDocumentId, EditorDocumentKind, EditorFieldFeedback, EditorFrameClock, EditorFrameModel,
@@ -72,10 +74,11 @@ use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 use crate::ProductRecipe;
 use crate::project_host::authoring::{
     AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
+    first_party_authoring_preview_registry,
 };
 use crate::project_host::composition::{
-    editor_play_runtime_plugins_with_recipe, resolve_project_runtime_request,
-    runtime_host_policy_contribution,
+    built_in_schema_providers, editor_play_runtime_plugins_with_recipe,
+    resolve_project_runtime_request, runtime_host_policy_contribution,
 };
 use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
 use crate::project_host::{
@@ -84,7 +87,7 @@ use crate::project_host::{
 
 use super::{
     PROJECT_MANIFEST, ProjectHost, RuntimePlan, RuntimePluginOverlay, runtime_plan_failure_report,
-    runtime_plan_selected_report, single_error,
+    runtime_plan_selected_report, single_error, single_warning,
 };
 use crate::project_host::persistence::{
     EditorPersistenceReceipt, OpenedSceneReopen, PrefabPersistenceHost, ScenePersistenceHost,
@@ -635,8 +638,6 @@ struct TrustedCompiledEditorLane {
     prefab_root: DirectoryCapability,
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
-    #[cfg(feature = "presentation-2d")]
-    preview: preview::EditorPreviewSession,
     runtime_host: ProjectHost,
     runtime_owner: EditorRuntimeOwnerState,
     pending_control: Option<PendingEditorControl>,
@@ -645,10 +646,6 @@ struct TrustedCompiledEditorLane {
     runtime_edit_result: Option<EditorRuntimeEditResult>,
     pending_apply_changes: Option<PendingApplyChanges>,
     apply_changes_result: Option<EditorApplyChangesResult>,
-    #[cfg(feature = "runtime-ui")]
-    ui_authoring_image_choices: EditorUiImageChoices,
-    #[cfg(feature = "presentation-ui")]
-    ui_preview: ui_preview::EditorUiPreviewSession,
 }
 
 /// Concrete product Host for one Editor workspace and its future single Play owner.
@@ -685,6 +682,12 @@ pub struct EditorProjectSession {
     published_frame: Option<PublishedEditorFrame>,
     gestures: EditorGestureController,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
+    #[cfg(feature = "presentation-2d")]
+    preview: preview::EditorPreviewSession,
+    #[cfg(feature = "runtime-ui")]
+    ui_authoring_image_choices: EditorUiImageChoices,
+    #[cfg(feature = "presentation-ui")]
+    ui_preview: ui_preview::EditorUiPreviewSession,
     #[cfg(feature = "runtime-ui")]
     ui_authoring_frame: Option<Arc<EditorUiAuthoringFrame>>,
     #[cfg(feature = "runtime-ui")]
@@ -730,6 +733,25 @@ impl EditorProjectSession {
         }
     }
 
+    /// Returns the complete unavailable-record manifest for the active generic authoring
+    /// document. Trusted compiled sessions do not publish this preservation contract.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn active_authoring_unavailable_record_manifest(
+        &self,
+    ) -> Option<&UnavailableRecordManifest> {
+        self.authoring_project()?;
+        let document = self.workspace.active_document()?;
+        self.workspace
+            .scene(document)
+            .and_then(|slot| slot.unavailable_record_manifest())
+            .or_else(|| {
+                self.workspace
+                    .prefab(document)
+                    .and_then(|slot| slot.unavailable_record_manifest())
+            })
+    }
+
     fn trusted_compiled(&self) -> Option<&TrustedCompiledEditorLane> {
         match &self.execution {
             EditorExecutionLane::Authoring(_) => None,
@@ -763,6 +785,20 @@ impl EditorProjectSession {
     pub(crate) fn open(receipt: AuthoringProjectReceipt) -> Result<Self, EditorProjectOpenError> {
         let parts = receipt.into_session_parts().map_err(|_| {
             editor_open_error("project.editor.authoring-receipt-consumption-failed")
+        })?;
+        #[cfg(feature = "presentation-2d")]
+        let preview_registry = first_party_authoring_preview_registry(built_in_schema_providers())
+            .map_err(|_| editor_open_error("project.editor.authoring-preview-registry-invalid"))?;
+        #[cfg(feature = "presentation-2d")]
+        let preview =
+            preview::EditorPreviewSession::new_authoring(&parts.snapshot, &preview_registry)
+                .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
+        #[cfg(feature = "runtime-ui")]
+        let ui_authoring_image_choices =
+            EditorUiImageChoices::from_authoring_snapshot(&parts.snapshot);
+        #[cfg(feature = "presentation-ui")]
+        let ui_preview = ui_preview::EditorUiPreviewSession::new_authoring().map_err(|_error| {
+            editor_open_error("project.editor.authoring-ui-preview-init-failed")
         })?;
         let project_root = parts.snapshot.project_root();
         let settings = parts.snapshot.settings();
@@ -836,6 +872,12 @@ impl EditorProjectSession {
             published_frame: None,
             gestures: EditorGestureController::default(),
             last_gesture_cancellation: None,
+            #[cfg(feature = "presentation-2d")]
+            preview,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_image_choices,
+            #[cfg(feature = "presentation-ui")]
+            ui_preview,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_frame: None,
             #[cfg(feature = "runtime-ui")]
@@ -996,8 +1038,6 @@ impl EditorProjectSession {
                 prefab_root,
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 game_view_config,
-                #[cfg(feature = "presentation-2d")]
-                preview,
                 runtime_host: ProjectHost::new(cleanup_policy),
                 runtime_owner: EditorRuntimeOwnerState::Empty,
                 pending_control: None,
@@ -1006,10 +1046,6 @@ impl EditorProjectSession {
                 runtime_edit_result: None,
                 pending_apply_changes: None,
                 apply_changes_result: None,
-                #[cfg(feature = "runtime-ui")]
-                ui_authoring_image_choices,
-                #[cfg(feature = "presentation-ui")]
-                ui_preview,
             })),
             project_content: EditorProjectContentView::Current {
                 generation: initial_content_generation,
@@ -1035,6 +1071,12 @@ impl EditorProjectSession {
             published_frame: None,
             gestures: EditorGestureController::default(),
             last_gesture_cancellation: None,
+            #[cfg(feature = "presentation-2d")]
+            preview,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_image_choices,
+            #[cfg(feature = "presentation-ui")]
+            ui_preview,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_frame: None,
             #[cfg(feature = "runtime-ui")]
@@ -1047,9 +1089,6 @@ impl EditorProjectSession {
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     pub fn configure_editor_preview(&mut self, extent: Option<Extent2d>) {
-        if self.trusted_compiled().is_none() {
-            return;
-        }
         self.set_editor_preview_extent(extent);
         self.drive_editor_preview();
     }
@@ -1058,25 +1097,21 @@ impl EditorProjectSession {
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     pub fn set_editor_preview_extent(&mut self, extent: Option<Extent2d>) {
-        if let Some(lane) = self.trusted_compiled_mut() {
-            lane.preview.set_extent(extent);
-        }
+        self.preview.set_extent(extent);
     }
 
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
-        self.trusted_compiled_mut()
-            .and_then(|lane| lane.preview.take_candidate())
+        self.preview.take_candidate()
     }
 
     #[cfg(feature = "presentation-ui")]
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_ui_preview_candidate(&mut self) -> Option<EditorUiPreviewCandidate> {
-        self.trusted_compiled_mut()
-            .and_then(|lane| lane.ui_preview.take_candidate())
+        self.ui_preview.take_candidate()
     }
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -1541,17 +1576,64 @@ impl EditorProjectSession {
 
     #[cfg(feature = "presentation-2d")]
     fn drive_editor_preview(&mut self) {
-        let source =
-            self.workspace
-                .scene(self.source_document)
-                .map(|slot| preview::EditorPreviewSource {
-                    document: self.source_document,
-                    revision: slot.revision(),
-                    scene: slot.session().document().clone(),
-                });
-        let report = self
-            .trusted_compiled_mut()
-            .and_then(|lane| lane.preview.drive(source));
+        let authoring = self.authoring_project().is_some();
+        let mut projection_rejected = false;
+        let mut projection_omitted = false;
+        let source_identity = self
+            .workspace
+            .scene(self.source_document)
+            .map(|slot| (self.source_document, slot.revision()));
+        let requires_projection = source_identity.is_some_and(|(document, revision)| {
+            self.preview.requires_source_projection(document, revision)
+        });
+        let source = self.workspace.scene(self.source_document).and_then(|slot| {
+            let scene = if requires_projection {
+                let (scene, omissions) = if authoring {
+                    match authoring_preview::project_scene(
+                        self.source_document,
+                        slot.revision(),
+                        slot.session(),
+                    ) {
+                        Ok((scene, omissions)) => (scene, omissions),
+                        Err(_) => {
+                            projection_rejected = true;
+                            return None;
+                        }
+                    }
+                } else {
+                    (
+                        slot.session().document().clone(),
+                        authoring_preview::EditorAuthoringPreviewOmissions::empty(
+                            self.source_document,
+                            slot.revision(),
+                        ),
+                    )
+                };
+                projection_omitted = !omissions.is_empty();
+                Some((scene, omissions))
+            } else {
+                None
+            };
+            Some(preview::EditorPreviewSource {
+                document: self.source_document,
+                revision: slot.revision(),
+                projection: scene.map(|(scene, omissions)| {
+                    preview::EditorPreviewProjection::new(scene, omissions)
+                }),
+            })
+        });
+        if projection_rejected {
+            let _ = self.diagnostics.extend(single_error(
+                "project.editor.authoring-scene-preview-projection-rejected",
+                "the authoring Scene could not publish a safe preview projection",
+            ));
+        } else if projection_omitted {
+            let _ = self.diagnostics.extend(single_warning(
+                "project.editor.authoring-scene-preview-source-omitted",
+                "the Scene preview omitted source values that are unavailable to generic authoring",
+            ));
+        }
+        let report = self.preview.drive(source);
         if let Some(report) = report {
             let _ = self.diagnostics.extend(report);
         }

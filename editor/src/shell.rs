@@ -65,7 +65,7 @@ fn normalize_profile(profile: Option<String>) -> Option<String> {
 
 pub(super) struct PublishedEditorProject {
     pub(super) request: EditorProjectRequest,
-    pub(super) session: EditorProjectSession,
+    pub(super) session: Box<EditorProjectSession>,
     pub(super) panel: EguiEditorPanel,
 }
 
@@ -73,7 +73,7 @@ impl PublishedEditorProject {
     pub(super) fn new(request: EditorProjectRequest, session: EditorProjectSession) -> Self {
         Self {
             request,
-            session,
+            session: Box::new(session),
             panel: EguiEditorPanel::new(),
         }
     }

@@ -129,8 +129,16 @@ impl std::fmt::Debug for EditorUiPreviewSession {
 
 impl EditorUiPreviewSession {
     pub(super) fn new(snapshot: &ProjectContentSnapshot) -> Result<Self, UiPreviewError> {
-        let compiler = UiAuthoringCanvasCompiler::new()?;
         let prepared_images = prepare_project_images(snapshot)?;
+        Self::new_with_prepared_images(prepared_images)
+    }
+
+    pub(super) fn new_authoring() -> Result<Self, UiPreviewError> {
+        Self::new_with_prepared_images(UiPreparedImages::new())
+    }
+
+    fn new_with_prepared_images(prepared_images: UiPreparedImages) -> Result<Self, UiPreviewError> {
+        let compiler = UiAuthoringCanvasCompiler::new()?;
         let render_generation = EditorRenderGeneration::try_acquire()
             .ok_or(UiPreviewError::RenderGenerationExhausted)?;
         Ok(Self {
@@ -286,12 +294,7 @@ impl EditorUiPreviewSession {
 fn prepare_project_images(
     snapshot: &ProjectContentSnapshot,
 ) -> Result<UiPreparedImages, UiPreviewError> {
-    let mut server = AssetServer::new();
-    let mut images = Assets::<ImageAsset>::default();
-    let mut states = AssetStates::default();
-    let mut events = AssetEvents::default();
-    let mut prepared_images = UiPreparedImages::new();
-
+    let mut imported = Vec::with_capacity(snapshot.images().len());
     for (index, content) in snapshot.images().iter().enumerate() {
         let source = content.image().source();
         let record = AssetRecord::new(
@@ -299,17 +302,36 @@ fn prepare_project_images(
             source.path().clone(),
             AssetSourceKind::Image,
         );
-        let handle = server.reserve_record::<ImageAsset>(&record)?;
         let image = snapshot
             .share_image_for_consumer(index)
             .ok_or(UiPreviewError::ImageSnapshotInvalid)?;
+        imported.push((record, image));
+    }
+    prepare_images(imported)
+}
+
+fn prepare_images(
+    imported: impl IntoIterator<Item = (AssetRecord, ImageAsset)>,
+) -> Result<UiPreparedImages, UiPreviewError> {
+    let mut server = AssetServer::new();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let mut prepared_images = UiPreparedImages::new();
+
+    for (record, image) in imported {
+        let source_hash = image.source().source_hash();
+        let artifact_hash = image.source().artifact().key().digest();
+        let path = record.path().as_str().to_owned();
+        let stable_id = record.stable_id().to_string();
+        let handle = server.reserve_record::<ImageAsset>(&record)?;
         images.commit_loaded(
             handle,
             image,
             &mut states,
             &mut events,
-            Some(source.source_hash()),
-            Some(source.artifact().key().digest()),
+            Some(source_hash),
+            Some(artifact_hash),
         )?;
         let image = images
             .get(handle)
@@ -326,10 +348,8 @@ fn prepare_project_images(
             ),
             PreparedImageResource::from_image(image),
         );
-        let path = source.path().as_str();
-        let stable_id = source.stable_id().to_string();
         for alias in [
-            path.to_owned(),
+            path.clone(),
             format!("path:{path}"),
             format!("project://{path}"),
             stable_id.clone(),

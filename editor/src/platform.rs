@@ -40,6 +40,7 @@ use crate::{
 
 mod canary;
 mod game_input;
+mod generic_open_canary;
 mod ui_canary;
 mod viewport;
 
@@ -50,8 +51,9 @@ pub use ui_canary::{
     EditorUiAuthoringCanaryEvidence, EditorUiAuthoringCanaryFrame, EditorUiAuthoringCanaryRequest,
 };
 
-use canary::EditorGameViewCanaryHost;
+use canary::{EditorGameViewCanaryFrameInput, EditorGameViewCanaryHost};
 use game_input::EditorGameInputRouter;
+use generic_open_canary::EditorGenericOpenCanaryHost;
 use viewport::{
     EditorGamePrepareOutcome, EditorGamePresenter, EditorScenePickRequest, EditorScenePresenter,
     EditorUiCanvasIdentity, EditorUiCanvasPickRequest, EditorUiCanvasPresenter, EditorViewportSlot,
@@ -103,6 +105,9 @@ impl EditorRunError {
 }
 
 pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+    if generic_open_canary::requested() {
+        return run_generic_open_canary(options);
+    }
     run_application(EditorApplication::new(options))
 }
 
@@ -121,6 +126,22 @@ fn run_application(application: EditorApplication) -> Result<(), EditorRunError>
     Ok(())
 }
 
+fn run_generic_open_canary(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+    let (application, canary) = EditorGenericOpenCanaryHost::new(options)?;
+    let mut host = drive_native_editor(
+        application,
+        Some(NativeEditorCanary::GenericOpen(Box::new(canary))),
+    )?;
+    let canary = match host.canary.take() {
+        Some(NativeEditorCanary::GenericOpen(canary)) => canary,
+        Some(NativeEditorCanary::GameView(_)) | None => {
+            unreachable!("the guarded launch installs one generic Open/Recovery canary")
+        }
+    };
+    drop(host);
+    canary.finish()
+}
+
 /// Runs one bounded native Game View canary over an already compiled first-party product intent.
 #[doc(hidden)]
 pub fn run_trusted_compiled_game_view_canary(
@@ -129,16 +150,23 @@ pub fn run_trusted_compiled_game_view_canary(
     request: EditorGameViewCanaryRequest,
 ) -> Result<EditorGameViewCanaryEvidence, EditorRunError> {
     let application = EditorApplication::open_trusted_compiled(options, intent)?;
-    let mut host = drive_native_editor(application, Some(EditorGameViewCanaryHost::new(request)))?;
-    host.canary
-        .take()
-        .expect("the canary launch installs one canary host")
-        .finish()
+    let mut host = drive_native_editor(
+        application,
+        Some(NativeEditorCanary::GameView(Box::new(
+            EditorGameViewCanaryHost::new(request),
+        ))),
+    )?;
+    match host.canary.take() {
+        Some(NativeEditorCanary::GameView(canary)) => canary.finish(),
+        Some(NativeEditorCanary::GenericOpen(_)) | None => {
+            unreachable!("the canary launch installs one Game View canary host")
+        }
+    }
 }
 
 fn drive_native_editor(
     application: EditorApplication,
-    canary: Option<EditorGameViewCanaryHost>,
+    canary: Option<NativeEditorCanary>,
 ) -> Result<NativeEditorHost, EditorRunError> {
     let event_loop = EventLoop::new().map_err(event_loop_error)?;
     event_loop.set_control_flow(ControlFlow::Wait);
@@ -179,7 +207,35 @@ struct NativeEditorHost {
     editor_frame_index: u64,
     repaint_deadline: Option<Instant>,
     terminal_error: Option<EditorRunError>,
-    canary: Option<EditorGameViewCanaryHost>,
+    canary: Option<NativeEditorCanary>,
+}
+
+enum NativeEditorCanary {
+    GameView(Box<EditorGameViewCanaryHost>),
+    GenericOpen(Box<EditorGenericOpenCanaryHost>),
+}
+
+impl NativeEditorCanary {
+    const fn deadline(&self) -> Instant {
+        match self {
+            Self::GameView(canary) => canary.deadline(),
+            Self::GenericOpen(canary) => canary.deadline(),
+        }
+    }
+
+    fn tracked_sprite_sort_key(&self) -> Option<i32> {
+        match self {
+            Self::GameView(canary) => Some(canary.tracked_sprite_sort_key()),
+            Self::GenericOpen(_) => None,
+        }
+    }
+
+    const fn viewport_extent_override(&self) -> Option<Extent2d> {
+        match self {
+            Self::GameView(canary) => canary.viewport_extent_override(),
+            Self::GenericOpen(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -276,7 +332,7 @@ impl EditorViewportSelection {
 impl NativeEditorHost {
     fn new(
         application: EditorApplication,
-        canary: Option<EditorGameViewCanaryHost>,
+        canary: Option<NativeEditorCanary>,
     ) -> Result<Self, EditorRunError> {
         Ok(Self {
             application,
@@ -324,7 +380,12 @@ impl NativeEditorHost {
         self.egui_state = Some(egui_state);
         self.gpu = Some(gpu);
         self.renderer = Some(renderer);
-        let _ = self.application.native_shell_ready();
+        if !matches!(
+            self.canary.as_ref(),
+            Some(NativeEditorCanary::GenericOpen(_))
+        ) {
+            let _ = self.application.native_shell_ready();
+        }
         self.gpu_recovery.owner_recreated_for_platform_resume();
         self.play_cadence.retire();
         Ok(())
@@ -560,16 +621,14 @@ impl NativeEditorHost {
         } else {
             self.game_input.handle_window_event(&event)
         };
-        if forward_to_egui
-            && self
+        let repaint_requested = !forward_to_egui
+            || self
                 .egui_state
                 .as_mut()
                 .expect("an installed native window has egui platform state")
                 .on_window_event(&window, &event)
-                .repaint
-        {
-            window.request_redraw();
-        } else if !forward_to_egui {
+                .repaint;
+        if repaint_requested {
             window.request_redraw();
         }
 
@@ -876,6 +935,7 @@ impl NativeEditorHost {
         self.game_input.invalidate_after_control(true);
         self.play_cadence.retire();
 
+        let rendered_state = self.application.state();
         let mut shell_update = EditorApplicationUpdate::idle();
         let output = self.context.run_ui(raw_input, |ui| {
             shell_update = self.application.show_project_shell(ui);
@@ -991,21 +1051,30 @@ impl NativeEditorHost {
             window.set_title(EDITOR_TITLE);
             self.gpu_recovery.mark_presentation_ready();
         }
+        let generic_canary_advanced = if presentation_deferred {
+            false
+        } else if let Some(NativeEditorCanary::GenericOpen(canary)) = self.canary.as_mut() {
+            canary.advance_project_shell(rendered_state, &mut self.application, window.id())?
+        } else {
+            false
+        };
 
         if open_update.actions_observed()
             || shell_update.actions_observed()
+            || generic_canary_advanced
             || repaint_delay.is_zero()
         {
             window.request_redraw();
             self.repaint_deadline = None;
             event_loop.set_control_flow(ControlFlow::Wait);
-        } else if presentation_deferred || repaint_delay < Duration::MAX {
-            let delay = if presentation_deferred {
-                repaint_delay.min(GAME_VIEW_PENDING_REPAINT_DELAY)
+        } else if let Some(deadline) = earliest_deadline(
+            if presentation_deferred {
+                Some(Instant::now() + repaint_delay.min(GAME_VIEW_PENDING_REPAINT_DELAY))
             } else {
-                repaint_delay
-            };
-            let deadline = Instant::now() + delay;
+                (repaint_delay < Duration::MAX).then(|| Instant::now() + repaint_delay)
+            },
+            self.canary.as_ref().map(NativeEditorCanary::deadline),
+        ) {
             self.repaint_deadline = Some(deadline);
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
@@ -1026,6 +1095,7 @@ impl NativeEditorHost {
         ui_authoring_frame: Option<Arc<nara::project_host::EditorUiAuthoringFrame>>,
         read_only: bool,
     ) -> Result<(), EditorRunError> {
+        let rendered_state = self.application.state();
         if read_only {
             self.game_input.invalidate_after_control(true);
         }
@@ -1088,7 +1158,7 @@ impl NativeEditorHost {
         let canary_sprite_sort_key = self
             .canary
             .as_ref()
-            .map(EditorGameViewCanaryHost::tracked_sprite_sort_key);
+            .and_then(NativeEditorCanary::tracked_sprite_sort_key);
         let prepared_viewport = match selected_viewport {
             EguiEditorViewport::Authoring if authoring_ui.is_some() => {
                 if ui_pick_stamp.is_some() {
@@ -1384,7 +1454,7 @@ impl NativeEditorHost {
         if let Some(canary_extent) = self
             .canary
             .as_ref()
-            .and_then(EditorGameViewCanaryHost::viewport_extent_override)
+            .and_then(NativeEditorCanary::viewport_extent_override)
         {
             desired_game_extent = Some(canary_extent);
         }
@@ -1609,6 +1679,19 @@ impl NativeEditorHost {
             (None, None) => {}
         }
 
+        if presentation.window().is_some() {
+            let generic_canary_complete =
+                if let Some(NativeEditorCanary::GenericOpen(canary)) = self.canary.as_mut() {
+                    canary.advance_workspace(rendered_state, &self.application, window.id())?
+                } else {
+                    false
+                };
+            if generic_canary_complete {
+                event_loop.exit();
+                return Ok(());
+            }
+        }
+
         if displayed_viewport == EguiEditorViewport::Game
             && selected_after_ui == EguiEditorViewport::Game
         {
@@ -1633,26 +1716,36 @@ impl NativeEditorHost {
             self.game_input.invalidate(false);
         }
 
-        if project_action.is_none() && !read_only && self.canary.is_some() {
+        if project_action.is_none()
+            && !read_only
+            && matches!(self.canary.as_ref(), Some(NativeEditorCanary::GameView(_)))
+        {
             let canary_observation = self.game_presenter.presented_observation();
             let ui_canary_observation = self
                 .ui_canvas_presenter
                 .presented_observation(&self.viewport_slot, ui_authoring_identity);
             let active_start = self.application.active_game_start_request();
-            let canary = self
-                .canary
-                .as_mut()
-                .expect("the guarded canary remains installed");
+            let Some(NativeEditorCanary::GameView(canary)) = self.canary.as_mut() else {
+                unreachable!("the guarded Game View canary remains installed")
+            };
+            if Instant::now() >= canary.deadline() {
+                return Err(canary.timeout_error(canary_observation.as_ref(), active_start));
+            }
             let advance = canary.advance(
-                &editor_frame,
-                canary_observation.as_ref(),
-                active_start,
-                ui_authoring_frame.as_deref(),
-                ui_canary_observation.as_ref(),
-                &self.ui_canvas_presenter,
+                EditorGameViewCanaryFrameInput {
+                    frame: &editor_frame,
+                    observation: canary_observation.as_ref(),
+                    active_start,
+                    ui_authoring_frame: ui_authoring_frame.as_deref(),
+                    ui_observation: ui_canary_observation.as_ref(),
+                    ui_presenter: &self.ui_canvas_presenter,
+                },
                 &mut self.game_input,
                 &window,
             )?;
+            if Instant::now() >= canary.deadline() {
+                return Err(canary.timeout_error(canary_observation.as_ref(), active_start));
+            }
             for action in advance.actions {
                 batch = append_editor_action(batch, action);
                 window.request_redraw();
@@ -1799,7 +1892,7 @@ impl NativeEditorHost {
                 .deadline(now, play_state_after_update, selected_after_ui);
         let wake_deadline = earliest_deadline(
             cadence_deadline,
-            self.canary.as_ref().map(EditorGameViewCanaryHost::deadline),
+            self.canary.as_ref().map(NativeEditorCanary::deadline),
         );
         let scene_retry_pending =
             selected_after_ui == EguiEditorViewport::Authoring && viewport_retry_pending;
@@ -1898,7 +1991,7 @@ impl NativeEditorHost {
         self.play_cadence.observe_after(now, state, selected);
         let deadline = earliest_deadline(
             self.play_cadence.deadline(now, state, selected),
-            self.canary.as_ref().map(EditorGameViewCanaryHost::deadline),
+            self.canary.as_ref().map(NativeEditorCanary::deadline),
         );
         if update.actions_observed() {
             if let Some(window) = self.window.as_ref() {
@@ -1914,6 +2007,23 @@ impl NativeEditorHost {
             event_loop.set_control_flow(ControlFlow::Wait);
         }
         Ok(())
+    }
+
+    fn expired_canary_error(&self, now: Instant) -> Option<EditorRunError> {
+        let canary = self.canary.as_ref()?;
+        if now < canary.deadline() {
+            return None;
+        }
+        Some(match canary {
+            NativeEditorCanary::GameView(canary) => {
+                let observation = self.game_presenter.presented_observation();
+                let active_start = self.application.active_game_start_request();
+                canary.timeout_error(observation.as_ref(), active_start)
+            }
+            NativeEditorCanary::GenericOpen(canary) => {
+                canary.timeout_error(self.application.state())
+            }
+        })
     }
 
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: EditorRunError) {
@@ -1932,24 +2042,13 @@ fn earliest_deadline(left: Option<Instant>, right: Option<Instant>) -> Option<In
 
 impl ApplicationHandler for NativeEditorHost {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if let Some(error) = self.expired_canary_error(Instant::now()) {
+            self.fail(event_loop, error);
+            return;
+        }
         if matches!(cause, StartCause::ResumeTimeReached { .. })
             && self.repaint_deadline.take().is_some()
         {
-            if self
-                .canary
-                .as_ref()
-                .is_some_and(|canary| Instant::now() >= canary.deadline())
-            {
-                let observation = self.game_presenter.presented_observation();
-                let active_start = self.application.active_game_start_request();
-                let error = self
-                    .canary
-                    .as_ref()
-                    .expect("the expired canary remains installed")
-                    .timeout_error(observation.as_ref(), active_start);
-                self.fail(event_loop, error);
-                return;
-            }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -2136,6 +2235,76 @@ fn game_view_wait_pending(
         && (retry_pending || awaiting_successor)
 }
 
+struct EditorEguiRenderer {
+    renderer: Renderer,
+    backend_instance_id: u64,
+    device_epoch: u64,
+    surface_format: wgpu::TextureFormat,
+}
+
+impl EditorEguiRenderer {
+    fn new(scope: &WgpuEditorDeviceScope<'_>) -> Self {
+        Self {
+            renderer: Renderer::new(
+                scope.device(),
+                scope.surface_format(),
+                RendererOptions::default(),
+            ),
+            backend_instance_id: scope.backend_instance_id(),
+            device_epoch: scope.device_epoch(),
+            surface_format: scope.surface_format(),
+        }
+    }
+
+    fn matches(&self, gpu: &WgpuEditorExecution) -> bool {
+        self.backend_instance_id == gpu.backend_instance_id()
+            && self.device_epoch == gpu.device_epoch()
+    }
+}
+
+fn create_editor_gpu_namespace(
+    context: &egui::Context,
+    window: Arc<Window>,
+) -> Result<(WgpuEditorExecution, EditorEguiRenderer, egui_winit::State), EditorRunError> {
+    let window_packet = editor_window_packet(window.as_ref());
+    let mut gpu = WgpuEditorExecution::new(
+        NaraWindowId::PRIMARY,
+        WindowHandleProvider::new(Arc::clone(&window)),
+    )
+    .map_err(platform_gpu_error)?;
+    let (renderer, max_texture_side) = gpu
+        .with_device(window_packet, |scope| {
+            (
+                EditorEguiRenderer::new(&scope),
+                scope.device().limits().max_texture_dimension_2d as usize,
+            )
+        })
+        .map_err(platform_gpu_error)?;
+    let egui_state = egui_winit::State::new(
+        context.clone(),
+        ViewportId::ROOT,
+        window.as_ref(),
+        Some(window.scale_factor() as f32),
+        window.theme(),
+        Some(max_texture_side),
+    );
+    Ok((gpu, renderer, egui_state))
+}
+
+fn editor_window_packet(window: &Window) -> RenderWindowPacket {
+    let size = window.inner_size();
+    RenderWindowPacket {
+        id: NaraWindowId::PRIMARY,
+        resolution: WindowResolution::new(size.width, size.height)
+            .with_scale_factor(window.scale_factor()),
+        present_mode: PresentMode::AutoVsync,
+    }
+}
+
+fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {
+    EditorRunError::Gpu(error)
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -2269,74 +2438,4 @@ mod tests {
             Duration::ZERO
         );
     }
-}
-
-struct EditorEguiRenderer {
-    renderer: Renderer,
-    backend_instance_id: u64,
-    device_epoch: u64,
-    surface_format: wgpu::TextureFormat,
-}
-
-impl EditorEguiRenderer {
-    fn new(scope: &WgpuEditorDeviceScope<'_>) -> Self {
-        Self {
-            renderer: Renderer::new(
-                scope.device(),
-                scope.surface_format(),
-                RendererOptions::default(),
-            ),
-            backend_instance_id: scope.backend_instance_id(),
-            device_epoch: scope.device_epoch(),
-            surface_format: scope.surface_format(),
-        }
-    }
-
-    fn matches(&self, gpu: &WgpuEditorExecution) -> bool {
-        self.backend_instance_id == gpu.backend_instance_id()
-            && self.device_epoch == gpu.device_epoch()
-    }
-}
-
-fn create_editor_gpu_namespace(
-    context: &egui::Context,
-    window: Arc<Window>,
-) -> Result<(WgpuEditorExecution, EditorEguiRenderer, egui_winit::State), EditorRunError> {
-    let window_packet = editor_window_packet(window.as_ref());
-    let mut gpu = WgpuEditorExecution::new(
-        NaraWindowId::PRIMARY,
-        WindowHandleProvider::new(Arc::clone(&window)),
-    )
-    .map_err(platform_gpu_error)?;
-    let (renderer, max_texture_side) = gpu
-        .with_device(window_packet, |scope| {
-            (
-                EditorEguiRenderer::new(&scope),
-                scope.device().limits().max_texture_dimension_2d as usize,
-            )
-        })
-        .map_err(platform_gpu_error)?;
-    let egui_state = egui_winit::State::new(
-        context.clone(),
-        ViewportId::ROOT,
-        window.as_ref(),
-        Some(window.scale_factor() as f32),
-        window.theme(),
-        Some(max_texture_side),
-    );
-    Ok((gpu, renderer, egui_state))
-}
-
-fn editor_window_packet(window: &Window) -> RenderWindowPacket {
-    let size = window.inner_size();
-    RenderWindowPacket {
-        id: NaraWindowId::PRIMARY,
-        resolution: WindowResolution::new(size.width, size.height)
-            .with_scale_factor(window.scale_factor()),
-        present_mode: PresentMode::AutoVsync,
-    }
-}
-
-fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {
-    EditorRunError::Gpu(error)
 }

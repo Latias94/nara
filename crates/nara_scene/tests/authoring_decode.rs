@@ -21,6 +21,166 @@ use nara_scene::{
 const OWNER: &str = "nara.scene.hierarchy.components";
 
 #[test]
+fn authoring_preview_projects_only_exact_available_direct_records() {
+    let (bundle, adapter) = scene_bundle_and_name_adapter();
+    let owner = persistent_owner(OWNER);
+    let entity = scene_id("player");
+    let mut source_entity = SceneEntityRecord::new(entity.clone())
+        .with_component(
+            component_id("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Player".to_owned()),
+            )
+            .with_owner(owner.clone()),
+        )
+        .with_component(
+            component_id("nara.scene.Visibility"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("visible".to_owned()),
+            )
+            .with_owner(owner.clone()),
+        );
+    let nested_source = AssetRef::path("prefabs/nested.prefab.json").unwrap();
+    source_entity.prefab = Some(PrefabInstance {
+        source: nested_source.clone(),
+        overrides: ScenePatchDocument::new([ScenePatchOperation::ReplaceComponent {
+            entity: entity.clone(),
+            component: component_id("nara.scene.Name"),
+            value: SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Patched name".to_owned()),
+            )
+            .with_owner(owner),
+        }]),
+    });
+    let source_scene = SceneDocument::from_ordered_roots([source_entity.clone()]);
+    let source_prefab = PrefabDocument::from_ordered_roots([source_entity]);
+
+    let published_scene = SceneDocumentCandidate::decode_json_bytes(
+        source_scene.to_json_string().unwrap().as_bytes(),
+    )
+    .unwrap()
+    .admit_authoring(
+        source("scenes/preview.scene.json"),
+        &bundle,
+        &[adapter.clone()],
+    )
+    .unwrap()
+    .publish();
+    let scene_before = published_scene.document().clone();
+    let scene_manifest_before = published_scene.unavailable_manifest().clone();
+
+    let published_scene_preview =
+        nara_scene::__private::project_published_authoring_scene_preview(&published_scene);
+
+    assert_eq!(published_scene.document(), &scene_before);
+    assert_eq!(
+        published_scene.unavailable_manifest(),
+        &scene_manifest_before
+    );
+    assert_eq!(scene_manifest_before.record_count(), 1);
+    assert_eq!(
+        published_scene_preview.document().entities[0]
+            .components
+            .keys()
+            .map(ComponentTypeId::as_str)
+            .collect::<Vec<_>>(),
+        vec!["nara.scene.Name"]
+    );
+    assert!(
+        published_scene_preview.document().entities[0]
+            .prefab
+            .is_none()
+    );
+    assert_eq!(published_scene_preview.omissions().len(), 2);
+    assert!(matches!(
+        published_scene_preview.omissions()[0].location(),
+        nara_scene::__private::AuthoringPreviewOmissionLocation::DirectEntityComponent {
+            entity: omitted_entity,
+            component,
+        } if omitted_entity == &entity && component.as_str() == "nara.scene.Visibility"
+    ));
+    assert_eq!(
+        published_scene_preview.omissions()[0].reason(),
+        nara_scene::__private::AuthoringPreviewOmissionReason::RecordUnavailable(
+            AuthoringRecordReadiness::KnownUnbound
+        )
+    );
+    assert!(matches!(
+        published_scene_preview.omissions()[1].location(),
+        nara_scene::__private::AuthoringPreviewOmissionLocation::NestedPrefab {
+            entity: omitted_entity,
+        } if omitted_entity == &entity
+    ));
+    assert_eq!(
+        published_scene_preview.omissions()[1].reason(),
+        nara_scene::__private::AuthoringPreviewOmissionReason::NestedPrefabUnsupported
+    );
+    assert!(
+        scene_before.entities[0]
+            .prefab
+            .as_ref()
+            .is_some_and(|prefab| !prefab.overrides.is_empty())
+    );
+
+    let scene_session = SceneAuthoringSession::from_published_authoring_document(published_scene);
+    let scene_session_preview =
+        nara_scene::__private::project_authoring_scene_session_preview(&scene_session).unwrap();
+
+    assert_eq!(scene_session.document(), &scene_before);
+    assert_eq!(
+        scene_session.unavailable_record_manifest(),
+        Some(&scene_manifest_before)
+    );
+    assert_eq!(scene_session_preview, published_scene_preview);
+
+    let published_prefab = PrefabDocumentCandidate::decode_json_bytes(
+        source_prefab.to_json_string().unwrap().as_bytes(),
+    )
+    .unwrap()
+    .admit_authoring(source("prefabs/preview.prefab.json"), &bundle, &[adapter])
+    .unwrap()
+    .publish();
+    let prefab_before = published_prefab.document().clone();
+    let prefab_manifest_before = published_prefab.unavailable_manifest().clone();
+    let published_prefab_preview =
+        nara_scene::__private::project_published_authoring_prefab_preview(&published_prefab);
+
+    assert_eq!(published_prefab.document(), &prefab_before);
+    assert_eq!(
+        published_prefab.unavailable_manifest(),
+        &prefab_manifest_before
+    );
+    assert_eq!(
+        published_prefab_preview.document().entities[0].components,
+        published_scene_preview.document().entities[0].components
+    );
+    assert!(
+        published_prefab_preview.document().entities[0]
+            .prefab
+            .is_none()
+    );
+    assert_eq!(
+        published_prefab_preview.omissions(),
+        published_scene_preview.omissions()
+    );
+
+    let prefab_session =
+        PrefabAuthoringSession::from_published_authoring_document(published_prefab);
+    let prefab_session_preview =
+        nara_scene::__private::project_authoring_prefab_session_preview(&prefab_session).unwrap();
+
+    assert_eq!(prefab_session.document(), &prefab_before);
+    assert_eq!(
+        prefab_session.unavailable_record_manifest(),
+        Some(&prefab_manifest_before)
+    );
+    assert_eq!(prefab_session_preview, published_prefab_preview);
+}
+
+#[test]
 fn available_scalar_edit_preserves_known_unbound_manifest_across_reopen() {
     let (bundle, adapter) = scene_bundle_and_name_adapter();
     let owner = persistent_owner(OWNER);

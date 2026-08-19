@@ -176,40 +176,53 @@ impl EditorProjectSession {
         let Some(request) = self.pending_content_refresh.take() else {
             return;
         };
-        let Some(lane) = self.trusted_compiled() else {
-            self.failed_content_refresh = Some(request);
-            return;
-        };
-        let runtime_agreement = match prepare_runtime_schema_agreement(
-            &lane.content_loader.project_root(),
-            &lane.content_candidate,
-            &lane.plan,
-        ) {
-            Ok(agreement) => agreement,
-            Err(error) => {
-                self.reject_project_content_refresh(request, self.classify_refresh_error(&error));
-                let _ = self.diagnostics.extend(error.diagnostics().clone());
+        let (successor, current_revision, preview_registry) = {
+            let Some(lane) = self.trusted_compiled() else {
+                self.failed_content_refresh = Some(request);
                 return;
-            }
-        };
-        let successor = match lane
-            .content_loader
-            .load_with_expected_prefab_digest_and_runtime_agreement(
+            };
+            let runtime_agreement = match prepare_runtime_schema_agreement(
+                &lane.content_loader.project_root(),
                 &lane.content_candidate,
                 &lane.plan,
-                request.prefab.clone(),
-                request.expected_digest,
-                runtime_agreement,
             ) {
-            Ok(successor) => successor,
-            Err(error) => {
-                self.reject_project_content_refresh(request, self.classify_refresh_error(&error));
-                let _ = self.diagnostics.extend(error.diagnostics().clone());
-                return;
-            }
+                Ok(agreement) => agreement,
+                Err(error) => {
+                    self.reject_project_content_refresh(
+                        request,
+                        self.classify_refresh_error(&error),
+                    );
+                    let _ = self.diagnostics.extend(error.diagnostics().clone());
+                    return;
+                }
+            };
+            let successor = match lane
+                .content_loader
+                .load_with_expected_prefab_digest_and_runtime_agreement(
+                    &lane.content_candidate,
+                    &lane.plan,
+                    request.prefab.clone(),
+                    request.expected_digest,
+                    runtime_agreement,
+                ) {
+                Ok(successor) => successor,
+                Err(error) => {
+                    self.reject_project_content_refresh(
+                        request,
+                        self.classify_refresh_error(&error),
+                    );
+                    let _ = self.diagnostics.extend(error.diagnostics().clone());
+                    return;
+                }
+            };
+            (
+                successor,
+                lane.snapshot.revision(),
+                lane.plan.schema_validation().snapshot().clone(),
+            )
         };
 
-        if successor.revision() == lane.snapshot.revision() {
+        if successor.revision() == current_revision {
             let Some(generation) = self.project_content.current_generation() else {
                 self.reject_project_content_refresh(
                     request,
@@ -223,10 +236,10 @@ impl EditorProjectSession {
         }
 
         #[cfg(feature = "presentation-2d")]
-        let replacement_preview = match {
-            lane.preview
-                .rebuild_for_project(successor.clone(), lane.plan.schema_validation().snapshot())
-        } {
+        let replacement_preview = match self
+            .preview
+            .rebuild_for_project(successor.clone(), &preview_registry)
+        {
             Ok(preview) => preview,
             Err(report) => {
                 self.reject_project_content_refresh(
@@ -275,22 +288,24 @@ impl EditorProjectSession {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
         }
-        let Some(lane) = self.trusted_compiled_mut() else {
-            self.failed_content_refresh = Some(request);
-            return;
-        };
-        lane.snapshot = successor;
+        {
+            let Some(lane) = self.trusted_compiled_mut() else {
+                self.failed_content_refresh = Some(request);
+                return;
+            };
+            lane.snapshot = successor;
+        }
         #[cfg(feature = "presentation-2d")]
         {
-            lane.preview = replacement_preview;
+            self.preview = replacement_preview;
         }
         #[cfg(feature = "presentation-ui")]
         {
-            lane.ui_preview = replacement_ui_preview;
+            self.ui_preview = replacement_ui_preview;
         }
         #[cfg(feature = "runtime-ui")]
         {
-            lane.ui_authoring_image_choices = replacement_ui_authoring_image_choices;
+            self.ui_authoring_image_choices = replacement_ui_authoring_image_choices;
         }
         self.next_project_content_generation = next_generation;
         self.project_content = EditorProjectContentView::Current { generation };

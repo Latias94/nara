@@ -17,6 +17,7 @@ use nara::{
         TrustedCompiledEditorProjectIntent,
     },
     render::Extent2d,
+    scene::UnavailableRecordManifest,
     tooling::{
         EditorAction, EditorActionBatch, EditorFrameModel, EditorPersistenceResult,
         EditorPlayAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
@@ -26,7 +27,8 @@ use nara::{
         EguiCentralViewportInput, EguiEditorOutput, EguiEditorProjectAction, EguiEditorViewport,
         EguiProjectManagerInput, EguiProjectOpeningInput, EguiProjectRecoveryDiagnostic,
         EguiProjectRecoveryInput, EguiProjectShellAction, EguiProjectShellInput,
-        EguiProjectShellPanel, EguiUiAuthoringInput,
+        EguiProjectShellPanel, EguiUiAuthoringImages, EguiUiAuthoringInput,
+        EguiUiAuthoringMutations,
     },
 };
 use thiserror::Error;
@@ -656,6 +658,20 @@ impl EditorApplication {
             .map(|project| project.session.current_frame())
     }
 
+    /// Returns the complete active preservation manifest for generic authoring verification.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn active_authoring_unavailable_record_manifest(
+        &self,
+    ) -> Option<UnavailableRecordManifest> {
+        self.state.workspace().and_then(|project| {
+            project
+                .session
+                .active_authoring_unavailable_record_manifest()
+                .cloned()
+        })
+    }
+
     #[must_use]
     pub fn show(&mut self, root: &mut egui::Ui) -> Option<EditorActionBatch> {
         self.show_with_viewport(
@@ -707,13 +723,27 @@ impl EditorApplication {
         let ui_authoring = project.session.current_ui_authoring_frame();
         let editor_output = egui::Frame::central_panel(root.style())
             .show(root, |ui| {
-                let mut lower_field =
+                let field_editing_enabled = |key: &nara::ui::__private::UiAuthoringFieldKey| {
+                    ui_authoring
+                        .as_ref()
+                        .is_some_and(|authoring| authoring.field_editing_enabled(key))
+                };
+                let mut lower_continuous_field =
                     |key: &nara::ui::__private::UiAuthoringFieldKey,
                      value: nara::ui::__private::UiAuthoringFieldValue| {
                         ui_authoring
                             .as_ref()
                             .ok_or_else(|| "UI authoring is unavailable".to_owned())?
                             .lower_field_edit(key, value)
+                            .map_err(|error| error.to_string())
+                    };
+                let mut lower_discrete_field =
+                    |key: &nara::ui::__private::UiAuthoringFieldKey,
+                     value: nara::ui::__private::UiAuthoringFieldValue| {
+                        ui_authoring
+                            .as_ref()
+                            .ok_or_else(|| "UI authoring is unavailable".to_owned())?
+                            .lower_discrete_field_edit(key, value)
                             .map_err(|error| error.to_string())
                     };
                 let mut lower_direct = |edit: &nara::ui::__private::UiAuthoringDirectEdit| {
@@ -738,11 +768,19 @@ impl EditorApplication {
                             authoring.selection(),
                             authoring.gesture(),
                             authoring.projection(),
-                            authoring.image_choice_generation(),
-                            authoring.image_choices(),
-                            &mut lower_field,
-                            &mut lower_direct,
-                            &mut lower_structure,
+                            EguiUiAuthoringImages::new(
+                                authoring.image_choice_generation(),
+                                authoring.image_choices(),
+                            ),
+                            EguiUiAuthoringMutations::new(
+                                &field_editing_enabled,
+                                authoring.direct_editing_enabled(),
+                                authoring.structure_editing_enabled(),
+                                &mut lower_continuous_field,
+                                &mut lower_discrete_field,
+                                &mut lower_direct,
+                                &mut lower_structure,
+                            ),
                         )
                     })
                 });
@@ -1323,6 +1361,17 @@ impl EditorApplication {
         };
         let frame = retained.session.current_frame();
         let phase = frame.workspace_intent().phase();
+        let persistence_save_failed = save_attempted
+            && frame.workspace_intent().phase()
+                == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+            && matches!(
+                frame.persistence().result(),
+                Some(
+                    EditorPersistenceResult::Rejected { .. }
+                        | EditorPersistenceResult::Failed { .. }
+                        | EditorPersistenceResult::PersistenceUncertain { .. }
+                )
+            );
         match frame.workspace_intent().result() {
             Some(EditorWorkspaceIntentResult::Applied {
                 intent: EditorWorkspaceIntent::Exit,
@@ -1340,31 +1389,19 @@ impl EditorApplication {
             ) => {
                 self.state = EditorProductState::from_published(retained);
             }
-            _ if save_attempted
-                && frame.workspace_intent().phase()
-                    == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
-                && matches!(
-                    frame.persistence().result(),
-                    Some(
-                        EditorPersistenceResult::Rejected { .. }
-                            | EditorPersistenceResult::Failed { .. }
-                            | EditorPersistenceResult::PersistenceUncertain { .. }
-                    )
-                ) =>
-            {
-                if cancel_pending_exit(&mut retained) {
-                    self.state = EditorProductState::from_published(retained);
-                } else {
-                    self.state =
-                        EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
-                            entry_generation,
-                            attempt_generation,
-                            retained,
-                            candidate,
-                            close_started,
-                            save_attempted,
-                        });
-                }
+            _ if persistence_save_failed && cancel_pending_exit(&mut retained) => {
+                self.state = EditorProductState::from_published(retained);
+            }
+            _ if persistence_save_failed => {
+                self.state =
+                    EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                        entry_generation,
+                        attempt_generation,
+                        retained,
+                        candidate,
+                        close_started,
+                        save_attempted,
+                    });
             }
             _ if phase == Some(EditorWorkspaceIntentPhase::Prepared) && actions_observed => {
                 self.state =

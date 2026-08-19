@@ -25,6 +25,15 @@ use super::{
 
 const CANARY_DEADLINE: Duration = Duration::from_secs(35);
 
+pub(super) struct EditorGameViewCanaryFrameInput<'a> {
+    pub(super) frame: &'a EditorFrameModel,
+    pub(super) observation: Option<&'a EditorGamePresentedObservation<'a>>,
+    pub(super) active_start: Option<EditorGameStartRequest>,
+    pub(super) ui_authoring_frame: Option<&'a EditorUiAuthoringFrame>,
+    pub(super) ui_observation: Option<&'a EditorUiCanvasPresentedObservation<'a>>,
+    pub(super) ui_presenter: &'a EditorUiCanvasPresenter,
+}
+
 /// Product-provided facts for one bounded first-party Game View native canary.
 #[doc(hidden)]
 #[derive(Clone, Debug, PartialEq)]
@@ -243,15 +252,18 @@ impl EditorGameViewCanaryHost {
 
     pub(super) fn advance(
         &mut self,
-        frame: &EditorFrameModel,
-        observation: Option<&EditorGamePresentedObservation<'_>>,
-        active_start: Option<EditorGameStartRequest>,
-        ui_authoring_frame: Option<&EditorUiAuthoringFrame>,
-        ui_observation: Option<&EditorUiCanvasPresentedObservation<'_>>,
-        ui_presenter: &EditorUiCanvasPresenter,
+        frame_input: EditorGameViewCanaryFrameInput<'_>,
         input: &mut EditorGameInputRouter,
         window: &Window,
     ) -> Result<EditorGameViewCanaryAdvance, EditorRunError> {
+        let EditorGameViewCanaryFrameInput {
+            frame,
+            observation,
+            active_start,
+            ui_authoring_frame,
+            ui_observation,
+            ui_presenter,
+        } = frame_input;
         if Instant::now() >= self.deadline {
             return Err(self.timeout_error(observation, active_start));
         }

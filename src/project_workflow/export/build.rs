@@ -1,4 +1,6 @@
-use std::{array, fmt};
+#[cfg(feature = "project-workflow-cli")]
+use std::array;
+use std::fmt;
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
@@ -307,6 +309,7 @@ pub struct ProjectExportProductAgreement {
 }
 
 impl ProjectExportProductAgreement {
+    #[cfg(feature = "project-workflow-cli")]
     pub fn new(
         target: ProjectExportBinaryTarget,
         executable_digest: ContentDigest,
@@ -360,6 +363,7 @@ impl fmt::Debug for ProjectExportProductAgreement {
     }
 }
 
+#[cfg(feature = "project-workflow-cli")]
 fn bind_product_agreements(
     agreements: [ProjectExportProductAgreement; 2],
     executables: [&ProjectExportExecutableReceipt; 2],

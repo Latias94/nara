@@ -15,12 +15,13 @@ use std::{
 
 use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
-    project_host::TrustedCompiledEditorProjectIntent,
+    project_host::{EditorUiAuthoringEditError, TrustedCompiledEditorProjectIntent},
     project_workflow::{
         NaraDependencySource, ProjectCreationRequest, ProjectDirectory, ProjectMember, ProjectSlug,
         prepare_desktop_2d_project,
     },
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind},
+    render::Extent2d,
     scene::{
         SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneEntityId,
         SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
@@ -36,6 +37,7 @@ use nara::{
         SceneInspectorCommand,
     },
     tooling_egui::{EguiEditorProjectAction, EguiProjectOpenDraft},
+    ui::__private::{UiAuthoringCanvasProjection, UiAuthoringFieldValue},
 };
 use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
 
@@ -391,6 +393,104 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
     let frame = current_frame(&application);
     assert!(has_diagnostic(&frame, "scene.authoring-known-unbound"));
     assert!(!has_diagnostic(&frame, "scene.authoring-unknown-schema"));
+    application.set_scene_preview_extent(Some(Extent2d::new(640, 360).unwrap()));
+    let _ =
+        application.submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+    let scene_candidate = application
+        .take_scene_preview_candidate()
+        .expect("ordinary Generic Open must publish one Scene preview candidate");
+    let active_scene = frame.workspace().active_scene.as_ref().unwrap();
+    assert_eq!(scene_candidate.document(), active_scene.document);
+    assert_eq!(scene_candidate.revision(), active_scene.revision);
+    assert!(
+        scene_candidate
+            .hits()
+            .iter()
+            .any(|hit| hit.entity().as_str() == "player-weapon"),
+        "ordinary Generic Open must preserve one known renderable Sprite"
+    );
+    assert!(!scene_candidate.preview_omissions().is_empty());
+    assert!(has_diagnostic(
+        &current_frame(&application),
+        "project.editor.authoring-scene-preview-source-omitted"
+    ));
+
+    let frame = current_frame(&application);
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let reference_ui = SceneEntityId::new("reference-ui").unwrap();
+    let opened = application.submit_and_drive(
+        EditorActionBatch::new(
+            frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: scene.document,
+                    entity: Some(reference_ui.clone()),
+                }),
+                EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    entity: reference_ui,
+                }),
+            ],
+        ),
+        Duration::ZERO,
+    );
+    assert!(opened.actions_observed());
+    let ui_frame = application
+        .current_ui_authoring_frame()
+        .expect("ordinary Generic Open must publish the active UI Prefab authoring frame");
+    let projection = ui_frame
+        .projection()
+        .expect("the built-in UI Prefab must retain its typed authoring projection");
+    assert!(!projection.hierarchy().is_empty());
+    assert!(matches!(
+        projection.canvas(),
+        UiAuthoringCanvasProjection::Ready(_)
+    ));
+    let candidate = application
+        .take_editor_ui_preview_candidate()
+        .expect("ordinary Generic Open must publish one UI Canvas candidate");
+    assert_eq!(candidate.document(), ui_frame.document());
+    assert_eq!(candidate.revision(), ui_frame.revision());
+    let discrete = projection
+        .fields()
+        .iter()
+        .find(|field| {
+            ui_frame.field_editing_enabled(field.key())
+                && matches!(field.value(), UiAuthoringFieldValue::Bool(_))
+        })
+        .expect("the built-in UI Prefab must expose one preservation-safe Boolean field");
+    let proposed = match discrete.value() {
+        UiAuthoringFieldValue::Bool(value) => UiAuthoringFieldValue::Bool(!value),
+        _ => unreachable!("the selected field is Boolean"),
+    };
+    assert!(!ui_frame.direct_editing_enabled());
+    assert!(!ui_frame.structure_editing_enabled());
+    assert!(matches!(
+        ui_frame.lower_field_edit(discrete.key(), proposed.clone()),
+        Err(EditorUiAuthoringEditError::MutationUnavailable)
+    ));
+    let mutation = ui_frame
+        .lower_discrete_field_edit(discrete.key(), proposed)
+        .expect("ordinary UI scalar lowering must use the preservation-safe command");
+    assert!(matches!(
+        mutation,
+        EditorDocumentMutation::ApplyAuthoringScalarEdit { .. }
+    ));
+    let action_frame = current_frame(&application).revision();
+    let edited = application.submit_and_drive(
+        EditorActionBatch::new(action_frame, [EditorAction::Mutate(mutation)]),
+        Duration::ZERO,
+    );
+    assert!(edited.actions_observed());
+    assert_ne!(
+        current_frame(&application)
+            .workspace()
+            .document(ui_frame.document())
+            .expect("the edited UI Prefab must remain open")
+            .revision,
+        ui_frame.revision()
+    );
 }
 
 #[test]

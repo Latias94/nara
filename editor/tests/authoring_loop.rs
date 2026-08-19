@@ -73,7 +73,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     .expect("the desktop starter must open with its explicit desktop profile");
     application.set_scene_preview_extent(Extent2d::new(960, 540));
 
-    let opened = application.current_frame();
+    let opened = current_frame(&application);
     let opened_scene = opened.workspace().active_scene.as_ref().unwrap();
     let document = opened_scene.document;
     let edited = dispatch(
@@ -157,7 +157,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     complete_plain_identity(&mut application, first_identity);
     drive_empty(&mut application);
     assert_eq!(
-        application.current_frame().play().state(),
+        current_frame(&application).play().state(),
         EditorPlayState::Running
     );
 
@@ -166,7 +166,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
         [EditorAction::Play(EditorPlayAction::Pause)],
     );
     assert_eq!(
-        application.current_frame().play().state(),
+        current_frame(&application).play().state(),
         EditorPlayState::Paused
     );
     let paused_candidate = take_game_candidate(&mut application);
@@ -191,7 +191,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
         [EditorAction::Play(EditorPlayAction::StepFixedTick)],
     );
     assert_eq!(
-        application.current_frame().play().state(),
+        current_frame(&application).play().state(),
         EditorPlayState::Stepping
     );
     let step_candidate = take_game_candidate(&mut application);
@@ -199,11 +199,11 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     complete_plain_candidate(&mut application, step_candidate);
     drive_empty(&mut application);
     assert_eq!(
-        application.current_frame().play().state(),
+        current_frame(&application).play().state(),
         EditorPlayState::Paused
     );
     assert!(matches!(
-        application.current_frame().play().result(),
+        current_frame(&application).play().result(),
         Some(EditorPlayOperationResult::Applied {
             operation: EditorPlayOperation::StepFixedTick,
             generation: Some(generation),
@@ -213,7 +213,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     application
         .set_game_view_source_active(false, "the starter trajectory selected Scene View")
         .unwrap();
-    let paused = application.current_frame();
+    let paused = current_frame(&application);
     let transform = selected_f64_field(&paused, TRANSFORM_COMPONENT, TRANSLATION_X_FIELD);
     let paused_edit = dispatch(
         &mut application,
@@ -269,17 +269,17 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     complete_plain_identity(&mut application, restarted_identity);
     drive_empty(&mut application);
     assert_eq!(
-        application.current_frame().play().state(),
+        current_frame(&application).play().state(),
         EditorPlayState::Running
     );
-    assert!(!application.current_frame().play().is_out_of_date());
+    assert!(!current_frame(&application).play().is_out_of_date());
 
     dispatch(
         &mut application,
         [EditorAction::Play(EditorPlayAction::Stop)],
     );
     drive_until_play_state(&mut application, EditorPlayState::Empty);
-    let stopped = application.current_frame();
+    let stopped = current_frame(&application);
     assert!(stopped.workspace().active_scene.as_ref().unwrap().dirty);
     assert_eq!(fs::read(&scene_path).unwrap(), source_before);
 
@@ -330,7 +330,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
         other => panic!("expected the saved starter Scene to reopen, got {other:?}"),
     };
     select_entity(&mut application, reopened_document, GAME_VIEW_PROBE_ENTITY);
-    let reopened = application.current_frame();
+    let reopened = current_frame(&application);
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
     assert_eq!(
         selected_f64_field(&reopened, TRANSFORM_COMPONENT, TRANSLATION_X_FIELD).value,
@@ -351,7 +351,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     )
     .expect("the published starter must open in the private Editor application");
     application.set_scene_preview_extent(Extent2d::new(960, 540));
-    let opened = application.current_frame();
+    let opened = current_frame(&application);
     let opened_scene = opened
         .workspace()
         .active_scene
@@ -364,7 +364,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let mut harness = editor_harness(application);
     harness.get_by_label("+ Root").click();
     harness.run();
-    let composed = harness.state().current_frame();
+    let composed = current_frame(harness.state());
     let composed_scene = composed.workspace().active_scene.as_ref().unwrap();
     let composed_revision = composed_scene.revision;
     let created_entity = SceneEntityId::new(CREATED_ENTITY).unwrap();
@@ -389,7 +389,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     harness.key_press(Key::Enter);
     harness.run();
 
-    let edited = harness.state().current_frame();
+    let edited = current_frame(harness.state());
     let edited_scene = edited.workspace().active_scene.as_ref().unwrap();
     let edited_revision = edited_scene.revision;
     let field = transform_x_field(&edited);
@@ -442,21 +442,21 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let mut harness = editor_harness(application);
     harness.get_by_label("Undo").click();
     harness.run();
-    let undone = harness.state().current_frame();
+    let undone = current_frame(harness.state());
     let undone_scene = undone.workspace().active_scene.as_ref().unwrap();
     assert!(undone_scene.dirty);
     assert_eq!(transform_x_field(&undone).value, 0.0);
 
     harness.get_by_label("Redo").click();
     harness.run();
-    let redone = harness.state().current_frame();
+    let redone = current_frame(harness.state());
     let redone_scene = redone.workspace().active_scene.as_ref().unwrap();
     assert!(redone_scene.dirty);
     assert_eq!(transform_x_field(&redone).value, EDITED_TRANSLATION_X);
 
     harness.get_by_label("Save").click();
     harness.run();
-    let saved = harness.state().current_frame();
+    let saved = current_frame(harness.state());
     assert!(matches!(
         saved.persistence().result(),
         Some(EditorPersistenceResult::Saved {
@@ -510,7 +510,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let mut harness = editor_harness(application);
     harness.get_by_label_contains(CREATED_ENTITY).click();
     harness.run();
-    let reopened = harness.state().current_frame();
+    let reopened = current_frame(harness.state());
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
     assert_eq!(transform_x_field(&reopened).value, EDITED_TRANSLATION_X);
     let reopened_scene = reopened.workspace().active_scene.as_ref().unwrap();
@@ -639,23 +639,32 @@ fn editor_harness(application: EditorApplication) -> Harness<'static, EditorAppl
         .with_size(egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, application| {
-                let batch = application.show(ui);
-                application.submit_and_drive(batch, Duration::ZERO);
+                if let Some(batch) = application.show(ui) {
+                    application.submit_and_drive(batch, Duration::ZERO);
+                }
             },
             application,
         )
+}
+
+fn current_frame(
+    application: &EditorApplication,
+) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
+    application
+        .current_frame()
+        .expect("the trusted compiled Editor retains one published workspace frame")
 }
 
 fn dispatch(
     application: &mut EditorApplication,
     actions: impl IntoIterator<Item = EditorAction>,
 ) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
-    let frame = application.current_frame();
+    let frame = current_frame(application);
     application.submit_and_drive(
         EditorActionBatch::new(frame.revision(), actions),
         Duration::ZERO,
     );
-    application.current_frame()
+    current_frame(application)
 }
 
 fn drive_empty(application: &mut EditorApplication) {
@@ -664,14 +673,14 @@ fn drive_empty(application: &mut EditorApplication) {
 
 fn drive_until_play_state(application: &mut EditorApplication, expected: EditorPlayState) {
     for _ in 0..32 {
-        if application.current_frame().play().state() == expected {
+        if current_frame(application).play().state() == expected {
             return;
         }
         drive_empty(application);
     }
     panic!(
         "the Editor did not reach {expected:?}; current frame: {:?}",
-        application.current_frame().play()
+        current_frame(application).play()
     );
 }
 
@@ -729,10 +738,10 @@ fn take_scene_preview_candidate(
     expected_revision: nara::scene::SceneAuthoringRevision,
 ) -> nara::project_host::EditorPreviewCandidate {
     for _ in 0..16 {
-        if let Some(candidate) = application.take_scene_preview_candidate() {
-            if candidate.revision() == expected_revision {
-                return candidate;
-            }
+        if let Some(candidate) = application.take_scene_preview_candidate()
+            && candidate.revision() == expected_revision
+        {
+            return candidate;
         }
         drive_empty(application);
     }

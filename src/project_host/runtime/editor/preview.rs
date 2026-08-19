@@ -4,10 +4,11 @@ use std::{
 };
 
 use nara_app::{App, CoreStage};
-use nara_asset::{AssetId, Handle};
+use nara_asset::{AssetId, AssetServer, AssetSourceKind, Handle};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
+use nara_image::ImageAsset;
 use nara_reflect::{ComponentRegistry, ComponentRegistrySnapshot};
 use nara_render::{
     __private::{EditorRenderGeneration, build_editor_render_frame_packet},
@@ -15,15 +16,17 @@ use nara_render::{
     RenderTarget, ViewportRect,
 };
 use nara_scene::{
-    SceneAuthoringRevision, SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntitySource,
+    __private::AuthoringPreviewOmission, SceneAuthoringRevision, SceneAuthoringSession,
+    SceneDocument, SceneEntityId, SceneEntitySource,
 };
 use nara_sprite_render::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
 use nara_transform::Transform2d;
 
-use crate::project_host::ProjectContentSnapshot;
+use crate::project_host::{ProjectContentSnapshot, authoring::AuthoringProjectSessionSnapshot};
 
 use super::super::{publish_snapshot_images, single_error};
+use super::authoring_preview::EditorAuthoringPreviewOmissions;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorPreviewHit {
@@ -77,6 +80,7 @@ pub struct EditorPreviewCandidate {
     packet: RenderFramePacket,
     sprite_batches: SpriteBatches,
     hits: Vec<EditorPreviewHit>,
+    omissions: EditorAuthoringPreviewOmissions,
 }
 
 impl EditorPreviewCandidate {
@@ -98,6 +102,13 @@ impl EditorPreviewCandidate {
     #[must_use]
     pub fn hits(&self) -> &[EditorPreviewHit] {
         &self.hits
+    }
+
+    /// Returns exact source facts omitted from this fail-closed authoring projection.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn preview_omissions(&self) -> &[AuthoringPreviewOmission] {
+        self.omissions.facts()
     }
 
     #[must_use]
@@ -125,9 +136,20 @@ impl EditorPreviewCandidate {
 struct EditorPreviewRequest {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
-    scene: SceneDocument,
+    projection: Option<EditorPreviewProjection>,
     extent: Extent2d,
     target: Handle<RenderImage2d>,
+}
+
+pub(super) struct EditorPreviewProjection {
+    scene: SceneDocument,
+    omissions: EditorAuthoringPreviewOmissions,
+}
+
+impl EditorPreviewProjection {
+    pub(super) fn new(scene: SceneDocument, omissions: EditorAuthoringPreviewOmissions) -> Self {
+        Self { scene, omissions }
+    }
 }
 
 #[derive(Clone, Resource)]
@@ -137,7 +159,10 @@ struct EditorPreviewInput(Arc<Mutex<Option<EditorPreviewRequest>>>);
 struct EditorPreviewRegistry(ComponentRegistry);
 
 #[derive(Resource)]
-struct EditorPreviewProject(ProjectContentSnapshot);
+enum EditorPreviewProject {
+    Authoring,
+    TrustedCompiled(ProjectContentSnapshot),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct EditorPreviewDocumentStamp {
@@ -145,31 +170,20 @@ struct EditorPreviewDocumentStamp {
     revision: SceneAuthoringRevision,
 }
 
-#[derive(Resource)]
+#[derive(Default, Resource)]
 struct EditorPreviewRuntimeState {
     materializer: Option<SceneAuthoringSession>,
     requested: Option<EditorPreviewDocumentStamp>,
     accepted: Option<EditorPreviewDocumentStamp>,
+    omissions: Option<EditorAuthoringPreviewOmissions>,
     camera: Option<Entity>,
     diagnostics: DiagnosticReport,
-}
-
-impl Default for EditorPreviewRuntimeState {
-    fn default() -> Self {
-        Self {
-            materializer: None,
-            requested: None,
-            accepted: None,
-            camera: None,
-            diagnostics: DiagnosticReport::default(),
-        }
-    }
 }
 
 pub(super) struct EditorPreviewSource {
     pub document: EditorDocumentId,
     pub revision: SceneAuthoringRevision,
-    pub scene: SceneDocument,
+    pub projection: Option<EditorPreviewProjection>,
 }
 
 pub(super) struct EditorPreviewSession {
@@ -200,6 +214,30 @@ impl EditorPreviewSession {
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<Self, DiagnosticReport> {
+        let image_source = project.clone();
+        Self::new_with_project(
+            EditorPreviewProject::TrustedCompiled(project),
+            registry,
+            |world| {
+                publish_snapshot_images(world, &image_source).map_err(|error| error.diagnostics)
+            },
+        )
+    }
+
+    pub(super) fn new_authoring(
+        project: &AuthoringProjectSessionSnapshot,
+        registry: &ComponentRegistrySnapshot,
+    ) -> Result<Self, DiagnosticReport> {
+        Self::new_with_project(EditorPreviewProject::Authoring, registry, |world| {
+            publish_authoring_image_records(world, project)
+        })
+    }
+
+    fn new_with_project(
+        project: EditorPreviewProject,
+        registry: &ComponentRegistrySnapshot,
+        publish_images: impl FnOnce(&mut World) -> Result<(), DiagnosticReport>,
+    ) -> Result<Self, DiagnosticReport> {
         let mut app = App::new();
         app.add_plugins((
             nara_reflect::ComponentRegistryPlugin,
@@ -227,16 +265,14 @@ impl EditorPreviewSession {
                     registry.clone(),
                 )))
             })
-            .and_then(|app| app.insert_resource(EditorPreviewProject(project.clone())))
+            .and_then(|app| app.insert_resource(project))
             .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::default()))
             .and_then(|app| app.add_systems(CoreStage::First, apply_editor_preview_request))
             .map_err(|_| preview_error("project.editor.preview-state-install-failed"))?;
-        publish_snapshot_images(
+        publish_images(
             app.world_mut()
                 .map_err(|_| preview_error("project.editor.preview-world-unavailable"))?,
-            &project,
-        )
-        .map_err(|error| error.diagnostics)?;
+        )?;
         let generation = EditorRenderGeneration::try_acquire()
             .ok_or_else(|| preview_error("project.editor.preview-generation-exhausted"))?;
         Ok(Self {
@@ -258,6 +294,21 @@ impl EditorPreviewSession {
             self.candidate = None;
             self.world_snapshot = None;
         }
+    }
+
+    pub(super) fn requires_source_projection(
+        &self,
+        document: EditorDocumentId,
+        revision: SceneAuthoringRevision,
+    ) -> bool {
+        if self.extent.is_none() {
+            return false;
+        }
+        self.app
+            .world()
+            .resource::<EditorPreviewRuntimeState>()
+            .requested
+            != Some(EditorPreviewDocumentStamp { document, revision })
     }
 
     pub(super) fn rebuild_for_project(
@@ -299,7 +350,7 @@ impl EditorPreviewSession {
         let request = EditorPreviewRequest {
             document: source.document,
             revision: source.revision,
-            scene: source.scene,
+            projection: source.projection,
             extent,
             target: self.target,
         };
@@ -323,7 +374,7 @@ impl EditorPreviewSession {
         let packet = build_editor_render_frame_packet(
             self.generation,
             self.app.world().resource::<RenderFrame>().index,
-            &views,
+            views,
         )
         .map_err(|_| preview_error("project.editor.preview-packet-rejected"))?
         .ok_or_else(|| preview_error("project.editor.preview-view-missing"))?;
@@ -361,6 +412,10 @@ impl EditorPreviewSession {
             packet,
             sprite_batches: self.app.world().resource::<SpriteBatches>().clone(),
             hits,
+            omissions: runtime_state
+                .omissions
+                .clone()
+                .expect("an accepted Editor preview retains exact omission facts"),
         });
         self.geometry_revision = geometry_revision;
         self.world_snapshot = Some(world_snapshot);
@@ -400,23 +455,34 @@ fn apply_editor_preview_request(world: &mut World) {
         revision: request.revision,
     };
     if state.requested != Some(stamp) {
+        let projection = request
+            .projection
+            .expect("a changed Editor preview source carries its safe projection and omissions");
+        let EditorPreviewProjection { scene, omissions } = projection;
+        debug_assert_eq!(omissions.document(), request.document);
+        debug_assert_eq!(omissions.revision(), request.revision);
         match state.materializer.as_mut() {
             Some(materializer) => materializer
-                .replace_document(request.scene)
+                .replace_document(scene)
                 .expect("Editor preview materializers always retain native authority"),
-            None => state.materializer = Some(SceneAuthoringSession::new(request.scene)),
+            None => state.materializer = Some(SceneAuthoringSession::new(scene)),
         }
         state.requested = Some(stamp);
+        state.omissions = Some(omissions);
     }
     if state.accepted != Some(stamp) {
-        let report = project.0.sync_editor_preview_scene(
-            state
-                .materializer
-                .as_mut()
-                .expect("a requested preview owns one materializer"),
-            world,
-            &registry.0,
-        );
+        let materializer = state
+            .materializer
+            .as_mut()
+            .expect("a requested preview owns one materializer");
+        let report = match &project {
+            EditorPreviewProject::Authoring => materializer
+                .sync_world(world, &registry.0)
+                .expect("authoring preview projections always create native materializers"),
+            EditorPreviewProject::TrustedCompiled(project) => {
+                project.sync_editor_preview_scene(materializer, world, &registry.0)
+            }
+        };
         state.diagnostics = report.diagnostics.clone();
         if report.synced {
             remove_authored_preview_cameras(world);
@@ -464,6 +530,22 @@ fn ensure_preview_camera(
             state.camera = Some(world.spawn((camera, Transform2d::default())).id());
         }
     }
+}
+
+fn publish_authoring_image_records(
+    world: &mut World,
+    snapshot: &AuthoringProjectSessionSnapshot,
+) -> Result<(), DiagnosticReport> {
+    let mut server = world.resource_mut::<AssetServer>();
+    for record in snapshot
+        .asset_records()
+        .filter(|record| record.source_kind() == &AssetSourceKind::Image)
+    {
+        server
+            .reserve_record::<ImageAsset>(record)
+            .map_err(|_| preview_error("project.editor.preview-image-identity-failed"))?;
+    }
+    Ok(())
 }
 
 fn preview_error(code: &'static str) -> DiagnosticReport {

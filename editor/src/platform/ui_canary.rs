@@ -469,8 +469,7 @@ impl EditorUiAuthoringCanaryHost {
                     .structure_placement_candidates(None)
                     .map_err(|error| EditorRunError::Platform(error.to_string()))?
                     .into_iter()
-                    .filter(|candidate| candidate.parent() == &self.request.structure_parent)
-                    .last()
+                    .rfind(|candidate| candidate.parent() == &self.request.structure_parent)
                     .ok_or_else(|| {
                         EditorRunError::Platform(format!(
                             "the UI authoring canary found no final placement under {}",

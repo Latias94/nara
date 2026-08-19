@@ -54,21 +54,15 @@ impl EditorProjectSession {
         }
         self.advance_workspace_retirement();
         #[cfg(feature = "presentation-2d")]
-        if self.trusted_compiled().is_some() {
-            self.drive_editor_preview();
-        }
+        self.drive_editor_preview();
         self.publish_editor_frame()
     }
 
     pub(super) fn publish_editor_frame(&mut self) -> Arc<EditorFrameModel> {
         #[cfg(feature = "runtime-ui")]
-        if self.trusted_compiled().is_some() {
-            self.reconcile_editor_gesture();
-        }
+        self.reconcile_editor_gesture();
         #[cfg(feature = "presentation-2d")]
-        let preview_world = self
-            .trusted_compiled()
-            .and_then(|lane| lane.preview.world_snapshot());
+        let preview_world = self.preview.world_snapshot();
         #[cfg(not(feature = "presentation-2d"))]
         let preview_world = None;
         let workspace = match self.trusted_compiled() {
@@ -97,12 +91,7 @@ impl EditorProjectSession {
             self.field_feedback.clone(),
         ));
         #[cfg(feature = "runtime-ui")]
-        if self.trusted_compiled().is_some() {
-            self.publish_ui_authoring_frame(frame.revision());
-        } else {
-            self.ui_authoring_frame = None;
-            self.ui_authoring_projection_cache = None;
-        }
+        self.publish_ui_authoring_frame(frame.revision());
         self.published_frame = Some(PublishedEditorFrame {
             model: Arc::clone(&frame),
             dispatched: false,

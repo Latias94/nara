@@ -653,9 +653,18 @@ impl EditorProjectSession {
                 Some(lane) => self
                     .persistence
                     .reopen_native(lane.plan.schema_validation().registry()),
-                None => {
-                    SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
-                }
+                None => match self.authoring_project() {
+                    Some(snapshot) => {
+                        let basis =
+                            nara_scene::SceneAuthoringSession::from_published_authoring_document(
+                                snapshot.fork_startup_scene(),
+                            );
+                        self.persistence.reopen_authoring(&basis)
+                    }
+                    None => SceneReopenOutcome::Rejected(
+                        EditorPersistenceRejection::PreservationMismatch,
+                    ),
+                },
             },
         };
         match reopened {
@@ -890,7 +899,7 @@ impl EditorProjectSession {
 fn prefab_contains_ui_root(document: &nara_scene::PrefabDocument) -> bool {
     #[cfg(feature = "runtime-ui")]
     {
-        return nara_ui::__private::prefab_contains_ui_root(document);
+        nara_ui::__private::prefab_contains_ui_root(document)
     }
     #[cfg(not(feature = "runtime-ui"))]
     {

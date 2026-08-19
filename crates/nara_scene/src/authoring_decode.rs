@@ -729,6 +729,17 @@ impl PublishedAuthoringSceneDocument {
     }
 }
 
+/// Forks one published Scene source into an independent Editor working owner.
+#[must_use]
+pub fn fork_published_authoring_scene_document(
+    published: &PublishedAuthoringSceneDocument,
+) -> PublishedAuthoringSceneDocument {
+    PublishedAuthoringSceneDocument {
+        document: published.document.clone(),
+        state: published.state.clone(),
+    }
+}
+
 #[derive(Debug)]
 pub struct PublishedAuthoringPrefabDocument {
     document: PrefabDocument,

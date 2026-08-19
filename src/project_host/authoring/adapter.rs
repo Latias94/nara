@@ -1,5 +1,6 @@
 use nara_reflect::{
-    __private::resolve_schema_provider, ComponentCapability, ComponentRegistryError,
+    __private::{register_or_validate_resolved_schema_provider, resolve_schema_provider},
+    ComponentCapability, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
     ComponentSchemaProviderDefinition,
 };
 use nara_scene::__private::{AuthoringAdapterReceipt, AuthoringAdapterReceiptError};
@@ -43,6 +44,34 @@ pub(crate) fn first_party_authoring_adapters(
         .filter_map(|result| result.transpose())
         .collect::<Result<Vec<_>, _>>()
         .map(Vec::into_boxed_slice)
+}
+
+pub(crate) fn first_party_authoring_preview_registry(
+    providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+) -> Result<ComponentRegistrySnapshot, FirstPartyAuthoringAdapterError> {
+    let mut registry = ComponentRegistry::new();
+    for provider in providers {
+        let resolved = resolve_schema_provider(provider)
+            .map_err(FirstPartyAuthoringAdapterError::ProviderSource)?;
+        let supports_authoring_preview =
+            resolved
+                .current()
+                .catalog()
+                .components()
+                .iter()
+                .any(|schema| {
+                    schema.has_capability(ComponentCapability::Scene)
+                        && schema.has_capability(ComponentCapability::Inspect)
+                });
+        if supports_authoring_preview {
+            register_or_validate_resolved_schema_provider(&mut registry, resolved)
+                .map_err(FirstPartyAuthoringAdapterError::ProviderSource)?;
+        }
+    }
+    registry
+        .freeze()
+        .and_then(|registry| registry.snapshot())
+        .map_err(FirstPartyAuthoringAdapterError::ProviderSource)
 }
 
 #[derive(Debug)]

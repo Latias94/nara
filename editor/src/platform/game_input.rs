@@ -115,8 +115,9 @@ struct EditorGamePresentedInput {
     transform: EditorGameContentTransform,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 enum EditorGameCaptureState {
+    #[default]
     Released,
     Captured {
         stamp: EditorGamePresentedStamp,
@@ -124,12 +125,6 @@ enum EditorGameCaptureState {
         held_keys: BTreeSet<KeyCode>,
         held_mouse_buttons: BTreeSet<MouseButton>,
     },
-}
-
-impl Default for EditorGameCaptureState {
-    fn default() -> Self {
-        Self::Released
-    }
 }
 
 #[derive(Debug, Default)]

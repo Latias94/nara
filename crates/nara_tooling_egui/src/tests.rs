@@ -30,7 +30,8 @@ use nara_tooling::{
 
 use crate::{
     EguiCentralViewportInput, EguiEditorOutput, EguiEditorPanel, EguiEditorProjectAction,
-    EguiEditorViewport, EguiEditorViewportIntent, EguiProjectOpenDraft, EguiUiAuthoringInput,
+    EguiEditorViewport, EguiEditorViewportIntent, EguiProjectOpenDraft, EguiUiAuthoringImages,
+    EguiUiAuthoringInput, EguiUiAuthoringMutations,
     editor::{test_control_rect, test_diagnostic_codes, test_inline_field_feedback},
     fields::parse_editable_value,
 };
@@ -1656,10 +1657,17 @@ fn render_ui_authoring_frame_with_structure_lowering(
         egui::Pos2::ZERO,
         egui::vec2(1280.0, 1600.0),
     ));
-    let mut lower_field =
+    let field_editing_enabled = |_key: &nara_ui::__private::UiAuthoringFieldKey| true;
+    let mut lower_continuous_field =
         |key: &nara_ui::__private::UiAuthoringFieldKey,
          value: nara_ui::__private::UiAuthoringFieldValue| {
             test_lower_ui_field_edit(document, revision, projection, key, value)
+        };
+    let mut lower_discrete_field =
+        |key: &nara_ui::__private::UiAuthoringFieldKey,
+         value: nara_ui::__private::UiAuthoringFieldValue| {
+            test_lower_ui_field_edit(document, revision, projection, key, value)
+                .map(|edit| EditorDocumentMutation::ApplyPrefabFieldEdit { edit })
         };
     let mut lower_direct = |_edit: &nara_ui::__private::UiAuthoringDirectEdit|
      -> Result<EditorAtomicFieldEdit, String> {
@@ -1676,11 +1684,16 @@ fn render_ui_authoring_frame_with_structure_lowering(
         selection,
         None,
         Ok(projection),
-        image_choices.generation(),
-        Ok(&image_choices),
-        &mut lower_field,
-        &mut lower_direct,
-        lower_structure,
+        EguiUiAuthoringImages::new(image_choices.generation(), Ok(&image_choices)),
+        EguiUiAuthoringMutations::new(
+            &field_editing_enabled,
+            true,
+            true,
+            &mut lower_continuous_field,
+            &mut lower_discrete_field,
+            &mut lower_direct,
+            lower_structure,
+        ),
     );
     let mut authoring = Some(authoring);
     let mut response = None;
