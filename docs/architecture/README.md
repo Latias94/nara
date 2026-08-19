@@ -9,15 +9,18 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
-   plan is active at EPB-U3 under
-   [registration `ae4a33089c7b41fd86c94ad7a95e6206`](../knowledge/engineering/registry/2026-08/2026-08-19T182337Z-editor-project-browser-source-index-v1-codex-root-ae4a33089c7b41fd86c94ad7a95e6206.md).
+   plan is active at EPB-U4 under
+   [registration `a958d458bd304a0688476ebf9540da04`](../knowledge/engineering/registry/2026-08/2026-08-19T192039Z-editor-project-browser-source-index-v1-codex-root-a958d458bd304a0688476ebf9540da04.md).
    EPB-U0 established the durable boundary at `4275d93`; EPB-U1 implemented and verified bounded
    handle-relative enumeration at `04914e1` with
    [evidence `e4b844f6b2764741a2bff0a731925a80`](../knowledge/engineering/verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md).
    EPB-U2 implemented the Host-owned source-index transaction at `8bdc4de` with
    [evidence `9ac12073205d4064a4bc76729225caf8`](../knowledge/engineering/verification/2026-08/2026-08-19T182322Z-epb-u2-bounded-host-project-source-index-9ac12073205d4064a4bc76729225caf8.md).
-   EPB-U3 now activates only closure-external Authoring Scene/Prefab admission and persistence
-   retargeting. Later EPB units and all
+   EPB-U3 implemented closure-external Authoring Scene/Prefab admission and independent path-bound
+   persistence lanes at `fe0fa55` with
+   [evidence `684770f357d14a0184e3cdbec4751355`](../knowledge/engineering/verification/2026-08/2026-08-19T192016Z-epb-u3-indexed-authoring-document-admission-684770f357d14a0184e3cdbec4751355.md).
+   EPB-U4 now activates only the UI-neutral browser projection, exact frame-bound Refresh/Open
+   ingress, bounded egui Project Browser, and unified pending-work composition. EPB-U5 and all
    unrelated Editor successors remain inactive.
    The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with
