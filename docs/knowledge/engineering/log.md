@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-19
+* **Work Registration**: [Standalone Generic Editor: SGE-U4 active](registry/2026-08/2026-08-19T023313Z-standalone-generic-editor-open-recovery-codex-root-f76ccc813f354e779f8ee043c2756360.md) - Activates only first-party authoring-bundle publication, generic project migration, and strict bundle/native Runtime agreement after verified SGE-U3.
+* **Verification Evidence**: [SGE-U3 shell-first generic Editor lifecycle](verification/2026-08/2026-08-19T023209Z-sge-u3-shell-first-generic-editor-lifecycle-140aa71012404a4c8b62e17b1c1279ad.md) - Verifies native shell-first project admission, retained replacement handoff, strict ordinary filesystem trust, recovery path hygiene, exact degraded Reopen preservation, explicit Runtime unavailability, and the advanced trusted canary boundary.
+
 ## 2026-08-18
 * **Work Registration**: [Standalone Generic Editor: SGE-U3 active](registry/2026-08/2026-08-18T214000Z-standalone-generic-editor-open-recovery-sge-u3.md) - Activates only the shell-first project lifecycle and explicit Runtime-unavailable boundary after verified SGE-U2 authoring authority.
 * **Verification Evidence**: [SGE-U2 lossless degraded authoring verification](verification/2026-08/2026-08-18T165000Z-sge-u2-lossless-degraded-authoring.md) - Verifies exact-receipt-bound degraded Scene and Prefab authoring, bounded source closure, lossless persistence, and strict Runtime rejection.
@@ -139,5 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [UIFM-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md) - Publishes the modal-entry-focus correction as the successor shared UI baseline and permits an explicit RUP-U1 rebase.
 * **Work Registration**: [UI modal-entry focus correction: UIFM-U2 active](registry/2026-08/2026-08-10T155956Z-ui-modal-entry-focus-correction-codex-root-93efa48145b143e8905e11e71e2579ea.md) - Closes the owning modal-focus correction and activates successor baseline publication plus explicit RUP-U1 rebase.
 * **Verification Evidence**: [UIFM-U1 Modal Entry Focus Correction](verification/2026-08/2026-08-10T155955Z-uifm-u1-modal-entry-focus-correction-04e51278170c4a839dbeb0c9658741d8.md) - Proves that the Surface Slot owner seat participates in candidate reconciliation and that initial modal focus is committed before final paint and semantic publication.
-* **Work Registration**: [UI modal-entry focus correction: UIFM-U1 active](registry/2026-08/2026-08-10T155950Z-ui-modal-entry-focus-correction-codex-root-e29de7d5dfaf44c4934407ff1e4a761a.md) - Pauses RUP-U1 after a renderer-neutral failure and activates the focused Surface-owner modal focus correction.
-* **Verification Evidence**: [RUP-U1 neutral modal-entry focus reproduction](verification/2026-08/2026-08-10T155945Z-rup-u1-neutral-modal-focus-reproduction-cc8d66c49d134e9f9d18d680afe19f7a.md) - Records the renderer-neutral product-triggered failure that pauses RUP-U1 and admits one focused UI Foundation correction.
