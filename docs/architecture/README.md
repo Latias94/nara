@@ -9,14 +9,15 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
-   plan is active only at SGE-U4 under
-   [registration `f76ccc813f354e779f8ee043c2756360`](../knowledge/engineering/registry/2026-08/2026-08-19T023313Z-standalone-generic-editor-open-recovery-codex-root-f76ccc813f354e779f8ee043c2756360.md),
-   against baseline `3c59e98`. SGE-U1 has implemented the bounded data-only authoring schema
+   plan is active only at SGE-U5 under
+   [registration `e2ca8341084b4c9ba5dbc44766cf8103`](../knowledge/engineering/registry/2026-08/2026-08-19T050414Z-standalone-generic-editor-open-recovery-codex-root-e2ca8341084b4c9ba5dbc44766cf8103.md),
+   against baseline `2d42516`. SGE-U1 has implemented the bounded data-only authoring schema
    bundle and root-private admission; SGE-U2 has implemented lossless degraded Scene and Prefab
    document authority plus the complete bounded Authoring Project receipt; SGE-U3 has implemented
-   the shell-first project lifecycle and explicit Runtime-unavailable boundary. SGE-U4 owns
-   first-party bundle publication, generic project migration, and strict bundle/native agreement;
-   SGE-U5 and all successor Editor lanes remain inactive.
+   the shell-first project lifecycle and explicit Runtime-unavailable boundary; SGE-U4 has
+   published canonical starter, Reference Game, and clean-room bundles and bound them back to
+   strict selected-native Runtime agreement. SGE-U5 owns the final Generic Open/Recovery product
+   trajectory and authority closure; all successor Editor lanes remain inactive.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
    closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and

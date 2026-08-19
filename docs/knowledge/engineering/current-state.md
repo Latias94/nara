@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "fb8eb024a90c93e5b6b50352a088eb48e5ff76c9b6456304afa1ce724056b7fe"
+source_fingerprint: "0698519ae0fb7c2e03ba2ea0605cdf76746761ff8bbe37d93f854c26ba85babd"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "fb8eb024a90c93e5b6b50352a088eb48e5ff76c9b6456304afa1ce72405
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `fb8eb024a90c93e5b6b50352a088eb48e5ff76c9b6456304afa1ce724056b7fe`
-- Immutable records: 522
+- Source fingerprint: `0698519ae0fb7c2e03ba2ea0605cdf76746761ff8bbe37d93f854c26ba85babd`
+- Immutable records: 524
 - Active lane heads: 1
 
 # Active Registrations
@@ -33,10 +33,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md): `completed` (reference-game-foundation-rgf-u19-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
-- [Standalone Generic Editor: SGE-U4 active](registry/2026-08/2026-08-19T023313Z-standalone-generic-editor-open-recovery-codex-root-f76ccc813f354e779f8ee043c2756360.md): `active` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
+- [Standalone Generic Editor: SGE-U5 active](registry/2026-08/2026-08-19T050414Z-standalone-generic-editor-open-recovery-codex-root-e2ca8341084b4c9ba5dbc44766cf8103.md): `active` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
 - **Verification Evidence**: [SGE-U3 shell-first generic Editor lifecycle](verification/2026-08/2026-08-19T023209Z-sge-u3-shell-first-generic-editor-lifecycle-140aa71012404a4c8b62e17b1c1279ad.md) - Verifies native shell-first project admission, retained replacement handoff, strict ordinary filesystem trust, recovery path hygiene, exact degraded Reopen preservation, explicit Runtime unavailability, and the advanced trusted canary boundary.
 - **Verification Evidence**: [SGE-U2 lossless degraded authoring verification](verification/2026-08/2026-08-18T165000Z-sge-u2-lossless-degraded-authoring.md) - Verifies exact-receipt-bound degraded Scene and Prefab authoring, bounded source closure, lossless persistence, and strict Runtime rejection.
 - **Verification Evidence**: [SGE-U1 data-only authoring schema admission](verification/2026-08/2026-08-18T164500Z-sge-u1-data-only-authoring-admission-c644e7a78e6d489c9237382f282dfd67.md) - Verifies the bounded data-only schema bundle, project manifest declaration, and exact root-private Authoring Project admission receipt.
@@ -48,7 +49,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EUSC-U4 egui structural authoring workflow](verification/2026-08/2026-08-18T060603Z-eusc-u4-egui-structural-authoring-workflow-af32c829b365491e84fe0af17c46d6eb.md) - Verifies the bounded egui Add, Move/Reparent, and Delete workflow, exact frame-lowered action parity, stale-state containment, keyboard accessibility, and Host-owned outcome focus.
 - **Memory Event**: [verification: Completed EUSC-U3 at 278b986 with exact active-document and revision-bound Prefa](logs/2026-08/2026-08-18T050540Z-verification-completed-eusc-u3-at-278b986-with-exact-active-document-and-revision-bound-prefa-db1f09bcec8846cd9a5acfe20f7f620c.md) - Completed EUSC-U3 at 278b986 with exact active-document and revision-bound Prefab composition, failure-atomic allocation/history/selection p
 - **Verification Evidence**: [EUSC-U3 exact Prefab composition transaction](verification/2026-08/2026-08-18T050411Z-eusc-u3-exact-prefab-composition-transaction-14822e4a808f412b8216eb02401eaca8.md) - Verifies exact document and revision-bound Prefab structural transactions, failure-atomic ID allocation, history and selection publication, Host revalidation, gesture cancellation, and Canvas retirement.
-- **Verification Evidence**: [EUSC-U2 closed UI catalog and exact placement facts](verification/2026-08/2026-08-18T041119Z-eusc-u2-closed-ui-catalog-and-exact-placement-facts-7c4c0f3ba8924f7f84668341aa0011ad.md) - Verifies closed Container/Text/Image/Button recipes, exact source-local structure preflight, semantic brush schema migration, and generation-bound project image choices.
 
 # Integration Notes
 

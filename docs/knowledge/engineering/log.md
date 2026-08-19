@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-19
+* **Work Registration**: [Standalone Generic Editor: SGE-U5 active](registry/2026-08/2026-08-19T050414Z-standalone-generic-editor-open-recovery-codex-root-e2ca8341084b4c9ba5dbc44766cf8103.md) - Activates only the final Generic Open/Recovery product trajectory and authority closure after verified SGE-U4.
+* **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
 * **Work Registration**: [Standalone Generic Editor: SGE-U4 active](registry/2026-08/2026-08-19T023313Z-standalone-generic-editor-open-recovery-codex-root-f76ccc813f354e779f8ee043c2756360.md) - Activates only first-party authoring-bundle publication, generic project migration, and strict bundle/native Runtime agreement after verified SGE-U3.
 * **Verification Evidence**: [SGE-U3 shell-first generic Editor lifecycle](verification/2026-08/2026-08-19T023209Z-sge-u3-shell-first-generic-editor-lifecycle-140aa71012404a4c8b62e17b1c1279ad.md) - Verifies native shell-first project admission, retained replacement handoff, strict ordinary filesystem trust, recovery path hygiene, exact degraded Reopen preservation, explicit Runtime unavailability, and the advanced trusted canary boundary.
 
@@ -141,5 +143,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-08-10
 * **Work Registration**: [Runtime UI product slice: RUP-U1 reactivated](registry/2026-08/2026-08-10T155958Z-runtime-ui-product-slice-codex-root-c561d92562464eadb2904a61f0c14465.md) - Pins the UIFM successor baseline and resumes the exact gameplay-to-Retry product trajectory.
 * **Verification Evidence**: [UIFM-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md) - Publishes the modal-entry-focus correction as the successor shared UI baseline and permits an explicit RUP-U1 rebase.
-* **Work Registration**: [UI modal-entry focus correction: UIFM-U2 active](registry/2026-08/2026-08-10T155956Z-ui-modal-entry-focus-correction-codex-root-93efa48145b143e8905e11e71e2579ea.md) - Closes the owning modal-focus correction and activates successor baseline publication plus explicit RUP-U1 rebase.
-* **Verification Evidence**: [UIFM-U1 Modal Entry Focus Correction](verification/2026-08/2026-08-10T155955Z-uifm-u1-modal-entry-focus-correction-04e51278170c4a839dbeb0c9658741d8.md) - Proves that the Surface Slot owner seat participates in candidate reconciliation and that initial modal focus is committed before final paint and semantic publication.
