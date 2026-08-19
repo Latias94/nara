@@ -59,6 +59,7 @@ pub(super) fn stage_project_tree(
     let assets = create_directory(&staging, ProjectDirectory::Assets, "assets")?;
     let prefabs = create_directory(&staging, ProjectDirectory::Prefabs, "prefabs")?;
     let scenes = create_directory(&staging, ProjectDirectory::Scenes, "scenes")?;
+    let schema = create_directory(&staging, ProjectDirectory::Schema, "schema")?;
     let source = create_directory(&staging, ProjectDirectory::Source, "src")?;
     let source_binaries = create_directory(&source, ProjectDirectory::SourceBinaries, "bin")?;
     let tree = StagedProjectTree {
@@ -66,6 +67,7 @@ pub(super) fn stage_project_tree(
         assets,
         prefabs,
         scenes,
+        schema,
         source,
         source_binaries,
     };
@@ -84,6 +86,7 @@ pub(super) fn stage_project_tree(
     sync_directory(&tree.assets, Some(ProjectDirectory::Assets))?;
     sync_directory(&tree.prefabs, Some(ProjectDirectory::Prefabs))?;
     sync_directory(&tree.scenes, Some(ProjectDirectory::Scenes))?;
+    sync_directory(&tree.schema, Some(ProjectDirectory::Schema))?;
     sync_directory(&tree.root, None)?;
     Ok(())
 }
@@ -93,6 +96,7 @@ struct StagedProjectTree {
     assets: DirectoryCapability,
     prefabs: DirectoryCapability,
     scenes: DirectoryCapability,
+    schema: DirectoryCapability,
     source: DirectoryCapability,
     source_binaries: DirectoryCapability,
 }
@@ -115,6 +119,7 @@ fn write_member(
         ProjectMember::CargoManifest
         | ProjectMember::ProjectManifest
         | ProjectMember::AuthorGuide => &tree.root,
+        ProjectMember::AuthoringSchemaBundle => &tree.schema,
         ProjectMember::LibrarySource => &tree.source,
         ProjectMember::HeadlessSource | ProjectMember::DesktopSource => &tree.source_binaries,
         ProjectMember::StartupScene => &tree.scenes,
@@ -186,6 +191,7 @@ pub(super) fn member_path(member: ProjectMember) -> RelativePath {
     RelativePath::new(match member {
         ProjectMember::CargoManifest => "Cargo.toml",
         ProjectMember::ProjectManifest => "nara.toml",
+        ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",
         ProjectMember::AuthorGuide => "README.md",
         ProjectMember::LibrarySource => "src/lib.rs",
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
@@ -200,6 +206,7 @@ pub(super) fn directory_path(directory: ProjectDirectory) -> RelativePath {
         ProjectDirectory::Assets => "assets",
         ProjectDirectory::Prefabs => "prefabs",
         ProjectDirectory::Scenes => "scenes",
+        ProjectDirectory::Schema => "schema",
         ProjectDirectory::Source => "src",
         ProjectDirectory::SourceBinaries => "src/bin",
     })
@@ -210,6 +217,7 @@ fn member_name(member: ProjectMember) -> RelativeComponent {
     component(match member {
         ProjectMember::CargoManifest => "Cargo.toml",
         ProjectMember::ProjectManifest => "nara.toml",
+        ProjectMember::AuthoringSchemaBundle => "authoring.bundle.json",
         ProjectMember::AuthorGuide => "README.md",
         ProjectMember::LibrarySource => "lib.rs",
         ProjectMember::HeadlessSource => "headless.rs",

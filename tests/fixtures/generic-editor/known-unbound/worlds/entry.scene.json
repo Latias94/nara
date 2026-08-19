@@ -1,0 +1,43 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "signal-node"
+    ],
+    "entities": [
+      {
+        "id": "signal-node",
+        "children": [],
+        "components": {
+          "nara.scene.Name": {
+            "owner": "nara.scene.hierarchy.components",
+            "version": 1,
+            "value": {
+              "type": "string",
+              "value": "Clean-room signal"
+            }
+          },
+          "studio.signal.Pulse": {
+            "owner": "studio.signal.components",
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "amplitude": {
+                  "type": "f64",
+                  "value": 0.75
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}

@@ -2,6 +2,7 @@ use std::fmt::{self, Debug, Formatter};
 
 use nara_fs::{ContentDigest, PathValidationError, RelativeComponent};
 use nara_project::CURRENT_PROJECT_SCHEMA_VERSION;
+use nara_reflect::{AuthoringSchemaBundle, ComponentSchemaProviderDefinition};
 use thiserror::Error;
 
 use super::dependency::NaraDependencyReceipt;
@@ -120,6 +121,7 @@ pub enum ProjectDirectory {
     Assets,
     Prefabs,
     Scenes,
+    Schema,
     Source,
     SourceBinaries,
 }
@@ -133,6 +135,7 @@ pub enum ProjectMember {
     HeadlessSource,
     DesktopSource,
     StartupScene,
+    AuthoringSchemaBundle,
 }
 
 pub struct ProjectMemberPlan {
@@ -313,12 +316,21 @@ impl Debug for ProjectCreationPlan {
     }
 }
 
-const PROJECT_DIRECTORIES: [ProjectDirectory; 5] = [
+const PROJECT_DIRECTORIES: [ProjectDirectory; 6] = [
     ProjectDirectory::Assets,
     ProjectDirectory::Prefabs,
     ProjectDirectory::Scenes,
+    ProjectDirectory::Schema,
     ProjectDirectory::Source,
     ProjectDirectory::SourceBinaries,
+];
+
+const DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS: [ComponentSchemaProviderDefinition; 5] = [
+    nara_scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
+    nara_transform::TRANSFORM_SCHEMA_PROVIDER,
+    nara_render::RENDER_SCHEMA_PROVIDER,
+    nara_sprite::SPRITE_SCHEMA_PROVIDER,
+    nara_tilemap::TILEMAP_SCHEMA_PROVIDER,
 ];
 
 pub(crate) fn build_desktop_2d_v1_plan(
@@ -329,6 +341,10 @@ pub(crate) fn build_desktop_2d_v1_plan(
 ) -> Result<ProjectCreationPlan, &'static str> {
     let cargo_manifest = render_cargo_manifest(&slug, dependency_manifest_fragment);
     let project_manifest = render_project_manifest(&slug);
+    let authoring_schema_bundle = desktop_2d_v1_authoring_schema_bundle()?;
+    let authoring_schema_bundle_json = authoring_schema_bundle
+        .to_json_string()
+        .map_err(|_| "starter authoring schema bundle could not be encoded")?;
     let author_guide = render_author_guide(
         &slug,
         dependency_manifest_fragment,
@@ -340,6 +356,8 @@ pub(crate) fn build_desktop_2d_v1_plan(
         ProductContractSources {
             cargo_manifest: cargo_manifest.as_bytes(),
             project_manifest: project_manifest.as_bytes(),
+            authoring_schema_bundle: authoring_schema_bundle_json.as_bytes(),
+            expected_authoring_schema_bundle: &authoring_schema_bundle,
             dependency_manifest_fragment,
             creation_command_arguments,
             author_guide: &author_guide,
@@ -358,6 +376,10 @@ pub(crate) fn build_desktop_2d_v1_plan(
         member(ProjectMember::HeadlessSource, HEADLESS_SOURCE)?,
         member(ProjectMember::DesktopSource, DESKTOP_SOURCE)?,
         member(ProjectMember::StartupScene, STARTUP_SCENE)?,
+        member(
+            ProjectMember::AuthoringSchemaBundle,
+            authoring_schema_bundle_json.as_bytes(),
+        )?,
     ];
     if members.iter().any(|member| {
         member.bytes().windows(2).any(|window| window == b"{{")
@@ -374,6 +396,13 @@ pub(crate) fn build_desktop_2d_v1_plan(
         dependency: dependency_receipt,
         members: Box::new(members),
     })
+}
+
+fn desktop_2d_v1_authoring_schema_bundle() -> Result<AuthoringSchemaBundle, &'static str> {
+    AuthoringSchemaBundle::from_trusted_provider_definitions(
+        DESKTOP_2D_V1_AUTHORING_SCHEMA_PROVIDERS,
+    )
+    .map_err(|_| "starter authoring schema bundle could not be composed")
 }
 
 fn render_author_guide(

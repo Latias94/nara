@@ -33,6 +33,7 @@
     "prefabs/enemy.prefab.json",
     "prefabs/reference-ui.prefab.json",
     "scenes/startup.scene.json",
+    "schema/authoring.bundle.json",
     "schema/component-schema-v1.json",
     "schema/component-schema-v2.json",
     "schema/component-schema-v3.json",

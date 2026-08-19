@@ -42,6 +42,7 @@ use nara_scene::{
 use crate::project_diagnostic_ids::{fs_operation_id, io_error_kind_id};
 use crate::project_host::{
     ProjectSettingsCandidate, ProjectSettingsLineage, RuntimePlan, SchemaValidationInput,
+    runtime_agreement::PreparedRuntimeSchemaAgreement,
 };
 use crate::scene_retention::{
     ARC_CONTROL_BLOCK_BYTES, BTREE_ENTRY_OVERHEAD, STRING_ALLOCATION_OVERHEAD,
@@ -157,6 +158,11 @@ impl ProjectContentSnapshot {
     #[must_use]
     pub(crate) fn shares_schema_snapshot(&self, snapshot: &ComponentRegistrySnapshot) -> bool {
         component_registry_snapshot_witness_matches(&self.inner.schema_authority, snapshot)
+    }
+
+    #[must_use]
+    pub(crate) fn has_runtime_schema_agreement(&self) -> bool {
+        self.inner.startup_closure.has_runtime_schema_agreement()
     }
 
     #[must_use]
@@ -359,6 +365,29 @@ impl ProjectContentError {
     #[must_use]
     pub fn diagnostics(&self) -> &DiagnosticReport {
         self.diagnostics.as_ref()
+    }
+
+    pub(crate) fn runtime_agreement(code: &'static str, summary: &'static str) -> Self {
+        Self::single(ProjectContentErrorKind::SchemaMismatch, code, summary)
+    }
+
+    pub(crate) fn runtime_agreement_with_identifier(
+        code: &'static str,
+        summary: &'static str,
+        key: &'static str,
+        value: &str,
+    ) -> Self {
+        Self::with_identifier(
+            ProjectContentErrorKind::SchemaMismatch,
+            code,
+            summary,
+            key,
+            value,
+        )
+    }
+
+    pub(crate) fn runtime_agreement_host(error: FsError) -> Self {
+        map_fs_error(error)
     }
 
     fn single(kind: ProjectContentErrorKind, code: &'static str, summary: &'static str) -> Self {
@@ -592,29 +621,50 @@ impl ProjectContentLoader {
         self.budget_host.clone()
     }
 
+    pub(crate) fn project_root(&self) -> DirectoryCapability {
+        self.root.share()
+    }
+
     pub fn load(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, None, None)
+        self.load_inner(candidate, plan, None, None, None)
     }
 
-    pub(crate) fn load_with_expected_startup_scene_digest(
+    pub(crate) fn load_with_runtime_agreement(
+        &self,
+        candidate: &ProjectSettingsCandidate,
+        plan: &RuntimePlan,
+        agreement: PreparedRuntimeSchemaAgreement,
+    ) -> Result<ProjectContentSnapshot, ProjectContentError> {
+        self.load_inner(candidate, plan, None, None, Some(agreement))
+    }
+
+    pub(crate) fn load_with_expected_startup_scene_digest_and_runtime_agreement(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         expected_startup_scene_digest: ContentDigest,
+        agreement: PreparedRuntimeSchemaAgreement,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
-        self.load_inner(candidate, plan, Some(expected_startup_scene_digest), None)
+        self.load_inner(
+            candidate,
+            plan,
+            Some(expected_startup_scene_digest),
+            None,
+            Some(agreement),
+        )
     }
 
-    pub(crate) fn load_with_expected_prefab_digest(
+    pub(crate) fn load_with_expected_prefab_digest_and_runtime_agreement(
         &self,
         candidate: &ProjectSettingsCandidate,
         plan: &RuntimePlan,
         path: AssetPath,
         digest: ContentDigest,
+        agreement: PreparedRuntimeSchemaAgreement,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.load_inner(
             candidate,
@@ -625,6 +675,7 @@ impl ProjectContentLoader {
                 digest,
                 observed: false,
             }),
+            Some(agreement),
         )
     }
 
@@ -634,8 +685,17 @@ impl ProjectContentLoader {
         plan: &RuntimePlan,
         expected_startup_scene_digest: Option<ContentDigest>,
         expected_prefab: Option<ExpectedPrefabSource>,
+        runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.validate_inputs(candidate, plan)?;
+        if runtime_agreement.as_ref().is_some_and(|agreement| {
+            !agreement.matches_inputs(self.root.identity(), candidate, plan)
+        }) {
+            return Err(ProjectContentError::runtime_agreement(
+                "project.runtime-agreement.input-mismatch",
+                "Prepared runtime schema agreement does not match the content load inputs",
+            ));
+        }
         let validation = plan.schema_validation();
         let mut context = LoadContext::new(
             self,
@@ -643,6 +703,7 @@ impl ProjectContentLoader {
             expected_startup_scene_digest,
             expected_prefab,
             candidate.manifest_digest(),
+            runtime_agreement,
         )?;
         context.load(candidate)
     }
@@ -716,6 +777,7 @@ struct LoadContext<'a> {
     source_upgrade_required: bool,
     expected_startup_scene_digest: Option<ContentDigest>,
     expected_prefab: Option<ExpectedPrefabSource>,
+    runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     startup_closure: Option<StartupContentClosureBuilder>,
     startup_closure_work_bytes: usize,
     asset_database: ProjectAssetDatabase,
@@ -740,6 +802,7 @@ impl<'a> LoadContext<'a> {
         expected_startup_scene_digest: Option<ContentDigest>,
         expected_prefab: Option<ExpectedPrefabSource>,
         manifest_digest: ContentDigest,
+        runtime_agreement: Option<PreparedRuntimeSchemaAgreement>,
     ) -> Result<Self, ProjectContentError> {
         let startup_closure_work_bytes = startup_closure_entry_work_bytes("nara.toml".len())?;
         let mut budget = loader.budget_host.reserve();
@@ -756,6 +819,7 @@ impl<'a> LoadContext<'a> {
             source_upgrade_required: false,
             expected_startup_scene_digest,
             expected_prefab,
+            runtime_agreement,
             startup_closure: Some(StartupContentClosureBuilder::new(manifest_digest)?),
             startup_closure_work_bytes,
             asset_database: ProjectAssetDatabase::default(),
@@ -842,6 +906,15 @@ impl<'a> LoadContext<'a> {
         })?;
         let expanded_retained = startup_scene_retained_bytes(&expanded, &provenance)?;
         self.commit_work_as_retained(work_before, expanded_retained)?;
+
+        if let Some(agreement) = self.runtime_agreement.take() {
+            let (path, digest) = agreement.revalidate_and_into_closure_member(&self.loader.root)?;
+            self.record_project_member(
+                StartupContentMemberKind::AuthoringSchemaBundle,
+                path,
+                digest,
+            )?;
+        }
 
         let asset_refs = self.collect_image_candidates(&expanded)?;
         let images = self.load_images(&assets, &settings.paths.assets, asset_refs)?;
@@ -1552,6 +1625,25 @@ impl<'a> LoadContext<'a> {
             .as_mut()
             .expect("load context owns one startup closure builder until publication")
             .insert(kind, directory, path, digest)?;
+        self.startup_closure_work_bytes = self
+            .startup_closure_work_bytes
+            .checked_add(work)
+            .ok_or_else(|| overflow_budget(ProjectContentBudgetKind::WorkBytes))?;
+        Ok(())
+    }
+
+    fn record_project_member(
+        &mut self,
+        kind: StartupContentMemberKind,
+        path: nara_project::ProjectPath,
+        digest: ContentDigest,
+    ) -> Result<(), ProjectContentError> {
+        let work = startup_closure_entry_work_bytes(path.as_str().len())?;
+        self.add_budget(ProjectContentBudgetKind::WorkBytes, work)?;
+        self.startup_closure
+            .as_mut()
+            .expect("load context owns one startup closure builder until publication")
+            .insert_project_path(kind, path, digest)?;
         self.startup_closure_work_bytes = self
             .startup_closure_work_bytes
             .checked_add(work)

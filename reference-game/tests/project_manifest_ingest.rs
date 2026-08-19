@@ -106,6 +106,15 @@ fn committed_manifest_is_opened_by_capability_and_lowers_product_settings() {
             .as_deref(),
         Some("startup.scene.json")
     );
+    assert_eq!(
+        candidate
+            .settings()
+            .authoring_schema_bundle
+            .as_ref()
+            .map(ToString::to_string)
+            .as_deref(),
+        Some("schema/authoring.bundle.json")
+    );
 }
 
 #[cfg(feature = "desktop")]

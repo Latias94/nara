@@ -13,6 +13,7 @@ use super::{
     },
     ingest_project_manifest, ingest_project_manifest_bytes,
     ingest_project_manifest_with_expected_digest,
+    runtime_agreement::prepare_runtime_schema_agreement,
 };
 use crate::ProductRecipe;
 
@@ -222,6 +223,8 @@ fn load_checked_candidate(
         None => resolve_product_recipe_with_overlay(&candidate, recipe, options.overlay),
     }
     .map_err(ProjectSourceCheckError::ProductComposition)?;
+    let runtime_agreement = prepare_runtime_schema_agreement(&project_root, &candidate, &plan)
+        .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
     let loader = ProjectContentLoader::new(project_root).map_err(|error| {
         ProjectSourceCheckError::StartupContent {
             error,
@@ -229,10 +232,13 @@ fn load_checked_candidate(
         }
     })?;
     let snapshot = match options.startup_scene_digest {
-        Some(expected) => {
-            loader.load_with_expected_startup_scene_digest(&candidate, &plan, expected)
-        }
-        None => loader.load(&candidate, &plan),
+        Some(expected) => loader.load_with_expected_startup_scene_digest_and_runtime_agreement(
+            &candidate,
+            &plan,
+            expected,
+            runtime_agreement,
+        ),
+        None => loader.load_with_runtime_agreement(&candidate, &plan, runtime_agreement),
     }
     .map_err(|error| startup_content_failure(error, &candidate, manifest_identity))?;
 

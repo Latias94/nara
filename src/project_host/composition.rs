@@ -15,6 +15,10 @@ use nara_reflect::__private::{
     ResolvedComponentSchemaProvider, register_or_validate_resolved_schema_provider,
     resolve_schema_provider,
 };
+#[cfg(feature = "serde")]
+use nara_reflect::{
+    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, PersistentComponentSchemaOwnerId,
+};
 use nara_reflect::{
     ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
     ComponentSchemaContributionReceipt, ComponentSchemaOwnerContributionReceipt,
@@ -328,6 +332,8 @@ impl ProjectRuntimePlugins {
 pub struct SchemaValidationInput {
     provider_ids: Arc<[PluginSchemaProviderId]>,
     provider_receipts: Arc<[ComponentSchemaProviderReceipt]>,
+    #[cfg(feature = "serde")]
+    authoring_schema_bundle: AuthoringSchemaBundle,
     snapshot: ComponentRegistrySnapshot,
     registry: Arc<ComponentRegistry>,
     composition_fingerprint: SchemaCompositionFingerprint,
@@ -354,6 +360,13 @@ impl SchemaValidationInput {
     #[must_use]
     pub fn provider_ids(&self) -> &[PluginSchemaProviderId] {
         &self.provider_ids
+    }
+
+    /// Projects the selected native schema owners into a data-only authoring bundle.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub const fn authoring_schema_bundle(&self) -> &AuthoringSchemaBundle {
+        &self.authoring_schema_bundle
     }
 
     pub fn contribution_receipts(
@@ -943,12 +956,23 @@ fn resolve_schema_validation(
     }
 
     let mut registry = ComponentRegistry::new();
+    #[cfg(feature = "serde")]
+    let mut authoring_schema_owners = Vec::with_capacity(selected_providers.len());
     for provider_id in &selected_providers {
         let provider = provider_catalog.remove(provider_id).ok_or(
             CompositionError::MissingSchemaProvider {
                 provider: *provider_id,
             },
         )?;
+        #[cfg(feature = "serde")]
+        authoring_schema_owners.push(AuthoringSchemaBundleOwner::new(
+            PersistentComponentSchemaOwnerId::try_new(provider.current().owner().as_str())
+                .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?,
+            provider.current().catalog().clone(),
+            provider
+                .predecessor()
+                .map(|predecessor| predecessor.catalog().clone()),
+        ));
         catch_unwind(AssertUnwindSafe(|| {
             register_or_validate_resolved_schema_provider(&mut registry, provider)
         }))
@@ -983,10 +1007,15 @@ fn resolve_schema_validation(
         .map(|receipt| receipt.provider())
         .collect::<Vec<_>>();
     let registry = ComponentRegistry::from_snapshot(snapshot.clone());
+    #[cfg(feature = "serde")]
+    let authoring_schema_bundle = AuthoringSchemaBundle::new(authoring_schema_owners)
+        .map_err(|_| CompositionError::SchemaAuthorityPublicationFailed)?;
 
     Ok(SchemaValidationInput {
         provider_ids: provider_ids.into(),
         provider_receipts: provider_receipts.into(),
+        #[cfg(feature = "serde")]
+        authoring_schema_bundle,
         snapshot,
         registry: Arc::new(registry),
         composition_fingerprint,

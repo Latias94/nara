@@ -14,8 +14,9 @@ use nara_core::{
 };
 
 use crate::{
-    ComponentSchemaCatalog, ComponentTypeId, PersistentComponentSchemaOwnerId,
-    PersistentComponentSchemaOwnerIdError, SchemaCompositionFingerprint,
+    ComponentSchemaCatalog, ComponentSchemaProviderDefinition, ComponentTypeId,
+    PersistentComponentSchemaOwnerId, PersistentComponentSchemaOwnerIdError,
+    SchemaCompositionFingerprint,
     format::{
         ComponentCatalogCounts, ComponentCatalogFileBudgetError, ComponentCatalogFileLimits,
         ComponentSchemaCatalogWire, accumulate_catalog_budget,
@@ -150,6 +151,39 @@ pub struct AuthoringSchemaBundle {
 }
 
 impl AuthoringSchemaBundle {
+    /// Projects trusted executable provider catalogs into a data-only authoring bundle.
+    ///
+    /// This executes only each definition's deterministic current and predecessor catalog
+    /// sources. It does not invoke native registration or validation callbacks.
+    pub fn from_trusted_provider_definitions(
+        providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
+    ) -> Result<Self, AuthoringSchemaBundleError> {
+        let owners = providers
+            .into_iter()
+            .map(|provider| {
+                let owner_id = PersistentComponentSchemaOwnerId::try_new(provider.owner().as_str())
+                    .map_err(AuthoringSchemaBundleError::InvalidOwnerId)?;
+                let resolved =
+                    provider
+                        .resolve()
+                        .map_err(|source| AuthoringSchemaBundleError::Catalog {
+                            owner: owner_id.clone(),
+                            source: Box::new(source),
+                        })?;
+                Ok::<AuthoringSchemaBundleOwner, AuthoringSchemaBundleError>(
+                    AuthoringSchemaBundleOwner::new(
+                        owner_id,
+                        resolved.current().catalog().clone(),
+                        resolved
+                            .predecessor()
+                            .map(|predecessor| predecessor.catalog().clone()),
+                    ),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::new(owners)
+    }
+
     /// Validates and canonicalizes an in-memory bundle candidate.
     pub fn new(
         owners: impl IntoIterator<Item = AuthoringSchemaBundleOwner>,

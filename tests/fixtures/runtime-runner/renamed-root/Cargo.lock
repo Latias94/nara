@@ -1199,6 +1199,7 @@ name = "nara_ui"
 version = "0.1.0"
 dependencies = [
  "nara_app",
+ "nara_asset",
  "nara_core",
  "nara_ecs",
  "nara_hierarchy",

@@ -3,7 +3,10 @@
 use std::{
     fs::{self, File},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 #[cfg(windows)]
@@ -13,15 +16,17 @@ use nara::{
     asset::{AssetMeta, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     project_host::{
-        ProjectSettingsCandidate, RuntimePlan, ingest_project_manifest, resolve_product_recipe,
+        ProjectSettingsCandidate, RuntimePlan, advanced::built_in_schema_providers,
+        ingest_project_manifest, resolve_product_recipe,
     },
-    reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    reflect::{AuthoringSchemaBundle, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
     },
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+static BUILT_IN_AUTHORING_SCHEMA_BUNDLE: OnceLock<Box<[u8]>> = OnceLock::new();
 
 pub struct TestProject {
     root: PathBuf,
@@ -38,6 +43,12 @@ impl TestProject {
         fs::create_dir_all(root.join("assets/textures")).unwrap();
         fs::create_dir_all(root.join("scenes")).unwrap();
         fs::create_dir_all(root.join("prefabs")).unwrap();
+        fs::create_dir_all(root.join("schema")).unwrap();
+        fs::write(
+            root.join("schema/authoring.bundle.json"),
+            built_in_authoring_schema_bundle(),
+        )
+        .unwrap();
         fs::write(
             root.join("nara.toml"),
             r#"schema_version = 1
@@ -52,6 +63,9 @@ prefabs = "prefabs"
 
 [startup]
 default_scene = "startup.scene.json"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
 
 [capabilities]
 requested = ["runtime-2d"]
@@ -157,6 +171,9 @@ prefabs = "prefabs"
 [startup]
 default_scene = "startup.scene.json"
 
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
 [runtime]
 preset = "local-headless"
 
@@ -213,6 +230,17 @@ requested = ["runtime-2d"]
     pub fn path(&self) -> &Path {
         &self.root
     }
+}
+
+fn built_in_authoring_schema_bundle() -> &'static [u8] {
+    BUILT_IN_AUTHORING_SCHEMA_BUNDLE.get_or_init(|| {
+        AuthoringSchemaBundle::from_trusted_provider_definitions(built_in_schema_providers())
+            .unwrap()
+            .to_json_string()
+            .unwrap()
+            .into_bytes()
+            .into_boxed_slice()
+    })
 }
 
 impl Drop for TestProject {

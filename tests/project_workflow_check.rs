@@ -8,26 +8,36 @@ use std::fs;
 use nara::{
     ProductRecipe,
     project::ProjectPath,
-    project_host::ProjectContentErrorKind,
+    project_host::{ProjectContentErrorKind, ProjectContentLoader},
     project_workflow::{
         ProjectCheckErrorKind, ProjectCheckRequest, ProjectStartupSceneRepairError,
         ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairRequest,
         StartupContentMemberKind, check_project, repair_startup_scene,
     },
+    reflect::{
+        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, PersistentComponentSchemaOwnerId,
+    },
+    scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord},
 };
-use project_content_fixture::TestProject;
+use project_content_fixture::{TestProject, scene_id};
 
 #[test]
 fn public_check_returns_the_exact_loader_owned_startup_closure() {
     let project = TestProject::with_prefab_startup();
     let (candidate, plan, root) = project.candidate_plan_and_root();
     let root_identity = root.identity();
+    let raw_snapshot = ProjectContentLoader::new(root.share())
+        .unwrap()
+        .load(&candidate, &plan)
+        .unwrap();
 
     let receipt = check_project(ProjectCheckRequest::new(root, ProductRecipe::new())).unwrap();
 
     assert_eq!(receipt.project_root_identity(), root_identity);
     assert_eq!(receipt.manifest_digest(), candidate.manifest_digest());
     assert_eq!(receipt.settings_lineage(), candidate.lineage());
+    assert_eq!(receipt.content_digest(), raw_snapshot.content_digest());
     assert_eq!(
         receipt.schema_fingerprint(),
         plan.schema_validation().composition_fingerprint()
@@ -53,7 +63,165 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
                 StartupContentMemberKind::Prefab,
             ),
             ("scenes/startup.scene.json", StartupContentMemberKind::Scene,),
+            (
+                "schema/authoring.bundle.json",
+                StartupContentMemberKind::AuthoringSchemaBundle,
+            ),
         ]
+    );
+}
+
+#[test]
+fn public_check_rejects_a_bundle_missing_one_selected_native_owner() {
+    let project = TestProject::with_prefab_startup();
+    let (_candidate, plan, root) = project.candidate_plan_and_root();
+    let selected_owner = plan
+        .schema_validation()
+        .owner_receipts()
+        .next()
+        .unwrap()
+        .owner();
+    let bundle_path = project.path().join("schema/authoring.bundle.json");
+    let encoded = fs::read(&bundle_path).unwrap();
+    let bundle = AuthoringSchemaBundle::from_json_bytes(&encoded).unwrap();
+    let retained_owners = bundle
+        .owners()
+        .iter()
+        .filter(|owner| !owner.owner_id().matches_executable(selected_owner).unwrap())
+        .cloned()
+        .collect::<Vec<AuthoringSchemaBundleOwner>>();
+    let divergent = AuthoringSchemaBundle::new(retained_owners).unwrap();
+    fs::write(bundle_path, divergent.to_json_string().unwrap()).unwrap();
+
+    let error = check_project(ProjectCheckRequest::new(root, ProductRecipe::new())).unwrap_err();
+
+    assert_eq!(error.kind(), ProjectCheckErrorKind::StartupContent);
+    let startup_error = error.startup_content_error().unwrap();
+    assert_eq!(
+        startup_error.kind(),
+        ProjectContentErrorKind::SchemaMismatch
+    );
+    assert!(startup_error.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "project.runtime-agreement.selected-owner-missing"
+    }));
+}
+
+#[test]
+fn runtime_agreement_accepts_a_bundle_superset_and_rejects_divergence_or_unbound_source() {
+    let custom_owner = AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("studio.signal.components").unwrap(),
+        ComponentSchemaCatalog {
+            components: vec![ComponentSchema::new(
+                ComponentTypeId::new("studio.signal.Pulse"),
+                "Pulse",
+                ComponentSchemaVersion::ONE,
+            )],
+            ..ComponentSchemaCatalog::default()
+        },
+        None,
+    );
+
+    let superset = TestProject::with_prefab_startup();
+    let superset_path = superset.path().join("schema/authoring.bundle.json");
+    let superset_bundle =
+        AuthoringSchemaBundle::from_json_bytes(&fs::read(&superset_path).unwrap()).unwrap();
+    let mut superset_owners = superset_bundle.owners().to_vec();
+    superset_owners.push(custom_owner.clone());
+    fs::write(
+        &superset_path,
+        AuthoringSchemaBundle::new(superset_owners)
+            .unwrap()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    check_project(ProjectCheckRequest::new(
+        superset.root_capability(),
+        ProductRecipe::new(),
+    ))
+    .unwrap();
+
+    let divergent = TestProject::with_prefab_startup();
+    let divergent_path = divergent.path().join("schema/authoring.bundle.json");
+    let divergent_bundle =
+        AuthoringSchemaBundle::from_json_bytes(&fs::read(&divergent_path).unwrap()).unwrap();
+    let scene_owner = PersistentComponentSchemaOwnerId::try_new(
+        nara::scene::SCENE_COMPONENTS_SCHEMA_PROVIDER
+            .owner()
+            .as_str(),
+    )
+    .unwrap();
+    let mut divergent_owners = divergent_bundle.owners().to_vec();
+    let selected = divergent_owners
+        .iter_mut()
+        .find(|owner| owner.owner_id() == &scene_owner)
+        .unwrap();
+    let mut divergent_catalog = selected.current().clone();
+    divergent_catalog
+        .type_tombstones
+        .push(ComponentTypeId::new("zz.runtime_agreement.Divergent"));
+    *selected = AuthoringSchemaBundleOwner::new(scene_owner, divergent_catalog, None);
+    fs::write(
+        &divergent_path,
+        AuthoringSchemaBundle::new(divergent_owners)
+            .unwrap()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let error = check_project(ProjectCheckRequest::new(
+        divergent.root_capability(),
+        ProductRecipe::new(),
+    ))
+    .unwrap_err();
+    assert!(
+        error
+            .startup_content_error()
+            .unwrap()
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code().as_str()
+                == "project.runtime-agreement.selected-owner-divergent")
+    );
+
+    let unbound = TestProject::with_prefab_startup();
+    let unbound_path = unbound.path().join("schema/authoring.bundle.json");
+    let unbound_bundle =
+        AuthoringSchemaBundle::from_json_bytes(&fs::read(&unbound_path).unwrap()).unwrap();
+    let mut unbound_owners = unbound_bundle.owners().to_vec();
+    unbound_owners.push(custom_owner);
+    fs::write(
+        &unbound_path,
+        AuthoringSchemaBundle::new(unbound_owners)
+            .unwrap()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    unbound.write_scene_source(&SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("signal-node")).with_component(
+            ComponentTypeId::new("studio.signal.Pulse"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::f64(0.75).unwrap(),
+            ),
+        ),
+    ]));
+    let error = check_project(ProjectCheckRequest::new(
+        unbound.root_capability(),
+        ProductRecipe::new(),
+    ))
+    .unwrap_err();
+    let codes = error
+        .startup_content_error()
+        .unwrap()
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| diagnostic.code().as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        codes.iter().any(|code| *code == "scene.unknown-component"),
+        "unexpected diagnostics: {codes:?}"
     );
 }
 

@@ -503,6 +503,12 @@ impl ProjectHost {
                 "Project content and runtime plan schemas do not match",
             )));
         }
+        if !snapshot.has_runtime_schema_agreement() {
+            return Err(HostFault::new(single_error(
+                "project.run.runtime-schema-agreement-missing",
+                "Project content was not admitted against the selected runtime schema owners",
+            )));
+        }
         let epoch = self.next_epoch;
         self.next_epoch = self.next_epoch.checked_add(1).ok_or_else(|| {
             HostFault::new(single_error(

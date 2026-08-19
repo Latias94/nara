@@ -10,6 +10,9 @@ assets = "assets"
 scenes = "scenes"
 prefabs = "prefabs"
 
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
 [startup]
 default_scene = "startup.scene.json"
 

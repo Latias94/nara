@@ -43,6 +43,7 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
             ProjectDirectory::Assets,
             ProjectDirectory::Prefabs,
             ProjectDirectory::Scenes,
+            ProjectDirectory::Schema,
             ProjectDirectory::Source,
             ProjectDirectory::SourceBinaries,
         ]
@@ -60,6 +61,7 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
             ProjectMember::HeadlessSource,
             ProjectMember::DesktopSource,
             ProjectMember::StartupScene,
+            ProjectMember::AuthoringSchemaBundle,
         ]
     );
 
@@ -125,6 +127,64 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
             .requested_capabilities
             .contains(nara::project::ProductCapability::RenderWgpu)
     );
+    assert_eq!(
+        manifest.authoring.schema_bundle.as_deref(),
+        Some("schema/authoring.bundle.json")
+    );
+    assert_eq!(
+        headless
+            .authoring_schema_bundle
+            .as_ref()
+            .map(|path| path.as_str()),
+        Some("schema/authoring.bundle.json")
+    );
+    assert_eq!(
+        desktop.authoring_schema_bundle,
+        headless.authoring_schema_bundle
+    );
+
+    let bundle_member = plan.member(ProjectMember::AuthoringSchemaBundle).unwrap();
+    let bundle =
+        nara::reflect::AuthoringSchemaBundle::from_json_bytes(bundle_member.bytes()).unwrap();
+    assert_eq!(
+        bundle.to_json_string().unwrap().as_bytes(),
+        bundle_member.bytes()
+    );
+    let providers = [
+        nara::scene::SCENE_COMPONENTS_SCHEMA_PROVIDER,
+        nara::transform::TRANSFORM_SCHEMA_PROVIDER,
+        nara::render::RENDER_SCHEMA_PROVIDER,
+        nara::sprite::SPRITE_SCHEMA_PROVIDER,
+        nara::tilemap::TILEMAP_SCHEMA_PROVIDER,
+    ];
+    let mut expected_owner_ids = providers
+        .iter()
+        .map(|provider| provider.owner().as_str())
+        .collect::<Vec<_>>();
+    expected_owner_ids.sort_unstable();
+    assert_eq!(
+        bundle
+            .owners()
+            .iter()
+            .map(|owner| owner.owner_id().as_str())
+            .collect::<Vec<_>>(),
+        expected_owner_ids
+    );
+    for provider in providers {
+        let resolved = nara::reflect::__private::resolve_schema_provider(provider).unwrap();
+        let owner_id = nara::reflect::PersistentComponentSchemaOwnerId::try_new(
+            resolved.current().owner().as_str(),
+        )
+        .unwrap();
+        let bundled = bundle.owner(&owner_id).unwrap();
+        assert_eq!(bundled.current(), resolved.current().catalog());
+        assert_eq!(
+            bundled.predecessor(),
+            resolved
+                .predecessor()
+                .map(|predecessor| predecessor.catalog())
+        );
+    }
 
     assert!(!root.path().join("sample-game").exists());
 }
@@ -356,11 +416,12 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
             ProjectDirectory::Assets,
             ProjectDirectory::Prefabs,
             ProjectDirectory::Scenes,
+            ProjectDirectory::Schema,
             ProjectDirectory::Source,
             ProjectDirectory::SourceBinaries,
         ]
     );
-    assert_eq!(receipt.plan().members().len(), 7);
+    assert_eq!(receipt.plan().members().len(), 8);
 
     let project_root = receipt.project_root();
     let manifest = project_root
@@ -376,10 +437,24 @@ fn published_project_is_reopened_and_admitted_through_ordinary_authority() {
             manifest_receipt.digest().length(),
         )
         .unwrap();
+    let authoring_bundle = project_root
+        .open_file(&RelativePath::new("schema/authoring.bundle.json").unwrap())
+        .unwrap();
+    let authoring_bundle_receipt = receipt
+        .plan()
+        .member(ProjectMember::AuthoringSchemaBundle)
+        .unwrap();
+    authoring_bundle
+        .verify_digest(
+            authoring_bundle_receipt.digest(),
+            authoring_bundle_receipt.digest().length(),
+        )
+        .unwrap();
 
     for path in [
         "Cargo.toml",
         "nara.toml",
+        "schema/authoring.bundle.json",
         "README.md",
         "src/lib.rs",
         "src/bin/headless.rs",

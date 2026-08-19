@@ -11,6 +11,9 @@ mod authoring;
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
 pub(crate) mod check;
 
+#[cfg(all(feature = "runtime-2d", feature = "serde"))]
+pub(crate) mod runtime_agreement;
+
 pub mod advanced;
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]

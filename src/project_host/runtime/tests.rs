@@ -34,12 +34,12 @@ use nara_fs::{
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
-#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
-use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId};
 use nara_reflect::{
-    ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, PersistentComponentSchemaOwnerId,
+    AuthoringSchemaBundle, ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId,
+    ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+use nara_reflect::{AuthoringSchemaBundleOwner, ComponentFieldId};
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_scene::{
     AuthoringScalarEdit, PrefabDocument, PrefabInstance, SCENE_COMPONENTS_SCHEMA_OWNER_ID,
@@ -64,12 +64,14 @@ use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWork
 use crate::project_content::{
     ProjectContentBudgetKind, ProjectContentLimits, ProjectContentLoader,
 };
+use crate::project_host::ProjectSettingsCandidate;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use crate::project_host::advanced::{RuntimeProbe, desktop_run_with_probe};
 use crate::project_host::advanced::{
     built_in_schema_providers, project_runtime_plugins, resolve_runtime_plan,
 };
 use crate::project_host::ingest_project_manifest;
+use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
 use crate::startup_scene::{
     StartupSceneActivation, StartupSceneActivationOwner, StartupSceneActivationSet,
 };
@@ -631,6 +633,38 @@ fn project_host_rejects_a_runtime_plan_from_another_project_lineage() {
 }
 
 #[test]
+fn project_host_rejects_content_without_runtime_schema_agreement() {
+    let project = TestProject::new("missing-runtime-agreement");
+    let root = project.capability();
+    let manifest = root
+        .open_file(&RelativePath::new(PROJECT_MANIFEST).unwrap())
+        .unwrap();
+    let candidate = ingest_project_manifest(&manifest, None).unwrap();
+    drop(manifest);
+    let plan = resolve_runtime_plan(
+        &candidate,
+        project_runtime_plugins(&candidate),
+        built_in_schema_providers(),
+    )
+    .unwrap();
+    let snapshot = ProjectContentLoader::new(root)
+        .unwrap()
+        .load(&candidate, &plan)
+        .unwrap();
+    let mut host = ProjectHost::new(RuntimeClosePolicy::default());
+
+    let Err(error) = host.begin_start(snapshot, plan, Vec::new()) else {
+        panic!("runtime content without schema agreement unexpectedly started");
+    };
+
+    assert_eq!(
+        first_code(&error.diagnostics),
+        "project.run.runtime-schema-agreement-missing"
+    );
+    assert!(matches!(host.slot, ProjectHostSlot::Empty));
+}
+
+#[test]
 fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
     let project = TestProject::new("schema-lineage");
     let (snapshot, default_plan, equivalent_plan, reduced_plan) =
@@ -720,6 +754,32 @@ fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
         nara_tooling::EditorPlayState::Empty
     );
     assert_eq!(editor.play_view().generation(), None);
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn trusted_compiled_editor_rejects_a_bundle_missing_selected_native_owners() {
+    let project = TestProject::new("editor-runtime-agreement");
+    fs::write(
+        project.root.join("schema/authoring.bundle.json"),
+        AuthoringSchemaBundle::new([])
+            .unwrap()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let Err(error) = super::editor::EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
+    ) else {
+        panic!("trusted compiled Editor accepted a bundle missing selected native owners");
+    };
+
+    assert_eq!(
+        first_code(error.diagnostics()),
+        "project.runtime-agreement.selected-owner-missing"
+    );
 }
 
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
@@ -2676,7 +2736,7 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
     let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
     let loader = ProjectContentLoader::new(root).unwrap();
     let budget_host = loader.budget_host();
-    let snapshot = loader.load(&candidate, &plan).unwrap();
+    let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
     let baseline_reservations = budget_host.snapshot().active_reservations();
     let source = snapshot
         .prepare_editor_startup_scene(
@@ -3702,6 +3762,15 @@ impl TestProject {
         fs::create_dir_all(root.join("assets")).unwrap();
         fs::create_dir_all(root.join("scenes")).unwrap();
         fs::create_dir_all(root.join("prefabs")).unwrap();
+        fs::create_dir_all(root.join("schema")).unwrap();
+        let authoring_schema_bundle =
+            AuthoringSchemaBundle::from_trusted_provider_definitions(built_in_schema_providers())
+                .unwrap();
+        fs::write(
+            root.join("schema/authoring.bundle.json"),
+            authoring_schema_bundle.to_json_string().unwrap(),
+        )
+        .unwrap();
         fs::write(
             root.join("nara.toml"),
             format!(
@@ -3717,6 +3786,9 @@ prefabs = "prefabs"
 
 [startup]
 default_scene = "startup.scene.json"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
 preset = "local-headless"
@@ -3790,7 +3862,7 @@ requested = ["runtime-2d"]
         };
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();
-        let snapshot = loader.load(&candidate, &plan).unwrap();
+        let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
         (snapshot, plan)
     }
 
@@ -3811,7 +3883,7 @@ requested = ["runtime-2d"]
         )
         .unwrap();
         let loader = ProjectContentLoader::with_limits(root, limits).unwrap();
-        let snapshot = loader.load(&candidate, &plan).unwrap();
+        let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
         (snapshot, plan, loader)
     }
 
@@ -3829,7 +3901,7 @@ requested = ["runtime-2d"]
             project_runtime_plugins(&candidate).insert_after::<GameplayCommandPlugin>(definition);
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();
-        let snapshot = loader.load(&candidate, &plan).unwrap();
+        let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
         (snapshot, plan)
     }
 
@@ -3853,7 +3925,7 @@ requested = ["runtime-2d"]
             .insert_after::<CloseProbePlugin>(failure);
         let plan = resolve_runtime_plan(&candidate, request, built_in_schema_providers()).unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();
-        let snapshot = loader.load(&candidate, &plan).unwrap();
+        let snapshot = load_runtime_snapshot(&loader, &candidate, &plan);
         (snapshot, plan)
     }
 
@@ -3890,7 +3962,7 @@ requested = ["runtime-2d"]
         )
         .unwrap();
         let loader = ProjectContentLoader::new(root).unwrap();
-        let snapshot = loader.load(&candidate, &default_plan).unwrap();
+        let snapshot = load_runtime_snapshot(&loader, &candidate, &default_plan);
         (snapshot, default_plan, equivalent_plan, reduced_plan)
     }
 
@@ -3909,6 +3981,18 @@ requested = ["runtime-2d"]
         )
         .unwrap()
     }
+}
+
+fn load_runtime_snapshot(
+    loader: &ProjectContentLoader,
+    candidate: &ProjectSettingsCandidate,
+    plan: &RuntimePlan,
+) -> ProjectContentSnapshot {
+    let project_root = loader.project_root();
+    let agreement = prepare_runtime_schema_agreement(&project_root, candidate, plan).unwrap();
+    loader
+        .load_with_runtime_agreement(candidate, plan, agreement)
+        .unwrap()
 }
 
 fn sprite_value(image: &AssetRef) -> ComponentValue {

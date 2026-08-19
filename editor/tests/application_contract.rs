@@ -20,10 +20,7 @@ use nara::{
         NaraDependencySource, ProjectCreationRequest, ProjectDirectory, ProjectMember, ProjectSlug,
         prepare_desktop_2d_project,
     },
-    reflect::{
-        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueKind,
-    },
+    reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind},
     scene::{
         SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneEntityId,
         SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
@@ -283,15 +280,15 @@ fn shell_first_open_routes_rejections_and_preservable_unknown_schema() {
     let _ = manager.native_shell_ready();
     assert_eq!(manager.state(), EditorApplicationState::ProjectManager);
 
-    let malformed_manifest = StarterProject::new_with_authoring_bundle("malformed-manifest");
+    let malformed_manifest = StarterProject::new("malformed-manifest");
     fs::write(malformed_manifest.root().join("nara.toml"), "not = [toml").unwrap();
     assert_recovery(malformed_manifest.root());
 
-    let missing_bundle = StarterProject::new_with_authoring_bundle("missing-bundle");
+    let missing_bundle = StarterProject::new("missing-bundle");
     fs::remove_file(missing_bundle.authoring_bundle()).unwrap();
     assert_recovery(missing_bundle.root());
 
-    let rejected_startup = StarterProject::new_with_authoring_bundle("rejected-startup");
+    let rejected_startup = StarterProject::new("rejected-startup");
     fs::write(
         rejected_startup.root().join("scenes/startup.scene.json"),
         "{\"not\":\"a scene envelope\"}",
@@ -299,7 +296,7 @@ fn shell_first_open_routes_rejections_and_preservable_unknown_schema() {
     .unwrap();
     assert_recovery(rejected_startup.root());
 
-    let unavailable_schema = StarterProject::new_with_authoring_bundle("unavailable-schema");
+    let unavailable_schema = StarterProject::new("unavailable-schema");
     let entity = SceneEntityRecord::new(SceneEntityId::new("unknown-schema").unwrap())
         .with_component(
             ComponentTypeId::new("example.Missing"),
@@ -321,8 +318,84 @@ fn shell_first_open_routes_rejections_and_preservable_unknown_schema() {
 }
 
 #[test]
+fn clean_room_custom_owner_opens_through_the_ordinary_editor() {
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../tests/fixtures/generic-editor/known-unbound")
+        .canonicalize()
+        .unwrap();
+    let mut application =
+        EditorApplication::new(EditorLaunchOptions::new(&project_root).with_profile("desktop"));
+    let _ = application.native_shell_ready();
+    drive_open_to_terminal(&mut application);
+
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
+    let frame = current_frame(&application);
+    assert!(active_scene_has_entity(&frame, "signal-node"));
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let signal_node = SceneEntityId::new("signal-node").unwrap();
+    let select = EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Navigate(
+            EditorNavigationAction::SelectEntity {
+                document: scene.document,
+                entity: Some(signal_node.clone()),
+            },
+        )],
+    );
+    application.submit_and_drive(select, Duration::ZERO);
+
+    let selected_frame = current_frame(&application);
+    let name_component = selected_frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .unwrap()
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_ref()
+        .unwrap()
+        .components
+        .iter()
+        .find(|component| component.component == ComponentTypeId::new("nara.scene.Name"))
+        .unwrap();
+    assert!(name_component.access.is_editable());
+    assert!(has_diagnostic(
+        &selected_frame,
+        "scene.authoring-known-unbound"
+    ));
+    assert!(!has_diagnostic(
+        &selected_frame,
+        "scene.authoring-unknown-schema"
+    ));
+}
+
+#[test]
+fn reference_game_opens_through_the_same_ordinary_editor_api() {
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../reference-game")
+        .canonicalize()
+        .unwrap();
+    let mut application =
+        EditorApplication::new(EditorLaunchOptions::new(&project_root).with_profile("desktop"));
+    let _ = application.native_shell_ready();
+    drive_open_to_terminal(&mut application);
+
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
+    let frame = current_frame(&application);
+    assert!(has_diagnostic(&frame, "scene.authoring-known-unbound"));
+    assert!(!has_diagnostic(&frame, "scene.authoring-unknown-schema"));
+}
+
+#[test]
 fn retry_and_replacement_close_are_failure_atomic() {
-    let repairable = StarterProject::new_with_authoring_bundle("retry-after-repair");
+    let repairable = StarterProject::new("retry-after-repair");
     let bundle = fs::read(repairable.authoring_bundle()).unwrap();
     fs::remove_file(repairable.authoring_bundle()).unwrap();
     let mut retrying = EditorApplication::new(EditorLaunchOptions::new(repairable.root()));
@@ -332,10 +405,10 @@ fn retry_and_replacement_close_are_failure_atomic() {
     fs::write(repairable.authoring_bundle(), bundle).unwrap();
     assert!(retrying.retry_project_open());
     drive_open_to_terminal(&mut retrying);
-    assert_eq!(retrying.state(), EditorApplicationState::AuthoringDegraded);
+    assert_eq!(retrying.state(), EditorApplicationState::AuthoringReady);
 
     let retained = StarterProject::new("retained-workspace");
-    let replacement = StarterProject::new_with_authoring_bundle("replacement-workspace");
+    let replacement = StarterProject::new("replacement-workspace");
     let mut application = EditorApplication::open_trusted_compiled(
         EditorLaunchOptions::new(retained.root()),
         TrustedCompiledEditorProjectIntent::new(),
@@ -437,17 +510,14 @@ fn retry_and_replacement_close_are_failure_atomic() {
     );
     let _ = application.submit_and_drive(discard, Duration::ZERO);
     drive_replacement_to_terminal(&mut application);
-    assert_eq!(
-        application.state(),
-        EditorApplicationState::AuthoringDegraded
-    );
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert!(!active_scene_state(&current_frame(&application)).2);
 }
 
 #[test]
 fn workspace_open_project_action_enters_the_retained_replacement_flow() {
     let retained = StarterProject::new("reachable-open-retained");
-    let replacement = StarterProject::new_with_authoring_bundle("reachable-open-replacement");
+    let replacement = StarterProject::new("reachable-open-replacement");
     let mut application = EditorApplication::open_trusted_compiled(
         EditorLaunchOptions::new(retained.root()),
         TrustedCompiledEditorProjectIntent::new(),
@@ -484,17 +554,14 @@ fn workspace_open_project_action_enters_the_retained_replacement_flow() {
     assert!(!ignored.actions_observed());
     drive_replacement_to_terminal(&mut application);
 
-    assert_eq!(
-        application.state(),
-        EditorApplicationState::AuthoringDegraded
-    );
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert!(!Arc::ptr_eq(&before, &current_frame(&application)));
 }
 
 #[test]
 fn replacement_cancel_restores_the_exact_retained_workspace() {
     let retained = StarterProject::new("cancel-opening-retained");
-    let replacement = StarterProject::new_with_authoring_bundle("cancel-opening-replacement");
+    let replacement = StarterProject::new("cancel-opening-replacement");
     let mut application = EditorApplication::open_trusted_compiled(
         EditorLaunchOptions::new(retained.root()),
         TrustedCompiledEditorProjectIntent::new(),
@@ -602,7 +669,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
 
 #[test]
 fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
-    let project = StarterProject::new_with_authoring_bundle("same-root-alias-save");
+    let project = StarterProject::new("same-root-alias-save");
     let mut application = EditorApplication::open_trusted_compiled(
         EditorLaunchOptions::new(project.root()),
         TrustedCompiledEditorProjectIntent::new(),
@@ -637,10 +704,7 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
     assert!(render_once(&mut application).into_actions().is_empty());
     drive_replacement_to_terminal(&mut application);
 
-    assert_eq!(
-        application.state(),
-        EditorApplicationState::AuthoringDegraded
-    );
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     let fresh = current_frame(&application);
     assert!(active_scene_has_entity(&fresh, "dirty-probe"));
     assert!(!active_scene_state(&fresh).2);
@@ -648,7 +712,7 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
 
 #[test]
 fn ordinary_play_reports_external_execution_host_unavailable() {
-    let project = StarterProject::new_with_authoring_bundle("runtime-unavailable");
+    let project = StarterProject::new("runtime-unavailable");
     let mut application = open_ordinary(project.root());
     let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
@@ -894,30 +958,8 @@ impl StarterProject {
         Self { parent, root }
     }
 
-    fn new_with_authoring_bundle(label: &str) -> Self {
-        let project = Self::new(label);
-        fs::create_dir_all(project.root.join("schemas")).unwrap();
-        let mut manifest = fs::read_to_string(project.root.join("nara.toml")).unwrap();
-        manifest.push_str(
-            r#"
-
-[authoring]
-schema_bundle = "schemas/authoring.bundle.json"
-"#,
-        );
-        fs::write(project.root.join("nara.toml"), manifest).unwrap();
-        project.write_empty_authoring_bundle();
-        project
-    }
-
-    fn write_empty_authoring_bundle(&self) {
-        let bundle =
-            AuthoringSchemaBundle::new(std::iter::empty::<AuthoringSchemaBundleOwner>()).unwrap();
-        fs::write(self.authoring_bundle(), bundle.to_json_string().unwrap()).unwrap();
-    }
-
     fn authoring_bundle(&self) -> PathBuf {
-        self.root.join("schemas/authoring.bundle.json")
+        self.root.join("schema/authoring.bundle.json")
     }
 
     fn root(&self) -> &Path {
@@ -953,6 +995,7 @@ fn directory_path(directory: ProjectDirectory) -> &'static str {
         ProjectDirectory::Assets => "assets",
         ProjectDirectory::Prefabs => "prefabs",
         ProjectDirectory::Scenes => "scenes",
+        ProjectDirectory::Schema => "schema",
         ProjectDirectory::Source => "src",
         ProjectDirectory::SourceBinaries => "src/bin",
     }
@@ -967,6 +1010,7 @@ fn member_path(member: ProjectMember) -> &'static str {
         ProjectMember::HeadlessSource => "src/bin/headless.rs",
         ProjectMember::DesktopSource => "src/bin/desktop.rs",
         ProjectMember::StartupScene => "scenes/startup.scene.json",
+        ProjectMember::AuthoringSchemaBundle => "schema/authoring.bundle.json",
     }
 }
 

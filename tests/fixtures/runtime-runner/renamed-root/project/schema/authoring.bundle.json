@@ -1,0 +1,1027 @@
+{
+  "kind": "authoring_schema_bundle",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "owners": [
+      {
+        "owner": "nara.render.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "nara.render.Camera2d",
+              "aliases": [
+                "Camera 2D"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "clear_color",
+                  "aliases": [
+                    "Clear color"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "clear_color"
+                    }
+                  ],
+                  "value_kind": "map",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                },
+                {
+                  "id": "order",
+                  "aliases": [
+                    "Order"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "order"
+                    }
+                  ],
+                  "value_kind": "i64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "i64",
+                    "value": 0
+                  }
+                },
+                {
+                  "id": "target",
+                  "aliases": [
+                    "Target"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "target"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "primary_window"
+                  }
+                },
+                {
+                  "id": "viewport",
+                  "aliases": [
+                    "Viewport"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "viewport"
+                    }
+                  ],
+                  "value_kind": "map",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                },
+                {
+                  "id": "viewport_height",
+                  "aliases": [
+                    "Viewport height"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "viewport_height"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      },
+      {
+        "owner": "nara.scene.hierarchy.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "nara.scene.Name",
+              "aliases": [
+                "Name"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "value",
+                  "aliases": [
+                    "Name"
+                  ],
+                  "path": [],
+                  "value_kind": "string",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
+              "id": "nara.scene.Visibility",
+              "aliases": [
+                "Visibility"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "value",
+                  "aliases": [
+                    "Visibility"
+                  ],
+                  "path": [],
+                  "value_kind": "string",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      },
+      {
+        "owner": "nara.sprite.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "nara.sprite.Sprite",
+              "aliases": [
+                "Sprite"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "anchor.x",
+                  "aliases": [
+                    "Anchor X"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "anchor"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "x"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "f64",
+                    "value": 0.0
+                  }
+                },
+                {
+                  "id": "anchor.y",
+                  "aliases": [
+                    "Anchor Y"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "anchor"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "y"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "f64",
+                    "value": 0.0
+                  }
+                },
+                {
+                  "id": "layer",
+                  "aliases": [
+                    "Layer"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "layer"
+                    }
+                  ],
+                  "value_kind": "i64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "i64",
+                    "value": 0
+                  }
+                },
+                {
+                  "id": "material.alpha_mode",
+                  "aliases": [
+                    "Alpha mode"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "alpha_mode"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "blend"
+                  }
+                },
+                {
+                  "id": "material.image",
+                  "aliases": [
+                    "Image"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "image"
+                    }
+                  ],
+                  "value_kind": "asset_ref",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                },
+                {
+                  "id": "material.sampler.address_mode_u",
+                  "aliases": [
+                    "Horizontal address mode"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "sampler"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "address_mode_u"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "clamp_to_edge"
+                  }
+                },
+                {
+                  "id": "material.sampler.address_mode_v",
+                  "aliases": [
+                    "Vertical address mode"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "sampler"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "address_mode_v"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "clamp_to_edge"
+                  }
+                },
+                {
+                  "id": "material.sampler.mag_filter",
+                  "aliases": [
+                    "Magnification filter"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "sampler"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "mag_filter"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "linear"
+                  }
+                },
+                {
+                  "id": "material.sampler.min_filter",
+                  "aliases": [
+                    "Minimum filter"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "sampler"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "min_filter"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "linear"
+                  }
+                },
+                {
+                  "id": "material.sampler.mipmap_filter",
+                  "aliases": [
+                    "Mipmap filter"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "sampler"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "mipmap_filter"
+                    }
+                  ],
+                  "value_kind": "string",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "string",
+                    "value": "linear"
+                  }
+                },
+                {
+                  "id": "material.tint.a",
+                  "aliases": [
+                    "Tint alpha"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "tint"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "a"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "material.tint.b",
+                  "aliases": [
+                    "Tint blue"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "tint"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "b"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "material.tint.g",
+                  "aliases": [
+                    "Tint green"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "tint"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "g"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "material.tint.r",
+                  "aliases": [
+                    "Tint red"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "material"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "tint"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "r"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "size.x",
+                  "aliases": [
+                    "Width"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "size"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "x"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "size.y",
+                  "aliases": [
+                    "Height"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "size"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "y"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "sort_key",
+                  "aliases": [
+                    "Sort key"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "sort_key"
+                    }
+                  ],
+                  "value_kind": "i64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "i64",
+                    "value": 0
+                  }
+                },
+                {
+                  "id": "texture_region",
+                  "aliases": [
+                    "Texture region"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "texture_region"
+                    }
+                  ],
+                  "value_kind": "map",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      },
+      {
+        "owner": "nara.tilemap.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "nara.tilemap.Tilemap",
+              "aliases": [
+                "Tilemap"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "cells",
+                  "aliases": [
+                    "Cells"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "cells"
+                    }
+                  ],
+                  "value_kind": "list",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "list",
+                    "value": []
+                  }
+                },
+                {
+                  "id": "layer",
+                  "aliases": [
+                    "Layer"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "layer"
+                    }
+                  ],
+                  "value_kind": "i64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "i64",
+                    "value": 0
+                  }
+                },
+                {
+                  "id": "sort_key",
+                  "aliases": [
+                    "Sort key"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "sort_key"
+                    }
+                  ],
+                  "value_kind": "i64",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "i64",
+                    "value": 0
+                  }
+                },
+                {
+                  "id": "tile_size.x",
+                  "aliases": [
+                    "Tile width"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "tile_size"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "x"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "tile_size.y",
+                  "aliases": [
+                    "Tile height"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "tile_size"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "y"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "tileset",
+                  "aliases": [
+                    "Tileset"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "tileset"
+                    }
+                  ],
+                  "value_kind": "asset_ref",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit",
+                    "asset_ref"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      },
+      {
+        "owner": "nara.transform.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "nara.transform.Transform2d",
+              "aliases": [
+                "Transform 2D"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "rotation",
+                  "aliases": [
+                    "Rotation"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "rotation"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "scale.x",
+                  "aliases": [
+                    "Scale X"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "scale"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "x"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "scale.y",
+                  "aliases": [
+                    "Scale Y"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "scale"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "y"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "translation.x",
+                  "aliases": [
+                    "Translation X"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "translation"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "x"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                },
+                {
+                  "id": "translation.y",
+                  "aliases": [
+                    "Translation Y"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "translation"
+                    },
+                    {
+                      "kind": "field",
+                      "value": "y"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      },
+      {
+        "owner": "renamed-root.schema",
+        "current": {
+          "generation": 1,
+          "components": [],
+          "type_tombstones": []
+        }
+      }
+    ]
+  }
+}

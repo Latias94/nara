@@ -68,3 +68,7 @@ required-features = ["host-parity"]
 name = "editor_game_view_canary"
 path = "src/bin/editor_game_view_canary.rs"
 required-features = ["editor-game-view-canary"]
+
+[[bin]]
+name = "authoring_bundle"
+path = "src/bin/authoring_bundle.rs"

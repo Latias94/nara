@@ -1,5 +1,6 @@
 use nara_fs::ContentDigest;
 use nara_project::{ProductCapability, ProductCapabilitySet, ProjectManifest, RuntimePreset};
+use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::SceneDocumentCandidate;
 use toml::Value;
 
@@ -26,6 +27,8 @@ const BINARY_MARKER: &[u8] = b"nara_game::product_recipe()";
 pub(super) struct ProductContractSources<'a> {
     pub(super) cargo_manifest: &'a [u8],
     pub(super) project_manifest: &'a [u8],
+    pub(super) authoring_schema_bundle: &'a [u8],
+    pub(super) expected_authoring_schema_bundle: &'a AuthoringSchemaBundle,
     pub(super) dependency_manifest_fragment: &'a str,
     pub(super) creation_command_arguments: &'a str,
     pub(super) author_guide: &'a str,
@@ -90,6 +93,9 @@ version = "0.1.0"
 assets = "assets"
 scenes = "scenes"
 prefabs = "prefabs"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
 
 [startup]
 default_scene = "startup.scene.json"
@@ -171,6 +177,7 @@ pub(super) fn validate(
         || manifest.paths.assets != "assets"
         || manifest.paths.scenes != "scenes"
         || manifest.paths.prefabs != "prefabs"
+        || manifest.authoring.schema_bundle.as_deref() != Some("schema/authoring.bundle.json")
         || manifest.startup.default_scene.as_deref() != Some("startup.scene.json")
     {
         return Err("generated project identity or startup paths disagree with the starter");
@@ -201,8 +208,24 @@ pub(super) fn validate(
     {
         return Err("generated Rust entry points disagree with the starter product contract");
     }
+    validate_authoring_schema_bundle(
+        sources.authoring_schema_bundle,
+        sources.expected_authoring_schema_bundle,
+    )?;
     SceneDocumentCandidate::decode_json_bytes(sources.startup_scene)
         .map_err(|_| "generated startup scene is invalid")?;
+    Ok(())
+}
+
+fn validate_authoring_schema_bundle(
+    encoded: &[u8],
+    expected: &AuthoringSchemaBundle,
+) -> Result<(), &'static str> {
+    let bundle = AuthoringSchemaBundle::from_json_bytes(encoded)
+        .map_err(|_| "generated authoring schema bundle is invalid")?;
+    if &bundle != expected {
+        return Err("generated authoring schema bundle disagrees with the starter");
+    }
     Ok(())
 }
 

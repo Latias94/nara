@@ -77,6 +77,7 @@ use crate::project_host::composition::{
     editor_play_runtime_plugins_with_recipe, resolve_project_runtime_request,
     runtime_host_policy_contribution,
 };
+use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
 use crate::project_host::{
     ProjectContentLoader, ProjectSettingsCandidate, ingest_project_manifest,
 };
@@ -902,6 +903,10 @@ impl EditorProjectSession {
                 diagnostics: runtime_plan_failure_report(&error),
             }
         })?;
+        let runtime_agreement = prepare_runtime_schema_agreement(&project_root, &candidate, &plan)
+            .map_err(|error| EditorProjectOpenError {
+                diagnostics: error.diagnostics().clone(),
+            })?;
 
         let prefabs_path = RelativePath::new(candidate.settings().paths.prefabs.as_str())
             .map_err(|_| editor_open_error("project.editor.prefabs-path-invalid"))?;
@@ -915,7 +920,7 @@ impl EditorProjectSession {
             }
         })?;
         let snapshot = loader
-            .load(&candidate, &plan)
+            .load_with_runtime_agreement(&candidate, &plan, runtime_agreement)
             .map_err(|error| EditorProjectOpenError {
                 diagnostics: error.diagnostics().clone(),
             })?;

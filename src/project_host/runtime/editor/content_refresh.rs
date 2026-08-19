@@ -6,6 +6,7 @@ use nara_tooling::{
     EditorProjectContentRefreshRequestResult, EditorProjectContentView,
 };
 
+use crate::project_host::runtime_agreement::prepare_runtime_schema_agreement;
 use crate::project_host::{ProjectContentError, ProjectContentErrorKind, StartupContentMemberKind};
 
 use super::{
@@ -179,12 +180,27 @@ impl EditorProjectSession {
             self.failed_content_refresh = Some(request);
             return;
         };
-        let successor = match lane.content_loader.load_with_expected_prefab_digest(
+        let runtime_agreement = match prepare_runtime_schema_agreement(
+            &lane.content_loader.project_root(),
             &lane.content_candidate,
             &lane.plan,
-            request.prefab.clone(),
-            request.expected_digest,
         ) {
+            Ok(agreement) => agreement,
+            Err(error) => {
+                self.reject_project_content_refresh(request, self.classify_refresh_error(&error));
+                let _ = self.diagnostics.extend(error.diagnostics().clone());
+                return;
+            }
+        };
+        let successor = match lane
+            .content_loader
+            .load_with_expected_prefab_digest_and_runtime_agreement(
+                &lane.content_candidate,
+                &lane.plan,
+                request.prefab.clone(),
+                request.expected_digest,
+                runtime_agreement,
+            ) {
             Ok(successor) => successor,
             Err(error) => {
                 self.reject_project_content_refresh(request, self.classify_refresh_error(&error));

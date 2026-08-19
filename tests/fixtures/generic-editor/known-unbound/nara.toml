@@ -1,0 +1,32 @@
+schema_version = 1
+
+[project]
+name = "Signal Workshop"
+stable_id = "signal-workshop-clean-room"
+version = "0.1.0"
+
+[paths]
+assets = "media"
+scenes = "worlds"
+prefabs = "blueprints"
+
+[authoring]
+schema_bundle = "catalogs/authoring.bundle.json"
+
+[startup]
+default_scene = "entry.scene.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+
+[profiles.desktop.window]
+enabled = false

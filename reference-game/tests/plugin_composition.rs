@@ -17,6 +17,8 @@ mod project_content_fixture;
 
 use project_content_fixture::{candidate_plan_and_root, resolve_reference_plan};
 
+const CHECKED_IN_AUTHORING_BUNDLE: &[u8] = include_bytes!("../schema/authoring.bundle.json");
+
 #[cfg(feature = "desktop")]
 use nara::{
     image::IMAGE_PREPARE_PLUGIN_ID, project_host::ProjectContentLoader, render::RENDER_PLUGIN_ID,
@@ -29,6 +31,16 @@ use nara_reference_game::REFERENCE_DESKTOP_PLUGIN_ID;
 use project_content_fixture::{
     desktop_candidate_plan_and_root, headless_wave_candidate_plan_and_root,
 };
+
+#[test]
+fn checked_in_authoring_bundle_matches_the_normal_reference_product_plan() {
+    let (_candidate, plan, _root) = candidate_plan_and_root();
+    let expected = plan.schema_validation().authoring_schema_bundle();
+    let mut expected_bytes = expected.to_json_string().unwrap().into_bytes();
+    expected_bytes.push(b'\n');
+
+    assert_eq!(CHECKED_IN_AUTHORING_BUNDLE, expected_bytes.as_slice());
+}
 
 #[test]
 fn ordinary_recipes_bind_reference_schema_once_without_parallel_provider_lists() {

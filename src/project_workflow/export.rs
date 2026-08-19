@@ -210,6 +210,9 @@ pub fn prepare_project_export(
         startup_content,
         build,
     } = request;
+    if !startup_content.has_runtime_schema_agreement() {
+        return Err(ProjectExportPlanError::RuntimeSchemaAgreementMissing);
+    }
     revalidate_sources(&startup_content, &build)?;
     let plan = plan_export(destination, &startup_content, &build)?;
     Ok(PreparedProjectExport {
@@ -222,6 +225,8 @@ pub fn prepare_project_export(
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectExportPlanError {
+    #[error("startup-content closure lacks a checked runtime schema agreement")]
+    RuntimeSchemaAgreementMissing,
     #[error(transparent)]
     Build(#[from] ProjectExportBuildError),
     #[error("startup-content member {path} changed after project check")]
@@ -590,6 +595,9 @@ fn member_kind_name(kind: ProjectExportMemberKind) -> &'static str {
         ProjectExportMemberKind::StartupContent(StartupContentMemberKind::ProjectManifest) => {
             "project-manifest"
         }
+        ProjectExportMemberKind::StartupContent(
+            StartupContentMemberKind::AuthoringSchemaBundle,
+        ) => "authoring-schema-bundle",
         ProjectExportMemberKind::StartupContent(StartupContentMemberKind::Scene) => "scene",
         ProjectExportMemberKind::StartupContent(StartupContentMemberKind::Prefab) => "prefab",
         ProjectExportMemberKind::StartupContent(StartupContentMemberKind::AssetMetadata) => {

@@ -17,6 +17,7 @@ use crate::project_host::ProjectSettingsLineage;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartupContentMemberKind {
     ProjectManifest,
+    AuthoringSchemaBundle,
     Scene,
     Prefab,
     AssetMetadata,
@@ -27,6 +28,7 @@ impl StartupContentMemberKind {
     pub(super) const fn digest_role(self) -> &'static str {
         match self {
             Self::ProjectManifest => "manifest",
+            Self::AuthoringSchemaBundle => "authoring-schema-bundle",
             Self::Scene => "scene",
             Self::Prefab => "prefab",
             Self::AssetMetadata => "asset-meta",
@@ -131,6 +133,13 @@ impl StartupContentClosureReceipt {
     pub(crate) fn project_root(&self) -> DirectoryCapability {
         self.inner.project_root.share()
     }
+
+    pub(crate) fn has_runtime_schema_agreement(&self) -> bool {
+        self.inner
+            .members
+            .iter()
+            .any(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+    }
 }
 
 impl std::fmt::Debug for StartupContentClosureReceipt {
@@ -148,6 +157,10 @@ impl std::fmt::Debug for StartupContentClosureReceipt {
                 &self.inner.runtime_directories.len(),
             )
             .field("member_count", &self.inner.members.len())
+            .field(
+                "has_runtime_schema_agreement",
+                &self.has_runtime_schema_agreement(),
+            )
             .finish()
     }
 }
@@ -246,7 +259,7 @@ impl StartupContentClosureBuilder {
         for (path, facts) in self
             .members
             .iter()
-            .filter(|(_, facts)| facts.kind != StartupContentMemberKind::ProjectManifest)
+            .filter(|(_, facts)| facts.kind.contributes_to_runtime_content_digest())
         {
             total = checked_plan_sum(
                 ProjectContentBudgetKind::WorkBytes,
@@ -281,7 +294,7 @@ impl StartupContentClosureBuilder {
         for (path, facts) in self
             .members
             .iter()
-            .filter(|(_, facts)| facts.kind != StartupContentMemberKind::ProjectManifest)
+            .filter(|(_, facts)| facts.kind.contributes_to_runtime_content_digest())
         {
             append_frame(&mut framed, facts.kind.digest_role().as_bytes())?;
             append_frame(&mut framed, path.as_bytes())?;
@@ -294,6 +307,15 @@ impl StartupContentClosureBuilder {
         debug_assert_eq!(framed.len(), framed_bytes);
         let hash = ContentDigest::of_bytes(&framed);
         Ok(ContentDigest::from_parts(encoded_length, *hash.as_bytes()))
+    }
+
+    pub(super) fn insert_project_path(
+        &mut self,
+        kind: StartupContentMemberKind,
+        path: ProjectPath,
+        digest: ContentDigest,
+    ) -> Result<(), ProjectContentError> {
+        self.insert_path(kind, path, digest)
     }
 
     fn insert_path(
@@ -350,5 +372,11 @@ impl StartupContentClosureBuilder {
                 })
                 .collect(),
         }
+    }
+}
+
+impl StartupContentMemberKind {
+    const fn contributes_to_runtime_content_digest(self) -> bool {
+        !matches!(self, Self::ProjectManifest | Self::AuthoringSchemaBundle)
     }
 }

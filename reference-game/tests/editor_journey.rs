@@ -461,7 +461,7 @@ impl WritableReferenceProject {
         fs::create_dir(&root).unwrap();
         let source = Path::new(env!("CARGO_MANIFEST_DIR"));
         fs::copy(source.join("nara.toml"), root.join("nara.toml")).unwrap();
-        for directory in ["assets", "prefabs", "scenes"] {
+        for directory in ["assets", "prefabs", "scenes", "schema"] {
             copy_tree(&source.join(directory), &root.join(directory));
         }
         Self { root }

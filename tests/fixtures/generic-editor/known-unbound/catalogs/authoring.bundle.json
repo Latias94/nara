@@ -1,0 +1,123 @@
+{
+  "kind": "authoring_schema_bundle",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "owners": [
+      {
+        "owner": "nara.scene.hierarchy.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "nara.scene.Name",
+              "aliases": [
+                "Name"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "value",
+                  "aliases": [
+                    "Name"
+                  ],
+                  "path": [],
+                  "value_kind": "string",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            },
+            {
+              "id": "nara.scene.Visibility",
+              "aliases": [
+                "Visibility"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "value",
+                  "aliases": [
+                    "Visibility"
+                  ],
+                  "path": [],
+                  "value_kind": "string",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      },
+      {
+        "owner": "studio.signal.components",
+        "current": {
+          "generation": 1,
+          "components": [
+            {
+              "id": "studio.signal.Pulse",
+              "aliases": [
+                "Pulse"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "amplitude",
+                  "aliases": [
+                    "Amplitude"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "amplitude"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": []
+            }
+          ],
+          "type_tombstones": []
+        }
+      }
+    ]
+  }
+}
