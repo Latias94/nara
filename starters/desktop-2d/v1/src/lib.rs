@@ -82,6 +82,22 @@ pub fn record_product_observation(
     let executable = ContentDigest::of_bytes(&fs::read(env::current_exe()?)?);
     let manifest = closure.manifest_digest();
     let content = closure.content_digest();
+    let closure_plan = closure.closure_plan_digest();
+    let schema = closure.schema_fingerprint();
+    let authoring_bundle = closure
+        .members()
+        .iter()
+        .find(|member| {
+            member.kind()
+                == nara::project_host::StartupContentMemberKind::AuthoringSchemaBundle
+        })
+        .map(nara::project_host::StartupContentMemberReceipt::digest)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "starter observation requires the admitted authoring schema bundle",
+            )
+        })?;
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -89,7 +105,7 @@ pub fn record_product_observation(
     file.write_all(b"{")?;
     write!(
         file,
-        "\"version\":1,\"attempt\":\"{attempt}\",\"target\":\"{}\",\"profile\":\"{}\",\"executable_length\":{},\"executable_blake3\":\"{}\",\"manifest_length\":{},\"manifest_blake3\":\"{}\",\"content_length\":{},\"content_blake3\":\"{}\"",
+        "\"version\":2,\"attempt\":\"{attempt}\",\"target\":\"{}\",\"profile\":\"{}\",\"executable_length\":{},\"executable_blake3\":\"{}\",\"manifest_length\":{},\"manifest_blake3\":\"{}\",\"content_length\":{},\"content_blake3\":\"{}\",\"closure_plan_length\":{},\"closure_plan_blake3\":\"{}\",\"schema_fingerprint\":\"{}\",\"authoring_bundle_length\":{},\"authoring_bundle_blake3\":\"{}\"",
         target.name(),
         target.profile(),
         executable.length(),
@@ -98,6 +114,11 @@ pub fn record_product_observation(
         digest_hex(manifest),
         content.length(),
         digest_hex(content),
+        closure_plan.length(),
+        digest_hex(closure_plan),
+        schema,
+        authoring_bundle.length(),
+        digest_hex(authoring_bundle),
     )?;
     file.write_all(b"}\n")
 }

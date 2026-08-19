@@ -85,6 +85,7 @@ pub(super) struct StartupContentClosureReceiptInner {
     schema_fingerprint: SchemaCompositionFingerprint,
     content_revision: ProjectContentRevision,
     content_digest: ContentDigest,
+    closure_plan_digest: ContentDigest,
     runtime_directories: Box<[ProjectPath]>,
     members: Box<[StartupContentMemberReceipt]>,
     _lease: ProjectContentLease,
@@ -116,6 +117,18 @@ impl StartupContentClosureReceipt {
         self.inner.content_digest
     }
 
+    /// Returns the exact ordered runtime-directory and source-member plan admitted by this load.
+    ///
+    /// Unlike [`Self::content_digest`], this digest includes the manifest, authoring schema bundle,
+    /// runtime directory paths, and every member kind/path/digest tuple. Product and export
+    /// adapters use it to prove that an executable started from the same source-carrying closure
+    /// that the export transaction will publish.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn closure_plan_digest(&self) -> ContentDigest {
+        self.inner.closure_plan_digest
+    }
+
     #[must_use]
     pub fn members(&self) -> &[StartupContentMemberReceipt] {
         &self.inner.members
@@ -135,10 +148,15 @@ impl StartupContentClosureReceipt {
     }
 
     pub(crate) fn has_runtime_schema_agreement(&self) -> bool {
+        self.runtime_schema_bundle_digest().is_some()
+    }
+
+    pub(crate) fn runtime_schema_bundle_digest(&self) -> Option<ContentDigest> {
         self.inner
             .members
             .iter()
-            .any(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+            .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+            .map(StartupContentMemberReceipt::digest)
     }
 }
 
@@ -152,6 +170,7 @@ impl std::fmt::Debug for StartupContentClosureReceipt {
             .field("schema_fingerprint", &self.inner.schema_fingerprint)
             .field("content_revision", &self.inner.content_revision)
             .field("content_digest", &self.inner.content_digest)
+            .field("closure_plan_digest", &self.inner.closure_plan_digest)
             .field(
                 "runtime_directory_count",
                 &self.inner.runtime_directories.len(),
@@ -171,6 +190,7 @@ pub(super) struct StartupContentClosureDraft {
     schema_fingerprint: SchemaCompositionFingerprint,
     content_revision: ProjectContentRevision,
     content_digest: ContentDigest,
+    closure_plan_digest: ContentDigest,
     runtime_directories: Box<[ProjectPath]>,
     members: Box<[StartupContentMemberReceipt]>,
 }
@@ -197,6 +217,7 @@ impl StartupContentClosureDraft {
                 schema_fingerprint: self.schema_fingerprint,
                 content_revision: self.content_revision,
                 content_digest: self.content_digest,
+                closure_plan_digest: self.closure_plan_digest,
                 runtime_directories: self.runtime_directories,
                 members: self.members,
                 _lease: lease,
@@ -347,32 +368,60 @@ impl StartupContentClosureBuilder {
         content_revision: ProjectContentRevision,
         content_digest: ContentDigest,
     ) -> StartupContentClosureDraft {
+        let runtime_directories = self
+            .runtime_directories
+            .into_iter()
+            .map(|path| {
+                ProjectPath::new(path)
+                    .expect("runtime directory paths were validated before admission")
+            })
+            .collect::<Box<[_]>>();
+        let members = self
+            .members
+            .into_iter()
+            .map(|(path, facts)| StartupContentMemberReceipt {
+                kind: facts.kind,
+                path: ProjectPath::new(path)
+                    .expect("startup closure paths were validated before admission"),
+                digest: facts.digest,
+            })
+            .collect::<Box<[_]>>();
+        let closure_plan_digest = closure_plan_digest(&runtime_directories, &members);
         StartupContentClosureDraft {
             settings_lineage,
             manifest_digest: self.manifest_digest,
             schema_fingerprint,
             content_revision,
             content_digest,
-            runtime_directories: self
-                .runtime_directories
-                .into_iter()
-                .map(|path| {
-                    ProjectPath::new(path)
-                        .expect("runtime directory paths were validated before admission")
-                })
-                .collect(),
-            members: self
-                .members
-                .into_iter()
-                .map(|(path, facts)| StartupContentMemberReceipt {
-                    kind: facts.kind,
-                    path: ProjectPath::new(path)
-                        .expect("startup closure paths were validated before admission"),
-                    digest: facts.digest,
-                })
-                .collect(),
+            closure_plan_digest,
+            runtime_directories,
+            members,
         }
     }
+}
+
+fn closure_plan_digest(
+    runtime_directories: &[ProjectPath],
+    members: &[StartupContentMemberReceipt],
+) -> ContentDigest {
+    let mut framed = Vec::new();
+    framed.extend_from_slice(b"nara.project-startup-closure-plan.v1\0");
+    for directory in runtime_directories {
+        append_plan_frame(&mut framed, b"runtime-directory");
+        append_plan_frame(&mut framed, directory.as_str().as_bytes());
+    }
+    for member in members {
+        append_plan_frame(&mut framed, member.kind.digest_role().as_bytes());
+        append_plan_frame(&mut framed, member.path.as_str().as_bytes());
+        append_plan_frame(&mut framed, &member.digest.length().to_le_bytes());
+        append_plan_frame(&mut framed, member.digest.as_bytes());
+    }
+    ContentDigest::of_bytes(&framed)
+}
+
+fn append_plan_frame(target: &mut Vec<u8>, bytes: &[u8]) {
+    target.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+    target.extend_from_slice(bytes);
 }
 
 impl StartupContentMemberKind {

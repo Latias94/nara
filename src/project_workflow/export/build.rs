@@ -1,7 +1,4 @@
-use std::fmt;
-
-#[cfg(feature = "project-workflow-cli")]
-use std::array;
+use std::{array, fmt};
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, FileCapability, FileIdentity, FsError, RelativePath,
@@ -81,6 +78,7 @@ pub struct ProjectExportBuildReceipt {
     profile: String,
     features: Box<[String]>,
     executables: [PreparedExecutable; 2],
+    product_agreements: [ProjectExportProductAgreement; 2],
 }
 
 impl ProjectExportBuildReceipt {
@@ -157,6 +155,7 @@ impl fmt::Debug for ProjectExportBuildReceipt {
             .field("profile", &self.profile)
             .field("features", &self.features)
             .field("executables", &executables)
+            .field("product_agreements", &self.product_agreements)
             .finish()
     }
 }
@@ -172,6 +171,10 @@ struct PreparedExecutable {
 pub struct ProjectExportBuildPreparation {
     project_root: DirectoryCapability,
     revision: BuildInputRevision,
+    manifest_digest: ContentDigest,
+    startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
+    authoring_schema_bundle_digest: ContentDigest,
 }
 
 #[cfg(feature = "project-workflow-cli")]
@@ -181,9 +184,16 @@ impl ProjectExportBuildPreparation {
     ) -> Result<Self, ProjectExportBuildError> {
         let project_root = startup_content.project_root();
         let revision = BuildInputRevision::capture(&project_root)?;
+        let authoring_schema_bundle_digest = startup_content
+            .runtime_schema_bundle_digest()
+            .ok_or(ProjectExportBuildError::RuntimeSchemaAgreementMissing)?;
         Ok(Self {
             project_root,
             revision,
+            manifest_digest: startup_content.manifest_digest(),
+            startup_content_digest: startup_content.content_digest(),
+            startup_closure_plan_digest: startup_content.closure_plan_digest(),
+            authoring_schema_bundle_digest,
         })
     }
 
@@ -207,6 +217,7 @@ impl ProjectExportBuildPreparation {
     pub fn bind(
         self,
         artifacts: [ProjectExportCargoArtifact; 2],
+        agreements: [ProjectExportProductAgreement; 2],
     ) -> Result<ProjectExportBuildReceipt, ProjectExportBuildError> {
         self.revision.revalidate(&self.project_root)?;
         let [first, second] = artifacts;
@@ -237,6 +248,14 @@ impl ProjectExportBuildPreparation {
         let desktop = desktop.ok_or(ProjectExportBuildError::MissingExecutable {
             target: ProjectExportBinaryTarget::Desktop,
         })?;
+        let agreements = bind_product_agreements(
+            agreements,
+            [&headless.receipt, &desktop.receipt],
+            self.manifest_digest,
+            self.startup_content_digest,
+            self.startup_closure_plan_digest,
+            self.authoring_schema_bundle_digest,
+        )?;
         Ok(ProjectExportBuildReceipt {
             project_root_identity: self.project_root.identity(),
             build_input_revision: self.revision,
@@ -245,6 +264,7 @@ impl ProjectExportBuildPreparation {
             profile: invocation.profile,
             features: invocation.features,
             executables: [headless, desktop],
+            product_agreements: agreements,
         })
     }
 }
@@ -256,8 +276,123 @@ impl fmt::Debug for ProjectExportBuildPreparation {
             .debug_struct("ProjectExportBuildPreparation")
             .field("project_root_identity", &self.project_root.identity())
             .field("build_input_digest", &self.revision.digest)
+            .field("manifest_digest", &self.manifest_digest)
+            .field("startup_content_digest", &self.startup_content_digest)
+            .field(
+                "startup_closure_plan_digest",
+                &self.startup_closure_plan_digest,
+            )
+            .field(
+                "authoring_schema_bundle_digest",
+                &self.authoring_schema_bundle_digest,
+            )
             .finish()
     }
+}
+
+/// Exact pre-publication observation made by one selected product executable.
+///
+/// The private Cargo Adapter may construct this value only after the executable has run its own
+/// provider-capable startup path and reported the exact schema and source facts it admitted.
+#[doc(hidden)]
+pub struct ProjectExportProductAgreement {
+    target: ProjectExportBinaryTarget,
+    executable_digest: ContentDigest,
+    manifest_digest: ContentDigest,
+    startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
+    authoring_schema_bundle_digest: ContentDigest,
+    schema_fingerprint: Box<str>,
+    observation_digest: ContentDigest,
+}
+
+impl ProjectExportProductAgreement {
+    pub fn new(
+        target: ProjectExportBinaryTarget,
+        executable_digest: ContentDigest,
+        manifest_digest: ContentDigest,
+        startup_content_digest: ContentDigest,
+        startup_closure_plan_digest: ContentDigest,
+        authoring_schema_bundle_digest: ContentDigest,
+        schema_fingerprint: impl Into<String>,
+        observation_digest: ContentDigest,
+    ) -> Result<Self, ProjectExportBuildError> {
+        let schema_fingerprint = schema_fingerprint.into();
+        if schema_fingerprint.len() != 64
+            || !schema_fingerprint
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return Err(ProjectExportBuildError::InvalidProductSchemaFingerprint { target });
+        }
+        Ok(Self {
+            target,
+            executable_digest,
+            manifest_digest,
+            startup_content_digest,
+            startup_closure_plan_digest,
+            authoring_schema_bundle_digest,
+            schema_fingerprint: schema_fingerprint.into_boxed_str(),
+            observation_digest,
+        })
+    }
+}
+
+impl fmt::Debug for ProjectExportProductAgreement {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProjectExportProductAgreement")
+            .field("target", &self.target)
+            .field("executable_digest", &self.executable_digest)
+            .field("manifest_digest", &self.manifest_digest)
+            .field("startup_content_digest", &self.startup_content_digest)
+            .field(
+                "startup_closure_plan_digest",
+                &self.startup_closure_plan_digest,
+            )
+            .field(
+                "authoring_schema_bundle_digest",
+                &self.authoring_schema_bundle_digest,
+            )
+            .field("schema_fingerprint", &self.schema_fingerprint)
+            .field("observation_digest", &self.observation_digest)
+            .finish()
+    }
+}
+
+fn bind_product_agreements(
+    agreements: [ProjectExportProductAgreement; 2],
+    executables: [&ProjectExportExecutableReceipt; 2],
+    manifest_digest: ContentDigest,
+    startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
+    authoring_schema_bundle_digest: ContentDigest,
+) -> Result<[ProjectExportProductAgreement; 2], ProjectExportBuildError> {
+    let mut ordered: [Option<ProjectExportProductAgreement>; 2] = array::from_fn(|_| None);
+    for agreement in agreements {
+        let target = agreement.target;
+        let executable = executables[target.index()];
+        if agreement.executable_digest != executable.digest
+            || agreement.manifest_digest != manifest_digest
+            || agreement.startup_content_digest != startup_content_digest
+            || agreement.startup_closure_plan_digest != startup_closure_plan_digest
+            || agreement.authoring_schema_bundle_digest != authoring_schema_bundle_digest
+        {
+            return Err(ProjectExportBuildError::ProductAgreementMismatch { target });
+        }
+        if ordered[target.index()].replace(agreement).is_some() {
+            return Err(ProjectExportBuildError::DuplicateProductAgreement { target });
+        }
+    }
+    let [headless, desktop] = ordered;
+    Ok([
+        headless.ok_or(ProjectExportBuildError::MissingProductAgreement {
+            target: ProjectExportBinaryTarget::Headless,
+        })?,
+        desktop.ok_or(ProjectExportBuildError::MissingProductAgreement {
+            target: ProjectExportBinaryTarget::Desktop,
+        })?,
+    ])
 }
 
 /// One structurally matched Cargo compiler-artifact selected by the private Adapter.
@@ -421,6 +556,8 @@ fn append_frame(target: &mut Vec<u8>, bytes: &[u8]) {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectExportBuildError {
+    #[error("project export startup content lacks a checked runtime schema agreement")]
+    RuntimeSchemaAgreementMissing,
     #[error("project export build input {path} is unavailable")]
     BuildInputUnavailable {
         path: &'static str,
@@ -455,4 +592,12 @@ pub enum ProjectExportBuildError {
     },
     #[error("the Cargo build receipt belongs to another project authority")]
     ProjectAuthorityMismatch,
+    #[error("the {target:?} product reported an invalid schema fingerprint")]
+    InvalidProductSchemaFingerprint { target: ProjectExportBinaryTarget },
+    #[error("the {target:?} product was observed more than once")]
+    DuplicateProductAgreement { target: ProjectExportBinaryTarget },
+    #[error("the {target:?} product was not observed before export publication")]
+    MissingProductAgreement { target: ProjectExportBinaryTarget },
+    #[error("the {target:?} product observation does not match the export inputs")]
+    ProductAgreementMismatch { target: ProjectExportBinaryTarget },
 }

@@ -11,8 +11,9 @@ use std::{
 use nara::{
     fs::{ContentDigest, FsError},
     project_workflow::{
-        ProjectExportBinaryTarget, ProjectExportMemberKind, ProjectExportMemberReceipt,
-        ProjectExportPlanReceipt,
+        __private::ProjectExportProductAgreement, ProjectExportBinaryTarget,
+        ProjectExportBuildError, ProjectExportMemberKind, ProjectExportMemberReceipt,
+        ProjectExportPlanReceipt, StartupContentClosureReceipt, StartupContentMemberKind,
     },
 };
 use serde_json::Value;
@@ -35,6 +36,9 @@ pub(crate) struct ProductProcessObservationReceipt {
     executable_digest: ContentDigest,
     manifest_digest: ContentDigest,
     startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
+    authoring_schema_bundle_digest: ContentDigest,
+    schema_fingerprint: String,
     observation_digest: ContentDigest,
 }
 
@@ -63,8 +67,35 @@ impl ProductProcessObservationReceipt {
         self.startup_content_digest
     }
 
+    pub(crate) const fn startup_closure_plan_digest(&self) -> ContentDigest {
+        self.startup_closure_plan_digest
+    }
+
+    pub(crate) const fn authoring_schema_bundle_digest(&self) -> ContentDigest {
+        self.authoring_schema_bundle_digest
+    }
+
+    pub(crate) fn schema_fingerprint(&self) -> &str {
+        &self.schema_fingerprint
+    }
+
     pub(crate) const fn observation_digest(&self) -> ContentDigest {
         self.observation_digest
+    }
+
+    pub(super) fn into_product_agreement(
+        self,
+    ) -> Result<ProjectExportProductAgreement, ProjectExportBuildError> {
+        ProjectExportProductAgreement::new(
+            self.target,
+            self.executable_digest,
+            self.manifest_digest,
+            self.startup_content_digest,
+            self.startup_closure_plan_digest,
+            self.authoring_schema_bundle_digest,
+            self.schema_fingerprint,
+            self.observation_digest,
+        )
     }
 }
 
@@ -83,6 +114,8 @@ impl ExportAcceptanceReceipt {
 pub(crate) enum ExportAcceptanceError {
     #[error("the export plan is missing its {target:?} executable")]
     MissingExecutable { target: ProjectExportBinaryTarget },
+    #[error("the checked startup closure is missing its authoring schema bundle")]
+    MissingAuthoringSchemaBundle,
     #[error("failed to open the published {target:?} executable")]
     OpenExecutable {
         target: ProjectExportBinaryTarget,
@@ -152,6 +185,7 @@ pub(super) fn accept(
     manifest_digest: ContentDigest,
 ) -> Result<ExportAcceptanceReceipt, ExportAcceptanceError> {
     let working_directory = AcceptanceWorkingDirectory::new()?;
+    let authoring_schema_bundle_digest = export_bundle_digest(plan)?;
     let mut products = Vec::with_capacity(2);
     for (target, arguments) in [
         (ProjectExportBinaryTarget::Headless, &[][..]),
@@ -170,6 +204,8 @@ pub(super) fn accept(
                 member.digest(),
                 manifest_digest,
                 plan.startup_content_digest(),
+                plan.startup_closure_plan_digest(),
+                authoring_schema_bundle_digest,
             ),
             working_directory.path(),
             arguments,
@@ -180,6 +216,69 @@ pub(super) fn accept(
             .try_into()
             .expect("the closed export acceptance always observes two products"),
     })
+}
+
+pub(super) fn observe_built_products(
+    attempt_prefix: &str,
+    startup_content: &StartupContentClosureReceipt,
+    executables: [(ProjectExportBinaryTarget, &Path); 2],
+) -> Result<[ProductProcessObservationReceipt; 2], ExportAcceptanceError> {
+    let working_directory = AcceptanceWorkingDirectory::new()?;
+    let authoring_schema_bundle_digest = startup_bundle_digest(startup_content)?;
+    let mut observations = Vec::with_capacity(2);
+    for (target, executable) in executables {
+        let executable_digest = host_fs::readable_file(executable)
+            .map_err(|source| ExportAcceptanceError::OpenExecutable { target, source })?
+            .digest(512 * 1024 * 1024)
+            .map_err(|source| ExportAcceptanceError::ExecutableChanged { target, source })?;
+        let arguments = match target {
+            ProjectExportBinaryTarget::Headless => &[][..],
+            ProjectExportBinaryTarget::Desktop => &["--verify-first-present"][..],
+        };
+        observations.push(observe_product(
+            attempt_prefix,
+            ExpectedProductObservation::new(
+                target,
+                executable,
+                executable_digest,
+                startup_content.manifest_digest(),
+                startup_content.content_digest(),
+                startup_content.closure_plan_digest(),
+                authoring_schema_bundle_digest,
+            ),
+            working_directory.path(),
+            arguments,
+        )?);
+    }
+    Ok(observations
+        .try_into()
+        .expect("the closed export build observes exactly two products"))
+}
+
+fn export_bundle_digest(
+    plan: &ProjectExportPlanReceipt,
+) -> Result<ContentDigest, ExportAcceptanceError> {
+    plan.members()
+        .iter()
+        .find(|member| {
+            member.kind()
+                == ProjectExportMemberKind::StartupContent(
+                    StartupContentMemberKind::AuthoringSchemaBundle,
+                )
+        })
+        .map(ProjectExportMemberReceipt::digest)
+        .ok_or(ExportAcceptanceError::MissingAuthoringSchemaBundle)
+}
+
+fn startup_bundle_digest(
+    startup_content: &StartupContentClosureReceipt,
+) -> Result<ContentDigest, ExportAcceptanceError> {
+    startup_content
+        .members()
+        .iter()
+        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+        .map(nara::project_workflow::StartupContentMemberReceipt::digest)
+        .ok_or(ExportAcceptanceError::MissingAuthoringSchemaBundle)
 }
 
 fn executable_member(
@@ -202,6 +301,8 @@ pub(super) struct ExpectedProductObservation<'a> {
     executable_digest: ContentDigest,
     manifest_digest: ContentDigest,
     startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
+    authoring_schema_bundle_digest: ContentDigest,
 }
 
 impl<'a> ExpectedProductObservation<'a> {
@@ -211,6 +312,8 @@ impl<'a> ExpectedProductObservation<'a> {
         executable_digest: ContentDigest,
         manifest_digest: ContentDigest,
         startup_content_digest: ContentDigest,
+        startup_closure_plan_digest: ContentDigest,
+        authoring_schema_bundle_digest: ContentDigest,
     ) -> Self {
         Self {
             target,
@@ -218,6 +321,8 @@ impl<'a> ExpectedProductObservation<'a> {
             executable_digest,
             manifest_digest,
             startup_content_digest,
+            startup_closure_plan_digest,
+            authoring_schema_bundle_digest,
         }
     }
 }
@@ -255,6 +360,8 @@ fn observe_product_command(
         executable_digest,
         manifest_digest,
         startup_content_digest,
+        startup_closure_plan_digest,
+        authoring_schema_bundle_digest,
     } = expected;
     host_fs::readable_file(executable)
         .map_err(|source| ExportAcceptanceError::OpenExecutable { target, source })?
@@ -283,12 +390,14 @@ fn observe_product_command(
                 return Err(ExportAcceptanceError::Failed { target, status });
             }
             let bytes = read_observation(target, &observation)?;
-            validate_observation(
+            let schema_fingerprint = validate_observation(
                 target,
                 &attempt,
                 executable_digest,
                 manifest_digest,
                 startup_content_digest,
+                startup_closure_plan_digest,
+                authoring_schema_bundle_digest,
                 &bytes,
             )?;
             return Ok(ProductProcessObservationReceipt {
@@ -297,6 +406,9 @@ fn observe_product_command(
                 executable_digest,
                 manifest_digest,
                 startup_content_digest,
+                startup_closure_plan_digest,
+                authoring_schema_bundle_digest,
+                schema_fingerprint,
                 observation_digest: ContentDigest::of_bytes(&bytes),
             });
         }
@@ -335,8 +447,10 @@ fn validate_observation(
     executable_digest: ContentDigest,
     manifest_digest: ContentDigest,
     startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
+    authoring_schema_bundle_digest: ContentDigest,
     bytes: &[u8],
-) -> Result<(), ExportAcceptanceError> {
+) -> Result<String, ExportAcceptanceError> {
     let value = serde_json::from_slice::<Value>(bytes)
         .map_err(|source| ExportAcceptanceError::ObservationJson { target, source })?;
     let Some(object) = value.as_object() else {
@@ -345,8 +459,11 @@ fn validate_observation(
     let executable_hash = digest_hex(executable_digest);
     let manifest_hash = digest_hex(manifest_digest);
     let content_hash = digest_hex(startup_content_digest);
-    let matches = object.len() == 10
-        && object.get("version").and_then(Value::as_u64) == Some(1)
+    let closure_plan_hash = digest_hex(startup_closure_plan_digest);
+    let bundle_hash = digest_hex(authoring_schema_bundle_digest);
+    let schema_fingerprint = object.get("schema_fingerprint").and_then(Value::as_str);
+    let matches = object.len() == 15
+        && object.get("version").and_then(Value::as_u64) == Some(2)
         && object.get("attempt").and_then(Value::as_str) == Some(attempt)
         && object.get("target").and_then(Value::as_str) == Some(target.cargo_target_name())
         && object.get("profile").and_then(Value::as_str) == Some(product_profile(target))
@@ -359,11 +476,34 @@ fn validate_observation(
         && object.get("content_length").and_then(Value::as_u64)
             == Some(startup_content_digest.length())
         && object.get("content_blake3").and_then(Value::as_str) == Some(content_hash.as_str());
+    let matches = matches
+        && object.get("closure_plan_length").and_then(Value::as_u64)
+            == Some(startup_closure_plan_digest.length())
+        && object.get("closure_plan_blake3").and_then(Value::as_str)
+            == Some(closure_plan_hash.as_str())
+        && object
+            .get("authoring_bundle_length")
+            .and_then(Value::as_u64)
+            == Some(authoring_schema_bundle_digest.length())
+        && object
+            .get("authoring_bundle_blake3")
+            .and_then(Value::as_str)
+            == Some(bundle_hash.as_str())
+        && schema_fingerprint.is_some_and(valid_schema_fingerprint);
     if matches {
-        Ok(())
+        Ok(schema_fingerprint
+            .expect("a matching product observation has a schema fingerprint")
+            .to_owned())
     } else {
         Err(ExportAcceptanceError::ObservationMismatch { target })
     }
+}
+
+fn valid_schema_fingerprint(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
 }
 
 fn product_attempt(
@@ -447,5 +587,72 @@ impl AcceptanceWorkingDirectory {
 impl Drop for AcceptanceWorkingDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn product_observation_binds_the_exact_startup_closure_plan() {
+        let target = ProjectExportBinaryTarget::Headless;
+        let attempt = "export-observation-contract";
+        let executable = ContentDigest::of_bytes(b"executable");
+        let manifest = ContentDigest::of_bytes(b"manifest");
+        let content = ContentDigest::of_bytes(b"content");
+        let closure_plan = ContentDigest::of_bytes(b"closure-plan");
+        let bundle = ContentDigest::of_bytes(b"authoring-bundle");
+        let schema_fingerprint = "ab".repeat(32);
+        let observation = json!({
+            "version": 2,
+            "attempt": attempt,
+            "target": "headless",
+            "profile": "default",
+            "executable_length": executable.length(),
+            "executable_blake3": digest_hex(executable),
+            "manifest_length": manifest.length(),
+            "manifest_blake3": digest_hex(manifest),
+            "content_length": content.length(),
+            "content_blake3": digest_hex(content),
+            "closure_plan_length": closure_plan.length(),
+            "closure_plan_blake3": digest_hex(closure_plan),
+            "schema_fingerprint": schema_fingerprint,
+            "authoring_bundle_length": bundle.length(),
+            "authoring_bundle_blake3": digest_hex(bundle),
+        });
+        let bytes = serde_json::to_vec(&observation).unwrap();
+        assert_eq!(
+            validate_observation(
+                target,
+                attempt,
+                executable,
+                manifest,
+                content,
+                closure_plan,
+                bundle,
+                &bytes,
+            )
+            .unwrap(),
+            "ab".repeat(32),
+        );
+
+        let mut mismatched = observation;
+        mismatched["closure_plan_blake3"] = json!("00".repeat(32));
+        assert!(matches!(
+            validate_observation(
+                target,
+                attempt,
+                executable,
+                manifest,
+                content,
+                closure_plan,
+                bundle,
+                &serde_json::to_vec(&mismatched).unwrap(),
+            ),
+            Err(ExportAcceptanceError::ObservationMismatch { target: actual }) if actual == target
+        ));
     }
 }

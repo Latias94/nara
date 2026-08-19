@@ -23,7 +23,9 @@ pub use build::{
 
 #[doc(hidden)]
 #[cfg(feature = "project-workflow-cli")]
-pub use build::{ProjectExportBuildPreparation, ProjectExportCargoArtifact};
+pub use build::{
+    ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
+};
 
 use stage::{ProjectExportStageError, stage_export_tree};
 
@@ -67,6 +69,7 @@ impl ProjectExportMemberReceipt {
 pub struct ProjectExportPlanReceipt {
     destination: RelativeComponent,
     startup_content_digest: ContentDigest,
+    startup_closure_plan_digest: ContentDigest,
     build_input_digest: ContentDigest,
     member_plan_digest: ContentDigest,
     runtime_directories: Box<[ProjectPath]>,
@@ -83,6 +86,11 @@ impl ProjectExportPlanReceipt {
     #[must_use]
     pub const fn startup_content_digest(&self) -> ContentDigest {
         self.startup_content_digest
+    }
+
+    #[must_use]
+    pub const fn startup_closure_plan_digest(&self) -> ContentDigest {
+        self.startup_closure_plan_digest
     }
 
     #[must_use]
@@ -111,6 +119,10 @@ impl Debug for ProjectExportPlanReceipt {
             .debug_struct("ProjectExportPlanReceipt")
             .field("destination", &self.destination)
             .field("startup_content_digest", &self.startup_content_digest)
+            .field(
+                "startup_closure_plan_digest",
+                &self.startup_closure_plan_digest,
+            )
             .field("build_input_digest", &self.build_input_digest)
             .field("member_plan_digest", &self.member_plan_digest)
             .field("runtime_directory_count", &self.runtime_directories.len())
@@ -561,6 +573,7 @@ fn plan_export(
     Ok(ProjectExportPlanReceipt {
         destination,
         startup_content_digest: startup_content.content_digest(),
+        startup_closure_plan_digest: startup_content.closure_plan_digest(),
         build_input_digest: build.build_input_digest(),
         member_plan_digest,
         runtime_directories,

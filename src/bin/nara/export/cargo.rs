@@ -13,6 +13,7 @@ use nara::project_workflow::{
 use serde_json::Value;
 use thiserror::Error;
 
+use super::acceptance::{self, ExportAcceptanceError};
 use crate::host_fs::{self, HostDirectoryError, HostFileError};
 
 const MAX_TOOL_IDENTITY_BYTES: usize = 16 * 1024;
@@ -50,6 +51,8 @@ pub(crate) enum CargoBuildAdapterError {
     ProjectRoot(#[source] HostDirectoryError),
     #[error(transparent)]
     HostFile(#[from] HostFileError),
+    #[error("the built products did not prove the selected runtime schema and source closure")]
+    ProductAgreement(#[from] ExportAcceptanceError),
     #[error(transparent)]
     BuildContract(#[from] ProjectExportBuildError),
 }
@@ -130,10 +133,29 @@ fn build_with_target_directory(
     }
     let selected = selector.finish()?;
     let [headless, desktop] = selected;
+    let observations = acceptance::observe_built_products(
+        "export-prepublication",
+        startup_content,
+        [
+            (
+                ProjectExportBinaryTarget::Headless,
+                headless.executable.as_path(),
+            ),
+            (
+                ProjectExportBinaryTarget::Desktop,
+                desktop.executable.as_path(),
+            ),
+        ],
+    )?;
+    let [headless_observation, desktop_observation] = observations;
+    let agreements = [
+        headless_observation.into_product_agreement()?,
+        desktop_observation.into_product_agreement()?,
+    ];
     let headless = bind_artifact(headless, &target_triple)?;
     let desktop = bind_artifact(desktop, &target_triple)?;
     let receipt = preparation
-        .bind([headless, desktop])
+        .bind([headless, desktop], agreements)
         .map_err(CargoBuildAdapterError::from)?;
     Ok(CargoBuildOutput { receipt })
 }

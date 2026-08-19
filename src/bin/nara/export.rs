@@ -149,6 +149,9 @@ pub(super) fn record_acceptance_observation(
                 "executable": digest_json(product.executable_digest()),
                 "manifest": digest_json(product.manifest_digest()),
                 "content": digest_json(product.startup_content_digest()),
+                "closure_plan": digest_json(product.startup_closure_plan_digest()),
+                "authoring_schema_bundle": digest_json(product.authoring_schema_bundle_digest()),
+                "schema_fingerprint": product.schema_fingerprint(),
                 "observation": digest_json(product.observation_digest()),
             })
         })

@@ -59,5 +59,7 @@ pub use starter::{
 #[doc(hidden)]
 #[cfg(feature = "project-workflow-cli")]
 pub mod __private {
-    pub use super::export::{ProjectExportBuildPreparation, ProjectExportCargoArtifact};
+    pub use super::export::{
+        ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
+    };
 }

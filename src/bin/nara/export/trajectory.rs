@@ -415,6 +415,8 @@ fn run_source_products(
             headless_digest,
             checked.headless.manifest_digest(),
             checked.headless.content_digest(),
+            checked.headless.closure_plan_digest(),
+            authoring_bundle_digest(&checked.headless),
         ),
         working_directory,
         source_product_command(
@@ -440,6 +442,8 @@ fn run_source_products(
             desktop_digest,
             checked.desktop.manifest_digest(),
             checked.desktop.content_digest(),
+            checked.desktop.closure_plan_digest(),
+            authoring_bundle_digest(&checked.desktop),
         ),
         working_directory,
         source_product_command(
@@ -746,8 +750,20 @@ fn product_value(product: &ProductProcessObservationReceipt) -> Value {
         "executable": digest_value(product.executable_digest()),
         "manifest": digest_value(product.manifest_digest()),
         "content": digest_value(product.startup_content_digest()),
+        "closure_plan": digest_value(product.startup_closure_plan_digest()),
+        "authoring_schema_bundle": digest_value(product.authoring_schema_bundle_digest()),
+        "schema_fingerprint": product.schema_fingerprint(),
         "observation": digest_value(product.observation_digest()),
     })
+}
+
+fn authoring_bundle_digest(closure: &StartupContentClosureReceipt) -> ContentDigest {
+    closure
+        .members()
+        .iter()
+        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+        .expect("checked product closure contains its authoring schema bundle")
+        .digest()
 }
 
 fn edit_startup_scene(project: &Path) -> ContentDigest {
