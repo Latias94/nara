@@ -8,17 +8,16 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
-   plan is active only at SGE-U5 under
-   [registration `387ccdc326954d24adb88d4c4c2c8090`](../knowledge/engineering/registry/2026-08/2026-08-19T053640Z-standalone-generic-editor-open-recovery-codex-root-387ccdc326954d24adb88d4c4c2c8090.md),
-   against baseline `76bfc6c`. SGE-U1 has implemented the bounded data-only authoring schema
-   bundle and root-private admission; SGE-U2 has implemented lossless degraded Scene and Prefab
-   document authority plus the complete bounded Authoring Project receipt; SGE-U3 has implemented
-   the shell-first project lifecycle and explicit Runtime-unavailable boundary; SGE-U4 has
-   published canonical starter, Reference Game, and clean-room bundles, bound them back to strict
-   selected-native Runtime agreement, and required both built products to prove the exact ordered
-   startup closure before Export publication. SGE-U5 owns the final Generic Open/Recovery product
-   trajectory and authority closure; all successor Editor lanes remain inactive.
+3. The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
+   plan closes at `a86aee1` with
+   [verification `25fbee67d7ea41a9bc8406abe6e8b221`](../knowledge/engineering/verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md)
+   and completed
+   [registration `931591fb6d2b4bcbad3151922814d8e6`](../knowledge/engineering/registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md).
+   SGE-U1 through SGE-U5 establish the bounded data-only schema basis, lossless degraded Scene and
+   Prefab authority, shell-first lifecycle, strict selected-native Runtime agreement, modular
+   generic authoring workspace, and one-window Project Manager/Open/Recovery product proof. No
+   successor Editor lane is active automatically; external Play, project-wide browsing, and
+   extension hosting remain separately trigger-gated.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
    closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and

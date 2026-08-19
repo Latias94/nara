@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "67dc3f71cc2f8235d195b7c257c4b2b371cf1153caae1aa2b13b7ab8614af1b4"
+source_fingerprint: "00a7afe3683373c82fb6ab3058caf7f8fad3368a8c59307a0828549670f1dbbc"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "67dc3f71cc2f8235d195b7c257c4b2b371cf1153caae1aa2b13b7ab8614
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `67dc3f71cc2f8235d195b7c257c4b2b371cf1153caae1aa2b13b7ab8614af1b4`
-- Immutable records: 526
-- Active lane heads: 1
+- Source fingerprint: `00a7afe3683373c82fb6ab3058caf7f8fad3368a8c59307a0828549670f1dbbc`
+- Immutable records: 528
+- Active lane heads: 0
 
 # Active Registrations
 
@@ -33,10 +33,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Reference-game-driven foundation refactor: RGF-U19](registry/2026-07/2026-07-20T000516Z-reference-game-foundation-rgf-u19-codex-root-b395ac7f13cf4a0cbf6addc4ac712d20.md): `completed` (reference-game-foundation-rgf-u19-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
-- [Standalone Generic Editor: SGE-U5 active after export correction](registry/2026-08/2026-08-19T053640Z-standalone-generic-editor-open-recovery-codex-root-387ccdc326954d24adb88d4c4c2c8090.md): `active` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
+- [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Verification Evidence**: [SGE-U5 standalone generic Editor product closure](verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md) - Verifies the modular generic authoring workspace, lossless Recovery trajectory, and one-window native product canary.
 - **Verification Evidence**: [SGE-U4 exact export product agreement correction](verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md) - Verifies that Export binds both built products to the exact ordered startup closure before publication.
 - **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
 - **Verification Evidence**: [SGE-U3 shell-first generic Editor lifecycle](verification/2026-08/2026-08-19T023209Z-sge-u3-shell-first-generic-editor-lifecycle-140aa71012404a4c8b62e17b1c1279ad.md) - Verifies native shell-first project admission, retained replacement handoff, strict ordinary filesystem trust, recovery path hygiene, exact degraded Reopen preservation, explicit Runtime unavailability, and the advanced trusted canary boundary.
@@ -48,7 +49,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EUSC-U5 persisted UI structure and native Canvas conformance](verification/2026-08/2026-08-18T072626Z-eusc-u5-persisted-ui-structure-and-native-canvas-conformance-436c589870ba4f3c83548d349caa6d4c.md) - Verifies one real source-local UI structure trajectory through migration, Editor composition, Save/Reopen, content refresh, Runtime restart, and one exact native Canvas successor presentation.
 - **Memory Event**: [verification: Completed EUSC-U4 at 9540deb; activated EUSC-U5 under registration 9123772c74da4](logs/2026-08/2026-08-18T061055Z-verification-completed-eusc-u4-at-9540deb-activated-eusc-u5-under-registration-9123772c74da4-543b9e40f8774296bb7c431df4e6050d.md) - Completed EUSC-U4 at 9540deb; activated EUSC-U5 under registration 9123772c74da4f56a63d86ddcd742c9c.
 - **Verification Evidence**: [EUSC-U4 egui structural authoring workflow](verification/2026-08/2026-08-18T060603Z-eusc-u4-egui-structural-authoring-workflow-af32c829b365491e84fe0af17c46d6eb.md) - Verifies the bounded egui Add, Move/Reparent, and Delete workflow, exact frame-lowered action parity, stale-state containment, keyboard accessibility, and Host-owned outcome focus.
-- **Memory Event**: [verification: Completed EUSC-U3 at 278b986 with exact active-document and revision-bound Prefa](logs/2026-08/2026-08-18T050540Z-verification-completed-eusc-u3-at-278b986-with-exact-active-document-and-revision-bound-prefa-db1f09bcec8846cd9a5acfe20f7f620c.md) - Completed EUSC-U3 at 278b986 with exact active-document and revision-bound Prefab composition, failure-atomic allocation/history/selection p
 
 # Integration Notes
 
