@@ -8,9 +8,11 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
-   plan is active at EPB-U5 under
-   [registration `2d72fcaec9574052a316cc3c357790f6`](../knowledge/engineering/registry/2026-08/2026-08-19T204830Z-editor-project-browser-source-index-v1-codex-root-2d72fcaec9574052a316cc3c357790f6.md).
+3. The completed [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
+   plan closes at `1a832df` with
+   [verification `2acde0398a8b467b93fe714241a5e216`](../knowledge/engineering/verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md)
+   and completed
+   [registration `6c28391e9cd8451f92b821dba9d0c9e3`](../knowledge/engineering/registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md).
    EPB-U0 established the durable boundary at `4275d93`; EPB-U1 implemented and verified bounded
    handle-relative enumeration at `04914e1` with
    [evidence `e4b844f6b2764741a2bff0a731925a80`](../knowledge/engineering/verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md).
@@ -23,7 +25,9 @@ an index, not another source of architecture decisions.
    bounded egui Project Browser, and unified pending-work composition at `cdd5892`, followed by the
    bounded-allocation correction at `6fb84d0`, with
    [evidence `495c3c9cb92b4f94aa0895dfbce04ebf`](../knowledge/engineering/verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md).
-   EPB-U5 is the sole active unit; all unrelated Editor successors remain inactive.
+   EPB-U5 proves the one-window browse/filter/Open/Refresh trajectory, equivalent snapshot facts,
+   and last-good retention at `1a832df`. EPB-U0 through EPB-U5 are complete; no unrelated Editor
+   successor is active.
    The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with
    [verification `25fbee67d7ea41a9bc8406abe6e8b221`](../knowledge/engineering/verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md)
@@ -32,9 +36,9 @@ an index, not another source of architecture decisions.
    SGE-U1 through SGE-U5 establish the bounded data-only schema basis, lossless degraded Scene and
    Prefab authority, shell-first lifecycle, strict selected-native Runtime agreement, modular
    generic authoring workspace, and one-window Project Manager/Open/Recovery product proof. No
-   successor Editor lane is active automatically; the EPB registration above is the explicit
-   project-browsing activation, while external Play and extension hosting remain separately
-   trigger-gated.
+   successor Editor lane is active automatically. The now-completed EPB lane was the explicit
+   project-browsing successor; external Play, import/reimport, watchers, source mutation, and
+   extension hosting remain separately trigger-gated.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
    closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and

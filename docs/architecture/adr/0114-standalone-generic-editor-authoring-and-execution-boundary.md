@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-18
+**Last Revised**: 2026-08-19
 **Owner**: Private `nara-editor`, project Host, `nara_project`, `nara_reflect`, `nara_scene`,
 `nara_tooling`, and project workflow owners
 **Refines**: [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md) and
@@ -18,7 +19,7 @@
 [ADR 0110](0110-first-party-project-workflow-and-source-carrying-export.md),
 [ADR 0111](0111-editor-scene-view-execution-and-picking-authority.md), and
 [ADR 0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md)
-**Implementation Plans**: completed [Standalone Generic Editor Project Open and Recovery](../../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md), SGE-U1 through SGE-U5; active [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md), EPB-U0 through EPB-U5
+**Implementation Plans**: completed [Standalone Generic Editor Project Open and Recovery](../../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md), SGE-U1 through SGE-U5; completed [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md), EPB-U0 through EPB-U5
 
 ## Context
 
@@ -190,10 +191,10 @@ stateDiagram-v2
 - Runtime readiness is an orthogonal frame fact, not another application state. In the first Generic
   Open/Recovery slice, ordinary Play and Run remain explicitly unavailable.
 - The completed Generic Open slice may open the manifest-selected startup Scene and its explicit
-  Scene/Prefab/UI dependency closure. The active Project Browser successor may add read-only,
-  manual-refresh discovery across manifest-declared source roots only after `nara_fs` publishes a
-  bounded handle-bound enumeration contract. The browser remains a non-executable Authoring
-  product and does not inherit Runtime closure authority.
+  Scene/Prefab/UI dependency closure. The completed Project Browser successor adds read-only,
+  manual-refresh discovery across manifest-declared source roots through `nara_fs`'s bounded
+  handle-bound enumeration contract. The browser remains a non-executable Authoring product and
+  does not inherit Runtime closure authority.
 - Every admitted path is project-relative and opened through the same exact `DirectoryCapability`.
   One attempt-wide budget bounds unique files, edges, depth, path bytes, handles, encoded and decoded
   bytes, decode work, diagnostics, and retained candidates; cycles and duplicates are charged
@@ -283,7 +284,7 @@ child-process protocol.
 - Provider-capable Runtime, Check, Play, Run, Cook, and Export remain stricter than Editor Open. They
   may consume the same source but cannot consume a Degraded Authoring receipt as executable
   authority. The first Generic Open/Recovery slice does not claim an ordinary Runtime launch.
-- Capability-bound read-only project browsing is active under the focused EPB plan. Importer
+- Capability-bound read-only project browsing is implemented by the completed EPB plan. Importer
   execution, source mutation, external Play transport, live edit, animation/shader tools, docking,
   and executable Editor extensions remain separate successor work.
 
@@ -330,7 +331,7 @@ The decision is implemented only when one clean generic Editor binary:
 6. exposes project and document recovery inside the shell instead of exiting the process.
 
 External process Play and extension hosting require their own focused evidence. Project-wide
-browsing is now active only under the separate EPB plan and does not retroactively broaden the
+browsing is implemented only by the completed EPB plan and does not retroactively broaden the
 completed Generic Open and Recovery implementation.
 
 ## Citations

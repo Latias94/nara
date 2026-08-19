@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "faaee243df742586f3f3373d46c58c8b473c25031d8057d47ae2afeda1aba96e"
+source_fingerprint: "fe6353ce6262ce9f1e0a6f71aaebfc7a717ee3d2dc620f5724c846be95779d11"
 ---
 
 # Current State
@@ -12,16 +12,16 @@ source_fingerprint: "faaee243df742586f3f3373d46c58c8b473c25031d8057d47ae2afeda1a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `faaee243df742586f3f3373d46c58c8b473c25031d8057d47ae2afeda1aba96e`
-- Immutable records: 538
-- Active lane heads: 1
+- Source fingerprint: `fe6353ce6262ce9f1e0a6f71aaebfc7a717ee3d2dc620f5724c846be95779d11`
+- Immutable records: 540
+- Active lane heads: 0
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
-- [Editor Project Browser and Source Index v1: EPB-U5 active](registry/2026-08/2026-08-19T204830Z-editor-project-browser-source-index-v1-codex-root-2d72fcaec9574052a316cc3c357790f6.md): `active` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
+- [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
@@ -38,6 +38,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EPB-U5 standalone Project Browser product closure](verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md) - Verifies one generic Editor browse, filter, Scene/Prefab Open, equivalent Refresh, and last-good failure trajectory on Windows.
 - **Verification Evidence**: [EPB-U4 bounded Editor Project Browser](verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md) - Verifies UI-neutral source-index projection, bounded query and rendering work, exact frame-bound Refresh/Open ingress, and no filesystem authority in adapters.
 - **Verification Evidence**: [EPB-U3 indexed Authoring document admission](verification/2026-08/2026-08-19T192016Z-epb-u3-indexed-authoring-document-admission-684770f357d14a0184e3cdbec4751355.md) - Verifies exact indexed Scene and Prefab admission, independent persistence lanes, and dirty replacement arbitration.
 - **Verification Evidence**: [EPB-U2 bounded Host project source index](verification/2026-08/2026-08-19T182322Z-epb-u2-bounded-host-project-source-index-9ac12073205d4064a4bc76729225caf8.md) - Verifies deterministic capability-bound source indexing, atomic last-good refresh, bounded lineage revalidation, and Runtime-closure isolation.
@@ -49,7 +50,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [SGE-U2 lossless degraded authoring verification](verification/2026-08/2026-08-18T165000Z-sge-u2-lossless-degraded-authoring.md) - Verifies exact-receipt-bound degraded Scene and Prefab authoring, bounded source closure, lossless persistence, and strict Runtime rejection.
 - **Verification Evidence**: [SGE-U1 data-only authoring schema admission](verification/2026-08/2026-08-18T164500Z-sge-u1-data-only-authoring-admission-c644e7a78e6d489c9237382f282dfd67.md) - Verifies the bounded data-only schema bundle, project manifest declaration, and exact root-private Authoring Project admission receipt.
 - **Session Handoff**: [Standalone generic editor planning handoff](sessions/2026-08/2026-08-18T145315Z-standalone-generic-editor-planning-handoff-38e6c41f99ff4d3ca971707ca25fab56.md) - Reviewed handoff for the accepted standalone generic Editor boundary and implementation-ready Generic Open/Recovery plan; no implementation unit is active.
-- **Engineering Research**: [Standalone generic editor product model](standalone-generic-editor-product-model-research.md) - Cross-engine and repository-grounded research for a Unity-, Unreal-, and Godot-class Nara Editor product model.
 
 # Integration Notes
 

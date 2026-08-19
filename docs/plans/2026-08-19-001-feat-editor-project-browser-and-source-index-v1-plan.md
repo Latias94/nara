@@ -15,6 +15,16 @@ unit_namespace: EPB
 
 # Capability-Bound Editor Project Browser and Source Index v1 - Plan
 
+## Completion
+
+EPB-U0 through EPB-U5 are complete. The final standalone Windows browse, filter, Scene/Prefab
+Open, equivalent Refresh, and last-good failure trajectory landed at `1a832df` and is recorded by
+[verification `2acde0398a8b467b93fe714241a5e216`](../knowledge/engineering/verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md).
+The lane is closed by completed
+[registration `6c28391e9cd8451f92b821dba9d0c9e3`](../knowledge/engineering/registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md).
+No successor is active automatically; import/reimport, watchers, source mutation, external Play,
+and extension hosting remain separately trigger-gated.
+
 ## Goal Capsule
 
 | Field | Contract |
@@ -235,8 +245,9 @@ into a bounded source index; only then may the UI offer selection and Open actio
 - AE5. Start a scan over a bounded large fixture. Each Editor update advances a finite amount of
   work, the shell remains responsive, and no thread/task/watcher is created. A budget overflow
   produces a structured failure and no partial replacement.
-- AE6. Submit an Open action after a newer scan or project replacement. Host rejects the stale
-  generation without mutating active document, selection, dirty state, or persistence state.
+- AE6. Submit an Open action from an older `EditorFrameRevision` after a newer scan or project
+  replacement. Host rejects the stale frame without mutating active document, selection, dirty
+  state, or persistence state.
 - AE7. On an unsupported macOS/BSD or unproven filesystem adapter, the Editor remains open and the
   browser displays a truthful unavailable diagnostic rather than falling back to ambient traversal.
 
@@ -490,7 +501,7 @@ SourceIndexEntry
 
 EditorProjectBrowserView (owned immutable Arc-backed frame value)
   status: NotRequested | Scanning | Ready | ReadyWithDiagnostics | Unavailable
-  generation/root_identity
+  safe generation (native root identity remains Host-private)
   scan progress and last-good generation
   ordered entries
   selected_path

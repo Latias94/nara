@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-10
-**Last Revised**: 2026-08-14
+**Last Revised**: 2026-08-19
 **Refines**: [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
 [ADR 0049](0049-untrusted-project-input-and-parse-budget-policy.md),
 [ADR 0050](0050-asset-root-symlink-junction-and-package-trust-policy.md)
@@ -171,16 +171,16 @@ cleanup/orphan outcomes, file/directory sync reporting, locking, positional read
 digest verification. Windows handle-bound temporary discard is included; Unix discard deliberately
 leaves a recoverable orphan rather than risking deletion of the wrong name.
 
-Two reserved public operations remain explicitly `Unsupported` and are not counted as implemented
+One reserved public operation remains explicitly `Unsupported` and is not counted as implemented
 foundation capability:
 
 | Reserved primitive | First owning unit | Completion rule |
 |---|---|---|
-| Handle-bound directory enumeration | The Editor/authoring source-index Host | Implement platform enumeration and return name plus scoped observation from `nara_fs`; `nara_asset`, the project Host, and Editor adapters must not enumerate ambient paths. |
 | Relative identity-guarded unlink and orphan reclamation | Proposed ADR 0091 persistence/recovery | Add a platform-specific exact-object or explicitly weaker recovery primitive in `nara_fs`; editor persistence/recovery must not reproduce `stat + unlink`. |
 
-The [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
-plan activates the first reserved enumeration consumer. Its first hosted product claim is limited to
+The completed [Editor Project Browser and Source Index v1](../../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
+plan implements the previously reserved handle-bound enumeration primitive and its first Host and
+Editor consumer. Its hosted product claim is limited to
 Windows x86-64 on local NTFS with per-capability proof. Other Windows filesystems, remote shares,
 Linux, macOS, and other targets remain `Unproven` or `Unsupported` until their own implementation
 and hosted evidence exist. `nara_fs` owns only bounded handle-relative enumeration and scoped entry
