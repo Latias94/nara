@@ -7,6 +7,7 @@ mod gesture;
 mod inspector;
 mod persistence;
 mod play;
+mod project_browser;
 mod snapshot;
 mod workspace;
 
@@ -57,6 +58,15 @@ pub use play::{
     EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
     SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus, SceneApplyChangesReport,
     SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
+};
+pub use project_browser::{
+    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorProjectBrowserBudgetUsage,
+    EditorProjectBrowserDiagnosticPhase, EditorProjectBrowserDiagnosticView,
+    EditorProjectBrowserEntry, EditorProjectBrowserKindFilter, EditorProjectBrowserLocalAction,
+    EditorProjectBrowserPendingWork, EditorProjectBrowserQueryAdvance, EditorProjectBrowserRow,
+    EditorProjectBrowserScanProgress, EditorProjectBrowserSnapshot, EditorProjectBrowserState,
+    EditorProjectBrowserStatus, EditorProjectBrowserView, EditorProjectSourceInspectReason,
+    EditorProjectSourceKind, EditorProjectSourceOpenCapability,
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{

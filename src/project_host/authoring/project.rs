@@ -537,6 +537,11 @@ impl AuthoringProjectSessionSnapshot {
         self.source_index.has_pending_work()
     }
 
+    #[must_use]
+    pub(crate) fn source_index_progress(&self) -> Option<super::ProjectSourceIndexProgress> {
+        self.source_index.progress()
+    }
+
     pub(crate) fn advance_source_index(&mut self) {
         self.source_index.advance();
     }

@@ -1342,9 +1342,15 @@ impl NativeEditorHost {
                 selected_viewport,
             );
         });
-        let (mut batch, project_action, viewport_output, viewport_intent) = panel_output
-            .expect("a matched workspace surface always returns one Editor panel output")
-            .into_parts();
+        let panel_output = panel_output
+            .expect("a matched workspace surface always returns one Editor panel output");
+        let (
+            mut batch,
+            project_action,
+            viewport_output,
+            viewport_intent,
+            project_browser_local_changed,
+        ) = panel_output.into_parts();
         if project_action.is_none()
             && let Some(intent) = viewport_intent
         {
@@ -1903,6 +1909,9 @@ impl NativeEditorHost {
             || source_changed
             || selected_after_ui != displayed_viewport
             || camera_changed
+            || project_browser_local_changed
+            || after_frame.project_browser().work_observed()
+            || after_frame.project_browser().has_pending_work()
             || repaint_delay.is_zero()
         {
             window.request_redraw();
@@ -1993,7 +2002,10 @@ impl NativeEditorHost {
             self.play_cadence.deadline(now, state, selected),
             self.canary.as_ref().map(NativeEditorCanary::deadline),
         );
-        if update.actions_observed() {
+        if update.actions_observed()
+            || after_frame.project_browser().work_observed()
+            || after_frame.project_browser().has_pending_work()
+        {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }

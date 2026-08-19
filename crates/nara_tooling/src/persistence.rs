@@ -378,6 +378,7 @@ impl EditorWorkspaceIntentView {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorProjectView {
     readiness: EditorProjectReadinessView,
+    project_browser: crate::EditorProjectBrowserView,
     play: EditorPlayView,
     persistence: EditorPersistenceView,
     project_content: EditorProjectContentView,
@@ -390,6 +391,7 @@ impl EditorProjectView {
     #[must_use]
     pub const fn new(
         readiness: EditorProjectReadinessView,
+        project_browser: crate::EditorProjectBrowserView,
         play: EditorPlayView,
         persistence: EditorPersistenceView,
         project_content: EditorProjectContentView,
@@ -397,6 +399,7 @@ impl EditorProjectView {
     ) -> Self {
         Self {
             readiness,
+            project_browser,
             play,
             persistence,
             project_content,
@@ -409,6 +412,11 @@ impl EditorProjectView {
     #[must_use]
     pub const fn readiness(&self) -> EditorProjectReadinessView {
         self.readiness
+    }
+
+    #[must_use]
+    pub const fn project_browser(&self) -> &crate::EditorProjectBrowserView {
+        &self.project_browser
     }
 
     #[must_use]
@@ -467,6 +475,7 @@ mod tests {
                 EditorAuthoringReadiness::Degraded,
                 EditorRuntimeAvailability::Unavailable(runtime_reason),
             ),
+            crate::EditorProjectBrowserView::default(),
             EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
             EditorPersistenceView::default(),
             EditorProjectContentView::NotInstalled,

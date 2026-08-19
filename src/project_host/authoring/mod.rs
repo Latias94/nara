@@ -17,7 +17,10 @@ pub(crate) use project::{
     AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
 };
 pub(crate) use source_index::{
-    ProjectSourceIndexFailure, ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind,
+    ProjectSourceIndexBudgetUsage, ProjectSourceIndexDiagnostic, ProjectSourceIndexDiagnosticPhase,
+    ProjectSourceIndexEntry, ProjectSourceIndexFailure, ProjectSourceIndexProgress,
+    ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind, ProjectSourceInspectReason,
+    ProjectSourceKind, ProjectSourceOpenCapability,
 };
 
 use std::{

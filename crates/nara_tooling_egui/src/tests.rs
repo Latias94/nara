@@ -16,16 +16,16 @@ use nara_tooling::{
     EditorFrameClock, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
     EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceResult,
     EditorPersistenceView, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
-    EditorPlayState, EditorPlayView, EditorProjectContentAction, EditorProjectContentGeneration,
-    EditorProjectContentRefreshFailure, EditorProjectContentView, EditorProjectReadinessView,
-    EditorProjectView, EditorReopenTarget, EditorRuntimeAvailability, EditorSceneModel,
-    EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-    EditorWorkspaceIntentPhase, EditorWorkspaceIntentView, EditorWorkspaceModel,
-    PrefabCompositionCommand, SceneCompositionCommand, SceneCompositionComponentKind,
-    SceneCompositionEntityKind, SceneEditorModel, SceneInspectorCommand,
-    SceneInspectorComponentAccess, SceneInspectorComponentView, SceneInspectorEntityRow,
-    SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
-    SceneInspectorModel,
+    EditorPlayState, EditorPlayView, EditorProjectBrowserView, EditorProjectContentAction,
+    EditorProjectContentGeneration, EditorProjectContentRefreshFailure, EditorProjectContentView,
+    EditorProjectReadinessView, EditorProjectView, EditorReopenTarget, EditorRuntimeAvailability,
+    EditorSceneModel, EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent,
+    EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentView,
+    EditorWorkspaceModel, PrefabCompositionCommand, SceneCompositionCommand,
+    SceneCompositionComponentKind, SceneCompositionEntityKind, SceneEditorModel,
+    SceneInspectorCommand, SceneInspectorComponentAccess, SceneInspectorComponentView,
+    SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
+    SceneInspectorFieldView, SceneInspectorModel,
 };
 
 use crate::{
@@ -166,6 +166,7 @@ fn fixed_toolbar_emits_exact_frame_bound_authoring_actions() {
         Some(scene.clone()),
         EditorProjectView::new(
             trusted_project_readiness(),
+            EditorProjectBrowserView::default(),
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
             current_project_content(),
@@ -896,6 +897,7 @@ fn host_field_feedback_is_rendered_only_for_the_matching_field() {
         Some(scene.clone()),
         EditorProjectView::new(
             trusted_project_readiness(),
+            EditorProjectBrowserView::default(),
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
             current_project_content(),
@@ -936,6 +938,7 @@ fn diagnostics_and_persistence_failure_remain_visible_and_dismissible() {
     let base_revision = scene.revision;
     let project = EditorProjectView::new(
         trusted_project_readiness(),
+        EditorProjectBrowserView::default(),
         play_view(Some(&scene)),
         EditorPersistenceView::new(
             nara_tooling::EditorPersistenceOperation::Idle,
@@ -1001,6 +1004,7 @@ fn stale_project_content_emits_one_typed_retry_action() {
         Some(scene.clone()),
         EditorProjectView::new(
             trusted_project_readiness(),
+            EditorProjectBrowserView::default(),
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
             content,
@@ -1032,6 +1036,7 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
     );
     let project = EditorProjectView::new(
         trusted_project_readiness(),
+        EditorProjectBrowserView::default(),
         play_view(Some(&scene)),
         EditorPersistenceView::default(),
         current_project_content(),
@@ -1140,6 +1145,7 @@ fn default_frame(scene: Option<EditorSceneModel>) -> EditorFrameModel {
         scene,
         EditorProjectView::new(
             trusted_project_readiness(),
+            EditorProjectBrowserView::default(),
             play,
             EditorPersistenceView::default(),
             current_project_content(),
@@ -1199,6 +1205,7 @@ fn frame_with_active_prefab(
         },
         EditorProjectView::new(
             trusted_project_readiness(),
+            EditorProjectBrowserView::default(),
             EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
             EditorPersistenceView::default(),
             current_project_content(),
@@ -1354,6 +1361,7 @@ fn frame_with_play_state_and_result(
         Some(scene),
         EditorProjectView::new(
             trusted_project_readiness(),
+            EditorProjectBrowserView::default(),
             EditorPlayView::new(
                 state,
                 Some(7),

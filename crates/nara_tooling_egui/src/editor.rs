@@ -8,14 +8,16 @@ use nara_tooling::{
     EditorCloseDecision, EditorDocumentKind, EditorDocumentMutation, EditorFrameModel,
     EditorNavigationAction, EditorPersistenceAction, EditorPersistenceOperation,
     EditorPersistenceRequestKind, EditorPersistenceResult, EditorPlayAction, EditorPlayOperation,
-    EditorPlayOperationResult, EditorPlayState, EditorProjectContentAction,
-    EditorProjectContentRefreshFailure, EditorProjectContentView, EditorWorkspaceIntent,
-    EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
+    EditorPlayOperationResult, EditorPlayState, EditorProjectBrowserLocalAction,
+    EditorProjectContentAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
+    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+    EditorWorkspaceIntentResult,
 };
 
 use crate::{
     game_view::{EguiGameViewInput, EguiGameViewOutput, EguiGameViewPanel},
     inspector::EguiSceneInspectorPanel,
+    project_browser::EguiProjectBrowserPanel,
     project_shell::EguiProjectOpenDraft,
     scene_view::{EguiSceneViewInput, EguiSceneViewOutput, EguiSceneViewPanel},
     ui_authoring::{
@@ -53,12 +55,21 @@ thread_local! {
 #[derive(Debug, Default)]
 pub struct EguiEditorPanel {
     inspector: EguiSceneInspectorPanel,
+    project_browser: EguiProjectBrowserPanel,
     scene_view: EguiSceneViewPanel,
     ui_authoring: EguiUiAuthoringPanel,
     ui_canvas: EguiUiCanvasPanel,
     game_view: EguiGameViewPanel,
     project_open_draft: EguiProjectOpenDraft,
     project_open_dialog_open: bool,
+    sidebar: EguiEditorSidebar,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum EguiEditorSidebar {
+    #[default]
+    Scene,
+    Project,
 }
 
 /// Toolkit-local selection for the fixed central Editor viewport.
@@ -134,9 +145,15 @@ pub struct EguiEditorOutput {
     project_action: Option<EguiEditorProjectAction>,
     viewport: EguiCentralViewportOutput,
     viewport_intent: Option<EguiEditorViewportIntent>,
+    project_browser_local_actions: Vec<EditorProjectBrowserLocalAction>,
 }
 
 impl EguiEditorOutput {
+    #[doc(hidden)]
+    pub fn take_project_browser_local_actions(&mut self) -> Vec<EditorProjectBrowserLocalAction> {
+        std::mem::take(&mut self.project_browser_local_actions)
+    }
+
     #[must_use]
     pub fn into_parts(
         self,
@@ -224,6 +241,7 @@ impl EguiEditorPanel {
         self.ui_authoring.synchronize(ui_authoring.as_ref());
         self.ui_canvas.synchronize(ui_authoring.as_ref());
         let mut actions = Vec::new();
+        let mut project_browser_local_actions = Vec::new();
         let mut project_action = None;
         let mut open_project_requested = false;
 
@@ -239,19 +257,15 @@ impl EguiEditorPanel {
                     &mut open_project_requested,
                 );
                 ui.separator();
-                let viewport = render_authoring_content(
+                let viewport = self.render_authoring_content(
                     ui,
                     scene,
-                    &mut self.inspector,
-                    &mut self.scene_view,
-                    &mut self.ui_authoring,
-                    &mut self.ui_canvas,
-                    &mut self.game_view,
                     ui_authoring.as_mut(),
                     viewport,
                     selected_viewport,
                     frame,
                     &mut actions,
+                    &mut project_browser_local_actions,
                 );
                 ui.separator();
                 render_diagnostics(ui, frame, &mut actions);
@@ -275,6 +289,7 @@ impl EguiEditorPanel {
 
         if project_action.is_some() {
             actions.clear();
+            project_browser_local_actions.clear();
             viewport_intent = None;
         }
 
@@ -283,6 +298,7 @@ impl EguiEditorPanel {
             project_action,
             viewport,
             viewport_intent,
+            project_browser_local_actions,
         }
     }
 
@@ -290,12 +306,14 @@ impl EguiEditorPanel {
     #[doc(hidden)]
     pub fn observe_action_report(&mut self, report: &EditorActionBatchReport) {
         self.ui_authoring.observe_action_report(report);
+        self.project_browser.observe_action_report(report);
     }
 
     /// Closes or reopens transient structure state after a batch-level Host rejection.
     #[doc(hidden)]
     pub fn observe_action_rejection(&mut self, rejection: EditorActionRejection) {
         self.ui_authoring.observe_action_rejection(rejection);
+        self.project_browser.observe_action_rejection(rejection);
     }
 
     #[cfg(test)]
@@ -653,121 +671,167 @@ fn play_state_label(state: EditorPlayState) -> &'static str {
     }
 }
 
-fn render_authoring_content(
-    ui: &mut Ui,
-    scene: Option<&nara_tooling::EditorSceneModel>,
-    inspector: &mut EguiSceneInspectorPanel,
-    scene_view_panel: &mut EguiSceneViewPanel,
-    ui_authoring_panel: &mut EguiUiAuthoringPanel,
-    ui_canvas_panel: &mut EguiUiCanvasPanel,
-    game_view_panel: &mut EguiGameViewPanel,
-    mut ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
-    viewport: EguiCentralViewportInput,
-    selected_viewport: EguiEditorViewport,
-    frame: &EditorFrameModel,
-    actions: &mut Vec<EditorAction>,
-) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
-    let reserved = DIAGNOSTICS_HEIGHT + ui.spacing().item_spacing.y * 2.0;
-    let content_height = (ui.available_height() - reserved).max(MIN_CONTENT_HEIGHT);
-    let editing_enabled = matches!(
-        (frame.play().state(), selected_viewport),
-        (
-            EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-            EguiEditorViewport::Authoring
-        )
-    ) && frame.workspace_intent().intent().is_none()
-        && frame.persistence().operation() == EditorPersistenceOperation::Idle;
+impl EguiEditorPanel {
+    fn render_authoring_content(
+        &mut self,
+        ui: &mut Ui,
+        scene: Option<&nara_tooling::EditorSceneModel>,
+        mut ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
+        viewport: EguiCentralViewportInput,
+        selected_viewport: EguiEditorViewport,
+        frame: &EditorFrameModel,
+        actions: &mut Vec<EditorAction>,
+        project_browser_local_actions: &mut Vec<EditorProjectBrowserLocalAction>,
+    ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
+        let reserved = DIAGNOSTICS_HEIGHT + ui.spacing().item_spacing.y * 2.0;
+        let content_height = (ui.available_height() - reserved).max(MIN_CONTENT_HEIGHT);
+        let editing_enabled = matches!(
+            (frame.play().state(), selected_viewport),
+            (
+                EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
+                EguiEditorViewport::Authoring
+            )
+        ) && frame.workspace_intent().intent().is_none()
+            && frame.persistence().operation() == EditorPersistenceOperation::Idle;
 
-    let visible_width = (ui.ctx().viewport_rect().right() - ui.cursor().left()).max(1.0);
-    let content_width = ui
-        .available_width()
-        .min(visible_width)
-        .max(TREE_PANEL_WIDTH + SCENE_PANEL_WIDTH + INSPECTOR_PANEL_WIDTH + COLUMN_GAP * 2.0);
-    let (row_rect, _) =
-        ui.allocate_exact_size(Vec2::new(content_width, content_height), Sense::hover());
-    let tree_rect = Rect::from_min_size(row_rect.min, Vec2::new(TREE_PANEL_WIDTH, content_height));
-    let inspector_rect = Rect::from_min_size(
-        row_rect.right_top() - Vec2::new(INSPECTOR_PANEL_WIDTH, 0.0),
-        Vec2::new(INSPECTOR_PANEL_WIDTH, content_height),
-    );
-    let scene_rect = Rect::from_min_max(
-        tree_rect.right_top() + Vec2::new(COLUMN_GAP, 0.0),
-        inspector_rect.left_bottom() - Vec2::new(COLUMN_GAP, 0.0),
-    );
+        let visible_width = (ui.ctx().viewport_rect().right() - ui.cursor().left()).max(1.0);
+        let content_width = ui
+            .available_width()
+            .min(visible_width)
+            .max(TREE_PANEL_WIDTH + SCENE_PANEL_WIDTH + INSPECTOR_PANEL_WIDTH + COLUMN_GAP * 2.0);
+        let (row_rect, _) =
+            ui.allocate_exact_size(Vec2::new(content_width, content_height), Sense::hover());
+        let tree_rect =
+            Rect::from_min_size(row_rect.min, Vec2::new(TREE_PANEL_WIDTH, content_height));
+        let inspector_rect = Rect::from_min_size(
+            row_rect.right_top() - Vec2::new(INSPECTOR_PANEL_WIDTH, 0.0),
+            Vec2::new(INSPECTOR_PANEL_WIDTH, content_height),
+        );
+        let scene_rect = Rect::from_min_max(
+            tree_rect.right_top() + Vec2::new(COLUMN_GAP, 0.0),
+            inspector_rect.left_bottom() - Vec2::new(COLUMN_GAP, 0.0),
+        );
 
-    let mut tree_ui = fixed_column(ui, "nara_editor_scene_tree_column", tree_rect);
-    ScrollArea::vertical()
-        .id_salt("nara_editor_scene_tree")
-        .max_height(content_height)
-        .auto_shrink([false, false])
-        .show(&mut tree_ui, |ui| {
-            if let Some(authoring) = ui_authoring.as_deref_mut() {
-                ui_authoring_panel.show_hierarchy(ui, authoring, editing_enabled, actions);
-            } else {
-                inspector.show_tree(ui, scene, editing_enabled, actions);
+        let mut tree_ui = fixed_column(ui, "nara_editor_scene_tree_column", tree_rect);
+        render_sidebar_tabs(&mut tree_ui, &mut self.sidebar);
+        match self.sidebar {
+            EguiEditorSidebar::Scene => {
+                ScrollArea::vertical()
+                    .id_salt("nara_editor_scene_tree")
+                    .max_height(content_height)
+                    .auto_shrink([false, false])
+                    .show(&mut tree_ui, |ui| {
+                        if let Some(authoring) = ui_authoring.as_deref_mut() {
+                            self.ui_authoring.show_hierarchy(
+                                ui,
+                                authoring,
+                                editing_enabled,
+                                actions,
+                            );
+                        } else {
+                            self.inspector
+                                .show_tree(ui, scene, editing_enabled, actions);
+                        }
+                    });
             }
-        });
-
-    let mut scene_ui = fixed_column(ui, "nara_editor_scene_view_column", scene_rect);
-    let viewport_intent =
-        render_viewport_tabs(&mut scene_ui, frame.play().state(), selected_viewport);
-    let viewport_size = scene_ui.available_size().max(Vec2::splat(1.0));
-    let viewport = match selected_viewport {
-        EguiEditorViewport::Authoring => match ui_authoring.as_deref_mut() {
-            Some(authoring) => EguiCentralViewportOutput::UiCanvas(ui_canvas_panel.show(
-                &mut scene_ui,
-                viewport.ui_canvas,
-                authoring,
-                viewport_size,
+            EguiEditorSidebar::Project => self.project_browser.show_tree(
+                &mut tree_ui,
+                frame.project_browser(),
+                frame.workspace_intent().intent().is_none(),
                 actions,
-            )),
-            None => EguiCentralViewportOutput::Scene(scene_view_panel.show(
+                project_browser_local_actions,
+            ),
+        }
+
+        let mut scene_ui = fixed_column(ui, "nara_editor_scene_view_column", scene_rect);
+        let viewport_intent =
+            render_viewport_tabs(&mut scene_ui, frame.play().state(), selected_viewport);
+        let viewport_size = scene_ui.available_size().max(Vec2::splat(1.0));
+        let viewport = match selected_viewport {
+            EguiEditorViewport::Authoring => match ui_authoring.as_deref_mut() {
+                Some(authoring) => EguiCentralViewportOutput::UiCanvas(self.ui_canvas.show(
+                    &mut scene_ui,
+                    viewport.ui_canvas,
+                    authoring,
+                    viewport_size,
+                    actions,
+                )),
+                None => EguiCentralViewportOutput::Scene(self.scene_view.show(
+                    &mut scene_ui,
+                    viewport.scene,
+                    viewport_size,
+                )),
+            },
+            EguiEditorViewport::Game => EguiCentralViewportOutput::Game(self.game_view.show(
                 &mut scene_ui,
-                viewport.scene,
+                viewport.game.with_modal_active(
+                    frame.workspace_intent().phase()
+                        == Some(EditorWorkspaceIntentPhase::AwaitingDecision),
+                ),
                 viewport_size,
             )),
-        },
-        EguiEditorViewport::Game => EguiCentralViewportOutput::Game(game_view_panel.show(
-            &mut scene_ui,
-            viewport.game.with_modal_active(
-                frame.workspace_intent().phase()
-                    == Some(EditorWorkspaceIntentPhase::AwaitingDecision),
-            ),
-            viewport_size,
-        )),
-    };
+        };
 
-    let mut inspector_ui = fixed_column(ui, "nara_editor_inspector_column", inspector_rect);
-    ScrollArea::vertical()
-        .id_salt("nara_editor_inspector")
-        .max_height(content_height)
-        .auto_shrink([false, false])
-        .show(&mut inspector_ui, |ui| {
-            if let Some(authoring) = ui_authoring.as_deref_mut() {
-                ui_authoring_panel.show_inspector(ui, authoring, editing_enabled, actions);
-            } else {
-                inspector.show_inspector(
+        let mut inspector_ui = fixed_column(ui, "nara_editor_inspector_column", inspector_rect);
+        ScrollArea::vertical()
+            .id_salt("nara_editor_inspector")
+            .max_height(content_height)
+            .auto_shrink([false, false])
+            .show(&mut inspector_ui, |ui| match self.sidebar {
+                EguiEditorSidebar::Project => self.project_browser.show_inspector(
                     ui,
-                    scene,
-                    frame.field_feedback(),
-                    editing_enabled,
+                    frame.project_browser(),
+                    frame.workspace_intent().intent().is_none(),
                     actions,
-                );
-            }
-        });
+                ),
+                EguiEditorSidebar::Scene => {
+                    if let Some(authoring) = ui_authoring.as_deref_mut() {
+                        self.ui_authoring
+                            .show_inspector(ui, authoring, editing_enabled, actions);
+                    } else {
+                        self.inspector.show_inspector(
+                            ui,
+                            scene,
+                            frame.field_feedback(),
+                            editing_enabled,
+                            actions,
+                        );
+                    }
+                }
+            });
 
-    let separator = ui.visuals().widgets.noninteractive.bg_stroke;
-    ui.painter().vline(
-        tree_rect.right() + COLUMN_GAP * 0.5,
-        row_rect.y_range(),
-        separator,
-    );
-    ui.painter().vline(
-        inspector_rect.left() - COLUMN_GAP * 0.5,
-        row_rect.y_range(),
-        separator,
-    );
-    (viewport, viewport_intent)
+        let separator = ui.visuals().widgets.noninteractive.bg_stroke;
+        ui.painter().vline(
+            tree_rect.right() + COLUMN_GAP * 0.5,
+            row_rect.y_range(),
+            separator,
+        );
+        ui.painter().vline(
+            inspector_rect.left() - COLUMN_GAP * 0.5,
+            row_rect.y_range(),
+            separator,
+        );
+        (viewport, viewport_intent)
+    }
+}
+
+fn render_sidebar_tabs(ui: &mut Ui, selected: &mut EguiEditorSidebar) {
+    ui.horizontal(|ui| {
+        let scene = ui.add(Button::new("Scene").selected(*selected == EguiEditorSidebar::Scene));
+        #[cfg(test)]
+        record_test_control("Scene sidebar tab", scene.rect);
+        if scene.clicked() {
+            *selected = EguiEditorSidebar::Scene;
+        }
+        let project =
+            ui.add(Button::new("Project").selected(*selected == EguiEditorSidebar::Project));
+        #[cfg(test)]
+        record_test_control("Project sidebar tab", project.rect);
+        if project.clicked() {
+            *selected = EguiEditorSidebar::Project;
+        }
+    });
+    ui.separator();
 }
 
 fn render_viewport_tabs(

@@ -13,6 +13,7 @@ mod persistence;
 mod play;
 #[cfg(feature = "presentation-2d")]
 mod preview;
+mod project_browser;
 #[cfg(feature = "runtime-ui")]
 mod ui_authoring;
 #[cfg(feature = "presentation-ui")]
@@ -613,6 +614,7 @@ impl PendingExitPreparation {
 
 struct PublishedEditorFrame {
     model: Arc<EditorFrameModel>,
+    source_index: Option<Arc<ProjectSourceIndexSnapshot>>,
     dispatched: bool,
 }
 
@@ -679,6 +681,7 @@ pub struct EditorProjectSession {
     failed_content_refresh: Option<PendingProjectContentRefresh>,
     prefab_lane: Option<EditorPrefabPersistenceLane>,
     pending_document_open: Option<document_open::PreparedAuthoringDocumentOpen>,
+    project_browser: project_browser::EditorProjectBrowserHost,
     authoring_prefab_source_observations:
         BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
     #[cfg(test)]
@@ -778,6 +781,13 @@ impl EditorProjectSession {
     pub(crate) fn project_source_index_work_pending(&self) -> bool {
         self.authoring_project()
             .is_some_and(AuthoringProjectSessionSnapshot::source_index_has_pending_work)
+    }
+
+    pub(crate) fn project_source_index_progress(
+        &self,
+    ) -> Option<crate::project_host::authoring::ProjectSourceIndexProgress> {
+        self.authoring_project()
+            .and_then(AuthoringProjectSessionSnapshot::source_index_progress)
     }
 
     pub(crate) fn request_project_source_index_refresh(&mut self) -> bool {
@@ -916,6 +926,7 @@ impl EditorProjectSession {
             failed_content_refresh: None,
             prefab_lane: None,
             pending_document_open: None,
+            project_browser: project_browser::EditorProjectBrowserHost::new(),
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -943,7 +954,7 @@ impl EditorProjectSession {
             #[cfg(feature = "runtime-ui")]
             ui_authoring_projection_cache: None,
         };
-        session.publish_editor_frame();
+        session.publish_editor_frame(false);
         Ok(session)
     }
 
@@ -1123,6 +1134,7 @@ impl EditorProjectSession {
             failed_content_refresh: None,
             prefab_lane: None,
             pending_document_open: None,
+            project_browser: project_browser::EditorProjectBrowserHost::new(),
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -1150,7 +1162,7 @@ impl EditorProjectSession {
             #[cfg(feature = "runtime-ui")]
             ui_authoring_projection_cache: None,
         };
-        session.publish_editor_frame();
+        session.publish_editor_frame(false);
         Ok(session)
     }
 

@@ -322,6 +322,31 @@ pub(crate) struct ProjectSourceIndexBudgetUsage {
     retained_snapshot_bytes: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProjectSourceIndexProgress {
+    phase: ProjectSourceIndexDiagnosticPhase,
+    usage: ProjectSourceIndexBudgetUsage,
+}
+
+impl ProjectSourceIndexProgress {
+    pub(super) const fn new(
+        phase: ProjectSourceIndexDiagnosticPhase,
+        usage: ProjectSourceIndexBudgetUsage,
+    ) -> Self {
+        Self { phase, usage }
+    }
+
+    #[must_use]
+    pub(crate) const fn phase(self) -> ProjectSourceIndexDiagnosticPhase {
+        self.phase
+    }
+
+    #[must_use]
+    pub(crate) const fn usage(self) -> ProjectSourceIndexBudgetUsage {
+        self.usage
+    }
+}
+
 impl ProjectSourceIndexBudgetUsage {
     #[must_use]
     pub(crate) const fn entries(self) -> usize {
@@ -664,6 +689,13 @@ impl ProjectSourceIndexState {
     #[must_use]
     pub(crate) const fn has_pending_work(&self) -> bool {
         self.attempt.is_some()
+    }
+
+    #[must_use]
+    pub(crate) fn progress(&self) -> Option<ProjectSourceIndexProgress> {
+        self.attempt
+            .as_ref()
+            .map(AuthoringSourceIndexAttempt::progress)
     }
 
     #[must_use]

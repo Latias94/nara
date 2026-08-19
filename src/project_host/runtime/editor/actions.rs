@@ -14,6 +14,8 @@ use nara_tooling::{
     EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
 };
 
+use crate::project_host::authoring::ProjectSourceIndexSnapshot;
+
 use super::{EditorProjectSession, EditorRuntimeOwnerState};
 
 #[derive(Clone, Copy)]
@@ -44,11 +46,14 @@ impl EditorProjectSession {
                     Err(EditorActionRejection::FrameAlreadyDispatched { revision: expected })
                 } else {
                     published.dispatched = true;
-                    Ok(Arc::clone(&published.model))
+                    Ok((
+                        Arc::clone(&published.model),
+                        published.source_index.as_ref().map(Arc::clone),
+                    ))
                 }
             }
         };
-        let frame = match frame {
+        let (frame, source_index) = match frame {
             Ok(frame) => frame,
             Err(rejection) => {
                 self.record_editor_action_rejection(rejection);
@@ -73,7 +78,7 @@ impl EditorProjectSession {
                     document,
                 })
             } else {
-                self.dispatch_editor_action(&frame, action)
+                self.dispatch_editor_action(&frame, source_index.as_ref(), action)
             };
             if let EditorActionOutcome::Rejected(rejection) = &outcome {
                 self.record_editor_action_rejection(*rejection);
@@ -92,12 +97,16 @@ impl EditorProjectSession {
     fn dispatch_editor_action(
         &mut self,
         frame: &EditorFrameModel,
+        source_index: Option<&Arc<ProjectSourceIndexSnapshot>>,
         action: EditorAction,
     ) -> EditorActionOutcome {
         match action {
             EditorAction::Navigate(action) => self.dispatch_navigation(frame, action),
             EditorAction::Mutate(action) => self.dispatch_document_mutation(frame, action),
             EditorAction::Persistence(action) => self.dispatch_persistence(frame, action),
+            EditorAction::ProjectBrowser(action) => EditorActionOutcome::ProjectBrowser(
+                self.dispatch_project_browser_action(frame, source_index, action),
+            ),
             EditorAction::ProjectContent(action) => {
                 EditorActionOutcome::ProjectContent(self.request_project_content_refresh(action))
             }
@@ -260,6 +269,7 @@ impl EditorProjectSession {
                 ));
             }
             EditorActionOutcome::Persistence(_)
+            | EditorActionOutcome::ProjectBrowser(_)
             | EditorActionOutcome::ProjectContent(_)
             | EditorActionOutcome::WorkspaceIntent(_)
             | EditorActionOutcome::Play(_)

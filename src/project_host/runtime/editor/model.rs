@@ -33,6 +33,7 @@ impl EditorProjectSession {
         real_delta: Duration,
         drive_runtime: bool,
     ) -> Arc<EditorFrameModel> {
+        let scan_work_observed = self.project_source_index_work_pending();
         if let Some(project) = self.authoring_project_mut() {
             project.advance_source_index();
         }
@@ -58,10 +59,14 @@ impl EditorProjectSession {
         self.advance_workspace_retirement();
         #[cfg(feature = "presentation-2d")]
         self.drive_editor_preview();
-        self.publish_editor_frame()
+        self.publish_editor_frame(scan_work_observed)
     }
 
-    pub(super) fn publish_editor_frame(&mut self) -> Arc<EditorFrameModel> {
+    pub(super) fn publish_editor_frame(
+        &mut self,
+        scan_work_observed: bool,
+    ) -> Arc<EditorFrameModel> {
+        let source_index = self.synchronize_project_browser(scan_work_observed);
         #[cfg(feature = "runtime-ui")]
         self.reconcile_editor_gesture();
         #[cfg(feature = "presentation-2d")]
@@ -98,6 +103,7 @@ impl EditorProjectSession {
         self.publish_ui_authoring_frame(frame.revision());
         self.published_frame = Some(PublishedEditorFrame {
             model: Arc::clone(&frame),
+            source_index,
             dispatched: false,
         });
         frame
@@ -106,6 +112,7 @@ impl EditorProjectSession {
     fn editor_project_view(&self) -> EditorProjectView {
         EditorProjectView::new(
             self.project_readiness(),
+            self.project_browser.view(),
             self.play_view(),
             self.persistence_view(),
             self.project_content,

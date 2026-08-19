@@ -9,10 +9,11 @@ use nara_scene::{AuthoringScalarEdit, SceneAuthoringRevision, SceneEntityId, Sce
 use crate::{
     EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentId, EditorGestureAction,
     EditorGestureOutcome, EditorPersistenceRequestResult, EditorPlayRequestResult,
-    EditorProjectView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
-    EditorWorkspaceCommandReport, EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult,
-    EditorWorkspaceModel, PrefabCompositionCommand, SceneApplyChangesRequest,
-    SceneCompositionCommand, SceneInspectorCommand,
+    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorProjectView,
+    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorWorkspaceCommandReport,
+    EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult, EditorWorkspaceModel,
+    PrefabCompositionCommand, SceneApplyChangesRequest, SceneCompositionCommand,
+    SceneInspectorCommand,
 };
 
 static NEXT_EDITOR_FRAME_SOURCE: AtomicU64 = AtomicU64::new(0);
@@ -254,6 +255,11 @@ impl EditorFrameModel {
     }
 
     #[must_use]
+    pub const fn project_browser(&self) -> &crate::EditorProjectBrowserView {
+        self.project.project_browser()
+    }
+
+    #[must_use]
     pub const fn authoring_readiness(&self) -> crate::EditorAuthoringReadiness {
         self.project.readiness().authoring()
     }
@@ -468,6 +474,7 @@ pub enum EditorAction {
     Navigate(EditorNavigationAction),
     Mutate(EditorDocumentMutation),
     Persistence(EditorPersistenceAction),
+    ProjectBrowser(EditorProjectBrowserAction),
     ProjectContent(crate::EditorProjectContentAction),
     WorkspaceIntent(EditorWorkspaceIntentAction),
     Play(EditorPlayAction),
@@ -654,6 +661,7 @@ fn inspector_field_target(
 pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
     Persistence(EditorPersistenceRequestResult),
+    ProjectBrowser(EditorProjectBrowserActionOutcome),
     ProjectContent(crate::EditorProjectContentRefreshRequestResult),
     WorkspaceIntent(EditorWorkspaceIntentRequestResult),
     Play(EditorPlayRequestResult),

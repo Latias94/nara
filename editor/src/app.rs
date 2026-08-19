@@ -24,7 +24,8 @@ use nara::{
         EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
     },
     tooling_egui::{
-        EguiCentralViewportInput, EguiEditorOutput, EguiEditorProjectAction, EguiEditorViewport,
+        EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorOutput,
+        EguiEditorProjectAction, EguiEditorViewport, EguiEditorViewportIntent,
         EguiProjectManagerInput, EguiProjectOpeningInput, EguiProjectRecoveryDiagnostic,
         EguiProjectRecoveryInput, EguiProjectShellAction, EguiProjectShellInput,
         EguiProjectShellPanel, EguiUiAuthoringImages, EguiUiAuthoringInput,
@@ -42,6 +43,36 @@ use shell::{
     EditorProductState, EditorProjectRequest, OpeningProjectState, OpeningProjectStep,
     OpeningReplacementState, ProjectManagerState, PublishedEditorProject, RecoveryState,
 };
+
+pub(crate) struct EditorWorkspaceRenderOutput {
+    editor: EguiEditorOutput,
+    project_browser_local_changed: bool,
+}
+
+impl EditorWorkspaceRenderOutput {
+    fn into_action_batch(self) -> EditorActionBatch {
+        self.editor.into_parts().0
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        EditorActionBatch,
+        Option<EguiEditorProjectAction>,
+        EguiCentralViewportOutput,
+        Option<EguiEditorViewportIntent>,
+        bool,
+    ) {
+        let (actions, project_action, viewport, viewport_intent) = self.editor.into_parts();
+        (
+            actions,
+            project_action,
+            viewport,
+            viewport_intent,
+            self.project_browser_local_changed,
+        )
+    }
+}
 
 /// Immutable launch configuration for one private Editor process.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -679,16 +710,16 @@ impl EditorApplication {
             EguiCentralViewportInput::unavailable(),
             EguiEditorViewport::Authoring,
         )
-        .map(|output| output.into_parts().0)
+        .map(EditorWorkspaceRenderOutput::into_action_batch)
     }
 
     #[must_use]
-    pub fn show_with_viewport(
+    pub(crate) fn show_with_viewport(
         &mut self,
         root: &mut egui::Ui,
         viewport: EguiCentralViewportInput,
         selected_viewport: EguiEditorViewport,
-    ) -> Option<EguiEditorOutput> {
+    ) -> Option<EditorWorkspaceRenderOutput> {
         let replacement_opening = match &self.state {
             EditorProductState::OpeningReplacement(replacement) => Some((
                 replacement.entry_generation(),
@@ -721,7 +752,7 @@ impl EditorApplication {
         };
         let frame = project.session.current_frame();
         let ui_authoring = project.session.current_ui_authoring_frame();
-        let editor_output = egui::Frame::central_panel(root.style())
+        let mut editor_output = egui::Frame::central_panel(root.style())
             .show(root, |ui| {
                 let field_editing_enabled = |key: &nara::ui::__private::UiAuthoringFieldKey| {
                     ui_authoring
@@ -794,6 +825,12 @@ impl EditorApplication {
                 )
             })
             .inner;
+        let project_browser_local_changed = editor_output
+            .take_project_browser_local_actions()
+            .into_iter()
+            .fold(false, |changed, action| {
+                project.session.apply_project_browser_local_action(action) || changed
+            });
 
         if let Some((entry_generation, attempt_generation, draft, phase, summary)) =
             replacement_opening
@@ -822,7 +859,10 @@ impl EditorApplication {
             }
         }
 
-        Some(editor_output)
+        Some(EditorWorkspaceRenderOutput {
+            editor: editor_output,
+            project_browser_local_changed,
+        })
     }
 
     pub fn submit_and_drive(

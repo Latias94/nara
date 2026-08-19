@@ -12,9 +12,9 @@ use super::{
     AuthoringSourceIndexBasis, PROJECT_MANIFEST_PATH, ProjectSourceIndexDiagnostic,
     ProjectSourceIndexDiagnosticCode, ProjectSourceIndexDiagnosticPhase, ProjectSourceIndexEntry,
     ProjectSourceIndexFailure, ProjectSourceIndexGeneration, ProjectSourceIndexLimits,
-    ProjectSourceIndexSnapshot, ProjectSourceInspectReason, ProjectSourceKind,
-    ProjectSourceOpenCapability, ProjectSourceRootAvailability, ProjectSourceRootFact,
-    ProjectSourceRootRole,
+    ProjectSourceIndexProgress, ProjectSourceIndexSnapshot, ProjectSourceInspectReason,
+    ProjectSourceKind, ProjectSourceOpenCapability, ProjectSourceRootAvailability,
+    ProjectSourceRootFact, ProjectSourceRootRole,
     budget::{SourceIndexBudget, SourceIndexBudgetError},
 };
 
@@ -121,6 +121,14 @@ impl AuthoringSourceIndexAttempt {
             Ok(None) => SourceIndexAttemptProgress::Pending,
             Err(failure) => SourceIndexAttemptProgress::Failed(failure),
         }
+    }
+
+    pub(super) const fn progress(&self) -> ProjectSourceIndexProgress {
+        let phase = match &self.phase {
+            AttemptPhase::Enumerating => ProjectSourceIndexDiagnosticPhase::Enumeration,
+            AttemptPhase::Revalidating(_) => ProjectSourceIndexDiagnosticPhase::LineageRevalidation,
+        };
+        ProjectSourceIndexProgress::new(phase, self.budget.usage())
     }
 
     #[cfg(test)]

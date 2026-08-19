@@ -56,8 +56,9 @@ use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
     EditorAtomicFieldEdit, EditorDocumentMutation, EditorFieldWrite, EditorGestureAction,
     EditorGestureCancelReason, EditorGestureOutcome, EditorNavigationAction,
-    EditorPersistenceAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
-    EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorPersistenceAction, EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
+    EditorProjectContentRefreshFailure, EditorProjectContentView, EditorWorkspaceIntent,
+    EditorWorkspaceIntentAction,
 };
 #[cfg(feature = "tooling")]
 use nara_tooling::{EditorPersistenceCommand, EditorPersistenceResult, EditorWorkspaceCommand};
@@ -1646,6 +1647,105 @@ fn indexed_document_admission_rejections_leave_the_workspace_unchanged() {
             code: "project.editor.document-index-stale"
         }
     );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn project_browser_rejects_stale_frames_without_rebasing_the_open_request() {
+    let project = TestProject::new("project-browser-stale-frame");
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let stale = editor.current_frame();
+    assert!(
+        stale
+            .project_browser()
+            .entry("scenes/external.scene.json")
+            .is_some()
+    );
+    let original_document = editor.workspace().active_document();
+    let current = editor.drive_editor_frame(Duration::ZERO);
+
+    assert_eq!(
+        editor.dispatch_editor_actions(EditorActionBatch::new(
+            stale.revision(),
+            [EditorAction::ProjectBrowser(
+                EditorProjectBrowserAction::Open {
+                    relative_path: Arc::from("scenes/external.scene.json"),
+                }
+            )],
+        )),
+        Err(EditorActionRejection::StaleFrame {
+            expected: current.revision(),
+            received: stale.revision(),
+        })
+    );
+    assert_eq!(editor.workspace().active_document(), original_document);
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn project_browser_rejects_unindexed_and_identity_replaced_sources_before_open() {
+    let project = TestProject::new("project-browser-open-admission");
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    let original_document = editor.workspace().active_document();
+
+    let frame = editor.current_frame();
+    let forged = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::ProjectBrowser(
+                EditorProjectBrowserAction::Open {
+                    relative_path: Arc::from("target/private.scene.json"),
+                },
+            )],
+        ))
+        .unwrap();
+    assert_eq!(
+        forged.outcomes(),
+        [EditorActionOutcome::ProjectBrowser(
+            EditorProjectBrowserActionOutcome::Rejected {
+                code: "project.editor.document-not-indexed",
+            }
+        )]
+    );
+
+    let current = editor.drive_editor_frame(Duration::ZERO);
+    fs::remove_file(project.root.join("scenes/external.scene.json")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    let replaced = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            current.revision(),
+            [EditorAction::ProjectBrowser(
+                EditorProjectBrowserAction::Open {
+                    relative_path: Arc::from("scenes/external.scene.json"),
+                },
+            )],
+        ))
+        .unwrap();
+    assert_eq!(
+        replaced.outcomes(),
+        [EditorActionOutcome::ProjectBrowser(
+            EditorProjectBrowserActionOutcome::Rejected {
+                code: "project.editor.document-source-identity-changed",
+            }
+        )]
+    );
+    assert_eq!(editor.workspace().active_document(), original_document);
 }
 
 #[cfg(feature = "tooling")]
