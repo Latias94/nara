@@ -7,15 +7,19 @@ use std::{
 };
 
 #[cfg(windows)]
+use std::collections::HashSet;
+#[cfg(windows)]
 use std::fs::OpenOptions;
 
 use nara_fs::{
     CapabilityRights, ConflictProtection, ContentDigest, DirectoryCapability,
-    DirectoryPublicationBeginError, DirectorySyncTier, ExpectedTarget, FileCapability, FsError,
-    HostCapabilityOptions, LockMode, ParentAuthorizationTier, ProofStatus, PublicationAtomicity,
-    PublicationIdentityEvidence, PublicationSourceBinding, RelativeComponent, RelativePath,
-    ResolutionTier, StageStatus, TrustMode, platform_capability_matrix,
+    DirectoryEnumerationLimits, DirectoryPublicationBeginError, DirectorySyncTier, ExpectedTarget,
+    FileCapability, FsError, HostCapabilityOptions, LockMode, ParentAuthorizationTier, ProofStatus,
+    PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding, RelativeComponent,
+    RelativePath, ResolutionTier, StageStatus, TrustMode, platform_capability_matrix,
 };
+#[cfg(windows)]
+use nara_fs::{DirectoryEnumerationSession, FileKind};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -214,6 +218,22 @@ fn trusted_read_write(root: &TestRoot) -> DirectoryCapability {
         HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
     )
     .unwrap()
+}
+
+#[cfg(windows)]
+fn collect_directory_entries(
+    mut session: DirectoryEnumerationSession,
+    batch_limit: usize,
+) -> Vec<nara_fs::DirectoryEntryObservation> {
+    let mut entries = Vec::new();
+    loop {
+        let batch = session.next_batch(batch_limit).unwrap();
+        assert!(batch.entries().len() + batch.rejected_entry_facts().len() <= batch_limit);
+        entries.extend_from_slice(batch.entries());
+        if batch.is_complete() {
+            return entries;
+        }
+    }
 }
 
 #[test]
@@ -814,8 +834,147 @@ fn strict_non_linux_unix_capability_is_explicitly_unproven() {
     );
 }
 
+#[cfg(windows)]
 #[test]
-fn deferred_public_primitives_fail_explicitly_and_match_the_matrix() {
+fn handle_bound_directory_enumeration_is_bounded_and_cursor_independent() {
+    let root = TestRoot::new();
+    fs::create_dir(root.path().join("scenes")).unwrap();
+    fs::write(root.path().join("scenes").join("nested.scene"), b"nested").unwrap();
+    fs::write(root.path().join("alpha.scene"), b"alpha").unwrap();
+    fs::write(root.path().join("beta.prefab"), b"beta").unwrap();
+    fs::write(root.path().join("notes.txt"), b"notes").unwrap();
+    let capability = portable_read_only(&root);
+    let limits = DirectoryEnumerationLimits::new(16, 1_024, 4);
+
+    assert_eq!(
+        platform_capability_matrix().read_directory(),
+        ProofStatus::Proven
+    );
+    let mut first = capability.begin_child_enumeration(limits).unwrap();
+    let first_batch = first.next_batch(2).unwrap();
+    assert_eq!(first_batch.entries().len(), 2);
+    assert!(first_batch.rejected_entry_facts().is_empty());
+    assert!(!first_batch.is_complete());
+    assert!(
+        first_batch
+            .entries()
+            .iter()
+            .all(|entry| entry.identity().is_some())
+    );
+
+    let mut first_entries = first_batch.entries().to_vec();
+    first_entries.extend(collect_directory_entries(first, 2));
+    let second_entries =
+        collect_directory_entries(capability.begin_child_enumeration(limits).unwrap(), 3);
+
+    let expected = [
+        component("scenes"),
+        component("alpha.scene"),
+        component("beta.prefab"),
+        component("notes.txt"),
+    ]
+    .into_iter()
+    .collect::<HashSet<_>>();
+    let first_names = first_entries
+        .iter()
+        .map(|entry| entry.name().clone())
+        .collect::<HashSet<_>>();
+    let second_names = second_entries
+        .iter()
+        .map(|entry| entry.name().clone())
+        .collect::<HashSet<_>>();
+
+    assert_eq!(first_names, expected);
+    assert_eq!(second_names, expected);
+    assert_eq!(
+        first_entries
+            .iter()
+            .find(|entry| entry.name() == &component("scenes"))
+            .unwrap()
+            .kind(),
+        FileKind::Directory
+    );
+
+    let scenes = capability.open_directory(&relative("scenes")).unwrap();
+    let child_entries = collect_directory_entries(
+        scenes
+            .begin_child_enumeration(DirectoryEnumerationLimits::default())
+            .unwrap(),
+        1,
+    );
+    assert_eq!(child_entries.len(), 1);
+    assert_eq!(child_entries[0].name(), &component("nested.scene"));
+    assert_eq!(child_entries[0].kind(), FileKind::Regular);
+}
+
+#[cfg(windows)]
+#[test]
+fn handle_bound_directory_enumeration_stays_on_open_object_after_name_replacement() {
+    let outer = TestRoot::new();
+    let original = outer.path().join("original");
+    let moved = outer.path().join("moved");
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("authorized.scene"), b"authorized").unwrap();
+    let capability = DirectoryCapability::from_host_handle(
+        host_directory(&original),
+        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted),
+    )
+    .unwrap();
+    let session = capability
+        .begin_child_enumeration(DirectoryEnumerationLimits::default())
+        .unwrap();
+
+    fs::rename(&original, &moved).unwrap();
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("replacement.scene"), b"replacement").unwrap();
+
+    let names = collect_directory_entries(session, 1)
+        .into_iter()
+        .map(|entry| entry.name().clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(names, HashSet::from([component("authorized.scene")]));
+}
+
+#[cfg(windows)]
+#[test]
+fn directory_enumeration_limit_failure_is_terminal() {
+    let root = TestRoot::new();
+    for name in ["one.txt", "two.txt", "three.txt"] {
+        fs::write(root.path().join(name), name.as_bytes()).unwrap();
+    }
+    let capability = portable_read_only(&root);
+    let mut session = capability
+        .begin_child_enumeration(DirectoryEnumerationLimits::new(2, 1_024, 4))
+        .unwrap();
+
+    assert!(matches!(
+        session.next_batch(8),
+        Err(FsError::DirectoryEnumerationEntryLimitExceeded { limit: 2 })
+    ));
+    assert!(matches!(
+        session.next_batch(1),
+        Err(FsError::DirectoryEnumerationTerminated)
+    ));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn unsupported_directory_enumeration_matches_the_platform_matrix() {
+    let root = TestRoot::new();
+    let capability = portable_read_only(&root);
+
+    assert_eq!(
+        platform_capability_matrix().read_directory(),
+        ProofStatus::Unsupported
+    );
+    assert!(matches!(
+        capability.begin_child_enumeration(DirectoryEnumerationLimits::default()),
+        Err(FsError::Unsupported { .. }) | Err(FsError::Unproven { .. })
+    ));
+}
+
+#[test]
+fn remaining_deferred_public_primitives_fail_explicitly_and_match_the_matrix() {
     let root = TestRoot::new();
     fs::write(root.path().join("value.txt"), b"value").unwrap();
     let capability = portable_read_write(&root);
@@ -825,13 +984,8 @@ fn deferred_public_primitives_fail_explicitly_and_match_the_matrix() {
         .identity();
     let matrix = platform_capability_matrix();
 
-    assert_eq!(matrix.read_directory(), ProofStatus::Unsupported);
     assert_eq!(matrix.relative_unlink(), ProofStatus::Unsupported);
     assert_eq!(matrix.non_overwrite_rename(), ProofStatus::Unsupported);
-    assert!(matches!(
-        capability.read_directory(&relative("value.txt")),
-        Err(FsError::Unsupported { .. })
-    ));
     assert!(matches!(
         capability.unlink_file(&relative("value.txt"), identity),
         Err(FsError::Unsupported { .. })

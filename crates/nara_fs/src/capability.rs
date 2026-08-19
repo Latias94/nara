@@ -8,9 +8,10 @@ use std::{
 };
 
 use crate::{
-    CapabilityGeneration, CapabilitySessionId, DirectorySyncReceipt, DirectorySyncTier,
-    DurabilityProgress, ExpectedTarget, FileCapability, FileFacts, FileIdentity, FileKind, FsError,
-    FsOperation, NativeFileIdentity, RelativeComponent, RelativePath, ResolutionTier, StageStatus,
+    CapabilityGeneration, CapabilitySessionId, DirectoryEnumerationLimits,
+    DirectoryEnumerationSession, DirectorySyncReceipt, DirectorySyncTier, DurabilityProgress,
+    ExpectedTarget, FileCapability, FileFacts, FileIdentity, FileKind, FsError, FsOperation,
+    NativeFileIdentity, RelativeComponent, RelativePath, ResolutionTier, StageStatus,
     TemporaryFile, platform,
 };
 
@@ -512,14 +513,12 @@ impl DirectoryCapability {
         ))
     }
 
-    pub fn read_directory(
+    pub fn begin_child_enumeration(
         &self,
-        _path: &RelativePath,
-    ) -> Result<Vec<DirectoryEntryObservation>, FsError> {
-        Err(FsError::Unsupported {
-            operation: FsOperation::ReadDirectory,
-            capability: "handle-bound directory enumeration is deferred to U11",
-        })
+        limits: DirectoryEnumerationLimits,
+    ) -> Result<DirectoryEnumerationSession, FsError> {
+        self.ensure_strict_resolution(FsOperation::ReadDirectory)?;
+        DirectoryEnumerationSession::begin(self.share(), limits)
     }
 
     pub fn unlink_file(
@@ -626,30 +625,6 @@ fn require_strict_resolution(
             operation,
             proof: "platform cannot prove strict beneath-root no-mount resolution",
         }),
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DirectoryEntryObservation {
-    name: RelativeComponent,
-    kind: FileKind,
-    identity: Option<FileIdentity>,
-}
-
-impl DirectoryEntryObservation {
-    #[must_use]
-    pub fn name(&self) -> &RelativeComponent {
-        &self.name
-    }
-
-    #[must_use]
-    pub const fn kind(&self) -> FileKind {
-        self.kind
-    }
-
-    #[must_use]
-    pub const fn identity(&self) -> Option<FileIdentity> {
-        self.identity
     }
 }
 

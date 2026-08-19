@@ -1,10 +1,10 @@
 use std::{
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     fs::File,
     io,
-    mem::{size_of, size_of_val},
+    mem::{offset_of, size_of, size_of_val},
     os::windows::{
-        ffi::OsStrExt,
+        ffi::{OsStrExt, OsStringExt},
         io::{AsRawHandle, FromRawHandle},
     },
     ptr,
@@ -13,17 +13,19 @@ use std::{
 use windows_sys::Wdk::{
     Foundation::OBJECT_ATTRIBUTES,
     Storage::FileSystem::{
-        FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN,
-        FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation,
-        FileRenameInformationEx, NtCreateFile, NtQueryVolumeInformationFile, NtSetInformationFile,
+        FILE_CREATE, FILE_DIRECTORY_FILE, FILE_ID_BOTH_DIR_INFORMATION, FILE_NON_DIRECTORY_FILE,
+        FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation,
+        FileIdBothDirectoryInformation, FileRenameInformationEx, NtCreateFile, NtOpenFile,
+        NtQueryDirectoryFileEx, NtQueryVolumeInformationFile, NtSetInformationFile,
     },
-    System::SystemServices::RtlGetVersion,
+    System::SystemServices::{RtlGetVersion, SL_RESTART_SCAN, SL_RETURN_SINGLE_ENTRY},
 };
 use windows_sys::Win32::{
     Foundation::{
         ERROR_ALREADY_EXISTS, ERROR_CALL_NOT_IMPLEMENTED, ERROR_FILE_EXISTS,
         ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SAME_DEVICE,
-        ERROR_NOT_SUPPORTED, RtlNtStatusToDosError, UNICODE_STRING,
+        ERROR_NOT_SUPPORTED, RtlNtStatusToDosError, STATUS_BUFFER_OVERFLOW, STATUS_NO_MORE_FILES,
+        STATUS_NO_SUCH_FILE, UNICODE_STRING,
     },
     Storage::FileSystem::{
         DELETE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
@@ -45,19 +47,28 @@ use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
     LockMode, NativeFileIdentity, ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus,
     PublicationAtomicity, PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
-    platform::{DirectoryPublicationSupport, FileCreateMode},
+    platform::{DirectoryPublicationSupport, FileCreateMode, NativeDirectoryEntry},
 };
 
 const OBJ_CASE_INSENSITIVE: u32 = 0x40;
 const FILE_REMOTE_DEVICE: u32 = 0x10;
 const FILE_RENAME_REPLACE_IF_EXISTS: u32 = 0x1;
 const FILE_RENAME_POSIX_SEMANTICS: u32 = 0x2;
+const DIRECTORY_ENUMERATION_BUFFER_BYTES: usize = 4_096;
+const DIRECTORY_ENUMERATION_BUFFER_WORDS: usize =
+    (DIRECTORY_ENUMERATION_BUFFER_BYTES + size_of::<usize>() - 1) / size_of::<usize>();
 
 #[repr(C)]
 #[derive(Default)]
 struct FileFsDeviceInformation {
     device_type: u32,
     characteristics: u32,
+}
+
+pub(crate) struct DirectoryEnumerationCursor {
+    file: File,
+    restart_scan: bool,
+    buffer: Box<[usize; DIRECTORY_ENUMERATION_BUFFER_WORDS]>,
 }
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
@@ -71,7 +82,11 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         file_sync: FileSyncTier::DataAndMetadata,
         directory_sync: DirectorySyncTier::Unsupported,
         advisory_lock: ProofStatus::Proven,
-        read_directory: ProofStatus::Unsupported,
+        read_directory: if cfg!(target_arch = "x86_64") {
+            ProofStatus::Proven
+        } else {
+            ProofStatus::Unsupported
+        },
         relative_unlink: ProofStatus::Unsupported,
         non_overwrite_rename: ProofStatus::Unsupported,
     }
@@ -79,6 +94,225 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
 
 pub(crate) const fn resolution_tier(_file: &File) -> ResolutionTier {
     ResolutionTier::HandleBound
+}
+
+pub(crate) fn begin_directory_enumeration(
+    directory: &File,
+) -> Result<DirectoryEnumerationCursor, FsError> {
+    if !cfg!(target_arch = "x86_64") {
+        return Err(FsError::Unsupported {
+            operation: FsOperation::ReadDirectory,
+            capability: "independent Windows directory enumeration is supported only on x86-64",
+        });
+    }
+    match windows_1809_or_later() {
+        Some(true) => {}
+        Some(false) => {
+            return Err(FsError::Unsupported {
+                operation: FsOperation::ReadDirectory,
+                capability: "NtQueryDirectoryFileEx requires the supported Windows baseline",
+            });
+        }
+        None => {
+            return Err(FsError::Unproven {
+                operation: FsOperation::ReadDirectory,
+                proof: "the Windows version required by the enumeration adapter is unavailable",
+            });
+        }
+    }
+    match volume_semantics(directory) {
+        WindowsVolumeSemantics::LocalNtfs => {}
+        WindowsVolumeSemantics::LocalRefs | WindowsVolumeSemantics::OtherLocal => {
+            return Err(FsError::Unsupported {
+                operation: FsOperation::ReadDirectory,
+                capability: "strict directory enumeration is proven only for local NTFS",
+            });
+        }
+        WindowsVolumeSemantics::Remote | WindowsVolumeSemantics::Unproven => {
+            return Err(FsError::Unproven {
+                operation: FsOperation::ReadDirectory,
+                proof: "the live directory handle cannot prove local NTFS enumeration semantics",
+            });
+        }
+    }
+
+    let original = facts(directory)?;
+    if original.kind != FileKind::Directory {
+        return Err(FsError::NotDirectory);
+    }
+    if let Some(tag) = original.reparse_tag {
+        return Err(FsError::ReparsePoint { tag });
+    }
+    let empty_name = UNICODE_STRING {
+        Length: 0,
+        MaximumLength: 0,
+        Buffer: ptr::null_mut(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: raw_handle(directory),
+        ObjectName: ptr::addr_of!(empty_name),
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: ptr::null(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let mut status_block = IO_STATUS_BLOCK::default();
+    let mut handle = ptr::null_mut();
+    // SAFETY: the retained directory handle is the only root authority; the empty relative name
+    // reopens that exact directory without consulting an ambient path. The output handle is
+    // synchronous and explicitly refuses reparse traversal.
+    let status = unsafe {
+        NtOpenFile(
+            &mut handle,
+            FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            ptr::addr_of!(attributes),
+            &mut status_block,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+        )
+    };
+    if status < 0 {
+        // SAFETY: conversion accepts the returned NTSTATUS value.
+        let code = unsafe { RtlNtStatusToDosError(status) };
+        if matches!(
+            code,
+            ERROR_NOT_SUPPORTED | ERROR_CALL_NOT_IMPLEMENTED | ERROR_INVALID_FUNCTION
+        ) {
+            return Err(FsError::Unsupported {
+                operation: FsOperation::ReadDirectory,
+                capability: "independent exact-self Windows directory handle reopen",
+            });
+        }
+        return Err(FsError::io(
+            FsOperation::ReadDirectory,
+            io::Error::from_raw_os_error(code as i32),
+        ));
+    }
+    if handle.is_null() {
+        return Err(FsError::IdentityUnavailable);
+    }
+    // SAFETY: successful `NtOpenFile` returned unique ownership of `handle`.
+    let file = unsafe { File::from_raw_handle(handle.cast()) };
+    let reopened = facts(&file).map_err(|_| FsError::Unproven {
+        operation: FsOperation::ReadDirectory,
+        proof: "the independent enumeration handle lacks exact live-object facts",
+    })?;
+    if reopened.kind != FileKind::Directory
+        || reopened.reparse_tag.is_some()
+        || reopened.identity != original.identity
+    {
+        return Err(FsError::CapabilityIdentityDrift {
+            operation: FsOperation::ReadDirectory,
+        });
+    }
+    if !matches!(volume_semantics(&file), WindowsVolumeSemantics::LocalNtfs) {
+        return Err(FsError::Unproven {
+            operation: FsOperation::ReadDirectory,
+            proof: "the independent enumeration handle changed filesystem semantics",
+        });
+    }
+
+    Ok(DirectoryEnumerationCursor {
+        file,
+        restart_scan: true,
+        buffer: Box::new([0; DIRECTORY_ENUMERATION_BUFFER_WORDS]),
+    })
+}
+
+pub(crate) fn next_directory_entry(
+    cursor: &mut DirectoryEnumerationCursor,
+) -> Result<Option<NativeDirectoryEntry>, FsError> {
+    loop {
+        cursor.buffer.fill(0);
+        let mut status_block = IO_STATUS_BLOCK::default();
+        let query_flags = SL_RETURN_SINGLE_ENTRY
+            | if cursor.restart_scan {
+                SL_RESTART_SCAN
+            } else {
+                0
+            };
+        // SAFETY: the cursor owns a synchronous directory handle and an aligned writable fixed
+        // buffer. No event, APC, filter name, or asynchronous completion state is requested.
+        let status = unsafe {
+            NtQueryDirectoryFileEx(
+                raw_handle(&cursor.file),
+                ptr::null_mut(),
+                None,
+                ptr::null(),
+                &mut status_block,
+                cursor.buffer.as_mut_ptr().cast(),
+                DIRECTORY_ENUMERATION_BUFFER_BYTES as u32,
+                FileIdBothDirectoryInformation,
+                query_flags,
+                ptr::null(),
+            )
+        };
+        cursor.restart_scan = false;
+        if status == STATUS_NO_MORE_FILES || status == STATUS_NO_SUCH_FILE {
+            return Ok(None);
+        }
+        if status == STATUS_BUFFER_OVERFLOW {
+            return Err(FsError::DirectoryEnumerationIncomplete);
+        }
+        if status < 0 {
+            // SAFETY: conversion accepts the returned NTSTATUS value.
+            let code = unsafe { RtlNtStatusToDosError(status) };
+            return Err(FsError::io(
+                FsOperation::ReadDirectory,
+                io::Error::from_raw_os_error(code as i32),
+            ));
+        }
+
+        let bytes = status_block.Information;
+        let name_offset = offset_of!(FILE_ID_BOTH_DIR_INFORMATION, FileName);
+        if bytes < name_offset || bytes > DIRECTORY_ENUMERATION_BUFFER_BYTES {
+            return Err(FsError::DirectoryEnumerationIncomplete);
+        }
+        let info = cursor
+            .buffer
+            .as_ptr()
+            .cast::<FILE_ID_BOTH_DIR_INFORMATION>();
+        // SAFETY: the successful query wrote at least the fixed record prefix into the aligned
+        // buffer; all variable-length bounds are checked before the name slice is constructed.
+        let (next_offset, name_bytes, attributes, name_ptr) = unsafe {
+            (
+                (*info).NextEntryOffset,
+                (*info).FileNameLength as usize,
+                (*info).FileAttributes,
+                ptr::addr_of!((*info).FileName).cast::<u16>(),
+            )
+        };
+        if next_offset != 0
+            || name_bytes == 0
+            || !name_bytes.is_multiple_of(size_of::<u16>())
+            || name_offset
+                .checked_add(name_bytes)
+                .is_none_or(|end| end > bytes)
+        {
+            return Err(FsError::DirectoryEnumerationIncomplete);
+        }
+        // SAFETY: `name_bytes` was checked against the returned record length and is an even number
+        // of bytes, so the UTF-16 slice lies wholly inside the fixed buffer.
+        let name_units = unsafe { std::slice::from_raw_parts(name_ptr, name_bytes / 2) };
+        if matches!(name_units, [unit] if *unit == u16::from(b'.'))
+            || matches!(name_units, [first, second] if *first == u16::from(b'.') && *second == u16::from(b'.'))
+        {
+            continue;
+        }
+        let kind = if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 {
+            FileKind::Directory
+        } else if attributes & FILE_ATTRIBUTE_DEVICE != 0 {
+            FileKind::Other
+        } else {
+            FileKind::Regular
+        };
+        return Ok(Some(NativeDirectoryEntry {
+            name: OsString::from_wide(name_units),
+            name_bytes,
+            kind,
+            reparse: attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0,
+        }));
+    }
 }
 
 pub(crate) fn directory_publication_support(file: &File) -> DirectoryPublicationSupport {

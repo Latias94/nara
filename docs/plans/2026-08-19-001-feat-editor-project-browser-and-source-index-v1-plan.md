@@ -315,13 +315,14 @@ All questions below are explicitly deferred and do not block this implementation
   `read_directory` placeholder rather than supporting two equivalent public entry points.
 - KTD2. **Use platform-native handle enumeration without sharing a mutable directory cursor.** The
   session owns an independent stream/handle and returns bounded batches plus a completion flag.
-  Windows first derives an independent handle from the retained directory handle (the narrow
-  implementation may use `ReOpenFile` with directory-list rights), then uses the handle-bound
-  `NtQueryDirectoryFileEx`/`FILE_ID_BOTH_DIR_INFORMATION` cursor. The first batch explicitly resets
-  that private cursor; later batches continue only through the move-only session. If the platform
-  cannot prove an independent exact-self handle, the operation remains Unsupported rather than
-  sharing `DirectoryInner.file`. No platform uses `std::fs::read_dir` on a path. Unix adapters
-  remain unchanged Unsupported/Unproven in this plan.
+  Windows derives an independent exact-self handle-relative cursor from the retained directory
+  handle (the implementation uses an empty-name `NtOpenFile` relative to that handle; a future
+  adapter may use `ReOpenFile` only when the platform proves that directory form). It then uses the
+  handle-bound `NtQueryDirectoryFileEx`/`FILE_ID_BOTH_DIR_INFORMATION` cursor. The first batch
+  explicitly resets that private cursor; later batches continue only through the move-only session.
+  If the platform cannot prove an independent exact-self handle, the operation remains Unsupported
+  rather than sharing `DirectoryInner.file`. No platform uses `std::fs::read_dir` on a path. Unix
+  adapters remain unchanged Unsupported/Unproven in this plan.
 - KTD3. **Keep filesystem observations scoped and non-durable.** `DirectoryEntryObservation::identity`
   remains an optional process/session-scoped fact. The browser derives no stable asset ID from it;
   selected entries are reopened and revalidated through the current root capability before Open.
@@ -592,6 +593,7 @@ independent Windows directory-enumeration session.
 **Files:**
 
 - `crates/nara_fs/src/capability.rs`
+- `crates/nara_fs/src/directory_enumeration.rs`
 - `crates/nara_fs/src/error.rs`
 - `crates/nara_fs/src/proof.rs`
 - `crates/nara_fs/src/platform/windows.rs`
@@ -606,11 +608,12 @@ independent Windows directory-enumeration session.
 - Replace the Unsupported placeholder with one move-only child-enumeration session. Its cumulative
   limits default to `4,096` entries, `1,024` bytes per name, and a bounded rejected-fact count; each
   `next_batch` consumes only the caller's remaining per-update allowance and returns completion.
-- Windows creates an independent handle-relative enumeration handle and uses a fixed-buffer,
-  resumable `NtQueryDirectoryFileEx`/`FILE_ID_BOTH_DIR_INFORMATION` loop for names/kinds. The
-  implementation may use `ReOpenFile` to derive the independent handle from the retained directory
-  handle; if that exact-self reopen cannot be proven, the capability remains Unsupported rather
-  than sharing a cursor. A directory record's 64-bit FileId must not be fabricated into Nara's
+- Windows creates an independent exact-self handle-relative enumeration handle and uses a
+  fixed-buffer, resumable `NtQueryDirectoryFileEx`/`FILE_ID_BOTH_DIR_INFORMATION` loop for
+  names/kinds. The current adapter opens an empty relative name with `NtOpenFile` against the
+  retained directory handle; `ReOpenFile` is not assumed for directory objects. If that exact-self
+  reopen cannot be proven, the capability remains Unsupported rather than sharing a cursor. A
+  directory record's 64-bit FileId must not be fabricated into Nara's
   128-bit Windows `FileIdentity`; exact identity is attached only after the existing child-open/facts
   validation can prove it.
 - Exclude `.`/`..`; represent safely isolated reparse/symlink/special/unportable names as bounded

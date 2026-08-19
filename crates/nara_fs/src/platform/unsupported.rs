@@ -4,8 +4,10 @@ use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileSyncTier, FsError, FsOperation, LockMode,
     ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus, PublicationAtomicity,
     PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
-    platform::{DirectoryPublicationSupport, FileCreateMode},
+    platform::{DirectoryPublicationSupport, FileCreateMode, NativeDirectoryEntry},
 };
+
+pub(crate) struct DirectoryEnumerationCursor;
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
     PlatformCapabilityMatrix {
@@ -29,6 +31,18 @@ fn unsupported<T>(operation: FsOperation) -> Result<T, FsError> {
         operation,
         capability: "no capability filesystem adapter exists for this target",
     })
+}
+
+pub(crate) fn begin_directory_enumeration(
+    _directory: &File,
+) -> Result<DirectoryEnumerationCursor, FsError> {
+    unsupported(FsOperation::ReadDirectory)
+}
+
+pub(crate) fn next_directory_entry(
+    _cursor: &mut DirectoryEnumerationCursor,
+) -> Result<Option<NativeDirectoryEntry>, FsError> {
+    unsupported(FsOperation::ReadDirectory)
 }
 
 pub(crate) fn facts(_file: &File) -> Result<FileFacts, FsError> {

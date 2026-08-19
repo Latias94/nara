@@ -161,6 +161,16 @@ pub enum FsError {
         expected: ContentDigest,
         actual: ContentDigest,
     },
+    #[error("directory enumeration requires a non-zero per-batch entry limit")]
+    DirectoryEnumerationBatchLimitZero,
+    #[error("directory enumeration exceeded the total entry limit of {limit}")]
+    DirectoryEnumerationEntryLimitExceeded { limit: usize },
+    #[error("directory enumeration exceeded the rejected-fact limit of {limit}")]
+    DirectoryEnumerationRejectedFactLimitExceeded { limit: usize },
+    #[error("native directory enumeration did not produce a complete valid record stream")]
+    DirectoryEnumerationIncomplete,
+    #[error("directory enumeration has already terminated after a failure")]
+    DirectoryEnumerationTerminated,
 }
 
 impl FsError {

@@ -1,13 +1,13 @@
 #[cfg(test)]
 use std::cell::RefCell;
-use std::fs::File;
 #[cfg(unix)]
 use std::io;
+use std::{ffi::OsString, fs::File};
 
 use crate::{
-    DirectorySyncTier, FileFacts, FileSyncTier, FsError, LockMode, PlatformCapabilityMatrix,
-    PublicationSourceBinding, PublicationTopologyEvidence, RelativeComponent, ResolutionTier,
-    TrustMode,
+    DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, LockMode,
+    PlatformCapabilityMatrix, PublicationSourceBinding, PublicationTopologyEvidence,
+    RelativeComponent, ResolutionTier, TrustMode,
 };
 
 #[cfg(windows)]
@@ -44,6 +44,17 @@ pub(crate) enum DirectoryCreation {
 pub(crate) enum FileCreateMode {
     Regular,
     Executable,
+}
+
+pub(crate) struct NativeDirectoryEntry {
+    pub(crate) name: OsString,
+    pub(crate) name_bytes: usize,
+    pub(crate) kind: FileKind,
+    pub(crate) reparse: bool,
+}
+
+pub(crate) struct DirectoryEnumerationCursor {
+    inner: imp::DirectoryEnumerationCursor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,6 +141,18 @@ pub(crate) fn with_test_facts_override<T>(facts: FileFacts, operation: impl FnOn
 
 pub(crate) fn resolution_tier(file: &File) -> ResolutionTier {
     imp::resolution_tier(file)
+}
+
+pub(crate) fn begin_directory_enumeration(
+    directory: &File,
+) -> Result<DirectoryEnumerationCursor, FsError> {
+    imp::begin_directory_enumeration(directory).map(|inner| DirectoryEnumerationCursor { inner })
+}
+
+pub(crate) fn next_directory_entry(
+    cursor: &mut DirectoryEnumerationCursor,
+) -> Result<Option<NativeDirectoryEntry>, FsError> {
+    imp::next_directory_entry(&mut cursor.inner)
 }
 
 pub(crate) fn open_directory(

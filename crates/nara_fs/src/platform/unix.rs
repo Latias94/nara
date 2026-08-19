@@ -10,8 +10,10 @@ use crate::{
     ConflictProtection, DirectorySyncTier, FileFacts, FileKind, FileSyncTier, FsError, FsOperation,
     LockMode, NativeFileIdentity, ParentAuthorizationTier, PlatformCapabilityMatrix, ProofStatus,
     PublicationAtomicity, PublicationSourceBinding, RelativeComponent, ResolutionTier, TrustMode,
-    platform::{DirectoryPublicationSupport, FileCreateMode},
+    platform::{DirectoryPublicationSupport, FileCreateMode, NativeDirectoryEntry},
 };
+
+pub(crate) struct DirectoryEnumerationCursor;
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
     #[cfg(target_os = "linux")]
@@ -35,6 +37,24 @@ pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
         relative_unlink: ProofStatus::Unsupported,
         non_overwrite_rename: ProofStatus::Unsupported,
     }
+}
+
+pub(crate) fn begin_directory_enumeration(
+    _directory: &File,
+) -> Result<DirectoryEnumerationCursor, FsError> {
+    Err(FsError::Unsupported {
+        operation: FsOperation::ReadDirectory,
+        capability: "handle-bound directory enumeration is unsupported on this Unix target",
+    })
+}
+
+pub(crate) fn next_directory_entry(
+    _cursor: &mut DirectoryEnumerationCursor,
+) -> Result<Option<NativeDirectoryEntry>, FsError> {
+    Err(FsError::Unsupported {
+        operation: FsOperation::ReadDirectory,
+        capability: "handle-bound directory enumeration is unsupported on this Unix target",
+    })
 }
 
 #[cfg(target_os = "linux")]

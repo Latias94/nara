@@ -5,6 +5,7 @@
 
 mod capability;
 mod digest;
+mod directory_enumeration;
 mod directory_publication;
 mod error;
 mod file;
@@ -16,11 +17,12 @@ mod proof;
 mod replace;
 mod sync;
 
-pub use capability::{
-    CapabilityRights, DirectoryCapability, DirectoryEntryObservation, HostCapabilityOptions,
-    TrustMode,
-};
+pub use capability::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 pub use digest::{ContentDigest, DigestLimit};
+pub use directory_enumeration::{
+    DirectoryEntryObservation, DirectoryEntryRejectedFact, DirectoryEntryRejectionReason,
+    DirectoryEnumerationBatch, DirectoryEnumerationLimits, DirectoryEnumerationSession,
+};
 pub use directory_publication::{
     DirectoryCleanupEvidence, DirectoryPublicationBeginError, DirectoryPublicationCause,
     DirectoryPublicationOrphan, DirectoryPublicationOutcome, DirectoryPublicationReceipt,
