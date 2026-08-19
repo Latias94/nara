@@ -10,6 +10,11 @@ use std::{
     time::Duration,
 };
 
+#[cfg(windows)]
+use nara::tooling::{
+    EditorDocumentKind, EditorProjectBrowserAction, EditorProjectBrowserDiagnosticPhase,
+    EditorProjectBrowserStatus, EditorProjectSourceKind,
+};
 use nara::{
     fs::ContentDigest,
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
@@ -30,6 +35,193 @@ const NAME_COMPONENT: &str = "nara.scene.Name";
 const PULSE_COMPONENT: &str = "studio.signal.Pulse";
 const EDITED_NAME: &str = "Edited without compiling project Rust";
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(windows)]
+#[test]
+fn standalone_project_browser_opens_external_documents_and_retains_last_good_refresh() {
+    let project = GuardedGenericProject::new();
+    assert!(
+        fs::read_to_string(project.unbuildable_source())
+            .unwrap()
+            .contains("compile_error!")
+    );
+
+    let mut application = open_ordinary(project.root());
+    let ready = drive_browser_to_settled(&mut application);
+    let initial = ready.project_browser().snapshot().unwrap();
+    assert_browser_entry(
+        initial,
+        "worlds/external.scene.json",
+        EditorProjectSourceKind::Scene,
+    );
+    assert_browser_entry(
+        initial,
+        "blueprints/external.prefab.json",
+        EditorProjectSourceKind::Prefab,
+    );
+    assert_browser_entry(
+        initial,
+        "media/icon.png",
+        EditorProjectSourceKind::AssetSource,
+    );
+    assert_browser_entry(
+        initial,
+        "media/icon.png.meta",
+        EditorProjectSourceKind::AssetMeta,
+    );
+    for path in ["media/linked.bin", "media/linked-copy.bin"] {
+        assert_browser_entry(initial, path, EditorProjectSourceKind::Unsupported);
+    }
+    assert!(initial.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == "project.source-index.entry-unsupported"
+            && diagnostic
+                .relative_source()
+                .is_some_and(|path| path.starts_with("media/linked"))
+    }));
+    assert_browser_entry(initial, "scripts/tool.rs", EditorProjectSourceKind::Script);
+    assert_browser_entry(
+        initial,
+        "worlds/notes.txt",
+        EditorProjectSourceKind::Unknown,
+    );
+    assert!(initial.entry(".git/ignored.scene.json").is_none());
+    assert!(initial.entry("target/ignored.prefab.json").is_none());
+
+    let opened_scene = dispatch(
+        &mut application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+            relative_path: "worlds/external.scene.json".into(),
+        }),
+    );
+    let external_scene_document = opened_scene
+        .workspace()
+        .documents
+        .iter()
+        .find(|document| {
+            document.kind == EditorDocumentKind::Scene
+                && document
+                    .source_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.locator() == "worlds/external.scene.json")
+        })
+        .expect("the browser must publish the closure-external Scene")
+        .document;
+    assert_eq!(
+        opened_scene.workspace().active_document,
+        Some(external_scene_document)
+    );
+
+    let opened_prefab = dispatch(
+        &mut application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Open {
+            relative_path: "blueprints/external.prefab.json".into(),
+        }),
+    );
+    let external_scene = opened_prefab
+        .workspace()
+        .documents
+        .iter()
+        .find(|document| {
+            document.kind == EditorDocumentKind::Scene
+                && document
+                    .source_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.locator() == "worlds/external.scene.json")
+        })
+        .expect("opening the Prefab must retain the independent Scene lane");
+    let external_prefab_document = opened_prefab
+        .workspace()
+        .documents
+        .iter()
+        .find(|document| {
+            document.kind == EditorDocumentKind::Prefab
+                && document
+                    .source_binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.locator() == "blueprints/external.prefab.json")
+        })
+        .expect("the browser must publish the closure-external Prefab")
+        .document;
+    assert!(!external_scene.active);
+    assert_eq!(
+        opened_prefab.workspace().active_document,
+        Some(external_prefab_document)
+    );
+
+    let first_snapshot = opened_prefab.project_browser().snapshot().unwrap();
+    let first_status = opened_prefab.project_browser().status();
+    let first_generation = first_snapshot.generation();
+    let first_entries = first_snapshot.entries();
+    let first_diagnostics = first_snapshot.diagnostics();
+    let first_usage = first_snapshot.usage();
+    let refresh_requested = dispatch(
+        &mut application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Refresh),
+    );
+    assert_eq!(
+        refresh_requested
+            .project_browser()
+            .snapshot()
+            .unwrap()
+            .generation(),
+        first_generation
+    );
+    let refreshed = drive_browser_to_settled(&mut application);
+    let refreshed_snapshot = refreshed.project_browser().snapshot().unwrap();
+    assert!(refreshed_snapshot.generation() > first_generation);
+    assert_eq!(refreshed.project_browser().status(), first_status);
+    assert_eq!(refreshed_snapshot.entries(), first_entries);
+    assert_eq!(refreshed_snapshot.diagnostics(), first_diagnostics);
+    assert_eq!(refreshed_snapshot.usage(), first_usage);
+
+    let retained_generation = refreshed_snapshot.generation();
+    let retained_entries = refreshed_snapshot.entries();
+    let retained_diagnostics = refreshed_snapshot.diagnostics();
+    let retained_usage = refreshed_snapshot.usage();
+    let _ = dispatch(
+        &mut application,
+        EditorAction::ProjectBrowser(EditorProjectBrowserAction::Refresh),
+    );
+    drive_browser_to_revalidation(&mut application);
+    project.replace_scripts_root();
+    let failed = drive_browser_to_idle(&mut application);
+    assert_eq!(
+        failed.project_browser().status(),
+        EditorProjectBrowserStatus::Unavailable
+    );
+    let retained = failed.project_browser().snapshot().unwrap();
+    assert_eq!(retained.generation(), retained_generation);
+    assert_eq!(retained.entries(), retained_entries);
+    assert_eq!(retained.diagnostics(), retained_diagnostics);
+    assert_eq!(retained.usage(), retained_usage);
+    let diagnostic = failed
+        .project_browser()
+        .failure()
+        .expect("the failed refresh must publish one safe diagnostic");
+    let root = project.root().display().to_string();
+    for text in [
+        diagnostic.code(),
+        diagnostic.summary(),
+        diagnostic.impact(),
+        diagnostic.repair_hint(),
+        diagnostic.relative_source().unwrap_or_default(),
+    ] {
+        assert!(!text.contains(&root));
+        assert!(!text.contains("FileIdentity"));
+    }
+    assert!(
+        failed
+            .workspace()
+            .document(external_scene_document)
+            .is_some()
+    );
+    assert!(
+        failed
+            .workspace()
+            .document(external_prefab_document)
+            .is_some()
+    );
+}
 
 #[test]
 fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery() {
@@ -326,6 +518,62 @@ fn current_frame(
         .expect("a published authoring project owns one Editor frame")
 }
 
+#[cfg(windows)]
+fn drive_browser_to_settled(
+    application: &mut EditorApplication,
+) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
+    let frame = drive_browser_to_idle(application);
+    assert!(matches!(
+        frame.project_browser().status(),
+        EditorProjectBrowserStatus::Ready | EditorProjectBrowserStatus::ReadyWithDiagnostics
+    ));
+    frame
+}
+
+#[cfg(windows)]
+fn drive_browser_to_idle(
+    application: &mut EditorApplication,
+) -> std::sync::Arc<nara::tooling::EditorFrameModel> {
+    for _ in 0..128 {
+        let frame = current_frame(application);
+        if !frame.project_browser().has_pending_work() {
+            return frame;
+        }
+        let _ = application
+            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+    }
+    panic!("the bounded Project Browser did not settle")
+}
+
+#[cfg(windows)]
+fn drive_browser_to_revalidation(application: &mut EditorApplication) {
+    for _ in 0..128 {
+        let frame = current_frame(application);
+        if frame
+            .project_browser()
+            .scan_progress()
+            .is_some_and(|progress| {
+                progress.phase() == EditorProjectBrowserDiagnosticPhase::LineageRevalidation
+            })
+        {
+            return;
+        }
+        assert!(frame.project_browser().has_pending_work());
+        let _ = application
+            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+    }
+    panic!("the bounded Project Browser did not reach lineage revalidation")
+}
+
+#[cfg(windows)]
+fn assert_browser_entry(
+    snapshot: &nara::tooling::EditorProjectBrowserSnapshot,
+    relative_path: &str,
+    kind: EditorProjectSourceKind,
+) {
+    assert_eq!(snapshot.entry(relative_path).unwrap().kind(), kind);
+}
+
 fn has_diagnostic(frame: &nara::tooling::EditorFrameModel, code: &str) -> bool {
     frame
         .diagnostics()
@@ -383,24 +631,39 @@ impl GuardedGenericProject {
             std::process::id()
         ));
         let root = parent.join("project");
-        fs::create_dir_all(root.join("catalogs")).unwrap();
-        fs::create_dir_all(root.join("worlds")).unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
+        for directory in [
+            ".git",
+            "blueprints",
+            "catalogs",
+            "media",
+            "scripts",
+            "src",
+            "target",
+            "worlds",
+        ] {
+            fs::create_dir_all(root.join(directory)).unwrap();
+        }
         for relative in [
+            "Cargo.toml",
             "nara.toml",
+            "blueprints/external.prefab.json",
             "catalogs/authoring.bundle.json",
+            "media/icon.png",
+            "media/icon.png.meta",
+            "scripts/tool.rs",
+            "src/lib.rs",
             "worlds/entry.scene.json",
+            "worlds/external.scene.json",
+            "worlds/notes.txt",
         ] {
             fs::copy(source.join(relative), root.join(relative)).unwrap();
         }
-        fs::write(
-            root.join("Cargo.toml"),
-            "[package]\nname = \"must-not-build\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("src/lib.rs"),
-            "compile_error!(\"the generic Editor must not compile project Rust\");\n",
+        fs::write(root.join(".git/ignored.scene.json"), "{}\n").unwrap();
+        fs::write(root.join("target/ignored.prefab.json"), "{}\n").unwrap();
+        fs::write(root.join("media/linked.bin"), "linked\n").unwrap();
+        fs::hard_link(
+            root.join("media/linked.bin"),
+            root.join("media/linked-copy.bin"),
         )
         .unwrap();
         Self { parent, root }
@@ -420,6 +683,15 @@ impl GuardedGenericProject {
 
     fn unbuildable_source(&self) -> PathBuf {
         self.root.join("src/lib.rs")
+    }
+
+    #[cfg(windows)]
+    fn replace_scripts_root(&self) {
+        let current = self.root.join("scripts");
+        let retained = self.root.join("scripts-before-refresh");
+        fs::rename(&current, &retained).unwrap();
+        fs::create_dir(&current).unwrap();
+        fs::write(current.join("replacement.rs"), "fn replacement() {}\n").unwrap();
     }
 }
 

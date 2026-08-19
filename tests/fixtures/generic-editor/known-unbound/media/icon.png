@@ -1,0 +1,1 @@
+Browser-only image source; the Editor must not decode it during indexing.

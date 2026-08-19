@@ -1,0 +1,30 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "external-scene"
+    ],
+    "entities": [
+      {
+        "id": "external-scene",
+        "children": [],
+        "components": {
+          "nara.scene.Name": {
+            "owner": "nara.scene.hierarchy.components",
+            "version": 1,
+            "value": {
+              "type": "string",
+              "value": "Closure-external Scene"
+            }
+          }
+        }
+      }
+    ]
+  }
+}

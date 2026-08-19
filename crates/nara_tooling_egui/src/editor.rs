@@ -178,6 +178,22 @@ impl EguiEditorPanel {
         Self::default()
     }
 
+    /// Selects the Project Browser in the Adapter's transient sidebar state.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn select_project_browser_sidebar(&mut self) -> bool {
+        let changed = self.sidebar != EguiEditorSidebar::Project;
+        self.sidebar = EguiEditorSidebar::Project;
+        changed
+    }
+
+    /// Reports whether the transient sidebar currently presents the Project Browser.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn project_browser_sidebar_selected(&self) -> bool {
+        matches!(self.sidebar, EguiEditorSidebar::Project)
+    }
+
     #[must_use]
     pub fn show(&mut self, ui: &mut Ui, frame: &EditorFrameModel) -> EditorActionBatch {
         self.show_with_viewport(

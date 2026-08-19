@@ -1685,14 +1685,17 @@ impl NativeEditorHost {
             (None, None) => {}
         }
 
-        if presentation.window().is_some() {
-            let generic_canary_complete =
-                if let Some(NativeEditorCanary::GenericOpen(canary)) = self.canary.as_mut() {
-                    canary.advance_workspace(rendered_state, &self.application, window.id())?
-                } else {
-                    false
-                };
-            if generic_canary_complete {
+        let mut generic_canary_advanced = false;
+        if presentation.window().is_some()
+            && let Some(NativeEditorCanary::GenericOpen(canary)) = self.canary.as_mut()
+        {
+            let advance =
+                canary.advance_workspace(rendered_state, &mut self.application, window.id())?;
+            generic_canary_advanced = advance.redraw;
+            if let Some(action) = advance.action {
+                batch = append_editor_action(batch, action);
+            }
+            if advance.exit {
                 event_loop.exit();
                 return Ok(());
             }
@@ -1910,6 +1913,7 @@ impl NativeEditorHost {
             || selected_after_ui != displayed_viewport
             || camera_changed
             || project_browser_local_changed
+            || generic_canary_advanced
             || after_frame.project_browser().work_observed()
             || after_frame.project_browser().has_pending_work()
             || repaint_delay.is_zero()

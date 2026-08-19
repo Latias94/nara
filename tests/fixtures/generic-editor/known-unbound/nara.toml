@@ -9,6 +9,7 @@ version = "0.1.0"
 assets = "media"
 scenes = "worlds"
 prefabs = "blueprints"
+scripts = "scripts"
 
 [authoring]
 schema_bundle = "catalogs/authoring.bundle.json"

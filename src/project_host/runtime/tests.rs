@@ -1301,6 +1301,16 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
     let second = editor.project_source_index_snapshot().unwrap();
     assert_eq!(second.generation().get(), 2);
     assert!(!Arc::ptr_eq(&first, &second));
+    assert_eq!(second.root_identity(), first.root_identity());
+    assert_eq!(second.manifest_identity(), first.manifest_identity());
+    assert_eq!(second.manifest_digest(), first.manifest_digest());
+    assert_eq!(second.bundle_identity(), first.bundle_identity());
+    assert_eq!(second.bundle_digest(), first.bundle_digest());
+    assert_eq!(second.effective_roots(), first.effective_roots());
+    assert_eq!(second.entries(), first.entries());
+    assert_eq!(second.diagnostics(), first.diagnostics());
+    assert_eq!(second.usage(), first.usage());
+    assert_eq!(second.completion(), first.completion());
 }
 
 #[cfg(feature = "tooling")]

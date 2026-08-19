@@ -20,8 +20,8 @@ use nara::{
     scene::UnavailableRecordManifest,
     tooling::{
         EditorAction, EditorActionBatch, EditorFrameModel, EditorPersistenceResult,
-        EditorPlayAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
+        EditorPlayAction, EditorProjectBrowserLocalAction, EditorWorkspaceIntent,
+        EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
     },
     tooling_egui::{
         EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorOutput,
@@ -687,6 +687,30 @@ impl EditorApplication {
         self.state
             .published()
             .map(|project| project.session.current_frame())
+    }
+
+    #[must_use]
+    pub(crate) fn select_project_browser_sidebar(&mut self) -> bool {
+        self.state
+            .workspace_mut()
+            .is_some_and(|project| project.panel.select_project_browser_sidebar())
+    }
+
+    #[must_use]
+    pub(crate) fn project_browser_sidebar_selected(&self) -> bool {
+        self.state
+            .workspace()
+            .is_some_and(|project| project.panel.project_browser_sidebar_selected())
+    }
+
+    #[must_use]
+    pub(crate) fn apply_project_browser_local_action(
+        &mut self,
+        action: EditorProjectBrowserLocalAction,
+    ) -> bool {
+        self.state
+            .workspace_mut()
+            .is_some_and(|project| project.session.apply_project_browser_local_action(action))
     }
 
     /// Returns the complete active preservation manifest for generic authoring verification.

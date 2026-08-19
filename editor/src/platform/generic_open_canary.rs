@@ -1,35 +1,49 @@
 use std::{
     env,
     ffi::OsStr,
-    fs::{self, File, OpenOptions},
-    io::{self, Write},
-    path::{Path, PathBuf},
-    process,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
-use nara::{
-    fs::{
-        CapabilityRights, DirectoryCapability, FileCapability, FsError, HostCapabilityOptions,
-        PathValidationError, RelativePath, TrustMode,
-    },
-    tooling::{
-        EditorPlayState, EditorProjectContentView, EditorRuntimeAvailability,
-        EditorRuntimeUnavailableReason,
-    },
+use nara::tooling::{
+    EditorAction, EditorDocumentId, EditorDocumentKind, EditorProjectBrowserAction,
+    EditorProjectBrowserBudgetUsage, EditorProjectBrowserDiagnosticPhase,
+    EditorProjectBrowserDiagnosticView, EditorProjectBrowserEntry, EditorProjectBrowserLocalAction,
+    EditorProjectBrowserStatus, EditorProjectSourceKind, EditorProjectSourceOpenCapability,
 };
-use thiserror::Error;
 use winit::window::WindowId;
 
 use crate::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
 
 use super::EditorRunError;
 
+mod contract;
+mod fixture;
+
+use contract::{
+    canary_state_error, project_browser_action, ready_status_label, require_browser_baseline,
+    require_browser_entry, require_browser_matches_baseline, require_current_frame,
+    require_document, require_document_id, require_filtered_row, require_last_good_snapshot,
+    require_open_documents, require_path_filter, require_project_browser_sidebar_presentation,
+    require_ready_browser_snapshot, require_rendered_state, require_safe_lineage_failure,
+    require_selected_path, require_workspace_contract,
+};
+use fixture::{
+    GuardedProject, canary_io_error, canary_prepare_error, canary_refresh_mutation_error,
+};
+
 const GENERIC_OPEN_CANARY_ENV: &str = "NARA_EDITOR_GENERIC_OPEN_CANARY";
 const GENERIC_OPEN_CANARY_DEADLINE: Duration = Duration::from_secs(35);
 const PROJECT_MANIFEST_PATH: &str = "nara.toml";
 const AUTHORING_BUNDLE_PATH: &str = "catalogs/authoring.bundle.json";
 const STARTUP_SCENE_PATH: &str = "worlds/entry.scene.json";
+const EXTERNAL_SCENE_PATH: &str = "worlds/external.scene.json";
+const EXTERNAL_PREFAB_PATH: &str = "blueprints/external.prefab.json";
+const EXTERNAL_SCENE_FILTER: &str = "external.scene";
+const EXTERNAL_PREFAB_FILTER: &str = "external.prefab";
+const SCRIPTS_ROOT_PATH: &str = "scripts";
+const RETAINED_SCRIPTS_ROOT_PATH: &str = "scripts-before-refresh";
+const LINEAGE_CHANGED_CODE: &str = "project.source-index.directory-lineage-changed";
 const TEMP_ROOT_PREFIX: &str = "nara-editor-generic-open-canary-";
 const SOURCE_MEMBER_BYTE_LIMIT: u64 = 16 * 1024 * 1024;
 
@@ -37,12 +51,104 @@ pub(super) fn requested() -> bool {
     env::var_os(GENERIC_OPEN_CANARY_ENV).as_deref() == Some(OsStr::new("1"))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 enum EditorGenericOpenCanaryStage {
     ProjectManager,
     Recovery,
-    AuthoringWorkspace,
-    Complete,
+    AwaitingInitialBrowser,
+    AwaitingProjectBrowserPresentation(BrowserBaseline),
+    AwaitingSceneFilter(BrowserBaseline),
+    AwaitingSceneSelection(BrowserBaseline),
+    AwaitingSceneOpen(BrowserBaseline),
+    AwaitingPrefabFilter(SceneDocumentState),
+    AwaitingPrefabSelection(SceneDocumentState),
+    AwaitingPrefabOpen(SceneDocumentState),
+    AwaitingEquivalentRefresh(OpenDocumentsState),
+    AwaitingFailureRevalidation(RefreshedBrowserState),
+    AwaitingLastGoodFailure(RefreshedBrowserState),
+    Complete(EditorGenericOpenCanaryEvidence),
+}
+
+#[derive(Debug, Clone)]
+struct BrowserBaseline {
+    status: EditorProjectBrowserStatus,
+    generation: u64,
+    entries: Arc<[EditorProjectBrowserEntry]>,
+    diagnostics: Arc<[EditorProjectBrowserDiagnosticView]>,
+    usage: EditorProjectBrowserBudgetUsage,
+}
+
+#[derive(Debug, Clone)]
+struct SceneDocumentState {
+    browser: BrowserBaseline,
+    scene_document: EditorDocumentId,
+}
+
+#[derive(Debug, Clone)]
+struct OpenDocumentsState {
+    browser: BrowserBaseline,
+    scene_document: EditorDocumentId,
+    prefab_document: EditorDocumentId,
+}
+
+#[derive(Debug, Clone)]
+struct RefreshedBrowserState {
+    documents: OpenDocumentsState,
+    status: EditorProjectBrowserStatus,
+    generation: u64,
+    diagnostics: Arc<[EditorProjectBrowserDiagnosticView]>,
+    usage: EditorProjectBrowserBudgetUsage,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EditorGenericOpenCanaryEvidence {
+    initial_status: EditorProjectBrowserStatus,
+    initial_generation: u64,
+    refreshed_status: EditorProjectBrowserStatus,
+    refreshed_generation: u64,
+    entry_count: usize,
+    scene_document: EditorDocumentId,
+    prefab_document: EditorDocumentId,
+}
+
+pub(super) struct EditorGenericOpenCanaryAdvance {
+    pub(super) action: Option<EditorAction>,
+    pub(super) redraw: bool,
+    pub(super) exit: bool,
+}
+
+impl EditorGenericOpenCanaryAdvance {
+    fn idle() -> Self {
+        Self {
+            action: None,
+            redraw: false,
+            exit: false,
+        }
+    }
+
+    fn redraw() -> Self {
+        Self {
+            action: None,
+            redraw: true,
+            exit: false,
+        }
+    }
+
+    fn action(action: EditorAction) -> Self {
+        Self {
+            action: Some(action),
+            redraw: true,
+            exit: false,
+        }
+    }
+
+    fn exit() -> Self {
+        Self {
+            action: None,
+            redraw: false,
+            exit: true,
+        }
+    }
 }
 
 pub(super) struct EditorGenericOpenCanaryHost {
@@ -83,12 +189,13 @@ impl EditorGenericOpenCanaryHost {
     ) -> Result<bool, EditorRunError> {
         self.require_before_deadline(application.state())?;
         self.observe_window(window_id, application.state())?;
-        match self.stage {
+        let stage = self.stage.clone();
+        match stage.clone() {
             EditorGenericOpenCanaryStage::ProjectManager => {
                 require_rendered_state(
                     rendered_state,
                     EditorApplicationState::ProjectManager,
-                    self.stage,
+                    &stage,
                 )?;
                 self.require_before_deadline(application.state())?;
                 let update = application.native_shell_ready();
@@ -96,7 +203,7 @@ impl EditorGenericOpenCanaryHost {
                     || application.state() != EditorApplicationState::OpeningInitial
                 {
                     return Err(canary_state_error(
-                        self.stage,
+                        &stage,
                         application.state(),
                         "the initial project request was not armed after Project Manager presentation",
                     ));
@@ -116,62 +223,408 @@ impl EditorGenericOpenCanaryHost {
                         || application.state() != EditorApplicationState::OpeningInitial
                     {
                         return Err(canary_state_error(
-                            self.stage,
+                            &stage,
                             application.state(),
                             "Recovery did not accept the guarded Retry",
                         ));
                     }
                     self.require_before_deadline(application.state())?;
-                    self.stage = EditorGenericOpenCanaryStage::AuthoringWorkspace;
+                    self.stage = EditorGenericOpenCanaryStage::AwaitingInitialBrowser;
                     Ok(true)
                 }
                 state => Err(canary_state_error(
-                    self.stage,
+                    &stage,
                     state,
                     "the missing authoring bundle did not reach Recovery",
                 )),
             },
-            EditorGenericOpenCanaryStage::AuthoringWorkspace => match rendered_state {
+            EditorGenericOpenCanaryStage::AwaitingInitialBrowser => match rendered_state {
                 EditorApplicationState::OpeningInitial => Ok(false),
                 EditorApplicationState::Recovery => Err(canary_state_error(
-                    self.stage,
+                    &stage,
                     rendered_state,
                     "the repaired authoring bundle was rejected",
                 )),
                 state => Err(canary_state_error(
-                    self.stage,
+                    &stage,
                     state,
                     "the repaired project left the bounded initial-open trajectory",
                 )),
             },
-            EditorGenericOpenCanaryStage::Complete => Ok(false),
+            EditorGenericOpenCanaryStage::AwaitingProjectBrowserPresentation(_)
+            | EditorGenericOpenCanaryStage::AwaitingSceneFilter(_)
+            | EditorGenericOpenCanaryStage::AwaitingSceneSelection(_)
+            | EditorGenericOpenCanaryStage::AwaitingSceneOpen(_)
+            | EditorGenericOpenCanaryStage::AwaitingPrefabFilter(_)
+            | EditorGenericOpenCanaryStage::AwaitingPrefabSelection(_)
+            | EditorGenericOpenCanaryStage::AwaitingPrefabOpen(_)
+            | EditorGenericOpenCanaryStage::AwaitingEquivalentRefresh(_)
+            | EditorGenericOpenCanaryStage::AwaitingFailureRevalidation(_)
+            | EditorGenericOpenCanaryStage::AwaitingLastGoodFailure(_)
+            | EditorGenericOpenCanaryStage::Complete(_) => Err(canary_state_error(
+                &stage,
+                rendered_state,
+                "the canary returned to the Project Shell after publishing its workspace",
+            )),
         }
     }
 
     pub(super) fn advance_workspace(
         &mut self,
         rendered_state: EditorApplicationState,
-        application: &EditorApplication,
+        application: &mut EditorApplication,
         window_id: WindowId,
-    ) -> Result<bool, EditorRunError> {
+    ) -> Result<EditorGenericOpenCanaryAdvance, EditorRunError> {
         self.require_before_deadline(application.state())?;
         self.observe_window(window_id, application.state())?;
-        if self.stage != EditorGenericOpenCanaryStage::AuthoringWorkspace {
-            return Err(canary_state_error(
-                self.stage,
-                rendered_state,
-                "a workspace was published before the guarded repair completed",
-            ));
-        }
+        let stage = self.stage.clone();
         require_rendered_state(
             rendered_state,
             EditorApplicationState::AuthoringDegraded,
-            self.stage,
+            &stage,
         )?;
-        require_workspace_contract(application, self.stage)?;
+        require_workspace_contract(application, &stage)?;
         self.require_before_deadline(application.state())?;
-        self.stage = EditorGenericOpenCanaryStage::Complete;
-        Ok(true)
+        match stage.clone() {
+            EditorGenericOpenCanaryStage::ProjectManager
+            | EditorGenericOpenCanaryStage::Recovery => Err(canary_state_error(
+                &stage,
+                rendered_state,
+                "a workspace was published before the guarded repair completed",
+            )),
+            EditorGenericOpenCanaryStage::AwaitingInitialBrowser => {
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                if browser.has_pending_work() {
+                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                }
+                let snapshot =
+                    require_ready_browser_snapshot(browser, application.state(), &stage)?;
+                require_browser_entry(
+                    snapshot,
+                    EXTERNAL_SCENE_PATH,
+                    EditorProjectSourceKind::Scene,
+                    EditorProjectSourceOpenCapability::Scene,
+                    application.state(),
+                    &stage,
+                )?;
+                require_browser_entry(
+                    snapshot,
+                    EXTERNAL_PREFAB_PATH,
+                    EditorProjectSourceKind::Prefab,
+                    EditorProjectSourceOpenCapability::Prefab,
+                    application.state(),
+                    &stage,
+                )?;
+                let baseline = BrowserBaseline {
+                    status: browser.status(),
+                    generation: snapshot.generation(),
+                    entries: Arc::from(snapshot.entries()),
+                    diagnostics: Arc::from(snapshot.diagnostics()),
+                    usage: snapshot.usage(),
+                };
+                drop(frame);
+                if !application.select_project_browser_sidebar() {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the native Editor did not switch from the default Scene sidebar to Project",
+                    ));
+                }
+                self.stage =
+                    EditorGenericOpenCanaryStage::AwaitingProjectBrowserPresentation(baseline);
+                Ok(EditorGenericOpenCanaryAdvance::redraw())
+            }
+            EditorGenericOpenCanaryStage::AwaitingProjectBrowserPresentation(baseline) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_browser_baseline(application, &baseline, &stage)?;
+                if !application.apply_project_browser_local_action(
+                    EditorProjectBrowserLocalAction::SetPathFilter {
+                        value: Arc::from(EXTERNAL_SCENE_FILTER),
+                    },
+                ) {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the Project Browser did not accept its UI-neutral Scene path filter",
+                    ));
+                }
+                self.stage = EditorGenericOpenCanaryStage::AwaitingSceneFilter(baseline);
+                Ok(EditorGenericOpenCanaryAdvance::redraw())
+            }
+            EditorGenericOpenCanaryStage::AwaitingSceneFilter(baseline) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                require_path_filter(browser, EXTERNAL_SCENE_FILTER, application.state(), &stage)?;
+                if browser.has_pending_work() {
+                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                }
+                require_browser_matches_baseline(browser, &baseline, application.state(), &stage)?;
+                require_filtered_row(
+                    browser,
+                    EXTERNAL_SCENE_PATH,
+                    EditorProjectSourceKind::Scene,
+                    application.state(),
+                    &stage,
+                )?;
+                drop(frame);
+                if !application.apply_project_browser_local_action(
+                    EditorProjectBrowserLocalAction::Select {
+                        relative_path: Some(Arc::from(EXTERNAL_SCENE_PATH)),
+                    },
+                ) {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the filtered Project Browser did not select the closure-external Scene",
+                    ));
+                }
+                self.stage = EditorGenericOpenCanaryStage::AwaitingSceneSelection(baseline);
+                Ok(EditorGenericOpenCanaryAdvance::redraw())
+            }
+            EditorGenericOpenCanaryStage::AwaitingSceneSelection(baseline) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                require_selected_path(browser, EXTERNAL_SCENE_PATH, application.state(), &stage)?;
+                require_browser_matches_baseline(browser, &baseline, application.state(), &stage)?;
+                self.stage = EditorGenericOpenCanaryStage::AwaitingSceneOpen(baseline);
+                Ok(project_browser_action(EditorProjectBrowserAction::Open {
+                    relative_path: Arc::from(EXTERNAL_SCENE_PATH),
+                }))
+            }
+            EditorGenericOpenCanaryStage::AwaitingSceneOpen(baseline) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let scene_document = require_document(
+                    &frame,
+                    EXTERNAL_SCENE_PATH,
+                    EditorDocumentKind::Scene,
+                    true,
+                    application.state(),
+                    &stage,
+                )?;
+                require_browser_matches_baseline(
+                    frame.project_browser(),
+                    &baseline,
+                    application.state(),
+                    &stage,
+                )?;
+                drop(frame);
+                if !application.apply_project_browser_local_action(
+                    EditorProjectBrowserLocalAction::SetPathFilter {
+                        value: Arc::from(EXTERNAL_PREFAB_FILTER),
+                    },
+                ) {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the Project Browser did not accept its UI-neutral Prefab path filter",
+                    ));
+                }
+                self.stage =
+                    EditorGenericOpenCanaryStage::AwaitingPrefabFilter(SceneDocumentState {
+                        browser: baseline,
+                        scene_document,
+                    });
+                Ok(EditorGenericOpenCanaryAdvance::redraw())
+            }
+            EditorGenericOpenCanaryStage::AwaitingPrefabFilter(scene) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                require_path_filter(browser, EXTERNAL_PREFAB_FILTER, application.state(), &stage)?;
+                if browser.has_pending_work() {
+                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                }
+                require_browser_matches_baseline(
+                    browser,
+                    &scene.browser,
+                    application.state(),
+                    &stage,
+                )?;
+                require_filtered_row(
+                    browser,
+                    EXTERNAL_PREFAB_PATH,
+                    EditorProjectSourceKind::Prefab,
+                    application.state(),
+                    &stage,
+                )?;
+                require_document_id(
+                    &frame,
+                    scene.scene_document,
+                    EXTERNAL_SCENE_PATH,
+                    EditorDocumentKind::Scene,
+                    true,
+                    application.state(),
+                    &stage,
+                )?;
+                drop(frame);
+                if !application.apply_project_browser_local_action(
+                    EditorProjectBrowserLocalAction::Select {
+                        relative_path: Some(Arc::from(EXTERNAL_PREFAB_PATH)),
+                    },
+                ) {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the filtered Project Browser did not select the closure-external Prefab",
+                    ));
+                }
+                self.stage = EditorGenericOpenCanaryStage::AwaitingPrefabSelection(scene);
+                Ok(EditorGenericOpenCanaryAdvance::redraw())
+            }
+            EditorGenericOpenCanaryStage::AwaitingPrefabSelection(scene) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                require_selected_path(browser, EXTERNAL_PREFAB_PATH, application.state(), &stage)?;
+                require_browser_matches_baseline(
+                    browser,
+                    &scene.browser,
+                    application.state(),
+                    &stage,
+                )?;
+                self.stage = EditorGenericOpenCanaryStage::AwaitingPrefabOpen(scene);
+                Ok(project_browser_action(EditorProjectBrowserAction::Open {
+                    relative_path: Arc::from(EXTERNAL_PREFAB_PATH),
+                }))
+            }
+            EditorGenericOpenCanaryStage::AwaitingPrefabOpen(scene) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                require_document_id(
+                    &frame,
+                    scene.scene_document,
+                    EXTERNAL_SCENE_PATH,
+                    EditorDocumentKind::Scene,
+                    false,
+                    application.state(),
+                    &stage,
+                )?;
+                let prefab_document = require_document(
+                    &frame,
+                    EXTERNAL_PREFAB_PATH,
+                    EditorDocumentKind::Prefab,
+                    true,
+                    application.state(),
+                    &stage,
+                )?;
+                require_browser_matches_baseline(
+                    frame.project_browser(),
+                    &scene.browser,
+                    application.state(),
+                    &stage,
+                )?;
+                let documents = OpenDocumentsState {
+                    browser: scene.browser,
+                    scene_document: scene.scene_document,
+                    prefab_document,
+                };
+                self.stage = EditorGenericOpenCanaryStage::AwaitingEquivalentRefresh(documents);
+                Ok(project_browser_action(EditorProjectBrowserAction::Refresh))
+            }
+            EditorGenericOpenCanaryStage::AwaitingEquivalentRefresh(documents) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                if browser.has_pending_work() {
+                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                }
+                let snapshot =
+                    require_ready_browser_snapshot(browser, application.state(), &stage)?;
+                if snapshot.generation() <= documents.browser.generation
+                    || snapshot.entries() != documents.browser.entries.as_ref()
+                    || snapshot.diagnostics() != documents.browser.diagnostics.as_ref()
+                    || snapshot.usage() != documents.browser.usage
+                    || browser.status() != documents.browser.status
+                {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the equivalent Project Browser Refresh did not publish a newer generation with identical snapshot facts",
+                    ));
+                }
+                require_open_documents(&frame, &documents, application.state(), &stage)?;
+                let refreshed = RefreshedBrowserState {
+                    documents,
+                    status: browser.status(),
+                    generation: snapshot.generation(),
+                    diagnostics: Arc::from(snapshot.diagnostics()),
+                    usage: snapshot.usage(),
+                };
+                self.stage = EditorGenericOpenCanaryStage::AwaitingFailureRevalidation(refreshed);
+                Ok(project_browser_action(EditorProjectBrowserAction::Refresh))
+            }
+            EditorGenericOpenCanaryStage::AwaitingFailureRevalidation(refreshed) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                require_last_good_snapshot(browser, &refreshed, application.state(), &stage)?;
+                if browser.status() == EditorProjectBrowserStatus::Unavailable {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the failure Refresh became unavailable before the scripts root was replaced",
+                    ));
+                }
+                let Some(progress) = browser.scan_progress() else {
+                    if browser.has_pending_work() {
+                        return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    }
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the failure Refresh stopped before lineage revalidation",
+                    ));
+                };
+                if progress.phase() != EditorProjectBrowserDiagnosticPhase::LineageRevalidation {
+                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                }
+                drop(frame);
+                self.guarded_project
+                    .replace_scripts_root()
+                    .map_err(canary_refresh_mutation_error)?;
+                self.stage = EditorGenericOpenCanaryStage::AwaitingLastGoodFailure(refreshed);
+                Ok(EditorGenericOpenCanaryAdvance::redraw())
+            }
+            EditorGenericOpenCanaryStage::AwaitingLastGoodFailure(refreshed) => {
+                require_project_browser_sidebar_presentation(application, &stage)?;
+                let frame = require_current_frame(application, &stage)?;
+                let browser = frame.project_browser();
+                if browser.has_pending_work() {
+                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                }
+                if browser.status() != EditorProjectBrowserStatus::Unavailable {
+                    return Err(canary_state_error(
+                        &stage,
+                        application.state(),
+                        "the scripts-root replacement did not make the Refresh unavailable",
+                    ));
+                }
+                require_last_good_snapshot(browser, &refreshed, application.state(), &stage)?;
+                require_safe_lineage_failure(
+                    browser.failure(),
+                    self.guarded_project.root(),
+                    application.state(),
+                    &stage,
+                )?;
+                require_open_documents(&frame, &refreshed.documents, application.state(), &stage)?;
+                let evidence = EditorGenericOpenCanaryEvidence {
+                    initial_status: refreshed.documents.browser.status,
+                    initial_generation: refreshed.documents.browser.generation,
+                    refreshed_status: refreshed.status,
+                    refreshed_generation: refreshed.generation,
+                    entry_count: refreshed.documents.browser.entries.len(),
+                    scene_document: refreshed.documents.scene_document,
+                    prefab_document: refreshed.documents.prefab_document,
+                };
+                self.stage = EditorGenericOpenCanaryStage::Complete(evidence);
+                Ok(EditorGenericOpenCanaryAdvance::exit())
+            }
+            EditorGenericOpenCanaryStage::Complete(_) => Ok(EditorGenericOpenCanaryAdvance::idle()),
+        }
     }
 
     pub(super) const fn deadline(&self) -> Instant {
@@ -189,14 +642,30 @@ impl EditorGenericOpenCanaryHost {
     }
 
     pub(super) fn finish(self) -> Result<(), EditorRunError> {
-        if self.stage != EditorGenericOpenCanaryStage::Complete {
-            return Err(EditorRunError::Platform(format!(
-                "the native Editor exited before the generic Open/Recovery canary completed ({:?})",
-                self.stage
-            )));
-        }
+        let evidence = match self.stage {
+            EditorGenericOpenCanaryStage::Complete(evidence) => evidence,
+            stage => {
+                return Err(EditorRunError::Platform(format!(
+                    "the native Editor exited before the generic Open/Recovery canary completed ({stage:?})"
+                )));
+            }
+        };
         println!(
-            "{{\"kind\":\"nara_editor_generic_open_canary\",\"version\":1,\"window\":\"single\",\"project_manager\":\"presented\",\"recovery\":\"presented\",\"workspace\":\"authoring_degraded\",\"runtime\":\"external_host_unavailable\",\"project_content\":\"not_installed\",\"play\":\"empty\",\"result\":\"ok\"}}"
+            "{{\"kind\":\"nara_editor_generic_open_canary\",\"version\":2,\"window\":\"single\",\"project_manager\":\"presented\",\"recovery\":\"presented\",\"workspace\":\"authoring_degraded\",\"project_browser\":{{\"sidebar\":\"project\",\"initial_status\":\"{}\",\"initial_generation\":{},\"entry_count\":{},\"scene\":{{\"filter\":\"{}\",\"path\":\"{}\",\"document\":{}}},\"prefab\":{{\"filter\":\"{}\",\"path\":\"{}\",\"document\":{},\"scene_retained\":true}},\"refresh\":{{\"status\":\"{}\",\"generation\":{},\"generation_monotonic\":true,\"entries_equal\":true}},\"last_good\":{{\"status\":\"unavailable\",\"generation\":{},\"retained\":true,\"failure_code\":\"{}\",\"phase\":\"lineage_revalidation\",\"relative_source\":\"{}\",\"diagnostic_safe\":true}}}},\"runtime\":\"external_host_unavailable\",\"project_content\":\"not_installed\",\"play\":\"empty\",\"result\":\"ok\"}}",
+            ready_status_label(evidence.initial_status),
+            evidence.initial_generation,
+            evidence.entry_count,
+            EXTERNAL_SCENE_FILTER,
+            EXTERNAL_SCENE_PATH,
+            evidence.scene_document.raw(),
+            EXTERNAL_PREFAB_FILTER,
+            EXTERNAL_PREFAB_PATH,
+            evidence.prefab_document.raw(),
+            ready_status_label(evidence.refreshed_status),
+            evidence.refreshed_generation,
+            evidence.refreshed_generation,
+            LINEAGE_CHANGED_CODE,
+            SCRIPTS_ROOT_PATH,
         );
         Ok(())
     }
@@ -228,251 +697,4 @@ impl EditorGenericOpenCanaryHost {
             ))),
         }
     }
-}
-
-fn require_workspace_contract(
-    application: &EditorApplication,
-    stage: EditorGenericOpenCanaryStage,
-) -> Result<(), EditorRunError> {
-    let state = application.state();
-    let frame = application.current_frame().ok_or_else(|| {
-        canary_state_error(
-            stage,
-            state,
-            "the repaired workspace has no published Editor frame",
-        )
-    })?;
-    let runtime = frame.runtime_availability();
-    let project_content = frame.project_content();
-    let play = frame.play();
-    let pending_game_start = application.pending_game_start_request().is_some();
-    let active_game_start = application.active_game_start_request().is_some();
-    if runtime
-        == EditorRuntimeAvailability::Unavailable(
-            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-        )
-        && project_content == EditorProjectContentView::NotInstalled
-        && play.state() == EditorPlayState::Empty
-        && play.generation().is_none()
-        && !pending_game_start
-        && !active_game_start
-    {
-        return Ok(());
-    }
-    Err(EditorRunError::Platform(format!(
-        "the generic Open/Recovery canary workspace violated the ordinary execution boundary; canary stage={stage:?}, application state={state:?}, runtime={runtime:?}, project content={project_content:?}, play state={:?}, play generation={:?}, pending game start={pending_game_start}, active game start={active_game_start}",
-        play.state(),
-        play.generation(),
-    )))
-}
-
-fn require_rendered_state(
-    actual: EditorApplicationState,
-    expected: EditorApplicationState,
-    stage: EditorGenericOpenCanaryStage,
-) -> Result<(), EditorRunError> {
-    if actual == expected {
-        return Ok(());
-    }
-    Err(canary_state_error(
-        stage,
-        actual,
-        "the native window presented an unexpected product surface",
-    ))
-}
-
-fn canary_state_error(
-    stage: EditorGenericOpenCanaryStage,
-    application_state: EditorApplicationState,
-    summary: &str,
-) -> EditorRunError {
-    EditorRunError::Platform(format!(
-        "{summary}; canary stage={stage:?}, application state={application_state:?}"
-    ))
-}
-
-fn canary_prepare_error(error: GuardedProjectError) -> EditorRunError {
-    EditorRunError::Platform(format!(
-        "the generic Open/Recovery canary could not prepare its guarded project: {error}"
-    ))
-}
-
-fn canary_io_error(error: io::Error) -> EditorRunError {
-    EditorRunError::Platform(format!(
-        "the generic Open/Recovery canary could not repair its guarded project: {error}"
-    ))
-}
-
-#[derive(Debug, Error)]
-enum GuardedProjectError {
-    #[error("the source project root could not be inspected")]
-    SourceRootInspect(#[source] io::Error),
-    #[error("the source project root must be one real directory: {0}")]
-    SourceRootInvalid(PathBuf),
-    #[error("the source project root could not be opened")]
-    SourceRootOpen(#[source] io::Error),
-    #[error("the source project root did not satisfy untrusted capability policy")]
-    SourceRootCapability(#[source] FsError),
-    #[error("the fixed canary source member path is invalid: {path}")]
-    SourceMemberPath {
-        path: &'static str,
-        #[source]
-        source: PathValidationError,
-    },
-    #[error("the canary source must provide one safe regular member: {path}")]
-    SourceMemberOpen {
-        path: &'static str,
-        #[source]
-        source: FsError,
-    },
-    #[error("the canary source member could not be read within its byte limit: {path}")]
-    SourceMemberRead {
-        path: &'static str,
-        #[source]
-        source: FsError,
-    },
-    #[error("the guarded destination could not be prepared")]
-    Destination(#[from] io::Error),
-}
-
-struct GuardedProject {
-    root: PathBuf,
-    temp_parent: PathBuf,
-    authoring_bundle: Vec<u8>,
-}
-
-impl GuardedProject {
-    fn prepare(source_root: &Path) -> Result<Self, GuardedProjectError> {
-        let source_metadata =
-            fs::symlink_metadata(source_root).map_err(GuardedProjectError::SourceRootInspect)?;
-        if source_metadata.file_type().is_symlink() || !source_metadata.is_dir() {
-            return Err(GuardedProjectError::SourceRootInvalid(
-                source_root.to_path_buf(),
-            ));
-        }
-        let source_root = open_source_root(source_root)?;
-        let authoring_bundle = read_source_member(&source_root, AUTHORING_BUNDLE_PATH)?;
-        let temp_parent = env::temp_dir();
-        let root = create_temp_root(&temp_parent)?;
-        if let Err(error) = copy_project_without_bundle(&source_root, &root) {
-            let _ = fs::remove_dir_all(&root);
-            return Err(error);
-        }
-        Ok(Self {
-            root,
-            temp_parent,
-            authoring_bundle,
-        })
-    }
-
-    fn root(&self) -> &Path {
-        &self.root
-    }
-
-    fn restore_authoring_bundle(&self) -> io::Result<()> {
-        let destination = self.root.join(AUTHORING_BUNDLE_PATH);
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&destination)?;
-        let result = file
-            .write_all(&self.authoring_bundle)
-            .and_then(|()| file.sync_all());
-        drop(file);
-        if let Err(error) = result {
-            let _ = fs::remove_file(&destination);
-            return Err(error);
-        }
-        Ok(())
-    }
-}
-
-impl Drop for GuardedProject {
-    fn drop(&mut self) {
-        let safe_name = self
-            .root
-            .file_name()
-            .and_then(OsStr::to_str)
-            .is_some_and(|name| name.starts_with(TEMP_ROOT_PREFIX));
-        if self.root.parent() == Some(self.temp_parent.as_path()) && safe_name {
-            let _ = fs::remove_dir_all(&self.root);
-        }
-    }
-}
-
-fn create_temp_root(temp_parent: &Path) -> io::Result<PathBuf> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    for attempt in 0..32_u8 {
-        let candidate = temp_parent.join(format!(
-            "{TEMP_ROOT_PREFIX}{}-{stamp}-{attempt}",
-            process::id()
-        ));
-        match fs::create_dir(&candidate) {
-            Ok(()) => return Ok(candidate),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::AlreadyExists,
-        "could not allocate a unique guarded canary directory",
-    ))
-}
-
-fn copy_project_without_bundle(
-    source_root: &DirectoryCapability,
-    destination_root: &Path,
-) -> Result<(), GuardedProjectError> {
-    fs::create_dir(destination_root.join("catalogs"))?;
-    fs::create_dir(destination_root.join("worlds"))?;
-    for relative in [PROJECT_MANIFEST_PATH, STARTUP_SCENE_PATH] {
-        let bytes = read_source_member(source_root, relative)?;
-        fs::write(destination_root.join(relative), bytes)?;
-    }
-    Ok(())
-}
-
-fn open_source_root(path: &Path) -> Result<DirectoryCapability, GuardedProjectError> {
-    let file = open_directory_handle(path).map_err(GuardedProjectError::SourceRootOpen)?;
-    DirectoryCapability::from_host_handle(
-        file,
-        HostCapabilityOptions::new(CapabilityRights::ReadOnly, TrustMode::Untrusted),
-    )
-    .map_err(GuardedProjectError::SourceRootCapability)
-}
-
-fn read_source_member(
-    root: &DirectoryCapability,
-    path: &'static str,
-) -> Result<Vec<u8>, GuardedProjectError> {
-    let relative = RelativePath::new(path)
-        .map_err(|source| GuardedProjectError::SourceMemberPath { path, source })?;
-    let file: FileCapability = root
-        .open_file(&relative)
-        .map_err(|source| GuardedProjectError::SourceMemberOpen { path, source })?;
-    file.read_to_end_bounded(SOURCE_MEMBER_BYTE_LIMIT)
-        .map_err(|source| GuardedProjectError::SourceMemberRead { path, source })
-}
-
-#[cfg(windows)]
-fn open_directory_handle(path: &Path) -> io::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt;
-
-    const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x1 | 0x2 | 0x4;
-    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
-    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
-
-    OpenOptions::new()
-        .read(true)
-        .share_mode(FILE_SHARE_READ_WRITE_DELETE)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
-        .open(path)
-}
-
-#[cfg(not(windows))]
-fn open_directory_handle(path: &Path) -> io::Result<File> {
-    File::open(path)
 }
