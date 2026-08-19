@@ -33,6 +33,9 @@ impl EditorProjectSession {
         real_delta: Duration,
         drive_runtime: bool,
     ) -> Arc<EditorFrameModel> {
+        if let Some(project) = self.authoring_project_mut() {
+            project.advance_source_index();
+        }
         if self.trusted_compiled().is_some() {
             self.resume_content_refresh_after_runtime_retirement();
             self.advance_project_content_refresh();

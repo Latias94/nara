@@ -23,6 +23,16 @@ impl RelativeComponent {
     pub(crate) fn as_os_str(&self) -> &OsStr {
         &self.0
     }
+
+    /// Returns the portable UTF-8 spelling when this component has one.
+    ///
+    /// Native directory enumeration rejects non-portable names before publishing an
+    /// observation, while callers that construct a component directly may still use a
+    /// platform-native spelling. Capability consumers must handle that distinction explicitly.
+    #[must_use]
+    pub fn to_str(&self) -> Option<&str> {
+        self.0.to_str()
+    }
 }
 
 impl Debug for RelativeComponent {

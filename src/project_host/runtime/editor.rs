@@ -74,6 +74,7 @@ use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 use crate::ProductRecipe;
 use crate::project_host::authoring::{
     AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
+    ProjectSourceIndexFailure, ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind,
     first_party_authoring_preview_registry,
 };
 use crate::project_host::composition::{
@@ -731,6 +732,44 @@ impl EditorProjectSession {
             EditorExecutionLane::Authoring(snapshot) => Some(snapshot),
             EditorExecutionLane::TrustedCompiled(_) => None,
         }
+    }
+
+    fn authoring_project_mut(&mut self) -> Option<&mut AuthoringProjectSessionSnapshot> {
+        match &mut self.execution {
+            EditorExecutionLane::Authoring(snapshot) => Some(snapshot),
+            EditorExecutionLane::TrustedCompiled(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn project_source_index_kind(&self) -> ProjectSourceIndexStateKind {
+        self.authoring_project().map_or(
+            ProjectSourceIndexStateKind::NotRequested,
+            AuthoringProjectSessionSnapshot::source_index_kind,
+        )
+    }
+
+    #[must_use]
+    pub(crate) fn project_source_index_snapshot(&self) -> Option<Arc<ProjectSourceIndexSnapshot>> {
+        self.authoring_project()
+            .and_then(AuthoringProjectSessionSnapshot::source_index_snapshot)
+    }
+
+    #[must_use]
+    pub(crate) fn project_source_index_failure(&self) -> Option<&ProjectSourceIndexFailure> {
+        self.authoring_project()
+            .and_then(AuthoringProjectSessionSnapshot::source_index_failure)
+    }
+
+    #[must_use]
+    pub(crate) fn project_source_index_work_pending(&self) -> bool {
+        self.authoring_project()
+            .is_some_and(AuthoringProjectSessionSnapshot::source_index_has_pending_work)
+    }
+
+    pub(crate) fn request_project_source_index_refresh(&mut self) -> bool {
+        self.authoring_project_mut()
+            .is_some_and(AuthoringProjectSessionSnapshot::request_source_index_refresh)
     }
 
     /// Returns the complete unavailable-record manifest for the active generic authoring

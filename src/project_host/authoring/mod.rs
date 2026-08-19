@@ -3,6 +3,7 @@
 mod adapter;
 mod bundle;
 mod project;
+mod source_index;
 
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use adapter::{first_party_authoring_adapters, first_party_authoring_preview_registry};
@@ -10,6 +11,9 @@ pub(crate) use adapter::{first_party_authoring_adapters, first_party_authoring_p
 pub(crate) use project::{
     AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
     AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
+};
+pub(crate) use source_index::{
+    ProjectSourceIndexFailure, ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind,
 };
 
 use std::{

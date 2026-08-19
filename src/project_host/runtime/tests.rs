@@ -1224,6 +1224,83 @@ logical_height = 540
     ));
 }
 
+#[cfg(feature = "tooling")]
+#[test]
+fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh() {
+    let project = TestProject::new("generic-source-index");
+    let baseline_runtime_digest = project.snapshot_and_plan(false).0.content_digest();
+    fs::create_dir_all(project.root.join("scripts")).unwrap();
+    fs::write(
+        project.root.join("scenes/external.scene.json"),
+        SceneDocument::default().to_json_string().unwrap(),
+    )
+    .unwrap();
+    fs::write(project.root.join("scripts/player.rs"), "fn player() {}\n").unwrap();
+    let browser_only_runtime_digest = project.snapshot_and_plan(false).0.content_digest();
+    assert_eq!(browser_only_runtime_digest, baseline_runtime_digest);
+
+    let mut host = super::editor::EditorProjectOpenHost::new();
+    let mut attempt = host.begin(project.writable_capability(), None);
+    let mut editor = loop {
+        match host.advance(attempt) {
+            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Opened(session) => break session,
+            super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
+                "the generic project should open before indexing: {:?}",
+                failure.diagnostics()
+            ),
+        }
+    };
+
+    assert_eq!(
+        editor.project_source_index_kind(),
+        crate::project_host::authoring::ProjectSourceIndexStateKind::Scanning
+    );
+    assert!(editor.project_source_index_work_pending());
+    assert!(editor.project_source_index_snapshot().is_none());
+    for _ in 0..64 {
+        if !editor.project_source_index_work_pending() {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        if editor.project_source_index_work_pending() {
+            assert!(editor.project_source_index_snapshot().is_none());
+        }
+    }
+
+    assert_eq!(
+        editor.project_source_index_kind(),
+        crate::project_host::authoring::ProjectSourceIndexStateKind::Ready
+    );
+    assert!(!editor.project_source_index_work_pending());
+    assert!(editor.project_source_index_failure().is_none());
+    let first = editor.project_source_index_snapshot().unwrap();
+    assert_eq!(first.generation().get(), 1);
+    assert!(first.entry("scenes/external.scene.json").is_some());
+    assert!(first.entry("scripts/player.rs").is_some());
+
+    assert!(editor.request_project_source_index_refresh());
+    assert!(editor.project_source_index_work_pending());
+    assert!(Arc::ptr_eq(
+        &first,
+        &editor.project_source_index_snapshot().unwrap()
+    ));
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(Arc::ptr_eq(
+        &first,
+        &editor.project_source_index_snapshot().unwrap()
+    ));
+    for _ in 0..64 {
+        if !editor.project_source_index_work_pending() {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    let second = editor.project_source_index_snapshot().unwrap();
+    assert_eq!(second.generation().get(), 2);
+    assert!(!Arc::ptr_eq(&first, &second));
+}
+
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 #[test]
 fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {

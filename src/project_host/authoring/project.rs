@@ -32,6 +32,7 @@ use nara_scene::{
 use super::{
     AuthoringProjectAdmissionBudget, AuthoringProjectAdmissionError,
     AuthoringProjectAdmissionUsage, AuthoringProjectAttemptGeneration, AuthoringSchemaReceipt,
+    source_index::ProjectSourceIndexState,
 };
 
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
@@ -395,6 +396,8 @@ impl AuthoringProjectReceipt {
         let inner = Arc::try_unwrap(self.snapshot.inner)
             .map_err(|_| AuthoringProjectReceiptUseError::SnapshotAliased)?;
         let startup_scene = fork_published_authoring_scene_document(&inner.startup_scene);
+        let mut source_index = ProjectSourceIndexState::new(&inner.schema);
+        source_index.request_refresh();
         Ok(AuthoringProjectSessionParts {
             snapshot: AuthoringProjectSessionSnapshot {
                 schema: inner.schema,
@@ -407,6 +410,7 @@ impl AuthoringProjectReceipt {
                 unresolved_dependencies: inner.unresolved_dependencies,
                 source_facts: inner.source_facts,
                 usage: inner.usage,
+                source_index,
             },
             startup_scene,
         })
@@ -455,6 +459,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Box<[Arc<AuthoringSourceFact>]>,
     usage: AuthoringProjectAdmissionUsage,
+    source_index: ProjectSourceIndexState,
 }
 
 impl AuthoringProjectSessionSnapshot {
@@ -508,6 +513,34 @@ impl AuthoringProjectSessionSnapshot {
     pub(crate) const fn usage(&self) -> AuthoringProjectAdmissionUsage {
         self.usage
     }
+
+    #[must_use]
+    pub(crate) fn source_index_kind(&self) -> super::ProjectSourceIndexStateKind {
+        self.source_index.kind()
+    }
+
+    #[must_use]
+    pub(crate) fn source_index_snapshot(&self) -> Option<Arc<super::ProjectSourceIndexSnapshot>> {
+        self.source_index.snapshot()
+    }
+
+    #[must_use]
+    pub(crate) const fn source_index_failure(&self) -> Option<&super::ProjectSourceIndexFailure> {
+        self.source_index.failure()
+    }
+
+    #[must_use]
+    pub(crate) const fn source_index_has_pending_work(&self) -> bool {
+        self.source_index.has_pending_work()
+    }
+
+    pub(crate) fn advance_source_index(&mut self) {
+        self.source_index.advance();
+    }
+
+    pub(crate) fn request_source_index_refresh(&mut self) -> bool {
+        self.source_index.request_refresh()
+    }
 }
 
 impl Debug for AuthoringProjectSessionSnapshot {
@@ -525,6 +558,7 @@ impl Debug for AuthoringProjectSessionSnapshot {
                 &self.unresolved_dependencies.len(),
             )
             .field("source_count", &self.source_facts.len())
+            .field("source_index", &self.source_index.kind())
             .field("usage", &self.usage)
             .finish_non_exhaustive()
     }
