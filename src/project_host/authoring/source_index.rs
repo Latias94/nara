@@ -122,6 +122,11 @@ impl ProjectSourceIndexEntry {
     }
 
     #[must_use]
+    pub(crate) fn relative_path_arc(&self) -> &Arc<str> {
+        &self.relative_path
+    }
+
+    #[must_use]
     pub(crate) const fn kind(&self) -> ProjectSourceKind {
         self.kind
     }

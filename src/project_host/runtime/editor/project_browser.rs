@@ -97,7 +97,7 @@ impl EditorProjectBrowserHost {
         {
             return Arc::clone(&projection.safe);
         }
-        let safe = Arc::new(EditorProjectBrowserSnapshot::new(
+        let safe = Arc::new(EditorProjectBrowserSnapshot::from_sorted(
             source.generation().get(),
             source.entries().iter().map(project_entry),
             source.diagnostics().iter().map(project_diagnostic),
@@ -220,7 +220,7 @@ fn project_status(kind: ProjectSourceIndexStateKind) -> EditorProjectBrowserStat
 
 fn project_entry(entry: &ProjectSourceIndexEntry) -> EditorProjectBrowserEntry {
     EditorProjectBrowserEntry::new(
-        Arc::from(entry.relative_path()),
+        Arc::clone(entry.relative_path_arc()),
         match entry.kind() {
             ProjectSourceKind::ProjectManifest => EditorProjectSourceKind::ProjectManifest,
             ProjectSourceKind::AuthoringSchemaBundle => {

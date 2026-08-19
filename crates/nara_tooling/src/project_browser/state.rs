@@ -112,7 +112,7 @@ pub struct EditorProjectBrowserView {
     selected_path: Option<Arc<str>>,
     path_filter: Arc<str>,
     kind_filter: EditorProjectBrowserKindFilter,
-    rows: Arc<[EditorProjectBrowserRow]>,
+    rows: Arc<Vec<EditorProjectBrowserRow>>,
     failure: Option<EditorProjectBrowserDiagnosticView>,
     scan_progress: Option<EditorProjectBrowserScanProgress>,
     pending_work: EditorProjectBrowserPendingWork,
@@ -164,7 +164,7 @@ impl EditorProjectBrowserView {
 
     #[must_use]
     pub fn rows(&self) -> &[EditorProjectBrowserRow] {
-        &self.rows
+        self.rows.as_slice()
     }
 
     #[must_use]
@@ -246,7 +246,7 @@ pub struct EditorProjectBrowserState {
     path_filter: Arc<str>,
     kind_filter: EditorProjectBrowserKindFilter,
     expanded_paths: BTreeSet<Arc<str>>,
-    rows: Arc<[EditorProjectBrowserRow]>,
+    rows: Arc<Vec<EditorProjectBrowserRow>>,
     failure: Option<EditorProjectBrowserDiagnosticView>,
     scan_progress: Option<EditorProjectBrowserScanProgress>,
     scan_pending: bool,
@@ -264,7 +264,7 @@ impl EditorProjectBrowserState {
             path_filter: Arc::from(""),
             kind_filter: EditorProjectBrowserKindFilter::All,
             expanded_paths: BTreeSet::new(),
-            rows: Arc::from([]),
+            rows: Arc::new(Vec::new()),
             failure: None,
             scan_progress: None,
             scan_pending: false,
@@ -424,7 +424,7 @@ impl EditorProjectBrowserState {
         let processed_entries = end - start;
         self.work_observed |= processed_entries != 0;
         if query.cursor == query.snapshot.entries().len() {
-            self.rows = Arc::from(query.rows);
+            self.rows = Arc::new(query.rows);
             EditorProjectBrowserQueryAdvance {
                 processed_entries,
                 pending: false,
@@ -443,7 +443,7 @@ impl EditorProjectBrowserState {
     }
 
     fn begin_query(&mut self) {
-        self.rows = Arc::from([]);
+        self.rows = Arc::new(Vec::new());
         self.query = self
             .snapshot
             .as_ref()

@@ -302,9 +302,28 @@ impl EditorProjectBrowserSnapshot {
     ) -> Self {
         let mut entries = entries.into_iter().collect::<Vec<_>>();
         entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        Self::from_sorted(generation, entries, diagnostics, usage)
+    }
+
+    /// Creates a projection from Host-owned entries already in canonical lexical order.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn from_sorted(
+        generation: u64,
+        entries: impl IntoIterator<Item = EditorProjectBrowserEntry>,
+        diagnostics: impl IntoIterator<Item = EditorProjectBrowserDiagnosticView>,
+        usage: EditorProjectBrowserBudgetUsage,
+    ) -> Self {
+        let entries = entries.into_iter().collect::<Box<[_]>>();
+        debug_assert!(
+            entries
+                .windows(2)
+                .all(|pair| pair[0].relative_path <= pair[1].relative_path),
+            "Host Project Browser entries must already be in canonical lexical order"
+        );
         Self {
             generation,
-            entries: entries.into_boxed_slice(),
+            entries,
             diagnostics: diagnostics.into_iter().collect(),
             usage,
         }
