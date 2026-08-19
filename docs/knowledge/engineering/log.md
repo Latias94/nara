@@ -5,6 +5,8 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-19
+* **Work Registration**: [Standalone Generic Editor: SGE-U5 active after export correction](registry/2026-08/2026-08-19T053640Z-standalone-generic-editor-open-recovery-codex-root-387ccdc326954d24adb88d4c4c2c8090.md) - Keeps SGE-U5 active after binding Export to both built products exact startup closure.
+* **Verification Evidence**: [SGE-U4 exact export product agreement correction](verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md) - Verifies that Export binds both built products to the exact ordered startup closure before publication.
 * **Work Registration**: [Standalone Generic Editor: SGE-U5 active](registry/2026-08/2026-08-19T050414Z-standalone-generic-editor-open-recovery-codex-root-e2ca8341084b4c9ba5dbc44766cf8103.md) - Activates only the final Generic Open/Recovery product trajectory and authority closure after verified SGE-U4.
 * **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
 * **Work Registration**: [Standalone Generic Editor: SGE-U4 active](registry/2026-08/2026-08-19T023313Z-standalone-generic-editor-open-recovery-codex-root-f76ccc813f354e779f8ee043c2756360.md) - Activates only first-party authoring-bundle publication, generic project migration, and strict bundle/native Runtime agreement after verified SGE-U3.
@@ -139,7 +141,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 ## 2026-08-11
 * **Work Registration**: [Runtime UI product slice: RUP-U2 active](registry/2026-08/2026-08-11T074415Z-engine-foundation-contract-completion-codex-root-9d1af91973c3432bba049dbeaa5af929.md) - Closes the exact gameplay-to-Retry behavior trajectory and activates authoring, surface, and packaged delivery closure.
 * **Verification Evidence**: [RUP-U1 exact gameplay-to-Retry trajectory](verification/2026-08/2026-08-11T074247Z-rup-u1-exact-gameplay-to-retry-trajectory-882397b5b744448cbd5cb8d5c3d0568a.md) - Closes the exact Runtime UI behavior trajectory with typed input evidence, native Windows UI Automation ingress, backend-submitted successor presentation, and causal Retry replacement.
-
-## 2026-08-10
-* **Work Registration**: [Runtime UI product slice: RUP-U1 reactivated](registry/2026-08/2026-08-10T155958Z-runtime-ui-product-slice-codex-root-c561d92562464eadb2904a61f0c14465.md) - Pins the UIFM successor baseline and resumes the exact gameplay-to-Retry product trajectory.
-* **Verification Evidence**: [UIFM-U2 Successor Foundation Conformance Baseline](verification/2026-08/2026-08-10T155957Z-uifm-u2-successor-foundation-conformance-baseline-19cfa496dc2346368764057367cc2163.md) - Publishes the modal-entry-focus correction as the successor shared UI baseline and permits an explicit RUP-U1 rebase.

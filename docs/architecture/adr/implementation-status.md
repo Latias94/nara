@@ -1,18 +1,21 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified**: 2026-08-19 @ SGE-U4 `2d42516`; SGE-U5 activation
+**Last Verified**: 2026-08-19 @ SGE-U4 correction `76bfc6c`; SGE-U5 active
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. The
 [Standalone Generic Editor Project Open and Recovery](../../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
-plan is active only at SGE-U5 under registration `e2ca8341084b4c9ba5dbc44766cf8103`, against
-baseline `2d42516`. SGE-U1 implemented the bounded data-only authoring schema bundle and
+plan is active only at SGE-U5 under registration `387ccdc326954d24adb88d4c4c2c8090`, against
+baseline `76bfc6c`. SGE-U1 implemented the bounded data-only authoring schema bundle and
 root-private admission. SGE-U2 implemented lossless degraded Scene and Prefab document authority,
 bounded source closure, typed persistence lanes, and the complete immutable Authoring Project
 receipt. SGE-U3 implemented the shell-first project lifecycle and explicit Runtime-unavailable
-boundary. SGE-U4 published canonical starter, Reference Game, and clean-room bundles and bound
-them back to strict selected-native Runtime agreement. SGE-U5 owns the final Generic Open/Recovery
+boundary. SGE-U4 published canonical starter, Reference Game, and clean-room bundles, bound them
+back to strict selected-native Runtime agreement, and required both built products to prove the
+exact ordered startup closure before Export publication. SGE-U5 owns the final Generic Open/Recovery
 product trajectory and authority closure; all successor Editor lanes remain inactive.
+The SGE-U4 Export correction is verified by
+`docs/knowledge/engineering/verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md`.
 The completed
 [Editor UI Prefab Structural Composition v1](../../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
 closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and completed

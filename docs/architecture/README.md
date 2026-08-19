@@ -10,13 +10,14 @@ an index, not another source of architecture decisions.
    gaps.
 3. The [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan is active only at SGE-U5 under
-   [registration `e2ca8341084b4c9ba5dbc44766cf8103`](../knowledge/engineering/registry/2026-08/2026-08-19T050414Z-standalone-generic-editor-open-recovery-codex-root-e2ca8341084b4c9ba5dbc44766cf8103.md),
-   against baseline `2d42516`. SGE-U1 has implemented the bounded data-only authoring schema
+   [registration `387ccdc326954d24adb88d4c4c2c8090`](../knowledge/engineering/registry/2026-08/2026-08-19T053640Z-standalone-generic-editor-open-recovery-codex-root-387ccdc326954d24adb88d4c4c2c8090.md),
+   against baseline `76bfc6c`. SGE-U1 has implemented the bounded data-only authoring schema
    bundle and root-private admission; SGE-U2 has implemented lossless degraded Scene and Prefab
    document authority plus the complete bounded Authoring Project receipt; SGE-U3 has implemented
    the shell-first project lifecycle and explicit Runtime-unavailable boundary; SGE-U4 has
-   published canonical starter, Reference Game, and clean-room bundles and bound them back to
-   strict selected-native Runtime agreement. SGE-U5 owns the final Generic Open/Recovery product
+   published canonical starter, Reference Game, and clean-room bundles, bound them back to strict
+   selected-native Runtime agreement, and required both built products to prove the exact ordered
+   startup closure before Export publication. SGE-U5 owns the final Generic Open/Recovery product
    trajectory and authority closure; all successor Editor lanes remain inactive.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
