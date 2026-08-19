@@ -96,5 +96,8 @@ pub use spawn::{
 #[doc(hidden)]
 #[cfg(feature = "serde")]
 pub mod __private {
-    pub use crate::authoring_decode::{AuthoringAdapterReceipt, AuthoringAdapterReceiptError};
+    pub use crate::authoring_decode::{
+        AuthoringAdapterReceipt, AuthoringAdapterReceiptError,
+        fork_published_authoring_prefab_document,
+    };
 }

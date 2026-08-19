@@ -35,20 +35,22 @@ use nara_fs::{
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
-use nara_reflect::ComponentFieldId;
+use nara_reflect::{AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId};
 use nara_reflect::{
     ComponentRegistrySnapshot, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
-use nara_scene::{PrefabDocument, PrefabInstance};
+use nara_scene::{
+    AuthoringScalarEdit, PrefabDocument, PrefabInstance, SCENE_COMPONENTS_SCHEMA_OWNER_ID,
+    SCENE_COMPONENTS_SCHEMA_PROVIDER,
+};
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
 #[cfg(feature = "tooling")]
 use nara_scene::{ScenePatchDocument, ScenePatchOperation, ScenePlacement, ScenePlacementOwner};
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
 };
-#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
     EditorAtomicFieldEdit, EditorDocumentMutation, EditorFieldWrite, EditorGestureAction,
@@ -675,9 +677,9 @@ fn project_host_rejects_a_different_schema_plan_from_the_same_lineage() {
 #[test]
 fn editor_no_play_workflow_keeps_one_plan_owned_schema_snapshot() {
     let project = TestProject::new("editor-schema-snapshot");
-    let mut editor = super::editor::EditorProjectSession::open(
+    let mut editor = super::editor::EditorProjectSession::open_trusted_compiled(
         project.capability(),
-        super::editor::EditorProjectIntent::new(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
     let expected = editor.test_schema_snapshot();
@@ -798,9 +800,9 @@ logical_height = 540
             .unwrap(),
     )
     .unwrap();
-    let mut editor = super::editor::EditorProjectSession::open(
+    let mut editor = super::editor::EditorProjectSession::open_trusted_compiled(
         project.writable_capability(),
-        super::editor::EditorProjectIntent::new(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
     let scene_document = editor.workspace().active_document().unwrap();
@@ -1105,6 +1107,7 @@ logical_height = 540
     ));
 
     let exit_frame = editor.drive_editor_frame(Duration::ZERO);
+    let retained_document_count = editor.workspace().len();
     let exit = editor
         .dispatch_editor_actions(EditorActionBatch::new(
             exit_frame.revision(),
@@ -1123,15 +1126,243 @@ logical_height = 540
             nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
         )
     ));
-    assert_eq!(editor.workspace().len(), 1);
+    for _ in 0..8 {
+        if editor.workspace_intent_view().phase()
+            == Some(nara_tooling::EditorWorkspaceIntentPhase::Prepared)
+        {
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    assert_eq!(
+        editor.workspace_intent_view().phase(),
+        Some(nara_tooling::EditorWorkspaceIntentPhase::Prepared)
+    );
+    assert_eq!(editor.workspace().len(), retained_document_count);
+    let commit_frame = editor.drive_editor_frame(Duration::ZERO);
+    let committed = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            commit_frame.revision(),
+            [EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::CommitPrepared,
+            )],
+        ))
+        .unwrap();
+    assert!(matches!(
+        committed.outcomes()[0],
+        EditorActionOutcome::WorkspaceIntent(
+            nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+        )
+    ));
     editor.drive_editor_frame(Duration::ZERO);
-    assert!(editor.workspace().is_empty());
+    assert_eq!(editor.workspace().len(), retained_document_count);
     assert!(matches!(
         editor.workspace_intent_view().result(),
         Some(nara_tooling::EditorWorkspaceIntentResult::Applied {
             intent: EditorWorkspaceIntent::Exit,
         })
     ));
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+#[test]
+fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
+    let project = TestProject::new("authoring-prefab-reopen");
+    fs::create_dir_all(project.root.join("schemas")).unwrap();
+    let mut manifest = fs::read_to_string(project.root.join("nara.toml")).unwrap();
+    manifest.push_str(
+        r#"
+
+[authoring]
+schema_bundle = "schemas/authoring.bundle.json"
+"#,
+    );
+    fs::write(project.root.join("nara.toml"), manifest).unwrap();
+    let resolved =
+        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
+    let schema_owner =
+        PersistentComponentSchemaOwnerId::try_new(SCENE_COMPONENTS_SCHEMA_OWNER_ID.as_str())
+            .unwrap();
+    let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        schema_owner.clone(),
+        resolved.current().catalog().clone(),
+        resolved
+            .predecessor()
+            .map(|record| record.catalog().clone()),
+    )])
+    .unwrap();
+    fs::write(
+        project.root.join("schemas/authoring.bundle.json"),
+        bundle.to_json_string().unwrap(),
+    )
+    .unwrap();
+
+    let prefab = AssetPath::new("panel.prefab.json").unwrap();
+    fs::write(
+        project.root.join("prefabs/panel.prefab.json"),
+        PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            nara_identity::SceneEntityId::new("panel").unwrap(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.scene.Name"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Panel".to_owned()),
+            )
+            .with_owner(schema_owner),
+        )])
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let anchor = nara_identity::SceneEntityId::new("panel-anchor").unwrap();
+    let mut anchor_record = SceneEntityRecord::new(anchor.clone());
+    anchor_record.prefab = Some(PrefabInstance {
+        source: AssetRef::Path(prefab),
+        overrides: ScenePatchDocument::default(),
+    });
+    fs::write(
+        project.root.join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([anchor_record])
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut host = super::editor::EditorProjectOpenHost::new();
+    let mut attempt = host.begin(project.writable_capability(), None);
+    let mut editor = loop {
+        match host.advance(attempt) {
+            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Opened(session) => break session,
+            super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
+                "the authoring project should open before the Prefab lifecycle test: {:?}",
+                failure.diagnostics()
+            ),
+        }
+    };
+    let scene_document = editor.workspace().active_document().unwrap();
+
+    editor.test_reject_next_prefab_source_binding();
+    let failed = open_prefab_from_scene(&mut editor, scene_document, &anchor);
+    assert!(!failed.applied);
+    assert_eq!(editor.workspace().len(), 1);
+
+    let opened = open_prefab_from_scene(&mut editor, scene_document, &anchor);
+    assert!(opened.applied, "{:?}", opened.diagnostics);
+    let prefab_document = opened.opened_document.unwrap();
+
+    let frame = editor.current_frame();
+    let prefab_revision = frame
+        .workspace()
+        .document(prefab_document)
+        .unwrap()
+        .revision;
+    let edited = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyAuthoringScalarEdit {
+                    document: prefab_document,
+                    base_revision: prefab_revision,
+                    edit: AuthoringScalarEdit::new(
+                        nara_identity::SceneEntityId::new("panel").unwrap(),
+                        ComponentTypeId::new("nara.scene.Name"),
+                        ComponentFieldId::new("value"),
+                        ComponentValue::String("Saved Panel".to_owned()),
+                    ),
+                },
+            )],
+        ))
+        .unwrap();
+    assert!(matches!(
+        &edited.outcomes()[0],
+        EditorActionOutcome::Workspace(report) if report.applied
+    ));
+    let edited_frame = editor.drive_editor_frame(Duration::ZERO);
+    let edited_revision = edited_frame
+        .workspace()
+        .document(prefab_document)
+        .unwrap()
+        .revision;
+    let save = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            edited_frame.revision(),
+            [EditorAction::Persistence(EditorPersistenceAction::Save {
+                document: prefab_document,
+                base_revision: edited_revision,
+            })],
+        ))
+        .unwrap();
+    assert!(matches!(
+        save.outcomes()[0],
+        EditorActionOutcome::Persistence(nara_tooling::EditorPersistenceRequestResult::Accepted)
+    ));
+    let _ = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Saved { document, .. }) if document == prefab_document
+    ));
+
+    let closed = editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument {
+        document: prefab_document,
+    });
+    assert_eq!(
+        closed,
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert!(editor.workspace().prefab(prefab_document).is_none());
+
+    let reopened = open_prefab_from_scene(&mut editor, scene_document, &anchor);
+    assert!(reopened.applied, "{:?}", reopened.diagnostics);
+    let reopened_document = reopened.opened_document.unwrap();
+    let reopened_prefab = editor.workspace().prefab(reopened_document).unwrap();
+    let reopened_panel = reopened_prefab
+        .session()
+        .document()
+        .entities
+        .iter()
+        .find(|entity| entity.id.as_str() == "panel")
+        .expect("the saved Prefab source should retain its panel entity");
+    assert_eq!(
+        reopened_panel
+            .components
+            .get(&ComponentTypeId::new("nara.scene.Name"))
+            .and_then(|record| record.value.as_str()),
+        Some("Saved Panel")
+    );
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+fn open_prefab_from_scene(
+    editor: &mut super::editor::EditorProjectSession,
+    scene_document: nara_tooling::EditorDocumentId,
+    anchor: &nara_identity::SceneEntityId,
+) -> nara_tooling::EditorWorkspaceCommandReport {
+    let frame = editor.current_frame();
+    let scene_revision = frame.workspace().document(scene_document).unwrap().revision;
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [
+                EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                    document: scene_document,
+                    entity: Some(anchor.clone()),
+                }),
+                EditorAction::Navigate(EditorNavigationAction::OpenPrefabSource {
+                    document: scene_document,
+                    base_revision: scene_revision,
+                    entity: anchor.clone(),
+                }),
+            ],
+        ))
+        .unwrap();
+    let EditorActionOutcome::Workspace(opened) = &report.outcomes()[1] else {
+        panic!("opening a Prefab source must return a workspace outcome");
+    };
+    let opened = opened.clone();
+    let _ = editor.drive_editor_frame(Duration::ZERO);
+    opened
 }
 
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
@@ -1244,9 +1475,9 @@ logical_height = 540
     )
     .unwrap();
 
-    let mut editor = super::editor::EditorProjectSession::open(
+    let mut editor = super::editor::EditorProjectSession::open_trusted_compiled(
         project.writable_capability(),
-        super::editor::EditorProjectIntent::new(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
     let scene_document = editor.workspace().active_document().unwrap();
@@ -1976,9 +2207,9 @@ logical_height = 540
 #[test]
 fn editor_play_runtime_uses_the_plan_owned_schema_snapshot() {
     let project = TestProject::new("editor-play-schema-snapshot");
-    let mut editor = super::editor::EditorProjectSession::open(
+    let mut editor = super::editor::EditorProjectSession::open_trusted_compiled(
         project.capability(),
-        super::editor::EditorProjectIntent::new(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
     let expected = editor.test_schema_snapshot();
@@ -2128,9 +2359,9 @@ resizable = true
 #[test]
 fn failed_and_uncertain_saves_do_not_advance_workspace_persistence_state() {
     let project = TestProject::new("editor-save-failure-state");
-    let mut editor = super::editor::EditorProjectSession::open(
+    let mut editor = super::editor::EditorProjectSession::open_trusted_compiled(
         project.writable_capability(),
-        super::editor::EditorProjectIntent::new(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
     let document = editor.workspace().active_document().unwrap();

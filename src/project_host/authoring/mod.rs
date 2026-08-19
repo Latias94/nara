@@ -4,10 +4,12 @@ mod adapter;
 mod bundle;
 mod project;
 
-#[cfg(test)]
-use project::{
-    AuthoringProjectReadiness, AuthoringProjectSourceAdmissionError, AuthoringSourceKind,
-    PreparedAuthoringProject,
+#[cfg(any(feature = "tooling", test))]
+pub(crate) use adapter::first_party_authoring_adapters;
+#[cfg(any(feature = "tooling", test))]
+pub(crate) use project::{
+    AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
+    AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
 };
 
 use std::{
@@ -572,6 +574,11 @@ pub(crate) struct PreparedAuthoringSchemaBasis {
 }
 
 impl PreparedAuthoringSchemaBasis {
+    #[must_use]
+    pub(crate) const fn bundle_path(&self) -> &ProjectPath {
+        &self.bundle_path
+    }
+
     pub(crate) fn admit_bundle(
         mut self,
     ) -> Result<AuthoringSchemaCandidate, AuthoringProjectAdmissionError> {

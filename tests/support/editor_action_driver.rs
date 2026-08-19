@@ -225,6 +225,30 @@ pub fn resolve_workspace_intent(
     }
 }
 
+pub fn commit_prepared_workspace_intent(
+    editor: &mut EditorProjectSession,
+) -> EditorWorkspaceIntentRequestResult {
+    match dispatch_one(
+        editor,
+        EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::CommitPrepared),
+    ) {
+        EditorActionOutcome::WorkspaceIntent(result) => result,
+        outcome => panic!("expected a workspace-intent outcome, got {outcome:?}"),
+    }
+}
+
+pub fn abort_prepared_workspace_intent(
+    editor: &mut EditorProjectSession,
+) -> EditorWorkspaceIntentRequestResult {
+    match dispatch_one(
+        editor,
+        EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::AbortPrepared),
+    ) {
+        EditorActionOutcome::WorkspaceIntent(result) => result,
+        outcome => panic!("expected a workspace-intent outcome, got {outcome:?}"),
+    }
+}
+
 pub fn acknowledge_workspace_intent_result(editor: &mut EditorProjectSession) -> bool {
     match dispatch_one(
         editor,

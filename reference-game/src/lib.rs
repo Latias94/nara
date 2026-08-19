@@ -42,7 +42,7 @@ use nara::{
 };
 
 #[cfg(feature = "editor")]
-use nara::project_host::EditorProjectIntent;
+use nara::project_host::TrustedCompiledEditorProjectIntent;
 #[cfg(feature = "desktop")]
 use nara::project_host::{DesktopRun, DesktopRunIntent};
 
@@ -434,16 +434,16 @@ pub fn wave_desktop_intent() -> DesktopRunIntent {
 /// Creates the Editor Play intent over the same committed wave content closure.
 #[cfg(feature = "editor")]
 #[must_use]
-pub fn wave_editor_intent() -> EditorProjectIntent {
-    EditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
+pub fn wave_editor_intent() -> TrustedCompiledEditorProjectIntent {
+    TrustedCompiledEditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
 }
 
 /// Creates the focused compiled-product intent used by the private native Game View canary.
 #[cfg(feature = "editor-game-view-canary")]
 #[doc(hidden)]
 #[must_use]
-pub fn wave_game_view_intent() -> EditorProjectIntent {
-    EditorProjectIntent::new()
+pub fn wave_game_view_intent() -> TrustedCompiledEditorProjectIntent {
+    TrustedCompiledEditorProjectIntent::new()
         .with_profile("desktop")
         .with_recipe(desktop_wave_recipe_or_panic())
 }

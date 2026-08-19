@@ -6,29 +6,41 @@
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
 use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
+    project_host::TrustedCompiledEditorProjectIntent,
     project_workflow::{
         NaraDependencySource, ProjectCreationRequest, ProjectDirectory, ProjectMember, ProjectSlug,
         prepare_desktop_2d_project,
     },
-    reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind},
+    reflect::{
+        AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueKind,
+    },
     scene::{
-        SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
-        ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+        SceneAuthoringRevision, SceneComponentRecord, SceneDocument, SceneEntityId,
+        SceneEntityRecord, ScenePatchDocument, ScenePatchOperation, ScenePlacement,
+        ScenePlacementOwner,
     },
     tooling::{
-        EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
-        EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure,
-        EditorNavigationAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
-        EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult, SceneInspectorCommand,
+        EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentId,
+        EditorDocumentMutation, EditorFieldFeedbackReason, EditorFieldTarget,
+        EditorFieldValidationFailure, EditorNavigationAction, EditorPlayAction,
+        EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayState,
+        EditorRuntimeUnavailableReason, EditorSelectionSet, EditorWorkspaceIntent,
+        EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
+        SceneInspectorCommand,
     },
+    tooling_egui::{EguiEditorProjectAction, EguiProjectOpenDraft},
 };
-use nara_editor::{EditorApplication, EditorApplicationOpenError, EditorLaunchOptions};
+use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
 
 const NARA_GIT_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -36,9 +48,12 @@ static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
 #[test]
 fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state() {
     let project = StarterProject::new("open-and-repaint");
-    let mut application = EditorApplication::open(EditorLaunchOptions::new(project.root()))
-        .expect("the canonical starter should open in the Editor");
-    let before = application.current_frame();
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(project.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the canonical starter should open in the Editor");
+    let before = current_frame(&application);
     let before_scene = before
         .workspace()
         .active_scene
@@ -51,7 +66,7 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
 
     let batch = render_once(&mut application);
     let update = application.submit_and_drive(batch, Duration::ZERO);
-    let after = application.current_frame();
+    let after = current_frame(&application);
     let after_scene = after
         .workspace()
         .scene(document)
@@ -71,9 +86,12 @@ fn starter_opens_one_coherent_frame_and_empty_repaint_preserves_document_state()
 #[test]
 fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     let project = StarterProject::new("dirty-close");
-    let mut application = EditorApplication::open(EditorLaunchOptions::new(project.root()))
-        .expect("the canonical starter should open in the Editor");
-    let frame = application.current_frame();
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(project.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the canonical starter should open in the Editor");
+    let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
     let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
         entity: SceneEntityRecord::new(SceneEntityId::new("dirty-probe").unwrap()),
@@ -91,8 +109,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     );
     application.submit_and_drive(batch, Duration::ZERO);
     assert!(
-        application
-            .current_frame()
+        current_frame(&application)
             .workspace()
             .active_scene
             .as_ref()
@@ -101,7 +118,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     );
 
     let close_request = application.request_exit();
-    let awaiting_cancel = application.current_frame();
+    let awaiting_cancel = current_frame(&application);
     assert!(!close_request.exit_ready());
     assert_eq!(
         awaiting_cancel.workspace_intent().phase(),
@@ -115,7 +132,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
         )],
     );
     let cancelled = application.submit_and_drive(cancel, Duration::ZERO);
-    let cancelled_frame = application.current_frame();
+    let cancelled_frame = current_frame(&application);
     assert!(!cancelled.exit_ready());
     assert!(cancelled_frame.workspace().active_scene.is_some());
     assert!(matches!(
@@ -126,7 +143,7 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     ));
 
     let second_request = application.request_exit();
-    let awaiting_discard = application.current_frame();
+    let awaiting_discard = current_frame(&application);
     assert!(!second_request.exit_ready());
     assert_eq!(
         awaiting_discard.workspace_intent().phase(),
@@ -140,16 +157,24 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
     );
     let discarded = application.submit_and_drive(discard, Duration::ZERO);
 
-    assert!(discarded.exit_ready());
-    assert!(application.current_frame().workspace().scenes.is_empty());
+    assert!(!discarded.exit_ready());
+    assert_eq!(
+        current_frame(&application).workspace_intent().phase(),
+        Some(EditorWorkspaceIntentPhase::Prepared)
+    );
+    assert!(drive_process_exit_to_terminal(&mut application));
+    assert!(application.current_frame().is_none());
 }
 
 #[test]
 fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
     let project = StarterProject::new("field-feedback");
-    let mut application = EditorApplication::open(EditorLaunchOptions::new(project.root()))
-        .expect("the canonical starter should open in the Editor");
-    let frame = application.current_frame();
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(project.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the canonical starter should open in the Editor");
+    let frame = current_frame(&application);
     let scene = frame.workspace().active_scene.as_ref().unwrap();
     let entity = scene.editor.inspector.entities[0].id.clone();
     let select = EditorActionBatch::new(
@@ -163,7 +188,7 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
     );
     application.submit_and_drive(select, Duration::ZERO);
 
-    let selected_frame = application.current_frame();
+    let selected_frame = current_frame(&application);
     let selected_scene = selected_frame.workspace().active_scene.as_ref().unwrap();
     let selected = selected_scene
         .editor
@@ -197,7 +222,7 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
     );
     application.submit_and_drive(invalid, Duration::ZERO);
 
-    let invalid_frame = application.current_frame();
+    let invalid_frame = current_frame(&application);
     let feedback = invalid_frame.field_feedback().unwrap();
     assert!(feedback.target().same_field(&target));
     assert_eq!(
@@ -224,14 +249,14 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
         )],
     );
     application.submit_and_drive(rejected_mutation, Duration::ZERO);
-    let rejected_frame = application.current_frame();
+    let rejected_frame = current_frame(&application);
     assert_eq!(
         rejected_frame.field_feedback().unwrap().reason(),
         EditorFieldFeedbackReason::MutationRejected
     );
     assert!(rejected_frame.diagnostics().stats().observed_errors() >= 2);
 
-    let stale_source = application.current_frame();
+    let stale_source = current_frame(&application);
     application.submit_and_drive(
         EditorActionBatch::new(stale_source.revision(), []),
         Duration::ZERO,
@@ -243,7 +268,7 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
         ),
         Duration::ZERO,
     );
-    let stale_frame = application.current_frame();
+    let stale_frame = current_frame(&application);
     let feedback = stale_frame.field_feedback().unwrap();
     assert!(feedback.target().same_field(&target));
     assert_eq!(feedback.reason(), EditorFieldFeedbackReason::StaleAction);
@@ -251,48 +276,417 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
 }
 
 #[test]
-fn invalid_project_inputs_fail_before_an_application_is_created() {
-    let missing = unique_test_path("missing-root");
-    let error = EditorApplication::open(EditorLaunchOptions::new(&missing)).unwrap_err();
-    assert!(matches!(
-        error,
-        EditorApplicationOpenError::ProjectRootOpen { path, .. } if path == missing
-    ));
+fn shell_first_open_routes_rejections_and_preservable_unknown_schema() {
+    let mut manager = EditorApplication::new(EditorLaunchOptions::project_manager());
+    assert_eq!(manager.state(), EditorApplicationState::ProjectManager);
+    assert!(manager.current_frame().is_none());
+    let _ = manager.native_shell_ready();
+    assert_eq!(manager.state(), EditorApplicationState::ProjectManager);
 
-    let missing_startup = StarterProject::new("missing-startup");
-    fs::remove_file(missing_startup.root().join("scenes/startup.scene.json")).unwrap();
-    let error = EditorApplication::open(EditorLaunchOptions::new(missing_startup.root()))
-        .expect_err("a missing configured startup Scene must fail before presentation");
-    assert!(
-        error
-            .diagnostics()
-            .is_some_and(|report| report.has_errors())
-    );
+    let malformed_manifest = StarterProject::new_with_authoring_bundle("malformed-manifest");
+    fs::write(malformed_manifest.root().join("nara.toml"), "not = [toml").unwrap();
+    assert_recovery(malformed_manifest.root());
 
-    let unavailable_schema = StarterProject::new("unavailable-schema");
+    let missing_bundle = StarterProject::new_with_authoring_bundle("missing-bundle");
+    fs::remove_file(missing_bundle.authoring_bundle()).unwrap();
+    assert_recovery(missing_bundle.root());
+
+    let rejected_startup = StarterProject::new_with_authoring_bundle("rejected-startup");
+    fs::write(
+        rejected_startup.root().join("scenes/startup.scene.json"),
+        "{\"not\":\"a scene envelope\"}",
+    )
+    .unwrap();
+    assert_recovery(rejected_startup.root());
+
+    let unavailable_schema = StarterProject::new_with_authoring_bundle("unavailable-schema");
     let entity = SceneEntityRecord::new(SceneEntityId::new("unknown-schema").unwrap())
         .with_component(
             ComponentTypeId::new("example.Missing"),
             SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::Null),
         );
-    let scene = SceneDocument::from_ordered_roots([entity]);
     fs::write(
         unavailable_schema.root().join("scenes/startup.scene.json"),
-        scene.to_json_string().unwrap(),
+        SceneDocument::from_ordered_roots([entity])
+            .to_json_string()
+            .unwrap(),
     )
     .unwrap();
-    let error = EditorApplication::open(EditorLaunchOptions::new(unavailable_schema.root()))
-        .expect_err("complete-schema-only Editor opening must reject unknown components");
-    assert!(
-        error
-            .diagnostics()
-            .is_some_and(|report| report.has_errors())
+    let application = open_ordinary(unavailable_schema.root());
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
     );
+    assert!(application.current_frame().is_some());
+}
+
+#[test]
+fn retry_and_replacement_close_are_failure_atomic() {
+    let repairable = StarterProject::new_with_authoring_bundle("retry-after-repair");
+    let bundle = fs::read(repairable.authoring_bundle()).unwrap();
+    fs::remove_file(repairable.authoring_bundle()).unwrap();
+    let mut retrying = EditorApplication::new(EditorLaunchOptions::new(repairable.root()));
+    let _ = retrying.native_shell_ready();
+    drive_open_to_terminal(&mut retrying);
+    assert_eq!(retrying.state(), EditorApplicationState::Recovery);
+    fs::write(repairable.authoring_bundle(), bundle).unwrap();
+    assert!(retrying.retry_project_open());
+    drive_open_to_terminal(&mut retrying);
+    assert_eq!(retrying.state(), EditorApplicationState::AuthoringDegraded);
+
+    let retained = StarterProject::new("retained-workspace");
+    let replacement = StarterProject::new_with_authoring_bundle("replacement-workspace");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(retained.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    dirty_active_scene(&mut application);
+    let before_failure = current_frame(&application);
+
+    assert!(application.request_project_replacement(unique_test_path("missing-replacement"), None));
+    drive_open_to_terminal(&mut application);
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    let after_failure = current_frame(&application);
+    assert!(Arc::ptr_eq(&before_failure, &after_failure));
+
+    assert!(application.request_project_replacement(replacement.root(), None));
+    drive_replacement_to_close_decision(&mut application);
+    assert!(render_once(&mut application).into_actions().is_empty());
+    let awaiting_cancel = current_frame(&application);
+    let cancel = EditorActionBatch::new(
+        awaiting_cancel.revision(),
+        [EditorAction::WorkspaceIntent(
+            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Cancel),
+        )],
+    );
+    let _ = application.submit_and_drive(cancel, Duration::ZERO);
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    let after_cancel = current_frame(&application);
+    assert_eq!(
+        active_scene_state(&after_cancel),
+        active_scene_state(&before_failure)
+    );
+
+    assert!(application.request_project_replacement(replacement.root(), None));
+    drive_replacement_to_close_decision(&mut application);
+    fs::write(
+        retained.root().join("scenes/startup.scene.json"),
+        SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("external-write").unwrap(),
+        )])
+        .to_json_string()
+        .unwrap(),
+    )
+    .unwrap();
+    let awaiting_failed_save = current_frame(&application);
+    let save = EditorActionBatch::new(
+        awaiting_failed_save.revision(),
+        [EditorAction::WorkspaceIntent(
+            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Save),
+        )],
+    );
+    let _ = application.submit_and_drive(save, Duration::ZERO);
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    assert_eq!(
+        active_scene_state(&current_frame(&application)),
+        active_scene_state(&after_cancel)
+    );
+    let failed_save = current_frame(&application);
+    assert_eq!(failed_save.workspace_intent().phase(), None);
+    assert!(matches!(
+        failed_save.persistence().result(),
+        Some(
+            nara::tooling::EditorPersistenceResult::Rejected { .. }
+                | nara::tooling::EditorPersistenceResult::Failed { .. }
+                | nara::tooling::EditorPersistenceResult::PersistenceUncertain { .. }
+        )
+    ));
+    let failed_scene = failed_save.workspace().active_scene.as_ref().unwrap();
+    let edit_after_failed_save = EditorActionBatch::new(
+        failed_save.revision(),
+        [EditorAction::Mutate(
+            EditorDocumentMutation::ApplyScenePatch {
+                document: failed_scene.document,
+                base_revision: failed_scene.revision,
+                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(
+                        SceneEntityId::new("edit-after-failed-save").unwrap(),
+                    ),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }]),
+            },
+        )],
+    );
+    let resumed = application.submit_and_drive(edit_after_failed_save, Duration::ZERO);
+    assert!(resumed.actions_observed());
+    assert_eq!(current_frame(&application).workspace_intent().phase(), None);
+    assert!(active_scene_has_entity(
+        &current_frame(&application),
+        "edit-after-failed-save"
+    ));
+
+    assert!(application.request_project_replacement(replacement.root(), None));
+    drive_replacement_to_close_decision(&mut application);
+    let awaiting_discard = current_frame(&application);
+    let discard = EditorActionBatch::new(
+        awaiting_discard.revision(),
+        [EditorAction::WorkspaceIntent(
+            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+        )],
+    );
+    let _ = application.submit_and_drive(discard, Duration::ZERO);
+    drive_replacement_to_terminal(&mut application);
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
+    assert!(!active_scene_state(&current_frame(&application)).2);
+}
+
+#[test]
+fn workspace_open_project_action_enters_the_retained_replacement_flow() {
+    let retained = StarterProject::new("reachable-open-retained");
+    let replacement = StarterProject::new_with_authoring_bundle("reachable-open-replacement");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(retained.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let before = current_frame(&application);
+
+    let selected = application.submit_project_action(EguiEditorProjectAction::OpenProject(
+        EguiProjectOpenDraft::new(replacement.root().to_string_lossy(), ""),
+    ));
+
+    assert!(selected.actions_observed());
+    assert!(!selected.exit_ready());
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::OpeningReplacement
+    );
+    assert!(Arc::ptr_eq(&before, &current_frame(&application)));
+    assert!(render_once(&mut application).into_actions().is_empty());
+    let preparing_frame = current_frame(&application);
+    let preparing_scene = preparing_frame.workspace().active_scene.as_ref().unwrap();
+    let ignored = application.submit_and_drive(
+        EditorActionBatch::new(
+            preparing_frame.revision(),
+            [EditorAction::Navigate(
+                EditorNavigationAction::SelectEntity {
+                    document: preparing_scene.document,
+                    entity: None,
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(!ignored.actions_observed());
+    drive_replacement_to_terminal(&mut application);
+
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
+    assert!(!Arc::ptr_eq(&before, &current_frame(&application)));
+}
+
+#[test]
+fn replacement_cancel_restores_the_exact_retained_workspace() {
+    let retained = StarterProject::new("cancel-opening-retained");
+    let replacement = StarterProject::new_with_authoring_bundle("cancel-opening-replacement");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(retained.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let before = current_frame(&application);
+
+    assert!(application.request_project_replacement(replacement.root(), None));
+    let context = egui::Context::default();
+    render_application(&context, &mut application, egui::RawInput::default());
+    let mut cancel = egui::RawInput::default();
+    cancel.events.push(egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    });
+    render_application(&context, &mut application, cancel);
+
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    assert!(Arc::ptr_eq(&before, &current_frame(&application)));
+    assert_eq!(current_frame(&application).workspace_intent().phase(), None);
+}
+
+#[test]
+fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
+    let project = StarterProject::new("reachable-close");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(project.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    dirty_active_scene(&mut application);
+    let before = current_frame(&application);
+    let before_scene = active_scene_state(&before);
+
+    let requested = application.submit_project_action(EguiEditorProjectAction::CloseProject);
+    assert!(requested.actions_observed());
+    assert!(!requested.exit_ready());
+    assert_eq!(
+        current_frame(&application).workspace_intent().phase(),
+        Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+    );
+
+    let locked = current_frame(&application);
+    let scene = locked.workspace().active_scene.as_ref().unwrap();
+    let ignored = application.submit_and_drive(
+        EditorActionBatch::new(
+            locked.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyScenePatch {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(SceneEntityId::new("locked-edit").unwrap()),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }]),
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(!ignored.actions_observed());
+    assert_eq!(
+        active_scene_state(&current_frame(&application)),
+        before_scene
+    );
+
+    let awaiting_cancel = current_frame(&application);
+    let cancelled = application.submit_and_drive(
+        EditorActionBatch::new(
+            awaiting_cancel.revision(),
+            [EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Cancel),
+            )],
+        ),
+        Duration::ZERO,
+    );
+    assert!(!cancelled.exit_ready());
+    assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
+    assert_eq!(
+        active_scene_state(&current_frame(&application)),
+        before_scene
+    );
+
+    let _ = application.submit_project_action(EguiEditorProjectAction::CloseProject);
+    let awaiting_discard = current_frame(&application);
+    let closed = application.submit_and_drive(
+        EditorActionBatch::new(
+            awaiting_discard.revision(),
+            [EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+            )],
+        ),
+        Duration::ZERO,
+    );
+
+    assert!(!closed.exit_ready());
+    drive_session_retirement_to_manager(&mut application);
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+    assert!(application.current_frame().is_none());
+    assert!(application.request_exit().exit_ready());
+}
+
+#[test]
+fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
+    let project = StarterProject::new_with_authoring_bundle("same-root-alias-save");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(project.root()),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    dirty_active_scene(&mut application);
+
+    let alias = project.root().join(".");
+    assert!(application.request_project_replacement(alias, None));
+    drive_replacement_to_close_decision(&mut application);
+    let awaiting_save = current_frame(&application);
+    let save = EditorActionBatch::new(
+        awaiting_save.revision(),
+        [EditorAction::WorkspaceIntent(
+            EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Save),
+        )],
+    );
+    let _ = application.submit_and_drive(save, Duration::ZERO);
+    let saved_frame = current_frame(&application);
+    let _ = application.submit_and_drive(
+        EditorActionBatch::new(saved_frame.revision(), []),
+        Duration::ZERO,
+    );
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::OpeningReplacement
+    );
+    assert_eq!(
+        current_frame(&application).workspace_intent().phase(),
+        Some(EditorWorkspaceIntentPhase::Prepared)
+    );
+    assert!(render_once(&mut application).into_actions().is_empty());
+    drive_replacement_to_terminal(&mut application);
+
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
+    let fresh = current_frame(&application);
+    assert!(active_scene_has_entity(&fresh, "dirty-probe"));
+    assert!(!active_scene_state(&fresh).2);
+}
+
+#[test]
+fn ordinary_play_reports_external_execution_host_unavailable() {
+    let project = StarterProject::new_with_authoring_bundle("runtime-unavailable");
+    let mut application = open_ordinary(project.root());
+    let frame = current_frame(&application);
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let batch = EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Play(EditorPlayAction::Play {
+            document: scene.document,
+            base_revision: scene.revision,
+        })],
+    );
+    let _ = application.submit_and_drive(batch, Duration::ZERO);
+    let frame = current_frame(&application);
+
+    assert_eq!(frame.play().state(), EditorPlayState::Empty);
+    assert_eq!(frame.play().generation(), None);
+    assert_eq!(
+        frame.play().result(),
+        Some(EditorPlayOperationResult::Rejected {
+            operation: EditorPlayOperation::Play,
+            reason: EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ),
+        })
+    );
+    assert!(frame.workspace().active_scene.is_some());
 }
 
 fn render_once(application: &mut EditorApplication) -> EditorActionBatch {
     let context = egui::Context::default();
-    let mut input = egui::RawInput::default();
+    render_application(&context, application, egui::RawInput::default())
+        .expect("the fixed Editor panel returns one workspace result")
+}
+
+fn render_application(
+    context: &egui::Context,
+    application: &mut EditorApplication,
+    mut input: egui::RawInput,
+) -> Option<EditorActionBatch> {
     input.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
         egui::vec2(1200.0, 800.0),
@@ -302,7 +696,164 @@ fn render_once(application: &mut EditorApplication) -> EditorActionBatch {
         batch = Some(application.show(ui));
     });
     output.drop_without_applying_deltas();
-    batch.expect("the fixed Editor panel returns one action batch")
+    batch.expect("the Editor application should render exactly one surface")
+}
+
+fn current_frame(application: &EditorApplication) -> Arc<nara::tooling::EditorFrameModel> {
+    application
+        .current_frame()
+        .expect("the trusted compiled application owns one Editor frame")
+}
+
+fn open_ordinary(project_root: &Path) -> EditorApplication {
+    let mut application = EditorApplication::new(EditorLaunchOptions::new(project_root));
+    assert_eq!(application.state(), EditorApplicationState::ProjectManager);
+    assert!(application.current_frame().is_none());
+    let _ = application.native_shell_ready();
+    assert_eq!(application.state(), EditorApplicationState::OpeningInitial);
+    drive_open_to_terminal(&mut application);
+    application
+}
+
+fn assert_recovery(project_root: &Path) {
+    let application = open_ordinary(project_root);
+    assert_eq!(application.state(), EditorApplicationState::Recovery);
+    assert!(application.current_frame().is_none());
+}
+
+fn drive_open_to_terminal(application: &mut EditorApplication) {
+    for _ in 0..8 {
+        match application.state() {
+            EditorApplicationState::AuthoringReady
+            | EditorApplicationState::AuthoringDegraded
+            | EditorApplicationState::Recovery => return,
+            EditorApplicationState::OpeningInitial | EditorApplicationState::OpeningReplacement => {
+                let _ = application.advance_project_open();
+            }
+            EditorApplicationState::ProjectManager => {
+                panic!("the native shell must arm the project-open request")
+            }
+        }
+    }
+    panic!("the bounded project-open state machine did not reach a terminal state")
+}
+
+fn drive_replacement_to_close_decision(application: &mut EditorApplication) {
+    for _ in 0..8 {
+        let _ = application.advance_project_open();
+        if application.state() == EditorApplicationState::OpeningReplacement
+            && current_frame(application).workspace_intent().phase()
+                == Some(EditorWorkspaceIntentPhase::AwaitingDecision)
+        {
+            return;
+        }
+    }
+    panic!("the replacement did not reach the retained session close decision")
+}
+
+fn drive_replacement_to_terminal(application: &mut EditorApplication) {
+    for _ in 0..24 {
+        match application.state() {
+            EditorApplicationState::AuthoringReady | EditorApplicationState::AuthoringDegraded => {
+                return;
+            }
+            EditorApplicationState::OpeningReplacement => {
+                let _ = application.advance_project_open();
+                if let Some(frame) = application.current_frame() {
+                    let _ = application.submit_and_drive(
+                        EditorActionBatch::new(frame.revision(), []),
+                        Duration::ZERO,
+                    );
+                }
+            }
+            EditorApplicationState::Recovery => return,
+            EditorApplicationState::ProjectManager | EditorApplicationState::OpeningInitial => {
+                panic!("the replacement should retain a published workspace")
+            }
+        }
+    }
+    panic!("the replacement did not reach a published terminal state")
+}
+
+fn drive_session_retirement_to_manager(application: &mut EditorApplication) {
+    for _ in 0..8 {
+        if application.state() == EditorApplicationState::ProjectManager {
+            return;
+        }
+        let frame = current_frame(application);
+        let _ = application
+            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+    }
+    panic!("the session retirement did not return to Project Manager")
+}
+
+fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
+    for _ in 0..8 {
+        if application.current_frame().is_none() {
+            return false;
+        }
+        let frame = current_frame(application);
+        let update = application
+            .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        if update.exit_ready() {
+            return true;
+        }
+    }
+    false
+}
+
+fn dirty_active_scene(application: &mut EditorApplication) {
+    let frame = current_frame(application);
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    let patch = ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+        entity: SceneEntityRecord::new(SceneEntityId::new("dirty-probe").unwrap()),
+        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+    }]);
+    let batch = EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Mutate(
+            EditorDocumentMutation::ApplyScenePatch {
+                document: scene.document,
+                base_revision: scene.revision,
+                patch,
+            },
+        )],
+    );
+    let _ = application.submit_and_drive(batch, Duration::ZERO);
+    assert!(active_scene_state(&current_frame(application)).2);
+}
+
+fn active_scene_state(
+    frame: &nara::tooling::EditorFrameModel,
+) -> (
+    EditorDocumentId,
+    SceneAuthoringRevision,
+    bool,
+    EditorSelectionSet,
+) {
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    (
+        scene.document,
+        scene.revision,
+        scene.dirty,
+        scene.selection.clone(),
+    )
+}
+
+fn active_scene_has_entity(frame: &nara::tooling::EditorFrameModel, id: &str) -> bool {
+    let expected = SceneEntityId::new(id).unwrap();
+    frame
+        .workspace()
+        .active_scene
+        .as_ref()
+        .is_some_and(|scene| {
+            scene
+                .editor
+                .inspector
+                .entities
+                .iter()
+                .any(|entity| entity.id == expected)
+        })
 }
 
 fn has_diagnostic(frame: &nara::tooling::EditorFrameModel, code: &str) -> bool {
@@ -341,6 +892,32 @@ impl StarterProject {
             fs::write(root.join(member_path(member.member())), member.bytes()).unwrap();
         }
         Self { parent, root }
+    }
+
+    fn new_with_authoring_bundle(label: &str) -> Self {
+        let project = Self::new(label);
+        fs::create_dir_all(project.root.join("schemas")).unwrap();
+        let mut manifest = fs::read_to_string(project.root.join("nara.toml")).unwrap();
+        manifest.push_str(
+            r#"
+
+[authoring]
+schema_bundle = "schemas/authoring.bundle.json"
+"#,
+        );
+        fs::write(project.root.join("nara.toml"), manifest).unwrap();
+        project.write_empty_authoring_bundle();
+        project
+    }
+
+    fn write_empty_authoring_bundle(&self) {
+        let bundle =
+            AuthoringSchemaBundle::new(std::iter::empty::<AuthoringSchemaBundleOwner>()).unwrap();
+        fs::write(self.authoring_bundle(), bundle.to_json_string().unwrap()).unwrap();
+    }
+
+    fn authoring_bundle(&self) -> PathBuf {
+        self.root.join("schemas/authoring.bundle.json")
     }
 
     fn root(&self) -> &Path {

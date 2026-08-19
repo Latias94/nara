@@ -33,8 +33,10 @@ impl EditorProjectSession {
         real_delta: Duration,
         drive_runtime: bool,
     ) -> Arc<EditorFrameModel> {
-        self.resume_content_refresh_after_runtime_retirement();
-        self.advance_project_content_refresh();
+        if self.trusted_compiled().is_some() {
+            self.resume_content_refresh_after_runtime_retirement();
+            self.advance_project_content_refresh();
+        }
         if let Some(operation) = self.pending_persistence.take() {
             self.persistence_result = Some(match operation {
                 PendingPersistence::Save(save) => self.complete_save(save),
@@ -47,25 +49,34 @@ impl EditorProjectSession {
         }
         self.advance_workspace_persistence();
         self.advance_workspace_retirement();
-        if drive_runtime {
+        if drive_runtime && self.trusted_compiled().is_some() {
             self.drive_play_owner(real_delta);
         }
         self.advance_workspace_retirement();
         #[cfg(feature = "presentation-2d")]
-        self.drive_editor_preview();
+        if self.trusted_compiled().is_some() {
+            self.drive_editor_preview();
+        }
         self.publish_editor_frame()
     }
 
     pub(super) fn publish_editor_frame(&mut self) -> Arc<EditorFrameModel> {
         #[cfg(feature = "runtime-ui")]
-        self.reconcile_editor_gesture();
+        if self.trusted_compiled().is_some() {
+            self.reconcile_editor_gesture();
+        }
         #[cfg(feature = "presentation-2d")]
-        let preview_world = self.preview.world_snapshot();
+        let preview_world = self
+            .trusted_compiled()
+            .and_then(|lane| lane.preview.world_snapshot());
         #[cfg(not(feature = "presentation-2d"))]
         let preview_world = None;
-        let workspace = self
-            .workspace
-            .model(self.plan.schema_validation().registry(), preview_world);
+        let workspace = match self.trusted_compiled() {
+            Some(lane) => self
+                .workspace
+                .model(lane.plan.schema_validation().registry(), preview_world),
+            None => self.workspace.authoring_model(),
+        };
         let project = self.editor_project_view();
         let diagnostics = self.diagnostics.clone();
         let reopen_document = workspace.active_document.unwrap_or(self.source_document);
@@ -86,7 +97,12 @@ impl EditorProjectSession {
             self.field_feedback.clone(),
         ));
         #[cfg(feature = "runtime-ui")]
-        self.publish_ui_authoring_frame(frame.revision());
+        if self.trusted_compiled().is_some() {
+            self.publish_ui_authoring_frame(frame.revision());
+        } else {
+            self.ui_authoring_frame = None;
+            self.ui_authoring_projection_cache = None;
+        }
         self.published_frame = Some(PublishedEditorFrame {
             model: Arc::clone(&frame),
             dispatched: false,
@@ -96,14 +112,17 @@ impl EditorProjectSession {
 
     fn editor_project_view(&self) -> EditorProjectView {
         EditorProjectView::new(
+            self.project_readiness(),
             self.play_view(),
             self.persistence_view(),
             self.project_content,
             self.workspace_intent_view(),
         )
         .with_inspector_results(
-            self.runtime_edit_result.clone(),
-            self.apply_changes_result.clone(),
+            self.trusted_compiled()
+                .and_then(|lane| lane.runtime_edit_result.clone()),
+            self.trusted_compiled()
+                .and_then(|lane| lane.apply_changes_result.clone()),
         )
     }
 }

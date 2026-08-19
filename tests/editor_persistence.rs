@@ -21,7 +21,7 @@ use nara::{
         CapabilityRights, DirectoryCapability, ExpectedTarget, HostCapabilityOptions,
         RelativeComponent, TrustMode,
     },
-    project_host::{EditorProjectIntent, EditorProjectSession},
+    project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
     scene::{
         SceneAuthoringSession, SceneDocument, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
         ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
@@ -49,8 +49,11 @@ const ASYNC_POLL_INTERVAL: Duration = Duration::from_millis(1);
 #[test]
 fn accepted_scene_revision_publishes_one_matching_preview_candidate() {
     let project = TestProject::new("scene-preview-candidate");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     editor.configure_editor_preview(Extent2d::new(320, 180));
     let _ = editor.take_editor_preview_candidate();
 
@@ -149,8 +152,11 @@ fn persistence_commit_rejects_content_changed_outside_the_temporary_capability()
 #[test]
 fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_bytes() {
     let project = TestProject::new("save-reopen");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
 
     assert!(apply_scene_patch(
@@ -344,8 +350,11 @@ fn save_advances_only_the_captured_revision_then_close_and_reopen_use_persisted_
 #[test]
 fn external_write_rejects_save_and_preserves_dirty_document() {
     let project = TestProject::new("external-write");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     let saved_revision = current_scene_model(&editor, document).saved_revision;
     assert!(apply_scene_patch(
@@ -413,8 +422,11 @@ fn external_write_rejects_save_and_preserves_dirty_document() {
 #[test]
 fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
     let project = TestProject::new("dirty-reopen");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
@@ -458,8 +470,11 @@ fn explicit_reopen_reconciles_a_dirty_document_from_persisted_bytes() {
 fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
     let project = TestProject::new("failed-reopen");
     let original_bytes = fs::read(project.scene_path()).unwrap();
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     let local = scene_id("local");
     assert!(apply_scene_patch(
@@ -646,8 +661,11 @@ fn failed_reopen_preserves_the_dirty_workspace_and_can_be_retried() {
 #[test]
 fn dirty_close_cancel_preserves_the_running_owner_and_document() {
     let project = TestProject::new("dirty-close-cancel");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
@@ -710,8 +728,11 @@ fn dirty_close_cancel_preserves_the_running_owner_and_document() {
 fn dirty_close_discard_stops_play_before_removal_without_writing_disk() {
     let project = TestProject::new("dirty-close-discard");
     let original_bytes = fs::read(project.scene_path()).unwrap();
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
@@ -755,8 +776,11 @@ fn dirty_close_discard_stops_play_before_removal_without_writing_disk() {
 #[test]
 fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
     let project = TestProject::new("dirty-close-save-conflict");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
@@ -832,8 +856,11 @@ fn dirty_close_save_conflict_keeps_document_and_runtime_open() {
 #[test]
 fn reopen_rejects_while_a_runtime_owner_is_live() {
     let project = TestProject::new("reopen-runtime-active");
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
@@ -875,8 +902,11 @@ fn reopen_rejects_while_a_runtime_owner_is_live() {
 fn dirty_close_save_publishes_bytes_before_retiring_play() {
     let project = TestProject::new("dirty-close-save");
     let original_bytes = fs::read(project.scene_path()).unwrap();
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
@@ -922,11 +952,14 @@ fn dirty_close_save_publishes_bytes_before_retiring_play() {
 }
 
 #[test]
-fn dirty_exit_uses_the_same_explicit_decision_before_closing() {
+fn dirty_exit_prepares_non_destructively_before_commit() {
     let project = TestProject::new("dirty-exit");
     let original_bytes = fs::read(project.scene_path()).unwrap();
-    let mut editor = EditorProjectSession::open(project.capability(), EditorProjectIntent::new())
-        .expect("the editor project should open");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the editor project should open");
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert!(apply_scene_patch(
         &mut editor,
@@ -963,8 +996,20 @@ fn dirty_exit_uses_the_same_explicit_decision_before_closing() {
         editor_driver::resolve_workspace_intent(&mut editor, EditorCloseDecision::Discard),
         EditorWorkspaceIntentRequestResult::Accepted
     );
-    drive_workspace_intent_until_idle(&mut editor);
-    assert!(editor.current_frame().workspace().scenes.is_empty());
+    drive_workspace_intent_until_phase(&mut editor, EditorWorkspaceIntentPhase::Prepared);
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert_eq!(
+        editor_driver::commit_prepared_workspace_intent(&mut editor),
+        EditorWorkspaceIntentRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(editor.current_frame().workspace().scene(document).is_some());
+    assert!(matches!(
+        editor.current_frame().workspace_intent().result(),
+        Some(EditorWorkspaceIntentResult::Applied {
+            intent: EditorWorkspaceIntent::Exit,
+        })
+    ));
     assert_eq!(fs::read(project.scene_path()).unwrap(), original_bytes);
 }
 
@@ -994,6 +1039,26 @@ fn drive_workspace_intent_until_idle(editor: &mut EditorProjectSession) {
         if Instant::now() >= deadline {
             panic!(
                 "workspace intent did not complete; observed {:?}",
+                editor.current_frame().workspace_intent().phase()
+            );
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        thread::sleep(ASYNC_POLL_INTERVAL);
+    }
+}
+
+fn drive_workspace_intent_until_phase(
+    editor: &mut EditorProjectSession,
+    expected: EditorWorkspaceIntentPhase,
+) {
+    let deadline = Instant::now() + ASYNC_DRIVER_TIMEOUT;
+    loop {
+        if editor.current_frame().workspace_intent().phase() == Some(expected) {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "workspace intent did not reach {expected:?}; observed {:?}",
                 editor.current_frame().workspace_intent().phase()
             );
         }

@@ -1,9 +1,9 @@
 #![cfg(feature = "editor-game-view-canary")]
 
-#[path = "support/reference_project_copy.rs"]
-mod reference_project_copy;
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
+#[path = "support/reference_project_copy.rs"]
+mod reference_project_copy;
 
 use std::{
     fs,
@@ -17,13 +17,9 @@ use std::{
 use nara::{
     app::{CoreStage, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
     prelude::{App, Assets, Children, ImageAsset, Parent, Resource, World},
-    project_host::{EditorProjectIntent, EditorProjectSession},
-    reflect::{
-        ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    },
-    scene::{
-        PrefabDocument, SceneEntityId, SceneEntitySource,
-    },
+    project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
+    reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
+    scene::{PrefabDocument, SceneEntityId, SceneEntitySource},
     tooling::{
         EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentKind,
         EditorDocumentMutation, EditorGestureAction, EditorGestureOutcome, EditorNavigationAction,
@@ -32,11 +28,11 @@ use nara::{
         PrefabCompositionOutcome,
     },
     ui::{
-        UiColor, UiImageId, UiNode, UiVisual,
         __private::{
             UiAuthoringCanvasProjection, UiAuthoringDirectEdit, UiAuthoringFieldValue,
             UiAuthoringHierarchyKind, UiBrushAuthoringKind, UiCreateParameters, UiStructureIntent,
         },
+        UiColor, UiImageId, UiNode, UiVisual,
     },
 };
 use nara_reference_game::{REFERENCE_RUNTIME_UI_PLUGIN_ID, ReferenceUiObservation, wave_recipe};
@@ -63,11 +59,13 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     seed_legacy_modal_image(&project);
     let migrated_content = try_load_project_content_from_path(project.path())
         .expect("the legacy image brush must migrate through the ordinary loader");
-    assert!(migrated_content
-        .snapshot
-        .images()
-        .iter()
-        .any(|image| image.path().as_str() == "textures/player.png"));
+    assert!(
+        migrated_content
+            .snapshot
+            .images()
+            .iter()
+            .any(|image| image.path().as_str() == "textures/player.png")
+    );
     assert!(migrated_content.snapshot.source_upgrade_required());
     let migrated_prefab = migrated_content
         .snapshot
@@ -80,9 +78,16 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .entities
         .iter()
         .find(|entity| entity.id.as_str() == "modal-dim")
-        .and_then(|entity| entity.components.get(&ComponentTypeId::new("nara.ui.UiVisual")))
+        .and_then(|entity| {
+            entity
+                .components
+                .get(&ComponentTypeId::new("nara.ui.UiVisual"))
+        })
         .expect("the migrated modal visual must remain present");
-    assert_eq!(migrated_visual.version, ComponentSchemaVersion::new(2).unwrap());
+    assert_eq!(
+        migrated_visual.version,
+        ComponentSchemaVersion::new(2).unwrap()
+    );
     drop(migrated_content);
     let stale_expected = UI_REFRESH_EXPECTED_SOURCE
         .lock()
@@ -99,9 +104,9 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     let recipe = wave_recipe()
         .and_then(|recipe| recipe.add_plugin::<EditorUiRefreshProbePlugin>())
         .expect("the UI refresh product recipe must be statically valid");
-    let mut editor = EditorProjectSession::open(
+    let mut editor = EditorProjectSession::open_trusted_compiled(
         project.capability(),
-        EditorProjectIntent::new().with_recipe(recipe),
+        TrustedCompiledEditorProjectIntent::new().with_recipe(recipe),
     )
     .expect("the guarded reference project must open in the Editor Host");
     let opened = editor.current_frame();
@@ -111,7 +116,10 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
         .as_ref()
         .expect("the startup Scene must be active");
     let scene_document = scene.document;
-    let initial_content_generation = opened.project_content().current_generation();
+    let initial_content_generation = opened
+        .project_content()
+        .current_generation()
+        .expect("the trusted compiled Editor installs one project-content generation");
 
     assert!(matches!(
         dispatch(
@@ -335,7 +343,10 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     let structure_deleted = editor.drive_editor_frame(Duration::ZERO);
     assert_eq!(
         ui_child_order(&editor, &ui_root),
-        vec![created.clone(), SceneEntityId::new("terminal-panel").unwrap()]
+        vec![
+            created.clone(),
+            SceneEntityId::new("terminal-panel").unwrap()
+        ]
     );
 
     let action_ui = editor.current_ui_authoring_frame().unwrap();
@@ -560,7 +571,13 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
             if document == prefab_document && digest == saved_digest
     ));
     assert!(reopened.project_content().is_current());
-    assert!(!reopened.workspace().document(prefab_document).unwrap().dirty);
+    assert!(
+        !reopened
+            .workspace()
+            .document(prefab_document)
+            .unwrap()
+            .dirty
+    );
     let reopened_ui = editor
         .current_ui_authoring_frame()
         .expect("the reopened Prefab must publish its saved structure");
@@ -568,13 +585,18 @@ fn saved_ui_prefab_refreshes_project_content_and_explicit_restart() {
     assert!(reopened_projection.hierarchy().iter().any(|node| {
         node.entity() == &created && node.kind() == UiAuthoringHierarchyKind::Image
     }));
-    assert!(!reopened_projection
-        .hierarchy()
-        .iter()
-        .any(|node| node.entity().as_str() == "modal-dim"));
+    assert!(
+        !reopened_projection
+            .hierarchy()
+            .iter()
+            .any(|node| node.entity().as_str() == "modal-dim")
+    );
     assert_eq!(
         ui_child_order(&editor, &ui_root),
-        vec![created.clone(), SceneEntityId::new("terminal-panel").unwrap()]
+        vec![
+            created.clone(),
+            SceneEntityId::new("terminal-panel").unwrap()
+        ]
     );
     let image_brush = reopened_projection
         .fields()
@@ -731,9 +753,10 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
     let Ok(parent) = world.get_entity(parent_id) else {
         return false;
     };
-    if !parent.get::<SceneEntitySource>().is_some_and(|source| {
-        source.source_entity_id.as_str() == "terminal-overlay"
-    }) {
+    if !parent
+        .get::<SceneEntitySource>()
+        .is_some_and(|source| source.source_entity_id.as_str() == "terminal-overlay")
+    {
         return false;
     }
     let Some(children) = parent.get::<Children>() else {
@@ -755,18 +778,20 @@ fn runtime_structure_is_current(world: &World, expected: &SceneEntityId) -> bool
             SceneEntityId::new("terminal-panel").unwrap(),
         ]
         || world.iter_entities().any(|entity| {
-            entity.get::<SceneEntitySource>().is_some_and(|source| {
-                source.source_entity_id.as_str() == "modal-dim"
-            })
+            entity
+                .get::<SceneEntitySource>()
+                .is_some_and(|source| source.source_entity_id.as_str() == "modal-dim")
         })
     {
         return false;
     }
-    world.get_resource::<Assets<ImageAsset>>().is_some_and(|images| {
-        images
-            .iter()
-            .any(|(_, image)| image.source().path().as_str() == "textures/player.png")
-    })
+    world
+        .get_resource::<Assets<ImageAsset>>()
+        .is_some_and(|images| {
+            images
+                .iter()
+                .any(|(_, image)| image.source().path().as_str() == "textures/player.png")
+        })
 }
 
 fn dispatch(
@@ -839,11 +864,13 @@ fn retry_authored_width(editor: &EditorProjectSession, retry: &SceneEntityId) ->
 fn seed_legacy_modal_image(project: &ReferenceProjectCopy) {
     let loaded = try_load_project_content_from_path(project.path())
         .expect("the temporary reference project must load before the source edit");
-    assert!(!loaded
-        .snapshot
-        .images()
-        .iter()
-        .any(|image| image.path().as_str() == "textures/player.png"));
+    assert!(
+        !loaded
+            .snapshot
+            .images()
+            .iter()
+            .any(|image| image.path().as_str() == "textures/player.png")
+    );
     let source = loaded
         .snapshot
         .prefabs()
@@ -917,10 +944,7 @@ fn legacy_brush(kind: &str, color: [f64; 4], reference: &str) -> ComponentValue 
     ])
 }
 
-fn ui_child_order(
-    editor: &EditorProjectSession,
-    parent: &SceneEntityId,
-) -> Vec<SceneEntityId> {
+fn ui_child_order(editor: &EditorProjectSession, parent: &SceneEntityId) -> Vec<SceneEntityId> {
     editor
         .current_ui_authoring_frame()
         .expect("the UI Prefab remains the active authoring source")

@@ -46,7 +46,7 @@ fn host_parity_probe_stays_on_the_public_bounded_product_surface() {
     for required in [
         "headless_run_with_probe",
         "desktop_run_with_probe",
-        "open_editor_with_probe",
+        "open_trusted_compiled_editor_with_probe",
         "RuntimeProbe::new",
         "wave_headless_intent",
         "wave_desktop_intent",

@@ -10,25 +10,27 @@ use nara_scene::{
     SceneDocument, SceneEntityId, SceneEntityRecord, ScenePlacement, ScenePlacementOwner,
 };
 use nara_tooling::{
-    EditorAction, EditorActionBatch, EditorAtomicFieldEdit, EditorCloseDecision, EditorDocumentId,
-    EditorDocumentMutation, EditorExternalReloadState, EditorFieldFeedback,
-    EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldWrite, EditorFrameClock,
-    EditorFrameModel, EditorNavigationAction, EditorPersistenceAction, EditorPersistenceRejection,
-    EditorPersistenceRequestKind, EditorPersistenceResult, EditorPersistenceView, EditorPlayAction,
-    EditorPlayOperation, EditorPlayOperationResult, EditorPlayState, EditorPlayView,
-    EditorProjectContentAction, EditorProjectContentGeneration, EditorProjectContentRefreshFailure,
-    EditorProjectContentView, EditorProjectView, EditorReopenTarget, EditorSceneModel,
+    EditorAction, EditorActionBatch, EditorAtomicFieldEdit, EditorAuthoringReadiness,
+    EditorCloseDecision, EditorDocumentId, EditorDocumentMutation, EditorExternalReloadState,
+    EditorFieldFeedback, EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldWrite,
+    EditorFrameClock, EditorFrameModel, EditorNavigationAction, EditorPersistenceAction,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceResult,
+    EditorPersistenceView, EditorPlayAction, EditorPlayOperation, EditorPlayOperationResult,
+    EditorPlayState, EditorPlayView, EditorProjectContentAction, EditorProjectContentGeneration,
+    EditorProjectContentRefreshFailure, EditorProjectContentView, EditorProjectReadinessView,
+    EditorProjectView, EditorReopenTarget, EditorRuntimeAvailability, EditorSceneModel,
     EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentView, EditorWorkspaceModel,
     PrefabCompositionCommand, SceneCompositionCommand, SceneCompositionComponentKind,
     SceneCompositionEntityKind, SceneEditorModel, SceneInspectorCommand,
-    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
-    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
+    SceneInspectorComponentAccess, SceneInspectorComponentView, SceneInspectorEntityRow,
+    SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
+    SceneInspectorModel,
 };
 
 use crate::{
-    EguiCentralViewportInput, EguiEditorOutput, EguiEditorPanel, EguiEditorViewport,
-    EguiEditorViewportIntent, EguiUiAuthoringInput,
+    EguiCentralViewportInput, EguiEditorOutput, EguiEditorPanel, EguiEditorProjectAction,
+    EguiEditorViewport, EguiEditorViewportIntent, EguiProjectOpenDraft, EguiUiAuthoringInput,
     editor::{test_control_rect, test_diagnostic_codes, test_inline_field_feedback},
     fields::parse_editable_value,
 };
@@ -52,10 +54,82 @@ fn scene_tab_emits_one_typed_shell_intent() {
         EguiEditorViewport::Game,
         "Authoring tab",
     );
-    let (actions, _, intent) = output.into_parts();
+    let (actions, project_action, _, intent) = output.into_parts();
 
     assert!(actions.into_actions().is_empty());
+    assert_eq!(project_action, None);
     assert_eq!(intent, Some(EguiEditorViewportIntent::SelectAuthoring));
+}
+
+#[test]
+fn workspace_project_controls_emit_only_typed_product_actions() {
+    let frame = default_frame(Some(scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    )));
+
+    let context = egui::Context::default();
+    let mut panel = EguiEditorPanel::new();
+    let draft = EguiProjectOpenDraft::new("candidate", "desktop");
+    panel.set_project_open_draft(draft.clone());
+
+    let opened = click_viewport_control(
+        &context,
+        &mut panel,
+        &frame,
+        EguiEditorViewport::Authoring,
+        "Open Project",
+    );
+    assert_eq!(opened.into_parts().1, None);
+    let confirmed = click_viewport_control(
+        &context,
+        &mut panel,
+        &frame,
+        EguiEditorViewport::Authoring,
+        "Confirm Open Project",
+    );
+    let (actions, project_action, _, viewport_intent) = confirmed.into_parts();
+    assert!(actions.into_actions().is_empty());
+    assert_eq!(
+        project_action,
+        Some(EguiEditorProjectAction::OpenProject(draft))
+    );
+    assert_eq!(viewport_intent, None);
+
+    let closed = click_viewport_control(
+        &context,
+        &mut panel,
+        &frame,
+        EguiEditorViewport::Authoring,
+        "Close Project",
+    );
+    let (actions, project_action, _, viewport_intent) = closed.into_parts();
+    assert!(actions.into_actions().is_empty());
+    assert_eq!(project_action, Some(EguiEditorProjectAction::CloseProject));
+    assert_eq!(viewport_intent, None);
+}
+
+#[test]
+fn transition_lock_disables_ordinary_workspace_actions() {
+    let scene = scene_model(
+        revision(),
+        true,
+        SceneAuthoringHistoryStatus {
+            undo_depth: 1,
+            redo_depth: 0,
+        },
+        true,
+    );
+    let frame = default_frame(Some(scene));
+    let mut panel = EguiEditorPanel::new();
+    let output = click_locked_control(&mut panel, &frame, "Undo");
+    let (actions, project_action, _, viewport_intent) = output.into_parts();
+
+    assert!(actions.into_actions().is_empty());
+    assert_eq!(project_action, None);
+    assert_eq!(viewport_intent, None);
 }
 
 #[test]
@@ -90,6 +164,7 @@ fn fixed_toolbar_emits_exact_frame_bound_authoring_actions() {
     let frame = frame(
         Some(scene.clone()),
         EditorProjectView::new(
+            trusted_project_readiness(),
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
             current_project_content(),
@@ -819,6 +894,7 @@ fn host_field_feedback_is_rendered_only_for_the_matching_field() {
     let frame = frame_with_feedback(
         Some(scene.clone()),
         EditorProjectView::new(
+            trusted_project_readiness(),
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
             current_project_content(),
@@ -858,6 +934,7 @@ fn diagnostics_and_persistence_failure_remain_visible_and_dismissible() {
     let document = scene.document;
     let base_revision = scene.revision;
     let project = EditorProjectView::new(
+        trusted_project_readiness(),
         play_view(Some(&scene)),
         EditorPersistenceView::new(
             nara_tooling::EditorPersistenceOperation::Idle,
@@ -922,6 +999,7 @@ fn stale_project_content_emits_one_typed_retry_action() {
     let frame = frame(
         Some(scene.clone()),
         EditorProjectView::new(
+            trusted_project_readiness(),
             play_view(Some(&scene)),
             EditorPersistenceView::default(),
             content,
@@ -952,6 +1030,7 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
         true,
     );
     let project = EditorProjectView::new(
+        trusted_project_readiness(),
         play_view(Some(&scene)),
         EditorPersistenceView::default(),
         current_project_content(),
@@ -960,12 +1039,14 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
                 document: scene.document,
             }),
             Some(EditorWorkspaceIntentPhase::AwaitingDecision),
+            Some(scene.document),
             None,
         ),
     );
     let frame = frame(Some(scene), project, DiagnosticReport::default());
     let mut panel = EguiEditorPanel::new();
-    let batch = click_control(&mut panel, &frame, "Close Cancel");
+    let output = click_locked_control(&mut panel, &frame, "Close Cancel");
+    let (batch, project_action, _, viewport_intent) = output.into_parts();
     assert_eq!(
         batch,
         EditorActionBatch::new(
@@ -975,6 +1056,8 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
             )]
         )
     );
+    assert_eq!(project_action, None);
+    assert_eq!(viewport_intent, None);
 }
 
 fn revision() -> nara_scene::SceneAuthoringRevision {
@@ -1005,6 +1088,7 @@ fn scene_model(
         component: component.clone(),
         document_version: ComponentSchemaVersion::ONE,
         schema_version: ComponentSchemaVersion::ONE,
+        access: SceneInspectorComponentAccess::editable(),
         capabilities: BTreeSet::from([
             ComponentCapability::Inspect,
             ComponentCapability::Edit,
@@ -1054,6 +1138,7 @@ fn default_frame(scene: Option<EditorSceneModel>) -> EditorFrameModel {
     frame(
         scene,
         EditorProjectView::new(
+            trusted_project_readiness(),
             play,
             EditorPersistenceView::default(),
             current_project_content(),
@@ -1088,6 +1173,7 @@ fn frame_with_active_prefab(
                     revision: scene.revision,
                     saved_revision: scene.saved_revision,
                     history: scene.editor.inspector.history,
+                    authoring_readiness: None,
                     source_binding: None,
                     external_reload: scene.external_reload,
                     active: false,
@@ -1100,6 +1186,7 @@ fn frame_with_active_prefab(
                     revision: prefab_revision,
                     saved_revision: prefab_revision,
                     history: SceneAuthoringHistoryStatus::default(),
+                    authoring_readiness: None,
                     source_binding: None,
                     external_reload: EditorExternalReloadState::Clean,
                     active: true,
@@ -1110,6 +1197,7 @@ fn frame_with_active_prefab(
             diagnostics: DiagnosticReport::default(),
         },
         EditorProjectView::new(
+            trusted_project_readiness(),
             EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
             EditorPersistenceView::default(),
             current_project_content(),
@@ -1264,6 +1352,7 @@ fn frame_with_play_state_and_result(
     frame(
         Some(scene),
         EditorProjectView::new(
+            trusted_project_readiness(),
             EditorPlayView::new(
                 state,
                 Some(7),
@@ -1292,6 +1381,13 @@ fn current_project_content() -> EditorProjectContentView {
     EditorProjectContentView::Current {
         generation: EditorProjectContentGeneration::new(1),
     }
+}
+
+fn trusted_project_readiness() -> EditorProjectReadinessView {
+    EditorProjectReadinessView::new(
+        EditorAuthoringReadiness::Complete,
+        EditorRuntimeAvailability::TrustedInProcess,
+    )
 }
 
 fn frame_with_feedback(
@@ -1340,6 +1436,7 @@ fn frame_with_feedback(
                     revision: scene.revision,
                     saved_revision: scene.revision,
                     history,
+                    authoring_readiness: None,
                     source_binding: None,
                     external_reload: scene.external_reload,
                     active: scene.active,
@@ -1375,6 +1472,17 @@ fn click_control(
     let context = egui::Context::default();
     click_recorded_control(label, |input| {
         render_editor_frame(&context, panel, frame, input)
+    })
+}
+
+fn click_locked_control(
+    panel: &mut EguiEditorPanel,
+    frame: &EditorFrameModel,
+    label: &str,
+) -> EguiEditorOutput {
+    let context = egui::Context::default();
+    click_recorded_control(label, |input| {
+        render_locked_editor_frame(&context, panel, frame, input)
     })
 }
 
@@ -1620,4 +1728,29 @@ fn render_editor_viewport_frame(
     });
     output.drop_without_applying_deltas();
     response.expect("the Editor frame should render the fixed viewport panel")
+}
+
+fn render_locked_editor_frame(
+    context: &egui::Context,
+    panel: &mut EguiEditorPanel,
+    frame: &EditorFrameModel,
+    mut input: egui::RawInput,
+) -> EguiEditorOutput {
+    input.screen_rect = Some(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(1280.0, 720.0),
+    ));
+    let mut response = None;
+    let output = context.run_ui(input, |ui| {
+        response = Some(panel.show_with_authoring_lock(
+            ui,
+            frame,
+            None,
+            EguiCentralViewportInput::unavailable(),
+            EguiEditorViewport::Authoring,
+            true,
+        ));
+    });
+    output.drop_without_applying_deltas();
+    response.expect("the locked Editor frame should render")
 }

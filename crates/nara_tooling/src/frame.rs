@@ -251,6 +251,21 @@ impl EditorFrameModel {
     }
 
     #[must_use]
+    pub const fn project_readiness(&self) -> crate::EditorProjectReadinessView {
+        self.project.readiness()
+    }
+
+    #[must_use]
+    pub const fn authoring_readiness(&self) -> crate::EditorAuthoringReadiness {
+        self.project.readiness().authoring()
+    }
+
+    #[must_use]
+    pub const fn runtime_availability(&self) -> crate::EditorRuntimeAvailability {
+        self.project.readiness().runtime()
+    }
+
+    #[must_use]
     pub const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
     }
@@ -424,6 +439,10 @@ pub enum EditorPersistenceAction {
 pub enum EditorWorkspaceIntentAction {
     Request(EditorWorkspaceIntent),
     Resolve(EditorCloseDecision),
+    /// Commits one fully prepared non-destructive workspace exit.
+    CommitPrepared,
+    /// Aborts one fully prepared non-destructive workspace exit.
+    AbortPrepared,
     AcknowledgeResult,
 }
 

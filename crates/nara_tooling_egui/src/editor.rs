@@ -1,5 +1,6 @@
 use egui::{
-    Align, Button, Color32, Layout, Rect, RichText, ScrollArea, Sense, Ui, UiBuilder, Vec2, Window,
+    Align, Button, Color32, Grid, Layout, Rect, RichText, ScrollArea, Sense, TextEdit, Ui,
+    UiBuilder, Vec2, Window,
 };
 use nara_diagnostic::{DiagnosticReport, DiagnosticSeverity};
 use nara_tooling::{
@@ -15,6 +16,7 @@ use nara_tooling::{
 use crate::{
     game_view::{EguiGameViewInput, EguiGameViewOutput, EguiGameViewPanel},
     inspector::EguiSceneInspectorPanel,
+    project_shell::EguiProjectOpenDraft,
     scene_view::{EguiSceneViewInput, EguiSceneViewOutput, EguiSceneViewPanel},
     ui_authoring::{
         EguiUiAuthoringInput, EguiUiAuthoringPanel, EguiUiCanvasInput, EguiUiCanvasOutput,
@@ -55,6 +57,8 @@ pub struct EguiEditorPanel {
     ui_authoring: EguiUiAuthoringPanel,
     ui_canvas: EguiUiCanvasPanel,
     game_view: EguiGameViewPanel,
+    project_open_draft: EguiProjectOpenDraft,
+    project_open_dialog_open: bool,
 }
 
 /// Toolkit-local selection for the fixed central Editor viewport.
@@ -70,6 +74,16 @@ pub enum EguiEditorViewport {
 pub enum EguiEditorViewportIntent {
     SelectAuthoring,
     SelectGame,
+}
+
+/// One product-level project lifecycle action emitted beside the workspace action batch.
+///
+/// These actions belong to the private Editor product rather than `nara_tooling`: they change which
+/// project session the application owns, not the contents of the currently installed workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EguiEditorProjectAction {
+    OpenProject(EguiProjectOpenDraft),
+    CloseProject,
 }
 
 /// Authoring and Game texture facts supplied for one central viewport redraw.
@@ -117,6 +131,7 @@ pub enum EguiCentralViewportOutput {
 #[derive(Debug)]
 pub struct EguiEditorOutput {
     actions: EditorActionBatch,
+    project_action: Option<EguiEditorProjectAction>,
     viewport: EguiCentralViewportOutput,
     viewport_intent: Option<EguiEditorViewportIntent>,
 }
@@ -127,10 +142,16 @@ impl EguiEditorOutput {
         self,
     ) -> (
         EditorActionBatch,
+        Option<EguiEditorProjectAction>,
         EguiCentralViewportOutput,
         Option<EguiEditorViewportIntent>,
     ) {
-        (self.actions, self.viewport, self.viewport_intent)
+        (
+            self.actions,
+            self.project_action,
+            self.viewport,
+            self.viewport_intent,
+        )
     }
 }
 
@@ -173,6 +194,28 @@ impl EguiEditorPanel {
         viewport: EguiCentralViewportInput,
         selected_viewport: EguiEditorViewport,
     ) -> EguiEditorOutput {
+        self.show_with_authoring_lock(
+            ui,
+            frame,
+            ui_authoring.take(),
+            viewport,
+            selected_viewport,
+            false,
+        )
+    }
+
+    /// Renders one exact authoring frame while enforcing the product-owned transition lock.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn show_with_authoring_lock(
+        &mut self,
+        ui: &mut Ui,
+        frame: &EditorFrameModel,
+        mut ui_authoring: Option<EguiUiAuthoringInput<'_>>,
+        viewport: EguiCentralViewportInput,
+        selected_viewport: EguiEditorViewport,
+        read_only: bool,
+    ) -> EguiEditorOutput {
         #[cfg(test)]
         clear_test_observations();
 
@@ -181,30 +224,63 @@ impl EguiEditorPanel {
         self.ui_authoring.synchronize(ui_authoring.as_ref());
         self.ui_canvas.synchronize(ui_authoring.as_ref());
         let mut actions = Vec::new();
+        let mut project_action = None;
+        let mut open_project_requested = false;
 
         ui.set_min_size(Vec2::new(MIN_EDITOR_WIDTH, MIN_EDITOR_HEIGHT));
-        render_toolbar(ui, frame, selected_viewport, &mut actions);
-        ui.separator();
-        let (viewport, viewport_intent) = render_authoring_content(
-            ui,
-            scene,
-            &mut self.inspector,
-            &mut self.scene_view,
-            &mut self.ui_authoring,
-            &mut self.ui_canvas,
-            &mut self.game_view,
-            ui_authoring.as_mut(),
-            viewport,
-            selected_viewport,
-            frame,
-            &mut actions,
-        );
-        ui.separator();
-        render_diagnostics(ui, frame, &mut actions);
+        let (viewport, mut viewport_intent) = ui
+            .add_enabled_ui(!read_only, |ui| {
+                render_toolbar(
+                    ui,
+                    frame,
+                    selected_viewport,
+                    &mut actions,
+                    &mut project_action,
+                    &mut open_project_requested,
+                );
+                ui.separator();
+                let viewport = render_authoring_content(
+                    ui,
+                    scene,
+                    &mut self.inspector,
+                    &mut self.scene_view,
+                    &mut self.ui_authoring,
+                    &mut self.ui_canvas,
+                    &mut self.game_view,
+                    ui_authoring.as_mut(),
+                    viewport,
+                    selected_viewport,
+                    frame,
+                    &mut actions,
+                );
+                ui.separator();
+                render_diagnostics(ui, frame, &mut actions);
+                viewport
+            })
+            .inner;
+        if open_project_requested {
+            self.project_open_dialog_open = true;
+        }
+        if read_only {
+            self.project_open_dialog_open = false;
+        } else {
+            render_project_open_dialog(
+                ui,
+                &mut self.project_open_draft,
+                &mut self.project_open_dialog_open,
+                &mut project_action,
+            );
+        }
         render_dirty_close_dialog(ui, frame, &mut actions);
+
+        if project_action.is_some() {
+            actions.clear();
+            viewport_intent = None;
+        }
 
         EguiEditorOutput {
             actions: EditorActionBatch::new(frame.revision(), actions),
+            project_action,
             viewport,
             viewport_intent,
         }
@@ -226,6 +302,11 @@ impl EguiEditorPanel {
     pub(crate) fn inspector_mut(&mut self) -> &mut EguiSceneInspectorPanel {
         &mut self.inspector
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_project_open_draft(&mut self, draft: EguiProjectOpenDraft) {
+        self.project_open_draft = draft;
+    }
 }
 
 fn render_toolbar(
@@ -233,6 +314,8 @@ fn render_toolbar(
     frame: &EditorFrameModel,
     selected_viewport: EguiEditorViewport,
     actions: &mut Vec<EditorAction>,
+    project_action: &mut Option<EguiEditorProjectAction>,
+    open_project_requested: &mut bool,
 ) {
     let scene = frame.workspace().active_scene.as_ref();
     let active_document = frame
@@ -331,6 +414,13 @@ fn render_toolbar(
         .auto_shrink([false, true])
         .show(ui, |ui| {
             ui.horizontal(|ui| {
+                if toolbar_button(ui, no_workspace_intent, "Open Project") {
+                    *open_project_requested = true;
+                }
+                if toolbar_button(ui, no_workspace_intent, "Close Project") {
+                    *project_action = Some(EguiEditorProjectAction::CloseProject);
+                }
+                ui.separator();
                 render_play_controls(ui, frame, scene, no_workspace_intent, play_pending, actions);
                 let history = active_document.map(|document| document.history);
                 if toolbar_button(
@@ -378,6 +468,68 @@ fn render_toolbar(
                 }
             });
         });
+}
+
+fn render_project_open_dialog(
+    ui: &mut Ui,
+    draft: &mut EguiProjectOpenDraft,
+    open: &mut bool,
+    project_action: &mut Option<EguiEditorProjectAction>,
+) {
+    if !*open {
+        return;
+    }
+
+    let mut close_dialog = false;
+    Window::new("Open Project")
+        .collapsible(false)
+        .resizable(false)
+        .show(ui.ctx(), |ui| {
+            ui.label("The current project remains available until the replacement is accepted.");
+            ui.add_space(8.0);
+            Grid::new("nara_workspace_project_open_fields")
+                .num_columns(2)
+                .spacing(Vec2::new(12.0, 8.0))
+                .show(ui, |ui| {
+                    ui.label("Project path");
+                    ui.add(
+                        TextEdit::singleline(draft.project_path_mut())
+                            .id_salt("nara_workspace_project_open_path")
+                            .desired_width(420.0)
+                            .hint_text("Path to a Nara project"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Profile");
+                    ui.add(
+                        TextEdit::singleline(draft.profile_mut())
+                            .id_salt("nara_workspace_project_open_profile")
+                            .desired_width(420.0)
+                            .hint_text("desktop"),
+                    );
+                    ui.end_row();
+                });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                let confirm = ui.add(Button::new("Open Project").min_size(Vec2::new(112.0, 28.0)));
+                #[cfg(test)]
+                record_test_control("Confirm Open Project", confirm.rect);
+                if confirm.clicked() {
+                    *project_action = Some(EguiEditorProjectAction::OpenProject(draft.clone()));
+                    close_dialog = true;
+                }
+
+                let cancel = ui.add(Button::new("Cancel").min_size(Vec2::new(112.0, 28.0)));
+                #[cfg(test)]
+                record_test_control("Cancel Open Project", cancel.rect);
+                if cancel.clicked() {
+                    close_dialog = true;
+                }
+            });
+        });
+    if close_dialog {
+        *open = false;
+    }
 }
 
 fn render_play_controls(
@@ -698,6 +850,10 @@ fn render_editor_status(
 ) -> bool {
     let mut rendered = false;
     match frame.project_content() {
+        EditorProjectContentView::NotInstalled => {
+            rendered = true;
+            ui.label(RichText::new("Runtime project content is not installed").weak());
+        }
         EditorProjectContentView::Current { .. } => {}
         EditorProjectContentView::RefreshPending { .. } => {
             rendered = true;
@@ -833,11 +989,7 @@ fn render_dirty_close_dialog(
     if frame.workspace_intent().phase() != Some(EditorWorkspaceIntentPhase::AwaitingDecision) {
         return;
     }
-    let save_document = match frame.workspace_intent().intent() {
-        Some(EditorWorkspaceIntent::CloseDocument { document }) => Some(document),
-        Some(EditorWorkspaceIntent::Exit) => frame.workspace().active_document,
-        None => None,
-    };
+    let save_document = frame.workspace_intent().decision_document();
     let save_enabled = frame.persistence().operation() == EditorPersistenceOperation::Idle
         && save_document.is_some_and(|document| {
             persistence_result_allows_request(
@@ -946,6 +1098,12 @@ fn workspace_intent_label(
             EditorWorkspaceIntentPhase::RetiringRuntime,
         ) => "Closing document",
         (EditorWorkspaceIntent::Exit, EditorWorkspaceIntentPhase::RetiringRuntime) => "Exiting",
+        (EditorWorkspaceIntent::CloseDocument { .. }, EditorWorkspaceIntentPhase::Prepared) => {
+            "Close prepared for commit"
+        }
+        (EditorWorkspaceIntent::Exit, EditorWorkspaceIntentPhase::Prepared) => {
+            "Exit prepared for commit"
+        }
     }
 }
 

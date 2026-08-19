@@ -3,7 +3,7 @@ use std::{path::Path, process::ExitCode};
 use nara::{input::KeyCode, scene::SceneEntityId};
 use nara_editor::{
     EditorGameViewCanaryRequest, EditorLaunchOptions, EditorUiAuthoringCanaryRequest,
-    run_game_view_canary_with_intent,
+    run_trusted_compiled_game_view_canary,
 };
 use nara_reference_game::wave_game_view_intent;
 
@@ -21,7 +21,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let evidence = run_game_view_canary_with_intent(
+    let evidence = run_trusted_compiled_game_view_canary(
         EditorLaunchOptions::new(Path::new(env!("CARGO_MANIFEST_DIR"))),
         wave_game_view_intent(),
         EditorGameViewCanaryRequest::new(PLAYER_SPRITE_SORT_KEY, KeyCode::Character('d'))
@@ -62,9 +62,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || committed_ui.revision() == selected_ui.revision()
         || structured_ui.revision().source_id() != committed_ui.revision().source_id()
         || structured_ui.revision().generation()
-            != committed_ui.revision().generation().checked_add(1).ok_or(
-                "the native UI authoring revision generation exhausted",
-            )?
+            != committed_ui
+                .revision()
+                .generation()
+                .checked_add(1)
+                .ok_or("the native UI authoring revision generation exhausted")?
         || selected_ui.gesture().is_some()
         || previewed_ui
             .gesture()

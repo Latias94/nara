@@ -414,9 +414,14 @@ impl EditorProjectSession {
                         .is_some_and(|document| {
                             document.kind == nara_tooling::EditorDocumentKind::Prefab
                         });
+                let Some(lane) = self.trusted_compiled() else {
+                    return EditorActionOutcome::Gesture(EditorGestureOutcome::Rejected(
+                        EditorGestureRejection::BaselineMismatch,
+                    ));
+                };
                 if !is_prefab
                     || !self.workspace.__prefab_field_edit_matches(
-                        self.plan.schema_validation().registry(),
+                        lane.plan.schema_validation().registry(),
                         &baseline,
                     )
                     || !self.ui_authoring_field_edit_matches(
@@ -601,6 +606,12 @@ impl EditorProjectSession {
             EditorWorkspaceIntentAction::Resolve(decision) => {
                 EditorActionOutcome::WorkspaceIntent(self.resolve_workspace_intent(decision))
             }
+            EditorWorkspaceIntentAction::CommitPrepared => {
+                EditorActionOutcome::WorkspaceIntent(self.commit_prepared_workspace_intent())
+            }
+            EditorWorkspaceIntentAction::AbortPrepared => {
+                EditorActionOutcome::WorkspaceIntent(self.abort_prepared_workspace_intent())
+            }
             EditorWorkspaceIntentAction::AcknowledgeResult => {
                 EditorActionOutcome::Acknowledged(EditorActionAcknowledgement::WorkspaceIntent(
                     self.acknowledge_workspace_intent_result(),
@@ -746,17 +757,21 @@ impl EditorProjectSession {
                 actual: frame.play().generation(),
             });
         }
-        let actual_document = match self.runtime_owner {
-            EditorRuntimeOwnerState::Active { document, .. } => Some(document),
-            _ => None,
-        };
+        let actual_document = self
+            .trusted_compiled()
+            .and_then(|lane| match &lane.runtime_owner {
+                EditorRuntimeOwnerState::Active { document, .. } => Some(*document),
+                _ => None,
+            });
         if actual_document != Some(document) {
             return Err(EditorActionRejection::RuntimeDocumentChanged {
                 expected: document,
                 actual: actual_document,
             });
         }
-        let actual_generation = self.runtime_host.running_runtime_generation();
+        let actual_generation = self
+            .trusted_compiled()
+            .and_then(|lane| lane.runtime_host.running_runtime_generation());
         if actual_generation != Some(generation) {
             return Err(EditorActionRejection::RuntimeGenerationChanged {
                 expected: generation,

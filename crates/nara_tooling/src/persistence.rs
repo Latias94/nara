@@ -2,8 +2,44 @@
 
 use nara_scene::SceneAuthoringRevision;
 
-use crate::{EditorApplyChangesResult, EditorPlayView, EditorRuntimeEditResult};
+use crate::{
+    EditorApplyChangesResult, EditorPlayView, EditorRuntimeAvailability, EditorRuntimeEditResult,
+};
 use crate::{EditorDocumentDigest, EditorDocumentId};
+
+/// Authoring completeness of the exact project snapshot installed in an Editor session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorAuthoringReadiness {
+    Complete,
+    Degraded,
+}
+
+/// Orthogonal Authoring and Runtime readiness facts for one installed Editor project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorProjectReadinessView {
+    authoring: EditorAuthoringReadiness,
+    runtime: EditorRuntimeAvailability,
+}
+
+impl EditorProjectReadinessView {
+    #[must_use]
+    pub const fn new(
+        authoring: EditorAuthoringReadiness,
+        runtime: EditorRuntimeAvailability,
+    ) -> Self {
+        Self { authoring, runtime }
+    }
+
+    #[must_use]
+    pub const fn authoring(self) -> EditorAuthoringReadiness {
+        self.authoring
+    }
+
+    #[must_use]
+    pub const fn runtime(self) -> EditorRuntimeAvailability {
+        self.runtime
+    }
+}
 
 /// Monotonic Host publication identity for one immutable project-content snapshot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -46,6 +82,8 @@ impl EditorProjectContentRefreshFailure {
 /// Project-content freshness is independent from document persistence and Runtime lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorProjectContentView {
+    /// No Runtime project-content lane is installed for this Authoring session.
+    NotInstalled,
     Current {
         generation: EditorProjectContentGeneration,
     },
@@ -66,15 +104,16 @@ pub enum EditorProjectContentView {
 
 impl EditorProjectContentView {
     #[must_use]
-    pub const fn current_generation(self) -> EditorProjectContentGeneration {
+    pub const fn current_generation(self) -> Option<EditorProjectContentGeneration> {
         match self {
-            Self::Current { generation } => generation,
+            Self::NotInstalled => None,
+            Self::Current { generation } => Some(generation),
             Self::RefreshPending {
                 current_generation, ..
             }
             | Self::Stale {
                 current_generation, ..
-            } => current_generation,
+            } => Some(current_generation),
         }
     }
 
@@ -256,6 +295,8 @@ pub enum EditorWorkspaceIntentPhase {
     AwaitingDecision,
     Saving,
     RetiringRuntime,
+    /// Every document decision and runtime retirement completed without destroying the workspace.
+    Prepared,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +333,7 @@ pub enum EditorWorkspaceIntentRequestResult {
 pub struct EditorWorkspaceIntentView {
     intent: Option<EditorWorkspaceIntent>,
     phase: Option<EditorWorkspaceIntentPhase>,
+    decision_document: Option<EditorDocumentId>,
     result: Option<EditorWorkspaceIntentResult>,
 }
 
@@ -300,11 +342,13 @@ impl EditorWorkspaceIntentView {
     pub const fn new(
         intent: Option<EditorWorkspaceIntent>,
         phase: Option<EditorWorkspaceIntentPhase>,
+        decision_document: Option<EditorDocumentId>,
         result: Option<EditorWorkspaceIntentResult>,
     ) -> Self {
         Self {
             intent,
             phase,
+            decision_document,
             result,
         }
     }
@@ -319,6 +363,12 @@ impl EditorWorkspaceIntentView {
         self.phase
     }
 
+    /// Returns the exact document whose close decision is currently requested.
+    #[must_use]
+    pub const fn decision_document(self) -> Option<EditorDocumentId> {
+        self.decision_document
+    }
+
     #[must_use]
     pub const fn result(self) -> Option<EditorWorkspaceIntentResult> {
         self.result
@@ -327,6 +377,7 @@ impl EditorWorkspaceIntentView {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorProjectView {
+    readiness: EditorProjectReadinessView,
     play: EditorPlayView,
     persistence: EditorPersistenceView,
     project_content: EditorProjectContentView,
@@ -338,12 +389,14 @@ pub struct EditorProjectView {
 impl EditorProjectView {
     #[must_use]
     pub const fn new(
+        readiness: EditorProjectReadinessView,
         play: EditorPlayView,
         persistence: EditorPersistenceView,
         project_content: EditorProjectContentView,
         workspace_intent: EditorWorkspaceIntentView,
     ) -> Self {
         Self {
+            readiness,
             play,
             persistence,
             project_content,
@@ -351,6 +404,11 @@ impl EditorProjectView {
             runtime_edit_result: None,
             apply_changes_result: None,
         }
+    }
+
+    #[must_use]
+    pub const fn readiness(&self) -> EditorProjectReadinessView {
+        self.readiness
     }
 
     #[must_use]
@@ -392,5 +450,39 @@ impl EditorProjectView {
     #[must_use]
     pub const fn apply_changes_result(&self) -> Option<&EditorApplyChangesResult> {
         self.apply_changes_result.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{EditorPlayState, EditorRuntimeUnavailableReason, EditorWorkspaceIntentView};
+
+    use super::*;
+
+    #[test]
+    fn ordinary_degraded_authoring_does_not_fabricate_runtime_project_content() {
+        let runtime_reason = EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented;
+        let project = EditorProjectView::new(
+            EditorProjectReadinessView::new(
+                EditorAuthoringReadiness::Degraded,
+                EditorRuntimeAvailability::Unavailable(runtime_reason),
+            ),
+            EditorPlayView::new(EditorPlayState::Empty, None, None, None, false, None),
+            EditorPersistenceView::default(),
+            EditorProjectContentView::NotInstalled,
+            EditorWorkspaceIntentView::default(),
+        );
+
+        assert_eq!(
+            project.readiness().authoring(),
+            EditorAuthoringReadiness::Degraded
+        );
+        assert_eq!(
+            project.readiness().runtime(),
+            EditorRuntimeAvailability::Unavailable(runtime_reason)
+        );
+        assert_eq!(project.project_content().current_generation(), None);
+        assert!(!project.project_content().is_current());
+        assert!(!project.project_content().retryable());
     }
 }

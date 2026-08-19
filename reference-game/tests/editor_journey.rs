@@ -16,7 +16,7 @@ use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     gameplay::GameplayCommandQueue,
     prelude::{App, Query, Res, ResMut, Resource},
-    project_host::{EditorProjectIntent, EditorProjectSession},
+    project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{SceneEntitySource, ScenePatchDocument, ScenePatchOperation},
     tooling::{
@@ -58,8 +58,8 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
     let recipe = wave_recipe()
         .and_then(|recipe| recipe.add_plugin::<EditorJourneyProbePlugin>())
         .expect("the Editor journey recipe should be statically valid");
-    let intent = EditorProjectIntent::new().with_recipe(recipe);
-    let mut editor = EditorProjectSession::open(project.capability(), intent)
+    let intent = TrustedCompiledEditorProjectIntent::new().with_recipe(recipe);
+    let mut editor = EditorProjectSession::open_trusted_compiled(project.capability(), intent)
         .expect("the writable reference project should open in the Editor Host");
     let initial_frame = editor.current_frame();
     let document = initial_frame

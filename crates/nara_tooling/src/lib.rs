@@ -38,12 +38,13 @@ pub use inspector::{
     SceneInspectorReadOnlyReason, SceneInspectorState,
 };
 pub use persistence::{
-    EditorCloseDecision, EditorPersistenceCommand, EditorPersistenceFailureStage,
-    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
-    EditorPersistenceRequestResult, EditorPersistenceResult, EditorPersistenceView,
-    EditorProjectContentAction, EditorProjectContentGeneration, EditorProjectContentRefreshFailure,
-    EditorProjectContentRefreshRejection, EditorProjectContentRefreshRequestResult,
-    EditorProjectContentView, EditorProjectView, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
+    EditorAuthoringReadiness, EditorCloseDecision, EditorPersistenceCommand,
+    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
+    EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
+    EditorPersistenceView, EditorProjectContentAction, EditorProjectContentGeneration,
+    EditorProjectContentRefreshFailure, EditorProjectContentRefreshRejection,
+    EditorProjectContentRefreshRequestResult, EditorProjectContentView, EditorProjectReadinessView,
+    EditorProjectView, EditorWorkspaceIntent, EditorWorkspaceIntentPhase,
     EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView,
 };
@@ -52,9 +53,10 @@ pub use play::__export_apply_changes_from_world;
 pub use play::{
     EditorApplyChangesRejection, EditorApplyChangesResult, EditorPlayCommand, EditorPlayFailure,
     EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
-    EditorPlayState, EditorPlayView, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
-    EditorRuntimeEditResult, SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus,
-    SceneApplyChangesReport, SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
+    EditorPlayState, EditorPlayView, EditorRuntimeAvailability, EditorRuntimeEditRejection,
+    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
+    SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus, SceneApplyChangesReport,
+    SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
 };
 pub use snapshot::{DEFAULT_WORLD_IDENTITY_SNAPSHOT_LOCATOR_LIMIT, WorldIdentitySnapshot};
 pub use workspace::{

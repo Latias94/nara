@@ -26,9 +26,9 @@ use nara::{
     },
     ecs::{Commands, Query, Res, Resource, schedule::IntoScheduleConfigs},
     project_host::{
-        EditorGameViewBridgeFailure, EditorGameViewCompletion, EditorProjectIntent,
-        EditorProjectSession,
-        advanced::{RuntimeProbe, open_editor_with_probe},
+        EditorGameViewBridgeFailure, EditorGameViewCompletion, EditorProjectSession,
+        TrustedCompiledEditorProjectIntent,
+        advanced::{RuntimeProbe, open_trusted_compiled_editor_with_probe},
     },
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     render::{Camera2d, Extent2d},
@@ -319,8 +319,11 @@ fn delayed_close_definition(release: Arc<AtomicBool>) -> PluginDefinition {
 fn editor_frame_publishes_ordered_navigation_and_mutation_only_after_drive() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     let frame = editor.current_frame();
     let document = frame.workspace().active_document.unwrap();
     let revision = frame.workspace().scene(document).unwrap().revision;
@@ -380,8 +383,11 @@ fn editor_frame_publishes_ordered_navigation_and_mutation_only_after_drive() {
 fn editor_frame_rejects_a_second_document_mutation_without_undoing_the_first() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     let frame = editor.current_frame();
     let document = frame.workspace().active_document.unwrap();
     let revision = frame.workspace().scene(document).unwrap().revision;
@@ -471,8 +477,11 @@ fn editor_frame_rejects_a_second_document_mutation_without_undoing_the_first() {
 fn play_does_not_rebase_to_a_later_document_revision_from_the_same_frame() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     let frame = editor.current_frame();
     let document = frame.workspace().active_document.unwrap();
     let revision = frame.workspace().scene(document).unwrap().revision;
@@ -531,9 +540,9 @@ fn play_does_not_rebase_to_a_later_document_revision_from_the_same_frame() {
 fn save_completion_becomes_visible_only_in_the_next_editor_frame() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor = EditorProjectSession::open(
+    let mut editor = EditorProjectSession::open_trusted_compiled(
         project.writable_root_capability(),
-        EditorProjectIntent::new(),
+        TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
     let initial = editor.current_frame();
@@ -595,9 +604,10 @@ fn editor_host_owns_prepare_start_pause_step_stop_and_fresh_restart() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let (service_sessions, service_session_observations) = mpsc::sync_channel(2);
-    let intent =
-        EditorProjectIntent::new().with_recipe(runtime_service_session_recipe(service_sessions));
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let intent = TrustedCompiledEditorProjectIntent::new()
+        .with_recipe(runtime_service_session_recipe(service_sessions));
+    let mut editor =
+        EditorProjectSession::open_trusted_compiled(project.root_capability(), intent).unwrap();
 
     assert_eq!(
         editor.current_frame().play().state(),
@@ -816,7 +826,7 @@ resizable = true
     )
     .unwrap();
     let intent = || {
-        EditorProjectIntent::new()
+        TrustedCompiledEditorProjectIntent::new()
             .with_profile("desktop")
             .with_recipe(
                 ProductRecipe::new()
@@ -824,8 +834,10 @@ resizable = true
                     .unwrap(),
             )
     };
-    let mut first = EditorProjectSession::open(project.root_capability(), intent()).unwrap();
-    let mut second = EditorProjectSession::open(project.root_capability(), intent()).unwrap();
+    let mut first =
+        EditorProjectSession::open_trusted_compiled(project.root_capability(), intent()).unwrap();
+    let mut second =
+        EditorProjectSession::open_trusted_compiled(project.root_capability(), intent()).unwrap();
 
     for editor in [&mut first, &mut second] {
         assert_eq!(
@@ -1011,9 +1023,10 @@ fn editor_product_recipe_runs_the_same_replayable_runtime_plugin() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let (observations, receiver) = mpsc::sync_channel(1);
-    let mut editor = EditorProjectSession::open(
+    let mut editor = EditorProjectSession::open_trusted_compiled(
         project.root_capability(),
-        EditorProjectIntent::new().with_recipe(runtime_service_session_recipe(observations)),
+        TrustedCompiledEditorProjectIntent::new()
+            .with_recipe(runtime_service_session_recipe(observations)),
     )
     .unwrap();
 
@@ -1055,8 +1068,11 @@ fn editor_product_recipe_runs_the_same_replayable_runtime_plugin() {
 fn play_without_an_active_document_rejects_without_creating_an_owner() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     let document = editor.current_frame().workspace().active_document.unwrap();
     let frame = editor.current_frame();
     let base_revision = frame.workspace().scene(document).unwrap().revision;
@@ -1091,8 +1107,11 @@ fn play_without_an_active_document_rejects_without_creating_an_owner() {
 fn runtime_edit_is_generation_and_safe_point_bound() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
@@ -1197,9 +1216,9 @@ fn paused_editor_edit_refreshes_parented_global_before_extract_and_resume() {
         ],
     ));
     let (observations, receiver) = mpsc::sync_channel(128);
-    let mut editor = open_editor_with_probe(
+    let mut editor = open_trusted_compiled_editor_with_probe(
         project.root_capability(),
-        EditorProjectIntent::new(),
+        TrustedCompiledEditorProjectIntent::new(),
         RuntimeProbe::new(spatial_observation_definition(child_id, observations)),
     )
     .unwrap();
@@ -1313,8 +1332,11 @@ fn apply_changes_exports_selected_runtime_value_and_marks_runtime_out_of_date() 
             ),
         ),
     ]));
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
@@ -1565,8 +1587,8 @@ fn workspace_close_retains_document_through_close_incomplete_and_retry() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let release = Arc::new(AtomicBool::new(false));
-    let intent = EditorProjectIntent::new().with_cleanup_timeout(Duration::ZERO);
-    let mut editor = open_editor_with_probe(
+    let intent = TrustedCompiledEditorProjectIntent::new().with_cleanup_timeout(Duration::ZERO);
+    let mut editor = open_trusted_compiled_editor_with_probe(
         project.root_capability(),
         intent,
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
@@ -1606,8 +1628,8 @@ fn direct_stop_retains_close_incomplete_until_retry() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let release = Arc::new(AtomicBool::new(false));
-    let intent = EditorProjectIntent::new().with_cleanup_timeout(Duration::ZERO);
-    let mut editor = open_editor_with_probe(
+    let intent = TrustedCompiledEditorProjectIntent::new().with_cleanup_timeout(Duration::ZERO);
+    let mut editor = open_trusted_compiled_editor_with_probe(
         project.root_capability(),
         intent,
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
@@ -1653,8 +1675,9 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
     let recipe = ProductRecipe::new()
         .add_plugin::<ShutdownFailurePlugin>()
         .expect("the shutdown-failure recipe is statically valid");
-    let intent = EditorProjectIntent::new().with_recipe(recipe);
-    let mut editor = EditorProjectSession::open(project.root_capability(), intent).unwrap();
+    let intent = TrustedCompiledEditorProjectIntent::new().with_recipe(recipe);
+    let mut editor =
+        EditorProjectSession::open_trusted_compiled(project.root_capability(), intent).unwrap();
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
         EditorPlayRequestResult::Accepted
@@ -1682,8 +1705,11 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
 fn apply_changes_rejects_prefab_expansion_without_document_mutation() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     let document = editor.current_frame().workspace().active_document.unwrap();
     assert_eq!(
         editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
@@ -1738,10 +1764,10 @@ fn failed_start_retains_retirement_owner_until_retry_completes() {
     let recipe = ProductRecipe::new()
         .add_plugin::<BuildFailurePlugin>()
         .expect("the build-failure recipe is statically valid");
-    let intent = EditorProjectIntent::new()
+    let intent = TrustedCompiledEditorProjectIntent::new()
         .with_cleanup_timeout(Duration::ZERO)
         .with_recipe(recipe);
-    let mut editor = open_editor_with_probe(
+    let mut editor = open_trusted_compiled_editor_with_probe(
         project.root_capability(),
         intent,
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),
@@ -1795,8 +1821,8 @@ fn failed_start_remains_retiring_while_cleanup_is_still_pending() {
     let recipe = ProductRecipe::new()
         .add_plugin::<BuildFailurePlugin>()
         .expect("the build-failure recipe is statically valid");
-    let intent = EditorProjectIntent::new().with_recipe(recipe);
-    let mut editor = open_editor_with_probe(
+    let intent = TrustedCompiledEditorProjectIntent::new().with_recipe(recipe);
+    let mut editor = open_trusted_compiled_editor_with_probe(
         project.root_capability(),
         intent,
         RuntimeProbe::new(delayed_close_definition(Arc::clone(&release))),

@@ -212,12 +212,6 @@ fn ordinary_product_intents_have_one_recipe_composition_authority() {
             "with_recipe",
         ],
     );
-    assert_intent_surface(
-        &read(root.join("src/project_host/runtime/editor.rs")),
-        "EditorProjectIntent",
-        &["cleanup_policy", "profile", "recipe"],
-        &["new", "with_cleanup_timeout", "with_profile", "with_recipe"],
-    );
 }
 
 #[test]

@@ -405,11 +405,20 @@ impl EditorProjectSession {
         self.ui_authoring_frame = None;
         self.ui_authoring_projection_cache = None;
         #[cfg(feature = "presentation-ui")]
-        self.ui_preview.retire();
+        if let Some(lane) = self.trusted_compiled_mut() {
+            lane.ui_preview.retire();
+        }
     }
 
     pub(super) fn reconcile_editor_gesture(&mut self) {
         let Some(active) = self.gestures.active().cloned() else {
+            return;
+        };
+        let Some(lane) = self.trusted_compiled() else {
+            let _ = self
+                .gestures
+                .cancel_active(EditorGestureCancelReason::SourceHandoff);
+            self.last_gesture_cancellation = Some(EditorGestureCancelReason::SourceHandoff);
             return;
         };
         let target = active.baseline().target();
@@ -426,7 +435,7 @@ impl EditorProjectSession {
                 }
                 Some(_)
                     if !self.workspace.__prefab_field_target_exists(
-                        self.plan.schema_validation().registry(),
+                        lane.plan.schema_validation().registry(),
                         target,
                     ) =>
                 {
@@ -442,25 +451,34 @@ impl EditorProjectSession {
     }
 
     pub(super) fn publish_ui_authoring_frame(&mut self, editor_frame: EditorFrameRevision) {
+        if self.trusted_compiled().is_none() {
+            self.ui_authoring_frame = None;
+            self.ui_authoring_projection_cache = None;
+            return;
+        }
         let Some(document) = self.workspace.active_document() else {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
             #[cfg(feature = "presentation-ui")]
-            self.ui_preview.retire();
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.ui_preview.retire();
+            }
             return;
         };
         let Some(slot) = self.workspace.prefab(document) else {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
             #[cfg(feature = "presentation-ui")]
-            self.ui_preview.retire();
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.ui_preview.retire();
+            }
             return;
         };
 
         let revision = slot.revision();
         let source_binding = slot.source_binding().clone();
         let selection = slot.selection().clone();
-        let accepted = slot.session().document();
+        let accepted = slot.session().document().clone();
         let mut gesture = self.gestures.active().cloned();
         let projected_document = gesture
             .as_ref()
@@ -470,13 +488,15 @@ impl EditorProjectSession {
             })
             .and_then(|gesture| {
                 let mut preview = PrefabAuthoringSession::new(accepted.clone());
-                preview
-                    .apply_patch(
-                        &gesture.preview().to_patch(),
-                        self.plan.schema_validation().registry(),
-                    )
-                    .applied
-                    .then(|| preview.document().clone())
+                self.trusted_compiled().and_then(|lane| {
+                    preview
+                        .apply_patch(
+                            &gesture.preview().to_patch(),
+                            lane.plan.schema_validation().registry(),
+                        )
+                        .applied
+                        .then(|| preview.document().clone())
+                })
             });
         let projected_document = match (gesture.is_some(), projected_document) {
             (true, None) => {
@@ -489,12 +509,18 @@ impl EditorProjectSession {
             }
             (_, projected) => projected,
         };
-        let projected_document = projected_document.as_ref().unwrap_or(accepted);
+        let projected_document = projected_document.as_ref().unwrap_or(&accepted);
+        let Some(image_choice_generation) = self
+            .trusted_compiled()
+            .map(|lane| lane.ui_authoring_image_choices.generation())
+        else {
+            return;
+        };
         let key = EditorUiAuthoringProjectionKey {
             document,
             revision,
             gesture: gesture.as_ref().map(EditorGestureView::stamp),
-            image_choice_generation: self.ui_authoring_image_choices.generation(),
+            image_choice_generation,
         };
         let projection = match self
             .ui_authoring_projection_cache
@@ -514,25 +540,32 @@ impl EditorProjectSession {
         #[cfg(feature = "presentation-ui")]
         let (projection, canvas_generation) = match projection {
             Ok(projection) => {
-                let canvas = self.ui_preview.prepare(
+                let Some(lane) = self.trusted_compiled_mut() else {
+                    return;
+                };
+                let primary_surface = lane
+                    .plan
+                    .settings()
+                    .ui
+                    .primary_surface
+                    .map(crate::product::AcceptedPrimaryUiSurfaceProfile::from_effective);
+                let canvas = lane.ui_preview.prepare(
                     document,
                     revision,
                     gesture.as_ref().map(EditorGestureView::stamp),
                     projection.as_ref(),
-                    self.plan
-                        .settings()
-                        .ui
-                        .primary_surface
-                        .map(crate::product::AcceptedPrimaryUiSurfaceProfile::from_effective),
+                    primary_surface,
                 );
-                let generation = self.ui_preview.geometry_generation();
+                let generation = lane.ui_preview.geometry_generation();
                 (
                     Ok(Arc::new(projection.as_ref().clone().with_canvas(canvas))),
                     generation,
                 )
             }
             Err(error) => {
-                self.ui_preview.retire();
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.ui_preview.retire();
+                }
                 (Err(error), None)
             }
         };
@@ -540,6 +573,12 @@ impl EditorProjectSession {
         let canvas_generation = {
             let _ = projected_document;
             None
+        };
+        let Some(image_choices) = self
+            .trusted_compiled()
+            .map(|lane| lane.ui_authoring_image_choices.clone())
+        else {
+            return;
         };
         self.ui_authoring_frame = Some(Arc::new(EditorUiAuthoringFrame {
             editor_frame,
@@ -550,7 +589,7 @@ impl EditorProjectSession {
             gesture,
             last_gesture_cancellation: self.last_gesture_cancellation.take(),
             canvas_generation,
-            image_choices: self.ui_authoring_image_choices.clone(),
+            image_choices,
             projection,
         }));
     }

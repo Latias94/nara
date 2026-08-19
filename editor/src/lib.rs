@@ -4,10 +4,12 @@ mod app;
 mod platform;
 
 pub use app::{
-    EditorApplication, EditorApplicationOpenError, EditorApplicationUpdate, EditorLaunchOptions,
+    EditorApplication, EditorApplicationOpenError, EditorApplicationState, EditorApplicationUpdate,
+    EditorLaunchOptions,
 };
 pub use platform::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
     EditorRunError, EditorUiAuthoringCanaryEvidence, EditorUiAuthoringCanaryFrame,
-    EditorUiAuthoringCanaryRequest, run, run_game_view_canary_with_intent, run_with_intent,
+    EditorUiAuthoringCanaryRequest, run, run_trusted_compiled,
+    run_trusted_compiled_game_view_canary,
 };

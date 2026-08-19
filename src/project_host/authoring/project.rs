@@ -17,7 +17,7 @@ use nara_fs::{
 };
 use nara_project::{EffectiveProjectSettings, ProjectPath, ProjectPathError};
 use nara_reflect::AuthoringSchemaBundle;
-use nara_scene::__private::AuthoringAdapterReceipt;
+use nara_scene::__private::{AuthoringAdapterReceipt, fork_published_authoring_prefab_document};
 use nara_scene::{
     AuthoringDocumentPublicationError, AuthoringDocumentReadiness, AuthoringDocumentSource,
     AuthoringRecordFact, PrefabDocument, PrefabDocumentCandidate, PublishedAuthoringPrefabDocument,
@@ -385,6 +385,29 @@ impl AuthoringProjectReceipt {
     pub(crate) fn attempt_generation(&self) -> AuthoringProjectAttemptGeneration {
         self.snapshot.attempt_generation()
     }
+
+    pub(crate) fn into_session_parts(
+        self,
+    ) -> Result<AuthoringProjectSessionParts, AuthoringProjectReceiptUseError> {
+        let inner = Arc::try_unwrap(self.snapshot.inner)
+            .map_err(|_| AuthoringProjectReceiptUseError::SnapshotAliased)?;
+        let startup_scene = Arc::try_unwrap(inner.startup_scene)
+            .map_err(|_| AuthoringProjectReceiptUseError::StartupDocumentAliased)?;
+        Ok(AuthoringProjectSessionParts {
+            snapshot: AuthoringProjectSessionSnapshot {
+                schema: inner.schema,
+                adapters: inner.adapters,
+                readiness: inner.readiness,
+                startup_source: inner.startup_source,
+                prefabs: inner.prefabs,
+                assets: inner.assets,
+                unresolved_dependencies: inner.unresolved_dependencies,
+                source_facts: inner.source_facts,
+                usage: inner.usage,
+            },
+            startup_scene,
+        })
+    }
 }
 
 impl Debug for AuthoringProjectReceipt {
@@ -393,6 +416,108 @@ impl Debug for AuthoringProjectReceipt {
             .debug_struct("AuthoringProjectReceipt")
             .field("snapshot", &self.snapshot)
             .finish()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuthoringProjectReceiptUseError {
+    SnapshotAliased,
+    StartupDocumentAliased,
+}
+
+impl Display for AuthoringProjectReceiptUseError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::SnapshotAliased => {
+                "authoring project receipt snapshot is still retained by another owner"
+            }
+            Self::StartupDocumentAliased => {
+                "authoring project startup document is still retained by another owner"
+            }
+        })
+    }
+}
+
+impl Error for AuthoringProjectReceiptUseError {}
+
+pub(crate) struct AuthoringProjectSessionParts {
+    pub(crate) snapshot: AuthoringProjectSessionSnapshot,
+    pub(crate) startup_scene: PublishedAuthoringSceneDocument,
+}
+
+pub(crate) struct AuthoringProjectSessionSnapshot {
+    schema: AuthoringSchemaReceipt,
+    adapters: Box<[AuthoringAdapterReceipt]>,
+    readiness: AuthoringProjectReadiness,
+    startup_source: Arc<AuthoringSourceFact>,
+    prefabs: Box<[AuthoringPrefabSource]>,
+    assets: Box<[AuthoringAssetSource]>,
+    unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
+    source_facts: Box<[Arc<AuthoringSourceFact>]>,
+    usage: AuthoringProjectAdmissionUsage,
+}
+
+impl AuthoringProjectSessionSnapshot {
+    #[must_use]
+    pub(crate) fn attempt_generation(&self) -> AuthoringProjectAttemptGeneration {
+        self.schema.attempt_generation()
+    }
+
+    #[must_use]
+    pub(crate) const fn settings(&self) -> &EffectiveProjectSettings {
+        self.schema.settings()
+    }
+
+    #[must_use]
+    pub(crate) fn project_root(&self) -> DirectoryCapability {
+        self.schema.project_root()
+    }
+
+    #[must_use]
+    pub(crate) const fn readiness(&self) -> AuthoringProjectReadiness {
+        self.readiness
+    }
+
+    #[must_use]
+    pub(crate) fn startup_source(&self) -> &AuthoringSourceFact {
+        &self.startup_source
+    }
+
+    #[must_use]
+    pub(crate) fn prefab(&self, path: &AssetPath) -> Option<&AuthoringPrefabSource> {
+        self.prefabs.iter().find(|prefab| prefab.path() == path)
+    }
+
+    #[must_use]
+    pub(crate) fn fork_prefab(&self, path: &AssetPath) -> Option<PublishedAuthoringPrefabDocument> {
+        self.prefab(path)
+            .map(AuthoringPrefabSource::document)
+            .map(fork_published_authoring_prefab_document)
+    }
+
+    #[must_use]
+    pub(crate) const fn usage(&self) -> AuthoringProjectAdmissionUsage {
+        self.usage
+    }
+}
+
+impl Debug for AuthoringProjectSessionSnapshot {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AuthoringProjectSessionSnapshot")
+            .field("attempt", &self.attempt_generation())
+            .field("readiness", &self.readiness)
+            .field("startup_source", &self.startup_source)
+            .field("adapter_count", &self.adapters.len())
+            .field("prefab_count", &self.prefabs.len())
+            .field("asset_count", &self.assets.len())
+            .field(
+                "unresolved_dependency_count",
+                &self.unresolved_dependencies.len(),
+            )
+            .field("source_count", &self.source_facts.len())
+            .field("usage", &self.usage)
+            .finish_non_exhaustive()
     }
 }
 

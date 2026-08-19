@@ -629,6 +629,9 @@ impl ScenePersistenceHost {
             Ok(session) => session,
             Err(stage) => return SceneReopenOutcome::Failed(stage),
         };
+        if !scene_authoring_basis_is_preserved(&session, current) {
+            return SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
+        }
         SceneReopenOutcome::Opened(Box::new(OpenedSceneReopen {
             session,
             digest: editor_digest(content_digest),
@@ -839,6 +842,9 @@ impl PrefabPersistenceHost {
             Ok(session) => session,
             Err(stage) => return PrefabReopenOutcome::Failed(stage),
         };
+        if !prefab_authoring_basis_is_preserved(&session, current) {
+            return PrefabReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch);
+        }
         PrefabReopenOutcome::Opened(Box::new(OpenedPrefabReopen {
             session,
             digest: editor_digest(content_digest),
@@ -944,12 +950,18 @@ fn validate_authoring_scene_save(
 ) -> Result<(), AuthoringSaveValidationError> {
     let reopened = decode_authoring_scene_session(encoding, bytes, limits, current)
         .map_err(AuthoringSaveValidationError::Decode)?;
-    if reopened.authoring_readiness() != current.authoring_readiness()
-        || reopened.unavailable_record_manifest() != current.unavailable_record_manifest()
-    {
+    if !scene_authoring_basis_is_preserved(&reopened, current) {
         return Err(AuthoringSaveValidationError::PreservationMismatch);
     }
     Ok(())
+}
+
+fn scene_authoring_basis_is_preserved(
+    reopened: &SceneAuthoringSession,
+    current: &SceneAuthoringSession,
+) -> bool {
+    reopened.authoring_readiness() == current.authoring_readiness()
+        && reopened.unavailable_record_manifest() == current.unavailable_record_manifest()
 }
 
 fn encode_prefab(
@@ -1011,12 +1023,18 @@ fn validate_authoring_prefab_save(
 ) -> Result<(), AuthoringSaveValidationError> {
     let reopened = decode_authoring_prefab_session(encoding, bytes, limits, current)
         .map_err(AuthoringSaveValidationError::Decode)?;
-    if reopened.authoring_readiness() != current.authoring_readiness()
-        || reopened.unavailable_record_manifest() != current.unavailable_record_manifest()
-    {
+    if !prefab_authoring_basis_is_preserved(&reopened, current) {
         return Err(AuthoringSaveValidationError::PreservationMismatch);
     }
     Ok(())
+}
+
+fn prefab_authoring_basis_is_preserved(
+    reopened: &PrefabAuthoringSession,
+    current: &PrefabAuthoringSession,
+) -> bool {
+    reopened.authoring_readiness() == current.authoring_readiness()
+        && reopened.unavailable_record_manifest() == current.unavailable_record_manifest()
 }
 
 fn create_temporary(parent: &DirectoryCapability) -> Result<nara_fs::TemporaryFile, FsError> {
@@ -1256,7 +1274,7 @@ mod tests {
     }
 
     #[test]
-    fn degraded_scene_save_and_reopen_preserve_the_exact_unavailable_manifest() {
+    fn degraded_scene_save_and_reopen_require_the_exact_unavailable_manifest() {
         let root = TestRoot::new();
         let entity = SceneEntityId::new("player").unwrap();
         let owner =
@@ -1390,6 +1408,24 @@ mod tests {
             ComponentValue::String("Renamed".to_owned())
         );
         host.commit_reopen(reopened.identity, reopened.content_digest);
+
+        let observed_identity = host.file.observed_identity;
+        let observed_digest = host.file.observed_digest;
+        let mut manifest_drift = scene.clone();
+        assert!(
+            manifest_drift.entities[0]
+                .components
+                .remove(&nara_reflect::ComponentTypeId::new("nara.scene.Visibility"))
+                .is_some()
+        );
+        fs::write(root.scene_path(), manifest_drift.to_json_string().unwrap()).unwrap();
+
+        assert!(matches!(
+            host.reopen_authoring(workspace.scene(document).unwrap().session()),
+            SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
+        ));
+        assert_eq!(host.file.observed_identity, observed_identity);
+        assert_eq!(host.file.observed_digest, observed_digest);
     }
 
     fn scene_with_entity(id: &str) -> SceneDocument {

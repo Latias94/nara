@@ -8,7 +8,17 @@ impl EditorProjectSession {
             .workspace
             .active_scene()
             .map(nara_tooling::EditorSceneSlot::revision);
-        let (state, source_revision) = match &self.runtime_owner {
+        let Some(lane) = self.trusted_compiled() else {
+            return EditorPlayView::new(
+                EditorPlayState::Empty,
+                None,
+                None,
+                current_revision,
+                false,
+                self.play_result,
+            );
+        };
+        let (state, source_revision) = match &lane.runtime_owner {
             EditorRuntimeOwnerState::Empty => (EditorPlayState::Empty, None),
             EditorRuntimeOwnerState::Preparing { revision, .. } => {
                 (EditorPlayState::PreparingPlay, Some(*revision))
@@ -29,7 +39,7 @@ impl EditorProjectSession {
             EditorRuntimeOwnerState::Active {
                 source_revision, ..
             } => {
-                let state = match self.runtime_host.running_runtime_state() {
+                let state = match lane.runtime_host.running_runtime_state() {
                     Some(RuntimeState::Running) => EditorPlayState::Running,
                     Some(RuntimeState::Paused) => EditorPlayState::Paused,
                     Some(RuntimeState::Stepping) => EditorPlayState::Stepping,
@@ -39,7 +49,7 @@ impl EditorProjectSession {
                     Some(RuntimeState::Stopped) | None => EditorPlayState::Empty,
                 };
                 let projected =
-                    self.pending_control
+                    lane.pending_control
                         .map_or(state, |pending| match pending.operation {
                             EditorPlayOperation::StepFixedTick => EditorPlayState::Stepping,
                             EditorPlayOperation::Stop
@@ -52,7 +62,7 @@ impl EditorProjectSession {
                             | EditorPlayOperation::RetryRetirement => state,
                         });
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-                let projected = if self.pending_step_presentation.is_some() {
+                let projected = if lane.pending_step_presentation.is_some() {
                     EditorPlayState::Stepping
                 } else {
                     projected
@@ -63,16 +73,16 @@ impl EditorProjectSession {
                 unreachable!("editor runtime state is not observed during a transition")
             }
         };
-        let running_content_revision = self.runtime_host.running_content_revision();
+        let running_content_revision = lane.runtime_host.running_content_revision();
         let out_of_date = running_content_revision.is_some()
             && (source_revision
                 .zip(current_revision)
                 .is_some_and(|(source, current)| source != current)
-                || running_content_revision != Some(self.snapshot.revision())
+                || running_content_revision != Some(lane.snapshot.revision())
                 || !self.play_source_is_current());
         EditorPlayView::new(
             state,
-            self.runtime_host.running_runtime_generation(),
+            lane.runtime_host.running_runtime_generation(),
             source_revision,
             current_revision,
             out_of_date,
@@ -88,9 +98,19 @@ impl EditorProjectSession {
                 EditorPlayRequestResult::Rejected(EditorPlayRejection::ResultPending)
             };
         }
-        if let Some(pending) = self.pending_workspace_intent {
+        if self.trusted_compiled().is_none() {
+            let reason = EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            );
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation: play_operation(command),
+                reason,
+            });
+            return EditorPlayRequestResult::Rejected(reason);
+        }
+        if let Some(pending) = self.pending_workspace_intent.as_ref() {
             let retry_matches_owner = matches!(
-                (pending.phase, command, self.play_view().state()),
+                (pending.phase(), command, self.play_view().state()),
                 (
                     EditorWorkspaceIntentPhase::RetiringRuntime,
                     EditorPlayCommand::RetryRetirement,
@@ -147,20 +167,27 @@ impl EditorProjectSession {
                 RuntimeControl::RetryClose,
             ),
             EditorPlayCommand::RetryRetirement => {
+                let Some(lane) = self.trusted_compiled_mut() else {
+                    return EditorPlayRequestResult::Rejected(
+                        EditorPlayRejection::RuntimeUnavailable(
+                            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                        ),
+                    );
+                };
                 let state = std::mem::replace(
-                    &mut self.runtime_owner,
+                    &mut lane.runtime_owner,
                     EditorRuntimeOwnerState::Transitioning,
                 );
                 match state {
                     EditorRuntimeOwnerState::RetirementIncomplete { terminal } => {
-                        self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay { terminal };
+                        lane.runtime_owner = EditorRuntimeOwnerState::RetiringPlay { terminal };
                         self.play_result = Some(EditorPlayOperationResult::Pending {
                             operation: EditorPlayOperation::RetryRetirement,
                         });
                         EditorPlayRequestResult::Accepted
                     }
                     other => {
-                        self.runtime_owner = other;
+                        lane.runtime_owner = other;
                         EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState)
                     }
                 }
@@ -174,11 +201,26 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         revision: nara_scene::SceneAuthoringRevision,
     ) -> EditorPlayRequestResult {
+        if self.trusted_compiled().is_none() {
+            let reason = EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            );
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation: EditorPlayOperation::Play,
+                reason,
+            });
+            return EditorPlayRequestResult::Rejected(reason);
+        }
         if self.pending_workspace_intent.is_some() {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
-        if !matches!(self.runtime_owner, EditorRuntimeOwnerState::Empty)
-            || self.pending_control.is_some()
+        let Some(lane) = self.trusted_compiled() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ));
+        };
+        if !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Empty)
+            || lane.pending_control.is_some()
         {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
@@ -203,7 +245,12 @@ impl EditorProjectSession {
             });
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::StaleDocument);
         }
-        self.runtime_owner = EditorRuntimeOwnerState::Preparing {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ));
+        };
+        lane.runtime_owner = EditorRuntimeOwnerState::Preparing {
             document,
             revision,
             operation: EditorPlayOperation::Play,
@@ -216,5 +263,22 @@ impl EditorProjectSession {
 
     pub(super) fn play_source_is_current(&self) -> bool {
         self.project_content.is_current() && !self.workspace.has_dirty_prefab()
+    }
+}
+
+fn play_operation(command: EditorPlayCommand) -> EditorPlayOperation {
+    match command {
+        EditorPlayCommand::Play => EditorPlayOperation::Play,
+        EditorPlayCommand::Cancel => EditorPlayOperation::Cancel,
+        EditorPlayCommand::Pause => EditorPlayOperation::Pause,
+        EditorPlayCommand::Resume => EditorPlayOperation::Resume,
+        EditorPlayCommand::StepFixedTick => EditorPlayOperation::StepFixedTick,
+        EditorPlayCommand::Stop => EditorPlayOperation::Stop,
+        EditorPlayCommand::Restart => EditorPlayOperation::Restart,
+        EditorPlayCommand::RetryClose => EditorPlayOperation::RetryClose,
+        EditorPlayCommand::RetryRetirement => EditorPlayOperation::RetryRetirement,
+        EditorPlayCommand::AcknowledgeResult => {
+            unreachable!("acknowledgement is handled before operation projection")
+        }
     }
 }

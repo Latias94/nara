@@ -9,7 +9,7 @@ use std::{sync::Arc, time::Duration};
 
 use editor_action_driver as editor_driver;
 use nara::{
-    project_host::{EditorProjectIntent, EditorProjectSession},
+    project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::SceneEntityId,
     tooling::{
@@ -23,8 +23,11 @@ use project_content_fixture::TestProject;
 fn runtime_only_edit_is_discarded_when_host_owned_play_stops() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
-    let mut editor =
-        EditorProjectSession::open(project.root_capability(), EditorProjectIntent::new()).unwrap();
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
     let before = editor.current_frame();
     let document = before.workspace().active_document.unwrap();
     let before_scene = before.workspace().scene(document).unwrap().clone();

@@ -81,7 +81,13 @@ pub use runtime::{
 ))]
 pub use runtime::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-pub use runtime::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
+#[doc(hidden)]
+pub use runtime::{
+    EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
+    EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
+    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectSession,
+    TrustedCompiledEditorProjectIntent,
+};
 #[cfg(all(
     feature = "runtime-2d",
     feature = "serde",

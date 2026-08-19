@@ -1,10 +1,11 @@
-use std::{fmt, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 
 mod actions;
 mod content_refresh;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
 mod model;
+mod open;
 mod persistence;
 mod play;
 #[cfg(feature = "presentation-2d")]
@@ -20,6 +21,11 @@ pub use game_view::{
     EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
     EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
     EditorGameViewCompletionDisposition,
+};
+pub use open::{
+    EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
+    EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
+    EditorProjectOpenProgress,
 };
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
@@ -37,7 +43,7 @@ use nara_app::{
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Mut, Resource, World};
-use nara_fs::{ContentDigest, DirectoryCapability, RelativePath};
+use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
 use nara_reflect::{
     ComponentCapability, ComponentRegistry, component_registry,
     report_component_registry_authority_fault,
@@ -46,16 +52,17 @@ use nara_reflect::{
 use nara_render::Extent2d;
 use nara_scene::SceneEntitySource;
 use nara_tooling::{
-    __export_apply_changes_from_world, EditorCloseDecision, EditorDocumentId, EditorDocumentKind,
-    EditorFieldFeedback, EditorFrameClock, EditorFrameModel, EditorGestureCancelReason,
-    EditorGestureController, EditorPersistenceAuthority, EditorPersistenceCommand,
-    EditorPersistenceFailureStage, EditorPersistenceOperation, EditorPersistenceRejection,
-    EditorPersistenceRequestKind, EditorPersistenceRequestResult, EditorPersistenceResult,
-    EditorPersistenceView, EditorPlayCommand, EditorPlayFailure, EditorPlayOperation,
-    EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult, EditorPlayState,
-    EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
-    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorWorkspace,
-    EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
+    __export_apply_changes_from_world, EditorAuthoringReadiness, EditorCloseDecision,
+    EditorDocumentId, EditorDocumentKind, EditorFieldFeedback, EditorFrameClock, EditorFrameModel,
+    EditorGestureCancelReason, EditorGestureController, EditorPersistenceAuthority,
+    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
+    EditorPlayState, EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
+    EditorProjectReadinessView, EditorRuntimeAvailability, EditorRuntimeEditRejection,
+    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
     SceneApplyChangesRequest,
@@ -63,6 +70,9 @@ use nara_tooling::{
 use nara_tooling::{EditorApplyChangesRejection, EditorApplyChangesResult};
 
 use crate::ProductRecipe;
+use crate::project_host::authoring::{
+    AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
+};
 use crate::project_host::composition::{
     editor_play_runtime_plugins_with_recipe, resolve_project_runtime_request,
     runtime_host_policy_contribution,
@@ -313,17 +323,18 @@ fn apply_runtime_edit(
     EditorRuntimeEditResult::Applied(request.clone())
 }
 
-/// Rust authoring configuration for one concrete Editor project session.
-pub struct EditorProjectIntent {
+/// Advanced Rust configuration for one trusted compiled Editor project session.
+#[doc(hidden)]
+pub struct TrustedCompiledEditorProjectIntent {
     profile: Option<String>,
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
 }
 
-impl fmt::Debug for EditorProjectIntent {
+impl fmt::Debug for TrustedCompiledEditorProjectIntent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("EditorProjectIntent")
+            .debug_struct("TrustedCompiledEditorProjectIntent")
             .field("profile_present", &self.profile.is_some())
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
@@ -331,13 +342,13 @@ impl fmt::Debug for EditorProjectIntent {
     }
 }
 
-impl Default for EditorProjectIntent {
+impl Default for TrustedCompiledEditorProjectIntent {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl EditorProjectIntent {
+impl TrustedCompiledEditorProjectIntent {
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -376,6 +387,11 @@ impl EditorProjectOpenError {
     #[must_use]
     pub const fn diagnostics(&self) -> &DiagnosticReport {
         &self.diagnostics
+    }
+
+    #[must_use]
+    pub fn into_diagnostics(self) -> DiagnosticReport {
+        self.diagnostics
     }
 }
 
@@ -523,16 +539,115 @@ struct PendingApplyChanges {
     request: SceneApplyChangesRequest,
 }
 
+#[derive(Debug)]
+enum PendingWorkspaceIntent {
+    CloseDocument(PendingDocumentClose),
+    Exit(PendingExitPreparation),
+}
+
 #[derive(Debug, Clone, Copy)]
-struct PendingWorkspaceIntent {
-    intent: EditorWorkspaceIntent,
+struct PendingDocumentClose {
     document: EditorDocumentId,
     phase: EditorWorkspaceIntentPhase,
+}
+
+#[derive(Debug)]
+struct PendingExitPreparation {
+    documents: Box<[EditorDocumentId]>,
+    cursor: usize,
+    phase: EditorWorkspaceIntentPhase,
+}
+
+impl PendingWorkspaceIntent {
+    const fn intent(&self) -> EditorWorkspaceIntent {
+        match self {
+            Self::CloseDocument(pending) => EditorWorkspaceIntent::CloseDocument {
+                document: pending.document,
+            },
+            Self::Exit(_) => EditorWorkspaceIntent::Exit,
+        }
+    }
+
+    const fn phase(&self) -> EditorWorkspaceIntentPhase {
+        match self {
+            Self::CloseDocument(pending) => pending.phase,
+            Self::Exit(pending) => pending.phase,
+        }
+    }
+
+    fn decision_document(&self) -> Option<EditorDocumentId> {
+        match self {
+            Self::CloseDocument(pending) => Some(pending.document),
+            Self::Exit(pending) => pending.current_document(),
+        }
+    }
+
+    fn set_phase(&mut self, phase: EditorWorkspaceIntentPhase) {
+        match self {
+            Self::CloseDocument(pending) => pending.phase = phase,
+            Self::Exit(pending) => pending.phase = phase,
+        }
+    }
+}
+
+impl PendingExitPreparation {
+    fn new(documents: Vec<EditorDocumentId>) -> Self {
+        Self {
+            documents: documents.into_boxed_slice(),
+            cursor: 0,
+            phase: EditorWorkspaceIntentPhase::AwaitingDecision,
+        }
+    }
+
+    fn current_document(&self) -> Option<EditorDocumentId> {
+        self.documents.get(self.cursor).copied()
+    }
 }
 
 struct PublishedEditorFrame {
     model: Arc<EditorFrameModel>,
     dispatched: bool,
+}
+
+enum EditorExecutionLane {
+    Authoring(AuthoringProjectSessionSnapshot),
+    TrustedCompiled(Box<TrustedCompiledEditorLane>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AuthoringPrefabSourceObservation {
+    identity: FileIdentity,
+    digest: ContentDigest,
+}
+
+impl AuthoringPrefabSourceObservation {
+    const fn new(identity: FileIdentity, digest: ContentDigest) -> Self {
+        Self { identity, digest }
+    }
+}
+
+struct TrustedCompiledEditorLane {
+    plan: RuntimePlan,
+    content_candidate: ProjectSettingsCandidate,
+    content_loader: ProjectContentLoader,
+    snapshot: crate::project_host::ProjectContentSnapshot,
+    prefab_root: DirectoryCapability,
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
+    #[cfg(feature = "presentation-2d")]
+    preview: preview::EditorPreviewSession,
+    runtime_host: ProjectHost,
+    runtime_owner: EditorRuntimeOwnerState,
+    pending_control: Option<PendingEditorControl>,
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    pending_step_presentation: Option<EditorStepPresentationState>,
+    runtime_edit_result: Option<EditorRuntimeEditResult>,
+    pending_apply_changes: Option<PendingApplyChanges>,
+    apply_changes_result: Option<EditorApplyChangesResult>,
+    #[cfg(feature = "runtime-ui")]
+    ui_authoring_image_choices: EditorUiImageChoices,
+    #[cfg(feature = "presentation-ui")]
+    ui_preview: ui_preview::EditorUiPreviewSession,
 }
 
 /// Concrete product Host for one Editor workspace and its future single Play owner.
@@ -545,36 +660,24 @@ pub struct EditorProjectSession {
     persistence_authority: EditorPersistenceAuthority,
     scene_title: String,
     source_document: EditorDocumentId,
-    plan: RuntimePlan,
-    content_candidate: ProjectSettingsCandidate,
-    content_loader: ProjectContentLoader,
-    snapshot: crate::project_host::ProjectContentSnapshot,
+    execution: EditorExecutionLane,
     project_content: EditorProjectContentView,
     next_project_content_generation: u64,
     pending_content_refresh: Option<PendingProjectContentRefresh>,
     failed_content_refresh: Option<PendingProjectContentRefresh>,
-    prefab_root: DirectoryCapability,
-    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-    game_view_config: Option<game_view::EditorGameViewCaptureConfig>,
-    #[cfg(feature = "presentation-2d")]
-    preview: preview::EditorPreviewSession,
     persistence: ScenePersistenceHost,
     prefab_persistence: Option<PrefabPersistenceHost>,
+    authoring_prefab_source_observations:
+        BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
+    #[cfg(test)]
+    reject_next_prefab_source_binding: bool,
     persistence_operation: EditorPersistenceOperation,
     pending_persistence: Option<PendingPersistence>,
     persistence_result: Option<EditorPersistenceResult>,
     last_persistence_receipt: Option<EditorPersistenceReceipt>,
     diagnostics: DiagnosticReport,
     field_feedback: Option<EditorFieldFeedback>,
-    runtime_host: ProjectHost,
-    runtime_owner: EditorRuntimeOwnerState,
-    pending_control: Option<PendingEditorControl>,
-    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-    pending_step_presentation: Option<EditorStepPresentationState>,
     play_result: Option<EditorPlayOperationResult>,
-    runtime_edit_result: Option<EditorRuntimeEditResult>,
-    pending_apply_changes: Option<PendingApplyChanges>,
-    apply_changes_result: Option<EditorApplyChangesResult>,
     pending_workspace_intent: Option<PendingWorkspaceIntent>,
     workspace_intent_result: Option<EditorWorkspaceIntentResult>,
     frame_clock: EditorFrameClock,
@@ -585,10 +688,6 @@ pub struct EditorProjectSession {
     ui_authoring_frame: Option<Arc<EditorUiAuthoringFrame>>,
     #[cfg(feature = "runtime-ui")]
     ui_authoring_projection_cache: Option<EditorUiAuthoringProjectionCache>,
-    #[cfg(feature = "runtime-ui")]
-    ui_authoring_image_choices: EditorUiImageChoices,
-    #[cfg(feature = "presentation-ui")]
-    ui_preview: ui_preview::EditorUiPreviewSession,
 }
 
 impl fmt::Debug for EditorProjectSession {
@@ -604,27 +703,170 @@ impl fmt::Debug for EditorProjectSession {
 }
 
 impl EditorProjectSession {
-    pub fn open(
-        project_root: DirectoryCapability,
-        intent: EditorProjectIntent,
-    ) -> Result<Self, EditorProjectOpenError> {
-        Self::open_impl(project_root, intent, None)
+    #[must_use]
+    pub const fn project_readiness(&self) -> EditorProjectReadinessView {
+        match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => EditorProjectReadinessView::new(
+                match snapshot.readiness() {
+                    AuthoringProjectReadiness::Complete => EditorAuthoringReadiness::Complete,
+                    AuthoringProjectReadiness::Degraded => EditorAuthoringReadiness::Degraded,
+                },
+                EditorRuntimeAvailability::Unavailable(
+                    EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                ),
+            ),
+            EditorExecutionLane::TrustedCompiled(_) => EditorProjectReadinessView::new(
+                EditorAuthoringReadiness::Complete,
+                EditorRuntimeAvailability::TrustedInProcess,
+            ),
+        }
     }
 
-    pub(crate) fn open_with_overlay(
+    fn authoring_project(&self) -> Option<&AuthoringProjectSessionSnapshot> {
+        match &self.execution {
+            EditorExecutionLane::Authoring(snapshot) => Some(snapshot),
+            EditorExecutionLane::TrustedCompiled(_) => None,
+        }
+    }
+
+    fn trusted_compiled(&self) -> Option<&TrustedCompiledEditorLane> {
+        match &self.execution {
+            EditorExecutionLane::Authoring(_) => None,
+            EditorExecutionLane::TrustedCompiled(lane) => Some(lane),
+        }
+    }
+
+    fn trusted_compiled_mut(&mut self) -> Option<&mut TrustedCompiledEditorLane> {
+        match &mut self.execution {
+            EditorExecutionLane::Authoring(_) => None,
+            EditorExecutionLane::TrustedCompiled(lane) => Some(lane),
+        }
+    }
+
+    fn take_trusted_runtime_owner(&mut self) -> Option<EditorRuntimeOwnerState> {
+        let lane = self.trusted_compiled_mut()?;
+        Some(std::mem::replace(
+            &mut lane.runtime_owner,
+            EditorRuntimeOwnerState::Transitioning,
+        ))
+    }
+
+    fn install_trusted_runtime_owner(&mut self, state: EditorRuntimeOwnerState) -> bool {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return false;
+        };
+        lane.runtime_owner = state;
+        true
+    }
+
+    pub(crate) fn open(receipt: AuthoringProjectReceipt) -> Result<Self, EditorProjectOpenError> {
+        let parts = receipt.into_session_parts().map_err(|_| {
+            editor_open_error("project.editor.authoring-receipt-consumption-failed")
+        })?;
+        let project_root = parts.snapshot.project_root();
+        let settings = parts.snapshot.settings();
+        let scenes_path = RelativePath::new(settings.paths.scenes.as_str())
+            .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
+        let scenes = project_root
+            .open_directory(&scenes_path)
+            .map_err(|_| editor_open_error("project.editor.scenes-open-failed"))?;
+        let startup = settings
+            .startup
+            .default_scene
+            .as_ref()
+            .ok_or_else(|| editor_open_error("project.editor.startup-scene-missing"))?;
+        let startup_title = startup.as_str().to_owned();
+        let startup_source = parts.snapshot.startup_source();
+        let (persistence, opened_digest) = ScenePersistenceHost::bind_authoring_source(
+            &scenes,
+            startup.as_str(),
+            startup_source.identity(),
+            startup_source.digest(),
+        )
+        .map_err(editor_persistence_open_error)?;
+        let diagnostics = parts.startup_scene.diagnostics().clone();
+        let (mut workspace, mut persistence_authority) = EditorWorkspace::new_hosted();
+        let report = workspace
+            .open_authoring_scene_document(
+                startup_title.clone(),
+                nara_tooling::EditorDocumentSourceBinding::new(startup_title.clone()),
+                parts.startup_scene,
+            )
+            .map_err(|_| editor_open_error("project.editor.scene-publication-failed"))?;
+        let document = report
+            .opened_document
+            .ok_or_else(|| editor_open_error("project.editor.scene-publication-failed"))?;
+        let binding = persistence_authority.bind_opened_source_digest(
+            &mut workspace,
+            document,
+            opened_digest,
+        );
+        if !binding.applied {
+            return Err(editor_open_error(
+                "project.editor.persistence-authority-invalid",
+            ));
+        }
+
+        let mut session = Self {
+            workspace,
+            persistence_authority,
+            scene_title: startup_title,
+            source_document: document,
+            execution: EditorExecutionLane::Authoring(parts.snapshot),
+            project_content: EditorProjectContentView::NotInstalled,
+            next_project_content_generation: 1,
+            pending_content_refresh: None,
+            failed_content_refresh: None,
+            persistence,
+            prefab_persistence: None,
+            authoring_prefab_source_observations: BTreeMap::new(),
+            #[cfg(test)]
+            reject_next_prefab_source_binding: false,
+            persistence_operation: EditorPersistenceOperation::Idle,
+            pending_persistence: None,
+            persistence_result: None,
+            last_persistence_receipt: None,
+            diagnostics,
+            field_feedback: None,
+            play_result: None,
+            pending_workspace_intent: None,
+            workspace_intent_result: None,
+            frame_clock: EditorFrameClock::new(),
+            published_frame: None,
+            gestures: EditorGestureController::default(),
+            last_gesture_cancellation: None,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_frame: None,
+            #[cfg(feature = "runtime-ui")]
+            ui_authoring_projection_cache: None,
+        };
+        session.publish_editor_frame();
+        Ok(session)
+    }
+
+    /// Opens the explicitly advanced in-process Editor lane compiled with project Runtime code.
+    #[doc(hidden)]
+    pub fn open_trusted_compiled(
         project_root: DirectoryCapability,
-        intent: EditorProjectIntent,
+        intent: TrustedCompiledEditorProjectIntent,
+    ) -> Result<Self, EditorProjectOpenError> {
+        Self::open_trusted_compiled_impl(project_root, intent, None)
+    }
+
+    pub(crate) fn open_trusted_compiled_with_overlay(
+        project_root: DirectoryCapability,
+        intent: TrustedCompiledEditorProjectIntent,
         overlay: RuntimePluginOverlay,
     ) -> Result<Self, EditorProjectOpenError> {
-        Self::open_impl(project_root, intent, Some(overlay))
+        Self::open_trusted_compiled_impl(project_root, intent, Some(overlay))
     }
 
-    fn open_impl(
+    fn open_trusted_compiled_impl(
         project_root: DirectoryCapability,
-        intent: EditorProjectIntent,
+        intent: TrustedCompiledEditorProjectIntent,
         overlay: Option<RuntimePluginOverlay>,
     ) -> Result<Self, EditorProjectOpenError> {
-        let EditorProjectIntent {
+        let TrustedCompiledEditorProjectIntent {
             profile,
             cleanup_policy,
             recipe,
@@ -741,38 +983,47 @@ impl EditorProjectSession {
             persistence_authority,
             scene_title: startup.as_str().to_owned(),
             source_document: document,
-            plan,
-            content_candidate: candidate,
-            content_loader: loader,
-            snapshot,
+            execution: EditorExecutionLane::TrustedCompiled(Box::new(TrustedCompiledEditorLane {
+                plan,
+                content_candidate: candidate,
+                content_loader: loader,
+                snapshot,
+                prefab_root,
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                game_view_config,
+                #[cfg(feature = "presentation-2d")]
+                preview,
+                runtime_host: ProjectHost::new(cleanup_policy),
+                runtime_owner: EditorRuntimeOwnerState::Empty,
+                pending_control: None,
+                #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+                pending_step_presentation: None,
+                runtime_edit_result: None,
+                pending_apply_changes: None,
+                apply_changes_result: None,
+                #[cfg(feature = "runtime-ui")]
+                ui_authoring_image_choices,
+                #[cfg(feature = "presentation-ui")]
+                ui_preview,
+            })),
             project_content: EditorProjectContentView::Current {
                 generation: initial_content_generation,
             },
             next_project_content_generation: 2,
             pending_content_refresh: None,
             failed_content_refresh: None,
-            prefab_root,
-            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            game_view_config,
-            #[cfg(feature = "presentation-2d")]
-            preview,
             persistence: opened.host,
             prefab_persistence: None,
+            authoring_prefab_source_observations: BTreeMap::new(),
+            #[cfg(test)]
+            reject_next_prefab_source_binding: false,
             persistence_operation: EditorPersistenceOperation::Idle,
             pending_persistence: None,
             persistence_result: None,
             last_persistence_receipt: None,
             diagnostics,
             field_feedback: None,
-            runtime_host: ProjectHost::new(cleanup_policy),
-            runtime_owner: EditorRuntimeOwnerState::Empty,
-            pending_control: None,
-            #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            pending_step_presentation: None,
             play_result: None,
-            runtime_edit_result: None,
-            pending_apply_changes: None,
-            apply_changes_result: None,
             pending_workspace_intent: None,
             workspace_intent_result: None,
             frame_clock: EditorFrameClock::new(),
@@ -783,10 +1034,6 @@ impl EditorProjectSession {
             ui_authoring_frame: None,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_projection_cache: None,
-            #[cfg(feature = "runtime-ui")]
-            ui_authoring_image_choices,
-            #[cfg(feature = "presentation-ui")]
-            ui_preview,
         };
         session.publish_editor_frame();
         Ok(session)
@@ -795,6 +1042,9 @@ impl EditorProjectSession {
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     pub fn configure_editor_preview(&mut self, extent: Option<Extent2d>) {
+        if self.trusted_compiled().is_none() {
+            return;
+        }
         self.set_editor_preview_extent(extent);
         self.drive_editor_preview();
     }
@@ -803,29 +1053,33 @@ impl EditorProjectSession {
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     pub fn set_editor_preview_extent(&mut self, extent: Option<Extent2d>) {
-        self.preview.set_extent(extent);
+        if let Some(lane) = self.trusted_compiled_mut() {
+            lane.preview.set_extent(extent);
+        }
     }
 
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
-        self.preview.take_candidate()
+        self.trusted_compiled_mut()
+            .and_then(|lane| lane.preview.take_candidate())
     }
 
     #[cfg(feature = "presentation-ui")]
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_ui_preview_candidate(&mut self) -> Option<EditorUiPreviewCandidate> {
-        self.ui_preview.take_candidate()
+        self.trusted_compiled_mut()
+            .and_then(|lane| lane.ui_preview.take_candidate())
     }
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     #[must_use]
     pub fn pending_game_start_request(&self) -> Option<EditorGameStartRequest> {
-        match self.runtime_owner {
-            EditorRuntimeOwnerState::AwaitingGameTarget { request, .. } => Some(request),
+        match self.trusted_compiled().map(|lane| &lane.runtime_owner) {
+            Some(EditorRuntimeOwnerState::AwaitingGameTarget { request, .. }) => Some(*request),
             _ => None,
         }
     }
@@ -834,10 +1088,10 @@ impl EditorProjectSession {
     #[doc(hidden)]
     #[must_use]
     pub fn active_game_start_request(&self) -> Option<EditorGameStartRequest> {
-        match self.runtime_owner {
-            EditorRuntimeOwnerState::Active {
+        match self.trusted_compiled().map(|lane| &lane.runtime_owner) {
+            Some(EditorRuntimeOwnerState::Active {
                 game: Some(game), ..
-            } => Some(game.start),
+            }) => Some(game.start),
             _ => None,
         }
     }
@@ -848,8 +1102,11 @@ impl EditorProjectSession {
         &mut self,
         expected: EditorGameStartRequest,
     ) -> Result<EditorGameStartActivation, EditorGameViewBridgeFailure> {
+        let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        };
         let state = std::mem::replace(
-            &mut self.runtime_owner,
+            &mut lane.runtime_owner,
             EditorRuntimeOwnerState::Transitioning,
         );
         match state {
@@ -860,7 +1117,7 @@ impl EditorProjectSession {
                 request,
                 prepared,
             } if request == expected => {
-                self.runtime_owner = EditorRuntimeOwnerState::CommittingGameTarget {
+                lane.runtime_owner = EditorRuntimeOwnerState::CommittingGameTarget {
                     document,
                     revision,
                     operation,
@@ -870,11 +1127,11 @@ impl EditorProjectSession {
                 Ok(EditorGameStartActivation::new(request))
             }
             other @ EditorRuntimeOwnerState::AwaitingGameTarget { .. } => {
-                self.runtime_owner = other;
+                lane.runtime_owner = other;
                 Err(EditorGameViewBridgeFailure::GameStartRequestMismatch)
             }
             other => {
-                self.runtime_owner = other;
+                lane.runtime_owner = other;
                 Err(EditorGameViewBridgeFailure::GameStartNotPending)
             }
         }
@@ -883,9 +1140,12 @@ impl EditorProjectSession {
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     pub fn commit_game_start_activation(&mut self, activation: EditorGameStartActivation) {
+        let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
+            return;
+        };
         let expected = activation.into_request();
         let state = std::mem::replace(
-            &mut self.runtime_owner,
+            &mut lane.runtime_owner,
             EditorRuntimeOwnerState::Transitioning,
         );
         let EditorRuntimeOwnerState::CommittingGameTarget {
@@ -896,22 +1156,22 @@ impl EditorProjectSession {
             prepared,
         } = state
         else {
-            self.runtime_owner = state;
+            lane.runtime_owner = state;
             panic!("a Game start activation commits only its prepared Runtime");
         };
         assert_eq!(
             request, expected,
             "a Game start activation cannot commit a foreign Runtime reservation"
         );
-        let diagnostics = self.runtime_host.commit_prepared_start(prepared);
+        let diagnostics = lane.runtime_host.commit_prepared_start(prepared);
         let _ = self.diagnostics.extend(diagnostics);
-        let generation = self.runtime_host.running_runtime_generation();
+        let generation = lane.runtime_host.running_runtime_generation();
         self.play_result = Some(EditorPlayOperationResult::Applied {
             operation,
             generation,
         });
-        self.pending_step_presentation = None;
-        self.runtime_owner = EditorRuntimeOwnerState::Active {
+        lane.pending_step_presentation = None;
+        lane.runtime_owner = EditorRuntimeOwnerState::Active {
             document,
             source_revision: revision,
             game: Some(ActiveEditorGameView::new(request)),
@@ -924,8 +1184,11 @@ impl EditorProjectSession {
         &mut self,
         expected: EditorGameStartRequest,
     ) -> Result<(), EditorGameViewBridgeFailure> {
+        let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        };
         let state = std::mem::replace(
-            &mut self.runtime_owner,
+            &mut lane.runtime_owner,
             EditorRuntimeOwnerState::Transitioning,
         );
         match state {
@@ -935,10 +1198,10 @@ impl EditorProjectSession {
                 prepared,
                 ..
             } if request == expected => {
-                self.runtime_host.abort_prepared_start(prepared);
-                self.pending_step_presentation = None;
+                lane.runtime_host.abort_prepared_start(prepared);
+                lane.pending_step_presentation = None;
                 self.play_result = Some(EditorPlayOperationResult::Pending { operation });
-                self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+                lane.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
                     terminal: EditorPlayOperationResult::Failed {
                         operation,
                         failure: EditorPlayFailure::Start,
@@ -947,11 +1210,11 @@ impl EditorProjectSession {
                 Ok(())
             }
             other @ EditorRuntimeOwnerState::AwaitingGameTarget { .. } => {
-                self.runtime_owner = other;
+                lane.runtime_owner = other;
                 Err(EditorGameViewBridgeFailure::GameStartRequestMismatch)
             }
             other => {
-                self.runtime_owner = other;
+                lane.runtime_owner = other;
                 Err(EditorGameViewBridgeFailure::GameStartNotPending)
             }
         }
@@ -962,7 +1225,10 @@ impl EditorProjectSession {
     pub fn take_game_view_candidate(
         &mut self,
     ) -> Result<Option<EditorGameViewCandidate>, EditorGameViewBridgeFailure> {
-        let start = match &self.runtime_owner {
+        let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        };
+        let start = match &lane.runtime_owner {
             EditorRuntimeOwnerState::Active {
                 game: Some(game), ..
             } if game.in_flight.is_none() => game.start,
@@ -971,7 +1237,7 @@ impl EditorProjectSession {
             }
             _ => return Err(EditorGameViewBridgeFailure::RuntimeUnavailable),
         };
-        let runtime = self
+        let runtime = lane
             .runtime_host
             .running_runtime_mut()
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
@@ -983,17 +1249,17 @@ impl EditorProjectSession {
         {
             let EditorRuntimeOwnerState::Active {
                 game: Some(game), ..
-            } = &mut self.runtime_owner
+            } = &mut lane.runtime_owner
             else {
                 unreachable!("a captured Game candidate retains its active Runtime owner")
             };
             game.in_flight = Some(identity);
         }
         if let Some(EditorStepPresentationState::AwaitingCandidate { generation }) =
-            self.pending_step_presentation
+            lane.pending_step_presentation
         {
             if generation == identity.runtime_generation().get() {
-                self.pending_step_presentation =
+                lane.pending_step_presentation =
                     Some(EditorStepPresentationState::AwaitingPresentation { identity });
             }
         }
@@ -1006,8 +1272,11 @@ impl EditorProjectSession {
         &mut self,
         completion: EditorGameViewCompletion,
     ) -> Result<(), EditorGameViewCompletion> {
+        let EditorExecutionLane::TrustedCompiled(lane) = &mut self.execution else {
+            return Err(completion);
+        };
         if !matches!(
-            &self.runtime_owner,
+            &lane.runtime_owner,
             EditorRuntimeOwnerState::Active {
                 game: Some(ActiveEditorGameView {
                     in_flight: Some(identity),
@@ -1020,41 +1289,41 @@ impl EditorProjectSession {
         }
         let identity = completion.identity();
         let disposition = completion.disposition();
-        let Some(runtime) = self.runtime_host.running_runtime_mut() else {
+        let Some(runtime) = lane.runtime_host.running_runtime_mut() else {
             return Err(completion);
         };
         match game_view::complete_candidate(runtime, completion) {
             Ok(()) => {
                 let EditorRuntimeOwnerState::Active {
                     game: Some(game), ..
-                } = &mut self.runtime_owner
+                } = &mut lane.runtime_owner
                 else {
                     unreachable!("a completed Game candidate retains its active Runtime owner")
                 };
                 game.in_flight = None;
                 if matches!(
-                    self.pending_step_presentation,
+                    lane.pending_step_presentation,
                     Some(EditorStepPresentationState::AwaitingPresentation {
                         identity: expected
                     }) if expected == identity
                 ) {
                     match disposition {
                         EditorGameViewCompletionDisposition::Presented => {
-                            self.pending_step_presentation = None;
+                            lane.pending_step_presentation = None;
                             self.play_result = Some(EditorPlayOperationResult::Applied {
                                 operation: EditorPlayOperation::StepFixedTick,
                                 generation: Some(identity.runtime_generation().get()),
                             });
                         }
                         EditorGameViewCompletionDisposition::Deferred => {
-                            self.pending_step_presentation =
+                            lane.pending_step_presentation =
                                 Some(EditorStepPresentationState::AwaitingCandidate {
                                     generation: identity.runtime_generation().get(),
                                 });
                         }
                         EditorGameViewCompletionDisposition::ContentRejected
                         | EditorGameViewCompletionDisposition::Failed => {
-                            self.pending_step_presentation = None;
+                            lane.pending_step_presentation = None;
                             self.play_result = Some(EditorPlayOperationResult::Failed {
                                 operation: EditorPlayOperation::StepFixedTick,
                                 failure: EditorPlayFailure::Presentation,
@@ -1075,26 +1344,31 @@ impl EditorProjectSession {
         active: bool,
         retirement_message: &'static str,
     ) -> Result<(), EditorGameViewBridgeFailure> {
-        if !matches!(
-            self.runtime_owner,
-            EditorRuntimeOwnerState::Active {
-                game: Some(ActiveEditorGameView {
-                    in_flight: None,
+        let source_is_idle = self.trusted_compiled().is_some_and(|lane| {
+            matches!(
+                lane.runtime_owner,
+                EditorRuntimeOwnerState::Active {
+                    game: Some(ActiveEditorGameView {
+                        in_flight: None,
+                        ..
+                    }),
                     ..
-                }),
-                ..
-            }
-        ) {
+                }
+            )
+        });
+        if !source_is_idle {
             return Err(EditorGameViewBridgeFailure::CandidateBusy);
         }
         if !active {
             self.cancel_game_step_presentation();
         }
-        let runtime = self
-            .runtime_host
-            .running_runtime_mut()
-            .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
-        game_view::set_capture_enabled(runtime, false)?;
+        {
+            let runtime = self
+                .trusted_compiled_mut()
+                .and_then(|lane| lane.runtime_host.running_runtime_mut())
+                .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
+            game_view::set_capture_enabled(runtime, false)?;
+        }
 
         if let Some(candidate) = self.take_game_view_candidate()? {
             let completion = candidate.content_rejected(retirement_message);
@@ -1104,8 +1378,8 @@ impl EditorProjectSession {
 
         if active {
             let runtime = self
-                .runtime_host
-                .running_runtime_mut()
+                .trusted_compiled_mut()
+                .and_then(|lane| lane.runtime_host.running_runtime_mut())
                 .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
             game_view::set_capture_enabled(runtime, true)?;
         }
@@ -1118,13 +1392,16 @@ impl EditorProjectSession {
         &mut self,
         extent: Extent2d,
     ) -> Result<bool, EditorGameViewBridgeFailure> {
+        let Some(lane) = self.trusted_compiled() else {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        };
         if !matches!(
-            self.runtime_host.running_runtime_state(),
+            lane.runtime_host.running_runtime_state(),
             Some(RuntimeState::Running | RuntimeState::Paused)
         ) {
             return Ok(false);
         }
-        let start = match self.runtime_owner {
+        let start = match &lane.runtime_owner {
             EditorRuntimeOwnerState::Active {
                 game: Some(game), ..
             } if game.in_flight.is_none() => game.start,
@@ -1146,19 +1423,22 @@ impl EditorProjectSession {
         let resized = start.resized(extent)?;
         {
             let runtime = self
-                .runtime_host
-                .running_runtime_mut()
+                .trusted_compiled_mut()
+                .and_then(|lane| lane.runtime_host.running_runtime_mut())
                 .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
             game_view::reconfigure(runtime, resized.capture_config())?;
         }
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        };
         let EditorRuntimeOwnerState::Active {
             game: Some(game), ..
-        } = &mut self.runtime_owner
+        } = &mut lane.runtime_owner
         else {
-            unreachable!("a resized Game View retains its active Runtime owner")
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
         };
         game.start = resized;
-        let runtime = self
+        let runtime = lane
             .runtime_host
             .running_runtime_mut()
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
@@ -1169,7 +1449,10 @@ impl EditorProjectSession {
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     pub fn cancel_game_step_presentation(&mut self) -> bool {
-        if self.pending_step_presentation.take().is_some() {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return false;
+        };
+        if lane.pending_step_presentation.take().is_some() {
             self.play_result = Some(EditorPlayOperationResult::Cancelled {
                 operation: EditorPlayOperation::StepFixedTick,
             });
@@ -1182,11 +1465,13 @@ impl EditorProjectSession {
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     #[must_use]
-    pub const fn game_step_requires_runtime_drive(&self) -> bool {
-        matches!(
-            self.pending_step_presentation,
-            Some(EditorStepPresentationState::AwaitingCandidate { .. })
-        )
+    pub fn game_step_requires_runtime_drive(&self) -> bool {
+        self.trusted_compiled().is_some_and(|lane| {
+            matches!(
+                lane.pending_step_presentation,
+                Some(EditorStepPresentationState::AwaitingCandidate { .. })
+            )
+        })
     }
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -1202,7 +1487,10 @@ impl EditorProjectSession {
         if events.len() > EditorGameInputBatch::MAX_EVENTS {
             return Err(EditorGameViewBridgeFailure::InputBudgetExceeded);
         }
-        let expected_start = match self.runtime_owner {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
+        };
+        let expected_start = match &lane.runtime_owner {
             EditorRuntimeOwnerState::Active {
                 game: Some(game), ..
             } => game.start,
@@ -1222,7 +1510,7 @@ impl EditorProjectSession {
         {
             return Err(EditorGameViewBridgeFailure::InputRouteMismatch);
         }
-        let runtime = self
+        let runtime = lane
             .runtime_host
             .running_runtime_mut()
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
@@ -1231,14 +1519,17 @@ impl EditorProjectSession {
 
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     fn game_view_retirement_blocked(&mut self) -> bool {
-        match &self.runtime_owner {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return false;
+        };
+        match &lane.runtime_owner {
             EditorRuntimeOwnerState::Active {
                 game: Some(game), ..
             } if game.in_flight.is_some() => return true,
             EditorRuntimeOwnerState::Active { game: Some(_), .. } => {}
             _ => return false,
         }
-        self.runtime_host
+        lane.runtime_host
             .running_runtime_mut()
             .is_some_and(game_view::retirement_blocked)
     }
@@ -1253,7 +1544,10 @@ impl EditorProjectSession {
                     revision: slot.revision(),
                     scene: slot.session().document().clone(),
                 });
-        if let Some(report) = self.preview.drive(source) {
+        let report = self
+            .trusted_compiled_mut()
+            .and_then(|lane| lane.preview.drive(source));
+        if let Some(report) = report {
             let _ = self.diagnostics.extend(report);
         }
     }
@@ -1267,13 +1561,19 @@ impl EditorProjectSession {
     #[cfg(test)]
     #[must_use]
     pub(super) fn workspace_model(&self) -> nara_tooling::EditorWorkspaceModel {
-        self.workspace
-            .model(self.plan.schema_validation().registry(), None)
+        match self.trusted_compiled() {
+            Some(lane) => self
+                .workspace
+                .model(lane.plan.schema_validation().registry(), None),
+            None => self.workspace.authoring_model(),
+        }
     }
 
     #[cfg(test)]
     pub(super) fn test_schema_snapshot(&self) -> nara_reflect::ComponentRegistrySnapshot {
-        self.plan
+        self.trusted_compiled()
+            .expect("the test schema snapshot is available only in the trusted compiled lane")
+            .plan
             .schema_validation()
             .registry()
             .snapshot()
@@ -1284,7 +1584,8 @@ impl EditorProjectSession {
     pub(super) fn test_runtime_schema_snapshot(
         &self,
     ) -> Option<nara_reflect::ComponentRegistrySnapshot> {
-        self.runtime_host
+        self.trusted_compiled()?
+            .runtime_host
             .with_running_world(|world| component_registry(world)?.snapshot().ok())
             .ok()
             .flatten()
@@ -1295,7 +1596,10 @@ impl EditorProjectSession {
     pub(super) fn test_project_content_revision(
         &self,
     ) -> crate::project_host::ProjectContentRevision {
-        self.snapshot.revision()
+        self.trusted_compiled()
+            .expect("project content is available only in the trusted compiled lane")
+            .snapshot
+            .revision()
     }
 
     #[cfg(test)]
@@ -1303,17 +1607,29 @@ impl EditorProjectSession {
     pub(super) fn test_project_content_budget_snapshot(
         &self,
     ) -> crate::project_host::ProjectContentBudgetSnapshot {
-        self.content_loader.budget_snapshot()
+        self.trusted_compiled()
+            .expect("project content is available only in the trusted compiled lane")
+            .content_loader
+            .budget_snapshot()
     }
 
     #[must_use]
     #[doc(hidden)]
-    pub(crate) const fn workspace_intent_view(&self) -> EditorWorkspaceIntentView {
-        let (intent, phase) = match self.pending_workspace_intent {
-            Some(pending) => (Some(pending.intent), Some(pending.phase)),
-            None => (None, None),
+    pub(crate) fn workspace_intent_view(&self) -> EditorWorkspaceIntentView {
+        let (intent, phase, decision_document) = match self.pending_workspace_intent.as_ref() {
+            Some(pending) => (
+                Some(pending.intent()),
+                Some(pending.phase()),
+                pending.decision_document(),
+            ),
+            None => (None, None, None),
         };
-        EditorWorkspaceIntentView::new(intent, phase, self.workspace_intent_result)
+        EditorWorkspaceIntentView::new(
+            intent,
+            phase,
+            decision_document,
+            self.workspace_intent_result,
+        )
     }
 
     #[cfg(test)]
@@ -1338,8 +1654,12 @@ impl EditorProjectSession {
                 "project.editor.workspace-intent-pending",
             );
         }
-        self.workspace
-            .apply_command(self.plan.schema_validation().registry(), command)
+        match &mut self.execution {
+            EditorExecutionLane::Authoring(_) => self.workspace.apply_authoring_command(command),
+            EditorExecutionLane::TrustedCompiled(lane) => self
+                .workspace
+                .apply_command(lane.plan.schema_validation().registry(), command),
+        }
     }
 
     pub(crate) fn request_workspace_intent(
@@ -1357,38 +1677,42 @@ impl EditorProjectSession {
             );
         }
 
-        let document = match intent {
-            EditorWorkspaceIntent::CloseDocument { document } => document,
+        let pending = match intent {
+            EditorWorkspaceIntent::CloseDocument { document } => {
+                let Some(dirty) = self.workspace.document_is_dirty(document) else {
+                    let reason = if self.workspace.active_document().is_some() {
+                        EditorWorkspaceIntentRejection::MissingDocument
+                    } else {
+                        EditorWorkspaceIntentRejection::NoActiveDocument
+                    };
+                    self.workspace_intent_result =
+                        Some(EditorWorkspaceIntentResult::Rejected { intent, reason });
+                    return EditorWorkspaceIntentRequestResult::Rejected(reason);
+                };
+                PendingWorkspaceIntent::CloseDocument(PendingDocumentClose {
+                    document,
+                    phase: if dirty {
+                        EditorWorkspaceIntentPhase::AwaitingDecision
+                    } else {
+                        EditorWorkspaceIntentPhase::RetiringRuntime
+                    },
+                })
+            }
             EditorWorkspaceIntent::Exit => {
-                let Some(document) = self.workspace.active_document() else {
+                let documents = self.workspace.__document_ids();
+                if documents.is_empty() {
                     self.workspace_intent_result =
                         Some(EditorWorkspaceIntentResult::Applied { intent });
                     return EditorWorkspaceIntentRequestResult::Accepted;
-                };
-                document
+                }
+                let mut pending = PendingExitPreparation::new(documents);
+                self.prepare_current_exit_document(&mut pending);
+                PendingWorkspaceIntent::Exit(pending)
             }
         };
-        let Some(dirty) = self.workspace.document_is_dirty(document) else {
-            let reason = if self.workspace.active_document().is_some() {
-                EditorWorkspaceIntentRejection::MissingDocument
-            } else {
-                EditorWorkspaceIntentRejection::NoActiveDocument
-            };
-            self.workspace_intent_result =
-                Some(EditorWorkspaceIntentResult::Rejected { intent, reason });
-            return EditorWorkspaceIntentRequestResult::Rejected(reason);
-        };
-        let phase = if dirty {
-            EditorWorkspaceIntentPhase::AwaitingDecision
-        } else {
-            EditorWorkspaceIntentPhase::RetiringRuntime
-        };
-        self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-            intent,
-            document,
-            phase,
-        });
-        if phase == EditorWorkspaceIntentPhase::RetiringRuntime {
+        let should_retire = pending.phase() == EditorWorkspaceIntentPhase::RetiringRuntime;
+        self.pending_workspace_intent = Some(pending);
+        if should_retire {
             self.advance_workspace_retirement();
         }
         EditorWorkspaceIntentRequestResult::Accepted
@@ -1398,50 +1722,110 @@ impl EditorProjectSession {
         &mut self,
         decision: EditorCloseDecision,
     ) -> EditorWorkspaceIntentRequestResult {
-        let Some(pending) = self.pending_workspace_intent else {
+        let Some(mut pending) = self.pending_workspace_intent.take() else {
             return EditorWorkspaceIntentRequestResult::Rejected(
                 EditorWorkspaceIntentRejection::DecisionNotRequired,
             );
         };
-        if pending.phase != EditorWorkspaceIntentPhase::AwaitingDecision {
+        if pending.phase() != EditorWorkspaceIntentPhase::AwaitingDecision {
+            self.pending_workspace_intent = Some(pending);
             return EditorWorkspaceIntentRequestResult::Rejected(
                 EditorWorkspaceIntentRejection::Busy,
             );
         }
+        let intent = pending.intent();
+        let Some(document) = pending.decision_document() else {
+            self.pending_workspace_intent = Some(pending);
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::DecisionNotRequired,
+            );
+        };
 
         match decision {
             EditorCloseDecision::Cancel => {
-                self.pending_workspace_intent = None;
-                self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Cancelled {
-                    intent: pending.intent,
-                });
+                self.workspace_intent_result =
+                    Some(EditorWorkspaceIntentResult::Cancelled { intent });
             }
             EditorCloseDecision::Discard => {
-                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-                    phase: EditorWorkspaceIntentPhase::RetiringRuntime,
-                    ..pending
-                });
-                self.advance_workspace_retirement();
+                match &mut pending {
+                    PendingWorkspaceIntent::CloseDocument(close) => {
+                        close.phase = EditorWorkspaceIntentPhase::RetiringRuntime;
+                    }
+                    PendingWorkspaceIntent::Exit(exit) => {
+                        exit.cursor = exit.cursor.saturating_add(1);
+                        self.prepare_current_exit_document(exit);
+                    }
+                }
+                let should_retire = pending.phase() == EditorWorkspaceIntentPhase::RetiringRuntime;
+                self.pending_workspace_intent = Some(pending);
+                if should_retire {
+                    self.advance_workspace_retirement();
+                }
             }
             EditorCloseDecision::Save => {
                 let requested =
                     self.request_persistence_for_workspace_intent(EditorPersistenceCommand::Save {
-                        document: Some(pending.document),
+                        document: Some(document),
                     });
                 let EditorPersistenceRequestResult::Accepted = requested else {
                     let EditorPersistenceRequestResult::Rejected(reason) = requested else {
                         unreachable!()
                     };
+                    self.pending_workspace_intent = Some(pending);
                     return EditorWorkspaceIntentRequestResult::Rejected(
                         EditorWorkspaceIntentRejection::PersistenceRejected(reason),
                     );
                 };
-                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-                    phase: EditorWorkspaceIntentPhase::Saving,
-                    ..pending
-                });
+                pending.set_phase(EditorWorkspaceIntentPhase::Saving);
+                self.pending_workspace_intent = Some(pending);
             }
         }
+        EditorWorkspaceIntentRequestResult::Accepted
+    }
+
+    pub(crate) fn commit_prepared_workspace_intent(
+        &mut self,
+    ) -> EditorWorkspaceIntentRequestResult {
+        let Some(pending) = self.pending_workspace_intent.take() else {
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::DecisionNotRequired,
+            );
+        };
+        if !matches!(
+            &pending,
+            PendingWorkspaceIntent::Exit(exit)
+                if exit.phase == EditorWorkspaceIntentPhase::Prepared
+        ) {
+            self.pending_workspace_intent = Some(pending);
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::Busy,
+            );
+        }
+        self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Applied {
+            intent: EditorWorkspaceIntent::Exit,
+        });
+        EditorWorkspaceIntentRequestResult::Accepted
+    }
+
+    pub(crate) fn abort_prepared_workspace_intent(&mut self) -> EditorWorkspaceIntentRequestResult {
+        let Some(pending) = self.pending_workspace_intent.take() else {
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::DecisionNotRequired,
+            );
+        };
+        if !matches!(
+            &pending,
+            PendingWorkspaceIntent::Exit(exit)
+                if exit.phase == EditorWorkspaceIntentPhase::Prepared
+        ) {
+            self.pending_workspace_intent = Some(pending);
+            return EditorWorkspaceIntentRequestResult::Rejected(
+                EditorWorkspaceIntentRejection::Busy,
+            );
+        }
+        self.workspace_intent_result = Some(EditorWorkspaceIntentResult::Cancelled {
+            intent: EditorWorkspaceIntent::Exit,
+        });
         EditorWorkspaceIntentRequestResult::Accepted
     }
 
@@ -1453,26 +1837,36 @@ impl EditorProjectSession {
         &mut self,
         request: EditorRuntimeEditRequest,
     ) -> Result<(), EditorRuntimeEditRejection> {
-        if self.pending_workspace_intent.is_some()
-            || self.pending_control.is_some()
-            || self.pending_apply_changes.is_some()
-            || self.runtime_edit_result.is_some()
-        {
+        if self.pending_workspace_intent.is_some() {
             return Err(EditorRuntimeEditRejection::Busy);
         }
-        let EditorRuntimeOwnerState::Active { document, .. } = self.runtime_owner else {
-            return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
+        let (document, generation) = match &self.execution {
+            EditorExecutionLane::Authoring(_) => {
+                return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
+            }
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                if lane.pending_control.is_some()
+                    || lane.pending_apply_changes.is_some()
+                    || lane.runtime_edit_result.is_some()
+                {
+                    return Err(EditorRuntimeEditRejection::Busy);
+                }
+                let EditorRuntimeOwnerState::Active { document, .. } = &lane.runtime_owner else {
+                    return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
+                };
+                if !matches!(
+                    lane.runtime_host.running_runtime_state(),
+                    Some(RuntimeState::Running | RuntimeState::Paused)
+                ) {
+                    return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
+                }
+                let generation = lane
+                    .runtime_host
+                    .running_runtime_generation()
+                    .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
+                (*document, generation)
+            }
         };
-        if !matches!(
-            self.runtime_host.running_runtime_state(),
-            Some(RuntimeState::Running | RuntimeState::Paused)
-        ) {
-            return Err(EditorRuntimeEditRejection::InvalidRuntimeState);
-        }
-        let generation = self
-            .runtime_host
-            .running_runtime_generation()
-            .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
         if request.generation != generation {
             return Err(EditorRuntimeEditRejection::StaleGeneration);
         }
@@ -1484,7 +1878,10 @@ impl EditorProjectSession {
         if request.document_revision != revision {
             return Err(EditorRuntimeEditRejection::StaleDocument);
         }
-        let runtime = self
+        let lane = self
+            .trusted_compiled_mut()
+            .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
+        let runtime = lane
             .runtime_host
             .running_runtime_mut()
             .ok_or(EditorRuntimeEditRejection::InvalidRuntimeState)?;
@@ -1498,7 +1895,7 @@ impl EditorProjectSession {
             .map_err(|_| EditorRuntimeEditRejection::InvalidRuntimeState)?;
         match submitted {
             EditorRuntimeBridgeOutput::Submitted => {
-                self.runtime_edit_result = Some(EditorRuntimeEditResult::Pending(request));
+                lane.runtime_edit_result = Some(EditorRuntimeEditResult::Pending(request));
                 Ok(())
             }
             EditorRuntimeBridgeOutput::Busy | EditorRuntimeBridgeOutput::Result(_) => {
@@ -1509,18 +1906,22 @@ impl EditorProjectSession {
 
     #[cfg(test)]
     #[must_use]
-    pub(super) const fn runtime_edit_result(&self) -> Option<&EditorRuntimeEditResult> {
-        self.runtime_edit_result.as_ref()
+    pub(super) fn runtime_edit_result(&self) -> Option<&EditorRuntimeEditResult> {
+        self.trusted_compiled()
+            .and_then(|lane| lane.runtime_edit_result.as_ref())
     }
 
     pub(crate) fn acknowledge_runtime_edit_result(&mut self) -> bool {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return false;
+        };
         if matches!(
-            self.runtime_edit_result,
+            lane.runtime_edit_result,
             Some(EditorRuntimeEditResult::Pending(_))
         ) {
             return false;
         }
-        self.runtime_edit_result.take().is_some()
+        lane.runtime_edit_result.take().is_some()
     }
 
     pub(crate) fn request_apply_changes(
@@ -1530,34 +1931,42 @@ impl EditorProjectSession {
         if self.pending_workspace_intent.is_some() {
             return Err(EditorApplyChangesRejection::Busy);
         }
-        if self.pending_control.is_some()
-            || self.pending_apply_changes.is_some()
-            || self.apply_changes_result.is_some()
-            || matches!(
-                self.runtime_edit_result,
-                Some(EditorRuntimeEditResult::Pending(_))
-            )
-        {
-            return Err(EditorApplyChangesRejection::Busy);
-        }
-        let EditorRuntimeOwnerState::Active {
-            document,
-            source_revision,
-            ..
-        } = self.runtime_owner
-        else {
-            return Err(EditorApplyChangesRejection::InvalidRuntimeState);
+        let (document, source_revision, generation) = match &self.execution {
+            EditorExecutionLane::Authoring(_) => {
+                return Err(EditorApplyChangesRejection::InvalidRuntimeState);
+            }
+            EditorExecutionLane::TrustedCompiled(lane) => {
+                if lane.pending_control.is_some()
+                    || lane.pending_apply_changes.is_some()
+                    || lane.apply_changes_result.is_some()
+                    || matches!(
+                        lane.runtime_edit_result,
+                        Some(EditorRuntimeEditResult::Pending(_))
+                    )
+                {
+                    return Err(EditorApplyChangesRejection::Busy);
+                }
+                let EditorRuntimeOwnerState::Active {
+                    document,
+                    source_revision,
+                    ..
+                } = &lane.runtime_owner
+                else {
+                    return Err(EditorApplyChangesRejection::InvalidRuntimeState);
+                };
+                if !matches!(
+                    lane.runtime_host.running_runtime_state(),
+                    Some(RuntimeState::Running | RuntimeState::Paused)
+                ) {
+                    return Err(EditorApplyChangesRejection::InvalidRuntimeState);
+                }
+                let generation = lane
+                    .runtime_host
+                    .running_runtime_generation()
+                    .ok_or(EditorApplyChangesRejection::InvalidRuntimeState)?;
+                (*document, *source_revision, generation)
+            }
         };
-        if !matches!(
-            self.runtime_host.running_runtime_state(),
-            Some(RuntimeState::Running | RuntimeState::Paused)
-        ) {
-            return Err(EditorApplyChangesRejection::InvalidRuntimeState);
-        }
-        let generation = self
-            .runtime_host
-            .running_runtime_generation()
-            .ok_or(EditorApplyChangesRejection::InvalidRuntimeState)?;
         let document_revision = self
             .workspace
             .scene(document)
@@ -1566,14 +1975,17 @@ impl EditorProjectSession {
         if document_revision != source_revision {
             return Err(EditorApplyChangesRejection::RuntimeOutOfDate);
         }
-        self.pending_apply_changes = Some(PendingApplyChanges {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return Err(EditorApplyChangesRejection::InvalidRuntimeState);
+        };
+        lane.pending_apply_changes = Some(PendingApplyChanges {
             generation,
             document,
             document_revision,
             source_revision,
             request: request.clone(),
         });
-        self.apply_changes_result = Some(EditorApplyChangesResult::Pending {
+        lane.apply_changes_result = Some(EditorApplyChangesResult::Pending {
             generation,
             document_revision,
             request,
@@ -1583,85 +1995,94 @@ impl EditorProjectSession {
 
     #[cfg(test)]
     #[must_use]
-    pub(super) const fn apply_changes_result(&self) -> Option<&EditorApplyChangesResult> {
-        self.apply_changes_result.as_ref()
+    pub(super) fn apply_changes_result(&self) -> Option<&EditorApplyChangesResult> {
+        self.trusted_compiled()
+            .and_then(|lane| lane.apply_changes_result.as_ref())
     }
 
     pub(crate) fn acknowledge_apply_changes_result(&mut self) -> bool {
-        if self.pending_apply_changes.is_some() {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return false;
+        };
+        if lane.pending_apply_changes.is_some() {
             return false;
         }
-        self.apply_changes_result.take().is_some()
+        lane.apply_changes_result.take().is_some()
     }
 
     fn advance_workspace_retirement(&mut self) {
-        let Some(pending) = self.pending_workspace_intent else {
+        let Some(pending) = self.pending_workspace_intent.as_ref() else {
             return;
         };
-        if pending.phase != EditorWorkspaceIntentPhase::RetiringRuntime {
+        if pending.phase() != EditorWorkspaceIntentPhase::RetiringRuntime {
             return;
         }
-        if self
-            .runtime_owner
-            .document()
-            .is_some_and(|document| document != pending.document)
-        {
-            self.finish_workspace_intent(pending);
+        let close_document = match pending {
+            PendingWorkspaceIntent::CloseDocument(pending) => Some(pending.document),
+            PendingWorkspaceIntent::Exit(_) => None,
+        };
+        let Some(state) = self.take_trusted_runtime_owner() else {
+            self.finish_workspace_intent_document();
+            return;
+        };
+        if close_document.is_some_and(|pending_document| {
+            state
+                .document()
+                .is_some_and(|document| document != pending_document)
+        }) {
+            let _ = self.install_trusted_runtime_owner(state);
+            self.finish_workspace_intent_document();
             return;
         }
 
-        match &self.runtime_owner {
+        match state {
             EditorRuntimeOwnerState::Empty => {
-                self.finish_workspace_intent(pending);
+                let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::Empty);
+                self.finish_workspace_intent_document();
             }
             EditorRuntimeOwnerState::Preparing { operation, .. } => {
-                let operation = *operation;
-                self.runtime_owner = EditorRuntimeOwnerState::Empty;
                 self.play_result = Some(EditorPlayOperationResult::Cancelled { operation });
-                self.finish_workspace_intent(pending);
+                let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::Empty);
+                self.finish_workspace_intent_document();
             }
-            EditorRuntimeOwnerState::Starting { .. } => {
-                let state = std::mem::replace(
-                    &mut self.runtime_owner,
-                    EditorRuntimeOwnerState::Transitioning,
-                );
-                let EditorRuntimeOwnerState::Starting {
-                    operation, attempt, ..
-                } = state
-                else {
-                    unreachable!("the matched starting state remains owned by the editor")
-                };
+            EditorRuntimeOwnerState::Starting {
+                operation, attempt, ..
+            } => {
                 self.cancel_pending_runtime_edit();
                 self.cancel_pending_apply_changes();
-                self.runtime_owner = EditorRuntimeOwnerState::CancellingStart {
-                    terminal: EditorPlayOperationResult::Cancelled { operation },
-                    attempt,
-                };
+                let _ =
+                    self.install_trusted_runtime_owner(EditorRuntimeOwnerState::CancellingStart {
+                        terminal: EditorPlayOperationResult::Cancelled { operation },
+                        attempt,
+                    });
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            EditorRuntimeOwnerState::AwaitingGameTarget { .. } => {
-                let state = std::mem::replace(
-                    &mut self.runtime_owner,
-                    EditorRuntimeOwnerState::Transitioning,
-                );
-                let EditorRuntimeOwnerState::AwaitingGameTarget {
-                    operation,
-                    prepared,
-                    ..
-                } = state
-                else {
-                    unreachable!("the matched Game start remains owned by the editor")
-                };
-                self.runtime_host.abort_prepared_start(prepared);
-                self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+            EditorRuntimeOwnerState::AwaitingGameTarget {
+                operation,
+                prepared,
+                ..
+            } => {
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.runtime_host.abort_prepared_start(prepared);
+                }
+                let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::RetiringPlay {
                     terminal: EditorPlayOperationResult::Cancelled { operation },
-                };
+                });
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-            EditorRuntimeOwnerState::CommittingGameTarget { .. } => {}
-            EditorRuntimeOwnerState::Active { .. } => {
-                let runtime_state = self.runtime_host.running_runtime_state();
-                if self.pending_control.is_none()
+            state @ EditorRuntimeOwnerState::CommittingGameTarget { .. } => {
+                let _ = self.install_trusted_runtime_owner(state);
+            }
+            state @ EditorRuntimeOwnerState::Active { .. } => {
+                let _ = self.install_trusted_runtime_owner(state);
+                let (runtime_state, control_pending) =
+                    self.trusted_compiled().map_or((None, false), |lane| {
+                        (
+                            lane.runtime_host.running_runtime_state(),
+                            lane.pending_control.is_some(),
+                        )
+                    });
+                if !control_pending
                     && !matches!(
                         runtime_state,
                         Some(
@@ -1675,61 +2096,69 @@ impl EditorProjectSession {
                         .request_active_control(EditorPlayOperation::Stop, RuntimeControl::Stop);
                 }
             }
-            EditorRuntimeOwnerState::CancellingStart { .. }
+            state @ (EditorRuntimeOwnerState::CancellingStart { .. }
             | EditorRuntimeOwnerState::RetiringPlay { .. }
-            | EditorRuntimeOwnerState::RetirementIncomplete { .. } => {}
-            EditorRuntimeOwnerState::Transitioning => {
-                unreachable!("workspace retirement is advanced outside runtime transitions")
+            | EditorRuntimeOwnerState::RetirementIncomplete { .. }
+            | EditorRuntimeOwnerState::Transitioning) => {
+                let _ = self.install_trusted_runtime_owner(state);
             }
         }
     }
 
-    fn finish_workspace_intent(&mut self, pending: PendingWorkspaceIntent) {
-        let closing_prefab =
-            self.workspace.document_kind(pending.document) == Some(EditorDocumentKind::Prefab);
-        let report = self.workspace.__discard_document(pending.document);
-        if report.applied && closing_prefab {
-            self.prefab_persistence = None;
-        }
-        let _ = self.diagnostics.extend(report.diagnostics);
-        if report.applied && pending.intent == EditorWorkspaceIntent::Exit {
-            if matches!(
-                self.persistence_result,
-                Some(EditorPersistenceResult::Saved { document, .. })
-                    if document == pending.document
-            ) {
-                self.persistence_result = None;
-            }
-            if let Some(document) = self.workspace.active_document() {
-                let phase = if self.workspace.document_is_dirty(document).unwrap_or(false) {
-                    EditorWorkspaceIntentPhase::AwaitingDecision
+    fn finish_workspace_intent_document(&mut self) {
+        let Some(pending) = self.pending_workspace_intent.take() else {
+            return;
+        };
+        match pending {
+            PendingWorkspaceIntent::CloseDocument(pending) => {
+                let closing_prefab = self.workspace.document_kind(pending.document)
+                    == Some(EditorDocumentKind::Prefab);
+                let report = self.workspace.__discard_document(pending.document);
+                if report.applied && closing_prefab {
+                    self.prefab_persistence = None;
+                }
+                let _ = self.diagnostics.extend(report.diagnostics);
+                self.workspace_intent_result = Some(if report.applied {
+                    EditorWorkspaceIntentResult::Applied {
+                        intent: EditorWorkspaceIntent::CloseDocument {
+                            document: pending.document,
+                        },
+                    }
                 } else {
-                    EditorWorkspaceIntentPhase::RetiringRuntime
-                };
-                self.pending_workspace_intent = Some(PendingWorkspaceIntent {
-                    intent: pending.intent,
-                    document,
-                    phase,
+                    EditorWorkspaceIntentResult::Rejected {
+                        intent: EditorWorkspaceIntent::CloseDocument {
+                            document: pending.document,
+                        },
+                        reason: EditorWorkspaceIntentRejection::MissingDocument,
+                    }
                 });
+            }
+            PendingWorkspaceIntent::Exit(mut pending) => {
+                pending.phase = EditorWorkspaceIntentPhase::Prepared;
+                self.pending_workspace_intent = Some(PendingWorkspaceIntent::Exit(pending));
+            }
+        }
+    }
+
+    fn prepare_current_exit_document(&self, pending: &mut PendingExitPreparation) {
+        while let Some(document) = pending.current_document() {
+            if self.workspace.document_is_dirty(document).unwrap_or(false) {
+                pending.phase = EditorWorkspaceIntentPhase::AwaitingDecision;
                 return;
             }
+            pending.cursor = pending.cursor.saturating_add(1);
         }
-        self.pending_workspace_intent = None;
-        self.workspace_intent_result = Some(if report.applied {
-            EditorWorkspaceIntentResult::Applied {
-                intent: pending.intent,
-            }
-        } else {
-            EditorWorkspaceIntentResult::Rejected {
-                intent: pending.intent,
-                reason: EditorWorkspaceIntentRejection::MissingDocument,
-            }
-        });
+        pending.phase = EditorWorkspaceIntentPhase::RetiringRuntime;
     }
 
     fn request_start(&mut self, operation: EditorPlayOperation) -> EditorPlayRequestResult {
-        if !matches!(self.runtime_owner, EditorRuntimeOwnerState::Empty)
-            || self.pending_control.is_some()
+        let Some(lane) = self.trusted_compiled() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ));
+        };
+        if !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Empty)
+            || lane.pending_control.is_some()
         {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
@@ -1748,7 +2177,12 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::NoActiveDocument);
         };
         let revision = slot.revision();
-        self.runtime_owner = EditorRuntimeOwnerState::Preparing {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ));
+        };
+        lane.runtime_owner = EditorRuntimeOwnerState::Preparing {
             document,
             revision,
             operation,
@@ -1758,23 +2192,25 @@ impl EditorProjectSession {
     }
 
     fn request_start_cancel(&mut self) -> EditorPlayRequestResult {
-        let state = std::mem::replace(
-            &mut self.runtime_owner,
-            EditorRuntimeOwnerState::Transitioning,
-        );
+        let Some(state) = self.take_trusted_runtime_owner() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ));
+        };
         match state {
             EditorRuntimeOwnerState::Preparing { operation, .. } => {
-                self.runtime_owner = EditorRuntimeOwnerState::Empty;
+                let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::Empty);
                 self.play_result = Some(EditorPlayOperationResult::Cancelled { operation });
                 EditorPlayRequestResult::Accepted
             }
             EditorRuntimeOwnerState::Starting {
                 operation, attempt, ..
             } => {
-                self.runtime_owner = EditorRuntimeOwnerState::CancellingStart {
-                    terminal: EditorPlayOperationResult::Cancelled { operation },
-                    attempt,
-                };
+                let _ =
+                    self.install_trusted_runtime_owner(EditorRuntimeOwnerState::CancellingStart {
+                        terminal: EditorPlayOperationResult::Cancelled { operation },
+                        attempt,
+                    });
                 self.play_result = Some(EditorPlayOperationResult::Pending {
                     operation: EditorPlayOperation::Cancel,
                 });
@@ -1786,17 +2222,19 @@ impl EditorProjectSession {
                 prepared,
                 ..
             } => {
-                self.runtime_host.abort_prepared_start(prepared);
-                self.runtime_owner = EditorRuntimeOwnerState::RetiringPlay {
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.runtime_host.abort_prepared_start(prepared);
+                }
+                let _ = self.install_trusted_runtime_owner(EditorRuntimeOwnerState::RetiringPlay {
                     terminal: EditorPlayOperationResult::Cancelled { operation },
-                };
+                });
                 self.play_result = Some(EditorPlayOperationResult::Pending {
                     operation: EditorPlayOperation::Cancel,
                 });
                 EditorPlayRequestResult::Accepted
             }
             other => {
-                self.runtime_owner = other;
+                let _ = self.install_trusted_runtime_owner(other);
                 EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState)
             }
         }
@@ -1807,17 +2245,22 @@ impl EditorProjectSession {
         operation: EditorPlayOperation,
         control: RuntimeControl,
     ) -> EditorPlayRequestResult {
-        if !matches!(self.runtime_owner, EditorRuntimeOwnerState::Active { .. }) {
+        let Some(lane) = self.trusted_compiled() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            ));
+        };
+        if !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Active { .. }) {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState);
         }
         let retires_runtime = matches!(
             operation,
             EditorPlayOperation::Stop | EditorPlayOperation::Restart
         );
-        if self.pending_apply_changes.is_some() && !retires_runtime {
+        if lane.pending_apply_changes.is_some() && !retires_runtime {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
-        if self.pending_control.is_some() {
+        if lane.pending_control.is_some() {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
@@ -1827,12 +2270,14 @@ impl EditorProjectSession {
         if retires_runtime {
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             {
-                self.pending_step_presentation = None;
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.pending_step_presentation = None;
+                }
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             if matches!(
-                self.runtime_owner,
-                EditorRuntimeOwnerState::Active { game: Some(_), .. }
+                self.trusted_compiled().map(|lane| &lane.runtime_owner),
+                Some(EditorRuntimeOwnerState::Active { game: Some(_), .. })
             ) {
                 if self
                     .set_game_view_source_active(false, "the Play Runtime is retiring")
@@ -1855,9 +2300,19 @@ impl EditorProjectSession {
             self.cancel_pending_runtime_edit();
             self.cancel_pending_apply_changes();
         }
-        match self.runtime_host.request_runtime_control(control) {
+        let requested = match self.trusted_compiled_mut() {
+            Some(lane) => lane.runtime_host.request_runtime_control(control),
+            None => {
+                return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                    EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                ));
+            }
+        };
+        match requested {
             Ok(ticket) => {
-                self.pending_control = Some(PendingEditorControl { operation, ticket });
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.pending_control = Some(PendingEditorControl { operation, ticket });
+                }
                 self.play_result = Some(EditorPlayOperationResult::Pending { operation });
                 EditorPlayRequestResult::Accepted
             }
@@ -1882,11 +2337,10 @@ impl EditorProjectSession {
     }
 
     fn drive_play_owner(&mut self, real_delta: Duration) {
-        let state = std::mem::replace(
-            &mut self.runtime_owner,
-            EditorRuntimeOwnerState::Transitioning,
-        );
-        self.runtime_owner = match state {
+        let Some(state) = self.take_trusted_runtime_owner() else {
+            return;
+        };
+        let next = match state {
             EditorRuntimeOwnerState::Empty => EditorRuntimeOwnerState::Empty,
             EditorRuntimeOwnerState::Preparing {
                 document,
@@ -1948,10 +2402,9 @@ impl EditorProjectSession {
                 game,
                 real_delta,
             ),
-            EditorRuntimeOwnerState::Transitioning => {
-                unreachable!("one Editor frame owns one runtime state transition")
-            }
+            EditorRuntimeOwnerState::Transitioning => EditorRuntimeOwnerState::Transitioning,
         };
+        let _ = self.install_trusted_runtime_owner(next);
     }
 
     fn drive_preparing(
@@ -1982,12 +2435,23 @@ impl EditorProjectSession {
             });
             return EditorRuntimeOwnerState::Empty;
         }
-        let expanded = match self.snapshot.prepare_editor_startup_scene(
-            slot.session().document(),
-            self.plan.schema_validation().registry(),
-        ) {
-            Ok(expanded) => expanded,
-            Err(error) => {
+        let expanded = match self.trusted_compiled().map(|lane| {
+            lane.snapshot.prepare_editor_startup_scene(
+                slot.session().document(),
+                lane.plan.schema_validation().registry(),
+            )
+        }) {
+            None => {
+                self.play_result = Some(EditorPlayOperationResult::Rejected {
+                    operation,
+                    reason: EditorPlayRejection::RuntimeUnavailable(
+                        EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                    ),
+                });
+                return EditorRuntimeOwnerState::Empty;
+            }
+            Some(Ok(expanded)) => expanded,
+            Some(Err(error)) => {
                 let _ = self.diagnostics.extend(error.diagnostics().clone());
                 self.play_result = Some(EditorPlayOperationResult::Failed {
                     operation,
@@ -1996,12 +2460,24 @@ impl EditorProjectSession {
                 return EditorRuntimeOwnerState::Empty;
             }
         };
-        match self.runtime_host.begin_editor_start(
-            self.snapshot.clone(),
-            self.plan.clone(),
-            expanded,
-            Vec::new(),
-        ) {
+        let started = match self.trusted_compiled_mut() {
+            Some(lane) => lane.runtime_host.begin_editor_start(
+                lane.snapshot.clone(),
+                lane.plan.clone(),
+                expanded,
+                Vec::new(),
+            ),
+            None => {
+                self.play_result = Some(EditorPlayOperationResult::Rejected {
+                    operation,
+                    reason: EditorPlayRejection::RuntimeUnavailable(
+                        EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                    ),
+                });
+                return EditorRuntimeOwnerState::Empty;
+            }
+        };
+        match started {
             Ok(attempt) => EditorRuntimeOwnerState::Starting {
                 document,
                 revision,
@@ -2026,10 +2502,25 @@ impl EditorProjectSession {
         operation: EditorPlayOperation,
         mut attempt: super::RuntimeStartAttempt,
     ) -> EditorRuntimeOwnerState {
-        match self.runtime_host.prepare_start(&mut attempt) {
+        let prepared = match self.trusted_compiled_mut() {
+            Some(lane) => lane.runtime_host.prepare_start(&mut attempt),
+            None => {
+                self.play_result = Some(EditorPlayOperationResult::Rejected {
+                    operation,
+                    reason: EditorPlayRejection::RuntimeUnavailable(
+                        EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                    ),
+                });
+                return EditorRuntimeOwnerState::Empty;
+            }
+        };
+        match prepared {
             Ok(prepared) => {
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
-                if let Some(config) = self.game_view_config {
+                if let Some(config) = self
+                    .trusted_compiled()
+                    .and_then(|lane| lane.game_view_config)
+                {
                     let request = game_view::start_request(config, document, revision, &prepared);
                     return EditorRuntimeOwnerState::AwaitingGameTarget {
                         document,
@@ -2040,9 +2531,23 @@ impl EditorProjectSession {
                     };
                 }
 
-                let diagnostics = self.runtime_host.commit_prepared_start(prepared);
+                let (diagnostics, generation) = match self.trusted_compiled_mut() {
+                    Some(lane) => {
+                        let diagnostics = lane.runtime_host.commit_prepared_start(prepared);
+                        let generation = lane.runtime_host.running_runtime_generation();
+                        (diagnostics, generation)
+                    }
+                    None => {
+                        self.play_result = Some(EditorPlayOperationResult::Rejected {
+                            operation,
+                            reason: EditorPlayRejection::RuntimeUnavailable(
+                                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                            ),
+                        });
+                        return EditorRuntimeOwnerState::Empty;
+                    }
+                };
                 let _ = self.diagnostics.extend(diagnostics);
-                let generation = self.runtime_host.running_runtime_generation();
                 self.play_result = Some(EditorPlayOperationResult::Applied {
                     operation,
                     generation,
@@ -2060,7 +2565,10 @@ impl EditorProjectSession {
                     operation,
                     failure: EditorPlayFailure::Start,
                 };
-                if self.runtime_host.has_cleanup_owner() {
+                if self
+                    .trusted_compiled()
+                    .is_some_and(|lane| lane.runtime_host.has_cleanup_owner())
+                {
                     self.play_result = Some(EditorPlayOperationResult::Pending { operation });
                     EditorRuntimeOwnerState::RetiringPlay { terminal }
                 } else {
@@ -2075,7 +2583,13 @@ impl EditorProjectSession {
         &mut self,
         terminal: EditorPlayOperationResult,
     ) -> EditorRuntimeOwnerState {
-        match self.runtime_host.drive_cleanup_once() {
+        let Some(outcome) = self
+            .trusted_compiled_mut()
+            .map(|lane| lane.runtime_host.drive_cleanup_once())
+        else {
+            return EditorRuntimeOwnerState::Empty;
+        };
+        match outcome {
             super::CleanupDriveOutcome::Complete {
                 failed,
                 diagnostics,
@@ -2121,10 +2635,17 @@ impl EditorProjectSession {
         >,
         real_delta: Duration,
     ) -> EditorRuntimeOwnerState {
-        if let Err(fault) = self.runtime_host.drive_running_runtime(real_delta) {
+        let driven = match self.trusted_compiled_mut() {
+            Some(lane) => lane.runtime_host.drive_running_runtime(real_delta),
+            None => return EditorRuntimeOwnerState::Empty,
+        };
+        if let Err(fault) = driven {
             let _ = self.diagnostics.extend(fault.diagnostics);
             self.cancel_pending_runtime_edit_without_port();
-            if let Some(pending) = self.pending_control.take() {
+            let pending = self
+                .trusted_compiled_mut()
+                .and_then(|lane| lane.pending_control.take());
+            if let Some(pending) = pending {
                 self.play_result = Some(EditorPlayOperationResult::Failed {
                     operation: pending.operation,
                     failure: EditorPlayFailure::Runtime,
@@ -2132,7 +2653,9 @@ impl EditorProjectSession {
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             {
-                self.pending_step_presentation = None;
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.pending_step_presentation = None;
+                }
             }
             return EditorRuntimeOwnerState::Active {
                 document,
@@ -2145,27 +2668,37 @@ impl EditorProjectSession {
         self.poll_runtime_edit();
         self.complete_pending_apply_changes(document, source_revision);
 
-        let runtime_state = self.runtime_host.running_runtime_state();
+        let runtime_state = self
+            .trusted_compiled()
+            .and_then(|lane| lane.runtime_host.running_runtime_state());
         if runtime_state == Some(RuntimeState::Stopped) {
-            let pending = self.pending_control.take();
+            let (pending, control_failed, close_failure, generation) = {
+                let Some(lane) = self.trusted_compiled_mut() else {
+                    return EditorRuntimeOwnerState::Empty;
+                };
+                let pending = lane.pending_control.take();
+                let control_failed = pending.is_some_and(|pending| {
+                    matches!(
+                        lane.runtime_host.runtime_control_status(pending.ticket),
+                        Some(RuntimeControlStatus::Failed(_))
+                    )
+                });
+                let close_failure = lane
+                    .runtime_host
+                    .running_runtime_close_evidence()
+                    .filter(super::close_evidence_has_terminal_failure);
+                let generation = lane.runtime_host.running_runtime_generation();
+                let released = lane.runtime_host.release_stopped_runtime();
+                debug_assert!(released);
+                (pending, control_failed, close_failure, generation)
+            };
             let operation = pending.map_or(EditorPlayOperation::Stop, |pending| pending.operation);
-            let control_failed = pending.is_some_and(|pending| {
-                matches!(
-                    self.runtime_host.runtime_control_status(pending.ticket),
-                    Some(RuntimeControlStatus::Failed(_))
-                )
-            });
-            let close_failure = self
-                .runtime_host
-                .running_runtime_close_evidence()
-                .filter(super::close_evidence_has_terminal_failure);
-            let generation = self.runtime_host.running_runtime_generation();
-            let released = self.runtime_host.release_stopped_runtime();
-            debug_assert!(released);
             if control_failed || close_failure.is_some() {
                 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                 {
-                    self.pending_step_presentation = None;
+                    if let Some(lane) = self.trusted_compiled_mut() {
+                        lane.pending_step_presentation = None;
+                    }
                 }
                 if let Some(evidence) = close_failure {
                     let _ = self
@@ -2196,7 +2729,9 @@ impl EditorProjectSession {
             }
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             {
-                self.pending_step_presentation = None;
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.pending_step_presentation = None;
+                }
             }
             self.play_result = Some(EditorPlayOperationResult::Applied {
                 operation,
@@ -2208,9 +2743,14 @@ impl EditorProjectSession {
         if runtime_state == Some(RuntimeState::CloseIncomplete) {
             #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
             {
-                self.pending_step_presentation = None;
+                if let Some(lane) = self.trusted_compiled_mut() {
+                    lane.pending_step_presentation = None;
+                }
             }
-            if let Some(pending) = self.pending_control.take() {
+            let pending = self
+                .trusted_compiled_mut()
+                .and_then(|lane| lane.pending_control.take());
+            if let Some(pending) = pending {
                 self.play_result = Some(EditorPlayOperationResult::Failed {
                     operation: pending.operation,
                     failure: EditorPlayFailure::Close,
@@ -2224,41 +2764,53 @@ impl EditorProjectSession {
             };
         }
 
-        if let Some(pending) = self.pending_control {
-            match self.runtime_host.runtime_control_status(pending.ticket) {
+        let pending = self
+            .trusted_compiled()
+            .and_then(|lane| lane.pending_control);
+        if let Some(pending) = pending {
+            let (status, generation) = self.trusted_compiled().map_or((None, None), |lane| {
+                (
+                    lane.runtime_host.runtime_control_status(pending.ticket),
+                    lane.runtime_host.running_runtime_generation(),
+                )
+            });
+            match status {
                 Some(RuntimeControlStatus::Applied) => {
-                    self.pending_control = None;
+                    if let Some(lane) = self.trusted_compiled_mut() {
+                        lane.pending_control = None;
+                    }
                     if pending.operation == EditorPlayOperation::StepFixedTick {
                         #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                         {
-                            self.pending_step_presentation = self
-                                .runtime_host
-                                .running_runtime_generation()
-                                .map(
-                                    |generation| EditorStepPresentationState::AwaitingCandidate {
-                                        generation,
-                                    },
-                                );
+                            if let Some(lane) = self.trusted_compiled_mut() {
+                                lane.pending_step_presentation = generation.map(|generation| {
+                                    EditorStepPresentationState::AwaitingCandidate { generation }
+                                });
+                            }
                         }
                         #[cfg(not(any(feature = "presentation-2d", feature = "presentation-ui")))]
                         {
                             self.play_result = Some(EditorPlayOperationResult::Applied {
                                 operation: pending.operation,
-                                generation: self.runtime_host.running_runtime_generation(),
+                                generation,
                             });
                         }
                     } else {
                         self.play_result = Some(EditorPlayOperationResult::Applied {
                             operation: pending.operation,
-                            generation: self.runtime_host.running_runtime_generation(),
+                            generation,
                         });
                     }
                 }
                 Some(RuntimeControlStatus::Failed(_)) | None => {
-                    self.pending_control = None;
+                    if let Some(lane) = self.trusted_compiled_mut() {
+                        lane.pending_control = None;
+                    }
                     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
                     {
-                        self.pending_step_presentation = None;
+                        if let Some(lane) = self.trusted_compiled_mut() {
+                            lane.pending_step_presentation = None;
+                        }
                     }
                     self.play_result = Some(EditorPlayOperationResult::Failed {
                         operation: pending.operation,
@@ -2277,16 +2829,19 @@ impl EditorProjectSession {
     }
 
     fn poll_runtime_edit(&mut self) {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return;
+        };
         if !matches!(
-            self.runtime_edit_result,
+            lane.runtime_edit_result,
             Some(EditorRuntimeEditResult::Pending(_))
         ) || !matches!(
-            self.runtime_host.running_runtime_state(),
+            lane.runtime_host.running_runtime_state(),
             Some(RuntimeState::Running | RuntimeState::Paused)
         ) {
             return;
         }
-        let Some(runtime) = self.runtime_host.running_runtime_mut() else {
+        let Some(runtime) = lane.runtime_host.running_runtime_mut() else {
             return;
         };
         let Ok(Ok(EditorRuntimeBridgeOutput::Result(Some(result)))) =
@@ -2296,17 +2851,20 @@ impl EditorProjectSession {
         else {
             return;
         };
-        self.runtime_edit_result = Some(result);
+        lane.runtime_edit_result = Some(result);
     }
 
     fn cancel_pending_runtime_edit(&mut self) {
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return;
+        };
         if !matches!(
-            self.runtime_edit_result,
+            lane.runtime_edit_result,
             Some(EditorRuntimeEditResult::Pending(_))
         ) {
             return;
         }
-        let result = self.runtime_host.running_runtime_mut().and_then(|runtime| {
+        let result = lane.runtime_host.running_runtime_mut().and_then(|runtime| {
             runtime
                 .with_driver_scope(|scope| {
                     scope.__apply_port::<EditorRuntimeBridge>(EditorRuntimeBridgeInput::Cancel)
@@ -2316,18 +2874,21 @@ impl EditorProjectSession {
         });
         match result {
             Some(EditorRuntimeBridgeOutput::Result(Some(result))) => {
-                self.runtime_edit_result = Some(result);
+                lane.runtime_edit_result = Some(result);
             }
             _ => self.cancel_pending_runtime_edit_without_port(),
         }
     }
 
     fn cancel_pending_runtime_edit_without_port(&mut self) {
-        let Some(EditorRuntimeEditResult::Pending(request)) = self.runtime_edit_result.take()
+        let Some(lane) = self.trusted_compiled_mut() else {
+            return;
+        };
+        let Some(EditorRuntimeEditResult::Pending(request)) = lane.runtime_edit_result.take()
         else {
             return;
         };
-        self.runtime_edit_result = Some(EditorRuntimeEditResult::Cancelled(request));
+        lane.runtime_edit_result = Some(EditorRuntimeEditResult::Cancelled(request));
     }
 
     fn complete_pending_apply_changes(
@@ -2335,76 +2896,102 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         source_revision: nara_scene::SceneAuthoringRevision,
     ) {
-        let Some(pending) = self.pending_apply_changes.take() else {
+        let Some(pending) = self
+            .trusted_compiled_mut()
+            .and_then(|lane| lane.pending_apply_changes.take())
+        else {
             return;
         };
+        let running_generation = self
+            .trusted_compiled()
+            .and_then(|lane| lane.runtime_host.running_runtime_generation());
         if pending.document != document
             || pending.source_revision != source_revision
-            || self.runtime_host.running_runtime_generation() != Some(pending.generation)
+            || running_generation != Some(pending.generation)
         {
-            self.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
-                request: pending.request,
-                reason: EditorApplyChangesRejection::StaleGeneration,
-                report: None,
-            });
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request: pending.request,
+                    reason: EditorApplyChangesRejection::StaleGeneration,
+                    report: None,
+                });
+            }
             return;
         }
         let Some(slot) = self.workspace.scene(document) else {
-            self.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
-                request: pending.request,
-                reason: EditorApplyChangesRejection::StaleDocument,
-                report: None,
-            });
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request: pending.request,
+                    reason: EditorApplyChangesRejection::StaleDocument,
+                    report: None,
+                });
+            }
             return;
         };
         if slot.revision() != pending.document_revision {
-            self.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
-                request: pending.request,
-                reason: EditorApplyChangesRejection::StaleDocument,
-                report: None,
-            });
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request: pending.request,
+                    reason: EditorApplyChangesRejection::StaleDocument,
+                    report: None,
+                });
+            }
             return;
         }
         let request = pending.request;
-        let exported = self.runtime_host.with_running_world(|world| {
-            __export_apply_changes_from_world(
-                world,
-                slot.session(),
-                self.plan.schema_validation().registry(),
-                source_revision,
-                request.clone(),
-            )
+        let exported = self.trusted_compiled().map(|lane| {
+            lane.runtime_host.with_running_world(|world| {
+                __export_apply_changes_from_world(
+                    world,
+                    slot.session(),
+                    lane.plan.schema_validation().registry(),
+                    source_revision,
+                    request.clone(),
+                )
+            })
         });
+        let Some(exported) = exported else {
+            return;
+        };
         let Ok(mut report) = exported else {
-            self.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
-                request,
-                reason: EditorApplyChangesRejection::InvalidRuntimeState,
-                report: None,
-            });
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request,
+                    reason: EditorApplyChangesRejection::InvalidRuntimeState,
+                    report: None,
+                });
+            }
             return;
         };
         let Some(patch) = report.patch.clone() else {
-            self.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
-                request,
-                reason: EditorApplyChangesRejection::Unsupported,
-                report: Some(report),
-            });
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request,
+                    reason: EditorApplyChangesRejection::Unsupported,
+                    report: Some(report),
+                });
+            }
             return;
         };
-        let patch_report = self.workspace.apply_command(
-            self.plan.schema_validation().registry(),
-            EditorWorkspaceCommand::ApplyScenePatch {
-                document,
-                base_revision: pending.document_revision,
-                patch,
-            },
-        );
+        let patch_report = match &mut self.execution {
+            EditorExecutionLane::Authoring(_) => return,
+            EditorExecutionLane::TrustedCompiled(lane) => self.workspace.apply_command(
+                lane.plan.schema_validation().registry(),
+                EditorWorkspaceCommand::ApplyScenePatch {
+                    document,
+                    base_revision: pending.document_revision,
+                    patch,
+                },
+            ),
+        };
         let Some(scene_patch_report) = patch_report.patch_report else {
-            self.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
-                request,
-                reason: EditorApplyChangesRejection::StaleDocument,
-                report: Some(report),
-            });
+            if let Some(lane) = self.trusted_compiled_mut() {
+                lane.apply_changes_result = Some(EditorApplyChangesResult::Rejected {
+                    request,
+                    reason: EditorApplyChangesRejection::StaleDocument,
+                    report: Some(report),
+                });
+            }
             return;
         };
         report.applied = scene_patch_report.applied;
@@ -2420,22 +3007,27 @@ impl EditorProjectSession {
                 };
             }
         }
-        self.apply_changes_result = Some(if report.applied {
-            EditorApplyChangesResult::Applied(report)
-        } else {
-            EditorApplyChangesResult::Rejected {
-                request,
-                reason: EditorApplyChangesRejection::StaleDocument,
-                report: Some(report),
-            }
-        });
+        if let Some(lane) = self.trusted_compiled_mut() {
+            lane.apply_changes_result = Some(if report.applied {
+                EditorApplyChangesResult::Applied(report)
+            } else {
+                EditorApplyChangesResult::Rejected {
+                    request,
+                    reason: EditorApplyChangesRejection::StaleDocument,
+                    report: Some(report),
+                }
+            });
+        }
     }
 
     fn cancel_pending_apply_changes(&mut self) {
-        let Some(pending) = self.pending_apply_changes.take() else {
+        let Some(lane) = self.trusted_compiled_mut() else {
             return;
         };
-        self.apply_changes_result = Some(EditorApplyChangesResult::Cancelled(pending.request));
+        let Some(pending) = lane.pending_apply_changes.take() else {
+            return;
+        };
+        lane.apply_changes_result = Some(EditorApplyChangesResult::Cancelled(pending.request));
     }
 }
 

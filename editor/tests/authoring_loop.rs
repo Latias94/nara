@@ -19,7 +19,10 @@ use nara::{
         CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, RelativePath,
         TrustMode,
     },
-    project_host::{EditorGameStartRequest, EditorGameViewCandidate, EditorGameViewCompletion},
+    project_host::{
+        EditorGameStartRequest, EditorGameViewCandidate, EditorGameViewCompletion,
+        TrustedCompiledEditorProjectIntent,
+    },
     project_workflow::{
         LocalDependencyParent, NaraDependencySource, ProjectCheckRequest, ProjectCreationOutcome,
         ProjectCreationRequest, ProjectSlug, StartupContentMemberKind, check_project,
@@ -63,9 +66,11 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     let project = create_project(&root);
     let scene_path = project.join("scenes/startup.scene.json");
     let source_before = fs::read(&scene_path).unwrap();
-    let mut application =
-        EditorApplication::open(EditorLaunchOptions::new(&project).with_profile("desktop"))
-            .expect("the desktop starter must open with its explicit desktop profile");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(&project),
+        TrustedCompiledEditorProjectIntent::new().with_profile("desktop"),
+    )
+    .expect("the desktop starter must open with its explicit desktop profile");
     application.set_scene_preview_extent(Extent2d::new(960, 540));
 
     let opened = application.current_frame();
@@ -340,8 +345,11 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let project = create_project(&root);
     let scene_path = project.join("scenes/startup.scene.json");
 
-    let mut application = EditorApplication::open(EditorLaunchOptions::new(&project))
-        .expect("the published starter must open in the private Editor application");
+    let mut application = EditorApplication::open_trusted_compiled(
+        EditorLaunchOptions::new(&project),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .expect("the published starter must open in the private Editor application");
     application.set_scene_preview_extent(Extent2d::new(960, 540));
     let opened = application.current_frame();
     let opened_scene = opened

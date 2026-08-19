@@ -766,6 +766,17 @@ impl PublishedAuthoringPrefabDocument {
     }
 }
 
+/// Forks one published source into an independent Editor working owner.
+#[must_use]
+pub fn fork_published_authoring_prefab_document(
+    published: &PublishedAuthoringPrefabDocument,
+) -> PublishedAuthoringPrefabDocument {
+    PublishedAuthoringPrefabDocument {
+        document: published.document.clone(),
+        state: published.state.clone(),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct AuthoringDocumentState {
     source: AuthoringDocumentSource,

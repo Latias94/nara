@@ -42,13 +42,11 @@ fn parse_arguments() -> Result<EditorLaunchOptions, EditorRunError> {
         }
     }
 
-    let project_root = match project_root {
-        Some(project_root) => project_root,
-        None => env::current_dir().map_err(|error| {
-            EditorRunError::usage(format!("current directory unavailable: {error}"))
-        })?,
+    let options = match project_root {
+        Some(project_root) => EditorLaunchOptions::new(project_root),
+        None => EditorLaunchOptions::project_manager(),
     };
-    Ok(EditorLaunchOptions::new(project_root).with_optional_profile(profile))
+    Ok(options.with_optional_profile(profile))
 }
 
 fn report_error(error: &EditorRunError) {

@@ -8,7 +8,7 @@ const FIRST_PARTY_SCHEMA_ADAPTER_ID: &str = "nara.first-party-authoring";
 const FIRST_PARTY_SCHEMA_ADAPTER_VERSION: u32 = 1;
 const FIRST_PARTY_SCHEMA_ADAPTER_GENERATION: u64 = 1;
 
-pub(super) fn first_party_authoring_adapters(
+pub(crate) fn first_party_authoring_adapters(
     providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,
 ) -> Result<Box<[AuthoringAdapterReceipt]>, FirstPartyAuthoringAdapterError> {
     providers
@@ -46,7 +46,7 @@ pub(super) fn first_party_authoring_adapters(
 }
 
 #[derive(Debug)]
-pub(super) enum FirstPartyAuthoringAdapterError {
+pub(crate) enum FirstPartyAuthoringAdapterError {
     ProviderSource(ComponentRegistryError),
     Receipt(AuthoringAdapterReceiptError),
 }

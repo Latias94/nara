@@ -63,6 +63,19 @@ pub enum EditorPlayState {
     CloseIncomplete,
 }
 
+/// Closed reason why an Editor session cannot create a Runtime execution owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRuntimeUnavailableReason {
+    ExternalExecutionHostNotImplemented,
+}
+
+/// Runtime execution capability published by one immutable Editor project frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorRuntimeAvailability {
+    Unavailable(EditorRuntimeUnavailableReason),
+    TrustedInProcess,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPlayRejection {
     Busy,
@@ -71,6 +84,7 @@ pub enum EditorPlayRejection {
     ResultPending,
     StaleDocument,
     RuntimeOutOfDate,
+    RuntimeUnavailable(EditorRuntimeUnavailableReason),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

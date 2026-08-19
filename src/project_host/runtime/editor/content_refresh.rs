@@ -53,11 +53,14 @@ impl EditorProjectSession {
         saved_digest: EditorDocumentDigest,
         expected_digest: ContentDigest,
     ) {
+        let Some(current_generation) = self.project_content.current_generation() else {
+            return;
+        };
         if self.current_snapshot_has_prefab_digest(&prefab, expected_digest) {
             self.pending_content_refresh = None;
             self.failed_content_refresh = None;
             self.project_content = EditorProjectContentView::Current {
-                generation: self.project_content.current_generation(),
+                generation: current_generation,
             };
             return;
         }
@@ -68,8 +71,7 @@ impl EditorProjectSession {
             saved_digest,
             expected_digest,
         };
-        self.project_content =
-            refresh_pending_view(self.project_content.current_generation(), &request);
+        self.project_content = refresh_pending_view(current_generation, &request);
         self.pending_content_refresh = Some(request);
         self.failed_content_refresh = None;
     }
@@ -79,12 +81,15 @@ impl EditorProjectSession {
         prefab: &AssetPath,
         digest: ContentDigest,
     ) -> bool {
+        let Some(lane) = self.trusted_compiled() else {
+            return false;
+        };
         let path = format!(
             "{}/{}",
-            self.content_candidate.settings().paths.prefabs.as_str(),
+            lane.content_candidate.settings().paths.prefabs.as_str(),
             prefab.as_str()
         );
-        self.snapshot
+        lane.snapshot
             .startup_content_closure()
             .members()
             .iter()
@@ -99,6 +104,11 @@ impl EditorProjectSession {
         &mut self,
         action: EditorProjectContentAction,
     ) -> EditorProjectContentRefreshRequestResult {
+        if self.trusted_compiled().is_none() {
+            return EditorProjectContentRefreshRequestResult::Rejected(
+                EditorProjectContentRefreshRejection::RetryNotAvailable,
+            );
+        }
         match action {
             EditorProjectContentAction::RetryRefresh => {}
         }
@@ -122,8 +132,12 @@ impl EditorProjectSession {
                 EditorProjectContentRefreshRejection::RetryNotAvailable,
             );
         };
-        self.project_content =
-            refresh_pending_view(self.project_content.current_generation(), &request);
+        let Some(current_generation) = self.project_content.current_generation() else {
+            return EditorProjectContentRefreshRequestResult::Rejected(
+                EditorProjectContentRefreshRejection::RetryNotAvailable,
+            );
+        };
+        self.project_content = refresh_pending_view(current_generation, &request);
         self.pending_content_refresh = Some(request);
         EditorProjectContentRefreshRequestResult::Accepted
     }
@@ -136,9 +150,12 @@ impl EditorProjectSession {
         else {
             return;
         };
-        if !matches!(self.runtime_owner, EditorRuntimeOwnerState::Empty)
-            || self.runtime_host.running_content_revision().is_some()
-            || self.runtime_host.has_cleanup_owner()
+        let Some(lane) = self.trusted_compiled() else {
+            return;
+        };
+        if !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Empty)
+            || lane.runtime_host.running_content_revision().is_some()
+            || lane.runtime_host.has_cleanup_owner()
             || self.pending_content_refresh.is_some()
         {
             return;
@@ -146,8 +163,11 @@ impl EditorProjectSession {
         let Some(request) = self.failed_content_refresh.take() else {
             return;
         };
-        self.project_content =
-            refresh_pending_view(self.project_content.current_generation(), &request);
+        let Some(current_generation) = self.project_content.current_generation() else {
+            self.failed_content_refresh = Some(request);
+            return;
+        };
+        self.project_content = refresh_pending_view(current_generation, &request);
         self.pending_content_refresh = Some(request);
     }
 
@@ -155,9 +175,13 @@ impl EditorProjectSession {
         let Some(request) = self.pending_content_refresh.take() else {
             return;
         };
-        let successor = match self.content_loader.load_with_expected_prefab_digest(
-            &self.content_candidate,
-            &self.plan,
+        let Some(lane) = self.trusted_compiled() else {
+            self.failed_content_refresh = Some(request);
+            return;
+        };
+        let successor = match lane.content_loader.load_with_expected_prefab_digest(
+            &lane.content_candidate,
+            &lane.plan,
             request.prefab.clone(),
             request.expected_digest,
         ) {
@@ -169,19 +193,24 @@ impl EditorProjectSession {
             }
         };
 
-        if successor.revision() == self.snapshot.revision() {
-            self.project_content = EditorProjectContentView::Current {
-                generation: self.project_content.current_generation(),
+        if successor.revision() == lane.snapshot.revision() {
+            let Some(generation) = self.project_content.current_generation() else {
+                self.reject_project_content_refresh(
+                    request,
+                    EditorProjectContentRefreshFailure::InvalidContent,
+                );
+                return;
             };
+            self.project_content = EditorProjectContentView::Current { generation };
             self.failed_content_refresh = None;
             return;
         }
 
         #[cfg(feature = "presentation-2d")]
-        let replacement_preview = match self
-            .preview
-            .rebuild_for_project(successor.clone(), self.plan.schema_validation().snapshot())
-        {
+        let replacement_preview = match {
+            lane.preview
+                .rebuild_for_project(successor.clone(), lane.plan.schema_validation().snapshot())
+        } {
             Ok(preview) => preview,
             Err(report) => {
                 self.reject_project_content_refresh(
@@ -225,20 +254,27 @@ impl EditorProjectSession {
         let replacement_ui_authoring_image_choices =
             super::ui_authoring::EditorUiImageChoices::from_snapshot(&successor, generation);
 
-        self.snapshot = successor;
-        #[cfg(feature = "presentation-2d")]
-        {
-            self.preview = replacement_preview;
-        }
-        #[cfg(feature = "presentation-ui")]
-        {
-            self.ui_preview = replacement_ui_preview;
-        }
         #[cfg(feature = "runtime-ui")]
         {
             self.ui_authoring_frame = None;
             self.ui_authoring_projection_cache = None;
-            self.ui_authoring_image_choices = replacement_ui_authoring_image_choices;
+        }
+        let Some(lane) = self.trusted_compiled_mut() else {
+            self.failed_content_refresh = Some(request);
+            return;
+        };
+        lane.snapshot = successor;
+        #[cfg(feature = "presentation-2d")]
+        {
+            lane.preview = replacement_preview;
+        }
+        #[cfg(feature = "presentation-ui")]
+        {
+            lane.ui_preview = replacement_ui_preview;
+        }
+        #[cfg(feature = "runtime-ui")]
+        {
+            lane.ui_authoring_image_choices = replacement_ui_authoring_image_choices;
         }
         self.next_project_content_generation = next_generation;
         self.project_content = EditorProjectContentView::Current { generation };
@@ -250,8 +286,12 @@ impl EditorProjectSession {
         request: PendingProjectContentRefresh,
         failure: EditorProjectContentRefreshFailure,
     ) {
+        let Some(current_generation) = self.project_content.current_generation() else {
+            self.failed_content_refresh = Some(request);
+            return;
+        };
         self.project_content = EditorProjectContentView::Stale {
-            current_generation: self.project_content.current_generation(),
+            current_generation,
             document: request.document,
             revision: request.revision,
             saved_digest: request.saved_digest,
@@ -274,11 +314,14 @@ impl EditorProjectSession {
                 EditorProjectContentRefreshFailure::HostUnavailable
             }
             ProjectContentErrorKind::GenerationCapacityExceeded => {
-                let runtime_retirement_can_release_a_generation = self
+                let Some(lane) = self.trusted_compiled() else {
+                    return EditorProjectContentRefreshFailure::CapacityExceeded;
+                };
+                let runtime_retirement_can_release_a_generation = lane
                     .runtime_host
                     .running_content_revision()
-                    .is_some_and(|revision| revision != self.snapshot.revision())
-                    || self.runtime_host.has_cleanup_owner();
+                    .is_some_and(|revision| revision != lane.snapshot.revision())
+                    || lane.runtime_host.has_cleanup_owner();
                 if runtime_retirement_can_release_a_generation {
                     EditorProjectContentRefreshFailure::RuntimeRetirementRequired
                 } else {

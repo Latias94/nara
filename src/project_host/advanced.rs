@@ -32,7 +32,9 @@ pub use super::composition::{
 ))]
 use super::runtime::{DesktopRun, DesktopRunIntent};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-use super::runtime::{EditorProjectIntent, EditorProjectOpenError, EditorProjectSession};
+use super::runtime::{
+    EditorProjectOpenError, EditorProjectSession, TrustedCompiledEditorProjectIntent,
+};
 
 /// One non-replayable plugin installed over an ordinary file-backed product recipe.
 ///
@@ -100,12 +102,16 @@ pub fn desktop_run_with_probe(
     DesktopRun::new_with_overlay(project_root, intent, probe.into_overlay())
 }
 
-/// Opens one Editor product session with a single non-replayable probe overlay.
+/// Opens one trusted in-process Editor session with a single non-replayable probe overlay.
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
-pub fn open_editor_with_probe(
+pub fn open_trusted_compiled_editor_with_probe(
     project_root: DirectoryCapability,
-    intent: EditorProjectIntent,
+    intent: TrustedCompiledEditorProjectIntent,
     probe: RuntimeProbe,
 ) -> Result<EditorProjectSession, EditorProjectOpenError> {
-    EditorProjectSession::open_with_overlay(project_root, intent, probe.into_overlay())
+    EditorProjectSession::open_trusted_compiled_with_overlay(
+        project_root,
+        intent,
+        probe.into_overlay(),
+    )
 }

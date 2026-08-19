@@ -28,7 +28,8 @@ use nara::{
     project_host::{
         DesktopRunOutcome, HeadlessRunOutcome,
         advanced::{
-            RuntimeProbe, desktop_run_with_probe, headless_run_with_probe, open_editor_with_probe,
+            RuntimeProbe, desktop_run_with_probe, headless_run_with_probe,
+            open_trusted_compiled_editor_with_probe,
         },
     },
     tooling::{
@@ -190,8 +191,12 @@ fn run_editor(
     root: nara::fs::DirectoryCapability,
     probe: PluginDefinition,
 ) -> Result<RuntimeFaultEvidence, &'static str> {
-    let mut session = open_editor_with_probe(root, wave_editor_intent(), RuntimeProbe::new(probe))
-        .map_err(|_| "host_parity_probe.editor-open")?;
+    let mut session = open_trusted_compiled_editor_with_probe(
+        root,
+        wave_editor_intent(),
+        RuntimeProbe::new(probe),
+    )
+    .map_err(|_| "host_parity_probe.editor-open")?;
     let initial = session.current_frame();
     let scene = initial
         .workspace()

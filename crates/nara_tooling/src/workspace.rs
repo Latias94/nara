@@ -414,6 +414,16 @@ impl EditorWorkspace {
         self.documents.len()
     }
 
+    /// Returns the stable document identities currently owned by this workspace.
+    ///
+    /// This Host-only snapshot supports non-destructive whole-workspace close preparation. UI
+    /// adapters should consume [`EditorWorkspaceModel`] instead.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn __document_ids(&self) -> Vec<EditorDocumentId> {
+        self.documents.keys().copied().collect()
+    }
+
     #[must_use]
     pub fn scene(&self, document: EditorDocumentId) -> Option<&EditorSceneSlot> {
         match self.documents.get(&document) {
