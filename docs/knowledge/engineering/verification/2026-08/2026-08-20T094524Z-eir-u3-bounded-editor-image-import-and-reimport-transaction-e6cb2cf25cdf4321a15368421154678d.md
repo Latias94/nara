@@ -9,17 +9,18 @@ producer_id: "codex-root"
 run_id: "019fd057-fb48-7493-b35e-bfb034e732c7"
 related_plan: "docs/plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md"
 git_branch: "refactor/engine-foundation-contracts"
-git_commit: "c53b189"
+git_commit: "2376a3a"
 verified_by: "codex-root"
 ---
 
 # Verification
 
-Verified commits `a0141e6`, `cb2e6c1`, and `c53b189` against EIR-U3. The unit adds one bounded
-Host-owned image catalog and Import/Reimport transaction, one shared Editor authoring runtime,
-receipt-bound metadata publication, retryable physical task retirement, exact retained-pixel
-leases, no-presentation lifecycle drive, and concrete session-local last-good image retention. It
-does not add Inspector, Canvas publication, reopen hydration, or a native product trajectory.
+Verified commits `a0141e6`, `cb2e6c1`, `c53b189`, and `2376a3a` against EIR-U3. The unit adds one
+bounded Host-owned image catalog and Import/Reimport transaction, one shared Editor authoring
+runtime, receipt-bound metadata publication, retryable physical task retirement, exact
+retained-pixel leases, no-presentation lifecycle drive, replacement handoff, and concrete
+session-local last-good image retention. It does not add Inspector, Canvas publication, reopen
+hydration, or a native product trajectory.
 
 # Result
 
@@ -75,7 +76,7 @@ normal Refresh re-establishes catalog truth.
   Stopping, and Retiring states:
 
   ```text
-  CARGO_BUILD_JOBS=1 cargo nextest run -p nara-editor -E 'test(runtime_lifecycle_drive_is_independent_of_presentation)' --test-threads=1
+  CARGO_BUILD_JOBS=1 cargo nextest run -p nara-editor -E 'test(runtime_lifecycle_drive_is_independent_of_presentation) or test(transitional_runtime_lifecycle_schedules_bounded_follow_up_drive)' --test-threads=1
   ```
 - Focused compile and owner tests also passed for the coalesced source-index refresh, shared file
   publication Host, and exclusive metadata lock path. `cargo check -p nara --features
@@ -103,6 +104,7 @@ hydration, referenced-image reopen, or the native end-to-end trajectory.
 - `a0141e6` (`feat(editor): implement image import transaction`)
 - `cb2e6c1` (`fix(editor): close image import resource lifetimes`)
 - `c53b189` (`fix(editor): drive runtime retirement without presentation`)
+- `2376a3a` (`fix(editor): keep runtime retirement progressing`)
 - `docs/plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md`
 - `docs/architecture/adr/0115-editor-image-import-metadata-and-authoring-publication.md`
 - `src/project_host/runtime/editor/image_import/catalog.rs`

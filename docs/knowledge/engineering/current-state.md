@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "eef896c5fef0d29d5fd78c74dbc8b79608ee2b512f697d55f6d1180e0a2269c9"
+source_fingerprint: "6cefd66f71807c2174c73bfb9a6e4b0249e44b29f61784cad3913ab80b5a41eb"
 ---
 
 # Current State
@@ -12,7 +12,7 @@ source_fingerprint: "eef896c5fef0d29d5fd78c74dbc8b79608ee2b512f697d55f6d1180e0a2
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `eef896c5fef0d29d5fd78c74dbc8b79608ee2b512f697d55f6d1180e0a2269c9`
+- Source fingerprint: `6cefd66f71807c2174c73bfb9a6e4b0249e44b29f61784cad3913ab80b5a41eb`
 - Immutable records: 546
 - Active lane heads: 1
 

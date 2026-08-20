@@ -17,7 +17,8 @@ an index, not another source of architecture decisions.
    [verification `48b2b28ab1404017b7fe14ab2c335071`](../knowledge/engineering/verification/2026-08/2026-08-20T053914Z-eir-u1-u2-canonical-image-recipe-and-strict-consumer-migration-48b2b28ab1404017b7fe14ab2c335071.md).
    EIR-U3 completed the bounded Host image catalog and Import/Reimport transaction at `a0141e6`,
    with exact retained-pixel accounting and retryable physical task retirement closed at `cb2e6c1`,
-   and no-presentation Runtime retirement wake closed at `c53b189`,
+   and no-presentation Runtime retirement plus replacement handoff closed across `c53b189` and
+   `2376a3a`,
    under
    [verification `e6cb2cf25cdf4321a15368421154678d`](../knowledge/engineering/verification/2026-08/2026-08-20T094524Z-eir-u3-bounded-editor-image-import-and-reimport-transaction-e6cb2cf25cdf4321a15368421154678d.md).
    EIR-U4 owns only the UI-neutral Inspector, private egui adapter, and native pending-work wake;

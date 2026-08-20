@@ -9,7 +9,7 @@ producer_id: "codex-root"
 run_id: "eir-u4-inspector-20260820"
 related_plan: "docs/plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md"
 git_branch: "refactor/engine-foundation-contracts"
-git_commit: "c53b189"
+git_commit: "2376a3a"
 supersedes: "9e9c9d493c16435ab3eb1e7aedc12fb4"
 registration_id: "editor-image-import-reimport-v1-codex-root"
 source_workspace: "F:\\SourceCodes\\Rust\\nara"
@@ -22,7 +22,7 @@ Execute EIR-U4 only; EIR-U5/EIR-U6 and unrelated Editor successors remain inacti
 
 # Current Claim
 
-EIR-U3 completed across `a0141e6`, `cb2e6c1`, and `c53b189` with bounded catalog admission, atomic metadata publication, one authoring runtime, retryable physical task retirement, exact retained-pixel leases, no-presentation lifecycle drive, and exact Reimport reconciliation.
+EIR-U3 completed across `a0141e6`, `cb2e6c1`, `c53b189`, and `2376a3a` with bounded catalog admission, atomic metadata publication, one authoring runtime, retryable physical task retirement, exact retained-pixel leases, no-presentation lifecycle drive, replacement handoff, and exact Reimport reconciliation.
 
 # Latest Links
 
@@ -38,5 +38,6 @@ Implement EIR-U4 from the published Host frame facts: UI-neutral actions and Ins
 - `a0141e6` (`feat(editor): implement image import transaction`)
 - `cb2e6c1` (`fix(editor): close image import resource lifetimes`)
 - `c53b189` (`fix(editor): drive runtime retirement without presentation`)
+- `2376a3a` (`fix(editor): keep runtime retirement progressing`)
 - `e6cb2cf25cdf4321a15368421154678d` (EIR-U3 verification)
 - `docs/architecture/adr/0115-editor-image-import-metadata-and-authoring-publication.md`
