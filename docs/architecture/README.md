@@ -9,12 +9,14 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
-   plan is active only at the build-green EIR-U1/EIR-U2 atomic migration under
-   [registration `a8651338ca4940429199c29e478862be`](../knowledge/engineering/registry/2026-08/2026-08-20T030624Z-editor-image-import-reimport-v1-codex-root-a8651338ca4940429199c29e478862be.md).
-   EIR-U0 accepted
-   [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md). EIR-U1 and
-   EIR-U2 migrate the typed recipe, strict consumers, reload path, and fixtures without a temporary
-   compatibility reader; EIR-U3 through EIR-U6 and all unrelated Editor successors remain inactive.
+   plan is active only at EIR-U3 under
+   [registration `9e9c9d493c16435ab3eb1e7aedc12fb4`](../knowledge/engineering/registry/2026-08/2026-08-20T053930Z-editor-image-import-reimport-v1-codex-root-9e9c9d493c16435ab3eb1e7aedc12fb4.md).
+   EIR-U0 accepted [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md).
+   EIR-U1/EIR-U2 completed the typed recipe, strict-consumer, reload, and fixture migration at
+   `334f946`, with the reviewed metadata-reload correction at `88f4a7a` and
+   [verification `48b2b28ab1404017b7fe14ab2c335071`](../knowledge/engineering/verification/2026-08/2026-08-20T053914Z-eir-u1-u2-canonical-image-recipe-and-strict-consumer-migration-48b2b28ab1404017b7fe14ab2c335071.md).
+   EIR-U3 owns only the Host image catalog and import transaction; EIR-U4 through EIR-U6 and all
+   unrelated Editor successors remain inactive.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with

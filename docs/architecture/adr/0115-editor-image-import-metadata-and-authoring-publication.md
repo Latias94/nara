@@ -250,7 +250,7 @@ publication authority, and leaves generalization evidence-gated.
 Implementation must prove the canonical metadata reset and strict consumers, one receipt-bound Host
 transaction with last-good retention, UI-neutral exact actions, same-generation image choices and
 prepared resources, bounded referenced-image hydration, and one standalone Editor trajectory. The
-implementation ledger remains `not-started` until those code and verification anchors exist.
+implementation ledger advances only when the corresponding code and verification anchors exist.
 
 ## Citations
 
