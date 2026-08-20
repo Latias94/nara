@@ -4,6 +4,9 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-20
+* **Work Registration**: [Editor Image Import and Reimport v1: EIR-U1 active](registry/2026-08/2026-08-20T024236Z-editor-image-import-reimport-v1-codex-root-8271913ae26044eda4c910646e49f6ea.md) - Activates only the canonical typed Image metadata and recipe unit after EIR-U0 architecture admission.
+
 ## 2026-08-19
 * **Work Registration**: [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md) - Closes EPB-U5 with one generic Editor browse/Open/Refresh product trajectory and truthful last-good recovery.
 * **Verification Evidence**: [EPB-U5 standalone Project Browser product closure](verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md) - Verifies one generic Editor browse, filter, Scene/Prefab Open, equivalent Refresh, and last-good failure trajectory on Windows.
@@ -136,4 +139,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [PCC-U4 Product Composition Conformance Baseline](verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md) - Publishes the independent product-composition baseline for explicit WGPU, Winit accessibility and ProductRecipe Host authority.
 * **Work Registration**: [Product composition contribution correction: PCC-U3 complete, PCC-U4 active](registry/2026-08/2026-08-13T045033Z-engine-foundation-contract-completion-codex-root-25e1b788e8864b51a53108ed4b185e64.md) - PCC-U3 is complete at 864c151; PCC-U4 is the sole active convergence unit before RUP-U3 resumes.
 * **Verification Evidence**: [PCC-U3 ProductRecipe ordinary Host authority verification](verification/2026-08/2026-08-13T045032Z-pcc-u3-productrecipe-ordinary-host-authority-verification-02de9ad341db4dcbb1519e0f5e8843f1.md) - Verifies one ProductRecipe ordinary Host composition input, explicit one-definition advanced probes, schema-authority closure, and Headless/Desktop/Editor parity.
-* **Work Registration**: [Product composition contribution correction: PCC-U2 complete, PCC-U3 active](registry/2026-08/2026-08-13T020623Z-engine-foundation-contract-completion-codex-root-cbb7db6fba494fd9b1ee15ec4818ed82.md) - Work Registration for Product composition contribution correction: PCC-U2 complete, PCC-U3 active.

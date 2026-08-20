@@ -10,6 +10,8 @@
 **Extracted From**: [ADR 0087](0087-asset-dependency-import-product-and-artifact-publication-graph.md),
 which remains Proposed for multi-product dependency discovery, artifact-group reconciliation, and
 crash-safe group publication
+**Refined By**: [ADR 0115](0115-editor-image-import-metadata-and-authoring-publication.md): Editor
+Image Import Metadata and Authoring Publication
 **Implementation Plan**: [Ordered UI Kernel and Engine Boundary Correction](../../plans/2026-08-04-002-refactor-ordered-ui-kernel-and-engine-boundary-correction-plan.md), NUI-U3
 
 ## Context
@@ -54,9 +56,10 @@ flowchart LR
   typed result, generation/version checks, and failure-atomic publication.
 - Image is the first admitted path. Its importer produces backend-neutral CPU image data and never
   allocates a GPU resource or publishes through a renderer-owned store.
-- `nara_asset` remains the owner of stable source/runtime identity, reload generations, expected
-  versions, artifact records where already consumed, and the scheduling sets that concrete domains
-  join. It does not depend on Image or dispatch a domain decoder.
+- `nara_asset` remains the owner of stable source/runtime identity, strict identity-first
+  `AssetMeta<TSettings>` admission, reload generations, expected versions, artifact records where
+  already consumed, and the scheduling sets that concrete domains join. It does not depend on
+  Image, interpret image settings, compute their hash, or dispatch a domain decoder.
 - The unused `TypedImporter<T>`, generic `ImportedAsset<T>`, erased importer registry, registration
   API, provider ID, and metadata that no executor consumes are removed rather than deprecated.
 - Failed, cancelled, over-budget, stale, and superseded work publishes no new asset state. A prior
@@ -67,6 +70,10 @@ flowchart LR
   task, budget, and publication semantics.
 - Multi-product dependency tracking and artifact-group publication remain governed by Proposed ADR
   0087 until its own admission evidence is complete.
+- ADR 0115's explicit Editor Import/Reimport lane and Host-private referenced-image hydration
+  worklist are two consumers of the same Image-domain implementation. Host-owned metadata
+  publication and a concrete Editor image store do not make either path a second asset domain and
+  do not satisfy the shared-executor trigger.
 
 ## Alternatives Considered
 
@@ -93,6 +100,8 @@ complete and keeping future generalization evidence-driven.
 - Image becomes easier to audit because one domain owns admission through typed publication.
 - A future audio, font, or model importer initially implements a concrete vertical slice. It may use
   shared asset primitives but cannot register into an executor that does not exist.
+- The first Editor image consumer remains concrete: the Host may orchestrate exact capabilities and
+  receipts, while `nara_image` retains settings-hash, decode, and typed commit authority.
 - Accepting this decision does not accept the compound-product graph, remote import execution,
   artifact cache protocol, GPU preparation, or a plugin sandbox.
 

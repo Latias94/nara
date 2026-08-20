@@ -2,12 +2,14 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
-**Amended**: 2026-07-18 for the RGF-U12 asset-metadata envelope
+**Amended**: 2026-08-20 for the EIR-U0 canonical typed asset-metadata reset
 **Implemented Slices**: RGF-U1 scene, prefab, scene-patch, and component-catalog envelopes; RGF-U12
 asset-metadata envelope
 **Refines**: ADR 0006, ADR 0007, ADR 0011, ADR 0037, ADR 0043, ADR 0045
 **Refined By**: ADR 0055: Feature Matrix, Boundary Checks, and Compatibility Fixtures;
-ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
+ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding;
+[ADR 0115](0115-editor-image-import-metadata-and-authoring-publication.md): Editor Image Import
+Metadata and Authoring Publication
 
 ## Context
 
@@ -70,18 +72,30 @@ Rules:
 | `component_schema_catalog` | 1 | 1 | none; a successor is checked against its direct predecessor |
 | `asset_meta` | 1 | 1 | none |
 
+ADR 0115 resets the unreleased canonical `asset_meta` version-1 payload to one typed composition.
+The exact Image shape is a nested `asset` object containing `stable_id`, `path`, and
+`source_kind: "image"`, followed by a `settings` object containing only
+`color_space: "srgb" | "linear"`. `nara_asset` owns strict identity-first admission and
+`AssetMeta<TSettings>` composition; `nara_image` owns `ImageImportSettings` and its canonical hash.
+
+The previous flat `stable_id`, `path`, and `source_kind` payload is not a retained version. It
+rejects under version 1, and no compatibility reader or hidden migration is permitted. EIR-U1
+deletes the flat reader while atomically rewriting
+`reference-game/assets/textures/player.png.meta`,
+`reference-game/assets/textures/tiny-dungeon.png.meta`, their consumers, and
+`crates/nara_asset/tests/meta_format.rs`.
+
 The eight RGF-U1 JSON/RON golden files intentionally contain empty payload containers. They lock
 the common envelope, field names, omission rules, line endings, and empty canonical shape. They do
 not prove representative nested payload stability. Non-empty component values, field-ID patches,
 embedded prefab overrides, catalog entries, and rejection behavior are covered by construction-based
 round-trip and negative tests until a real project fixture is admitted.
 
-RGF-U12 adds strict `asset_meta` JSON decode and canonical serialization around `AssetMeta`.
-Unknown fields, wrong kind/version/engine compatibility, malformed stable IDs, over-budget input,
-and writer output that would fail the same decoder reject before publication. The committed
-reference-game image metadata and `nara_asset` format tests provide the first production-shaped
-fixture and round-trip evidence. Import artifact records remain runtime/cache records rather than a
-new persistent file kind.
+RGF-U12 established strict `asset_meta` JSON decode and canonical serialization around the original
+flat `AssetMeta`. ADR 0115 keeps its envelope, budget, unknown-field, kind/version/engine, stable-ID,
+and writer-self-validation rules while replacing that unreleased payload atomically. Until EIR-U1
+lands, the implementation ledger remains partial and does not claim the accepted typed shape.
+Import artifact records remain runtime/cache records rather than a new persistent file kind.
 
 ## Alternatives Considered
 

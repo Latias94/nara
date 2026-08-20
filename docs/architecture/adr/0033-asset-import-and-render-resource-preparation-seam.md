@@ -6,7 +6,8 @@
 Render Resource Lifetime and Submitter Ownership; ADR 0054: GPU Upload Budget and Buffer
 Allocation Policy; ADR 0080: Domain-Owned TaskUpdate Integration Sets;
 [ADR 0103](0103-concrete-domain-owned-asset-import-execution.md): Concrete Domain-Owned Asset
-Import Execution
+Import Execution; [ADR 0115](0115-editor-image-import-metadata-and-authoring-publication.md):
+Editor Image Import Metadata and Authoring Publication
 
 ## Context
 
@@ -29,15 +30,17 @@ rendering, atlases, materials, runtime UI images, or 3D mesh/material rendering.
 
 Rules:
 
-- `nara_asset` owns source asset identity, `.meta` records, import settings hashes, imported
-  artifact records, asset dependency graph data, load states, and reload events. Concrete asset
-  domains own import execution; `nara_asset` has no generic decoder registry.
+- `nara_asset` owns source asset identity, strict identity-first `.meta` admission, typed
+  `AssetMeta<TSettings>` composition, imported artifact records, asset dependency graph data, load
+  states, and reload events. Concrete asset domains own settings semantics and hashing plus import
+  execution; `nara_asset` has no generic decoder registry.
 - `nara_asset` must not own GPU resources or depend on render backend crates.
 - Source asset `.meta` files live beside source assets first, for example
   `assets/textures/player.png.meta`. The `.meta` file is the stable identity authority for the
   source asset.
-- Generated imported artifacts live under `.nara/import-cache/` and are never hand-authored source
-  data.
+- When a durable imported-artifact product is separately admitted, generated artifacts live under
+  `.nara/import-cache/` and are never hand-authored source data. ADR 0115's Editor image v1 keeps
+  accepted decoded pixels session-local and does not publish that cache.
 - An import recipe key includes stable asset ID, source content digest, importer ID/version and
   implementation digest, canonical import settings, every tracked import-input dependency,
   output schema/format, and target/import profile when relevant. An artifact content digest
@@ -120,7 +123,8 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 - Scene and prefab validation can check unresolved asset IDs before world mutation. Spawning uses a
   scratch `AssetServer` during component preflight and writes it back to the target `World` only when
   the full scene/prefab preflight succeeds.
-- Editor asset browsers and future hot reload can reuse the same importer/dependency graph data.
+- Editor catalogs may reuse stable identity and source-index facts, but a catalog entry does not
+  prove source freshness or authorize a generic importer/dependency-graph executor.
 - Cache reuse is valid only when the complete import recipe matches. Equal output bytes may share a
   content digest without collapsing stable source/product identity or dependency provenance.
 - The next plan should be allowed to add meaningful code and crate structure; avoiding the seam now
@@ -161,6 +165,10 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
   `ImageImportBudgetHost`; no global or static owner exists. Built-in importer version 2
   intentionally invalidates version-1 image artifacts. The importer does not read ambient paths or
   create GPU resources.
+- ADR 0115 adds explicit Editor Import/Reimport and referenced-image hydration as two Host consumers
+  of this same Image-domain recipe. The Host owns capability-bound metadata publication and its
+  concrete session image store; neither consumer is a second asset domain or a trigger for a
+  generic executor.
 - Image reload preserves stable handles while changing `AssetVersion`, `LoadState`, asset events,
   exact `AssetSlotRevision`, prepared-resource snapshots, and source dependency edges behind those
   handles. Direct slot mutation is observable through the same exact revision even when loader
@@ -188,7 +196,7 @@ use; preserves backend isolation; gives hot reload and editor tooling a durable 
 |---|---:|---|
 | Stable asset identity | `AssetRef::StableId` resolves through `.meta`/project asset records | Scene/prefab validation and unit tests |
 | Backend isolation | `nara_asset`, `nara_sprite`, `nara_tilemap`, and `nara_render` do not import `wgpu` | Dependency search |
-| Source/artifact split | Source `.meta` and generated `.nara/import-cache` records are separate | Fixture and docs review |
+| Source/artifact split | Editor source `.meta` and session-local pixels are separate; durable `.nara/import-cache` publication requires another admitted product | Fixture and docs review |
 | Hot reload readiness | Asset version changes invalidate prepared render resources without changing handles | Unit tests |
 | Texture path reuse | Sprite/tilemap and runtime UI image materials use the same image import/prepare/cache path that reusable materials can later use | Example review and UI render tests |
 

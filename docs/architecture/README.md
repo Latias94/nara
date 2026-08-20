@@ -8,7 +8,13 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The completed [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
+3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
+   plan is active only at EIR-U1 under
+   [registration `8271913ae26044eda4c910646e49f6ea`](../knowledge/engineering/registry/2026-08/2026-08-20T024236Z-editor-image-import-reimport-v1-codex-root-8271913ae26044eda4c910646e49f6ea.md).
+   EIR-U0 accepted
+   [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md); EIR-U2 through
+   EIR-U6 and all unrelated Editor successors remain inactive. The completed
+   [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with
    [verification `2acde0398a8b467b93fe714241a5e216`](../knowledge/engineering/verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md)
    and completed
@@ -26,8 +32,8 @@ an index, not another source of architecture decisions.
    bounded-allocation correction at `6fb84d0`, with
    [evidence `495c3c9cb92b4f94aa0895dfbce04ebf`](../knowledge/engineering/verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md).
    EPB-U5 proves the one-window browse/filter/Open/Refresh trajectory, equivalent snapshot facts,
-   and last-good retention at `1a832df`. EPB-U0 through EPB-U5 are complete; no unrelated Editor
-   successor is active.
+   and last-good retention at `1a832df`. EPB-U0 through EPB-U5 are complete and remain immutable
+   predecessor evidence for the explicitly activated EIR lane.
    The completed [Standalone Generic Editor Project Open and Recovery](../plans/2026-08-18-2158-feat-standalone-generic-editor-project-open-and-recovery-plan.md)
    plan closes at `a86aee1` with
    [verification `25fbee67d7ea41a9bc8406abe6e8b221`](../knowledge/engineering/verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md)
@@ -36,9 +42,9 @@ an index, not another source of architecture decisions.
    SGE-U1 through SGE-U5 establish the bounded data-only schema basis, lossless degraded Scene and
    Prefab authority, shell-first lifecycle, strict selected-native Runtime agreement, modular
    generic authoring workspace, and one-window Project Manager/Open/Recovery product proof. No
-   successor Editor lane is active automatically. The now-completed EPB lane was the explicit
-   project-browsing successor; external Play, import/reimport, watchers, source mutation, and
-   extension hosting remain separately trigger-gated.
+   successor Editor lane is active automatically. The completed EPB lane was the explicit
+   project-browsing successor; ADR 0115 now admits only the EIR image workflow. External Play,
+   watchers, unrelated source mutation, and extension hosting remain separately trigger-gated.
    The completed
    [Editor UI Prefab Structural Composition v1](../plans/2026-08-18-0848-feat-editor-ui-prefab-structural-composition-v1-plan.md)
    closes at `993a793` with conformance record `436c589870ba4f3c83548d349caa6d4c` and
@@ -73,7 +79,7 @@ an index, not another source of architecture decisions.
 | [Source Extension Package Interface Design](source-extension-package-interface-design.md) | Canonical harness for source-package scenarios | Tracer-gated; illustrative interfaces do not authorize a package kernel or public API. |
 | [Multi-Role Extension Package Tracer](multi-role-extension-package-tracer-design.md) | Scenario appendix | Owns only the multi-role tracer; shared package decisions remain in the source-package harness. |
 | [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md) | Candidate-interface appendix | No production consumer exists; it must not create a crate or public API before a named tracer admits it. |
-| [Asset Import Host Interface Design](asset-import-host-interface-design.md) | Import specialization appendix | Dormant until ADR 0087 or an Accepted successor admits a concrete importer workflow. |
+| [Asset Import Host Interface Design](asset-import-host-interface-design.md) | Import specialization appendix | ADR 0115 admits only the concrete Editor Image workflow; this broader appendix remains non-normative and cannot authorize a registry, watcher, durable cache, project plugin, or multi-product graph. |
 | [Extension Package Concept Guide](extension-package-concept-guide.md) | Explanatory guide | Explains vocabulary only and never adds decisions. |
 | [Render Capability Demand and Pressure Matrix](render-capability-pressure-matrix.md) | Render evidence/admission appendix | Evaluates whether a capability deserves a tracer; it is not a renderer roadmap. |
 | [Render Extension Capability Interface Design](render-extension-capability-interface-design.md) | Future render canonical harness | Inactive and needs rebaseline; the RGF closure architecture handoff owns activation against the landed render owners and evidence. |
