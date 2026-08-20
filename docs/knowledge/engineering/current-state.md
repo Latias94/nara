@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "6cefd66f71807c2174c73bfb9a6e4b0249e44b29f61784cad3913ab80b5a41eb"
+source_fingerprint: "791a2efd46486423e8139414a9176ab632752138a5781d72769aef0d7bfb60f5"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "6cefd66f71807c2174c73bfb9a6e4b0249e44b29f61784cad3913ab80b5
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `6cefd66f71807c2174c73bfb9a6e4b0249e44b29f61784cad3913ab80b5a41eb`
-- Immutable records: 546
+- Source fingerprint: `791a2efd46486423e8139414a9176ab632752138a5781d72769aef0d7bfb60f5`
+- Immutable records: 548
 - Active lane heads: 1
 
 # Active Registrations
@@ -21,7 +21,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
-- [Editor Image Import and Reimport v1: EIR-U4 Inspector active](registry/2026-08/2026-08-20T094525Z-editor-image-import-reimport-v1-codex-root-369ef53ed4104ca88f11a30a9449643b.md): `active` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
+- [Editor Image Import and Reimport v1: EIR-U5 authoring publication active](registry/2026-08/2026-08-20T121502Z-editor-image-import-reimport-v1-codex-root-245355740b684b4d93569c53f383d8e4.md): `active` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
 - [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
@@ -39,6 +39,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EIR-U4 image import Inspector and native wake](verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md) - Verifies the UI-neutral image import projection, private egui Inspector, exact frame-bound action, last-good diagnostics, and bounded native polling wake.
 - **Verification Evidence**: [EIR-U3 bounded Editor image import and reimport transaction](verification/2026-08/2026-08-20T094524Z-eir-u3-bounded-editor-image-import-and-reimport-transaction-e6cb2cf25cdf4321a15368421154678d.md) - Verifies the bounded Host catalog, atomic metadata publication, task-owned image import, exact retained-pixel leases, retryable close, and failure-atomic reimport workflow.
 - **Verification Evidence**: [EIR-U1/U2 canonical image recipe and strict consumer migration](verification/2026-08/2026-08-20T053914Z-eir-u1-u2-canonical-image-recipe-and-strict-consumer-migration-48b2b28ab1404017b7fe14ab2c335071.md) - Verifies the atomic typed metadata reset across image owners, Generic Authoring, strict ProjectContent, reload, fixtures, and consumers.
 - **Verification Evidence**: [EPB-U5 standalone Project Browser product closure](verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md) - Verifies one generic Editor browse, filter, Scene/Prefab Open, equivalent Refresh, and last-good failure trajectory on Windows.
@@ -50,7 +51,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [SGE-U4 exact export product agreement correction](verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md) - Verifies that Export binds both built products to the exact ordered startup closure before publication.
 - **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
 - **Verification Evidence**: [SGE-U3 shell-first generic Editor lifecycle](verification/2026-08/2026-08-19T023209Z-sge-u3-shell-first-generic-editor-lifecycle-140aa71012404a4c8b62e17b1c1279ad.md) - Verifies native shell-first project admission, retained replacement handoff, strict ordinary filesystem trust, recovery path hygiene, exact degraded Reopen preservation, explicit Runtime unavailability, and the advanced trusted canary boundary.
-- **Verification Evidence**: [SGE-U2 lossless degraded authoring verification](verification/2026-08/2026-08-18T165000Z-sge-u2-lossless-degraded-authoring.md) - Verifies exact-receipt-bound degraded Scene and Prefab authoring, bounded source closure, lossless persistence, and strict Runtime rejection.
 
 # Integration Notes
 

@@ -9,8 +9,8 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
-   plan is active only at EIR-U4 under
-   [registration `369ef53ed4104ca88f11a30a9449643b`](../knowledge/engineering/registry/2026-08/2026-08-20T094525Z-editor-image-import-reimport-v1-codex-root-369ef53ed4104ca88f11a30a9449643b.md).
+   plan is active only at EIR-U5 under
+   [registration `245355740b684b4d93569c53f383d8e4`](../knowledge/engineering/registry/2026-08/2026-08-20T121502Z-editor-image-import-reimport-v1-codex-root-245355740b684b4d93569c53f383d8e4.md).
    EIR-U0 accepted [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md).
    EIR-U1/EIR-U2 completed the typed recipe, strict-consumer, reload, and fixture migration at
    `334f946`, with the reviewed metadata-reload correction at `88f4a7a` and
@@ -21,8 +21,12 @@ an index, not another source of architecture decisions.
    `2376a3a`,
    under
    [verification `e6cb2cf25cdf4321a15368421154678d`](../knowledge/engineering/verification/2026-08/2026-08-20T094524Z-eir-u3-bounded-editor-image-import-and-reimport-transaction-e6cb2cf25cdf4321a15368421154678d.md).
-   EIR-U4 owns only the UI-neutral Inspector, private egui adapter, and native pending-work wake;
-   EIR-U5/EIR-U6 and all unrelated Editor successors remain inactive.
+   EIR-U4 completed the UI-neutral Inspector, private egui adapter, exact frame-bound action, honest
+   last-good projection, and bounded native pending-work wake across `1620786` and correction
+   `6797956`, under
+   [verification `d109ae1760a2463a862ffd4c0148caaf`](../knowledge/engineering/verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md).
+   EIR-U5 owns only same-generation UI authoring publication and referenced-image hydration;
+   EIR-U6 and all unrelated Editor successors remain inactive.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with
