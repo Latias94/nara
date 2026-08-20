@@ -4,11 +4,10 @@ use std::{
 };
 
 use nara_app::{App, CoreStage};
-use nara_asset::{AssetId, AssetServer, AssetSourceKind, Handle};
+use nara_asset::{AssetId, Handle};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
-use nara_image::ImageAsset;
 use nara_reflect::{ComponentRegistry, ComponentRegistrySnapshot};
 use nara_render::{
     __private::{EditorRenderGeneration, build_editor_render_frame_packet},
@@ -23,9 +22,9 @@ use nara_sprite_render::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
 use nara_transform::Transform2d;
 
-use crate::project_host::{ProjectContentSnapshot, authoring::AuthoringProjectSessionSnapshot};
+use crate::project_host::ProjectContentSnapshot;
 
-use super::super::{publish_snapshot_images, single_error};
+use super::super::single_error;
 use super::authoring_preview::EditorAuthoringPreviewOmissions;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -187,7 +186,6 @@ pub(super) struct EditorPreviewSource {
 }
 
 pub(super) struct EditorPreviewSession {
-    app: App,
     input: Arc<Mutex<Option<EditorPreviewRequest>>>,
     generation: EditorRenderGeneration,
     target: Handle<RenderImage2d>,
@@ -210,54 +208,30 @@ impl std::fmt::Debug for EditorPreviewSession {
 }
 
 impl EditorPreviewSession {
-    pub(super) fn new(
+    pub(super) fn install_trusted(
+        app: &mut App,
         project: ProjectContentSnapshot,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<Self, DiagnosticReport> {
-        let image_source = project.clone();
-        Self::new_with_project(
+        Self::install(
+            app,
             EditorPreviewProject::TrustedCompiled(project),
             registry,
-            |world| {
-                publish_snapshot_images(world, &image_source).map_err(|error| error.diagnostics)
-            },
         )
     }
 
-    pub(super) fn new_authoring(
-        project: &AuthoringProjectSessionSnapshot,
+    pub(super) fn install_authoring(
+        app: &mut App,
         registry: &ComponentRegistrySnapshot,
     ) -> Result<Self, DiagnosticReport> {
-        Self::new_with_project(EditorPreviewProject::Authoring, registry, |world| {
-            publish_authoring_image_records(world, project)
-        })
+        Self::install(app, EditorPreviewProject::Authoring, registry)
     }
 
-    fn new_with_project(
+    fn install(
+        app: &mut App,
         project: EditorPreviewProject,
         registry: &ComponentRegistrySnapshot,
-        publish_images: impl FnOnce(&mut World) -> Result<(), DiagnosticReport>,
     ) -> Result<Self, DiagnosticReport> {
-        let mut app = App::new();
-        app.add_plugins((
-            nara_reflect::ComponentRegistryPlugin,
-            nara_hierarchy::HierarchyPlugin,
-            nara_scene::SceneComponentsPlugin,
-            nara_diagnostic::DiagnosticsPlugin::default(),
-            nara_tasks::TaskPlugin::default(),
-            nara_asset::AssetPlugin,
-            nara_transform::TransformPlugin,
-            nara_render::RenderComponentsPlugin,
-        ))
-        .and_then(|app| {
-            app.add_plugins((
-                nara_image::ImagePlugin::default(),
-                nara_render::RenderPlugin,
-                nara_image::ImagePreparePlugin,
-                nara_sprite_render::SpriteRenderPlugin,
-            ))
-        })
-        .map_err(|_| preview_error("project.editor.preview-plugin-install-failed"))?;
         let input = Arc::new(Mutex::new(None));
         app.insert_resource(EditorPreviewInput(Arc::clone(&input)))
             .and_then(|app| {
@@ -269,14 +243,9 @@ impl EditorPreviewSession {
             .and_then(|app| app.insert_resource(EditorPreviewRuntimeState::default()))
             .and_then(|app| app.add_systems(CoreStage::First, apply_editor_preview_request))
             .map_err(|_| preview_error("project.editor.preview-state-install-failed"))?;
-        publish_images(
-            app.world_mut()
-                .map_err(|_| preview_error("project.editor.preview-world-unavailable"))?,
-        )?;
         let generation = EditorRenderGeneration::try_acquire()
             .ok_or_else(|| preview_error("project.editor.preview-generation-exhausted"))?;
         Ok(Self {
-            app,
             input,
             generation,
             target: Handle::new(AssetId::from_raw(1)),
@@ -296,36 +265,29 @@ impl EditorPreviewSession {
         }
     }
 
+    pub(super) const fn extent(&self) -> Option<Extent2d> {
+        self.extent
+    }
+
     pub(super) fn requires_source_projection(
         &self,
+        world: &World,
         document: EditorDocumentId,
         revision: SceneAuthoringRevision,
     ) -> bool {
         if self.extent.is_none() {
             return false;
         }
-        self.app
-            .world()
-            .resource::<EditorPreviewRuntimeState>()
-            .requested
+        world.resource::<EditorPreviewRuntimeState>().requested
             != Some(EditorPreviewDocumentStamp { document, revision })
-    }
-
-    pub(super) fn rebuild_for_project(
-        &self,
-        project: ProjectContentSnapshot,
-        registry: &ComponentRegistrySnapshot,
-    ) -> Result<Self, DiagnosticReport> {
-        let mut replacement = Self::new(project, registry)?;
-        replacement.set_extent(self.extent);
-        Ok(replacement)
     }
 
     pub(super) fn drive(
         &mut self,
+        app: &mut App,
         source: Option<EditorPreviewSource>,
     ) -> Option<DiagnosticReport> {
-        match self.try_drive(source) {
+        match self.try_drive(app, source) {
             Ok(()) => {
                 self.last_failure = None;
                 None
@@ -338,7 +300,11 @@ impl EditorPreviewSession {
         }
     }
 
-    fn try_drive(&mut self, source: Option<EditorPreviewSource>) -> Result<(), DiagnosticReport> {
+    fn try_drive(
+        &mut self,
+        app: &mut App,
+        source: Option<EditorPreviewSource>,
+    ) -> Result<(), DiagnosticReport> {
         self.candidate = None;
         let Some(extent) = self.extent else {
             return Ok(());
@@ -358,28 +324,27 @@ impl EditorPreviewSession {
             .input
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(request);
-        self.app
-            .run_once(Duration::ZERO)
+        app.run_once(Duration::ZERO)
             .map_err(|_| preview_error("project.editor.preview-frame-failed"))?;
 
         let stamp = EditorPreviewDocumentStamp {
             document: source.document,
             revision: source.revision,
         };
-        let runtime_state = self.app.world().resource::<EditorPreviewRuntimeState>();
+        let runtime_state = app.world().resource::<EditorPreviewRuntimeState>();
         if runtime_state.accepted != Some(stamp) {
             return Err(runtime_state.diagnostics.clone());
         }
-        let views = self.app.world().resource::<ExtractedViews>();
+        let views = app.world().resource::<ExtractedViews>();
         let packet = build_editor_render_frame_packet(
             self.generation,
-            self.app.world().resource::<RenderFrame>().index,
+            app.world().resource::<RenderFrame>().index,
             views,
         )
         .map_err(|_| preview_error("project.editor.preview-packet-rejected"))?
         .ok_or_else(|| preview_error("project.editor.preview-view-missing"))?;
         let target = packet.view().target;
-        let queued = self.app.world().resource::<QueuedSpriteItems>();
+        let queued = app.world().resource::<QueuedSpriteItems>();
         let mut hits = Vec::with_capacity(queued.len());
         for (ordinal, item) in queued.as_slice().iter().enumerate() {
             if item.view_index != 0 || item.target != target {
@@ -387,8 +352,7 @@ impl EditorPreviewSession {
                     "project.editor.preview-queue-target-mismatch",
                 ));
             }
-            let source = self
-                .app
+            let source = app
                 .world()
                 .get::<SceneEntitySource>(item.entity)
                 .ok_or_else(|| preview_error("project.editor.preview-source-identity-missing"))?;
@@ -403,14 +367,14 @@ impl EditorPreviewSession {
             .geometry_revision
             .checked_add(1)
             .ok_or_else(|| preview_error("project.editor.preview-geometry-exhausted"))?;
-        let world_snapshot = WorldIdentitySnapshot::capture_default(self.app.world())
+        let world_snapshot = WorldIdentitySnapshot::capture_default(app.world())
             .map_err(|_| preview_error("project.editor.preview-identity-snapshot-failed"))?;
         self.candidate = Some(EditorPreviewCandidate {
             document: source.document,
             revision: source.revision,
             geometry_revision,
             packet,
-            sprite_batches: self.app.world().resource::<SpriteBatches>().clone(),
+            sprite_batches: app.world().resource::<SpriteBatches>().clone(),
             hits,
             omissions: runtime_state
                 .omissions
@@ -530,22 +494,6 @@ fn ensure_preview_camera(
             state.camera = Some(world.spawn((camera, Transform2d::default())).id());
         }
     }
-}
-
-fn publish_authoring_image_records(
-    world: &mut World,
-    snapshot: &AuthoringProjectSessionSnapshot,
-) -> Result<(), DiagnosticReport> {
-    let mut server = world.resource_mut::<AssetServer>();
-    for record in snapshot
-        .asset_records()
-        .filter(|record| record.source_kind() == &AssetSourceKind::Image)
-    {
-        server
-            .reserve_record::<ImageAsset>(record)
-            .map_err(|_| preview_error("project.editor.preview-image-identity-failed"))?;
-    }
-    Ok(())
 }
 
 fn preview_error(code: &'static str) -> DiagnosticReport {

@@ -228,6 +228,10 @@ impl ImageAsset {
         self.retention.as_ref().map(Arc::clone)
     }
 
+    pub(crate) const fn has_retention_owner(&self) -> bool {
+        self.retention.is_some()
+    }
+
     fn validate_rgba_bytes(
         extent: ImageExtent,
         format: ImageFormat,

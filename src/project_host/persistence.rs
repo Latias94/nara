@@ -1,12 +1,14 @@
-use std::{
-    io::Write,
-    sync::atomic::{AtomicU64, Ordering},
+mod file_publication;
+
+pub(super) use file_publication::{
+    FilePublicationBinding, FilePublicationEvidence, FilePublicationFailureStage,
+    FilePublicationHost, FilePublicationOutcome, FilePublicationRejection,
 };
 
 use nara_fs::{
-    ContentDigest, DirectoryCapability, DurabilityProgress, ExpectedTarget, FileIdentity, FsError,
-    LockMode, PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding,
-    RelativeComponent, RelativePath, StageStatus,
+    ContentDigest, DirectoryCapability, DurabilityProgress, FileIdentity, FsError,
+    PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding, RelativePath,
+    StageStatus,
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
@@ -17,9 +19,6 @@ use nara_tooling::{
     EditorDocumentDigest, EditorDocumentId, EditorPersistenceCheckpoint, EditorPersistenceCommit,
     EditorPersistenceFailureStage, EditorPersistenceRejection,
 };
-
-static NEXT_TEMPORARY_NAME: AtomicU64 = AtomicU64::new(1);
-const TEMPORARY_NAME_ATTEMPTS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DocumentEncoding {
@@ -35,13 +34,9 @@ enum PersistenceDocumentLane {
 
 #[derive(Debug)]
 struct PersistenceFileState {
-    parent: DirectoryCapability,
-    target: RelativeComponent,
+    publication: FilePublicationHost,
     encoding: DocumentEncoding,
     limits: SceneFileLimits,
-    observed_identity: FileIdentity,
-    observed_digest: ContentDigest,
-    uncertain: bool,
     #[cfg(test)]
     reject_next_valid_receipt: bool,
     #[cfg(test)]
@@ -224,13 +219,15 @@ impl PersistenceFileState {
         let digest = ContentDigest::of_bytes(&bytes);
         Ok((
             Self {
-                parent,
-                target,
+                publication: FilePublicationHost::from_existing(
+                    parent,
+                    target,
+                    identity,
+                    digest,
+                    file_byte_limit(limits),
+                ),
                 encoding,
                 limits,
-                observed_identity: identity,
-                observed_digest: digest,
-                uncertain: false,
                 #[cfg(test)]
                 reject_next_valid_receipt: false,
                 #[cfg(test)]
@@ -265,13 +262,15 @@ impl PersistenceFileState {
                 _ => EditorPersistenceFailureStage::ReadTarget,
             })?;
         Ok(Self {
-            parent,
-            target,
+            publication: FilePublicationHost::from_existing(
+                parent,
+                target,
+                expected_identity,
+                expected_digest,
+                file_byte_limit(limits),
+            ),
             encoding,
             limits,
-            observed_identity: expected_identity,
-            observed_digest: expected_digest,
-            uncertain: false,
             #[cfg(test)]
             reject_next_valid_receipt: false,
             #[cfg(test)]
@@ -280,7 +279,7 @@ impl PersistenceFileState {
     }
 
     fn preflight_save(&mut self) -> Result<(), PersistenceSaveOutcome> {
-        if self.uncertain {
+        if self.publication.uncertain() {
             return Err(PersistenceSaveOutcome::Rejected(
                 EditorPersistenceRejection::RequiresReconcile,
             ));
@@ -309,120 +308,51 @@ impl PersistenceFileState {
             return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::Encode);
         }
 
-        let target = match self.parent.open_child_file(&self.target) {
-            Ok(target) => target,
-            Err(error) => return open_target_failure(error),
-        };
-        if target.identity() != self.observed_identity {
-            return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
-        }
-        let lock = match target.try_lock(LockMode::Exclusive) {
-            Ok(lock) => lock,
-            Err(FsError::LockContended) => {
+        let previous_identity = match self.publication.binding() {
+            FilePublicationBinding::Existing { identity, .. } => identity,
+            FilePublicationBinding::Missing => {
                 return PersistenceSaveOutcome::Rejected(
-                    EditorPersistenceRejection::LockUnavailable,
-                );
-            }
-            Err(_) => {
-                return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::OpenTarget);
-            }
-        };
-        if target
-            .verify_digest(self.observed_digest, file_byte_limit(self.limits))
-            .is_err()
-        {
-            return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
-        }
-
-        let mut temporary = match create_temporary(&self.parent) {
-            Ok(temporary) => temporary,
-            Err(_) => {
-                return PersistenceSaveOutcome::Failed(
-                    EditorPersistenceFailureStage::CreateTemporary,
+                    EditorPersistenceRejection::PreservationMismatch,
                 );
             }
         };
-        if temporary.write_all(bytes).is_err() || temporary.flush().is_err() {
-            return PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::WriteTemporary);
-        }
-        let sync = match temporary.sync() {
-            Ok(sync) => sync,
-            Err(_) => {
-                return PersistenceSaveOutcome::Failed(
-                    EditorPersistenceFailureStage::SyncTemporary,
-                );
+        let accepted = match self.publication.publish(bytes) {
+            FilePublicationOutcome::Published(accepted) => accepted,
+            FilePublicationOutcome::Rejected(reason) => {
+                return PersistenceSaveOutcome::Rejected(editor_publication_rejection(reason));
+            }
+            FilePublicationOutcome::Failed(stage) => {
+                return PersistenceSaveOutcome::Failed(editor_publication_failure(stage));
+            }
+            FilePublicationOutcome::Uncertain(evidence) => {
+                return PersistenceSaveOutcome::PersistenceUncertain {
+                    evidence: editor_persistence_receipt(&checkpoint, &evidence),
+                };
             }
         };
-        if sync.progress().data_synced() != StageStatus::Achieved
-            || sync.progress().file_metadata_synced() != StageStatus::Achieved
-        {
-            return PersistenceSaveOutcome::Rejected(
-                EditorPersistenceRejection::UnsupportedGuarantee,
-            );
-        }
-
-        let receipt = match self.parent.replace_temp(
-            temporary,
-            &self.target,
-            ExpectedTarget::Identity(self.observed_identity),
-        ) {
-            Ok(receipt) => receipt,
-            Err(FsError::TargetStateMismatch) => {
-                return PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetChanged);
-            }
-            Err(_) => {
-                return PersistenceSaveOutcome::Failed(
-                    EditorPersistenceFailureStage::ReplaceTarget,
-                );
-            }
-        };
-        drop(lock);
-
-        let parent_directory_sync = self.parent.sync().map_or(StageStatus::Unknown, |receipt| {
-            receipt.progress().parent_directory_synced()
-        });
-        let expected_digest = ContentDigest::of_bytes(bytes);
-        let written_digest = receipt.written_content_digest();
-        let published_digest = receipt.published_content_digest();
-        let evidence = EditorPersistenceReceipt {
-            document: checkpoint.document(),
-            revision: checkpoint.revision(),
-            digest: editor_digest(expected_digest),
-            published_digest: published_digest.map(editor_digest),
-            previous_identity: receipt.previous_identity(),
-            candidate_identity: receipt.candidate_identity(),
-            published_identity: receipt.published_identity(),
-            identity_evidence: receipt.publication_identity_evidence(),
-            publication: receipt.publication_atomicity(),
-            durability: receipt.durability(),
-            parent_directory_sync,
-        };
+        let evidence = editor_persistence_receipt(&checkpoint, accepted.evidence());
 
         #[cfg(test)]
         if std::mem::take(&mut self.reject_next_valid_receipt) {
-            self.uncertain = true;
+            self.publication.mark_uncertain();
             return PersistenceSaveOutcome::PersistenceUncertain { evidence };
         }
-        if written_digest != expected_digest {
-            self.uncertain = true;
-            return PersistenceSaveOutcome::PersistenceUncertain { evidence };
-        }
-        let candidate_identity = receipt.candidate_identity();
+
+        let (publication_evidence, binding) = accepted.into_parts();
+        let (receipt, _) = publication_evidence.into_parts();
         let Some(commit) =
-            EditorPersistenceCommit::from_publication(checkpoint, self.observed_identity, receipt)
+            EditorPersistenceCommit::from_publication(checkpoint, previous_identity, receipt)
         else {
-            self.uncertain = true;
+            self.publication.mark_uncertain();
             return PersistenceSaveOutcome::PersistenceUncertain { evidence };
         };
 
-        self.observed_identity = candidate_identity;
-        self.observed_digest = published_digest
-            .expect("an accepted persistence commit has published content evidence");
+        self.publication.commit_published(binding);
         PersistenceSaveOutcome::Saved { commit, evidence }
     }
 
     fn reopen(&self) -> FileReopenOutcome {
-        let file = match self.parent.open_child_file(&self.target) {
+        let file = match self.publication.open_target() {
             Ok(file) => file,
             Err(error) => return open_target_reopen_failure(error),
         };
@@ -439,13 +369,33 @@ impl PersistenceFileState {
     }
 
     fn commit_reopen(&mut self, identity: FileIdentity, digest: ContentDigest) {
-        self.observed_identity = identity;
-        self.observed_digest = digest;
-        self.uncertain = false;
+        self.publication.commit_reconciled(identity, digest);
     }
 
     fn mark_uncertain(&mut self) {
-        self.uncertain = true;
+        self.publication.mark_uncertain();
+    }
+
+    fn uncertain(&self) -> bool {
+        self.publication.uncertain()
+    }
+
+    fn observed_identity(&self) -> FileIdentity {
+        match self.publication.binding() {
+            FilePublicationBinding::Existing { identity, .. } => identity,
+            FilePublicationBinding::Missing => {
+                unreachable!("document persistence is always bound to an existing source")
+            }
+        }
+    }
+
+    fn observed_digest(&self) -> ContentDigest {
+        match self.publication.binding() {
+            FilePublicationBinding::Existing { digest, .. } => digest,
+            FilePublicationBinding::Missing => {
+                unreachable!("document persistence is always bound to an existing source")
+            }
+        }
     }
 
     #[cfg(test)]
@@ -469,7 +419,7 @@ impl ScenePersistenceHost {
         let (file, bytes) = PersistenceFileState::open(scenes, scene_path, limits)?;
         let session = decode_scene_session(file.encoding, &bytes, limits, registry)?;
         Ok(OpenedScenePersistence {
-            digest: editor_digest(file.observed_digest),
+            digest: editor_digest(file.observed_digest()),
             host: Self {
                 file,
                 lane: PersistenceDocumentLane::Native,
@@ -669,7 +619,7 @@ impl PrefabPersistenceHost {
         let (file, bytes) = PersistenceFileState::open(prefabs, source_binding.locator(), limits)?;
         let session = decode_prefab_session(file.encoding, &bytes, limits, registry)?;
         Ok(OpenedPrefabPersistence {
-            digest: editor_digest(file.observed_digest),
+            digest: editor_digest(file.observed_digest()),
             host: Self {
                 file,
                 source_binding,
@@ -1037,32 +987,56 @@ fn prefab_authoring_basis_is_preserved(
         && reopened.unavailable_record_manifest() == current.unavailable_record_manifest()
 }
 
-fn create_temporary(parent: &DirectoryCapability) -> Result<nara_fs::TemporaryFile, FsError> {
-    for _ in 0..TEMPORARY_NAME_ATTEMPTS {
-        let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
-        let name =
-            RelativeComponent::new(format!(".nara-save-{}-{sequence}.tmp", std::process::id()))
-                .expect("the engine-owned temporary filename is valid");
-        match parent.create_temp(&name) {
-            Ok(temporary) => return Ok(temporary),
-            Err(FsError::AlreadyExists { .. }) => continue,
-            Err(error) => return Err(error),
-        }
+fn editor_persistence_receipt(
+    checkpoint: &EditorPersistenceCheckpoint,
+    evidence: &FilePublicationEvidence,
+) -> EditorPersistenceReceipt {
+    let receipt = evidence.receipt();
+    EditorPersistenceReceipt {
+        document: checkpoint.document(),
+        revision: checkpoint.revision(),
+        digest: editor_digest(receipt.written_content_digest()),
+        published_digest: receipt.published_content_digest().map(editor_digest),
+        previous_identity: receipt.previous_identity(),
+        candidate_identity: receipt.candidate_identity(),
+        published_identity: receipt.published_identity(),
+        identity_evidence: receipt.publication_identity_evidence(),
+        publication: receipt.publication_atomicity(),
+        durability: receipt.durability(),
+        parent_directory_sync: evidence.parent_directory_sync(),
     }
-    Err(FsError::AlreadyExists {
-        operation: nara_fs::FsOperation::CreateTemporary,
-    })
 }
 
-fn open_target_failure(error: FsError) -> PersistenceSaveOutcome {
-    match error {
-        FsError::Io { ref source, .. } if source.kind() == std::io::ErrorKind::NotFound => {
-            PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::TargetDeleted)
+const fn editor_publication_rejection(
+    rejection: FilePublicationRejection,
+) -> EditorPersistenceRejection {
+    match rejection {
+        FilePublicationRejection::TargetChanged => EditorPersistenceRejection::TargetChanged,
+        FilePublicationRejection::TargetDeleted => EditorPersistenceRejection::TargetDeleted,
+        FilePublicationRejection::LockUnavailable => EditorPersistenceRejection::LockUnavailable,
+        FilePublicationRejection::UnsupportedGuarantee => {
+            EditorPersistenceRejection::UnsupportedGuarantee
         }
-        FsError::Unsupported { .. } | FsError::Unproven { .. } => {
-            PersistenceSaveOutcome::Rejected(EditorPersistenceRejection::UnsupportedGuarantee)
+        FilePublicationRejection::RequiresReconcile => {
+            EditorPersistenceRejection::RequiresReconcile
         }
-        _ => PersistenceSaveOutcome::Failed(EditorPersistenceFailureStage::OpenTarget),
+    }
+}
+
+const fn editor_publication_failure(
+    failure: FilePublicationFailureStage,
+) -> EditorPersistenceFailureStage {
+    match failure {
+        FilePublicationFailureStage::PayloadTooLarge => EditorPersistenceFailureStage::Encode,
+        FilePublicationFailureStage::OpenTarget => EditorPersistenceFailureStage::OpenTarget,
+        FilePublicationFailureStage::CreateTemporary => {
+            EditorPersistenceFailureStage::CreateTemporary
+        }
+        FilePublicationFailureStage::WriteTemporary => {
+            EditorPersistenceFailureStage::WriteTemporary
+        }
+        FilePublicationFailureStage::SyncTemporary => EditorPersistenceFailureStage::SyncTemporary,
+        FilePublicationFailureStage::ReplaceTarget => EditorPersistenceFailureStage::ReplaceTarget,
     }
 }
 
@@ -1099,7 +1073,7 @@ mod tests {
     #[cfg(windows)]
     use std::fs::OpenOptions;
 
-    use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
+    use nara_fs::{CapabilityRights, HostCapabilityOptions, LockMode, TrustMode};
     use nara_reflect::{
         AuthoringSchemaBundle, AuthoringSchemaBundleOwner, ComponentFieldId, ComponentValue,
         PersistentComponentSchemaOwnerId,
@@ -1112,6 +1086,75 @@ mod tests {
     use nara_tooling::{EditorDocumentSourceBinding, EditorWorkspace, EditorWorkspaceCommand};
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    #[test]
+    fn file_publication_preserves_missing_and_existing_target_expectations() {
+        let root = TestRoot::new();
+        let capability = root.capability();
+        let target = root.path.join("new-image.png.meta");
+        let first = b"first canonical metadata";
+        let second = b"second canonical metadata";
+        let mut publication =
+            FilePublicationHost::bind_missing(&capability, "new-image.png.meta", 1024).unwrap();
+
+        let FilePublicationOutcome::Published(accepted) = publication.publish(first) else {
+            panic!("an absent target must accept one expected-missing publication");
+        };
+        assert_eq!(accepted.evidence().receipt().previous_identity(), None);
+        let (_, binding) = accepted.into_parts();
+        publication.commit_published(binding);
+        assert_eq!(fs::read(&target).unwrap(), first);
+
+        let FilePublicationOutcome::Published(accepted) = publication.publish(second) else {
+            panic!("the accepted successor binding must support exact replacement");
+        };
+        assert_eq!(
+            accepted.evidence().receipt().previous_identity(),
+            publication.binding().identity()
+        );
+        let (_, binding) = accepted.into_parts();
+        publication.commit_published(binding);
+        assert_eq!(fs::read(&target).unwrap(), second);
+
+        let raced_target = root.path.join("raced-image.png.meta");
+        let mut raced =
+            FilePublicationHost::bind_missing(&capability, "raced-image.png.meta", 1024).unwrap();
+        fs::write(&raced_target, b"external metadata").unwrap();
+        assert!(matches!(
+            raced.publish(b"editor metadata"),
+            FilePublicationOutcome::Rejected(FilePublicationRejection::TargetChanged)
+        ));
+        assert_eq!(fs::read(raced_target).unwrap(), b"external metadata");
+    }
+
+    #[test]
+    fn existing_file_publication_locks_before_revalidating_the_binding() {
+        let root = TestRoot::new();
+        let capability = root.capability();
+        let target_name = "new-image.png.meta";
+        let target_path = RelativePath::new(target_name).unwrap();
+        let target = root.path.join(target_name);
+        fs::write(&target, b"catalog metadata").unwrap();
+        let opened = capability.open_file(&target_path).unwrap();
+        let identity = opened.identity();
+        let digest = opened.digest(1024).unwrap();
+        drop(opened);
+        let mut publication =
+            FilePublicationHost::bind_existing(&capability, target_name, identity, digest, 1024)
+                .unwrap();
+
+        fs::write(&target, b"externally changed metadata").unwrap();
+        let locked = capability.open_file(&target_path).unwrap();
+        let _lock = locked.try_lock(LockMode::Exclusive).unwrap();
+
+        assert!(matches!(
+            publication.publish(b"editor metadata"),
+            FilePublicationOutcome::Rejected(FilePublicationRejection::LockUnavailable)
+        ));
+        drop(_lock);
+        drop(locked);
+        assert_eq!(fs::read(target).unwrap(), b"externally changed metadata");
+    }
 
     #[test]
     fn uncertain_receipt_blocks_save_until_reopen_is_committed() {
@@ -1151,7 +1194,7 @@ mod tests {
             evidence.published_identity(),
             Some(evidence.candidate_identity())
         );
-        assert!(host.file.uncertain);
+        assert!(host.file.uncertain());
         let first_bytes = fs::read(root.scene_path()).unwrap();
 
         assert!(matches!(
@@ -1172,10 +1215,10 @@ mod tests {
             ..
         } = *opened;
         assert_eq!(session.document(), &first);
-        assert!(host.file.uncertain);
+        assert!(host.file.uncertain());
 
         host.commit_reopen(identity, content_digest);
-        assert!(!host.file.uncertain);
+        assert!(!host.file.uncertain());
         assert!(matches!(
             host.save_native(SceneSaveCandidate {
                 checkpoint: authority.capture(&workspace, document).unwrap(),
@@ -1409,8 +1452,8 @@ mod tests {
         );
         host.commit_reopen(reopened.identity, reopened.content_digest);
 
-        let observed_identity = host.file.observed_identity;
-        let observed_digest = host.file.observed_digest;
+        let observed_identity = host.file.observed_identity();
+        let observed_digest = host.file.observed_digest();
         let mut manifest_drift = scene.clone();
         assert!(
             manifest_drift.entities[0]
@@ -1424,8 +1467,8 @@ mod tests {
             host.reopen_authoring(workspace.scene(document).unwrap().session()),
             SceneReopenOutcome::Rejected(EditorPersistenceRejection::PreservationMismatch)
         ));
-        assert_eq!(host.file.observed_identity, observed_identity);
-        assert_eq!(host.file.observed_digest, observed_digest);
+        assert_eq!(host.file.observed_identity(), observed_identity);
+        assert_eq!(host.file.observed_digest(), observed_digest);
     }
 
     fn scene_with_entity(id: &str) -> SceneDocument {

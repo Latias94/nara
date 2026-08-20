@@ -139,6 +139,15 @@ pub(crate) fn replace_temporary(
     unsupported(FsOperation::Replace)
 }
 
+pub(crate) fn publish_temporary_no_replace(
+    _parent: &File,
+    _temporary: &File,
+    _source_name: &RelativeComponent,
+    _target_name: &RelativeComponent,
+) -> Result<(), FsError> {
+    unsupported(FsOperation::Replace)
+}
+
 pub(crate) fn sync_file(_file: &File) -> Result<FileSyncTier, FsError> {
     unsupported(FsOperation::SyncFile)
 }

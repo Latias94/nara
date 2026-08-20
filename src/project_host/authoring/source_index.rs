@@ -606,6 +606,7 @@ pub(crate) struct ProjectSourceIndexState {
     limits: ProjectSourceIndexLimits,
     next_generation: Option<NonZeroU64>,
     attempt: Option<AuthoringSourceIndexAttempt>,
+    refresh_queued: Option<ProjectSourceIndexGeneration>,
     snapshot: Option<Arc<ProjectSourceIndexSnapshot>>,
     failure: Option<ProjectSourceIndexFailure>,
 }
@@ -621,15 +622,24 @@ impl ProjectSourceIndexState {
             limits,
             next_generation: Some(NonZeroU64::MIN),
             attempt: None,
+            refresh_queued: None,
             snapshot: None,
             failure: None,
         }
     }
 
-    pub(crate) fn request_refresh(&mut self) -> bool {
+    pub(crate) fn request_refresh(&mut self) -> Option<ProjectSourceIndexGeneration> {
         if self.attempt.is_some() {
-            return false;
+            let generation = self
+                .refresh_queued
+                .or_else(|| self.next_generation.map(ProjectSourceIndexGeneration))?;
+            self.refresh_queued = Some(generation);
+            return Some(generation);
         }
+        self.begin_refresh()
+    }
+
+    fn begin_refresh(&mut self) -> Option<ProjectSourceIndexGeneration> {
         let Some(generation) = self.next_generation else {
             self.failure = Some(ProjectSourceIndexFailure::new(
                 ProjectSourceIndexDiagnosticCode::GenerationExhausted,
@@ -637,7 +647,7 @@ impl ProjectSourceIndexState {
                 None,
                 ProjectSourceIndexBudgetUsage::default(),
             ));
-            return false;
+            return None;
         };
         self.next_generation = generation.get().checked_add(1).and_then(NonZeroU64::new);
         let generation = ProjectSourceIndexGeneration(generation);
@@ -645,11 +655,11 @@ impl ProjectSourceIndexState {
             Ok(attempt) => {
                 self.attempt = Some(attempt);
                 self.failure = None;
-                true
+                Some(generation)
             }
             Err(failure) => {
                 self.failure = Some(failure);
-                false
+                None
             }
         }
     }
@@ -666,6 +676,15 @@ impl ProjectSourceIndexState {
             }
             SourceIndexAttemptProgress::Failed(failure) => {
                 self.failure = Some(failure);
+            }
+        };
+        if self.attempt.is_none() {
+            if let Some(expected_generation) = self.refresh_queued.take() {
+                let started_generation = self.begin_refresh();
+                debug_assert!(
+                    started_generation.is_none() || started_generation == Some(expected_generation),
+                    "a queued source-index refresh keeps its reserved generation"
+                );
             }
         }
     }

@@ -73,6 +73,16 @@ impl ImageImportCharge {
             total_bytes: plan.publication_bytes(),
         }
     }
+
+    pub(crate) const fn retained_pixels(plan: ImageImportMemoryPlan) -> Self {
+        Self {
+            encoded_bytes: 0,
+            decoder_work_bytes: 0,
+            rgba_bytes: plan.rgba_bytes(),
+            publication_overlap_bytes: 0,
+            total_bytes: plan.rgba_bytes(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

@@ -25,7 +25,9 @@ use nara_diagnostic::{
     Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
 };
 use nara_ecs::{ResMut, Resource, schedule::IntoScheduleConfigs};
-use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
+use nara_fs::{
+    CapabilityRights, ContentDigest, DirectoryCapability, HostCapabilityOptions, TrustMode,
+};
 use nara_render::PreparedRenderResources;
 use nara_tasks::{
     TaskCancellation, TaskCancellationReason, TaskCancellationToken, TaskCoalesceKey,
@@ -737,6 +739,7 @@ fn concrete_image_import_owns_stable_artifact_identity() {
 
     assert_eq!(key.stable_id(), record.stable_id());
     assert_eq!(key.source_hash(), SourceHash::from_bytes(&bytes));
+    assert_eq!(imported.source_digest(), ContentDigest::of_bytes(&bytes));
     assert_eq!(key.dependency_digest(), ImportDependencyDigest::empty());
     assert_eq!(key.importer_id().as_str(), "nara_image_png");
     assert_eq!(key.importer_version(), ImporterVersion::new(3));
@@ -748,12 +751,13 @@ fn concrete_image_import_owns_stable_artifact_identity() {
 }
 
 #[test]
-fn admitted_file_import_owns_the_authorized_source() {
+fn admitted_file_import_reports_the_digest_of_the_authorized_source() {
     let temp_root = unique_temp_root();
     let record = image_record("textures/player.png");
     let texture_path = temp_root.join(record.path().as_str());
+    let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
     fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
-    fs::write(&texture_path, rgba_png(1, 1, &[0, 0, 255, 255])).unwrap();
+    fs::write(&texture_path, &bytes).unwrap();
     let source_directory = image_source_directory(&temp_root);
     let file = source_directory.open(&record).unwrap();
     let mut server = AssetServer::new();
@@ -774,6 +778,7 @@ fn admitted_file_import_owns_the_authorized_source() {
     let imported = admitted.import(TaskCancellationToken::new()).unwrap();
 
     assert_eq!(imported.image().extent(), ImageExtent::new(1, 1));
+    assert_eq!(imported.source_digest(), ContentDigest::of_bytes(&bytes));
     assert_eq!(
         imported.artifact().key().output_asset_type().as_str(),
         "nara_image.image"
@@ -833,6 +838,39 @@ fn imported_image_stores_under_reserved_handle() {
 }
 
 #[test]
+fn retained_commit_accounts_for_pixels_until_the_final_shared_image_drops() {
+    let record = image_record("textures/player.png");
+    let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+    let importer = ImageImporter::default();
+    let mut server = AssetServer::new();
+    let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let imported = importer
+        .import_image(
+            bytes_request(&record, &bytes),
+            handle,
+            AssetVersion::ZERO,
+            &server,
+            &images,
+            &states,
+        )
+        .unwrap();
+
+    imported
+        .commit_retained(&server, &mut images, &mut states, &mut events)
+        .unwrap();
+    assert_eq!(importer.budget_snapshot().active_reservations(), 1);
+
+    let shared = images.get(handle).unwrap().share_retained().unwrap();
+    drop(images);
+    assert_eq!(importer.budget_snapshot().active_reservations(), 1);
+    drop(shared);
+    assert_budget_released(importer.budget_snapshot());
+}
+
+#[test]
 fn publication_admission_rejects_a_mismatched_stable_target_without_charging() {
     let source = image_record_with_id(
         "textures/source.png",
@@ -862,6 +900,50 @@ fn publication_admission_rejects_a_mismatched_stable_target_without_charging() {
         error,
         ImageImportError::Publication(ImagePublicationFailureKind::TargetMismatch)
     );
+    assert_budget_released(importer.budget_snapshot());
+}
+
+#[test]
+fn publication_candidate_rejects_a_changed_path_for_the_same_stable_id() {
+    let admitted_record = image_record("textures/player.png");
+    let rebound_record = image_record("textures/renamed.png");
+    let importer = ImageImporter::default();
+    let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+    let mut admitted_server = AssetServer::new();
+    let handle = admitted_server
+        .reserve_record::<ImageAsset>(&admitted_record)
+        .unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    let candidate = importer
+        .import_image(
+            bytes_request(&admitted_record, &bytes),
+            handle,
+            AssetVersion::ZERO,
+            &admitted_server,
+            &images,
+            &states,
+        )
+        .unwrap();
+    let mut rebound_server = AssetServer::new();
+    let rebound_handle = rebound_server
+        .reserve_record::<ImageAsset>(&rebound_record)
+        .unwrap();
+    assert_eq!(rebound_handle.id(), handle.id());
+    assert_eq!(
+        rebound_server.stable_id(handle.id()),
+        Some(admitted_record.stable_id())
+    );
+
+    let error = candidate
+        .commit(&rebound_server, &mut images, &mut states, &mut events)
+        .unwrap_err();
+
+    assert_eq!(error, ImagePublicationFailureKind::TargetMismatch);
+    assert!(images.get(handle).is_none());
+    assert!(states.state(handle.id()).is_none());
+    assert!(events.drain().is_empty());
     assert_budget_released(importer.budget_snapshot());
 }
 

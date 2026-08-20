@@ -235,12 +235,11 @@ impl EditorProjectSession {
             return;
         }
 
-        #[cfg(feature = "presentation-2d")]
-        let replacement_preview = match self
-            .preview
+        let replacement_authoring_runtime = match self
+            .authoring_runtime
             .rebuild_for_project(successor.clone(), &preview_registry)
         {
-            Ok(preview) => preview,
+            Ok(runtime) => runtime,
             Err(report) => {
                 self.reject_project_content_refresh(
                     request,
@@ -295,10 +294,7 @@ impl EditorProjectSession {
             };
             lane.snapshot = successor;
         }
-        #[cfg(feature = "presentation-2d")]
-        {
-            self.preview = replacement_preview;
-        }
+        self.authoring_runtime = replacement_authoring_runtime;
         #[cfg(feature = "presentation-ui")]
         {
             self.ui_preview = replacement_ui_preview;

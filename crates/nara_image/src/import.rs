@@ -13,7 +13,9 @@ use nara_asset::{
     SourceHash,
 };
 use nara_ecs::Resource;
-use nara_fs::{DirectoryCapability, FileCapability, FsError, PathValidationError, RelativePath};
+use nara_fs::{
+    ContentDigest, DirectoryCapability, FileCapability, FsError, PathValidationError, RelativePath,
+};
 use nara_tasks::TaskCancellationToken;
 
 use crate::budget::{
@@ -447,13 +449,21 @@ struct ImageDecodeRequest<'a> {
 }
 
 impl<'a> ImageDecodeRequest<'a> {
-    fn new(source: &'a AssetRecord, source_bytes: &'a [u8], settings: ImageImportSettings) -> Self {
-        Self {
-            source,
-            source_bytes,
-            source_hash: SourceHash::from_bytes(source_bytes),
-            settings,
-        }
+    fn from_source_bytes(
+        source: &'a AssetRecord,
+        source_bytes: &'a [u8],
+        settings: ImageImportSettings,
+    ) -> (Self, ContentDigest) {
+        let source_digest = ContentDigest::of_bytes(source_bytes);
+        (
+            Self {
+                source,
+                source_bytes,
+                source_hash: SourceHash::from_digest(*source_digest.as_bytes()),
+                settings,
+            },
+            source_digest,
+        )
     }
 
     const fn source(&self) -> &AssetRecord {
@@ -527,7 +537,7 @@ impl UnpublishedImageImport {
         let mut input = BudgetedImageInput::new(source_bytes, reservation);
         let image = {
             let (bytes, reservation) = input.parts_mut();
-            let request = ImageDecodeRequest::new(&source, bytes, settings);
+            let (request, _) = ImageDecodeRequest::from_source_bytes(&source, bytes, settings);
             let (image, observed_plan) = importer.decode_png_with_preflight(
                 request,
                 preflight,
@@ -587,19 +597,21 @@ impl AdmittedImageImport {
                 stage: ImageImportStage::Header,
             });
         }
-        let (image, memory_plan) = {
+        let (image, source_digest, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
-            let import_request = ImageDecodeRequest::new(&request.source, bytes, request.settings);
-            importer.decode_png(
+            let (import_request, source_digest) =
+                ImageDecodeRequest::from_source_bytes(&request.source, bytes, request.settings);
+            let (image, memory_plan) = importer.decode_png(
                 import_request,
                 bytes.len(),
                 publication.overlap_bytes(),
                 reservation,
                 Some(&cancellation),
-            )?
+            )?;
+            (image, source_digest, memory_plan)
         };
         let reservation = input.release_encoded();
-        ImageImportedAsset::new(image, memory_plan, publication, reservation)
+        ImageImportedAsset::new(image, source_digest, memory_plan, publication, reservation)
             .retain_publication_charge()
     }
 }
@@ -801,19 +813,21 @@ impl ImageImporter {
             .reserve(charge)
             .map_err(|error| ImageImportError::budget(ImageImportStage::Admission, error))?;
         let mut input = BudgetedImageInput::new(source_bytes, reservation);
-        let (image, memory_plan) = {
+        let (image, source_digest, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
-            let import_request = ImageDecodeRequest::new(&source, bytes, settings);
-            self.decode_png(
+            let (import_request, source_digest) =
+                ImageDecodeRequest::from_source_bytes(&source, bytes, settings);
+            let (image, memory_plan) = self.decode_png(
                 import_request,
                 bytes.len(),
                 publication.overlap_bytes(),
                 reservation,
                 None,
-            )?
+            )?;
+            (image, source_digest, memory_plan)
         };
         let reservation = input.release_encoded();
-        ImageImportedAsset::new(image, memory_plan, publication, reservation)
+        ImageImportedAsset::new(image, source_digest, memory_plan, publication, reservation)
             .retain_publication_charge()
     }
 

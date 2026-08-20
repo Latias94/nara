@@ -10,7 +10,7 @@ use std::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(windows)]
@@ -36,7 +36,7 @@ use nara_fs::{
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
-use nara_image::ImageImportSettings;
+use nara_image::{ImageColorSpace, ImageImportSettings};
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_reflect::AuthoringSchemaBundleOwner;
 #[cfg(feature = "tooling")]
@@ -1314,6 +1314,350 @@ fn generic_editor_drives_the_initial_source_index_and_retains_it_during_refresh(
     assert_eq!(second.diagnostics(), first.diagnostics());
     assert_eq!(second.usage(), first.usage());
     assert_eq!(second.completion(), first.completion());
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_failure() {
+    let project = TestProject::new("generic-image-import");
+    fs::create_dir_all(project.root.join("assets/textures")).unwrap();
+    let source_bytes = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+    )
+    .unwrap();
+    fs::write(
+        project.root.join("assets/textures/imported.png"),
+        &source_bytes,
+    )
+    .unwrap();
+
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let linear = ImageImportSettings::new(ImageColorSpace::Linear);
+    let stale_frame = editor.current_frame();
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(matches!(
+        editor.request_editor_image_import(
+            stale_frame.revision(),
+            "assets/textures/imported.png",
+            linear,
+        ),
+        super::editor::EditorImageImportRequestResult::Rejected(
+            super::editor::EditorImageImportFailure::StaleFrame
+        )
+    ));
+    assert!(
+        !project
+            .root
+            .join("assets/textures/imported.png.meta")
+            .exists()
+    );
+
+    let frame = editor.current_frame();
+    let import_basis_generation = editor.project_source_index_snapshot().unwrap().generation();
+    let started = editor.request_editor_image_import(
+        frame.revision(),
+        "assets/textures/imported.png",
+        linear,
+    );
+    assert!(matches!(
+        started,
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(editor.project_source_index_work_pending());
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            linear,
+        ),
+        super::editor::EditorImageImportRequestResult::Rejected(
+            super::editor::EditorImageImportFailure::Busy
+        )
+    ));
+
+    let first_state = drive_image_import_to_terminal(&mut editor);
+    let (stable_id, first_version) = match first_state {
+        super::editor::EditorImageImportState::Succeeded {
+            stable_id, version, ..
+        } => (stable_id, version),
+        other => panic!("the initial image import did not succeed: {other:?}"),
+    };
+    drive_image_import_host_until_idle(&mut editor);
+    let refreshed_index = editor.project_source_index_snapshot().unwrap();
+    assert!(refreshed_index.generation() > import_basis_generation);
+    assert!(
+        refreshed_index
+            .entry("assets/textures/imported.png.meta")
+            .is_some()
+    );
+    let asset_path = AssetPath::new("textures/imported.png").unwrap();
+    let first_last_good = editor
+        .editor_image_last_good(&asset_path)
+        .cloned()
+        .expect("a successful import publishes concrete last-good image facts");
+    assert_eq!(first_last_good.stable_id(), stable_id);
+    assert_eq!(first_last_good.version(), first_version);
+    assert_eq!(
+        first_last_good.source_digest(),
+        nara_fs::ContentDigest::of_bytes(&source_bytes)
+    );
+    assert_eq!(first_last_good.settings_hash(), linear.settings_hash());
+
+    let metadata_path = project.root.join("assets/textures/imported.png.meta");
+    let metadata = nara_asset::AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(
+        &fs::read(&metadata_path).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(metadata.identity().stable_id(), stable_id);
+    assert_eq!(metadata.identity().path(), &asset_path);
+    assert_eq!(metadata.settings(), &linear);
+
+    editor.test_reject_next_valid_image_metadata_receipt();
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    let srgb = ImageImportSettings::default();
+    assert!(matches!(
+        editor.request_editor_image_import(frame.revision(), "assets/textures/imported.png", srgb),
+        super::editor::EditorImageImportRequestResult::Completed(
+            super::editor::EditorImageImportState::ReconcileRequired { .. }
+        )
+    ));
+    assert!(matches!(
+        editor.request_editor_image_import(frame.revision(), "assets/textures/imported.png", srgb),
+        super::editor::EditorImageImportRequestResult::Rejected(
+            super::editor::EditorImageImportFailure::ReconcileRequired
+        )
+    ));
+    assert_eq!(
+        editor.editor_image_last_good(&asset_path),
+        Some(&first_last_good)
+    );
+    drive_image_import_host_until_idle(&mut editor);
+
+    fs::write(
+        project.root.join("assets/textures/imported.png"),
+        b"not a png",
+    )
+    .unwrap();
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.request_editor_image_import(frame.revision(), "assets/textures/imported.png", srgb,),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    let failed = drive_image_import_to_terminal(&mut editor);
+    assert!(matches!(
+        failed,
+        super::editor::EditorImageImportState::Failed {
+            failure: super::editor::EditorImageImportFailure::Runtime(
+                "editor.image-import.decode-failed"
+            ),
+            ..
+        }
+    ));
+    assert_eq!(
+        editor.editor_image_last_good(&asset_path),
+        Some(&first_last_good)
+    );
+
+    let desired = nara_asset::AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(
+        &fs::read(&metadata_path).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(desired.identity().stable_id(), stable_id);
+    assert_eq!(desired.settings(), &srgb);
+
+    fs::write(
+        project.root.join("assets/textures/imported.png"),
+        &source_bytes,
+    )
+    .unwrap();
+    drive_image_import_host_until_idle(&mut editor);
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            linear,
+        ),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    let reimported = drive_image_import_to_terminal(&mut editor);
+    let second_version = match reimported {
+        super::editor::EditorImageImportState::Succeeded {
+            stable_id: reimported_id,
+            version,
+            ..
+        } => {
+            assert_eq!(reimported_id, stable_id);
+            assert!(version > first_version);
+            version
+        }
+        other => panic!("the image reimport did not succeed: {other:?}"),
+    };
+    let second_last_good = editor
+        .editor_image_last_good(&asset_path)
+        .cloned()
+        .expect("a successful reimport replaces the concrete last-good image facts");
+    assert_eq!(second_last_good.stable_id(), stable_id);
+    assert_eq!(second_last_good.version(), second_version);
+    assert_eq!(second_last_good.settings_hash(), linear.settings_hash());
+    drive_image_import_host_until_idle(&mut editor);
+
+    let metadata_replacement = editor.test_hold_next_image_import();
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.request_editor_image_import(frame.revision(), "assets/textures/imported.png", srgb,),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(metadata_replacement.wait_until_started());
+    let external_metadata = AssetMeta::new(
+        AssetMetaIdentity::new(stable_id, asset_path.clone(), AssetSourceKind::Image),
+        linear,
+    )
+    .to_json_string()
+    .unwrap();
+    fs::write(&metadata_path, external_metadata).unwrap();
+    assert!(metadata_replacement.release());
+    assert!(matches!(
+        drive_image_import_to_terminal(&mut editor),
+        super::editor::EditorImageImportState::Failed {
+            failure: super::editor::EditorImageImportFailure::MetadataPublicationRejected,
+            ..
+        }
+    ));
+    assert_eq!(
+        editor.editor_image_last_good(&asset_path),
+        Some(&second_last_good)
+    );
+    drive_image_import_host_until_idle(&mut editor);
+
+    let source_replacement = editor.test_hold_next_image_import();
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.request_editor_image_import(frame.revision(), "assets/textures/imported.png", srgb,),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(source_replacement.wait_until_started());
+    fs::write(
+        project.root.join("assets/textures/imported.png"),
+        b"source changed after the accepted metadata receipt",
+    )
+    .unwrap();
+    assert!(source_replacement.release());
+    assert!(matches!(
+        drive_image_import_to_terminal(&mut editor),
+        super::editor::EditorImageImportState::Failed {
+            failure: super::editor::EditorImageImportFailure::Runtime(
+                "editor.image-import.source-changed"
+            ),
+            ..
+        }
+    ));
+    assert_eq!(
+        editor.editor_image_last_good(&asset_path),
+        Some(&second_last_good)
+    );
+
+    fs::write(
+        project.root.join("assets/textures/imported.png"),
+        &source_bytes,
+    )
+    .unwrap();
+    drive_image_import_host_until_idle(&mut editor);
+    let cancellation = editor.test_hold_next_image_import();
+    let budget = editor.test_image_import_budget_host();
+    let retained_reservations = budget.snapshot().active_reservations();
+    assert_eq!(retained_reservations, 1);
+    let frame = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            linear,
+        ),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(cancellation.wait_until_started());
+    assert!(budget.snapshot().active_reservations() > retained_reservations);
+    drop(editor);
+    assert_eq!(budget.snapshot().active_reservations(), 0);
+
+    fs::write(project.root.join("assets/non-image.bin"), b"asset payload").unwrap();
+    let conflicting_metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            stable_id,
+            AssetPath::new("non-image.bin").unwrap(),
+            AssetSourceKind::Other("binary".to_owned()),
+        ),
+        (),
+    )
+    .to_json_string()
+    .unwrap();
+    fs::write(
+        project.root.join("assets/non-image.bin.meta"),
+        conflicting_metadata,
+    )
+    .unwrap();
+    let mut successor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut successor);
+    assert_eq!(
+        successor.editor_image_import_state(),
+        super::editor::EditorImageImportState::Idle
+    );
+    assert!(successor.editor_image_last_good(&asset_path).is_none());
+    let frame = successor.drive_editor_frame(Duration::ZERO);
+    let conflict = successor.request_editor_image_import(
+        frame.revision(),
+        "assets/textures/imported.png",
+        linear,
+    );
+    assert!(
+        matches!(
+            conflict,
+            super::editor::EditorImageImportRequestResult::Completed(
+                super::editor::EditorImageImportState::Failed {
+                    failure: super::editor::EditorImageImportFailure::MetadataInvalid,
+                    ..
+                }
+            )
+        ),
+        "global Stable Asset ID conflict returned {conflict:?}"
+    );
+}
+
+#[cfg(feature = "tooling")]
+fn drive_image_import_to_terminal(
+    editor: &mut super::editor::EditorProjectSession,
+) -> super::editor::EditorImageImportState {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        let state = editor.editor_image_import_state();
+        if !matches!(
+            state,
+            super::editor::EditorImageImportState::Idle
+                | super::editor::EditorImageImportState::Pending { .. }
+        ) {
+            return state;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    panic!("the bounded image import did not reach a terminal state");
+}
+
+#[cfg(feature = "tooling")]
+fn drive_image_import_host_until_idle(editor: &mut super::editor::EditorProjectSession) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if !editor.project_source_index_work_pending() && !editor.editor_image_import_work_pending()
+        {
+            return;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    panic!("the bounded image catalog or refresh did not settle");
 }
 
 #[cfg(feature = "tooling")]

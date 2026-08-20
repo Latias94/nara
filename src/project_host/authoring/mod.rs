@@ -18,9 +18,9 @@ pub(crate) use project::{
 };
 pub(crate) use source_index::{
     ProjectSourceIndexBudgetUsage, ProjectSourceIndexDiagnostic, ProjectSourceIndexDiagnosticPhase,
-    ProjectSourceIndexEntry, ProjectSourceIndexFailure, ProjectSourceIndexProgress,
-    ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind, ProjectSourceInspectReason,
-    ProjectSourceKind, ProjectSourceOpenCapability,
+    ProjectSourceIndexEntry, ProjectSourceIndexFailure, ProjectSourceIndexGeneration,
+    ProjectSourceIndexProgress, ProjectSourceIndexSnapshot, ProjectSourceIndexStateKind,
+    ProjectSourceInspectReason, ProjectSourceKind, ProjectSourceOpenCapability,
 };
 
 use std::{

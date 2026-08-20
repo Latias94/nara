@@ -471,6 +471,15 @@ pub(crate) fn replace_temporary(
     imp::replace_temporary(parent, temporary, source_name, target_name)
 }
 
+pub(crate) fn publish_temporary_no_replace(
+    parent: &File,
+    temporary: &File,
+    source_name: &RelativeComponent,
+    target_name: &RelativeComponent,
+) -> Result<(), FsError> {
+    imp::publish_temporary_no_replace(parent, temporary, source_name, target_name)
+}
+
 pub(crate) fn sync_file(file: &File) -> Result<FileSyncTier, FsError> {
     imp::sync_file(file)
 }

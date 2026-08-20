@@ -404,7 +404,7 @@ impl AuthoringProjectReceipt {
             .map_err(|_| AuthoringProjectReceiptUseError::SnapshotAliased)?;
         let startup_scene = fork_published_authoring_scene_document(&inner.startup_scene);
         let mut source_index = ProjectSourceIndexState::new(&inner.schema);
-        source_index.request_refresh();
+        let _ = source_index.request_refresh();
         Ok(AuthoringProjectSessionParts {
             snapshot: AuthoringProjectSessionSnapshot {
                 schema: inner.schema,
@@ -552,7 +552,9 @@ impl AuthoringProjectSessionSnapshot {
         self.source_index.advance();
     }
 
-    pub(crate) fn request_source_index_refresh(&mut self) -> bool {
+    pub(crate) fn request_source_index_refresh(
+        &mut self,
+    ) -> Option<super::ProjectSourceIndexGeneration> {
         self.source_index.request_refresh()
     }
 

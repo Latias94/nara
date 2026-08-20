@@ -448,12 +448,26 @@ impl DirectoryCapability {
         }
 
         let written_content_digest = temporary.written_content_digest();
-        platform::replace_temporary(
-            &self.inner.file,
-            temporary.file_handle(),
-            temporary.name(),
-            target,
-        )?;
+        let conflict_protection = if matches!(expected, ExpectedTarget::Missing) {
+            match platform::publish_temporary_no_replace(
+                &self.inner.file,
+                temporary.file_handle(),
+                temporary.name(),
+                target,
+            ) {
+                Ok(()) => crate::ConflictProtection::StrongCompareAndSwap,
+                Err(FsError::AlreadyExists { .. }) => return Err(FsError::TargetStateMismatch),
+                Err(error) => return Err(error),
+            }
+        } else {
+            platform::replace_temporary(
+                &self.inner.file,
+                temporary.file_handle(),
+                temporary.name(),
+                target,
+            )?;
+            matrix.conflict_protection()
+        };
         temporary.mark_published();
         let (observed_published, identity_evidence) = match matrix.replace_source_binding() {
             crate::PublicationSourceBinding::HandleBound => (
@@ -489,7 +503,7 @@ impl DirectoryCapability {
             identity_evidence,
             matrix.replace_parent_authorization(),
             matrix.publication_atomicity(),
-            matrix.conflict_protection(),
+            conflict_protection,
             matrix.replace_source_binding(),
             temporary
                 .durability()

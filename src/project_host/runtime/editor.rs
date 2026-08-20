@@ -3,10 +3,12 @@ use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 mod actions;
 #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
 mod authoring_preview;
+mod authoring_runtime;
 mod content_refresh;
 mod document_open;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
+mod image_import;
 mod model;
 mod open;
 mod persistence;
@@ -26,6 +28,10 @@ pub use game_view::{
     EditorGameStartRequest, EditorGameViewBridgeFailure, EditorGameViewCandidate,
     EditorGameViewCandidateIdentity, EditorGameViewCandidateParts, EditorGameViewCompletion,
     EditorGameViewCompletionDisposition,
+};
+#[cfg(test)]
+pub(crate) use image_import::{
+    EditorImageImportFailure, EditorImageImportRequestResult, EditorImageImportState,
 };
 pub use open::{
     EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
@@ -49,6 +55,7 @@ use nara_app::{
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Mut, Resource, World};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, RelativePath};
+use nara_image::ImageImportSettings;
 use nara_reflect::{
     ComponentCapability, ComponentRegistry, component_registry,
     report_component_registry_authority_fault,
@@ -59,15 +66,16 @@ use nara_scene::{SceneEntitySource, UnavailableRecordManifest};
 use nara_tooling::{
     __export_apply_changes_from_world, EditorAuthoringReadiness, EditorCloseDecision,
     EditorDocumentId, EditorDocumentKind, EditorFieldFeedback, EditorFrameClock, EditorFrameModel,
-    EditorGestureCancelReason, EditorGestureController, EditorPersistenceAuthority,
-    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
-    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
-    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
-    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
-    EditorPlayState, EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
-    EditorProjectReadinessView, EditorRuntimeAvailability, EditorRuntimeEditRejection,
-    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
-    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
+    EditorFrameRevision, EditorGestureCancelReason, EditorGestureController,
+    EditorPersistenceAuthority, EditorPersistenceCommand, EditorPersistenceFailureStage,
+    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
+    EditorPersistenceRequestResult, EditorPersistenceResult, EditorPersistenceView,
+    EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
+    EditorPlayRejection, EditorPlayRequestResult, EditorPlayState, EditorPlayView,
+    EditorProjectContentGeneration, EditorProjectContentView, EditorProjectReadinessView,
+    EditorRuntimeAvailability, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
+    EditorRuntimeEditResult, EditorRuntimeUnavailableReason, EditorWorkspace,
+    EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
     SceneApplyChangesRequest,
@@ -615,6 +623,7 @@ impl PendingExitPreparation {
 struct PublishedEditorFrame {
     model: Arc<EditorFrameModel>,
     source_index: Option<Arc<ProjectSourceIndexSnapshot>>,
+    image_import: Option<image_import::EditorImageImportFrame>,
     dispatched: bool,
 }
 
@@ -682,6 +691,7 @@ pub struct EditorProjectSession {
     prefab_lane: Option<EditorPrefabPersistenceLane>,
     pending_document_open: Option<document_open::PreparedAuthoringDocumentOpen>,
     project_browser: project_browser::EditorProjectBrowserHost,
+    image_import: image_import::EditorImageImportHost,
     authoring_prefab_source_observations:
         BTreeMap<nara_asset::AssetPath, AuthoringPrefabSourceObservation>,
     #[cfg(test)]
@@ -699,8 +709,7 @@ pub struct EditorProjectSession {
     published_frame: Option<PublishedEditorFrame>,
     gestures: EditorGestureController,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
-    #[cfg(feature = "presentation-2d")]
-    preview: preview::EditorPreviewSession,
+    authoring_runtime: authoring_runtime::EditorAuthoringRuntime,
     #[cfg(feature = "runtime-ui")]
     ui_authoring_image_choices: EditorUiImageChoices,
     #[cfg(feature = "presentation-ui")]
@@ -720,6 +729,13 @@ impl fmt::Debug for EditorProjectSession {
             .field("persistence_result", &self.persistence_result)
             .field("play_state", &self.play_view().state())
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for EditorProjectSession {
+    fn drop(&mut self) {
+        self.image_import.cancel_pending();
+        self.authoring_runtime.shutdown_tasks();
     }
 }
 
@@ -792,7 +808,76 @@ impl EditorProjectSession {
 
     pub(crate) fn request_project_source_index_refresh(&mut self) -> bool {
         self.authoring_project_mut()
-            .is_some_and(AuthoringProjectSessionSnapshot::request_source_index_refresh)
+            .and_then(AuthoringProjectSessionSnapshot::request_source_index_refresh)
+            .is_some()
+    }
+
+    pub(crate) fn editor_image_import_work_pending(&self) -> bool {
+        self.image_import.has_pending_work()
+    }
+
+    pub(crate) const fn editor_image_import_state(&self) -> image_import::EditorImageImportState {
+        self.image_import.state()
+    }
+
+    pub(crate) fn editor_image_last_good(
+        &self,
+        asset_path: &nara_asset::AssetPath,
+    ) -> Option<&image_import::EditorImageLastGood> {
+        self.image_import.last_good(asset_path)
+    }
+
+    pub(crate) fn request_editor_image_import(
+        &mut self,
+        frame_revision: EditorFrameRevision,
+        project_relative_path: &str,
+        settings: ImageImportSettings,
+    ) -> image_import::EditorImageImportRequestResult {
+        let Some(frame) = self.published_frame.as_ref() else {
+            return image_import::EditorImageImportRequestResult::Rejected(
+                image_import::EditorImageImportFailure::StaleFrame,
+            );
+        };
+        if frame.model.revision() != frame_revision {
+            return image_import::EditorImageImportRequestResult::Rejected(
+                image_import::EditorImageImportFailure::StaleFrame,
+            );
+        }
+        let Some(image_frame) = frame.image_import.clone() else {
+            return image_import::EditorImageImportRequestResult::Rejected(
+                image_import::EditorImageImportFailure::CatalogUnavailable,
+            );
+        };
+        let EditorProjectSession {
+            execution,
+            authoring_runtime,
+            image_import,
+            ..
+        } = self;
+        let EditorExecutionLane::Authoring(project) = execution else {
+            return image_import::EditorImageImportRequestResult::Rejected(
+                image_import::EditorImageImportFailure::CatalogUnavailable,
+            );
+        };
+        image_import.request(
+            project,
+            authoring_runtime,
+            image_frame,
+            project_relative_path,
+            settings,
+        )
+    }
+
+    fn advance_editor_image_import(&mut self) {
+        let EditorProjectSession {
+            execution,
+            authoring_runtime,
+            image_import,
+            ..
+        } = self;
+        if let EditorExecutionLane::Authoring(project) = execution {
+            image_import.advance(project, authoring_runtime);
+        }
     }
 
     /// Returns the complete unavailable-record manifest for the active generic authoring
@@ -848,13 +933,13 @@ impl EditorProjectSession {
         let parts = receipt.into_session_parts().map_err(|_| {
             editor_open_error("project.editor.authoring-receipt-consumption-failed")
         })?;
-        #[cfg(feature = "presentation-2d")]
         let preview_registry = first_party_authoring_preview_registry(built_in_schema_providers())
             .map_err(|_| editor_open_error("project.editor.authoring-preview-registry-invalid"))?;
-        #[cfg(feature = "presentation-2d")]
-        let preview =
-            preview::EditorPreviewSession::new_authoring(&parts.snapshot, &preview_registry)
-                .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
+        let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new_authoring(
+            &parts.snapshot,
+            &preview_registry,
+        )
+        .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
         #[cfg(feature = "runtime-ui")]
         let ui_authoring_image_choices =
             EditorUiImageChoices::from_authoring_snapshot(&parts.snapshot);
@@ -927,6 +1012,7 @@ impl EditorProjectSession {
             prefab_lane: None,
             pending_document_open: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
+            image_import: image_import::EditorImageImportHost::default(),
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -943,8 +1029,7 @@ impl EditorProjectSession {
             published_frame: None,
             gestures: EditorGestureController::default(),
             last_gesture_cancellation: None,
-            #[cfg(feature = "presentation-2d")]
-            preview,
+            authoring_runtime,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_image_choices,
             #[cfg(feature = "presentation-ui")]
@@ -1050,8 +1135,7 @@ impl EditorProjectSession {
                 ),
             }
         })?;
-        #[cfg(feature = "presentation-2d")]
-        let preview = preview::EditorPreviewSession::new(
+        let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new(
             snapshot.clone(),
             plan.schema_validation().snapshot(),
         )
@@ -1135,6 +1219,7 @@ impl EditorProjectSession {
             prefab_lane: None,
             pending_document_open: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
+            image_import: image_import::EditorImageImportHost::default(),
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -1151,8 +1236,7 @@ impl EditorProjectSession {
             published_frame: None,
             gestures: EditorGestureController::default(),
             last_gesture_cancellation: None,
-            #[cfg(feature = "presentation-2d")]
-            preview,
+            authoring_runtime,
             #[cfg(feature = "runtime-ui")]
             ui_authoring_image_choices,
             #[cfg(feature = "presentation-ui")]
@@ -1177,14 +1261,14 @@ impl EditorProjectSession {
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     pub fn set_editor_preview_extent(&mut self, extent: Option<Extent2d>) {
-        self.preview.set_extent(extent);
+        self.authoring_runtime.set_preview_extent(extent);
     }
 
     #[cfg(feature = "presentation-2d")]
     #[doc(hidden)]
     #[must_use]
     pub fn take_editor_preview_candidate(&mut self) -> Option<EditorPreviewCandidate> {
-        self.preview.take_candidate()
+        self.authoring_runtime.take_preview_candidate()
     }
 
     #[cfg(feature = "presentation-ui")]
@@ -1666,7 +1750,8 @@ impl EditorProjectSession {
                 .map(|slot| (document, slot.revision()))
         });
         let requires_projection = source_identity.is_some_and(|(document, revision)| {
-            self.preview.requires_source_projection(document, revision)
+            self.authoring_runtime
+                .preview_requires_source_projection(document, revision)
         });
         let source = scene_document.and_then(|document| {
             self.workspace.scene(document).and_then(|slot| {
@@ -1717,7 +1802,7 @@ impl EditorProjectSession {
                 "the Scene preview omitted source values that are unavailable to generic authoring",
             ));
         }
-        let report = self.preview.drive(source);
+        let report = self.authoring_runtime.drive_preview(source);
         if let Some(report) = report {
             let _ = self.diagnostics.extend(report);
         }
@@ -1782,6 +1867,23 @@ impl EditorProjectSession {
             .expect("project content is available only in the trusted compiled lane")
             .content_loader
             .budget_snapshot()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_hold_next_image_import(
+        &mut self,
+    ) -> authoring_runtime::EditorImageImportTestControl {
+        self.authoring_runtime.hold_next_image_import()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_image_import_budget_host(&self) -> nara_image::ImageImportBudgetHost {
+        self.authoring_runtime.image_import_budget_host()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_reject_next_valid_image_metadata_receipt(&mut self) {
+        self.image_import.test_reject_next_valid_metadata_receipt();
     }
 
     #[must_use]

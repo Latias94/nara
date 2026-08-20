@@ -37,6 +37,7 @@ impl EditorProjectSession {
         if let Some(project) = self.authoring_project_mut() {
             project.advance_source_index();
         }
+        self.advance_editor_image_import();
         if self.trusted_compiled().is_some() {
             self.resume_content_refresh_after_runtime_retirement();
             self.advance_project_content_refresh();
@@ -67,10 +68,13 @@ impl EditorProjectSession {
         scan_work_observed: bool,
     ) -> Arc<EditorFrameModel> {
         let source_index = self.synchronize_project_browser(scan_work_observed);
+        let image_import = source_index
+            .as_ref()
+            .and_then(|source_index| self.image_import.frame_for(source_index));
         #[cfg(feature = "runtime-ui")]
         self.reconcile_editor_gesture();
         #[cfg(feature = "presentation-2d")]
-        let preview_world = self.preview.world_snapshot();
+        let preview_world = self.authoring_runtime.preview_world_snapshot();
         #[cfg(not(feature = "presentation-2d"))]
         let preview_world = None;
         let workspace = match self.trusted_compiled() {
@@ -104,6 +108,7 @@ impl EditorProjectSession {
         self.published_frame = Some(PublishedEditorFrame {
             model: Arc::clone(&frame),
             source_index,
+            image_import,
             dispatched: false,
         });
         frame

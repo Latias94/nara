@@ -46,7 +46,7 @@ fn mixed_source_tree_publishes_once_in_lexical_order_with_safe_rejections() {
             ..ProjectSourceIndexLimits::default()
         },
     );
-    assert!(state.request_refresh());
+    assert!(state.request_refresh().is_some());
     state.advance();
     assert_eq!(state.kind(), ProjectSourceIndexStateKind::Scanning);
     assert!(state.snapshot().is_none());
@@ -122,6 +122,43 @@ fn mixed_source_tree_publishes_once_in_lexical_order_with_safe_rejections() {
 }
 
 #[test]
+fn refresh_requested_during_a_scan_publishes_one_coalesced_successor() {
+    let project = TestSourceProject::new("coalesced-refresh", false);
+    project.write("assets/safe.bin", b"safe");
+    project.write("scenes/startup.scene.json", b"{}");
+    project.write("prefabs/base.prefab.json", b"{}");
+    let schema = project.schema_receipt();
+    let mut state = ProjectSourceIndexState::with_limits(
+        &schema,
+        ProjectSourceIndexLimits {
+            max_entries_per_update: 1,
+            max_directories_per_update: 1,
+            ..ProjectSourceIndexLimits::default()
+        },
+    );
+
+    let first_generation = state.request_refresh().unwrap();
+    let queued_generation = state.request_refresh().unwrap();
+    assert_eq!(first_generation.get(), 1);
+    assert_eq!(queued_generation.get(), 2);
+    while state
+        .snapshot()
+        .is_none_or(|snapshot| snapshot.generation() < first_generation)
+    {
+        state.advance();
+    }
+    assert_eq!(state.snapshot().unwrap().generation(), first_generation);
+    assert!(state.has_pending_work());
+    drive_to_terminal(&mut state);
+
+    assert_eq!(state.snapshot().unwrap().generation(), queued_generation);
+    assert_eq!(
+        state.kind(),
+        ProjectSourceIndexStateKind::ReadyWithDiagnostics
+    );
+}
+
+#[test]
 fn refresh_budget_failure_retains_the_last_good_generation() {
     let project = TestSourceProject::new("budget", false);
     project.write("assets/safe.bin", b"safe");
@@ -137,7 +174,7 @@ fn refresh_budget_failure_retains_the_last_good_generation() {
             ..ProjectSourceIndexLimits::default()
         },
     );
-    assert!(state.request_refresh());
+    assert!(state.request_refresh().is_some());
     drive_to_terminal(&mut state);
     assert_eq!(
         state.kind(),
@@ -153,7 +190,7 @@ fn refresh_budget_failure_retains_the_last_good_generation() {
     for index in 0..64 {
         project.write(&format!("assets/generated-{index:03}.bin"), b"generated");
     }
-    assert!(state.request_refresh());
+    assert!(state.request_refresh().is_some());
     drive_to_terminal(&mut state);
 
     assert_eq!(state.kind(), ProjectSourceIndexStateKind::Unavailable);
@@ -182,12 +219,12 @@ fn final_lineage_revalidation_rejects_directory_replacement() {
             ..ProjectSourceIndexLimits::default()
         },
     );
-    assert!(state.request_refresh());
+    assert!(state.request_refresh().is_some());
     drive_to_terminal(&mut state);
     let first = state.snapshot().unwrap();
     assert_eq!(first.generation().get(), 1);
 
-    assert!(state.request_refresh());
+    assert!(state.request_refresh().is_some());
     while state.has_pending_work() && !state.is_revalidating() {
         state.advance();
     }

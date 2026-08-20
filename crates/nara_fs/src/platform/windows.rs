@@ -521,6 +521,16 @@ pub(crate) fn replace_temporary(
     })
 }
 
+pub(crate) fn publish_temporary_no_replace(
+    parent: &File,
+    temporary: &File,
+    _source_name: &RelativeComponent,
+    target_name: &RelativeComponent,
+) -> Result<(), FsError> {
+    rename_open_handle(parent, temporary, target_name, 0)
+        .map_err(|code| classify_no_replace_publication_error(code, FsOperation::Replace))
+}
+
 pub(crate) fn publish_directory_no_replace(
     parent: &File,
     source: &File,
@@ -623,25 +633,24 @@ fn rename_open_handle(
 }
 
 fn classify_directory_publication_error(code: u32) -> FsError {
+    classify_no_replace_publication_error(code, FsOperation::PublishDirectory)
+}
+
+fn classify_no_replace_publication_error(code: u32, operation: FsOperation) -> FsError {
     match code {
-        ERROR_ALREADY_EXISTS | ERROR_FILE_EXISTS => FsError::AlreadyExists {
-            operation: FsOperation::PublishDirectory,
-        },
+        ERROR_ALREADY_EXISTS | ERROR_FILE_EXISTS => FsError::AlreadyExists { operation },
         ERROR_NOT_SAME_DEVICE => FsError::CrossVolume,
         ERROR_NOT_SUPPORTED | ERROR_CALL_NOT_IMPLEMENTED | ERROR_INVALID_FUNCTION => {
             FsError::Unsupported {
-                operation: FsOperation::PublishDirectory,
-                capability: "handle-bound no-replace directory publication",
+                operation,
+                capability: "handle-bound no-replace publication",
             }
         }
         ERROR_INVALID_PARAMETER => FsError::Unproven {
-            operation: FsOperation::PublishDirectory,
+            operation,
             proof: "the live filesystem rejected the required no-replace rename flags",
         },
-        _ => FsError::io(
-            FsOperation::PublishDirectory,
-            io::Error::from_raw_os_error(code as i32),
-        ),
+        _ => FsError::io(operation, io::Error::from_raw_os_error(code as i32)),
     }
 }
 

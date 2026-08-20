@@ -514,6 +514,50 @@ fn same_directory_replace_is_atomic_but_does_not_claim_strong_cas() {
     );
 }
 
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn missing_target_publication_uses_atomic_no_replace() {
+    let root = TestRoot::new();
+    let capability = trusted_read_write(&root);
+    let mut temporary = capability.create_temp(&component("document.tmp")).unwrap();
+    temporary.write_all(b"first").unwrap();
+    temporary.sync().unwrap();
+
+    let receipt = capability
+        .replace_temp(
+            temporary,
+            &component("document.scene"),
+            ExpectedTarget::Missing,
+        )
+        .unwrap();
+
+    assert_eq!(receipt.previous_identity(), None);
+    assert_eq!(
+        receipt.conflict_protection(),
+        ConflictProtection::StrongCompareAndSwap
+    );
+    assert_eq!(
+        fs::read(root.path().join("document.scene")).unwrap(),
+        b"first"
+    );
+
+    let mut collision = capability.create_temp(&component("collision.tmp")).unwrap();
+    collision.write_all(b"second").unwrap();
+    let error = capability
+        .replace_temp(
+            collision,
+            &component("document.scene"),
+            ExpectedTarget::Missing,
+        )
+        .unwrap_err();
+
+    assert!(matches!(error, FsError::TargetStateMismatch));
+    assert_eq!(
+        fs::read(root.path().join("document.scene")).unwrap(),
+        b"first"
+    );
+}
+
 #[test]
 fn replacement_receipt_detects_candidate_bytes_changed_outside_its_capability() {
     let root = TestRoot::new();

@@ -336,6 +336,36 @@ pub(crate) fn replace_temporary(
     .map_err(|error| super::rustix_io(FsOperation::Replace, error))
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn publish_temporary_no_replace(
+    parent: &File,
+    _temporary: &File,
+    source_name: &RelativeComponent,
+    target_name: &RelativeComponent,
+) -> Result<(), FsError> {
+    renameat_with(
+        parent,
+        source_name.as_os_str(),
+        parent,
+        target_name.as_os_str(),
+        RenameFlags::NOREPLACE,
+    )
+    .map_err(|error| classify_no_replace_publication_error(error, FsOperation::Replace))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn publish_temporary_no_replace(
+    _parent: &File,
+    _temporary: &File,
+    _source_name: &RelativeComponent,
+    _target_name: &RelativeComponent,
+) -> Result<(), FsError> {
+    Err(FsError::Unsupported {
+        operation: FsOperation::Replace,
+        capability: "same-parent no-replace temporary-file publication",
+    })
+}
+
 pub(crate) fn sync_file(file: &File) -> Result<FileSyncTier, FsError> {
     fsync(file)
         .map(|()| FileSyncTier::DataAndMetadata)
@@ -454,29 +484,35 @@ fn strict_open_error(operation: FsOperation, error: rustix::io::Errno) -> FsErro
 
 #[cfg(target_os = "linux")]
 fn classify_directory_publication_error(error: rustix::io::Errno) -> FsError {
+    classify_no_replace_publication_error(error, FsOperation::PublishDirectory)
+}
+
+#[cfg(target_os = "linux")]
+fn classify_no_replace_publication_error(
+    error: rustix::io::Errno,
+    operation: FsOperation,
+) -> FsError {
     match error {
-        rustix::io::Errno::EXIST | rustix::io::Errno::NOTEMPTY => FsError::AlreadyExists {
-            operation: FsOperation::PublishDirectory,
-        },
+        rustix::io::Errno::EXIST | rustix::io::Errno::NOTEMPTY => {
+            FsError::AlreadyExists { operation }
+        }
         rustix::io::Errno::XDEV => FsError::CrossVolume,
         rustix::io::Errno::NOSYS | rustix::io::Errno::OPNOTSUPP | rustix::io::Errno::INVAL => {
             FsError::Unsupported {
-                operation: FsOperation::PublishDirectory,
-                capability: "renameat2 RENAME_NOREPLACE directory publication",
+                operation,
+                capability: "renameat2 RENAME_NOREPLACE publication",
             }
         }
         rustix::io::Errno::PERM => FsError::Unproven {
-            operation: FsOperation::PublishDirectory,
+            operation,
             proof: "the runtime policy rejected RENAME_NOREPLACE",
         },
-        rustix::io::Errno::NOENT => FsError::CapabilityIdentityDrift {
-            operation: FsOperation::PublishDirectory,
-        },
+        rustix::io::Errno::NOENT => FsError::CapabilityIdentityDrift { operation },
         rustix::io::Errno::BUSY => FsError::Unproven {
-            operation: FsOperation::PublishDirectory,
+            operation,
             proof: "the live source or mount topology became busy during publication",
         },
-        error => super::rustix_io(FsOperation::PublishDirectory, error),
+        error => super::rustix_io(operation, error),
     }
 }
 
