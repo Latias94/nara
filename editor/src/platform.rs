@@ -1900,8 +1900,11 @@ impl NativeEditorHost {
             self.play_cadence
                 .deadline(now, play_state_after_update, selected_after_ui);
         let wake_deadline = earliest_deadline(
-            cadence_deadline,
-            self.canary.as_ref().map(NativeEditorCanary::deadline),
+            earliest_deadline(
+                cadence_deadline,
+                self.canary.as_ref().map(NativeEditorCanary::deadline),
+            ),
+            self.application.session_close_retry_deadline(),
         );
         let scene_retry_pending =
             selected_after_ui == EguiEditorViewport::Authoring && viewport_retry_pending;
@@ -1946,6 +1949,7 @@ impl NativeEditorHost {
         &mut self,
         event_loop: &ActiveEventLoop,
     ) -> Result<(), EditorRunError> {
+        let session_close_pending = self.application.session_close_pending();
         let frame = match self.application.surface() {
             EditorApplicationSurface::ProjectShell => {
                 self.game_input.invalidate_after_control(true);
@@ -1956,7 +1960,7 @@ impl NativeEditorHost {
             }
             EditorApplicationSurface::Workspace {
                 read_only: true, ..
-            } => {
+            } if !session_close_pending => {
                 self.game_input.invalidate_after_control(true);
                 self.flush_game_input()?;
                 self.play_cadence.retire();
@@ -2003,8 +2007,11 @@ impl NativeEditorHost {
         }
         self.play_cadence.observe_after(now, state, selected);
         let deadline = earliest_deadline(
-            self.play_cadence.deadline(now, state, selected),
-            self.canary.as_ref().map(NativeEditorCanary::deadline),
+            earliest_deadline(
+                self.play_cadence.deadline(now, state, selected),
+                self.canary.as_ref().map(NativeEditorCanary::deadline),
+            ),
+            self.application.session_close_retry_deadline(),
         );
         if update.actions_observed()
             || after_frame.project_browser().work_observed()

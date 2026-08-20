@@ -1629,6 +1629,7 @@ impl TaskPoolShutdownReport {
 #[derive(Resource, Debug, Clone, PartialEq, Eq)]
 pub struct TaskShutdownReport {
     per_kind: BTreeMap<TaskPoolKind, TaskPoolShutdownReport>,
+    complete: bool,
 }
 
 impl Default for TaskShutdownReport {
@@ -1637,11 +1638,20 @@ impl Default for TaskShutdownReport {
         for kind in TaskPoolKind::ALL {
             per_kind.insert(kind, TaskPoolShutdownReport::default());
         }
-        Self { per_kind }
+        Self {
+            per_kind,
+            complete: false,
+        }
     }
 }
 
 impl TaskShutdownReport {
+    /// Returns whether every pool close owner reached its terminal joined state.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.complete
+    }
+
     #[must_use]
     pub fn for_kind(&self, kind: TaskPoolKind) -> TaskPoolShutdownReport {
         self.per_kind.get(&kind).copied().unwrap_or_default()
@@ -2443,6 +2453,7 @@ impl TaskPoolsCloseOwner {
                 report.per_kind.insert(kind, owner.shutdown_report);
             }
         }
+        report.complete = self.is_complete();
         report
     }
 

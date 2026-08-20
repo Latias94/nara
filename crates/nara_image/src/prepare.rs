@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     fmt::{self, Debug, Formatter},
     sync::Arc,
 };
@@ -11,7 +10,7 @@ use nara_render::{
     PreparedRenderResources, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
 };
 
-use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat};
+use crate::{ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, asset::ImagePixelRetention};
 
 #[derive(Clone)]
 pub struct PreparedImageResource {
@@ -21,7 +20,7 @@ pub struct PreparedImageResource {
     source_hash: SourceHash,
     artifact_hash: ImportArtifactDigest,
     pixels: Arc<Box<[u8]>>,
-    retention: Option<Arc<dyn Any + Send + Sync>>,
+    retention: Option<ImagePixelRetention>,
 }
 
 impl PreparedImageResource {
@@ -34,7 +33,7 @@ impl PreparedImageResource {
             source_hash: image.source().source_hash(),
             artifact_hash: image.source().artifact().key().digest(),
             pixels: image.shared_pixels(),
-            retention: image.shared_retention_owner(),
+            retention: image.shared_pixel_retention(),
         }
     }
 
@@ -73,7 +72,7 @@ impl PreparedImageResource {
         self.pixels.as_ref().as_ref()
     }
 
-    /// Reports whether the source import's memory-accounting owner is retained by this snapshot.
+    /// Reports whether this snapshot retains the source image's lifetime owner or import lease.
     #[must_use]
     pub const fn retains_source_allocation(&self) -> bool {
         self.retention.is_some()

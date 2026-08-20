@@ -871,6 +871,81 @@ fn retained_commit_accounts_for_pixels_until_the_final_shared_image_drops() {
 }
 
 #[test]
+fn same_host_retained_pixel_lease_is_exact_and_not_transferable() {
+    let record = image_record("textures/player.png");
+    let host_limits = ImageImportLimits::default().with_max_rgba_bytes(ByteLimit::new(8).unwrap());
+    let host = ImageImportBudgetHost::new(host_limits).unwrap();
+    let owner = ImageImporter::with_budget_host(host_limits, host.clone()).unwrap();
+    let mut server = AssetServer::new();
+    let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+    let mut images = Assets::<ImageAsset>::default();
+    let mut states = AssetStates::default();
+    let mut events = AssetEvents::default();
+    owner
+        .import_image(
+            bytes_request(&record, &rgba_png(2, 1, &[24; 8])),
+            handle,
+            AssetVersion::ZERO,
+            &server,
+            &images,
+            &states,
+        )
+        .unwrap()
+        .commit_retained(&server, &mut images, &mut states, &mut events)
+        .unwrap();
+    assert_eq!(host.snapshot().active_rgba_bytes(), 8);
+
+    let small_limits = host_limits.with_max_rgba_bytes(ByteLimit::new(4).unwrap());
+    let foreign = ImageImporter::with_limits(small_limits).unwrap();
+    let expected_version = states.set_loading(handle.id());
+    let error = foreign
+        .import_image(
+            bytes_request(&record, &rgba_png(1, 1, &[48; 4])),
+            handle,
+            expected_version,
+            &server,
+            &images,
+            &states,
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        ImageImportError::Budget {
+            stage: ImageImportStage::Admission,
+            error: ImageImportBudgetError::per_image(ImageImportLimitKind::RgbaBytes, Some(8), 4,),
+        }
+    );
+    assert_budget_released(foreign.budget_snapshot());
+
+    let same_host = ImageImporter::with_budget_host(small_limits, host.clone()).unwrap();
+    let replacement = same_host
+        .import_image(
+            bytes_request(&record, &rgba_png(1, 1, &[96; 4])),
+            handle,
+            expected_version,
+            &server,
+            &images,
+            &states,
+        )
+        .unwrap();
+    assert_eq!(replacement.memory_plan().publication_overlap_bytes(), 0);
+    let publication = host.snapshot();
+    assert_eq!(publication.active_rgba_bytes(), 12);
+    assert_eq!(publication.high_water_rgba_bytes(), 12);
+    assert_eq!(publication.active_publication_overlap_bytes(), 0);
+
+    replacement
+        .commit_retained(&server, &mut images, &mut states, &mut events)
+        .unwrap();
+    let retained = host.snapshot();
+    assert_eq!(retained.active_rgba_bytes(), 4);
+    assert_eq!(retained.high_water_rgba_bytes(), 12);
+    assert_eq!(retained.active_publication_overlap_bytes(), 0);
+    drop(images);
+    assert_budget_released(host.snapshot());
+}
+
+#[test]
 fn publication_admission_rejects_a_mismatched_stable_target_without_charging() {
     let source = image_record_with_id(
         "textures/source.png",
@@ -961,6 +1036,42 @@ fn publication_admission_rejects_an_existing_value_above_the_overlap_limit() {
             .into_image();
     let mut images = Assets::default();
     images.insert(handle, oversized);
+
+    let error = importer
+        .import_image(
+            bytes_request(&record, &rgba_png(1, 1, &[0; 4])),
+            handle,
+            AssetVersion::ZERO,
+            &server,
+            &images,
+            &AssetStates::default(),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        ImageImportError::Budget {
+            stage: ImageImportStage::Admission,
+            error: ImageImportBudgetError::per_image(ImageImportLimitKind::RgbaBytes, Some(8), 4,),
+        }
+    );
+    assert_budget_released(importer.budget_snapshot());
+}
+
+#[test]
+fn arbitrary_retention_owner_does_not_bypass_publication_overlap_limit() {
+    let record = image_record("textures/player.png");
+    let importer = ImageImporter::with_limits(
+        ImageImportLimits::default().with_max_rgba_bytes(ByteLimit::new(4).unwrap()),
+    )
+    .unwrap();
+    let mut server = AssetServer::new();
+    let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
+    let mut old = import_uncommitted(&ImageImporter::default(), &record, &rgba_png(2, 1, &[0; 8]))
+        .into_image();
+    assert!(old.try_attach_retention_owner(Arc::new(())));
+    let mut images = Assets::default();
+    images.insert(handle, old);
 
     let error = importer
         .import_image(
@@ -3120,7 +3231,7 @@ fn image_asset_reuses_the_admitted_pixel_allocation() {
 }
 
 #[test]
-fn shared_image_pixels_retain_their_accounting_owner_until_runtime_release() {
+fn shared_image_pixels_retain_their_lifetime_owner_until_runtime_release() {
     struct RetentionProbe(Arc<std::sync::atomic::AtomicBool>);
 
     impl Drop for RetentionProbe {

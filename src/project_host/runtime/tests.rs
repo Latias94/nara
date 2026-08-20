@@ -1627,6 +1627,84 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
 }
 
 #[cfg(feature = "tooling")]
+#[test]
+fn editor_project_close_retries_timed_out_image_task_owner_before_releasing_session() {
+    let project = TestProject::new("editor-image-close-retry");
+    fs::create_dir_all(project.root.join("assets/textures")).unwrap();
+    let source_bytes = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+    )
+    .unwrap();
+    fs::write(
+        project.root.join("assets/textures/imported.png"),
+        source_bytes,
+    )
+    .unwrap();
+
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let linear = ImageImportSettings::new(ImageColorSpace::Linear);
+    let frame = editor.current_frame();
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            linear,
+        ),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(matches!(
+        drive_image_import_to_terminal(&mut editor),
+        super::editor::EditorImageImportState::Succeeded { .. }
+    ));
+    drive_image_import_host_until_idle(&mut editor);
+
+    let budget = editor.test_image_import_budget_host();
+    assert_eq!(budget.snapshot().active_reservations(), 1);
+    let blocked = editor.test_hold_next_image_import_through_shutdown();
+    let frame = editor.current_frame();
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            ImageImportSettings::default(),
+        ),
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ));
+    assert!(blocked.wait_until_started());
+    assert!(budget.snapshot().active_reservations() > 1);
+
+    let incomplete = editor.advance_close();
+    assert!(matches!(
+        &incomplete,
+        super::editor::EditorProjectCloseProgress::Incomplete { .. }
+    ));
+    assert!(!incomplete.task_shutdown().is_complete());
+    assert!(incomplete.task_shutdown().timed_out());
+    assert!(budget.snapshot().active_reservations() > 1);
+
+    assert!(blocked.release());
+    let complete = editor.advance_close();
+    assert!(matches!(
+        &complete,
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+    assert!(complete.task_shutdown().is_complete());
+    assert!(complete.task_shutdown().timed_out());
+    assert!(
+        complete
+            .task_shutdown()
+            .for_kind(TaskPoolKind::Io)
+            .joined_workers
+            > 0
+    );
+    assert_eq!(budget.snapshot().active_reservations(), 1);
+
+    drop(editor);
+    assert_eq!(budget.snapshot().active_reservations(), 0);
+}
+
+#[cfg(feature = "tooling")]
 fn drive_image_import_to_terminal(
     editor: &mut super::editor::EditorProjectSession,
 ) -> super::editor::EditorImageImportState {

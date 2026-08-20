@@ -63,6 +63,7 @@ use nara_reflect::{
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 use nara_render::Extent2d;
 use nara_scene::{SceneEntitySource, UnavailableRecordManifest};
+use nara_tasks::TaskShutdownReport;
 use nara_tooling::{
     __export_apply_changes_from_world, EditorAuthoringReadiness, EditorCloseDecision,
     EditorDocumentId, EditorDocumentKind, EditorFieldFeedback, EditorFrameClock, EditorFrameModel,
@@ -720,6 +721,43 @@ pub struct EditorProjectSession {
     ui_authoring_projection_cache: Option<EditorUiAuthoringProjectionCache>,
 }
 
+/// Evidence that every task owner belonging to one Editor project session completed shutdown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditorProjectCloseReceipt {
+    task_shutdown: TaskShutdownReport,
+}
+
+impl EditorProjectCloseReceipt {
+    fn new(task_shutdown: TaskShutdownReport) -> Self {
+        debug_assert!(task_shutdown.is_complete());
+        Self { task_shutdown }
+    }
+
+    #[must_use]
+    pub const fn task_shutdown(&self) -> &TaskShutdownReport {
+        &self.task_shutdown
+    }
+}
+
+/// One bounded attempt to retire the task owner of an Editor project session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditorProjectCloseProgress {
+    /// The task owner hit a bounded close deadline and remains owned by this session.
+    Incomplete { task_shutdown: TaskShutdownReport },
+    /// Every session-local task owner completed shutdown.
+    Complete(EditorProjectCloseReceipt),
+}
+
+impl EditorProjectCloseProgress {
+    #[must_use]
+    pub const fn task_shutdown(&self) -> &TaskShutdownReport {
+        match self {
+            Self::Incomplete { task_shutdown } => task_shutdown,
+            Self::Complete(receipt) => receipt.task_shutdown(),
+        }
+    }
+}
+
 impl fmt::Debug for EditorProjectSession {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -735,11 +773,27 @@ impl fmt::Debug for EditorProjectSession {
 impl Drop for EditorProjectSession {
     fn drop(&mut self) {
         self.image_import.cancel_pending();
-        self.authoring_runtime.shutdown_tasks();
     }
 }
 
 impl EditorProjectSession {
+    /// Cancels session-local work and advances one bounded task-owner shutdown attempt.
+    ///
+    /// The caller must retain this session and retry after `Incomplete`. Dropping an incomplete
+    /// session invokes only the runtime's last-resort shutdown attempt.
+    #[doc(hidden)]
+    pub fn advance_close(&mut self) -> EditorProjectCloseProgress {
+        self.image_import.cancel_pending();
+        match self.authoring_runtime.shutdown_tasks() {
+            authoring_runtime::EditorAuthoringRuntimeCloseProgress::Incomplete(task_shutdown) => {
+                EditorProjectCloseProgress::Incomplete { task_shutdown }
+            }
+            authoring_runtime::EditorAuthoringRuntimeCloseProgress::Complete(task_shutdown) => {
+                EditorProjectCloseProgress::Complete(EditorProjectCloseReceipt::new(task_shutdown))
+            }
+        }
+    }
+
     #[must_use]
     pub const fn project_readiness(&self) -> EditorProjectReadinessView {
         match &self.execution {
@@ -1874,6 +1928,14 @@ impl EditorProjectSession {
         &mut self,
     ) -> authoring_runtime::EditorImageImportTestControl {
         self.authoring_runtime.hold_next_image_import()
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_hold_next_image_import_through_shutdown(
+        &mut self,
+    ) -> authoring_runtime::EditorImageImportTestControl {
+        self.authoring_runtime
+            .hold_next_image_import_through_shutdown()
     }
 
     #[cfg(test)]

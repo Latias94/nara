@@ -3,7 +3,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use nara::{
@@ -12,9 +12,9 @@ use nara::{
     project_host::{
         EditorGameInputBatch, EditorGameStartActivation, EditorGameStartRequest,
         EditorGameViewBridgeFailure, EditorGameViewCandidate, EditorGameViewCompletion,
-        EditorPreviewCandidate, EditorProjectOpenHost, EditorProjectOpenProgress,
-        EditorProjectSession, EditorUiAuthoringFrame, EditorUiPreviewCandidate,
-        TrustedCompiledEditorProjectIntent,
+        EditorPreviewCandidate, EditorProjectCloseProgress, EditorProjectOpenHost,
+        EditorProjectOpenProgress, EditorProjectSession, EditorUiAuthoringFrame,
+        EditorUiPreviewCandidate, TrustedCompiledEditorProjectIntent,
     },
     render::Extent2d,
     scene::UnavailableRecordManifest,
@@ -33,6 +33,8 @@ use nara::{
     },
 };
 use thiserror::Error;
+
+const EDITOR_SESSION_CLOSE_RETRY_DELAY: Duration = Duration::from_millis(16);
 
 #[path = "shell.rs"]
 mod shell;
@@ -229,6 +231,7 @@ pub struct EditorApplication {
     next_entry_generation: u64,
     next_attempt_generation: u64,
     session_retirement: Option<EditorSessionRetirement>,
+    session_close_retry_at: Option<Instant>,
 }
 
 impl std::fmt::Debug for EditorApplication {
@@ -267,6 +270,7 @@ impl EditorApplication {
             next_entry_generation: 2,
             next_attempt_generation: 1,
             session_retirement: None,
+            session_close_retry_at: None,
         }
     }
 
@@ -294,6 +298,7 @@ impl EditorApplication {
             next_entry_generation: 2,
             next_attempt_generation: 1,
             session_retirement: None,
+            session_close_retry_at: None,
         })
     }
 
@@ -1147,6 +1152,7 @@ impl EditorApplication {
         retirement: EditorSessionRetirement,
     ) -> EditorApplicationUpdate {
         self.session_retirement = Some(retirement);
+        self.session_close_retry_at = None;
         let update = match &mut self.state {
             EditorProductState::AuthoringReady(project)
             | EditorProductState::AuthoringDegraded(project) => request_exit_on_project(project),
@@ -1155,6 +1161,7 @@ impl EditorApplication {
             | EditorProductState::OpeningReplacement(_)
             | EditorProductState::Recovery(_) => {
                 self.session_retirement = None;
+                self.session_close_retry_at = None;
                 return EditorApplicationUpdate::idle();
             }
         };
@@ -1174,6 +1181,7 @@ impl EditorApplication {
         };
         let Some(frame) = self.current_frame() else {
             self.session_retirement = None;
+            self.session_close_retry_at = None;
             return EditorApplicationUpdate {
                 actions_observed,
                 exit_ready: false,
@@ -1183,6 +1191,38 @@ impl EditorApplication {
             Some(EditorWorkspaceIntentResult::Applied {
                 intent: EditorWorkspaceIntent::Exit,
             }) => {
+                if self.session_close_retry_deferred() {
+                    return EditorApplicationUpdate {
+                        actions_observed,
+                        exit_ready: false,
+                    };
+                }
+                let close_progress = match &mut self.state {
+                    EditorProductState::AuthoringReady(project)
+                    | EditorProductState::AuthoringDegraded(project) => {
+                        Some(project.session.advance_close())
+                    }
+                    _ => None,
+                };
+                if matches!(
+                    &close_progress,
+                    Some(EditorProjectCloseProgress::Incomplete { .. })
+                ) {
+                    self.defer_session_close_retry();
+                    return EditorApplicationUpdate {
+                        actions_observed: true,
+                        exit_ready: false,
+                    };
+                }
+                let Some(EditorProjectCloseProgress::Complete(_)) = close_progress else {
+                    self.session_retirement = None;
+                    self.session_close_retry_at = None;
+                    return EditorApplicationUpdate {
+                        actions_observed,
+                        exit_ready: false,
+                    };
+                };
+                self.session_close_retry_at = None;
                 let state = self.take_state();
                 match state {
                     EditorProductState::AuthoringReady(project)
@@ -1230,6 +1270,7 @@ impl EditorApplication {
                 },
             ) => {
                 self.session_retirement = None;
+                self.session_close_retry_at = None;
                 EditorApplicationUpdate {
                     actions_observed,
                     exit_ready: false,
@@ -1243,10 +1284,14 @@ impl EditorApplication {
     }
 
     pub fn request_exit(&mut self) -> EditorApplicationUpdate {
+        if self.session_retirement.is_some() {
+            return EditorApplicationUpdate::idle();
+        }
         let state = self.take_state();
         match state {
             EditorProductState::ProjectManager(manager) => {
                 self.session_retirement = None;
+                self.session_close_retry_at = None;
                 self.state = EditorProductState::ProjectManager(manager);
                 EditorApplicationUpdate {
                     actions_observed: false,
@@ -1255,6 +1300,7 @@ impl EditorApplication {
             }
             EditorProductState::Recovery(recovery) => {
                 self.session_retirement = None;
+                self.session_close_retry_at = None;
                 self.state = EditorProductState::Recovery(recovery);
                 EditorApplicationUpdate {
                     actions_observed: false,
@@ -1263,6 +1309,7 @@ impl EditorApplication {
             }
             EditorProductState::OpeningInitial(opening) => {
                 self.session_retirement = None;
+                self.session_close_retry_at = None;
                 let entry_generation = self.allocate_entry_generation();
                 self.state = EditorProductState::ProjectManager(ProjectManagerState::new(
                     entry_generation,
@@ -1407,6 +1454,12 @@ impl EditorApplication {
     }
 
     fn finish_replacement_handoff(&mut self, actions_observed: bool) -> EditorApplicationUpdate {
+        if self.session_close_retry_deferred() {
+            return EditorApplicationUpdate {
+                actions_observed,
+                exit_ready: false,
+            };
+        }
         let state = self.take_state();
         let EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
             entry_generation,
@@ -1439,9 +1492,28 @@ impl EditorApplication {
         match frame.workspace_intent().result() {
             Some(EditorWorkspaceIntentResult::Applied {
                 intent: EditorWorkspaceIntent::Exit,
-            }) => {
-                self.state = EditorProductState::from_published(candidate);
-            }
+            }) => match retained.session.advance_close() {
+                EditorProjectCloseProgress::Incomplete { .. } => {
+                    self.defer_session_close_retry();
+                    self.state =
+                        EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                            entry_generation,
+                            attempt_generation,
+                            retained,
+                            candidate,
+                            close_started,
+                            save_attempted,
+                        });
+                    return EditorApplicationUpdate {
+                        actions_observed: true,
+                        exit_ready: false,
+                    };
+                }
+                EditorProjectCloseProgress::Complete(_) => {
+                    self.session_close_retry_at = None;
+                    self.state = EditorProductState::from_published(candidate);
+                }
+            },
             Some(
                 EditorWorkspaceIntentResult::Cancelled {
                     intent: EditorWorkspaceIntent::Exit,
@@ -1451,9 +1523,11 @@ impl EditorApplication {
                     ..
                 },
             ) => {
+                self.session_close_retry_at = None;
                 self.state = EditorProductState::from_published(retained);
             }
             _ if persistence_save_failed && cancel_pending_exit(&mut retained) => {
+                self.session_close_retry_at = None;
                 self.state = EditorProductState::from_published(retained);
             }
             _ if persistence_save_failed => {
@@ -1580,7 +1654,32 @@ impl EditorApplication {
     }
 
     fn enter_recovery(&mut self, recovery: RecoveryState) {
+        self.session_close_retry_at = None;
         self.state = EditorProductState::Recovery(recovery);
+    }
+
+    fn session_close_retry_deferred(&self) -> bool {
+        self.session_close_retry_at
+            .is_some_and(|retry_at| Instant::now() < retry_at)
+    }
+
+    pub(crate) const fn session_close_retry_deadline(&self) -> Option<Instant> {
+        self.session_close_retry_at
+    }
+
+    pub(crate) fn session_close_pending(&self) -> bool {
+        self.session_retirement.is_some()
+            || matches!(
+                self.state,
+                EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                    close_started: true,
+                    ..
+                })
+            )
+    }
+
+    fn defer_session_close_retry(&mut self) {
+        self.session_close_retry_at = Some(Instant::now() + EDITOR_SESSION_CLOSE_RETRY_DELAY);
     }
 
     fn take_state(&mut self) -> EditorProductState {

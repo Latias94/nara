@@ -750,13 +750,12 @@ impl ImageImporter {
         states: &AssetStates,
     ) -> Result<AdmittedImageImport, ImageImportError> {
         validate_extension(request.source.path())?;
-        let publication_overlap_bytes = self.budget_host.publication_overlap_limit().get();
         let publication = publication.admit(
             &request.source,
             asset_server,
             images,
             states,
-            publication_overlap_bytes,
+            &self.budget_host,
         )?;
         let charge = ImageImportCharge::admission(
             self.limits.max_encoded_bytes().get(),
@@ -792,16 +791,9 @@ impl ImageImporter {
         } = request;
         validate_extension(source.path())?;
         check_encoded_limit(self.limits, source_bytes.len())?;
-        let publication_overlap_bytes = self.budget_host.publication_overlap_limit().get();
         let publication =
             ImagePublicationSnapshot::capture(&source, handle, expected_version, images, states)
-                .admit(
-                    &source,
-                    asset_server,
-                    images,
-                    states,
-                    publication_overlap_bytes,
-                )?;
+                .admit(&source, asset_server, images, states, &self.budget_host)?;
         let charge = ImageImportCharge::admission(
             source_bytes.len(),
             publication.overlap_bytes(),

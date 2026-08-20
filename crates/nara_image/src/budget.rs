@@ -74,13 +74,13 @@ impl ImageImportCharge {
         }
     }
 
-    pub(crate) const fn retained_pixels(plan: ImageImportMemoryPlan) -> Self {
+    pub(crate) const fn retained_pixels(rgba_bytes: usize) -> Self {
         Self {
             encoded_bytes: 0,
             decoder_work_bytes: 0,
-            rgba_bytes: plan.rgba_bytes(),
+            rgba_bytes,
             publication_overlap_bytes: 0,
-            total_bytes: plan.rgba_bytes(),
+            total_bytes: rgba_bytes,
         }
     }
 }
@@ -358,6 +358,35 @@ impl ImageImportReservation {
         self.charge = charge;
         Ok(())
     }
+
+    fn is_publication_for(&self, rgba_bytes: usize) -> bool {
+        let overlap_bytes = self.charge.publication_overlap_bytes;
+        let Some(expected_total) = rgba_bytes.checked_add(overlap_bytes) else {
+            return false;
+        };
+        self.charge.encoded_bytes == 0
+            && self.charge.decoder_work_bytes == 0
+            && self.charge.rgba_bytes == rgba_bytes
+            && self.charge.total_bytes == expected_total
+    }
+
+    fn release_publication_overlap(&mut self, rgba_bytes: usize) {
+        if !self.is_publication_for(rgba_bytes) {
+            return;
+        }
+        let retained_charge = ImageImportCharge::retained_pixels(rgba_bytes);
+        if retained_charge == self.charge {
+            return;
+        }
+
+        let released = self.charge.total_bytes - retained_charge.total_bytes;
+        let mut state = lock_unpoisoned(&self.budget.inner.state);
+        state.active_bytes = state.active_bytes.saturating_sub(released);
+        state.total_released_bytes = state.total_released_bytes.saturating_add(released as u64);
+        remove_charge(&mut state, self.charge);
+        add_charge(&mut state, retained_charge);
+        self.charge = retained_charge;
+    }
 }
 
 impl Debug for ImageImportReservation {
@@ -379,6 +408,74 @@ impl Drop for ImageImportReservation {
             .total_released_bytes
             .saturating_add(self.charge.total_bytes as u64);
         state.released_reservations = state.released_reservations.saturating_add(1);
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ImageImportPixelLease {
+    inner: Arc<ImageImportPixelLeaseInner>,
+}
+
+struct ImageImportPixelLeaseInner {
+    budget: ImageImportBudget,
+    reservation: Mutex<ImageImportReservation>,
+    rgba_bytes: usize,
+}
+
+impl ImageImportPixelLease {
+    fn new(reservation: ImageImportReservation, rgba_bytes: usize) -> Self {
+        let budget = reservation.budget.clone();
+        Self {
+            inner: Arc::new(ImageImportPixelLeaseInner {
+                budget,
+                reservation: Mutex::new(reservation),
+                rgba_bytes,
+            }),
+        }
+    }
+
+    pub(crate) fn from_publication(
+        reservation: ImageImportReservation,
+        rgba_bytes: usize,
+    ) -> Result<(Self, ImageImportPublicationOverlapGuard), ImageImportReservation> {
+        if !reservation.is_publication_for(rgba_bytes) {
+            return Err(reservation);
+        }
+        let lease = Self::new(reservation, rgba_bytes);
+        let guard = ImageImportPublicationOverlapGuard {
+            lease: lease.clone(),
+        };
+        Ok((lease, guard))
+    }
+
+    pub(crate) fn accounts_for(
+        &self,
+        budget_host: &ImageImportBudgetHost,
+        rgba_bytes: usize,
+    ) -> bool {
+        self.inner.rgba_bytes == rgba_bytes
+            && Arc::ptr_eq(&self.inner.budget.inner, &budget_host.budget.inner)
+    }
+}
+
+impl Debug for ImageImportPixelLease {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ImageImportPixelLease")
+            .field("rgba_bytes", &self.inner.rgba_bytes)
+            .field("shared_owners", &Arc::strong_count(&self.inner))
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct ImageImportPublicationOverlapGuard {
+    lease: ImageImportPixelLease,
+}
+
+impl Drop for ImageImportPublicationOverlapGuard {
+    fn drop(&mut self) {
+        let mut reservation = lock_unpoisoned(&self.lease.inner.reservation);
+        reservation.release_publication_overlap(self.lease.inner.rgba_bytes);
     }
 }
 

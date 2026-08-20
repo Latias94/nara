@@ -8,6 +8,7 @@ use std::{
 use nara_asset::{AssetPath, ImportArtifactRecord, ImportSettingsHash, SourceHash, StableAssetId};
 
 use crate::ImageImportSettings;
+use crate::budget::ImageImportPixelLease;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -144,7 +145,13 @@ pub struct ImageAsset {
     #[cfg_attr(feature = "serde", serde(serialize_with = "shared_bytes::serialize"))]
     pixels: Arc<Box<[u8]>>,
     #[cfg_attr(feature = "serde", serde(skip))]
-    retention: Option<Arc<dyn Any + Send + Sync>>,
+    retention: Option<ImagePixelRetention>,
+}
+
+#[derive(Clone)]
+pub(crate) enum ImagePixelRetention {
+    LifetimeOwner { _owner: Arc<dyn Any + Send + Sync> },
+    ImportBudget(ImageImportPixelLease),
 }
 
 impl ImageAsset {
@@ -168,9 +175,11 @@ impl ImageAsset {
         })
     }
 
-    /// Installs the owner that accounts for this shared pixel allocation.
+    /// Installs an owner whose lifetime must follow this shared pixel allocation.
     ///
-    /// Returns `false` without replacing the existing owner when one is already attached.
+    /// This owner does not prove an [`crate::ImageImportBudgetHost`] charge and therefore never
+    /// exempts the allocation from publication-overlap accounting. Returns `false` without
+    /// replacing the existing owner when one is already attached.
     #[must_use]
     pub fn try_attach_retention_owner<R>(&mut self, retention: Arc<R>) -> bool
     where
@@ -179,7 +188,7 @@ impl ImageAsset {
         if self.retention.is_some() {
             return false;
         }
-        self.retention = Some(retention);
+        self.retention = Some(ImagePixelRetention::LifetimeOwner { _owner: retention });
         true
     }
 
@@ -191,7 +200,7 @@ impl ImageAsset {
             extent: self.extent,
             format: self.format,
             pixels: Arc::clone(&self.pixels),
-            retention: Some(Arc::clone(self.retention.as_ref()?)),
+            retention: Some(self.retention.as_ref()?.clone()),
         })
     }
 
@@ -220,16 +229,29 @@ impl ImageAsset {
         self.pixels.as_ref().as_ref()
     }
 
+    #[cfg(any(feature = "render-prepare", test))]
     pub(crate) fn shared_pixels(&self) -> Arc<Box<[u8]>> {
         Arc::clone(&self.pixels)
     }
 
-    pub(crate) fn shared_retention_owner(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.retention.as_ref().map(Arc::clone)
+    #[cfg(any(feature = "render-prepare", test))]
+    pub(crate) fn shared_pixel_retention(&self) -> Option<ImagePixelRetention> {
+        self.retention.clone()
     }
 
-    pub(crate) const fn has_retention_owner(&self) -> bool {
-        self.retention.is_some()
+    pub(crate) fn shared_import_pixel_lease(&self) -> Option<ImageImportPixelLease> {
+        match self.retention.as_ref()? {
+            ImagePixelRetention::LifetimeOwner { .. } => None,
+            ImagePixelRetention::ImportBudget(lease) => Some(lease.clone()),
+        }
+    }
+
+    pub(crate) fn try_attach_import_pixel_lease(&mut self, lease: ImageImportPixelLease) -> bool {
+        if self.retention.is_some() {
+            return false;
+        }
+        self.retention = Some(ImagePixelRetention::ImportBudget(lease));
+        true
     }
 
     fn validate_rgba_bytes(

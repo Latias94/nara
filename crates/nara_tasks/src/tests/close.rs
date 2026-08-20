@@ -148,6 +148,7 @@ fn shutdown_retains_an_uncooperative_worker_and_completes_on_retry() {
     let started = Instant::now();
     let report = pools.shutdown_blocking().unwrap();
     assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(!report.is_complete());
     let io = report.for_kind(TaskPoolKind::Io);
     assert!(io.drain_timed_out);
     assert!(io.cancel_timed_out);
@@ -161,18 +162,16 @@ fn shutdown_retains_an_uncooperative_worker_and_completes_on_retry() {
     ));
     drop(release_tx);
     exited_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-    let completed = pools
-        .shutdown_blocking()
-        .unwrap()
-        .for_kind(TaskPoolKind::Io);
+    let completed_report = pools.shutdown_blocking().unwrap();
+    assert!(completed_report.is_complete());
+    let completed = completed_report.for_kind(TaskPoolKind::Io);
     assert!(completed.drain_timed_out);
     assert!(completed.cancel_timed_out);
     assert!(completed.join_timed_out);
     assert_eq!(completed.joined_workers, 1);
-    let repeated = pools
-        .shutdown_blocking()
-        .unwrap()
-        .for_kind(TaskPoolKind::Io);
+    let repeated_report = pools.shutdown_blocking().unwrap();
+    assert!(repeated_report.is_complete());
+    let repeated = repeated_report.for_kind(TaskPoolKind::Io);
     assert_eq!(repeated, completed);
     assert_eq!(pools.stats().for_kind(TaskPoolKind::Io).shutdowns, 1);
     let drop_started = Instant::now();
@@ -476,6 +475,7 @@ fn runtime_close_retains_timed_out_task_owners_until_retry_completes() {
     drive_until_state(&mut runtime, RuntimeState::Stopped);
 
     let report = runtime.world().resource::<TaskShutdownReport>();
+    assert!(report.is_complete());
     assert!(report.timed_out());
     assert_eq!(report.for_kind(TaskPoolKind::Io).joined_workers, 1);
     assert!(!runtime.world().contains_resource::<TaskPools>());

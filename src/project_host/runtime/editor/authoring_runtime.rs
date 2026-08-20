@@ -14,7 +14,8 @@ use nara_reflect::{ComponentRegistryPlugin, ComponentRegistrySnapshot};
 #[cfg(feature = "presentation-2d")]
 use nara_scene::SceneAuthoringRevision;
 use nara_tasks::{
-    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest, TaskTerminal,
+    TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskShutdownReport, TaskSpawnRequest,
+    TaskTerminal,
 };
 #[cfg(feature = "presentation-2d")]
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
@@ -98,6 +99,14 @@ pub(super) struct EditorImageRuntimeTask {
 struct EditorImageImportTestGate {
     started: SyncSender<()>,
     release: Receiver<()>,
+    cancellation: EditorImageImportTestCancellation,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditorImageImportTestCancellation {
+    Cooperative,
+    ManualRelease,
 }
 
 #[cfg(test)]
@@ -152,6 +161,11 @@ pub(super) enum EditorImageRuntimeTerminal {
         source: EditorImageSourceCompletion,
     },
     Rejected(EditorImageRuntimeFailure),
+}
+
+pub(super) enum EditorAuthoringRuntimeCloseProgress {
+    Incomplete(TaskShutdownReport),
+    Complete(TaskShutdownReport),
 }
 
 /// Owns the Editor's single task and image-asset world.
@@ -324,7 +338,9 @@ impl EditorAuthoringRuntime {
                     if let Some(gate) = test_gate {
                         let _ = gate.started.send(());
                         loop {
-                            if cancellation.is_cancelled() {
+                            if gate.cancellation == EditorImageImportTestCancellation::Cooperative
+                                && cancellation.is_cancelled()
+                            {
                                 return EditorImageTaskOutput::Rejected(
                                     EditorImageRuntimeFailure::TaskCancelled,
                                 );
@@ -412,14 +428,41 @@ impl EditorAuthoringRuntime {
         )
     }
 
-    pub(super) fn shutdown_tasks(&self) {
-        if let Some(pools) = self.app.world().get_resource::<TaskPools>() {
-            let _ = pools.shutdown_blocking();
+    pub(super) fn shutdown_tasks(&self) -> EditorAuthoringRuntimeCloseProgress {
+        let Some(pools) = self.app.world().get_resource::<TaskPools>() else {
+            return EditorAuthoringRuntimeCloseProgress::Incomplete(TaskShutdownReport::default());
+        };
+        let Ok(report) = pools.shutdown_blocking() else {
+            return EditorAuthoringRuntimeCloseProgress::Incomplete(TaskShutdownReport::default());
+        };
+        if report.is_complete() {
+            EditorAuthoringRuntimeCloseProgress::Complete(report)
+        } else {
+            EditorAuthoringRuntimeCloseProgress::Incomplete(report)
         }
     }
 
     #[cfg(test)]
     pub(super) fn hold_next_image_import(&mut self) -> EditorImageImportTestControl {
+        self.hold_next_image_import_with_cancellation(
+            EditorImageImportTestCancellation::Cooperative,
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn hold_next_image_import_through_shutdown(
+        &mut self,
+    ) -> EditorImageImportTestControl {
+        self.hold_next_image_import_with_cancellation(
+            EditorImageImportTestCancellation::ManualRelease,
+        )
+    }
+
+    #[cfg(test)]
+    fn hold_next_image_import_with_cancellation(
+        &mut self,
+        cancellation: EditorImageImportTestCancellation,
+    ) -> EditorImageImportTestControl {
         assert!(
             self.next_image_import_gate.is_none(),
             "only one image import test gate may be armed"
@@ -429,6 +472,7 @@ impl EditorAuthoringRuntime {
         self.next_image_import_gate = Some(EditorImageImportTestGate {
             started: started_sender,
             release: release_receiver,
+            cancellation,
         });
         EditorImageImportTestControl {
             started,
@@ -444,7 +488,7 @@ impl EditorAuthoringRuntime {
 
 impl Drop for EditorAuthoringRuntime {
     fn drop(&mut self) {
-        self.shutdown_tasks();
+        let _ = self.shutdown_tasks();
     }
 }
 

@@ -1,7 +1,5 @@
 use std::fmt::{self, Debug, Formatter};
 
-use std::sync::Arc;
-
 use nara_asset::{
     AssetEvents, AssetPath, AssetRecord, AssetServer, AssetSlotRevision, AssetStateError,
     AssetStateRevision, AssetStates, AssetVersion, Assets, Handle, ImportArtifactRecord,
@@ -9,9 +7,9 @@ use nara_asset::{
 };
 use nara_fs::ContentDigest;
 
-use crate::budget::{ImageImportCharge, ImageImportReservation};
+use crate::budget::{ImageImportCharge, ImageImportPixelLease, ImageImportReservation};
 use crate::limits::{ImageImportBudgetError, ImageImportMemoryPlan};
-use crate::{ImageAsset, ImageImportLimitKind, ImageImportSettings};
+use crate::{ImageAsset, ImageImportBudgetHost, ImageImportLimitKind, ImageImportSettings};
 
 use super::{ImageImportError, ImageImportStage, ImagePublicationFailureKind};
 
@@ -21,6 +19,7 @@ enum PreviousImageSlot {
     Occupied {
         revision: AssetSlotRevision,
         rgba_bytes: usize,
+        retained_pixels: Option<ImageImportPixelLease>,
     },
 }
 
@@ -34,11 +33,8 @@ impl PreviousImageSlot {
         match previous {
             Some(image) => Self::Occupied {
                 revision,
-                rgba_bytes: if image.has_retention_owner() {
-                    0
-                } else {
-                    image.pixels().len()
-                },
+                rgba_bytes: image.pixels().len(),
+                retained_pixels: image.shared_import_pixel_lease(),
             },
             None => Self::Vacant(revision),
         }
@@ -73,10 +69,23 @@ impl PreviousImageSlot {
         Ok(())
     }
 
-    const fn rgba_bytes(&self) -> usize {
+    fn publication_overlap_bytes(&self, budget_host: &ImageImportBudgetHost) -> usize {
         match self {
             Self::Vacant(_) => 0,
-            Self::Occupied { rgba_bytes, .. } => *rgba_bytes,
+            Self::Occupied {
+                rgba_bytes,
+                retained_pixels,
+                ..
+            } => {
+                if retained_pixels
+                    .as_ref()
+                    .is_some_and(|lease| lease.accounts_for(budget_host, *rgba_bytes))
+                {
+                    0
+                } else {
+                    *rgba_bytes
+                }
+            }
         }
     }
 
@@ -151,7 +160,7 @@ impl ImagePublicationSnapshot {
         asset_server: &AssetServer,
         images: &Assets<ImageAsset>,
         states: &AssetStates,
-        reserved_overlap_bytes: usize,
+        budget_host: &ImageImportBudgetHost,
     ) -> Result<ImagePublicationAdmission, ImageImportError> {
         if source.stable_id() != self.source_stable_id || source.path() != &self.source_path {
             return Err(ImageImportError::Publication(
@@ -165,7 +174,8 @@ impl ImagePublicationSnapshot {
         self.previous_slot
             .validate(self.handle, images)
             .map_err(ImageImportError::Publication)?;
-        let observed = self.previous_slot.rgba_bytes();
+        let reserved_overlap_bytes = budget_host.publication_overlap_limit().get();
+        let observed = self.previous_slot.publication_overlap_bytes(budget_host);
         if observed > reserved_overlap_bytes {
             return Err(ImageImportError::budget(
                 ImageImportStage::Admission,
@@ -319,18 +329,28 @@ impl ImageImportedAsset {
             source_digest: _,
             memory_plan,
             publication,
-            mut publication_reservation,
+            publication_reservation,
         } = self;
-        publication_reservation
-            .resize(ImageImportCharge::retained_pixels(memory_plan))
-            .map_err(|error| ImageImportError::budget(ImageImportStage::Publication, error))?;
-        if !image.try_attach_retention_owner(Arc::new(publication_reservation)) {
+        let rgba_bytes = image.pixels().len();
+        if rgba_bytes != memory_plan.rgba_bytes() {
             return Err(ImageImportError::Publication(
                 ImagePublicationFailureKind::TargetMismatch,
             ));
         }
-        commit_published_image(image, publication, asset_server, images, states, events)
-            .map_err(ImageImportError::Publication)
+        let (retention, publication_overlap_guard) =
+            ImageImportPixelLease::from_publication(publication_reservation, rgba_bytes).map_err(
+                |_| ImageImportError::Publication(ImagePublicationFailureKind::TargetMismatch),
+            )?;
+        if !image.try_attach_import_pixel_lease(retention) {
+            return Err(ImageImportError::Publication(
+                ImagePublicationFailureKind::TargetMismatch,
+            ));
+        }
+        let result =
+            commit_published_image(image, publication, asset_server, images, states, events)
+                .map_err(ImageImportError::Publication);
+        drop(publication_overlap_guard);
+        result
     }
 
     pub(super) fn retain_publication_charge(mut self) -> Result<Self, ImageImportError> {

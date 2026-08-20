@@ -70,10 +70,10 @@ pub use editor::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(feature = "tooling")]
 #[doc(hidden)]
 pub use editor::{
-    EditorProjectOpenAttempt, EditorProjectOpenError, EditorProjectOpenFailure,
-    EditorProjectOpenFailureImpact, EditorProjectOpenFailureSource, EditorProjectOpenHost,
-    EditorProjectOpenPhase, EditorProjectOpenProgress, EditorProjectSession,
-    TrustedCompiledEditorProjectIntent,
+    EditorProjectCloseProgress, EditorProjectCloseReceipt, EditorProjectOpenAttempt,
+    EditorProjectOpenError, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
+    EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
+    EditorProjectOpenProgress, EditorProjectSession, TrustedCompiledEditorProjectIntent,
 };
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 pub use editor::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
