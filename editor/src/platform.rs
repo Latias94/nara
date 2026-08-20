@@ -1840,14 +1840,7 @@ impl NativeEditorHost {
             || game_resized
             || source_changed
             || self.application.game_step_requires_runtime_drive()
-            || matches!(
-                play_state_before,
-                EditorPlayState::PreparingPlay
-                    | EditorPlayState::Starting
-                    | EditorPlayState::RetiringPlay
-                    | EditorPlayState::Running
-                    | EditorPlayState::Stopping
-            );
+            || play_lifecycle_requires_runtime_drive(play_state_before);
         let delta = self
             .play_cadence
             .real_delta(now, play_state_before, dispatch, drive_runtime);
@@ -1977,8 +1970,8 @@ impl NativeEditorHost {
         let now = Instant::now();
         let selected = self.viewport_selection.selected();
         let state = frame.play().state();
-        let drive_runtime =
-            state == EditorPlayState::Running && selected == EguiEditorViewport::Game;
+        let drive_runtime = self.application.game_step_requires_runtime_drive()
+            || play_lifecycle_requires_runtime_drive(state);
         let dispatch = EditorApplicationDispatch::default();
         let delta = self
             .play_cadence
@@ -2061,6 +2054,17 @@ fn earliest_deadline(left: Option<Instant>, right: Option<Instant>) -> Option<In
         (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
         (None, None) => None,
     }
+}
+
+fn play_lifecycle_requires_runtime_drive(state: EditorPlayState) -> bool {
+    matches!(
+        state,
+        EditorPlayState::PreparingPlay
+            | EditorPlayState::Starting
+            | EditorPlayState::RetiringPlay
+            | EditorPlayState::Running
+            | EditorPlayState::Stopping
+    )
 }
 
 impl ApplicationHandler for NativeEditorHost {
@@ -2339,8 +2343,28 @@ mod tests {
 
     use super::{
         EditorApplicationDispatch, EditorGpuRecovery, EditorPlayCadence, EditorViewportSelection,
-        game_view_wait_pending,
+        game_view_wait_pending, play_lifecycle_requires_runtime_drive,
     };
+
+    #[test]
+    fn runtime_lifecycle_drive_is_independent_of_presentation() {
+        for state in [
+            EditorPlayState::PreparingPlay,
+            EditorPlayState::Starting,
+            EditorPlayState::RetiringPlay,
+            EditorPlayState::Running,
+            EditorPlayState::Stopping,
+        ] {
+            assert!(play_lifecycle_requires_runtime_drive(state));
+        }
+
+        assert!(!play_lifecycle_requires_runtime_drive(
+            EditorPlayState::Paused
+        ));
+        assert!(!play_lifecycle_requires_runtime_drive(
+            EditorPlayState::RetirementIncomplete
+        ));
+    }
 
     #[test]
     fn gpu_recovery_requires_explicit_retry_after_one_automatic_replacement() {
