@@ -9,12 +9,15 @@
 mod editor;
 mod fields;
 mod game_view;
+mod image_import;
 mod inspector;
 mod project_browser;
 mod project_shell;
 mod scene_view;
 mod ui_authoring;
 
+#[cfg(test)]
+mod image_import_tests;
 #[cfg(test)]
 mod project_browser_tests;
 #[cfg(test)]

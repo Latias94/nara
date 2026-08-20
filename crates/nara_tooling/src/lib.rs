@@ -4,6 +4,7 @@ mod composition;
 mod diagnostic;
 mod frame;
 mod gesture;
+mod image_import;
 mod inspector;
 mod persistence;
 mod play;
@@ -31,6 +32,14 @@ pub use gesture::{
     EditorAtomicFieldEdit, EditorAtomicFieldEditError, EditorFieldWrite, EditorGestureAction,
     EditorGestureCancelReason, EditorGestureId, EditorGestureOutcome, EditorGestureRejection,
     EditorGestureStamp, EditorGestureView, MAX_EDITOR_ATOMIC_FIELD_WRITES,
+};
+pub use image_import::{
+    EditorImageColorSpace, EditorImageDimensions, EditorImageImportAction,
+    EditorImageImportActionOutcome, EditorImageImportActionRejection,
+    EditorImageImportAttemptPhase, EditorImageImportAttemptView, EditorImageImportAvailabilityView,
+    EditorImageImportDetailRevision, EditorImageImportFailureReason, EditorImageImportFreshness,
+    EditorImageImportMetadataIssue, EditorImageImportMetadataView, EditorImageImportSettings,
+    EditorImageImportView,
 };
 pub use inspector::{
     SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentAccess,

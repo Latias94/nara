@@ -251,7 +251,7 @@ fn render(
                 &mut host_actions,
                 &mut local_actions,
             );
-            panel.show_inspector(&mut columns[1], view, true, &mut host_actions);
+            panel.show_inspector(&mut columns[1], view, None, true, false, &mut host_actions);
         });
     });
     output.drop_without_applying_deltas();

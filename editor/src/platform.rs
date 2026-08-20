@@ -71,6 +71,7 @@ const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";
 const GAME_VIEW_PENDING_REPAINT_DELAY: Duration = Duration::from_millis(16);
 const PLAY_DRIVE_CADENCE: Duration = Duration::from_millis(16);
 const PLAY_LIFECYCLE_POLL_DELAY: Duration = Duration::from_millis(16);
+const IMAGE_IMPORT_POLL_DELAY: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Error)]
 pub enum EditorRunError {
@@ -1829,6 +1830,7 @@ impl NativeEditorHost {
         let open_update = self.application.advance_project_open();
         let now = Instant::now();
         let play_state_before = editor_frame.play().state();
+        let image_import_was_pending = editor_frame.image_import_work_pending();
         let dispatch = self.application.dispatch_editor_actions(batch);
         if dispatch.invalidates_game_input() {
             self.game_input.invalidate_after_control(matches!(
@@ -1864,6 +1866,11 @@ impl NativeEditorHost {
         };
         let game_started = self.commit_pending_game_start(window_packet)?;
         let play_state_after_update = after_frame.play().state();
+        let image_import_is_pending = after_frame.image_import_work_pending();
+        let image_import_completed = image_import_terminal_successor_required(
+            image_import_was_pending,
+            image_import_is_pending,
+        );
         if play_state_after_update == EditorPlayState::Faulted {
             self.application.cancel_game_step_presentation();
             self.game_input.invalidate(true);
@@ -1899,9 +1906,12 @@ impl NativeEditorHost {
                     cadence_deadline,
                     play_lifecycle_poll_deadline(now, play_state_after_update),
                 ),
-                self.canary.as_ref().map(NativeEditorCanary::deadline),
+                image_import_poll_deadline(now, image_import_is_pending),
             ),
-            self.application.session_close_retry_deadline(),
+            earliest_deadline(
+                self.canary.as_ref().map(NativeEditorCanary::deadline),
+                self.application.session_close_retry_deadline(),
+            ),
         );
         let scene_retry_pending =
             selected_after_ui == EguiEditorViewport::Authoring && viewport_retry_pending;
@@ -1914,6 +1924,7 @@ impl NativeEditorHost {
             || camera_changed
             || project_browser_local_changed
             || generic_canary_advanced
+            || image_import_completed
             || after_frame.project_browser().work_observed()
             || after_frame.project_browser().has_pending_work()
             || repaint_delay.is_zero()
@@ -1956,8 +1967,10 @@ impl NativeEditorHost {
                 return Ok(());
             }
             EditorApplicationSurface::Workspace {
-                read_only: true, ..
-            } if !session_close_pending => {
+                frame,
+                read_only: true,
+                ..
+            } if !session_close_pending && !frame.image_import_work_pending() => {
                 self.game_input.invalidate_after_control(true);
                 self.flush_game_input()?;
                 self.play_cadence.retire();
@@ -1974,6 +1987,7 @@ impl NativeEditorHost {
         let now = Instant::now();
         let selected = self.viewport_selection.selected();
         let state = frame.play().state();
+        let image_import_was_pending = frame.image_import_work_pending();
         let drive_runtime = self.application.game_step_requires_runtime_drive()
             || play_lifecycle_requires_runtime_drive(state);
         let dispatch = EditorApplicationDispatch::default();
@@ -1998,6 +2012,11 @@ impl NativeEditorHost {
             return Ok(());
         };
         let state = after_frame.play().state();
+        let image_import_is_pending = after_frame.image_import_work_pending();
+        let image_import_completed = image_import_terminal_successor_required(
+            image_import_was_pending,
+            image_import_is_pending,
+        );
         if state == EditorPlayState::Faulted {
             self.game_input.invalidate(true);
             self.flush_game_input()?;
@@ -2009,11 +2028,15 @@ impl NativeEditorHost {
                     self.play_cadence.deadline(now, state, selected),
                     play_lifecycle_poll_deadline(now, state),
                 ),
-                self.canary.as_ref().map(NativeEditorCanary::deadline),
+                image_import_poll_deadline(now, image_import_is_pending),
             ),
-            self.application.session_close_retry_deadline(),
+            earliest_deadline(
+                self.canary.as_ref().map(NativeEditorCanary::deadline),
+                self.application.session_close_retry_deadline(),
+            ),
         );
         if update.actions_observed()
+            || image_import_completed
             || after_frame.project_browser().work_observed()
             || after_frame.project_browser().has_pending_work()
         {
@@ -2083,6 +2106,14 @@ fn play_lifecycle_poll_deadline(now: Instant, state: EditorPlayState) -> Option<
             | EditorPlayState::Stopping
     )
     .then_some(now + PLAY_LIFECYCLE_POLL_DELAY)
+}
+
+fn image_import_poll_deadline(now: Instant, pending: bool) -> Option<Instant> {
+    pending.then_some(now + IMAGE_IMPORT_POLL_DELAY)
+}
+
+fn image_import_terminal_successor_required(was_pending: bool, is_pending: bool) -> bool {
+    was_pending && !is_pending
 }
 
 impl ApplicationHandler for NativeEditorHost {
@@ -2361,7 +2392,8 @@ mod tests {
 
     use super::{
         EditorApplicationDispatch, EditorGpuRecovery, EditorPlayCadence, EditorViewportSelection,
-        game_view_wait_pending, play_lifecycle_poll_deadline,
+        earliest_deadline, game_view_wait_pending, image_import_poll_deadline,
+        image_import_terminal_successor_required, play_lifecycle_poll_deadline,
         play_lifecycle_requires_runtime_drive,
     };
 
@@ -2408,6 +2440,36 @@ mod tests {
         assert_eq!(
             play_lifecycle_poll_deadline(now, EditorPlayState::CloseIncomplete),
             None
+        );
+    }
+
+    #[test]
+    fn image_import_pending_work_uses_a_bounded_poll_deadline() {
+        let now = Instant::now();
+
+        assert_eq!(
+            image_import_poll_deadline(now, true),
+            Some(now + Duration::from_millis(16))
+        );
+        assert_eq!(image_import_poll_deadline(now, false), None);
+    }
+
+    #[test]
+    fn image_import_terminal_transition_requests_one_successor_frame() {
+        assert!(image_import_terminal_successor_required(true, false));
+        assert!(!image_import_terminal_successor_required(true, true));
+        assert!(!image_import_terminal_successor_required(false, false));
+        assert!(!image_import_terminal_successor_required(false, true));
+    }
+
+    #[test]
+    fn earlier_wake_source_wins_over_image_import_polling() {
+        let now = Instant::now();
+        let earlier = now + Duration::from_millis(4);
+
+        assert_eq!(
+            earliest_deadline(Some(earlier), image_import_poll_deadline(now, true)),
+            Some(earlier)
         );
     }
 

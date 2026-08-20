@@ -1,6 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
-use nara_tooling::{EditorFrameModel, EditorProjectView, EditorReopenTarget};
+use nara_tooling::{
+    EditorFrameModel, EditorProjectBrowserView, EditorProjectView, EditorReopenTarget,
+};
 
 use super::{
     EditorPersistenceOperation, EditorProjectSession, PendingPersistence, PublishedEditorFrame,
@@ -68,9 +70,18 @@ impl EditorProjectSession {
         scan_work_observed: bool,
     ) -> Arc<EditorFrameModel> {
         let source_index = self.synchronize_project_browser(scan_work_observed);
-        let image_import = source_index
-            .as_ref()
-            .and_then(|source_index| self.image_import.frame_for(source_index));
+        let project_browser = self.project_browser.view();
+        let image_import = source_index.as_ref().and_then(|source_index| {
+            let selected = project_browser.selected_entry()?;
+            self.image_import.projection_for(
+                source_index,
+                selected.relative_path(),
+                &self.authoring_runtime,
+            )
+        });
+        let (image_import, image_import_view) = image_import
+            .map(super::image_import::EditorImageImportProjection::into_parts)
+            .map_or((None, None), |(private, public)| (private, Some(public)));
         #[cfg(feature = "runtime-ui")]
         self.reconcile_editor_gesture();
         #[cfg(feature = "presentation-2d")]
@@ -83,7 +94,7 @@ impl EditorProjectSession {
                 .model(lane.plan.schema_validation().registry(), preview_world),
             None => self.workspace.authoring_model(),
         };
-        let project = self.editor_project_view();
+        let project = self.editor_project_view(project_browser);
         let diagnostics = self.diagnostics.clone();
         let reopen_target = workspace
             .active_document
@@ -96,13 +107,18 @@ impl EditorProjectSession {
                     })
             })
             .unwrap_or(EditorReopenTarget::Unavailable);
-        let frame = Arc::new(self.frame_clock.publish(
-            workspace,
-            project,
-            diagnostics,
-            reopen_target,
-            self.field_feedback.clone(),
-        ));
+        let image_import_work_pending = self.editor_image_import_work_pending();
+        let frame = Arc::new(
+            self.frame_clock
+                .publish(
+                    workspace,
+                    project,
+                    diagnostics,
+                    reopen_target,
+                    self.field_feedback.clone(),
+                )
+                .with_image_import(image_import_view, image_import_work_pending),
+        );
         #[cfg(feature = "runtime-ui")]
         self.publish_ui_authoring_frame(frame.revision());
         self.published_frame = Some(PublishedEditorFrame {
@@ -114,10 +130,10 @@ impl EditorProjectSession {
         frame
     }
 
-    fn editor_project_view(&self) -> EditorProjectView {
+    fn editor_project_view(&self, project_browser: EditorProjectBrowserView) -> EditorProjectView {
         EditorProjectView::new(
             self.project_readiness(),
-            self.project_browser.view(),
+            project_browser,
             self.play_view(),
             self.persistence_view(),
             self.project_content,

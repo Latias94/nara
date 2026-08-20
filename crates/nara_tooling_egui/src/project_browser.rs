@@ -3,11 +3,13 @@ use std::sync::Arc;
 use egui::{Button, ComboBox, RichText, ScrollArea, TextEdit, Ui};
 use nara_tooling::{
     EditorAction, EditorActionBatchReport, EditorActionOutcome, EditorActionRejection,
-    EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorProjectBrowserKindFilter,
-    EditorProjectBrowserLocalAction, EditorProjectBrowserPendingWork, EditorProjectBrowserStatus,
-    EditorProjectBrowserView, EditorProjectSourceInspectReason, EditorProjectSourceKind,
-    EditorProjectSourceOpenCapability,
+    EditorImageImportView, EditorProjectBrowserAction, EditorProjectBrowserActionOutcome,
+    EditorProjectBrowserKindFilter, EditorProjectBrowserLocalAction,
+    EditorProjectBrowserPendingWork, EditorProjectBrowserStatus, EditorProjectBrowserView,
+    EditorProjectSourceInspectReason, EditorProjectSourceKind, EditorProjectSourceOpenCapability,
 };
+
+use crate::image_import::EguiImageImportPanel;
 
 const MAX_RENDERED_ROWS_PER_FRAME: usize = 256;
 const MAX_RENDERED_DIAGNOSTICS: usize = 32;
@@ -28,6 +30,7 @@ thread_local! {
 pub(crate) struct EguiProjectBrowserPanel {
     filter_draft: String,
     notice: Option<&'static str>,
+    image_import: EguiImageImportPanel,
 }
 
 impl EguiProjectBrowserPanel {
@@ -181,36 +184,49 @@ impl EguiProjectBrowserPanel {
         &mut self,
         ui: &mut Ui,
         view: &EditorProjectBrowserView,
+        image_import: Option<&EditorImageImportView>,
         host_actions_enabled: bool,
+        image_import_work_pending: bool,
         actions: &mut Vec<EditorAction>,
     ) {
-        ui.heading("Project Source");
-        if let Some(entry) = view.selected_entry() {
-            ui.label(entry.relative_path());
-            ui.label(format!("Kind: {}", source_kind_label(entry.kind())));
-            match entry.open_capability() {
-                EditorProjectSourceOpenCapability::Scene
-                | EditorProjectSourceOpenCapability::Prefab => {
-                    let open = ui.add_enabled(host_actions_enabled, Button::new("Open"));
-                    #[cfg(test)]
-                    record_test_control("Project Open", open.rect);
-                    if open.clicked() {
-                        actions.push(EditorAction::ProjectBrowser(
-                            EditorProjectBrowserAction::Open {
-                                relative_path: Arc::from(entry.relative_path()),
-                            },
-                        ));
+        if let Some(image_import) = eligible_image_import(view, image_import) {
+            self.image_import.show(
+                ui,
+                image_import,
+                host_actions_enabled && !image_import_work_pending,
+                actions,
+            );
+        } else {
+            self.image_import.clear();
+
+            ui.heading("Project Source");
+            if let Some(entry) = view.selected_entry() {
+                ui.label(entry.relative_path());
+                ui.label(format!("Kind: {}", source_kind_label(entry.kind())));
+                match entry.open_capability() {
+                    EditorProjectSourceOpenCapability::Scene
+                    | EditorProjectSourceOpenCapability::Prefab => {
+                        let open = ui.add_enabled(host_actions_enabled, Button::new("Open"));
+                        #[cfg(test)]
+                        record_test_control("Project Open", open.rect);
+                        if open.clicked() {
+                            actions.push(EditorAction::ProjectBrowser(
+                                EditorProjectBrowserAction::Open {
+                                    relative_path: Arc::from(entry.relative_path()),
+                                },
+                            ));
+                        }
+                    }
+                    EditorProjectSourceOpenCapability::InspectOnly(reason) => {
+                        ui.label(RichText::new(inspect_reason_label(reason)).weak());
+                    }
+                    EditorProjectSourceOpenCapability::None => {
+                        ui.label(RichText::new("No operation is available for this source").weak());
                     }
                 }
-                EditorProjectSourceOpenCapability::InspectOnly(reason) => {
-                    ui.label(RichText::new(inspect_reason_label(reason)).weak());
-                }
-                EditorProjectSourceOpenCapability::None => {
-                    ui.label(RichText::new("No operation is available for this source").weak());
-                }
+            } else {
+                ui.label(RichText::new("Select a project source to inspect it").weak());
             }
-        } else {
-            ui.label(RichText::new("Select a project source to inspect it").weak());
         }
 
         if let Some(notice) = self.notice {
@@ -283,6 +299,17 @@ impl EguiProjectBrowserPanel {
             self.notice = Some("Project Browser action came from a stale Editor frame");
         }
     }
+}
+
+fn eligible_image_import<'view>(
+    browser: &EditorProjectBrowserView,
+    image_import: Option<&'view EditorImageImportView>,
+) -> Option<&'view EditorImageImportView> {
+    let entry = browser.selected_entry()?;
+    image_import.filter(|image_import| {
+        entry.kind() == EditorProjectSourceKind::AssetSource
+            && entry.relative_path() == image_import.relative_path()
+    })
 }
 
 fn diagnostic_phase_label(

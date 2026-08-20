@@ -140,11 +140,6 @@ impl EditorImageCatalogSnapshot {
     }
 
     #[must_use]
-    pub(super) fn entries(&self) -> &[EditorImageCatalogEntry] {
-        &self.entries
-    }
-
-    #[must_use]
     pub(super) fn entry(&self, project_relative_path: &str) -> Option<&EditorImageCatalogEntry> {
         self.entries
             .binary_search_by(|entry| entry.project_relative_path().cmp(project_relative_path))

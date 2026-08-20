@@ -21,6 +21,8 @@ mod ui_authoring;
 #[cfg(feature = "presentation-ui")]
 mod ui_preview;
 
+#[cfg(test)]
+pub(crate) use authoring_runtime::EditorImageRuntimeFailure;
 pub(crate) use document_open::EditorDocumentOpenRequestResult;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 pub use game_view::{
@@ -64,19 +66,20 @@ use nara_reflect::{
 use nara_render::Extent2d;
 use nara_scene::{SceneEntitySource, UnavailableRecordManifest};
 use nara_tasks::TaskShutdownReport;
+#[cfg(test)]
+use nara_tooling::EditorFrameRevision;
 use nara_tooling::{
     __export_apply_changes_from_world, EditorAuthoringReadiness, EditorCloseDecision,
     EditorDocumentId, EditorDocumentKind, EditorFieldFeedback, EditorFrameClock, EditorFrameModel,
-    EditorFrameRevision, EditorGestureCancelReason, EditorGestureController,
-    EditorPersistenceAuthority, EditorPersistenceCommand, EditorPersistenceFailureStage,
-    EditorPersistenceOperation, EditorPersistenceRejection, EditorPersistenceRequestKind,
-    EditorPersistenceRequestResult, EditorPersistenceResult, EditorPersistenceView,
-    EditorPlayCommand, EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult,
-    EditorPlayRejection, EditorPlayRequestResult, EditorPlayState, EditorPlayView,
-    EditorProjectContentGeneration, EditorProjectContentView, EditorProjectReadinessView,
-    EditorRuntimeAvailability, EditorRuntimeEditRejection, EditorRuntimeEditRequest,
-    EditorRuntimeEditResult, EditorRuntimeUnavailableReason, EditorWorkspace,
-    EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
+    EditorGestureCancelReason, EditorGestureController, EditorPersistenceAuthority,
+    EditorPersistenceCommand, EditorPersistenceFailureStage, EditorPersistenceOperation,
+    EditorPersistenceRejection, EditorPersistenceRequestKind, EditorPersistenceRequestResult,
+    EditorPersistenceResult, EditorPersistenceView, EditorPlayCommand, EditorPlayFailure,
+    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
+    EditorPlayState, EditorPlayView, EditorProjectContentGeneration, EditorProjectContentView,
+    EditorProjectReadinessView, EditorRuntimeAvailability, EditorRuntimeEditRejection,
+    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
+    EditorWorkspace, EditorWorkspaceCommand, EditorWorkspaceCommandReport, EditorWorkspaceIntent,
     EditorWorkspaceIntentPhase, EditorWorkspaceIntentRejection, EditorWorkspaceIntentRequestResult,
     EditorWorkspaceIntentResult, EditorWorkspaceIntentView, SceneApplyChangesComponentStatus,
     SceneApplyChangesRequest,
@@ -870,10 +873,12 @@ impl EditorProjectSession {
         self.image_import.has_pending_work()
     }
 
+    #[cfg(test)]
     pub(crate) const fn editor_image_import_state(&self) -> image_import::EditorImageImportState {
         self.image_import.state()
     }
 
+    #[cfg(test)]
     pub(crate) fn editor_image_last_good(
         &self,
         asset_path: &nara_asset::AssetPath,
@@ -881,27 +886,47 @@ impl EditorProjectSession {
         self.image_import.last_good(asset_path)
     }
 
+    #[cfg(test)]
     pub(crate) fn request_editor_image_import(
         &mut self,
         frame_revision: EditorFrameRevision,
         project_relative_path: &str,
         settings: ImageImportSettings,
     ) -> image_import::EditorImageImportRequestResult {
-        let Some(frame) = self.published_frame.as_ref() else {
-            return image_import::EditorImageImportRequestResult::Rejected(
-                image_import::EditorImageImportFailure::StaleFrame,
-            );
+        let source_index = match self.published_frame.as_ref() {
+            Some(frame) if frame.model.revision() == frame_revision => {
+                frame.source_index.as_ref().map(Arc::clone)
+            }
+            _ => {
+                return image_import::EditorImageImportRequestResult::Rejected(
+                    image_import::EditorImageImportFailure::StaleFrame,
+                );
+            }
         };
-        if frame.model.revision() != frame_revision {
-            return image_import::EditorImageImportRequestResult::Rejected(
-                image_import::EditorImageImportFailure::StaleFrame,
-            );
-        }
-        let Some(image_frame) = frame.image_import.clone() else {
+        let Some(image_frame) = source_index.as_ref().and_then(|source_index| {
+            self.image_import
+                .frame_for(source_index, project_relative_path)
+        }) else {
             return image_import::EditorImageImportRequestResult::Rejected(
                 image_import::EditorImageImportFailure::CatalogUnavailable,
             );
         };
+        let expected_detail_revision = image_frame.detail_revision();
+        self.submit_editor_image_import(
+            image_frame,
+            project_relative_path,
+            expected_detail_revision,
+            settings,
+        )
+    }
+
+    fn submit_editor_image_import(
+        &mut self,
+        image_frame: image_import::EditorImageImportFrame,
+        project_relative_path: &str,
+        expected_detail_revision: u64,
+        settings: ImageImportSettings,
+    ) -> image_import::EditorImageImportRequestResult {
         let EditorProjectSession {
             execution,
             authoring_runtime,
@@ -918,6 +943,7 @@ impl EditorProjectSession {
             authoring_runtime,
             image_frame,
             project_relative_path,
+            expected_detail_revision,
             settings,
         )
     }

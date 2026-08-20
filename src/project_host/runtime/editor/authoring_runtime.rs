@@ -35,7 +35,7 @@ use super::preview::{EditorPreviewCandidate, EditorPreviewSession, EditorPreview
 const EDITOR_IMAGE_IMPORT_TASK_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x6e61_7261_696d_6701);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum EditorImageRuntimeFailure {
+pub(crate) enum EditorImageRuntimeFailure {
     RuntimeUnavailable,
     AssetIdentity,
     ImportAdmission,
@@ -45,23 +45,6 @@ pub(super) enum EditorImageRuntimeFailure {
     TaskCancelled,
     TaskFailed,
     Publication,
-}
-
-impl EditorImageRuntimeFailure {
-    #[must_use]
-    pub(super) const fn code(self) -> &'static str {
-        match self {
-            Self::RuntimeUnavailable => "editor.image-import.runtime-unavailable",
-            Self::AssetIdentity => "editor.image-import.asset-identity-rejected",
-            Self::ImportAdmission => "editor.image-import.admission-rejected",
-            Self::TaskAdmission => "editor.image-import.task-rejected",
-            Self::SourceChanged => "editor.image-import.source-changed",
-            Self::Import => "editor.image-import.decode-failed",
-            Self::TaskCancelled => "editor.image-import.cancelled",
-            Self::TaskFailed => "editor.image-import.task-failed",
-            Self::Publication => "editor.image-import.publication-rejected",
-        }
-    }
 }
 
 enum EditorImageTaskOutput {
@@ -426,6 +409,19 @@ impl EditorAuthoringRuntime {
                 })
             },
         )
+    }
+
+    #[must_use]
+    pub(super) fn image_import_asset(
+        &self,
+        handle: Handle<ImageAsset>,
+        expected_version: AssetVersion,
+    ) -> Option<&ImageAsset> {
+        let world = self.app.world();
+        if world.get_resource::<AssetStates>()?.version(handle.id()) != Some(expected_version) {
+            return None;
+        }
+        world.get_resource::<Assets<ImageAsset>>()?.get(handle)
     }
 
     pub(super) fn shutdown_tasks(&self) -> EditorAuthoringRuntimeCloseProgress {

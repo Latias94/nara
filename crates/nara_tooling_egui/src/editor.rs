@@ -797,7 +797,9 @@ impl EguiEditorPanel {
                 EguiEditorSidebar::Project => self.project_browser.show_inspector(
                     ui,
                     frame.project_browser(),
+                    frame.image_import(),
                     frame.workspace_intent().intent().is_none(),
+                    frame.image_import_work_pending(),
                     actions,
                 ),
                 EguiEditorSidebar::Scene => {

@@ -56,39 +56,8 @@ pub(crate) enum EditorImageImportFailure {
     MetadataPublicationRejected,
     MetadataPublicationFailed,
     MetadataPublicationUncertain,
-    RefreshRejected,
-    Runtime(&'static str),
+    Runtime(EditorImageRuntimeFailure),
     ResultMismatch,
-}
-
-impl EditorImageImportFailure {
-    #[must_use]
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::CatalogUnavailable => "editor.image-import.catalog-unavailable",
-            Self::CatalogRejected => "editor.image-import.catalog-rejected",
-            Self::Busy => "editor.image-import.busy",
-            Self::ReconcileRequired => "editor.image-import.reconcile-required",
-            Self::StaleFrame => "editor.image-import.stale-frame",
-            Self::EntryUnavailable => "editor.image-import.entry-unavailable",
-            Self::MetadataInvalid => "editor.image-import.metadata-invalid",
-            Self::StableIdUnavailable => "editor.image-import.stable-id-unavailable",
-            Self::LastGoodLimitExceeded => "editor.image-import.last-good-limit-exceeded",
-            Self::SourceUnavailable => "editor.image-import.source-unavailable",
-            Self::SourceChanged => "editor.image-import.source-changed",
-            Self::MetadataEncoding => "editor.image-import.metadata-encoding-failed",
-            Self::MetadataPublicationRejected => {
-                "editor.image-import.metadata-publication-rejected"
-            }
-            Self::MetadataPublicationFailed => "editor.image-import.metadata-publication-failed",
-            Self::MetadataPublicationUncertain => {
-                "editor.image-import.metadata-publication-uncertain"
-            }
-            Self::RefreshRejected => "editor.image-import.source-index-refresh-rejected",
-            Self::Runtime(code) => code,
-            Self::ResultMismatch => "editor.image-import.result-mismatch",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,6 +91,7 @@ pub(crate) enum EditorImageImportState {
 pub(crate) struct EditorImageLastGood {
     stable_id: StableAssetId,
     handle: Handle<ImageAsset>,
+    source_identity: FileIdentity,
     source_digest: ContentDigest,
     settings_hash: ImportSettingsHash,
     version: AssetVersion,
@@ -136,6 +106,11 @@ impl EditorImageLastGood {
     #[must_use]
     pub(crate) const fn handle(&self) -> Handle<ImageAsset> {
         self.handle
+    }
+
+    #[must_use]
+    pub(crate) const fn source_identity(&self) -> FileIdentity {
+        self.source_identity
     }
 
     #[must_use]
@@ -168,12 +143,103 @@ struct PendingImageImport {
 #[derive(Clone, Copy)]
 struct RefreshObligation {
     target_generation: ProjectSourceIndexGeneration,
+    attempt_generation: EditorImageImportGeneration,
+}
+
+#[derive(Clone, Copy)]
+struct ReconciliationObligation {
+    target_generation: u64,
+    attempt_generation: EditorImageImportGeneration,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum EditorImageImportLatestMetadata {
+    Ready,
+    Uncertain,
+}
+
+#[derive(Clone)]
+pub(super) struct EditorImageImportLatestDetail {
+    relative_path: Arc<str>,
+    detail_revision: u64,
+    asset_path: AssetPath,
+    stable_id: StableAssetId,
+    source_identity: FileIdentity,
+    settings: ImageImportSettings,
+    metadata: EditorImageImportLatestMetadata,
+}
+
+impl EditorImageImportLatestDetail {
+    #[must_use]
+    pub(super) fn relative_path(&self) -> &str {
+        &self.relative_path
+    }
+
+    #[must_use]
+    pub(super) const fn detail_revision(&self) -> u64 {
+        self.detail_revision
+    }
+
+    #[must_use]
+    pub(super) const fn asset_path(&self) -> &AssetPath {
+        &self.asset_path
+    }
+
+    #[must_use]
+    pub(super) const fn stable_id(&self) -> StableAssetId {
+        self.stable_id
+    }
+
+    #[must_use]
+    pub(super) const fn source_identity(&self) -> FileIdentity {
+        self.source_identity
+    }
+
+    #[must_use]
+    pub(super) const fn settings(&self) -> ImageImportSettings {
+        self.settings
+    }
+
+    #[must_use]
+    pub(super) const fn metadata(&self) -> EditorImageImportLatestMetadata {
+        self.metadata
+    }
 }
 
 #[derive(Clone)]
 pub(crate) struct EditorImageImportFrame {
+    relative_path: Arc<str>,
+    detail_revision: u64,
     source_index: Arc<ProjectSourceIndexSnapshot>,
     catalog: Arc<EditorImageCatalogSnapshot>,
+}
+
+impl EditorImageImportFrame {
+    #[must_use]
+    pub(crate) fn relative_path(&self) -> &str {
+        &self.relative_path
+    }
+
+    #[must_use]
+    pub(crate) const fn detail_revision(&self) -> u64 {
+        self.detail_revision
+    }
+
+    #[must_use]
+    pub(super) fn entry(&self) -> Option<&super::catalog::EditorImageCatalogEntry> {
+        self.catalog.entry(&self.relative_path)
+    }
+
+    #[must_use]
+    pub(super) fn contains_stable_id(&self, stable_id: StableAssetId) -> bool {
+        self.catalog.contains_stable_id(stable_id)
+    }
+
+    #[must_use]
+    fn matches_action(&self, relative_path: &str, expected_detail_revision: u64) -> bool {
+        self.relative_path.as_ref() == relative_path
+            && self.detail_revision == expected_detail_revision
+    }
 }
 
 pub(crate) struct EditorImageImportHost {
@@ -184,9 +250,11 @@ pub(crate) struct EditorImageImportHost {
     next_attempt_generation: u64,
     pending: Option<PendingImageImport>,
     latest: EditorImageImportState,
+    latest_target: Option<Arc<str>>,
+    latest_detail: Option<EditorImageImportLatestDetail>,
     last_good: BTreeMap<AssetPath, EditorImageLastGood>,
     refresh: Option<RefreshObligation>,
-    reconcile_after_generation: Option<u64>,
+    reconciliation: Option<ReconciliationObligation>,
     #[cfg(test)]
     reject_next_valid_metadata_receipt: bool,
 }
@@ -201,9 +269,11 @@ impl Default for EditorImageImportHost {
             next_attempt_generation: 1,
             pending: None,
             latest: EditorImageImportState::Idle,
+            latest_target: None,
+            latest_detail: None,
             last_good: BTreeMap::new(),
             refresh: None,
-            reconcile_after_generation: None,
+            reconciliation: None,
             #[cfg(test)]
             reject_next_valid_metadata_receipt: false,
         }
@@ -215,13 +285,17 @@ impl EditorImageImportHost {
     pub(crate) fn frame_for(
         &self,
         source_index: &Arc<ProjectSourceIndexSnapshot>,
+        relative_path: &str,
     ) -> Option<EditorImageImportFrame> {
         let catalog = self
             .catalog
             .as_ref()
             .filter(|catalog| catalog.matches_source_index(source_index))
             .map(Arc::clone)?;
+        catalog.entry(relative_path)?;
         Some(EditorImageImportFrame {
+            relative_path: Arc::from(relative_path),
+            detail_revision: source_index.generation().get(),
             source_index: Arc::clone(source_index),
             catalog,
         })
@@ -233,6 +307,16 @@ impl EditorImageImportHost {
     }
 
     #[must_use]
+    pub(super) fn latest_target(&self) -> Option<&str> {
+        self.latest_target.as_deref()
+    }
+
+    #[must_use]
+    pub(super) fn latest_detail(&self) -> Option<&EditorImageImportLatestDetail> {
+        self.latest_detail.as_ref()
+    }
+
+    #[must_use]
     pub(crate) fn last_good(&self, asset_path: &AssetPath) -> Option<&EditorImageLastGood> {
         self.last_good.get(asset_path)
     }
@@ -240,6 +324,12 @@ impl EditorImageImportHost {
     #[must_use]
     pub(crate) fn has_pending_work(&self) -> bool {
         self.catalog_attempt.is_some() || self.pending.is_some() || self.refresh.is_some()
+    }
+
+    #[must_use]
+    pub(super) fn reconciliation_generation(&self) -> Option<EditorImageImportGeneration> {
+        self.reconciliation
+            .map(|obligation| obligation.attempt_generation)
     }
 
     pub(crate) fn cancel_pending(&mut self) {
@@ -268,12 +358,13 @@ impl EditorImageImportHost {
         runtime: &mut EditorAuthoringRuntime,
         frame: EditorImageImportFrame,
         project_relative_path: &str,
+        expected_detail_revision: u64,
         settings: ImageImportSettings,
     ) -> EditorImageImportRequestResult {
         if self.pending.is_some() {
             return EditorImageImportRequestResult::Rejected(EditorImageImportFailure::Busy);
         }
-        if self.reconcile_after_generation.is_some() {
+        if self.reconciliation.is_some() {
             return EditorImageImportRequestResult::Rejected(
                 EditorImageImportFailure::ReconcileRequired,
             );
@@ -281,7 +372,12 @@ impl EditorImageImportHost {
         if self.refresh.is_some() {
             return EditorImageImportRequestResult::Rejected(EditorImageImportFailure::StaleFrame);
         }
+        if !frame.matches_action(project_relative_path, expected_detail_revision) {
+            return EditorImageImportRequestResult::Rejected(EditorImageImportFailure::StaleFrame);
+        }
         let EditorImageImportFrame {
+            relative_path: _,
+            detail_revision: _,
             source_index,
             catalog,
         } = frame;
@@ -331,6 +427,7 @@ impl EditorImageImportHost {
                 );
             }
         };
+        self.latest_target = Some(Arc::from(project_relative_path));
         let project_root = project.project_root();
         let source_path = match RelativePath::new(project_relative_path) {
             Ok(path) => path,
@@ -346,11 +443,27 @@ impl EditorImageImportHost {
             }
         };
 
+        let last_good_stable_id = self
+            .last_good
+            .get(entry.asset_path())
+            .map(EditorImageLastGood::stable_id);
         let (stable_id, previous_settings, mut publication) = match entry.metadata() {
             EditorImageMetadataStatus::Missing => {
-                let Some(stable_id) = fresh_stable_id(&catalog) else {
-                    return self
-                        .fail_request(generation, EditorImageImportFailure::StableIdUnavailable);
+                let stable_id = match last_good_stable_id {
+                    Some(stable_id) if catalog.contains_stable_id(stable_id) => {
+                        return self
+                            .fail_request(generation, EditorImageImportFailure::MetadataInvalid);
+                    }
+                    Some(stable_id) => stable_id,
+                    None => {
+                        let Some(stable_id) = fresh_stable_id(&catalog) else {
+                            return self.fail_request(
+                                generation,
+                                EditorImageImportFailure::StableIdUnavailable,
+                            );
+                        };
+                        stable_id
+                    }
                 };
                 let publication = match FilePublicationHost::bind_missing(
                     &project_root,
@@ -368,6 +481,10 @@ impl EditorImageImportHost {
                 (stable_id, None, publication)
             }
             EditorImageMetadataStatus::Ready(receipt) => {
+                if last_good_stable_id.is_some_and(|stable_id| stable_id != receipt.stable_id()) {
+                    return self
+                        .fail_request(generation, EditorImageImportFailure::MetadataInvalid);
+                }
                 let publication = match FilePublicationHost::bind_existing(
                     &project_root,
                     entry.metadata_project_relative_path(),
@@ -406,6 +523,7 @@ impl EditorImageImportHost {
             }
         };
         let metadata_changed = previous_settings != Some(settings);
+        let mut detail_revision = source_index.generation().get();
         if metadata_changed {
             match publication.publish(encoded.as_bytes()) {
                 FilePublicationOutcome::Published(candidate) => {
@@ -414,19 +532,41 @@ impl EditorImageImportHost {
                         let _ = candidate.into_parts();
                         publication.mark_uncertain();
                         let target_generation = self
-                            .schedule_refresh(project)
+                            .schedule_refresh(project, generation)
                             .map(ProjectSourceIndexGeneration::get)
                             .unwrap_or_else(|| source_index.generation().get().saturating_add(1));
-                        self.reconcile_after_generation = Some(target_generation);
-                        self.latest = EditorImageImportState::ReconcileRequired { generation };
+                        self.remember_latest_detail(
+                            project_relative_path,
+                            target_generation,
+                            &entry,
+                            stable_id,
+                            source_identity,
+                            settings,
+                            EditorImageImportLatestMetadata::Uncertain,
+                        );
+                        self.require_reconciliation(generation, target_generation);
                         return EditorImageImportRequestResult::Completed(self.latest);
                     }
                     let (_, binding) = candidate.into_parts();
                     publication.commit_published(binding);
-                    if self.schedule_refresh(project).is_none() {
-                        return self
-                            .fail_request(generation, EditorImageImportFailure::RefreshRejected);
-                    }
+                    let target_generation = self.schedule_refresh(project, generation);
+                    detail_revision = target_generation.map_or_else(
+                        || source_index.generation().get().saturating_add(1),
+                        ProjectSourceIndexGeneration::get,
+                    );
+                    if target_generation.is_none() {
+                        self.remember_latest_detail(
+                            project_relative_path,
+                            detail_revision,
+                            &entry,
+                            stable_id,
+                            source_identity,
+                            settings,
+                            EditorImageImportLatestMetadata::Ready,
+                        );
+                        self.require_reconciliation(generation, detail_revision);
+                        return EditorImageImportRequestResult::Completed(self.latest);
+                    };
                 }
                 FilePublicationOutcome::Rejected(reason) => {
                     return self.fail_request(generation, map_publication_rejection(reason));
@@ -436,11 +576,19 @@ impl EditorImageImportHost {
                 }
                 FilePublicationOutcome::Uncertain(_) => {
                     let target_generation = self
-                        .schedule_refresh(project)
+                        .schedule_refresh(project, generation)
                         .map(ProjectSourceIndexGeneration::get)
                         .unwrap_or_else(|| source_index.generation().get().saturating_add(1));
-                    self.reconcile_after_generation = Some(target_generation);
-                    self.latest = EditorImageImportState::ReconcileRequired { generation };
+                    self.remember_latest_detail(
+                        project_relative_path,
+                        target_generation,
+                        &entry,
+                        stable_id,
+                        source_identity,
+                        settings,
+                        EditorImageImportLatestMetadata::Uncertain,
+                    );
+                    self.require_reconciliation(generation, target_generation);
                     return EditorImageImportRequestResult::Completed(self.latest);
                 }
             }
@@ -454,6 +602,15 @@ impl EditorImageImportHost {
                 EditorImageImportFailure::MetadataPublicationUncertain,
             );
         }
+        self.remember_latest_detail(
+            project_relative_path,
+            detail_revision,
+            &entry,
+            stable_id,
+            source_identity,
+            settings,
+            EditorImageImportLatestMetadata::Ready,
+        );
         let record = AssetRecord::new(
             stable_id,
             entry.asset_path().clone(),
@@ -470,8 +627,7 @@ impl EditorImageImportHost {
         ) {
             Ok(task) => task,
             Err(reason) => {
-                return self
-                    .fail_request(generation, EditorImageImportFailure::Runtime(reason.code()));
+                return self.fail_request(generation, EditorImageImportFailure::Runtime(reason));
             }
         };
 
@@ -566,7 +722,7 @@ impl EditorImageImportHost {
         let generation = pending.generation;
         let result = match terminal {
             EditorImageRuntimeTerminal::Rejected(reason) => {
-                Err(EditorImageImportFailure::Runtime(reason.code()))
+                Err(EditorImageImportFailure::Runtime(reason))
             }
             EditorImageRuntimeTerminal::Imported {
                 handle,
@@ -578,13 +734,12 @@ impl EditorImageImportHost {
                     let source_digest = imported.source_digest();
                     let settings_hash = imported.artifact().key().settings_hash();
                     let version = runtime.commit_image_import(imported).map_err(|_| {
-                        EditorImageImportFailure::Runtime(
-                            EditorImageRuntimeFailure::Publication.code(),
-                        )
+                        EditorImageImportFailure::Runtime(EditorImageRuntimeFailure::Publication)
                     })?;
                     let last_good = EditorImageLastGood {
                         stable_id: pending.stable_id,
                         handle,
+                        source_identity: source.identity(),
                         source_digest,
                         settings_hash,
                         version,
@@ -662,17 +817,21 @@ impl EditorImageImportHost {
         }
         if !project.source_index_has_pending_work() && project.source_index_failure().is_some() {
             self.refresh = None;
+            self.reconciliation = Some(ReconciliationObligation {
+                target_generation: obligation.target_generation.get(),
+                attempt_generation: obligation.attempt_generation,
+            });
         }
     }
 
     fn advance_reconciliation(&mut self, project: &AuthoringProjectSessionSnapshot) {
-        let Some(target_generation) = self.reconcile_after_generation else {
+        let Some(obligation) = self.reconciliation else {
             return;
         };
         let Some(source_index) = project.source_index_snapshot() else {
             return;
         };
-        if source_index.generation().get() < target_generation
+        if source_index.generation().get() < obligation.target_generation
             || !self
                 .catalog
                 .as_ref()
@@ -680,7 +839,7 @@ impl EditorImageImportHost {
         {
             return;
         }
-        self.reconcile_after_generation = None;
+        self.reconciliation = None;
         if matches!(
             self.latest,
             EditorImageImportState::ReconcileRequired { .. }
@@ -692,11 +851,29 @@ impl EditorImageImportHost {
     fn schedule_refresh(
         &mut self,
         project: &mut AuthoringProjectSessionSnapshot,
+        attempt_generation: EditorImageImportGeneration,
     ) -> Option<ProjectSourceIndexGeneration> {
         self.invalidate_catalog();
         let target_generation = project.request_source_index_refresh()?;
-        self.refresh = Some(RefreshObligation { target_generation });
+        self.refresh = Some(RefreshObligation {
+            target_generation,
+            attempt_generation,
+        });
         Some(target_generation)
+    }
+
+    fn require_reconciliation(
+        &mut self,
+        attempt_generation: EditorImageImportGeneration,
+        target_generation: u64,
+    ) {
+        self.reconciliation = Some(ReconciliationObligation {
+            target_generation,
+            attempt_generation,
+        });
+        self.latest = EditorImageImportState::ReconcileRequired {
+            generation: attempt_generation,
+        };
     }
 
     fn invalidate_catalog(&mut self) {
@@ -710,6 +887,27 @@ impl EditorImageImportHost {
         let generation = self.next_attempt_generation;
         self.next_attempt_generation = generation.checked_add(1)?;
         Some(EditorImageImportGeneration(generation))
+    }
+
+    fn remember_latest_detail(
+        &mut self,
+        relative_path: &str,
+        detail_revision: u64,
+        entry: &super::catalog::EditorImageCatalogEntry,
+        stable_id: StableAssetId,
+        source_identity: FileIdentity,
+        settings: ImageImportSettings,
+        metadata: EditorImageImportLatestMetadata,
+    ) {
+        self.latest_detail = Some(EditorImageImportLatestDetail {
+            relative_path: Arc::from(relative_path),
+            detail_revision,
+            asset_path: entry.asset_path().clone(),
+            stable_id,
+            source_identity,
+            settings,
+            metadata,
+        });
     }
 
     fn fail_request(

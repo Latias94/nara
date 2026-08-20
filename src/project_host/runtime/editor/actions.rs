@@ -9,9 +9,10 @@ use nara_tooling::{
     EditorActionOutcome, EditorActionRejection, EditorAtomicFieldEdit, EditorDocumentId,
     EditorDocumentMutation, EditorFieldFeedback, EditorFieldFeedbackReason, EditorFieldTarget,
     EditorFieldValidationFailure, EditorFrameModel, EditorGestureAction, EditorGestureCancelReason,
-    EditorGestureOutcome, EditorGestureRejection, EditorNavigationAction, EditorPersistenceAction,
-    EditorPersistenceCommand, EditorPlayAction, EditorPlayCommand, EditorReopenTarget,
-    EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorGestureOutcome, EditorGestureRejection, EditorImageImportAction,
+    EditorImageImportActionOutcome, EditorImageImportActionRejection, EditorNavigationAction,
+    EditorPersistenceAction, EditorPersistenceCommand, EditorPlayAction, EditorPlayCommand,
+    EditorReopenTarget, EditorWorkspaceCommand, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
 };
 
 use crate::project_host::authoring::ProjectSourceIndexSnapshot;
@@ -49,11 +50,12 @@ impl EditorProjectSession {
                     Ok((
                         Arc::clone(&published.model),
                         published.source_index.as_ref().map(Arc::clone),
+                        published.image_import.clone(),
                     ))
                 }
             }
         };
-        let (frame, source_index) = match frame {
+        let (frame, source_index, image_import) = match frame {
             Ok(frame) => frame,
             Err(rejection) => {
                 self.record_editor_action_rejection(rejection);
@@ -78,7 +80,12 @@ impl EditorProjectSession {
                     document,
                 })
             } else {
-                self.dispatch_editor_action(&frame, source_index.as_ref(), action)
+                self.dispatch_editor_action(
+                    &frame,
+                    source_index.as_ref(),
+                    image_import.as_ref(),
+                    action,
+                )
             };
             if let EditorActionOutcome::Rejected(rejection) = &outcome {
                 self.record_editor_action_rejection(*rejection);
@@ -98,6 +105,7 @@ impl EditorProjectSession {
         &mut self,
         frame: &EditorFrameModel,
         source_index: Option<&Arc<ProjectSourceIndexSnapshot>>,
+        image_import: Option<&super::image_import::EditorImageImportFrame>,
         action: EditorAction,
     ) -> EditorActionOutcome {
         match action {
@@ -107,6 +115,9 @@ impl EditorProjectSession {
             EditorAction::ProjectBrowser(action) => EditorActionOutcome::ProjectBrowser(
                 self.dispatch_project_browser_action(frame, source_index, action),
             ),
+            EditorAction::ImageImport(action) => {
+                self.dispatch_image_import(frame, image_import, action)
+            }
             EditorAction::ProjectContent(action) => {
                 EditorActionOutcome::ProjectContent(self.request_project_content_refresh(action))
             }
@@ -150,6 +161,70 @@ impl EditorProjectSession {
                 EditorActionAcknowledgement::ApplyChanges(self.acknowledge_apply_changes_result()),
             ),
         }
+    }
+
+    fn dispatch_image_import(
+        &mut self,
+        frame: &EditorFrameModel,
+        image_frame: Option<&super::image_import::EditorImageImportFrame>,
+        action: EditorImageImportAction,
+    ) -> EditorActionOutcome {
+        let EditorImageImportAction::Submit {
+            relative_path,
+            expected_detail_revision,
+            settings,
+        } = action;
+        let Some(view) = frame.image_import() else {
+            return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
+                EditorImageImportActionRejection::Unavailable,
+            ));
+        };
+        if view.relative_path() != relative_path.as_ref()
+            || view.detail_revision() != expected_detail_revision
+        {
+            return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
+                EditorImageImportActionRejection::Stale,
+            ));
+        }
+        if !view.can_submit() {
+            let rejection = match view.attempt() {
+                nara_tooling::EditorImageImportAttemptView::Pending { .. } => {
+                    EditorImageImportActionRejection::Busy
+                }
+                nara_tooling::EditorImageImportAttemptView::ReconcileRequired { .. } => {
+                    EditorImageImportActionRejection::ReconcileRequired
+                }
+                nara_tooling::EditorImageImportAttemptView::Idle
+                | nara_tooling::EditorImageImportAttemptView::Succeeded { .. }
+                | nara_tooling::EditorImageImportAttemptView::Failed { .. }
+                | nara_tooling::EditorImageImportAttemptView::Stale { .. }
+                | nara_tooling::EditorImageImportAttemptView::Cancelled { .. } => {
+                    EditorImageImportActionRejection::MetadataBlocked
+                }
+            };
+            return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
+                rejection,
+            ));
+        }
+        let Some(image_frame) = image_frame.cloned() else {
+            return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
+                EditorImageImportActionRejection::Unavailable,
+            ));
+        };
+        if image_frame.relative_path() != relative_path.as_ref()
+            || image_frame.detail_revision() != expected_detail_revision.get()
+        {
+            return EditorActionOutcome::ImageImport(EditorImageImportActionOutcome::Rejected(
+                EditorImageImportActionRejection::Stale,
+            ));
+        }
+        let result = self.submit_editor_image_import(
+            image_frame,
+            &relative_path,
+            expected_detail_revision.get(),
+            super::image_import::domain_settings(settings),
+        );
+        EditorActionOutcome::ImageImport(super::image_import::project_request_outcome(result))
     }
 
     fn dispatch_navigation(
@@ -270,6 +345,7 @@ impl EditorProjectSession {
             }
             EditorActionOutcome::Persistence(_)
             | EditorActionOutcome::ProjectBrowser(_)
+            | EditorActionOutcome::ImageImport(_)
             | EditorActionOutcome::ProjectContent(_)
             | EditorActionOutcome::WorkspaceIntent(_)
             | EditorActionOutcome::Play(_)

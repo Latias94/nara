@@ -8,7 +8,8 @@ use nara_scene::{AuthoringScalarEdit, SceneAuthoringRevision, SceneEntityId, Sce
 
 use crate::{
     EditorApplyChangesRejection, EditorCloseDecision, EditorDocumentId, EditorGestureAction,
-    EditorGestureOutcome, EditorPersistenceRequestResult, EditorPlayRequestResult,
+    EditorGestureOutcome, EditorImageImportAction, EditorImageImportActionOutcome,
+    EditorImageImportView, EditorPersistenceRequestResult, EditorPlayRequestResult,
     EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorProjectView,
     EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorWorkspaceCommandReport,
     EditorWorkspaceIntent, EditorWorkspaceIntentRequestResult, EditorWorkspaceModel,
@@ -71,6 +72,8 @@ impl EditorFrameClock {
             diagnostics,
             reopen_target,
             field_feedback,
+            image_import: None,
+            image_import_work_pending: false,
         }
     }
 }
@@ -231,9 +234,24 @@ pub struct EditorFrameModel {
     diagnostics: DiagnosticReport,
     reopen_target: EditorReopenTarget,
     field_feedback: Option<EditorFieldFeedback>,
+    image_import: Option<EditorImageImportView>,
+    image_import_work_pending: bool,
 }
 
 impl EditorFrameModel {
+    /// Installs the Host-owned selected-image projection and project-global pending-work fact.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_image_import(
+        mut self,
+        image_import: Option<EditorImageImportView>,
+        image_import_work_pending: bool,
+    ) -> Self {
+        self.image_import = image_import;
+        self.image_import_work_pending = image_import_work_pending;
+        self
+    }
+
     #[must_use]
     pub const fn revision(&self) -> EditorFrameRevision {
         self.revision
@@ -257,6 +275,18 @@ impl EditorFrameModel {
     #[must_use]
     pub const fn project_browser(&self) -> &crate::EditorProjectBrowserView {
         self.project.project_browser()
+    }
+
+    /// Returns image import details only when the current Browser selection admits them.
+    #[must_use]
+    pub const fn image_import(&self) -> Option<&EditorImageImportView> {
+        self.image_import.as_ref()
+    }
+
+    /// Reports project-global image work independently of the current Browser selection.
+    #[must_use]
+    pub const fn image_import_work_pending(&self) -> bool {
+        self.image_import_work_pending
     }
 
     #[must_use]
@@ -475,6 +505,7 @@ pub enum EditorAction {
     Mutate(EditorDocumentMutation),
     Persistence(EditorPersistenceAction),
     ProjectBrowser(EditorProjectBrowserAction),
+    ImageImport(EditorImageImportAction),
     ProjectContent(crate::EditorProjectContentAction),
     WorkspaceIntent(EditorWorkspaceIntentAction),
     Play(EditorPlayAction),
@@ -662,6 +693,7 @@ pub enum EditorActionOutcome {
     Workspace(EditorWorkspaceCommandReport),
     Persistence(EditorPersistenceRequestResult),
     ProjectBrowser(EditorProjectBrowserActionOutcome),
+    ImageImport(EditorImageImportActionOutcome),
     ProjectContent(crate::EditorProjectContentRefreshRequestResult),
     WorkspaceIntent(EditorWorkspaceIntentRequestResult),
     Play(EditorPlayRequestResult),
