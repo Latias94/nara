@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "533e1895777b99580eddae4cb034a8ce1aef2b9f17e164c4fe19c944816ffa4e"
+source_fingerprint: "199313da4e4d4ce836dbbf5bc3f398c17ba56f990ac6e58f7719530a85374520"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "533e1895777b99580eddae4cb034a8ce1aef2b9f17e164c4fe19c944816
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `533e1895777b99580eddae4cb034a8ce1aef2b9f17e164c4fe19c944816ffa4e`
-- Immutable records: 541
+- Source fingerprint: `199313da4e4d4ce836dbbf5bc3f398c17ba56f990ac6e58f7719530a85374520`
+- Immutable records: 542
 - Active lane heads: 1
 
 # Active Registrations
@@ -21,7 +21,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
-- [Editor Image Import and Reimport v1: EIR-U1 active](registry/2026-08/2026-08-20T024236Z-editor-image-import-reimport-v1-codex-root-8271913ae26044eda4c910646e49f6ea.md): `active` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
+- [Editor Image Import and Reimport v1: EIR-U1/U2 atomic migration active](registry/2026-08/2026-08-20T030624Z-editor-image-import-reimport-v1-codex-root-a8651338ca4940429199c29e478862be.md): `active` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
 - [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)

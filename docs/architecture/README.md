@@ -9,11 +9,13 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
-   plan is active only at EIR-U1 under
-   [registration `8271913ae26044eda4c910646e49f6ea`](../knowledge/engineering/registry/2026-08/2026-08-20T024236Z-editor-image-import-reimport-v1-codex-root-8271913ae26044eda4c910646e49f6ea.md).
+   plan is active only at the build-green EIR-U1/EIR-U2 atomic migration under
+   [registration `a8651338ca4940429199c29e478862be`](../knowledge/engineering/registry/2026-08/2026-08-20T030624Z-editor-image-import-reimport-v1-codex-root-a8651338ca4940429199c29e478862be.md).
    EIR-U0 accepted
-   [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md); EIR-U2 through
-   EIR-U6 and all unrelated Editor successors remain inactive. The completed
+   [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md). EIR-U1 and
+   EIR-U2 migrate the typed recipe, strict consumers, reload path, and fixtures without a temporary
+   compatibility reader; EIR-U3 through EIR-U6 and all unrelated Editor successors remain inactive.
+   The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with
    [verification `2acde0398a8b467b93fe714241a5e216`](../knowledge/engineering/verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md)

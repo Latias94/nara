@@ -5,6 +5,7 @@
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
 ## 2026-08-20
+* **Work Registration**: [Editor Image Import and Reimport v1: EIR-U1/U2 atomic migration active](registry/2026-08/2026-08-20T030624Z-editor-image-import-reimport-v1-codex-root-a8651338ca4940429199c29e478862be.md) - Reconciles the build-green boundary: typed metadata deletion and all strict consumers migrate atomically.
 * **Work Registration**: [Editor Image Import and Reimport v1: EIR-U1 active](registry/2026-08/2026-08-20T024236Z-editor-image-import-reimport-v1-codex-root-8271913ae26044eda4c910646e49f6ea.md) - Activates only the canonical typed Image metadata and recipe unit after EIR-U0 architecture admission.
 
 ## 2026-08-19
@@ -138,4 +139,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Product composition baseline complete; RUP-U3 active](registry/2026-08/2026-08-13T054008Z-engine-foundation-contract-completion-codex-root-fb09b3106ba641a6a913eb152fbe1ad8.md) - PCC-U1 through PCC-U4 are complete at the independent product-composition baseline; RUP-U3 resumes as the sole active product unit.
 * **Verification Evidence**: [PCC-U4 Product Composition Conformance Baseline](verification/2026-08/2026-08-13T052431Z-pcc-u4-product-composition-conformance-baseline-180d0dfe0a41417a9633c11cccb91eab.md) - Publishes the independent product-composition baseline for explicit WGPU, Winit accessibility and ProductRecipe Host authority.
 * **Work Registration**: [Product composition contribution correction: PCC-U3 complete, PCC-U4 active](registry/2026-08/2026-08-13T045033Z-engine-foundation-contract-completion-codex-root-25e1b788e8864b51a53108ed4b185e64.md) - PCC-U3 is complete at 864c151; PCC-U4 is the sole active convergence unit before RUP-U3 resumes.
-* **Verification Evidence**: [PCC-U3 ProductRecipe ordinary Host authority verification](verification/2026-08/2026-08-13T045032Z-pcc-u3-productrecipe-ordinary-host-authority-verification-02de9ad341db4dcbb1519e0f5e8843f1.md) - Verifies one ProductRecipe ordinary Host composition input, explicit one-definition advanced probes, schema-authority closure, and Headless/Desktop/Editor parity.
