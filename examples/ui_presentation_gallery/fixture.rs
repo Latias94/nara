@@ -162,9 +162,7 @@ fn import_ui_texture(
             ImageBytesImportRequest::new(
                 record.clone(),
                 png_bytes.into_boxed_slice(),
-                ImportDependencyDigest::empty(),
-                ImportSettingsHash::default(),
-                ImportProfile::default(),
+                ImageImportSettings::default(),
             ),
             image,
             states.version(image.id()).unwrap_or(AssetVersion::ZERO),

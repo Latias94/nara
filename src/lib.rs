@@ -208,7 +208,8 @@ pub mod prelude {
 
     #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
     pub use nara_image::{
-        ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat, ImagePlugin,
+        ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat,
+        ImageImportSettings, ImagePlugin,
     };
     #[cfg(feature = "runtime-2d")]
     pub use nara_material::{
@@ -262,14 +263,14 @@ pub mod advanced_prelude {
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
         AssetEvent, AssetEventKind, AssetEvents, AssetLoadGeneration, AssetLoadGenerations,
-        AssetMeta, AssetPathError, AssetRecord, AssetRefError, AssetRefExportPolicy,
-        AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind,
-        AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind, AssetSourceChanges,
-        AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError, AssetStates,
-        AssetTaskUpdateSet, AssetVersion, DigestParseError, ImportArtifactDigest,
+        AssetMeta, AssetMetaIdentity, AssetPathError, AssetRecord, AssetRefError,
+        AssetRefExportPolicy, AssetReloadDiagnostics, AssetReloadRequest, AssetReloadRequestId,
+        AssetReloadRequestKind, AssetReloadRequests, AssetSourceChange, AssetSourceChangeKind,
+        AssetSourceChanges, AssetSourceKind, AssetSourceRoot, AssetState, AssetStateError,
+        AssetStates, AssetTaskUpdateSet, AssetVersion, DigestParseError, ImportArtifactDigest,
         ImportArtifactKey, ImportArtifactPath, ImportArtifactRecord, ImportDependency,
         ImportDependencyDigest, ImportDependencyRole, ImportProfile, ImportSettingsHash,
-        ImporterId, LoadState, MissingMetaPolicy, ProjectAssetDatabase, SourceHash,
+        ImporterId, LoadState, ProjectAssetDatabase, SourceHash, StableAssetIdGenerationError,
     };
     pub use nara_core::{ByteLimit, DepthLimit, ItemLimit, TimeLimit};
     pub use nara_diagnostic::{
@@ -348,10 +349,11 @@ pub mod advanced_prelude {
         AdmittedImageImport, IMAGE_IMPORT_MEMORY_PLAN_VERSION, ImageBytesImportRequest,
         ImageFileImportRequest, ImageImportBudgetError, ImageImportBudgetHost,
         ImageImportBudgetSnapshot, ImageImportError, ImageImportLimitKind, ImageImportLimits,
-        ImageImportLimitsError, ImageImportMemoryPlan, ImageImportStage, ImageImportedAsset,
-        ImageImporter, ImageImporterCreateError, ImagePngFailureKind, ImagePublicationFailureKind,
-        ImageReloadError, ImageReloadStats, ImageSourceDirectory, ImageSourceFailureKind,
-        ImageSourceMetadata, ImageUnsupportedFeature,
+        ImageImportLimitsError, ImageImportMemoryPlan, ImageImportSettings, ImageImportStage,
+        ImageImportedAsset, ImageImporter, ImageImporterCreateError, ImagePngFailureKind,
+        ImagePublicationFailureKind, ImageReloadError, ImageReloadStats, ImageSourceDirectory,
+        ImageSourceFailureKind, ImageSourceMetadata, ImageSourceMetadataCreateError,
+        ImageUnsupportedFeature,
     };
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     pub use nara_image::{

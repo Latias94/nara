@@ -348,12 +348,11 @@ mod tests {
     use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetId, AssetPath, AssetVersion, Assets, Handle,
         ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-        ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion, SourceHash,
-        StableAssetId,
+        ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
     };
 
     use nara_image::{
-        ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata,
+        ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
         PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
     };
     use nara_render::RenderResourceSnapshot;
@@ -832,7 +831,7 @@ mod tests {
             ImportDependencyDigest::empty(),
             ImporterId::new("nara-wgpu-test").unwrap(),
             ImporterVersion::new(1),
-            ImportSettingsHash::default(),
+            ImageImportSettings::default().settings_hash(),
             ImportProfile::default(),
             ImportedAssetType::new("image").unwrap(),
             ArtifactLabel::default(),
@@ -841,14 +840,13 @@ mod tests {
         .unwrap();
         let image = ImageAsset::new(
             ImageSourceMetadata::new(
-                stable_id,
                 AssetPath::new("ui/readback.png").unwrap(),
-                source_hash,
+                ImageImportSettings::default(),
                 artifact,
-            ),
+            )
+            .unwrap(),
             ImageExtent::new(1, 1),
             ImageFormat::Rgba8,
-            ImageColorSpace::Srgb,
             vec![240, 16, 120, 255],
         )
         .unwrap();

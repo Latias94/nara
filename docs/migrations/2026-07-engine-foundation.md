@@ -64,6 +64,7 @@ Every implementation unit that changes a public API, persistent shape, cache con
 | NUI-U6-U7-1 | NUI-U6/U7 | `7c2c5ba`, `53d6678` | `serialized-format/rust-api/behavior` | Record-owned `parent`, implicit root order, placement-free add/remove, and bare `Reparent` | Rewrite Scene/Prefab documents to ordered `roots` plus parent-owned `children`; express Patch mutations with `ScenePlacement`, `MoveEntity { from, to }`, and exact subtree `RestoreEntity`. |
 | NUI-U8-1 | NUI-U8 | `4b2146a`, `fc3a0b8` | `rust-api/behavior` | Construction-only hierarchy attachment and runtime order inferred from entity allocation | Register every structural root and child with `HierarchyWriter` using exact ordered placements; consume the completed `HierarchyOrder` for structural layout, hit testing, and drawing. |
 | UIF-U1-1 | UIF-U1 | `c2806a5` | `rust-api/behavior` | Dispatch batches that mixed routed events with rejection and invalidation releases that entered activation | Match the closed `UiDispatchOutcome`; reduce widgets only for `Consumed`, and treat lifecycle cleanup as a consumed reconciliation. |
+| EIR-U1-1 | EIR-U1/U2 | `EIR-U1/U2` | `persistent-shape/rust-api/cache` | Flat image `asset_meta`, caller-authored image recipe hashes, and global image color-space configuration | Rewrite image sidecars to nested identity plus typed settings, pass `ImageImportSettings` to concrete requests, and rebuild image artifacts. |
 
 ## Entry Contract
 
@@ -1376,9 +1377,7 @@ let imported = importer.import_image(
     ImageBytesImportRequest::new(
         record,
         png_bytes.into_boxed_slice(),
-        dependency_digest,
-        settings_hash,
-        profile,
+        ImageImportSettings::new(ImageColorSpace::Srgb),
     ),
     handle,
     expected_version,
@@ -2849,9 +2848,7 @@ let imported = ImageImporter::default().import_image(
     ImageBytesImportRequest::new(
         record,
         png_bytes,
-        dependency_digest,
-        settings_hash,
-        profile,
+        ImageImportSettings::new(ImageColorSpace::Srgb),
     ),
     handle,
     expected_version,
@@ -4095,6 +4092,91 @@ post-create terminal outcomes.
 verification record `b27082ccee9b484bb298d4d00901400c` prove no-replace publication, collision,
 identity/topology drift, exact cleanup, created-but-unopened staging, orphan authority and the
 absence of a destructive fallback.
+
+## EIR-U1-1: Typed Image Metadata And Canonical Import Recipes
+
+**Removed contract**:
+
+- The flat `AssetMeta { stable_id, path, source_kind }` Rust value and matching flat
+  `asset_meta` payload.
+- `MissingMetaPolicy` and `ProjectAssetDatabase::insert_source_with_meta_policy`, which could
+  install an asset identity without a persisted sidecar.
+- Image byte/file request parameters for caller-provided dependency digests, settings hashes, and
+  import profiles, plus importer/plugin-wide color-space setters.
+- Image source metadata that duplicated stable ID and source hash outside its artifact key.
+
+**Canonical replacement or deletion rationale**: use `AssetMetaIdentity` for the persisted identity
+core and `AssetMeta<ImageImportSettings>` for the only canonical image sidecar. The image domain
+owns the closed sRGB/Linear settings value, canonical settings bytes, settings hash, fixed PNG
+recipe facts, and importer version 3. Strict ProjectContent and runtime reload consume that same
+typed recipe. No compatibility reader remains because the superseded shape was never released.
+
+Before:
+
+```rust
+let meta = AssetMeta::new(stable_id, path, AssetSourceKind::Image);
+let request = ImageBytesImportRequest::new(
+    record,
+    png_bytes,
+    dependency_digest,
+    settings_hash,
+    profile,
+);
+```
+
+After:
+
+```rust
+let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+let meta = AssetMeta::new(
+    AssetMetaIdentity::new(stable_id, path, AssetSourceKind::Image),
+    settings,
+);
+let request = ImageBytesImportRequest::new(record, png_bytes, settings);
+```
+
+The corresponding payload is now nested:
+
+```json
+{
+  "asset": {
+    "stable_id": "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f",
+    "path": "textures/player.png",
+    "source_kind": "image"
+  },
+  "settings": {
+    "color_space": "linear"
+  }
+}
+```
+
+**Affected examples and fixtures**: root image-import and windowed-sprite examples, the UI
+presentation gallery, Sprite/UI/WGPU image fixtures, ProjectContent fixtures, Reference Game image
+sidecars and safety tests, and every image import/reload test now use the typed recipe.
+
+**User action**: rewrite every experimental image `.meta` payload into the nested `asset` plus
+`settings` shape before opening the project. Preserve the existing stable ID and assets-root-relative
+path. Choose `srgb` or `linear` explicitly. Update direct import requests to pass
+`ImageImportSettings`; remove independent hash/profile arguments and global color-space setters.
+
+**Source action**: `manual-rewrite`. Runtime and Generic Authoring do not rewrite the superseded flat
+shape. Repository-owned sidecars were rewritten atomically with the strict reader.
+
+**Cache action**: `delete` or rebuild affected image artifacts. Importer version 3 and the typed
+settings hash intentionally supersede the NUI-U3 version-2 cache-keep statement.
+
+**Compatibility window**: none (unreleased canonical replacement). There is no flat-reader alias,
+implicit on-open migration, default settings hash, or global color-space fallback.
+
+**Rollback**: restore sidecars and code together from the pre-EIR revision. Do not restore a flat
+reader, unpersisted identity generation, or caller-authored recipe hashes independently.
+
+**Verification anchors**: `crates/nara_asset/tests/meta_format.rs`,
+`crates/nara_image/tests/{image_settings,image_import_limits}.rs`,
+`crates/nara_image/src/tests.rs`, `tests/{project_content_boot,project_content_boundary}.rs`,
+`src/project_host/authoring/mod.rs`, `reference-game/tests/image_asset_safety.rs`, and the canonical
+Reference Game sidecars prove strict nested admission, distinct settings hashes, typed strict load,
+recipe-preserving reload, Generic Authoring retention, and fail-before-publication rejection.
 
 ## Persistent Format Matrix
 

@@ -24,13 +24,16 @@ pub use artifact::{
     ImporterVersion, SourceHash,
 };
 pub use database::{
-    AssetDatabaseError, AssetMeta, AssetRecord, AssetSourceKind, MissingMetaPolicy,
+    AssetDatabaseError, AssetMeta, AssetMetaIdentity, AssetRecord, AssetSourceKind,
     ProjectAssetDatabase,
 };
 #[cfg(feature = "serde")]
-pub use format::{AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError};
+pub use format::{
+    AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
+};
 pub use identity::{
     AssetId, AssetPath, AssetPathError, AssetRef, StableAssetId, StableAssetIdError,
+    StableAssetIdGenerationError,
 };
 pub use reload::{
     ASSET_PLUGIN_DECLARATION, ASSET_PLUGIN_ID, AssetLoadGeneration, AssetLoadGenerations,
@@ -393,49 +396,17 @@ mod tests {
     #[test]
     fn project_database_rejects_mismatched_meta_paths() {
         let mut database = ProjectAssetDatabase::default();
-        let meta = AssetMeta::new(
+        let identity = AssetMetaIdentity::new(
             stable_id(),
             AssetPath::new("textures/player.png").unwrap(),
             AssetSourceKind::Image,
         );
 
         let error = database
-            .insert_meta(AssetPath::new("textures/other.png").unwrap(), meta)
+            .insert_identity(AssetPath::new("textures/other.png").unwrap(), identity)
             .unwrap_err();
 
         assert!(matches!(error, AssetDatabaseError::MetaPathMismatch { .. }));
-    }
-
-    #[test]
-    fn project_database_diagnoses_or_generates_missing_meta_by_policy() {
-        let source_path = AssetPath::new("textures/player.png").unwrap();
-        let mut database = ProjectAssetDatabase::default();
-
-        let error = database
-            .insert_source_with_meta_policy(source_path.clone(), None, MissingMetaPolicy::Diagnose)
-            .unwrap_err();
-
-        assert_eq!(
-            error,
-            AssetDatabaseError::MissingMeta {
-                path: source_path.clone()
-            }
-        );
-
-        database
-            .insert_source_with_meta_policy(
-                source_path.clone(),
-                None,
-                MissingMetaPolicy::Generate {
-                    stable_id: stable_id(),
-                    source_kind: AssetSourceKind::Image,
-                },
-            )
-            .unwrap();
-
-        let record = database.record_for_path(&source_path).unwrap();
-        assert_eq!(record.stable_id(), stable_id());
-        assert_eq!(record.source_kind(), &AssetSourceKind::Image);
     }
 
     #[test]

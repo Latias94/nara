@@ -5,13 +5,36 @@ mod project_content_fixture;
 
 use std::sync::Arc;
 
+use nara::asset::AssetMeta;
+use nara::image::{ImageColorSpace, ImageImportSettings};
 use nara::project_host::{
     ProjectContentBudgetKind, ProjectContentLoader, StartupContentMemberKind,
 };
 use nara::scene::{PrefabDocument, SceneComponentRecord, SceneEntityRecord};
-use project_content_fixture::{TestProject, scene_id};
+use project_content_fixture::{TestProject, player_image_meta, scene_id};
 
 struct EscapeOwner;
+
+#[test]
+fn strict_project_content_load_uses_the_persisted_linear_recipe() {
+    let project = TestProject::with_prefab_startup();
+    let meta = player_image_meta();
+    let (identity, _) = meta.into_parts();
+    let meta = AssetMeta::new(identity, ImageImportSettings::new(ImageColorSpace::Linear));
+    project.write_player_image_meta(&meta);
+    let (candidate, plan, root) = project.candidate_plan_and_root();
+    let loader = ProjectContentLoader::new(root).unwrap();
+
+    let snapshot = loader.load(&candidate, &plan).unwrap();
+    let image = snapshot.images()[0].image();
+
+    assert_eq!(image.color_space(), ImageColorSpace::Linear);
+    assert_eq!(image.source().settings(), *meta.settings());
+    assert_eq!(
+        image.source().artifact().key().settings_hash(),
+        meta.settings().settings_hash()
+    );
+}
 
 #[test]
 fn authorized_startup_closure_publishes_an_immutable_snapshot() {

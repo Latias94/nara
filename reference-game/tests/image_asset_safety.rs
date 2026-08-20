@@ -84,9 +84,7 @@ fn import_file(
             ImageFileImportRequest::new(
                 record,
                 file,
-                ImportDependencyDigest::empty(),
-                ImportSettingsHash::default(),
-                ImportProfile::default(),
+                ImageImportSettings::default(),
             ),
             handle,
             expected_version,

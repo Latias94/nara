@@ -33,9 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ImageBytesImportRequest::new(
             record.clone(),
             png_bytes.into_boxed_slice(),
-            ImportDependencyDigest::empty(),
-            ImportSettingsHash::default(),
-            ImportProfile::default(),
+            ImageImportSettings::default(),
         ),
         texture,
         AssetVersion::ZERO,

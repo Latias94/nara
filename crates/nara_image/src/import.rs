@@ -9,8 +9,8 @@ use std::{
 use nara_asset::{
     ArtifactFormatVersion, ArtifactLabel, AssetPath, AssetRecord, AssetServer, AssetStates,
     AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactPathError, ImportArtifactRecord,
-    ImportDependencyDigest, ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId,
-    ImporterVersion, SourceHash,
+    ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
+    SourceHash,
 };
 use nara_ecs::Resource;
 use nara_fs::{DirectoryCapability, FileCapability, FsError, PathValidationError, RelativePath};
@@ -23,7 +23,7 @@ use crate::limits::{
     ImageImportBudgetError, ImageImportLimits, ImageImportLimitsError, ImageImportMemoryPlan,
     file_admission_ceiling,
 };
-use crate::{ImageAsset, ImageColorSpace};
+use crate::{ImageAsset, ImageImportSettings};
 
 use png::{PngHeaderPreflight, check_encoded_limit};
 pub use publication::ImageImportedAsset;
@@ -304,9 +304,7 @@ impl Debug for ImageSourceDirectory {
 pub struct ImageBytesImportRequest {
     source: AssetRecord,
     source_bytes: Vec<u8>,
-    dependency_digest: ImportDependencyDigest,
-    settings_hash: ImportSettingsHash,
-    profile: ImportProfile,
+    settings: ImageImportSettings,
 }
 
 impl ImageBytesImportRequest {
@@ -314,16 +312,12 @@ impl ImageBytesImportRequest {
     pub fn new(
         source: AssetRecord,
         source_bytes: impl Into<Vec<u8>>,
-        dependency_digest: ImportDependencyDigest,
-        settings_hash: ImportSettingsHash,
-        profile: ImportProfile,
+        settings: ImageImportSettings,
     ) -> Self {
         Self {
             source,
             source_bytes: source_bytes.into(),
-            dependency_digest,
-            settings_hash,
-            profile,
+            settings,
         }
     }
 }
@@ -334,9 +328,7 @@ impl Debug for ImageBytesImportRequest {
             .debug_struct("ImageBytesImportRequest")
             .field("source", &self.source)
             .field("source_bytes", &self.source_bytes.len())
-            .field("dependency_digest", &self.dependency_digest)
-            .field("settings_hash", &self.settings_hash)
-            .field("profile", &self.profile)
+            .field("settings", &self.settings)
             .finish()
     }
 }
@@ -344,26 +336,16 @@ impl Debug for ImageBytesImportRequest {
 pub struct ImageFileImportRequest {
     source: AssetRecord,
     file: FileCapability,
-    dependency_digest: ImportDependencyDigest,
-    settings_hash: ImportSettingsHash,
-    profile: ImportProfile,
+    settings: ImageImportSettings,
 }
 
 impl ImageFileImportRequest {
     #[must_use]
-    pub fn new(
-        source: AssetRecord,
-        file: FileCapability,
-        dependency_digest: ImportDependencyDigest,
-        settings_hash: ImportSettingsHash,
-        profile: ImportProfile,
-    ) -> Self {
+    pub fn new(source: AssetRecord, file: FileCapability, settings: ImageImportSettings) -> Self {
         Self {
             source,
             file,
-            dependency_digest,
-            settings_hash,
-            profile,
+            settings,
         }
     }
 }
@@ -374,9 +356,7 @@ impl Debug for ImageFileImportRequest {
             .debug_struct("ImageFileImportRequest")
             .field("source", &self.source)
             .field("file", &self.file)
-            .field("dependency_digest", &self.dependency_digest)
-            .field("settings_hash", &self.settings_hash)
-            .field("profile", &self.profile)
+            .field("settings", &self.settings)
             .finish()
     }
 }
@@ -441,26 +421,16 @@ struct ImageDecodeRequest<'a> {
     source: &'a AssetRecord,
     source_bytes: &'a [u8],
     source_hash: SourceHash,
-    dependency_digest: ImportDependencyDigest,
-    settings_hash: ImportSettingsHash,
-    profile: ImportProfile,
+    settings: ImageImportSettings,
 }
 
 impl<'a> ImageDecodeRequest<'a> {
-    fn new(
-        source: &'a AssetRecord,
-        source_bytes: &'a [u8],
-        dependency_digest: ImportDependencyDigest,
-        settings_hash: ImportSettingsHash,
-        profile: ImportProfile,
-    ) -> Self {
+    fn new(source: &'a AssetRecord, source_bytes: &'a [u8], settings: ImageImportSettings) -> Self {
         Self {
             source,
             source_bytes,
             source_hash: SourceHash::from_bytes(source_bytes),
-            dependency_digest,
-            settings_hash,
-            profile,
+            settings,
         }
     }
 
@@ -472,8 +442,8 @@ impl<'a> ImageDecodeRequest<'a> {
         self.source_bytes
     }
 
-    const fn source_hash(&self) -> SourceHash {
-        self.source_hash
+    const fn settings(&self) -> ImageImportSettings {
+        self.settings
     }
 }
 
@@ -520,9 +490,7 @@ impl UnpublishedImageImport {
         let ImageBytesImportRequest {
             source,
             source_bytes,
-            dependency_digest,
-            settings_hash,
-            profile,
+            settings,
         } = request;
         let charge = ImageImportCharge::admission(
             source_bytes.len(),
@@ -537,8 +505,7 @@ impl UnpublishedImageImport {
         let mut input = BudgetedImageInput::new(source_bytes, reservation);
         let image = {
             let (bytes, reservation) = input.parts_mut();
-            let request =
-                ImageDecodeRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
+            let request = ImageDecodeRequest::new(&source, bytes, settings);
             let (image, observed_plan) = importer.decode_png_with_preflight(
                 request,
                 preflight,
@@ -600,13 +567,7 @@ impl AdmittedImageImport {
         }
         let (image, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
-            let import_request = ImageDecodeRequest::new(
-                &request.source,
-                bytes,
-                request.dependency_digest,
-                request.settings_hash,
-                request.profile,
-            );
+            let import_request = ImageDecodeRequest::new(&request.source, bytes, request.settings);
             importer.decode_png(
                 import_request,
                 bytes.len(),
@@ -633,7 +594,6 @@ impl Debug for AdmittedImageImport {
 
 #[derive(Debug, Clone, Resource)]
 pub struct ImageImporter {
-    color_space: ImageColorSpace,
     limits: ImageImportLimits,
     budget_host: ImageImportBudgetHost,
 }
@@ -686,16 +646,9 @@ impl ImageImporter {
             });
         }
         Ok(Self {
-            color_space: ImageColorSpace::Srgb,
             limits,
             budget_host,
         })
-    }
-
-    #[must_use]
-    pub fn with_color_space(mut self, color_space: ImageColorSpace) -> Self {
-        self.color_space = color_space;
-        self
     }
 
     #[must_use]
@@ -801,9 +754,7 @@ impl ImageImporter {
         let ImageBytesImportRequest {
             source,
             source_bytes,
-            dependency_digest,
-            settings_hash,
-            profile,
+            settings,
         } = request;
         validate_extension(source.path())?;
         check_encoded_limit(self.limits, source_bytes.len())?;
@@ -830,8 +781,7 @@ impl ImageImporter {
         let mut input = BudgetedImageInput::new(source_bytes, reservation);
         let (image, memory_plan) = {
             let (bytes, reservation) = input.parts_mut();
-            let import_request =
-                ImageDecodeRequest::new(&source, bytes, dependency_digest, settings_hash, profile);
+            let import_request = ImageDecodeRequest::new(&source, bytes, settings);
             self.decode_png(
                 import_request,
                 bytes.len(),
@@ -852,11 +802,11 @@ impl ImageImporter {
         let key = ImportArtifactKey::new(
             request.source.stable_id(),
             request.source_hash,
-            request.dependency_digest,
+            ImportDependencyDigest::empty(),
             IMAGE_IMPORTER_ID.clone(),
             IMAGE_IMPORTER_VERSION,
-            request.settings_hash,
-            request.profile.clone(),
+            request.settings.settings_hash(),
+            ImportProfile::default(),
             IMAGE_OUTPUT_ASSET_TYPE.clone(),
             ArtifactLabel::default(),
             IMAGE_ARTIFACT_FORMAT_VERSION,
@@ -871,7 +821,7 @@ static IMAGE_IMPORTER_ID: LazyLock<ImporterId> = LazyLock::new(|| {
 static IMAGE_OUTPUT_ASSET_TYPE: LazyLock<ImportedAssetType> = LazyLock::new(|| {
     ImportedAssetType::new("nara_image.image").expect("built-in image output type is valid")
 });
-const IMAGE_IMPORTER_VERSION: ImporterVersion = ImporterVersion::new(2);
+const IMAGE_IMPORTER_VERSION: ImporterVersion = ImporterVersion::new(3);
 const IMAGE_ARTIFACT_FORMAT_VERSION: ArtifactFormatVersion = ArtifactFormatVersion::new(1);
 
 fn validate_extension(path: &AssetPath) -> Result<(), ImageImportError> {

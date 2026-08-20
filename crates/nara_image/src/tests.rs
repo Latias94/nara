@@ -15,8 +15,8 @@ use nara_asset::{
     AssetReloadRequest, AssetReloadRequestId, AssetReloadRequestKind, AssetServer,
     AssetSourceChangeKind, AssetSourceChanges, AssetSourceKind, AssetStates, AssetTaskUpdateSet,
     AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactPathError, ImportArtifactRecord,
-    ImportDependencyDigest, ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId,
-    ImporterVersion, LoadState, SourceHash, StableAssetId,
+    ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
+    LoadState, SourceHash, StableAssetId,
 };
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
@@ -70,12 +70,18 @@ fn bounded_task_config(io_workers: usize, io_pending: usize) -> TaskPoolConfig {
 }
 
 fn bytes_request(record: &AssetRecord, source_bytes: &[u8]) -> ImageBytesImportRequest {
+    bytes_request_with_settings(record, source_bytes, ImageImportSettings::default())
+}
+
+fn bytes_request_with_settings(
+    record: &AssetRecord,
+    source_bytes: &[u8],
+    settings: ImageImportSettings,
+) -> ImageBytesImportRequest {
     ImageBytesImportRequest::new(
         record.clone(),
         source_bytes.to_vec().into_boxed_slice(),
-        ImportDependencyDigest::empty(),
-        ImportSettingsHash::default(),
-        ImportProfile::default(),
+        settings,
     )
 }
 
@@ -104,10 +110,45 @@ fn import_uncommitted(
     try_import_uncommitted(importer, record, source_bytes).unwrap()
 }
 
+fn import_uncommitted_with_settings(
+    importer: &ImageImporter,
+    record: &AssetRecord,
+    source_bytes: &[u8],
+    settings: ImageImportSettings,
+) -> ImageImportedAsset {
+    let mut server = AssetServer::new();
+    let handle = server.reserve_record::<ImageAsset>(record).unwrap();
+    importer
+        .import_image(
+            bytes_request_with_settings(record, source_bytes, settings),
+            handle,
+            AssetVersion::ZERO,
+            &server,
+            &Assets::default(),
+            &AssetStates::default(),
+        )
+        .unwrap()
+}
+
 fn loaded_image_store(
     importer: &ImageImporter,
     record: &AssetRecord,
     pixels: &[u8],
+) -> (
+    AssetServer,
+    Handle<ImageAsset>,
+    Assets<ImageAsset>,
+    AssetStates,
+    AssetEvents,
+) {
+    loaded_image_store_with_settings(importer, record, pixels, ImageImportSettings::default())
+}
+
+fn loaded_image_store_with_settings(
+    importer: &ImageImporter,
+    record: &AssetRecord,
+    pixels: &[u8],
+    settings: ImageImportSettings,
 ) -> (
     AssetServer,
     Handle<ImageAsset>,
@@ -123,7 +164,7 @@ fn loaded_image_store(
     let bytes = rgba_png(1, 1, pixels);
     importer
         .import_image(
-            bytes_request(record, &bytes),
+            bytes_request_with_settings(record, &bytes, settings),
             handle,
             AssetVersion::ZERO,
             &server,
@@ -670,20 +711,12 @@ fn concrete_image_import_owns_stable_artifact_identity() {
     let importer = ImageImporter::default();
     let record = image_record("textures/player.png");
     let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
-    let dependency_digest = ImportDependencyDigest::from_digest([7; 32]);
-    let settings_hash = ImportSettingsHash::from_bytes(b"image-settings");
-    let profile = ImportProfile::new("mobile").unwrap();
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
     let mut server = AssetServer::new();
     let handle = server.reserve_record::<ImageAsset>(&record).unwrap();
     let imported = importer
         .import_image(
-            ImageBytesImportRequest::new(
-                record.clone(),
-                bytes.clone(),
-                dependency_digest,
-                settings_hash,
-                profile.clone(),
-            ),
+            ImageBytesImportRequest::new(record.clone(), bytes.clone(), settings),
             handle,
             AssetVersion::ZERO,
             &server,
@@ -695,11 +728,11 @@ fn concrete_image_import_owns_stable_artifact_identity() {
 
     assert_eq!(key.stable_id(), record.stable_id());
     assert_eq!(key.source_hash(), SourceHash::from_bytes(&bytes));
-    assert_eq!(key.dependency_digest(), dependency_digest);
+    assert_eq!(key.dependency_digest(), ImportDependencyDigest::empty());
     assert_eq!(key.importer_id().as_str(), "nara_image_png");
-    assert_eq!(key.importer_version(), ImporterVersion::new(2));
-    assert_eq!(key.settings_hash(), settings_hash);
-    assert_eq!(key.profile(), &profile);
+    assert_eq!(key.importer_version(), ImporterVersion::new(3));
+    assert_eq!(key.settings_hash(), settings.settings_hash());
+    assert_eq!(key.profile(), &ImportProfile::default());
     assert_eq!(key.output_asset_type().as_str(), "nara_image.image");
     assert_eq!(key.artifact_label(), &ArtifactLabel::default());
     assert_eq!(key.artifact_format_version(), ArtifactFormatVersion::new(1));
@@ -720,13 +753,7 @@ fn admitted_file_import_owns_the_authorized_source() {
     let states = AssetStates::default();
     let admitted = ImageImporter::default()
         .admit_file(
-            ImageFileImportRequest::new(
-                record,
-                file,
-                ImportDependencyDigest::empty(),
-                ImportSettingsHash::default(),
-                ImportProfile::default(),
-            ),
+            ImageFileImportRequest::new(record, file, ImageImportSettings::default()),
             handle,
             AssetVersion::ZERO,
             &server,
@@ -1322,7 +1349,6 @@ fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unc
                 source,
                 ImageExtent::new(1, 1),
                 ImageFormat::Rgba8,
-                ImageColorSpace::Srgb,
                 vec![255, 0, 255, 255],
             )
             .unwrap(),
@@ -1353,7 +1379,7 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
         .snapshot()
         .clone();
 
-    let changed_importer = ImageImporter::default().with_color_space(ImageColorSpace::Linear);
+    let changed_importer = ImageImporter::default();
     let record = image_record("textures/player.png");
     let server = app
         .world_mut()
@@ -1373,7 +1399,11 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
     let expected_version = states.version(handle.id()).unwrap();
     let changed = changed_importer
         .import_image(
-            bytes_request(&record, &rgba_png(1, 1, &[0, 0, 255, 255])),
+            bytes_request_with_settings(
+                &record,
+                &rgba_png(1, 1, &[0, 0, 255, 255]),
+                ImageImportSettings::new(ImageColorSpace::Linear),
+            ),
             handle,
             expected_version,
             &server,
@@ -1456,19 +1486,24 @@ fn prepare_system_removes_prepared_resources_for_removed_images() {
 }
 
 #[test]
-fn image_plugin_loads_and_reloads_image_through_task_update() {
+fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
     let temp_root = unique_temp_root();
     let texture_path = temp_root.join("textures").join("player.png");
     fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
     fs::write(&texture_path, rgba_png(1, 1, &[255, 0, 0, 255])).unwrap();
     let record = image_record("textures/player.png");
     let mut app = app_with_image_plugin(&temp_root, record.clone());
-    let handle = app
-        .world_mut()
-        .unwrap()
-        .resource_mut::<AssetServer>()
-        .reserve_record::<ImageAsset>(&record)
-        .unwrap();
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) = loaded_image_store_with_settings(
+        &importer,
+        &record,
+        &[255, 0, 0, 255],
+        ImageImportSettings::new(ImageColorSpace::Linear),
+    );
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
 
     app.world_mut()
         .unwrap()
@@ -1506,6 +1541,11 @@ fn image_plugin_loads_and_reloads_image_through_task_update() {
         .get(handle)
         .unwrap();
     assert_ne!(image.source().source_hash(), first_hash);
+    assert_eq!(
+        image.source().settings(),
+        ImageImportSettings::new(ImageColorSpace::Linear)
+    );
+    assert_eq!(image.color_space(), ImageColorSpace::Linear);
     assert_eq!(app.world().resource::<ImageReloadStats>().applied, 2);
     assert_eq!(
         app.world()
@@ -1527,11 +1567,11 @@ fn image_plugin_loads_and_reloads_image_through_task_update() {
 }
 
 #[test]
-fn image_plugin_records_first_load_failure_without_asset_value() {
+fn image_plugin_rejects_first_load_without_accepted_settings() {
     let temp_root = unique_temp_root();
     let texture_path = temp_root.join("textures").join("player.png");
     fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
-    fs::write(&texture_path, b"not a png").unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[255, 0, 0, 255])).unwrap();
     let record = image_record("textures/player.png");
     let mut app = app_with_image_plugin(&temp_root, record.clone());
     let handle = app
@@ -1560,7 +1600,7 @@ fn image_plugin_records_first_load_failure_without_asset_value() {
             .state(handle.id())
             .unwrap()
             .load_state(),
-        LoadState::Failed { .. }
+        LoadState::Failed { message } if message == "image.reload-settings-missing"
     ));
     assert!(
         app.world()
@@ -1589,18 +1629,13 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         TaskPools::inline_for_tests(TaskPoolConfig::default()).unwrap(),
         ImagePlugin::with_limits(limits).unwrap(),
     );
-    let handle = app
-        .world_mut()
-        .unwrap()
-        .resource_mut::<AssetServer>()
-        .reserve_record::<ImageAsset>(&record)
-        .unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
-        .unwrap();
-    drive_image_jobs(&mut app);
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) =
+        loaded_image_store(&importer, &record, &[255, 0, 0, 255]);
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
 
     let last_good_hash = app
         .world()
@@ -2029,6 +2064,49 @@ fn queue_rejection_records_failure_and_never_leaves_loading_state() {
         .resource_mut::<AssetServer>()
         .reserve_record::<ImageAsset>(&second_record)
         .unwrap();
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let server = app
+        .world_mut()
+        .unwrap()
+        .remove_resource::<AssetServer>()
+        .unwrap();
+    let mut images = app
+        .world_mut()
+        .unwrap()
+        .remove_resource::<Assets<ImageAsset>>()
+        .unwrap();
+    let mut states = app
+        .world_mut()
+        .unwrap()
+        .remove_resource::<AssetStates>()
+        .unwrap();
+    let mut events = app
+        .world_mut()
+        .unwrap()
+        .remove_resource::<AssetEvents>()
+        .unwrap();
+    for (record, handle) in [
+        (&first_record, first_handle),
+        (&second_record, second_handle),
+    ] {
+        importer
+            .import_image(
+                bytes_request(record, &rgba_png(1, 1, &[255, 255, 255, 255])),
+                handle,
+                AssetVersion::ZERO,
+                &server,
+                &images,
+                &states,
+            )
+            .unwrap()
+            .commit(&server, &mut images, &mut states, &mut events)
+            .unwrap();
+    }
+    events.drain();
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
     {
         let mut changes = app
             .world_mut()
@@ -2710,10 +2788,11 @@ fn descriptor_hash_changes_when_content_descriptor_changes() {
     let record = image_record("textures/player.png");
     let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
     let image = import_uncommitted(&ImageImporter::default(), &record, &bytes).into_image();
-    let changed = import_uncommitted(
-        &ImageImporter::default().with_color_space(ImageColorSpace::Linear),
+    let changed = import_uncommitted_with_settings(
+        &ImageImporter::default(),
         &record,
         &bytes,
+        ImageImportSettings::new(ImageColorSpace::Linear),
     )
     .into_image();
 
@@ -2728,11 +2807,30 @@ fn direct_image_source() -> ImageSourceMetadata {
     let source_bytes = b"direct image source";
     let artifact = test_artifact_record(&record, source_bytes);
     ImageSourceMetadata::new(
-        record.stable_id(),
         record.path().clone(),
-        SourceHash::from_bytes(source_bytes),
+        ImageImportSettings::default(),
         artifact,
     )
+    .unwrap()
+}
+
+#[test]
+fn image_source_metadata_rejects_a_mismatched_settings_hash() {
+    let record = image_record("textures/player.png");
+    let source_bytes = b"image-source";
+    let settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let artifact = test_artifact_record(&record, source_bytes);
+    let actual = artifact.key().settings_hash();
+
+    let error = ImageSourceMetadata::new(record.path().clone(), settings, artifact).unwrap_err();
+
+    assert_eq!(
+        error,
+        ImageSourceMetadataCreateError::SettingsHashMismatch {
+            expected: settings.settings_hash(),
+            actual,
+        }
+    );
 }
 
 fn test_artifact_record(record: &AssetRecord, source_bytes: &[u8]) -> ImportArtifactRecord {
@@ -2742,7 +2840,7 @@ fn test_artifact_record(record: &AssetRecord, source_bytes: &[u8]) -> ImportArti
         ImportDependencyDigest::empty(),
         ImporterId::new("image-test").unwrap(),
         ImporterVersion::new(1),
-        ImportSettingsHash::default(),
+        ImageImportSettings::default().settings_hash(),
         ImportProfile::default(),
         ImportedAssetType::new("image-test").unwrap(),
         ArtifactLabel::default(),
@@ -2759,7 +2857,6 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
                 direct_image_source(),
                 extent,
                 ImageFormat::Rgba8,
-                ImageColorSpace::Srgb,
                 Vec::new(),
             )
             .unwrap_err(),
@@ -2771,7 +2868,6 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
             direct_image_source(),
             ImageExtent::new(u32::MAX, u32::MAX),
             ImageFormat::Rgba8,
-            ImageColorSpace::Srgb,
             Vec::new(),
         )
         .unwrap_err(),
@@ -2785,7 +2881,6 @@ fn image_asset_rejects_zero_overflowing_and_mismatched_rgba_storage() {
                 direct_image_source(),
                 ImageExtent::new(1, 1),
                 ImageFormat::Rgba8,
-                ImageColorSpace::Srgb,
                 pixels,
             )
             .unwrap_err(),
@@ -2808,14 +2903,13 @@ fn image_asset_reuses_the_admitted_pixel_allocation() {
 
     let image = ImageAsset::new(
         ImageSourceMetadata::new(
-            record.stable_id(),
             record.path().clone(),
-            SourceHash::from_bytes(source_bytes),
+            ImageImportSettings::default(),
             artifact,
-        ),
+        )
+        .unwrap(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
-        ImageColorSpace::Srgb,
         pixels,
     )
     .unwrap();
@@ -2881,7 +2975,6 @@ fn prepared_image_resource_retains_exact_pixels_across_source_replacement() {
         direct_image_source(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
-        ImageColorSpace::Srgb,
         vec![255, 32, 16, 255],
     )
     .unwrap();
@@ -2927,7 +3020,6 @@ fn image_asset_deserialization_reuses_the_constructor_validation() {
         direct_image_source(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
-        ImageColorSpace::Srgb,
         vec![24, 120, 220, 255],
     )
     .unwrap();
@@ -2949,6 +3041,10 @@ fn image_asset_deserialization_reuses_the_constructor_validation() {
     let mut undersized = valid.clone();
     undersized["pixels"] = serde_json::json!([24, 120, 220]);
     assert!(serde_json::from_value::<ImageAsset>(undersized).is_err());
+
+    let mut mismatched_recipe = valid.clone();
+    mismatched_recipe["source"]["settings"]["color_space"] = serde_json::json!("linear");
+    assert!(serde_json::from_value::<ImageAsset>(mismatched_recipe).is_err());
 
     let mut oversized = valid;
     oversized["pixels"] = serde_json::json!([24, 120, 220, 255, 0]);
@@ -3106,9 +3202,10 @@ fn app_with_image_plugin_configuration(
         nara_render::RenderComponentsPlugin,
         nara_render::RenderPlugin,
         ImagePreparePlugin,
-        plugin.with_source_directory(image_source_directory(asset_root)),
     ))
     .unwrap();
+    app.add_plugins(plugin.with_source_directory(image_source_directory(asset_root)))
+        .unwrap();
     {
         let mut database = app
             .world_mut()

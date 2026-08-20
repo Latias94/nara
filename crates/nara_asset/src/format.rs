@@ -3,6 +3,7 @@
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
+    mem::size_of,
 };
 
 use nara_core::{
@@ -11,8 +12,9 @@ use nara_core::{
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits,
     decode_persistent_file_with_preflight, preflight_serde_shape,
 };
+use serde::{Serialize, de::DeserializeOwned};
 
-use crate::AssetMeta;
+use crate::{AssetMeta, AssetMetaIdentity};
 
 const ASSET_META_KIND: &str = "asset_meta";
 const CANONICAL_V1_ENGINE_MIN_VERSION: &str = "0.1.0";
@@ -64,12 +66,27 @@ impl AssetMetaFileLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AssetMetaCandidate {
-    meta: AssetMeta,
+/// A bounded metadata candidate whose asset identity is validated before a domain admits settings.
+///
+/// The exact encoded bytes remain private and immutable so a concrete domain can decode its typed
+/// settings without an erased JSON settings surface.
+#[derive(PartialEq, Eq)]
+pub struct AssetMetaIdentityCandidate {
+    identity: AssetMetaIdentity,
+    encoded: Box<[u8]>,
 }
 
-impl AssetMetaCandidate {
+impl fmt::Debug for AssetMetaIdentityCandidate {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AssetMetaIdentityCandidate")
+            .field("identity", &self.identity)
+            .field("encoded_len", &self.encoded.len())
+            .finish()
+    }
+}
+
+impl AssetMetaIdentityCandidate {
     pub fn decode_json_bytes(input: &[u8]) -> Result<Self, AssetMetaFormatError> {
         Self::decode_json_bytes_with_limits(input, AssetMetaFileLimits::default())
     }
@@ -78,46 +95,108 @@ impl AssetMetaCandidate {
         input: &[u8],
         limits: AssetMetaFileLimits,
     ) -> Result<Self, AssetMetaFormatError> {
-        let contract = PersistentFileContract::canonical_v1(
-            format_kind()?,
-            engine_version(env!("CARGO_PKG_VERSION"))?,
-        );
-        let envelope = decode_persistent_file_with_preflight(
-            input,
-            limits.encoded_bytes(),
-            &contract,
-            |bytes| {
-                let mut deserializer = serde_json::Deserializer::from_slice(bytes);
-                preflight_serde_shape(&mut deserializer, limits.shape())
-                    .map_err(AssetMetaJsonError::Shape)
-            },
-            |bytes| {
-                serde_json::from_slice::<PersistentFileHeader>(bytes)
-                    .map_err(AssetMetaJsonError::Syntax)
-            },
-            |bytes| {
-                serde_json::from_slice::<PersistentFileEnvelope<AssetMeta>>(bytes)
-                    .map_err(AssetMetaJsonError::Syntax)
-            },
-        )
-        .map_err(map_decode_error)?;
+        let identity = decode_identity(input, limits)?;
         Ok(Self {
+            identity,
+            encoded: input.into(),
+        })
+    }
+
+    pub fn decode_json_bytes_owned(input: Box<[u8]>) -> Result<Self, AssetMetaFormatError> {
+        Self::decode_json_bytes_owned_with_limits(input, AssetMetaFileLimits::default())
+    }
+
+    pub fn decode_json_bytes_owned_with_limits(
+        input: Box<[u8]>,
+        limits: AssetMetaFileLimits,
+    ) -> Result<Self, AssetMetaFormatError> {
+        let identity = decode_identity(&input, limits)?;
+        Ok(Self {
+            identity,
+            encoded: input,
+        })
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &AssetMetaIdentity {
+        &self.identity
+    }
+
+    #[must_use]
+    pub fn retained_bytes(&self) -> Option<usize> {
+        size_of::<Self>()
+            .checked_add(self.encoded.len())?
+            .checked_add(self.identity.retained_bytes()?)
+    }
+
+    pub fn admit<TSettings>(&self) -> Result<AssetMetaCandidate<TSettings>, AssetMetaFormatError>
+    where
+        TSettings: DeserializeOwned,
+    {
+        let envelope =
+            serde_json::from_slice::<PersistentFileEnvelope<AssetMeta<TSettings>>>(&self.encoded)
+                .map_err(|source| AssetMetaFormatError::Payload(Box::new(source)))?;
+        Ok(AssetMetaCandidate {
             meta: envelope.into_payload(),
         })
     }
 
     #[must_use]
-    pub fn meta(&self) -> &AssetMeta {
+    pub fn into_identity(self) -> AssetMetaIdentity {
+        self.identity
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetMetaCandidate<TSettings> {
+    meta: AssetMeta<TSettings>,
+}
+
+impl<TSettings> AssetMetaCandidate<TSettings>
+where
+    TSettings: DeserializeOwned,
+{
+    pub fn decode_json_bytes(input: &[u8]) -> Result<Self, AssetMetaFormatError> {
+        Self::decode_json_bytes_with_limits(input, AssetMetaFileLimits::default())
+    }
+
+    pub fn decode_json_bytes_with_limits(
+        input: &[u8],
+        limits: AssetMetaFileLimits,
+    ) -> Result<Self, AssetMetaFormatError> {
+        let envelope = decode_envelope::<AssetMeta<TSettings>>(input, limits)?;
+        Ok(Self {
+            meta: envelope.into_payload(),
+        })
+    }
+}
+
+impl<TSettings> AssetMetaCandidate<TSettings> {
+    #[must_use]
+    pub const fn meta(&self) -> &AssetMeta<TSettings> {
         &self.meta
     }
 
     #[must_use]
-    pub fn into_meta(self) -> AssetMeta {
+    pub const fn identity(&self) -> &AssetMetaIdentity {
+        self.meta.identity()
+    }
+
+    #[must_use]
+    pub const fn settings(&self) -> &TSettings {
+        self.meta.settings()
+    }
+
+    #[must_use]
+    pub fn into_meta(self) -> AssetMeta<TSettings> {
         self.meta
     }
 }
 
-impl AssetMeta {
+impl<TSettings> AssetMeta<TSettings>
+where
+    TSettings: Serialize,
+{
     pub fn to_json_string(&self) -> Result<String, AssetMetaFormatError> {
         self.to_json_string_with_limits(AssetMetaFileLimits::default())
     }
@@ -134,7 +213,7 @@ impl AssetMeta {
                 engine_version(env!("CARGO_PKG_VERSION"))?,
             )
             .map_err(metadata_error)?,
-            self.clone(),
+            self,
         );
         let encoded =
             serde_json::to_string_pretty(&envelope).map_err(AssetMetaFormatError::Encode)?;
@@ -150,6 +229,14 @@ impl AssetMeta {
             .map_err(|source| AssetMetaFormatError::Shape(Box::new(source)))?;
         Ok(encoded)
     }
+}
+
+fn decode_identity(
+    input: &[u8],
+    limits: AssetMetaFileLimits,
+) -> Result<AssetMetaIdentity, AssetMetaFormatError> {
+    let envelope = decode_envelope::<AssetMeta<serde::de::IgnoredAny>>(input, limits)?;
+    Ok(envelope.into_payload().into_parts().0)
 }
 
 #[derive(Debug)]
@@ -221,6 +308,38 @@ impl Error for AssetMetaJsonError {
             Self::Syntax(source) => Some(source),
         }
     }
+}
+
+fn decode_envelope<TPayload>(
+    input: &[u8],
+    limits: AssetMetaFileLimits,
+) -> Result<PersistentFileEnvelope<TPayload>, AssetMetaFormatError>
+where
+    TPayload: DeserializeOwned,
+{
+    let contract = PersistentFileContract::canonical_v1(
+        format_kind()?,
+        engine_version(env!("CARGO_PKG_VERSION"))?,
+    );
+    decode_persistent_file_with_preflight(
+        input,
+        limits.encoded_bytes(),
+        &contract,
+        |bytes| {
+            let mut deserializer = serde_json::Deserializer::from_slice(bytes);
+            preflight_serde_shape(&mut deserializer, limits.shape())
+                .map_err(AssetMetaJsonError::Shape)
+        },
+        |bytes| {
+            serde_json::from_slice::<PersistentFileHeader>(bytes)
+                .map_err(AssetMetaJsonError::Syntax)
+        },
+        |bytes| {
+            serde_json::from_slice::<PersistentFileEnvelope<TPayload>>(bytes)
+                .map_err(AssetMetaJsonError::Syntax)
+        },
+    )
+    .map_err(map_decode_error)
 }
 
 fn map_decode_error(error: PersistentFileDecodeError<AssetMetaJsonError>) -> AssetMetaFormatError {

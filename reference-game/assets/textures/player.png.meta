@@ -7,8 +7,13 @@
     "version": "0.1.0"
   },
   "payload": {
-    "stable_id": "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f",
-    "path": "textures/player.png",
-    "source_kind": "image"
+    "asset": {
+      "stable_id": "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f",
+      "path": "textures/player.png",
+      "source_kind": "image"
+    },
+    "settings": {
+      "color_space": "srgb"
+    }
   }
 }

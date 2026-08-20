@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 bevy_ecs.workspace = true
 blake3.workspace = true
+getrandom.workspace = true
 nara_app.workspace = true
 nara_core.workspace = true
 nara_diagnostic.workspace = true

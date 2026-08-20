@@ -13,8 +13,9 @@ use std::{
 use std::fs::OpenOptions;
 
 use nara::{
-    asset::{AssetMeta, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
+    asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
+    image::ImageImportSettings,
     project_host::{
         ProjectSettingsCandidate, RuntimePlan, advanced::built_in_schema_providers,
         ingest_project_manifest, resolve_product_recipe,
@@ -24,6 +25,8 @@ use nara::{
         PrefabDocument, PrefabInstance, SceneComponentRecord, SceneDocument, SceneEntityRecord,
     },
 };
+
+pub type ImageAssetMeta = AssetMeta<ImageImportSettings>;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static BUILT_IN_AUTHORING_SCHEMA_BUNDLE: OnceLock<Box<[u8]>> = OnceLock::new();
@@ -208,7 +211,7 @@ requested = ["runtime-2d"]
         fs::write(self.root.join("prefabs").join(path), bytes).unwrap();
     }
 
-    pub fn write_player_image_meta(&self, meta: &AssetMeta) {
+    pub fn write_player_image_meta(&self, meta: &ImageAssetMeta) {
         fs::write(
             self.root.join("assets/textures/player.png.meta"),
             meta.to_json_string().unwrap(),
@@ -216,7 +219,7 @@ requested = ["runtime-2d"]
         .unwrap();
     }
 
-    pub fn write_asset(&self, path: &str, bytes: &[u8], meta: &AssetMeta) {
+    pub fn write_asset(&self, path: &str, bytes: &[u8], meta: &ImageAssetMeta) {
         let source = self.root.join("assets").join(path);
         fs::create_dir_all(source.parent().unwrap()).unwrap();
         fs::write(&source, bytes).unwrap();
@@ -253,18 +256,21 @@ pub fn scene_id(value: &str) -> nara::identity::SceneEntityId {
     nara::identity::SceneEntityId::new(value).unwrap()
 }
 
-pub fn player_image_meta() -> AssetMeta {
+pub fn player_image_meta() -> ImageAssetMeta {
     image_meta(
         "3c7c5be4-fd4e-4b65-b8d4-c671f5982186",
         "textures/player.png",
     )
 }
 
-pub fn image_meta(stable_id: &str, path: &str) -> AssetMeta {
+pub fn image_meta(stable_id: &str, path: &str) -> ImageAssetMeta {
     AssetMeta::new(
-        StableAssetId::parse_str(stable_id).unwrap(),
-        AssetPath::new(path).unwrap(),
-        AssetSourceKind::Image,
+        AssetMetaIdentity::new(
+            StableAssetId::parse_str(stable_id).unwrap(),
+            AssetPath::new(path).unwrap(),
+            AssetSourceKind::Image,
+        ),
+        ImageImportSettings::default(),
     )
 }
 

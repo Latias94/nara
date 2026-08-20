@@ -26,7 +26,9 @@ use nara_app::{
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_app::{RuntimeControl, RuntimeControlRequestResult};
-use nara_asset::{AssetMeta, AssetPath, AssetRef, StableAssetId};
+use nara_asset::{
+    AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+};
 use nara_diagnostic::DiagnosticValueRef;
 use nara_ecs::{Res, Resource, error::BevyError, schedule::IntoScheduleConfigs};
 use nara_fs::{
@@ -34,6 +36,7 @@ use nara_fs::{
 };
 use nara_gameplay::{GameplayCommandPlugin, GameplayCommandQueue};
 use nara_identity::{EntityLookup, WorldIdentityDomain};
+use nara_image::ImageImportSettings;
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_reflect::AuthoringSchemaBundleOwner;
 #[cfg(feature = "tooling")]
@@ -4549,9 +4552,12 @@ requested = ["runtime-2d"]
         )
         .unwrap();
         let meta = AssetMeta::new(
-            StableAssetId::parse_str("3c7c5be4-fd4e-4b65-b8d4-c671f5982186").unwrap(),
-            AssetPath::new("textures/player.png").unwrap(),
-            AssetSourceKind::Image,
+            AssetMetaIdentity::new(
+                StableAssetId::parse_str("3c7c5be4-fd4e-4b65-b8d4-c671f5982186").unwrap(),
+                AssetPath::new("textures/player.png").unwrap(),
+                AssetSourceKind::Image,
+            ),
+            ImageImportSettings::default(),
         );
         fs::write(
             project.root.join("assets/textures/player.png.meta"),

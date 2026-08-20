@@ -44,13 +44,13 @@ impl AssetSourceKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct AssetMeta {
-    pub stable_id: StableAssetId,
-    pub path: AssetPath,
-    pub source_kind: AssetSourceKind,
+pub struct AssetMetaIdentity {
+    stable_id: StableAssetId,
+    path: AssetPath,
+    source_kind: AssetSourceKind,
 }
 
-impl AssetMeta {
+impl AssetMetaIdentity {
     #[must_use]
     pub const fn new(
         stable_id: StableAssetId,
@@ -62,6 +62,28 @@ impl AssetMeta {
             path,
             source_kind,
         }
+    }
+
+    #[must_use]
+    pub const fn stable_id(&self) -> StableAssetId {
+        self.stable_id
+    }
+
+    #[must_use]
+    pub const fn path(&self) -> &AssetPath {
+        &self.path
+    }
+
+    #[must_use]
+    pub const fn source_kind(&self) -> &AssetSourceKind {
+        &self.source_kind
+    }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn retained_bytes(&self) -> Option<usize> {
+        self.path
+            .retained_bytes()
+            .checked_add(self.source_kind.retained_bytes())
     }
 }
 
@@ -108,19 +130,40 @@ impl AssetRecord {
     }
 }
 
-impl From<AssetMeta> for AssetRecord {
-    fn from(meta: AssetMeta) -> Self {
-        Self::new(meta.stable_id, meta.path, meta.source_kind)
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+pub struct AssetMeta<TSettings> {
+    asset: AssetMetaIdentity,
+    settings: TSettings,
+}
+
+impl<TSettings> AssetMeta<TSettings> {
+    #[must_use]
+    pub const fn new(asset: AssetMetaIdentity, settings: TSettings) -> Self {
+        Self { asset, settings }
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &AssetMetaIdentity {
+        &self.asset
+    }
+
+    #[must_use]
+    pub const fn settings(&self) -> &TSettings {
+        &self.settings
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (AssetMetaIdentity, TSettings) {
+        (self.asset, self.settings)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MissingMetaPolicy {
-    Diagnose,
-    Generate {
-        stable_id: StableAssetId,
-        source_kind: AssetSourceKind,
-    },
+impl From<AssetMetaIdentity> for AssetRecord {
+    fn from(identity: AssetMetaIdentity) -> Self {
+        Self::new(identity.stable_id, identity.path, identity.source_kind)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,9 +183,6 @@ pub enum AssetDatabaseError {
     MetaPathMismatch {
         source_path: AssetPath,
         meta_path: AssetPath,
-    },
-    MissingMeta {
-        path: AssetPath,
     },
     UnknownPath(AssetPath),
     UnknownStableId(StableAssetId),
@@ -179,7 +219,6 @@ impl Display for AssetDatabaseError {
                 formatter,
                 "asset meta path '{meta_path}' does not match source path '{source_path}'"
             ),
-            Self::MissingMeta { path } => write!(formatter, "asset path '{path}' is missing .meta"),
             Self::UnknownPath(path) => write!(formatter, "asset path '{path}' is not registered"),
             Self::UnknownStableId(id) => {
                 write!(formatter, "stable asset id '{id}' is not registered")
@@ -203,39 +242,19 @@ pub struct ProjectAssetDatabase {
 }
 
 impl ProjectAssetDatabase {
-    pub fn insert_source_with_meta_policy(
+    pub fn insert_identity(
         &mut self,
         source_path: AssetPath,
-        meta: Option<AssetMeta>,
-        missing_meta_policy: MissingMetaPolicy,
+        identity: AssetMetaIdentity,
     ) -> Result<(), AssetDatabaseError> {
-        match meta {
-            Some(meta) => self.insert_meta(source_path, meta),
-            None => match missing_meta_policy {
-                MissingMetaPolicy::Diagnose => {
-                    Err(AssetDatabaseError::MissingMeta { path: source_path })
-                }
-                MissingMetaPolicy::Generate {
-                    stable_id,
-                    source_kind,
-                } => self.insert(AssetRecord::new(stable_id, source_path, source_kind)),
-            },
-        }
-    }
-
-    pub fn insert_meta(
-        &mut self,
-        source_path: AssetPath,
-        meta: AssetMeta,
-    ) -> Result<(), AssetDatabaseError> {
-        if source_path != meta.path {
+        if source_path != identity.path {
             return Err(AssetDatabaseError::MetaPathMismatch {
                 source_path,
-                meta_path: meta.path,
+                meta_path: identity.path,
             });
         }
 
-        self.insert(meta.into())
+        self.insert(identity.into())
     }
 
     pub fn insert(&mut self, record: AssetRecord) -> Result<(), AssetDatabaseError> {

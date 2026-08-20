@@ -5,7 +5,9 @@ use std::{
     sync::Arc,
 };
 
-use nara_asset::{AssetPath, ImportArtifactRecord, SourceHash, StableAssetId};
+use nara_asset::{AssetPath, ImportArtifactRecord, ImportSettingsHash, SourceHash, StableAssetId};
+
+use crate::ImageImportSettings;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -42,33 +44,35 @@ impl ImageExtent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ImageSourceMetadata {
-    stable_id: StableAssetId,
     path: AssetPath,
-    source_hash: SourceHash,
+    settings: ImageImportSettings,
     artifact: ImportArtifactRecord,
 }
 
 impl ImageSourceMetadata {
-    #[must_use]
     pub fn new(
-        stable_id: StableAssetId,
         path: AssetPath,
-        source_hash: SourceHash,
+        settings: ImageImportSettings,
         artifact: ImportArtifactRecord,
-    ) -> Self {
-        Self {
-            stable_id,
-            path,
-            source_hash,
-            artifact,
+    ) -> Result<Self, ImageSourceMetadataCreateError> {
+        let expected = settings.settings_hash();
+        let actual = artifact.key().settings_hash();
+        if actual != expected {
+            return Err(ImageSourceMetadataCreateError::SettingsHashMismatch { expected, actual });
         }
+
+        Ok(Self {
+            path,
+            settings,
+            artifact,
+        })
     }
 
     #[must_use]
     pub const fn stable_id(&self) -> StableAssetId {
-        self.stable_id
+        self.artifact.key().stable_id()
     }
 
     #[must_use]
@@ -78,7 +82,12 @@ impl ImageSourceMetadata {
 
     #[must_use]
     pub const fn source_hash(&self) -> SourceHash {
-        self.source_hash
+        self.artifact.key().source_hash()
+    }
+
+    #[must_use]
+    pub const fn settings(&self) -> ImageImportSettings {
+        self.settings
     }
 
     #[must_use]
@@ -87,12 +96,51 @@ impl ImageSourceMetadata {
     }
 }
 
+/// Failure to compose image source metadata from one self-consistent typed recipe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageSourceMetadataCreateError {
+    /// The artifact was authenticated from settings other than the supplied typed settings.
+    SettingsHashMismatch {
+        expected: ImportSettingsHash,
+        actual: ImportSettingsHash,
+    },
+}
+
+impl Display for ImageSourceMetadataCreateError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SettingsHashMismatch { .. } => formatter
+                .write_str("image artifact settings hash does not match typed import settings"),
+        }
+    }
+}
+
+impl Error for ImageSourceMetadataCreateError {}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for ImageSourceMetadata {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ImageSourceMetadataWire {
+            path: AssetPath,
+            settings: ImageImportSettings,
+            artifact: ImportArtifactRecord,
+        }
+
+        let wire = ImageSourceMetadataWire::deserialize(deserializer)?;
+        Self::new(wire.path, wire.settings, wire.artifact).map_err(serde::de::Error::custom)
+    }
+}
+
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ImageAsset {
     source: ImageSourceMetadata,
     extent: ImageExtent,
     format: ImageFormat,
-    color_space: ImageColorSpace,
     #[cfg_attr(feature = "serde", serde(serialize_with = "shared_bytes::serialize"))]
     pixels: Arc<Box<[u8]>>,
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -108,7 +156,6 @@ impl ImageAsset {
         source: ImageSourceMetadata,
         extent: ImageExtent,
         format: ImageFormat,
-        color_space: ImageColorSpace,
         pixels: Vec<u8>,
     ) -> Result<Self, ImageAssetCreateError> {
         Self::validate_rgba_bytes(extent, format, pixels.len())?;
@@ -116,7 +163,6 @@ impl ImageAsset {
             source,
             extent,
             format,
-            color_space,
             pixels: Arc::new(pixels.into_boxed_slice()),
             retention: None,
         })
@@ -144,7 +190,6 @@ impl ImageAsset {
             source: self.source.clone(),
             extent: self.extent,
             format: self.format,
-            color_space: self.color_space,
             pixels: Arc::clone(&self.pixels),
             retention: Some(Arc::clone(self.retention.as_ref()?)),
         })
@@ -167,7 +212,7 @@ impl ImageAsset {
 
     #[must_use]
     pub const fn color_space(&self) -> ImageColorSpace {
-        self.color_space
+        self.source.settings().color_space()
     }
 
     #[must_use]
@@ -258,7 +303,6 @@ impl PartialEq for ImageAsset {
         self.source == other.source
             && self.extent == other.extent
             && self.format == other.format
-            && self.color_space == other.color_space
             && self.pixels == other.pixels
     }
 }
@@ -290,19 +334,12 @@ impl<'de> serde::Deserialize<'de> for ImageAsset {
             source: ImageSourceMetadata,
             extent: ImageExtent,
             format: ImageFormat,
-            color_space: ImageColorSpace,
             pixels: Vec<u8>,
         }
 
         let wire = <ImageAssetWire as serde::Deserialize>::deserialize(deserializer)?;
-        Self::new(
-            wire.source,
-            wire.extent,
-            wire.format,
-            wire.color_space,
-            wire.pixels,
-        )
-        .map_err(serde::de::Error::custom)
+        Self::new(wire.source, wire.extent, wire.format, wire.pixels)
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -313,7 +350,7 @@ impl fmt::Debug for ImageAsset {
             .field("source", &self.source)
             .field("extent", &self.extent)
             .field("format", &self.format)
-            .field("color_space", &self.color_space)
+            .field("color_space", &self.color_space())
             .field("pixel_len", &self.pixels.len())
             .field("retained", &self.retention.is_some())
             .finish()

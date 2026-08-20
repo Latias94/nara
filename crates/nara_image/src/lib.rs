@@ -10,10 +10,11 @@ mod limits;
 #[cfg(any(feature = "render-prepare", test))]
 mod prepare;
 mod reload;
+mod settings;
 
 pub use asset::{
     ImageAsset, ImageAssetCreateError, ImageColorSpace, ImageExtent, ImageFormat,
-    ImageSourceMetadata,
+    ImageSourceMetadata, ImageSourceMetadataCreateError,
 };
 pub use budget::{ImageImportBudgetHost, ImageImportBudgetSnapshot};
 pub use import::{
@@ -36,6 +37,7 @@ pub use reload::{
     IMAGE_PLUGIN_DECLARATION, IMAGE_PLUGIN_ID, ImagePlugin, ImageReloadError, ImageReloadStats,
     plugin,
 };
+pub use settings::ImageImportSettings;
 
 #[cfg(test)]
 mod tests;

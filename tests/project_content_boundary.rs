@@ -4,7 +4,7 @@ mod project_content_fixture;
 
 #[cfg(all(feature = "serde", feature = "runtime-2d"))]
 use nara::{
-    asset::{AssetPath, AssetRef, AssetSourceKind, StableAssetId},
+    asset::{AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId},
     diagnostic::{DiagnosticFieldClass, DiagnosticValueRef},
     project_host::{ProjectContentError, ProjectContentErrorKind, ProjectContentLoader},
     reflect::{ComponentSchemaVersion, ComponentTypeId, ComponentValue},
@@ -136,11 +136,19 @@ fn document_catalog_mismatch_rejects_without_partial_publication() {
 }
 
 #[test]
-fn image_metadata_must_match_the_referenced_path_and_source_kind() {
+fn image_metadata_must_match_the_referenced_path_kind_and_typed_recipe() {
     let path_mismatch = TestProject::with_prefab_startup();
     let (candidate, plan, root) = path_mismatch.candidate_plan_and_root();
-    let mut meta = player_image_meta();
-    meta.path = AssetPath::new("textures/other.png").unwrap();
+    let meta = player_image_meta();
+    let (identity, settings) = meta.into_parts();
+    let meta = AssetMeta::new(
+        AssetMetaIdentity::new(
+            identity.stable_id(),
+            AssetPath::new("textures/other.png").unwrap(),
+            identity.source_kind().clone(),
+        ),
+        settings,
+    );
     path_mismatch.write_player_image_meta(&meta);
     let loader = ProjectContentLoader::new(root).unwrap();
     let error = loader.load(&candidate, &plan).unwrap_err();
@@ -149,12 +157,35 @@ fn image_metadata_must_match_the_referenced_path_and_source_kind() {
 
     let kind_mismatch = TestProject::with_prefab_startup();
     let (candidate, plan, root) = kind_mismatch.candidate_plan_and_root();
-    let mut meta = player_image_meta();
-    meta.source_kind = AssetSourceKind::Other("binary".to_owned());
+    let meta = player_image_meta();
+    let (identity, settings) = meta.into_parts();
+    let meta = AssetMeta::new(
+        AssetMetaIdentity::new(
+            identity.stable_id(),
+            identity.path().clone(),
+            AssetSourceKind::Other("binary".to_owned()),
+        ),
+        settings,
+    );
     kind_mismatch.write_player_image_meta(&meta);
     let loader = ProjectContentLoader::new(root).unwrap();
     let error = loader.load(&candidate, &plan).unwrap_err();
     assert_eq!(error.kind(), ProjectContentErrorKind::UnsupportedAssetKind);
+    assert_eq!(loader.budget_snapshot().active_reservations(), 0);
+
+    let invalid_recipe = TestProject::with_prefab_startup();
+    let (candidate, plan, root) = invalid_recipe.candidate_plan_and_root();
+    let meta_path = invalid_recipe
+        .path()
+        .join("assets/textures/player.png.meta");
+    let mut encoded =
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&meta_path).unwrap()).unwrap();
+    encoded["payload"]["settings"]["color_space"] =
+        serde_json::Value::String("display_p3".to_owned());
+    std::fs::write(&meta_path, serde_json::to_vec_pretty(&encoded).unwrap()).unwrap();
+    let loader = ProjectContentLoader::new(root).unwrap();
+    let error = loader.load(&candidate, &plan).unwrap_err();
+    assert_eq!(error.kind(), ProjectContentErrorKind::AssetMeta);
     assert_eq!(loader.budget_snapshot().active_reservations(), 0);
 }
 

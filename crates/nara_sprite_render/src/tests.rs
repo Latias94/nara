@@ -8,8 +8,7 @@ use nara_app::{
 use nara_asset::{
     ArtifactFormatVersion, ArtifactLabel, AssetEvents, AssetId, AssetPath, AssetStates,
     AssetVersion, Assets, Handle, ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest,
-    ImportProfile, ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion, SourceHash,
-    StableAssetId,
+    ImportProfile, ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource, World, schedule::IntoScheduleConfigs};
@@ -18,7 +17,7 @@ use nara_hierarchy::{
     HierarchyWriter,
 };
 use nara_image::{
-    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata,
+    ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
     PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
 };
 use nara_material::{AlphaMode2d, SamplerDescriptor};
@@ -1018,7 +1017,7 @@ fn test_image() -> ImageAsset {
         ImportDependencyDigest::empty(),
         ImporterId::new("nara-image").unwrap(),
         ImporterVersion::new(1),
-        ImportSettingsHash::default(),
+        ImageImportSettings::default().settings_hash(),
         ImportProfile::default(),
         ImportedAssetType::new("image").unwrap(),
         ArtifactLabel::default(),
@@ -1026,16 +1025,15 @@ fn test_image() -> ImageAsset {
     );
     let artifact = ImportArtifactRecord::new(key).unwrap();
     let source = ImageSourceMetadata::new(
-        stable_id,
         AssetPath::new("textures/test.png").unwrap(),
-        source_hash,
+        ImageImportSettings::default(),
         artifact,
-    );
+    )
+    .unwrap();
     ImageAsset::new(
         source,
         ImageExtent::new(2, 2),
         ImageFormat::Rgba8,
-        ImageColorSpace::Srgb,
         vec![255; 16],
     )
     .unwrap()

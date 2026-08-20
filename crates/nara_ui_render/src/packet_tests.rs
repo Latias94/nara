@@ -3,10 +3,10 @@ use std::sync::Arc;
 use nara_asset::{
     ArtifactFormatVersion, ArtifactLabel, AssetId, AssetPath, AssetVersion, Assets, Handle,
     ImportArtifactKey, ImportArtifactRecord, ImportDependencyDigest, ImportProfile,
-    ImportSettingsHash, ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
+    ImportedAssetType, ImporterId, ImporterVersion, SourceHash, StableAssetId,
 };
 use nara_image::{
-    ImageAsset, ImageColorSpace, ImageExtent, ImageFormat, ImageSourceMetadata,
+    ImageAsset, ImageExtent, ImageFormat, ImageImportSettings, ImageSourceMetadata,
     PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
 };
 use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget};
@@ -91,7 +91,7 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
         ImportDependencyDigest::empty(),
         ImporterId::new("nara-ui-planner-test").unwrap(),
         ImporterVersion::new(1),
-        ImportSettingsHash::default(),
+        ImageImportSettings::default().settings_hash(),
         ImportProfile::default(),
         ImportedAssetType::new("image").unwrap(),
         ArtifactLabel::default(),
@@ -100,14 +100,13 @@ fn captured_image_snapshot() -> PreparedImageSnapshot {
     .unwrap();
     let image = ImageAsset::new(
         ImageSourceMetadata::new(
-            stable_id,
             AssetPath::new("ui/planner.png").unwrap(),
-            source_hash,
+            ImageImportSettings::default(),
             artifact,
-        ),
+        )
+        .unwrap(),
         ImageExtent::new(1, 1),
         ImageFormat::Rgba8,
-        ImageColorSpace::Srgb,
         vec![240, 16, 120, 255],
     )
     .unwrap();

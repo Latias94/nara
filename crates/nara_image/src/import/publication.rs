@@ -7,7 +7,7 @@ use nara_asset::{
 
 use crate::budget::{ImageImportCharge, ImageImportReservation};
 use crate::limits::{ImageImportBudgetError, ImageImportMemoryPlan};
-use crate::{ImageAsset, ImageImportLimitKind};
+use crate::{ImageAsset, ImageImportLimitKind, ImageImportSettings};
 
 use super::{ImageImportError, ImageImportStage, ImagePublicationFailureKind};
 
@@ -21,9 +21,13 @@ enum PreviousImageSlot {
 }
 
 impl PreviousImageSlot {
-    fn capture(handle: Handle<ImageAsset>, images: &Assets<ImageAsset>) -> Self {
+    fn capture_observed(
+        handle: Handle<ImageAsset>,
+        previous: Option<&ImageAsset>,
+        images: &Assets<ImageAsset>,
+    ) -> Self {
         let revision = images.slot_revision(handle);
-        match images.get(handle) {
+        match previous {
             Some(image) => Self::Occupied {
                 revision,
                 rgba_bytes: image.pixels().len(),
@@ -90,13 +94,45 @@ impl ImagePublicationSnapshot {
         images: &Assets<ImageAsset>,
         states: &AssetStates,
     ) -> Self {
+        Self::capture_observed(
+            source,
+            handle,
+            expected_version,
+            images.get(handle),
+            images,
+            states,
+        )
+    }
+
+    fn capture_observed(
+        source: &AssetRecord,
+        handle: Handle<ImageAsset>,
+        expected_version: AssetVersion,
+        previous: Option<&ImageAsset>,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> Self {
         Self {
             handle,
             source_stable_id: source.stable_id(),
             expected_version,
             expected_state_revision: states.state_revision(handle.id()),
-            previous_slot: PreviousImageSlot::capture(handle, images),
+            previous_slot: PreviousImageSlot::capture_observed(handle, previous, images),
         }
+    }
+
+    pub(crate) fn capture_with_settings(
+        source: &AssetRecord,
+        handle: Handle<ImageAsset>,
+        expected_version: AssetVersion,
+        images: &Assets<ImageAsset>,
+        states: &AssetStates,
+    ) -> (Self, Option<ImageImportSettings>) {
+        let previous = images.get(handle);
+        let settings = previous.map(|image| image.source().settings());
+        let snapshot =
+            Self::capture_observed(source, handle, expected_version, previous, images, states);
+        (snapshot, settings)
     }
 
     pub(super) fn admit(

@@ -9,15 +9,15 @@ use std::{
 
 use nara_asset::{
     AssetPath, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion, Assets,
-    ImportDependencyDigest, ImportProfile, ImportSettingsHash, StableAssetId,
+    StableAssetId,
 };
 use nara_core::ByteLimit;
 use nara_fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode};
 use nara_image::{
     AdmittedImageImport, ImageBytesImportRequest, ImageFileImportRequest, ImageImportBudgetHost,
     ImageImportBudgetSnapshot, ImageImportError, ImageImportLimitKind, ImageImportLimits,
-    ImageImportStage, ImageImportedAsset, ImageImporter, ImagePngFailureKind, ImageSourceDirectory,
-    ImageUnsupportedFeature,
+    ImageImportSettings, ImageImportStage, ImageImportedAsset, ImageImporter, ImagePngFailureKind,
+    ImageSourceDirectory, ImageUnsupportedFeature,
 };
 use nara_tasks::{
     TaskCancellationToken, TaskDomainKey, TaskPoolConfig, TaskPoolKind, TaskPools,
@@ -453,13 +453,7 @@ fn import_file(
     let states = AssetStates::default();
     importer
         .admit_file(
-            ImageFileImportRequest::new(
-                record,
-                file,
-                ImportDependencyDigest::empty(),
-                ImportSettingsHash::default(),
-                ImportProfile::default(),
-            ),
+            ImageFileImportRequest::new(record, file, ImageImportSettings::default()),
             handle,
             AssetVersion::ZERO,
             &server,
@@ -480,13 +474,7 @@ fn admit_file(
         .reserve_record::<nara_image::ImageAsset>(&record)
         .unwrap();
     importer.admit_file(
-        ImageFileImportRequest::new(
-            record,
-            file,
-            ImportDependencyDigest::empty(),
-            ImportSettingsHash::default(),
-            ImportProfile::default(),
-        ),
+        ImageFileImportRequest::new(record, file, ImageImportSettings::default()),
         handle,
         AssetVersion::ZERO,
         &server,
@@ -522,9 +510,7 @@ fn import_request(record: &AssetRecord, bytes: &[u8]) -> ImageBytesImportRequest
     ImageBytesImportRequest::new(
         record.clone(),
         bytes.to_vec().into_boxed_slice(),
-        ImportDependencyDigest::empty(),
-        ImportSettingsHash::default(),
-        ImportProfile::default(),
+        ImageImportSettings::default(),
     )
 }
 

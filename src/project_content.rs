@@ -13,8 +13,7 @@ use std::{
 };
 
 use nara_asset::{
-    AssetMetaCandidate, AssetPath, AssetRecord, AssetRef, AssetSourceKind, ImportDependencyDigest,
-    ImportProfile, ImportSettingsHash, ProjectAssetDatabase,
+    AssetMetaCandidate, AssetPath, AssetRecord, AssetRef, AssetSourceKind, ProjectAssetDatabase,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, DiagnosticReport,
@@ -22,8 +21,8 @@ use nara_diagnostic::{
 };
 use nara_fs::{ContentDigest, DirectoryCapability, FsError, FsOperation, RelativePath};
 use nara_image::{
-    ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan, ImageImporter,
-    ImageImporterCreateError,
+    ImageAsset, ImageBytesImportRequest, ImageImportError, ImageImportMemoryPlan,
+    ImageImportSettings, ImageImporter, ImageImporterCreateError,
 };
 use nara_reflect::__private::{
     ComponentRegistrySnapshotWitness, component_registry_snapshot_witness,
@@ -1440,7 +1439,7 @@ impl<'a> LoadContext<'a> {
             &meta_path,
             meta_digest,
         )?;
-        let meta = AssetMetaCandidate::decode_json_bytes(&meta_bytes)
+        let meta = AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(&meta_bytes)
             .map_err(|_| {
                 ProjectContentError::with_identifier(
                     ProjectContentErrorKind::AssetMeta,
@@ -1451,7 +1450,7 @@ impl<'a> LoadContext<'a> {
                 )
             })?
             .into_meta();
-        if &meta.path != path {
+        if meta.identity().path() != path {
             return Err(ProjectContentError::with_identifier(
                 ProjectContentErrorKind::AssetMetaMismatch,
                 "project.content.asset-meta-path-mismatch",
@@ -1460,7 +1459,7 @@ impl<'a> LoadContext<'a> {
                 path.as_str(),
             ));
         }
-        if meta.source_kind != AssetSourceKind::Image {
+        if meta.identity().source_kind() != &AssetSourceKind::Image {
             return Err(ProjectContentError::with_identifier(
                 ProjectContentErrorKind::UnsupportedAssetKind,
                 "project.content.asset-kind-unsupported",
@@ -1469,16 +1468,19 @@ impl<'a> LoadContext<'a> {
                 path.as_str(),
             ));
         }
-        let record = AssetRecord::from(meta);
-        self.asset_database.insert(record.clone()).map_err(|_| {
-            ProjectContentError::with_identifier(
-                ProjectContentErrorKind::AssetMetaMismatch,
-                "project.content.asset-identity-conflict",
-                "Project asset identity conflicts within the startup closure",
-                "asset",
-                path.as_str(),
-            )
-        })?;
+        let (identity, settings) = meta.into_parts();
+        self.asset_database
+            .insert_identity(path.clone(), identity.clone())
+            .map_err(|_| {
+                ProjectContentError::with_identifier(
+                    ProjectContentErrorKind::AssetMetaMismatch,
+                    "project.content.asset-identity-conflict",
+                    "Project asset identity conflicts within the startup closure",
+                    "asset",
+                    path.as_str(),
+                )
+            })?;
+        let record = AssetRecord::from(identity);
         let ceiling = self
             .loader
             .image_importer
@@ -1492,9 +1494,7 @@ impl<'a> LoadContext<'a> {
             .preflight_unpublished_import(ImageBytesImportRequest::new(
                 record,
                 source_bytes,
-                ImportDependencyDigest::empty(),
-                ImportSettingsHash::default(),
-                ImportProfile::default(),
+                settings,
             ))
             .map_err(map_image_import_error)?;
         let memory = import.memory_plan();

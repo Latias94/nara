@@ -891,7 +891,9 @@ mod tests {
     #[cfg(windows)]
     use std::fs::OpenOptions;
 
-    use nara_asset::{AssetMeta, AssetPath, AssetRef, AssetSourceKind, StableAssetId};
+    use nara_asset::{
+        AssetMeta, AssetMetaIdentity, AssetPath, AssetRef, AssetSourceKind, StableAssetId,
+    };
     use nara_fs::{CapabilityRights, HostCapabilityOptions, TrustMode};
     use nara_reflect::{
         AuthoringSchemaBundleOwner, ComponentCapability, ComponentFieldId, ComponentFieldPath,
@@ -1038,13 +1040,25 @@ mod tests {
 
     #[test]
     fn project_receipt_retains_declared_asset_metadata_and_source_bytes() {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct ImageSettingsFixture {
+            color_space: ImageColorSpaceFixture,
+        }
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum ImageColorSpaceFixture {
+            Linear,
+        }
+
         let owner = PersistentComponentSchemaOwnerId::try_new("nara.test.asset-owner").unwrap();
         let component = ComponentTypeId::new("nara.test.ImageLink");
         let bundle = asset_schema_bundle(owner.clone(), component.clone());
         let project = TestAuthoringProject::new("asset-closure", bundle);
         project.write_startup_manifest();
 
-        let asset_path = AssetPath::new("textures/icon.bin").unwrap();
+        let asset_path = AssetPath::new("textures/icon.png").unwrap();
         let source_bytes = b"authoring asset source";
         fs::create_dir_all(project.root.join("scenes")).unwrap();
         fs::create_dir_all(project.root.join("assets/textures")).unwrap();
@@ -1073,14 +1087,19 @@ mod tests {
             scene.to_json_string().unwrap(),
         )
         .unwrap();
-        fs::write(project.root.join("assets/textures/icon.bin"), source_bytes).unwrap();
+        fs::write(project.root.join("assets/textures/icon.png"), source_bytes).unwrap();
         let meta = AssetMeta::new(
-            StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
-            asset_path.clone(),
-            AssetSourceKind::Other("binary".to_owned()),
+            AssetMetaIdentity::new(
+                StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap(),
+                asset_path.clone(),
+                AssetSourceKind::Image,
+            ),
+            ImageSettingsFixture {
+                color_space: ImageColorSpaceFixture::Linear,
+            },
         );
         fs::write(
-            project.root.join("assets/textures/icon.bin.meta"),
+            project.root.join("assets/textures/icon.png.meta"),
             meta.to_json_string().unwrap(),
         )
         .unwrap();
@@ -1102,11 +1121,26 @@ mod tests {
         assert_eq!(snapshot.assets().len(), 1);
         let asset = &snapshot.assets()[0];
         assert_eq!(asset.path(), &asset_path);
-        assert_eq!(
-            asset.record().source_kind(),
-            &AssetSourceKind::Other("binary".to_owned())
-        );
+        assert_eq!(asset.record().source_kind(), &AssetSourceKind::Image);
         assert_eq!(asset.bytes(), source_bytes);
+        assert_eq!(
+            asset
+                .metadata()
+                .admit::<ImageSettingsFixture>()
+                .unwrap()
+                .settings(),
+            meta.settings()
+        );
+        #[cfg(feature = "runtime-2d")]
+        assert_eq!(
+            asset
+                .metadata()
+                .admit::<nara_image::ImageImportSettings>()
+                .unwrap()
+                .settings()
+                .color_space(),
+            nara_image::ImageColorSpace::Linear
+        );
         assert_eq!(
             asset.metadata_source().kind(),
             AuthoringSourceKind::AssetMetadata

@@ -2,8 +2,8 @@
 
 use crate::import::ImagePublicationSnapshot;
 use crate::{
-    ImageAsset, ImageColorSpace, ImageFileImportRequest, ImageImportBudgetHost, ImageImportError,
-    ImageImportLimits, ImageImportedAsset, ImageImporter, ImageImporterCreateError,
+    ImageAsset, ImageFileImportRequest, ImageImportBudgetHost, ImageImportError, ImageImportLimits,
+    ImageImportSettings, ImageImportedAsset, ImageImporter, ImageImporterCreateError,
     ImagePublicationFailureKind, ImageSourceDirectory,
 };
 
@@ -39,6 +39,7 @@ pub(super) const IMAGE_RELOAD_TASK_DOMAIN: TaskDomainKey =
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImageReloadError {
     MissingSourceDirectory,
+    MissingImportSettings,
     Import(ImageImportError),
     TaskRejected(TaskRejection),
     TaskCancelled(TaskCancellation),
@@ -51,6 +52,9 @@ impl Display for ImageReloadError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingSourceDirectory => formatter.write_str("image source authority is absent"),
+            Self::MissingImportSettings => {
+                formatter.write_str("image reload has no accepted import settings")
+            }
             Self::Import(error) => Display::fmt(error, formatter),
             Self::TaskRejected(_) => formatter.write_str("image import task was rejected"),
             Self::TaskCancelled(_) => formatter.write_str("image import task was cancelled"),
@@ -67,6 +71,7 @@ impl ImageReloadError {
     const fn stable_code(&self) -> &'static str {
         match self {
             Self::MissingSourceDirectory => "image.reload-source-authority-missing",
+            Self::MissingImportSettings => "image.reload-settings-missing",
             Self::Import(error) => error.stable_code(),
             Self::TaskRejected(_) => "image.reload-task-rejected",
             Self::TaskCancelled(_) => "image.reload-task-cancelled",
@@ -79,6 +84,7 @@ impl ImageReloadError {
     const fn safe_summary(&self) -> &'static str {
         match self {
             Self::MissingSourceDirectory => "Image source authority is absent",
+            Self::MissingImportSettings => "Image reload settings are absent",
             Self::Import(error) => error.safe_summary(),
             Self::TaskRejected(_) => "Image import task was rejected",
             Self::TaskCancelled(_) => "Image import task was cancelled",
@@ -232,6 +238,7 @@ enum ReadyImageImportOutcome {
 pub(super) struct ImageReloadAttempt {
     request: AssetReloadRequest,
     publication: ImagePublicationSnapshot,
+    settings: Option<ImageImportSettings>,
 }
 
 impl ImageReloadAttempt {
@@ -240,9 +247,10 @@ impl ImageReloadAttempt {
         images: &Assets<ImageAsset>,
         states: &AssetStates,
     ) -> Self {
-        let publication = ImagePublicationSnapshot::capture(
+        let handle = Handle::<ImageAsset>::new(request.asset_id());
+        let (publication, settings) = ImagePublicationSnapshot::capture_with_settings(
             &request.record(),
-            Handle::<ImageAsset>::new(request.asset_id()),
+            handle,
             request.expected_version(),
             images,
             states,
@@ -250,6 +258,7 @@ impl ImageReloadAttempt {
         Self {
             request,
             publication,
+            settings,
         }
     }
 
@@ -371,12 +380,6 @@ impl ImagePlugin {
     }
 
     #[must_use]
-    pub fn with_color_space(mut self, color_space: ImageColorSpace) -> Self {
-        self.importer = self.importer.with_color_space(color_space);
-        self
-    }
-
-    #[must_use]
     pub fn with_source_directory(mut self, source_directory: ImageSourceDirectory) -> Self {
         self.source_directory = Some(Arc::new(source_directory));
         self
@@ -473,23 +476,24 @@ fn spawn_image_reload_jobs(
             AssetReloadRequestKind::LoadOrReload => {
                 let record = attempt.request.record();
                 let asset_id = attempt.request.asset_id();
+                let settings = attempt
+                    .settings
+                    .ok_or(ImageReloadError::MissingImportSettings);
                 let admitted = source_directory
                     .ok_or(ImageReloadError::MissingSourceDirectory)
                     .and_then(|source_directory| {
+                        settings.map(|settings| (source_directory, settings))
+                    })
+                    .and_then(|(source_directory, settings)| {
                         source_directory
                             .open(&record)
+                            .map(|file| (file, settings))
                             .map_err(ImageReloadError::Import)
                     })
-                    .and_then(|file| {
+                    .and_then(|(file, settings)| {
                         importer
                             .admit_file_with_snapshot(
-                                ImageFileImportRequest::new(
-                                    record.clone(),
-                                    file,
-                                    nara_asset::ImportDependencyDigest::empty(),
-                                    nara_asset::ImportSettingsHash::default(),
-                                    nara_asset::ImportProfile::default(),
-                                ),
+                                ImageFileImportRequest::new(record.clone(), file, settings),
                                 attempt.publication.clone(),
                                 &asset_server,
                                 &images,
@@ -749,7 +753,7 @@ pub(super) fn image_reload_diagnostic(path: &AssetPath, error: &ImageReloadError
     diagnostic = with_image_diagnostic_field(diagnostic, path_field);
 
     match error {
-        ImageReloadError::MissingSourceDirectory => {}
+        ImageReloadError::MissingSourceDirectory | ImageReloadError::MissingImportSettings => {}
         ImageReloadError::Import(error) => {
             diagnostic = with_image_public_identifier(diagnostic, "stage", error.stage().as_str());
             match error {

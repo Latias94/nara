@@ -4,7 +4,7 @@ use std::{
     str::FromStr,
 };
 
-use uuid::Uuid;
+use uuid::{Builder, Uuid};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AssetId(u64);
@@ -31,6 +31,12 @@ impl Debug for AssetId {
 pub struct StableAssetId(Uuid);
 
 impl StableAssetId {
+    pub fn try_random() -> Result<Self, StableAssetIdGenerationError> {
+        let mut bytes = [0_u8; 16];
+        getrandom::fill(&mut bytes).map_err(StableAssetIdGenerationError::new)?;
+        Ok(Self(Builder::from_random_bytes(bytes).into_uuid()))
+    }
+
     pub fn parse_str(id: impl AsRef<str>) -> Result<Self, StableAssetIdError> {
         Uuid::parse_str(id.as_ref())
             .map(Self)
@@ -45,6 +51,29 @@ impl StableAssetId {
     #[must_use]
     pub const fn as_uuid(self) -> Uuid {
         self.0
+    }
+}
+
+#[derive(Debug)]
+pub struct StableAssetIdGenerationError {
+    source: getrandom::Error,
+}
+
+impl StableAssetIdGenerationError {
+    const fn new(source: getrandom::Error) -> Self {
+        Self { source }
+    }
+}
+
+impl Display for StableAssetIdGenerationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("stable asset identity generation failed")
+    }
+}
+
+impl Error for StableAssetIdGenerationError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.source)
     }
 }
 

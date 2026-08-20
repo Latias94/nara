@@ -250,9 +250,7 @@ fn import_request(record: &AssetRecord, bytes: &[u8]) -> ImageBytesImportRequest
     ImageBytesImportRequest::new(
         record.clone(),
         bytes.to_vec().into_boxed_slice(),
-        ImportDependencyDigest::empty(),
-        ImportSettingsHash::default(),
-        ImportProfile::default(),
+        ImageImportSettings::default(),
     )
 }
 

@@ -164,16 +164,19 @@ impl ImageImporter {
         drop(reader);
 
         let artifact = self.import_record(&request)?;
+        let source = ImageSourceMetadata::new(
+            request.source().path().clone(),
+            request.settings(),
+            artifact,
+        )
+        .map_err(|_| ImageImportError::Png {
+            stage: ImageImportStage::Finalize,
+            kind: ImagePngFailureKind::DecoderContract,
+        })?;
         let image = ImageAsset::new(
-            ImageSourceMetadata::new(
-                request.source().stable_id(),
-                request.source().path().clone(),
-                request.source_hash(),
-                artifact,
-            ),
+            source,
             ImageExtent::new(width, height),
             ImageFormat::Rgba8,
-            self.color_space,
             rgba,
         )
         .map_err(|_| ImageImportError::Png {

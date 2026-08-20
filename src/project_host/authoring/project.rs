@@ -7,8 +7,8 @@ use std::{
 };
 
 use nara_asset::{
-    AssetDatabaseError, AssetMetaCandidate, AssetMetaFileLimits, AssetMetaFormatError, AssetPath,
-    AssetPathError, AssetRecord, AssetRef, AssetSourceKind, ProjectAssetDatabase,
+    AssetDatabaseError, AssetMetaFileLimits, AssetMetaFormatError, AssetMetaIdentityCandidate,
+    AssetPath, AssetPathError, AssetRecord, AssetRef, AssetSourceKind, ProjectAssetDatabase,
 };
 use nara_core::ByteLimit;
 use nara_fs::{
@@ -168,6 +168,7 @@ pub(crate) struct AuthoringPrefabSource {
 
 pub(crate) struct AuthoringAssetSource {
     record: AssetRecord,
+    metadata: AssetMetaIdentityCandidate,
     metadata_source: Arc<AuthoringSourceFact>,
     source: Arc<AuthoringSourceFact>,
     bytes: Arc<[u8]>,
@@ -182,6 +183,11 @@ impl AuthoringAssetSource {
     #[must_use]
     pub(crate) const fn record(&self) -> &AssetRecord {
         &self.record
+    }
+
+    #[must_use]
+    pub(crate) const fn metadata(&self) -> &AssetMetaIdentityCandidate {
+        &self.metadata
     }
 
     #[must_use]
@@ -852,34 +858,41 @@ impl PreparedAuthoringProject {
             )?;
             let exact_metadata_limit = ByteLimit::new(metadata_read.read_limit)
                 .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-            let meta = AssetMetaCandidate::decode_json_bytes_with_limits(
-                &metadata_read.bytes,
+            let metadata_encoded_bytes = metadata_read.bytes.len();
+            let metadata_source = metadata_read.source;
+            let metadata = AssetMetaIdentityCandidate::decode_json_bytes_owned_with_limits(
+                metadata_read.bytes.into_boxed_slice(),
                 metadata_limits.with_encoded_bytes(exact_metadata_limit),
             )
-            .map_err(
-                |source| AuthoringProjectSourceAdmissionError::AssetMetadataFormat {
+            .map_err(|source| {
+                AuthoringProjectSourceAdmissionError::AssetMetadataFormat {
                     path: path.clone(),
-                    source,
-                },
-            )?
-            .into_meta();
-            if meta.path != path {
-                return Err(
-                    AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
-                        requested: path,
-                        declared: meta.path,
-                    },
-                );
-            }
-            let record = AssetRecord::from(meta);
-            asset_database.insert(record.clone()).map_err(|source| {
-                AuthoringProjectSourceAdmissionError::AssetIdentity {
-                    path: record.path().clone(),
                     source,
                 }
             })?;
-            charge_asset_metadata(&metadata_read, &record, &mut self.schema.budget)?;
-            let metadata_source = Arc::clone(&metadata_read.source);
+            asset_database
+                .insert_identity(path.clone(), metadata.identity().clone())
+                .map_err(|source| match source {
+                    AssetDatabaseError::MetaPathMismatch {
+                        source_path,
+                        meta_path,
+                    } => AuthoringProjectSourceAdmissionError::AssetMetadataPathMismatch {
+                        requested: source_path,
+                        declared: meta_path,
+                    },
+                    source => AuthoringProjectSourceAdmissionError::AssetIdentity {
+                        path: path.clone(),
+                        source,
+                    },
+                })?;
+            let record = AssetRecord::from(metadata.identity().clone());
+            charge_asset_metadata(
+                &metadata_source,
+                metadata_encoded_bytes,
+                &metadata,
+                &record,
+                &mut self.schema.budget,
+            )?;
             identities.insert(metadata_source.identity(), LoadedIdentity::AssetMetadata);
             source_facts.insert(
                 metadata_source.project_path().as_str().to_owned(),
@@ -913,6 +926,7 @@ impl PreparedAuthoringProject {
                 record.path().clone(),
                 AuthoringAssetSource {
                     record,
+                    metadata,
                     metadata_source,
                     source,
                     bytes,
@@ -1094,15 +1108,18 @@ fn ensure_unclaimed_source_identity(
 }
 
 fn charge_asset_metadata(
-    metadata: &ReadAuthoringSource,
+    metadata_source: &AuthoringSourceFact,
+    encoded_bytes: usize,
+    candidate: &AssetMetaIdentityCandidate,
     record: &AssetRecord,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     let decoded_bytes = asset_record_retained_bytes(record)?;
     let retained_bytes = decoded_bytes
-        .checked_add(source_fact_retained_bytes(&metadata.source)?)
+        .checked_add(source_fact_retained_bytes(metadata_source)?)
+        .and_then(|total| total.checked_add(candidate.retained_bytes()?))
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
-    budget.charge_source_bytes(0, decoded_bytes, metadata.bytes.len(), retained_bytes)?;
+    budget.charge_source_bytes(0, decoded_bytes, encoded_bytes, retained_bytes)?;
     Ok(())
 }
 
