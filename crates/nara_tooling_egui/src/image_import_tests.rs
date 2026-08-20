@@ -162,6 +162,10 @@ fn image_import_state_table_uses_closed_status_and_button_rules() {
 #[test]
 fn last_good_status_labels_are_safe_and_specific() {
     assert_eq!(
+        freshness_status_label(EditorImageImportFreshness::SourceUnverified),
+        "Last-good image: Available; source not verified"
+    );
+    assert_eq!(
         freshness_status_label(EditorImageImportFreshness::SettingsChanged),
         "Last-good image: Available; settings changed"
     );

@@ -1840,7 +1840,7 @@ fn generic_editor_image_import_action_submits_the_exact_selected_detail() {
             stable_id: projected_id,
             version: projected_version,
             active_settings,
-            freshness: nara_tooling::EditorImageImportFreshness::DesiredStateUnavailable,
+            freshness: nara_tooling::EditorImageImportFreshness::SourceUnverified,
             ..
         } if projected_id == stable_id
             && projected_version == version
@@ -2039,6 +2039,221 @@ fn generic_editor_image_import_refresh_failure_retains_last_good_without_pending
                 .image_import_work_pending()
         );
     }
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn generic_editor_image_import_fallback_binds_freshness_and_attempt_to_the_selected_target() {
+    let project = TestProject::new("generic-image-import-target-bound-fallback");
+    fs::create_dir_all(project.root.join("assets/textures")).unwrap();
+    for file_name in ["first.png", "second.png"] {
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+            project.root.join("assets/textures").join(file_name),
+        )
+        .unwrap();
+    }
+
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
+            relative_path: Some(Arc::from("assets/textures/first.png")),
+        })
+    );
+    let first_frame = editor.drive_editor_frame(Duration::ZERO);
+    let first_action = first_frame
+        .image_import()
+        .expect("the first PNG publishes an import detail")
+        .submit_action(ToolingImageImportSettings::default());
+    editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            first_frame.revision(),
+            [EditorAction::ImageImport(first_action)],
+        ))
+        .unwrap();
+    let (stable_id, version) = match drive_image_import_to_terminal(&mut editor) {
+        super::editor::EditorImageImportState::Succeeded {
+            stable_id, version, ..
+        } => (stable_id, version),
+        other => panic!("the first image import did not succeed: {other:?}"),
+    };
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(editor.request_project_source_index_refresh());
+    drive_image_import_host_until_idle(&mut editor);
+    let unverified = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        unverified
+            .image_import()
+            .expect("a newer catalog cannot authenticate the previous source digest")
+            .availability(),
+        EditorImageImportAvailabilityView::LastGood {
+            freshness: nara_tooling::EditorImageImportFreshness::SourceUnverified,
+            ..
+        }
+    ));
+
+    assert!(
+        editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
+            relative_path: Some(Arc::from("assets/textures/second.png")),
+        })
+    );
+    let second_frame = editor.drive_editor_frame(Duration::ZERO);
+    let second_action = second_frame
+        .image_import()
+        .expect("the second PNG publishes an import detail")
+        .submit_action(ToolingImageImportSettings::default());
+    fs::remove_file(project.root.join("assets/textures/second.png")).unwrap();
+    let second_report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            second_frame.revision(),
+            [EditorAction::ImageImport(second_action)],
+        ))
+        .unwrap();
+    assert!(matches!(
+        second_report.outcomes(),
+        [EditorActionOutcome::ImageImport(
+            EditorImageImportActionOutcome::Completed {
+                attempt: EditorImageImportAttemptView::Failed { .. },
+            }
+        )]
+    ));
+
+    assert!(editor.request_project_source_index_refresh());
+    let mut reached_revalidation = false;
+    for _ in 0..1_024 {
+        if editor.project_source_index_progress().is_some_and(|progress| {
+            progress.phase()
+                == crate::project_host::authoring::ProjectSourceIndexDiagnosticPhase::LineageRevalidation
+        }) {
+            reached_revalidation = true;
+            break;
+        }
+        editor.drive_editor_frame(Duration::ZERO);
+    }
+    assert!(reached_revalidation);
+    fs::rename(
+        project.root.join("assets"),
+        project.root.join("assets-before-target-bound-refresh"),
+    )
+    .unwrap();
+    fs::create_dir(project.root.join("assets")).unwrap();
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(editor.project_source_index_failure().is_some());
+
+    assert!(
+        editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
+            relative_path: Some(Arc::from("assets/textures/first.png")),
+        })
+    );
+    let fallback = editor.drive_editor_frame(Duration::ZERO);
+    let detail = fallback
+        .image_import()
+        .expect("the first image retains one bounded fallback detail");
+    assert_eq!(detail.attempt(), EditorImageImportAttemptView::Idle);
+    assert!(matches!(
+        detail.availability(),
+        EditorImageImportAvailabilityView::LastGood {
+            stable_id: projected_id,
+            version: projected_version,
+            freshness: nara_tooling::EditorImageImportFreshness::DesiredStateUnavailable,
+            ..
+        } if projected_id == stable_id && projected_version == version
+    ));
+    assert!(!detail.can_submit());
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn generic_editor_image_import_exact_source_conflict_overrides_stale_catalog_freshness() {
+    let project = TestProject::new("generic-image-import-exact-source-conflict");
+    fs::create_dir_all(project.root.join("assets/textures")).unwrap();
+    let source = project.root.join("assets/textures/imported.png");
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+        &source,
+    )
+    .unwrap();
+
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    assert!(
+        editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
+            relative_path: Some(Arc::from("assets/textures/imported.png")),
+        })
+    );
+    let initial_frame = editor.drive_editor_frame(Duration::ZERO);
+    let initial_action = initial_frame
+        .image_import()
+        .expect("the selected PNG publishes an import detail")
+        .submit_action(ToolingImageImportSettings::default());
+    editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            initial_frame.revision(),
+            [EditorAction::ImageImport(initial_action)],
+        ))
+        .unwrap();
+    let (stable_id, version) = match drive_image_import_to_terminal(&mut editor) {
+        super::editor::EditorImageImportState::Succeeded {
+            stable_id, version, ..
+        } => (stable_id, version),
+        other => panic!("the initial image import did not succeed: {other:?}"),
+    };
+    drive_image_import_host_until_idle(&mut editor);
+
+    let catalog_generation = editor.project_source_index_snapshot().unwrap().generation();
+    let reimport_frame = editor.drive_editor_frame(Duration::ZERO);
+    let reimport_action = reimport_frame
+        .image_import()
+        .expect("the accepted image remains reimportable")
+        .submit_action(ToolingImageImportSettings::default());
+    fs::rename(
+        &source,
+        project.root.join("imported-before-exact-conflict.png"),
+    )
+    .unwrap();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+        &source,
+    )
+    .unwrap();
+
+    let report = editor
+        .dispatch_editor_actions(EditorActionBatch::new(
+            reimport_frame.revision(),
+            [EditorAction::ImageImport(reimport_action)],
+        ))
+        .unwrap();
+    assert!(matches!(
+        report.outcomes(),
+        [EditorActionOutcome::ImageImport(
+            EditorImageImportActionOutcome::Completed {
+                attempt: EditorImageImportAttemptView::Stale { .. },
+            }
+        )]
+    ));
+    assert_eq!(
+        editor.project_source_index_snapshot().unwrap().generation(),
+        catalog_generation
+    );
+
+    let conflicted = editor.drive_editor_frame(Duration::ZERO);
+    let detail = conflicted
+        .image_import()
+        .expect("the stale catalog still projects the selected last-good image");
+    assert!(matches!(
+        detail.attempt(),
+        EditorImageImportAttemptView::Stale { .. }
+    ));
+    assert!(matches!(
+        detail.availability(),
+        EditorImageImportAvailabilityView::LastGood {
+            stable_id: projected_id,
+            version: projected_version,
+            freshness: nara_tooling::EditorImageImportFreshness::SourceChanged,
+            ..
+        } if projected_id == stable_id && projected_version == version
+    ));
 }
 
 #[cfg(feature = "tooling")]

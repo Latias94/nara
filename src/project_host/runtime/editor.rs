@@ -874,7 +874,7 @@ impl EditorProjectSession {
     }
 
     #[cfg(test)]
-    pub(crate) const fn editor_image_import_state(&self) -> image_import::EditorImageImportState {
+    pub(crate) fn editor_image_import_state(&self) -> image_import::EditorImageImportState {
         self.image_import.state()
     }
 

@@ -11,7 +11,7 @@ use nara_tooling::{
     EditorImageImportView,
 };
 
-use crate::project_host::authoring::ProjectSourceIndexSnapshot;
+use crate::project_host::authoring::{ProjectSourceIndexGeneration, ProjectSourceIndexSnapshot};
 
 use super::{
     catalog::{EditorImageMetadataInvalidity, EditorImageMetadataStatus},
@@ -28,6 +28,17 @@ use crate::project_host::runtime::editor::authoring_runtime::{
 pub(crate) struct EditorImageImportProjection {
     frame: Option<EditorImageImportFrame>,
     view: EditorImageImportView,
+}
+
+#[derive(Clone, Copy)]
+enum EditorImageSourceObservation {
+    Verified {
+        identity: nara_fs::FileIdentity,
+        digest: nara_fs::ContentDigest,
+    },
+    Unverified,
+    Changed,
+    Unavailable,
 }
 
 impl EditorImageImportProjection {
@@ -48,9 +59,7 @@ impl EditorImageImportHost {
         if let Some(frame) = self.frame_for(source_index, relative_path) {
             return Some(self.project_catalog_detail(frame, runtime));
         }
-        let detail = self
-            .latest_detail()
-            .filter(|detail| detail.relative_path() == relative_path)?;
+        let detail = self.detail_for(relative_path)?;
         Some(self.project_accepted_detail(detail, runtime))
     }
 
@@ -93,23 +102,22 @@ impl EditorImageImportHost {
             | (None, EditorImageMetadataStatus::Invalid(_))
             | (None, EditorImageMetadataStatus::IdentityConflict { .. }) => None,
         };
+        let attempt = self.attempt_for(frame.relative_path());
         let availability = self.project_availability(
             entry.asset_path(),
-            entry.source_identity(),
+            entry
+                .source_identity()
+                .map(|identity| (identity, frame.source_index_generation())),
+            source_conflict_observed(attempt, Some(entry.metadata())),
             desired,
             runtime,
         );
-        let attempt = if self.latest_target() == Some(frame.relative_path()) {
-            project_attempt(self.state())
-        } else {
-            EditorImageImportAttemptView::Idle
-        };
         let view = EditorImageImportView::new(
             Arc::from(frame.relative_path()),
             EditorImageImportDetailRevision::new(frame.detail_revision()),
             metadata,
             availability,
-            attempt,
+            project_attempt(attempt),
             true,
         );
         EditorImageImportProjection {
@@ -138,9 +146,11 @@ impl EditorImageImportHost {
                 None,
             ),
         };
+        let attempt = self.attempt_for(detail.relative_path());
         let availability = self.project_availability(
             detail.asset_path(),
-            Some(detail.source_identity()),
+            None,
+            source_conflict_observed(attempt, None),
             desired,
             runtime,
         );
@@ -149,12 +159,7 @@ impl EditorImageImportHost {
             EditorImageImportDetailRevision::new(detail.detail_revision()),
             metadata,
             availability,
-            self.reconciliation_generation().map_or_else(
-                || project_attempt(self.state()),
-                |generation| EditorImageImportAttemptView::ReconcileRequired {
-                    generation: generation.get(),
-                },
-            ),
+            project_attempt(attempt),
             false,
         );
         EditorImageImportProjection { frame: None, view }
@@ -163,7 +168,8 @@ impl EditorImageImportHost {
     fn project_availability(
         &self,
         asset_path: &nara_asset::AssetPath,
-        desired_source_identity: Option<nara_fs::FileIdentity>,
+        current_source: Option<(nara_fs::FileIdentity, ProjectSourceIndexGeneration)>,
+        source_conflict_observed: bool,
         desired: Option<(nara_asset::StableAssetId, ImageImportSettings)>,
         runtime: &EditorAuthoringRuntime,
     ) -> EditorImageImportAvailabilityView {
@@ -179,23 +185,51 @@ impl EditorImageImportHost {
                 {
                     return None;
                 }
-                let freshness = match (desired_source_identity, desired) {
-                    (Some(source_identity), _)
-                        if source_identity != last_good.source_identity() =>
+                let source_observation = match current_source {
+                    _ if source_conflict_observed => EditorImageSourceObservation::Changed,
+                    Some((identity, _)) if identity != last_good.source_identity() => {
+                        EditorImageSourceObservation::Changed
+                    }
+                    Some((identity, generation))
+                        if generation == last_good.source_index_generation() =>
+                    {
+                        EditorImageSourceObservation::Verified {
+                            identity,
+                            digest: last_good.source_digest(),
+                        }
+                    }
+                    Some(_) => EditorImageSourceObservation::Unverified,
+                    None => EditorImageSourceObservation::Unavailable,
+                };
+                let freshness = match (source_observation, desired) {
+                    (EditorImageSourceObservation::Changed, _) => {
+                        EditorImageImportFreshness::SourceChanged
+                    }
+                    (EditorImageSourceObservation::Unverified, _) => {
+                        EditorImageImportFreshness::SourceUnverified
+                    }
+                    (EditorImageSourceObservation::Unavailable, _) => {
+                        EditorImageImportFreshness::DesiredStateUnavailable
+                    }
+                    (EditorImageSourceObservation::Verified { identity, digest }, _)
+                        if identity != last_good.source_identity()
+                            || digest != last_good.source_digest() =>
                     {
                         EditorImageImportFreshness::SourceChanged
                     }
-                    (Some(_), Some((stable_id, settings)))
-                        if stable_id == last_good.stable_id() =>
-                    {
+                    (
+                        EditorImageSourceObservation::Verified { .. },
+                        Some((stable_id, settings)),
+                    ) if stable_id == last_good.stable_id() => {
                         if settings.settings_hash() == last_good.settings_hash() {
                             EditorImageImportFreshness::Fresh
                         } else {
                             EditorImageImportFreshness::SettingsChanged
                         }
                     }
-                    (None, _) => EditorImageImportFreshness::SourceChanged,
-                    (Some(_), _) => EditorImageImportFreshness::DesiredStateUnavailable,
+                    (EditorImageSourceObservation::Verified { .. }, _) => {
+                        EditorImageImportFreshness::DesiredStateUnavailable
+                    }
                 };
                 let extent = image.extent();
                 Some(EditorImageImportAvailabilityView::LastGood {
@@ -209,6 +243,28 @@ impl EditorImageImportHost {
             })
             .unwrap_or(EditorImageImportAvailabilityView::Unavailable)
     }
+}
+
+fn source_conflict_observed(
+    attempt: EditorImageImportState,
+    metadata: Option<&EditorImageMetadataStatus>,
+) -> bool {
+    matches!(
+        attempt,
+        EditorImageImportState::Failed {
+            failure: EditorImageImportFailure::SourceUnavailable
+                | EditorImageImportFailure::SourceChanged
+                | EditorImageImportFailure::Runtime(EditorImageRuntimeFailure::SourceChanged),
+            ..
+        }
+    ) || matches!(
+        metadata,
+        Some(EditorImageMetadataStatus::Invalid(
+            EditorImageMetadataInvalidity::SourceIdentityUnavailable
+                | EditorImageMetadataInvalidity::SourceUnavailable
+                | EditorImageMetadataInvalidity::SourceIdentityDrift
+        ))
+    )
 }
 
 #[must_use]

@@ -238,6 +238,9 @@ fn metadata_status_label(metadata: EditorImageImportMetadataView) -> &'static st
 pub(crate) fn freshness_status_label(freshness: EditorImageImportFreshness) -> &'static str {
     match freshness {
         EditorImageImportFreshness::Fresh => "Last-good image: Current",
+        EditorImageImportFreshness::SourceUnverified => {
+            "Last-good image: Available; source not verified"
+        }
         EditorImageImportFreshness::SourceChanged => "Last-good image: Available; source changed",
         EditorImageImportFreshness::SettingsChanged => {
             "Last-good image: Available; settings changed"

@@ -126,6 +126,7 @@ impl EditorImageDimensions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorImageImportFreshness {
     Fresh,
+    SourceUnverified,
     SourceChanged,
     SettingsChanged,
     DesiredStateUnavailable,
