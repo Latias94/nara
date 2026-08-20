@@ -9,14 +9,19 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
-   plan is active only at EIR-U3 under
-   [registration `9e9c9d493c16435ab3eb1e7aedc12fb4`](../knowledge/engineering/registry/2026-08/2026-08-20T053930Z-editor-image-import-reimport-v1-codex-root-9e9c9d493c16435ab3eb1e7aedc12fb4.md).
+   plan is active only at EIR-U4 under
+   [registration `369ef53ed4104ca88f11a30a9449643b`](../knowledge/engineering/registry/2026-08/2026-08-20T094525Z-editor-image-import-reimport-v1-codex-root-369ef53ed4104ca88f11a30a9449643b.md).
    EIR-U0 accepted [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md).
    EIR-U1/EIR-U2 completed the typed recipe, strict-consumer, reload, and fixture migration at
    `334f946`, with the reviewed metadata-reload correction at `88f4a7a` and
    [verification `48b2b28ab1404017b7fe14ab2c335071`](../knowledge/engineering/verification/2026-08/2026-08-20T053914Z-eir-u1-u2-canonical-image-recipe-and-strict-consumer-migration-48b2b28ab1404017b7fe14ab2c335071.md).
-   EIR-U3 owns only the Host image catalog and import transaction; EIR-U4 through EIR-U6 and all
-   unrelated Editor successors remain inactive.
+   EIR-U3 completed the bounded Host image catalog and Import/Reimport transaction at `a0141e6`,
+   with exact retained-pixel accounting and retryable physical task retirement closed at `cb2e6c1`,
+   and no-presentation Runtime retirement wake closed at `c53b189`,
+   under
+   [verification `e6cb2cf25cdf4321a15368421154678d`](../knowledge/engineering/verification/2026-08/2026-08-20T094524Z-eir-u3-bounded-editor-image-import-and-reimport-transaction-e6cb2cf25cdf4321a15368421154678d.md).
+   EIR-U4 owns only the UI-neutral Inspector, private egui adapter, and native pending-work wake;
+   EIR-U5/EIR-U6 and all unrelated Editor successors remain inactive.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with
