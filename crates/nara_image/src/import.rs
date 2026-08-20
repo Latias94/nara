@@ -290,6 +290,28 @@ impl ImageSourceDirectory {
             .open_file(&path)
             .map_err(|error| map_fs_error(ImageImportStage::SourceOpen, error))
     }
+
+    #[cfg(feature = "serde")]
+    pub(crate) fn read_metadata_bytes(
+        &self,
+        record: &AssetRecord,
+    ) -> Result<Vec<u8>, ImageImportError> {
+        let path = RelativePath::new(record.path().meta_path()).map_err(|error| {
+            ImageImportError::Source {
+                stage: ImageImportStage::SourceOpen,
+                kind: map_path_error(error),
+            }
+        })?;
+        let file = self
+            .directory
+            .open_file(&path)
+            .map_err(|error| map_fs_error(ImageImportStage::SourceOpen, error))?;
+        let limit = nara_asset::AssetMetaFileLimits::default()
+            .encoded_bytes()
+            .get();
+        file.read_to_end_bounded(u64::try_from(limit).unwrap_or(u64::MAX))
+            .map_err(|error| map_fs_error(ImageImportStage::SourceRead, error))
+    }
 }
 
 impl Debug for ImageSourceDirectory {

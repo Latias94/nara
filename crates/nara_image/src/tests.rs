@@ -18,6 +18,8 @@ use nara_asset::{
     ImportDependencyDigest, ImportProfile, ImportedAssetType, ImporterId, ImporterVersion,
     LoadState, SourceHash, StableAssetId,
 };
+#[cfg(feature = "serde")]
+use nara_asset::{AssetMeta, AssetMetaIdentity};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{
     Diagnostic, DiagnosticFieldClass, DiagnosticReport, DiagnosticSeverity, DiagnosticValueRef,
@@ -288,6 +290,13 @@ fn image_reload_diagnostic_matrix_preserves_codes_and_typed_privacy_fields() {
             ImageReloadError::MissingSourceDirectory,
             "image.reload-source-authority-missing",
             "Image source authority is absent",
+            vec![],
+        ),
+        ImageDiagnosticCase::new(
+            "metadata-invalid",
+            ImageReloadError::MetadataInvalid,
+            "image.reload-metadata-invalid",
+            "Image metadata is invalid",
             vec![],
         ),
         ImageDiagnosticCase::new(
@@ -1561,6 +1570,117 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
             .len(),
         1
     );
+    assert_app_image_budget_released(&app);
+
+    remove_temp_root(&temp_root);
+}
+
+#[cfg(feature = "serde")]
+#[test]
+fn image_plugin_meta_reload_admits_changed_recipe_and_preserves_last_good_on_invalid_meta() {
+    let temp_root = unique_temp_root();
+    let texture_path = temp_root.join("textures").join("player.png");
+    let metadata_path = temp_root.join("textures").join("player.png.meta");
+    fs::create_dir_all(texture_path.parent().unwrap()).unwrap();
+    fs::write(&texture_path, rgba_png(1, 1, &[255, 0, 0, 255])).unwrap();
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(&temp_root, record.clone());
+    let importer = app.world().resource::<ImageImporter>().clone();
+    let (server, handle, images, states, events) = loaded_image_store_with_settings(
+        &importer,
+        &record,
+        &[255, 0, 0, 255],
+        ImageImportSettings::default(),
+    );
+    app.world_mut().unwrap().insert_resource(server);
+    app.world_mut().unwrap().insert_resource(images);
+    app.world_mut().unwrap().insert_resource(states);
+    app.world_mut().unwrap().insert_resource(events);
+
+    let last_good_version = app
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id())
+        .unwrap();
+    let last_good_hash = app
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .unwrap()
+        .source()
+        .artifact()
+        .key()
+        .settings_hash();
+    fs::write(&metadata_path, b"{ invalid metadata").unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .meta_modified(record.path().clone())
+        .unwrap();
+    drive_image_jobs(&mut app);
+
+    let image = app
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .unwrap();
+    assert_eq!(image.source().settings(), ImageImportSettings::default());
+    assert_eq!(image.color_space(), ImageColorSpace::Srgb);
+    assert_eq!(
+        image.source().artifact().key().settings_hash(),
+        last_good_hash
+    );
+    assert_eq!(
+        app.world().resource::<AssetStates>().version(handle.id()),
+        Some(last_good_version)
+    );
+    assert_eq!(app.world().resource::<ImageReloadStats>().failed, 1);
+    assert!(matches!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .load_state(),
+        LoadState::Failed { message } if message == "image.reload-metadata-invalid"
+    ));
+
+    let linear = ImageImportSettings::new(ImageColorSpace::Linear);
+    let metadata = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            record.path().clone(),
+            record.source_kind().clone(),
+        ),
+        linear,
+    );
+    fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .meta_modified(record.path().clone())
+        .unwrap();
+    drive_image_jobs(&mut app);
+
+    let image = app
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .unwrap();
+    assert_eq!(image.source().settings(), linear);
+    assert_eq!(image.color_space(), ImageColorSpace::Linear);
+    assert_eq!(
+        image.source().artifact().key().settings_hash(),
+        linear.settings_hash()
+    );
+    assert_ne!(
+        image.source().artifact().key().settings_hash(),
+        last_good_hash
+    );
+    assert_eq!(
+        app.world().resource::<AssetStates>().version(handle.id()),
+        Some(AssetVersion::from_raw(last_good_version.raw() + 1))
+    );
+    assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
     assert_app_image_budget_released(&app);
 
     remove_temp_root(&temp_root);

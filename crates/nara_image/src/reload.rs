@@ -15,11 +15,14 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError, RealTime};
+#[cfg(feature = "serde")]
+use nara_asset::AssetMetaIdentityCandidate;
 use nara_asset::{
     AssetEvents, AssetId, AssetLoadGenerations, AssetPath, AssetReloadDiagnostics,
-    AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer, AssetStateError,
-    AssetStates, AssetTaskUpdateSet, Assets, Handle, ImageReloadConsumer, ImageReloadDrainError,
-    ImageReloadRegistrationError, register_image_reload_consumer,
+    AssetReloadRequest, AssetReloadRequestKind, AssetReloadRequests, AssetServer,
+    AssetSourceChangeKind, AssetStateError, AssetStates, AssetTaskUpdateSet, Assets, Handle,
+    ImageReloadConsumer, ImageReloadDrainError, ImageReloadRegistrationError,
+    register_image_reload_consumer,
 };
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, PublicDiagnosticIdentifier,
@@ -40,6 +43,10 @@ pub(super) const IMAGE_RELOAD_TASK_DOMAIN: TaskDomainKey =
 pub enum ImageReloadError {
     MissingSourceDirectory,
     MissingImportSettings,
+    MetadataSupportUnavailable,
+    MetadataInvalid,
+    MetadataIdentityMismatch,
+    InvalidSourceChange,
     Import(ImageImportError),
     TaskRejected(TaskRejection),
     TaskCancelled(TaskCancellation),
@@ -54,6 +61,16 @@ impl Display for ImageReloadError {
             Self::MissingSourceDirectory => formatter.write_str("image source authority is absent"),
             Self::MissingImportSettings => {
                 formatter.write_str("image reload has no accepted import settings")
+            }
+            Self::MetadataSupportUnavailable => {
+                formatter.write_str("image metadata reload support is unavailable")
+            }
+            Self::MetadataInvalid => formatter.write_str("image metadata is invalid"),
+            Self::MetadataIdentityMismatch => {
+                formatter.write_str("image metadata identity does not match the reload target")
+            }
+            Self::InvalidSourceChange => {
+                formatter.write_str("image reload received an invalid source-change kind")
             }
             Self::Import(error) => Display::fmt(error, formatter),
             Self::TaskRejected(_) => formatter.write_str("image import task was rejected"),
@@ -72,6 +89,10 @@ impl ImageReloadError {
         match self {
             Self::MissingSourceDirectory => "image.reload-source-authority-missing",
             Self::MissingImportSettings => "image.reload-settings-missing",
+            Self::MetadataSupportUnavailable => "image.reload-metadata-support-unavailable",
+            Self::MetadataInvalid => "image.reload-metadata-invalid",
+            Self::MetadataIdentityMismatch => "image.reload-metadata-identity-mismatch",
+            Self::InvalidSourceChange => "image.reload-source-change-invalid",
             Self::Import(error) => error.stable_code(),
             Self::TaskRejected(_) => "image.reload-task-rejected",
             Self::TaskCancelled(_) => "image.reload-task-cancelled",
@@ -85,6 +106,12 @@ impl ImageReloadError {
         match self {
             Self::MissingSourceDirectory => "Image source authority is absent",
             Self::MissingImportSettings => "Image reload settings are absent",
+            Self::MetadataSupportUnavailable => "Image metadata reload support is unavailable",
+            Self::MetadataInvalid => "Image metadata is invalid",
+            Self::MetadataIdentityMismatch => {
+                "Image metadata identity does not match the reload target"
+            }
+            Self::InvalidSourceChange => "Image reload source change is invalid",
             Self::Import(error) => error.safe_summary(),
             Self::TaskRejected(_) => "Image import task was rejected",
             Self::TaskCancelled(_) => "Image import task was cancelled",
@@ -476,9 +503,7 @@ fn spawn_image_reload_jobs(
             AssetReloadRequestKind::LoadOrReload => {
                 let record = attempt.request.record();
                 let asset_id = attempt.request.asset_id();
-                let settings = attempt
-                    .settings
-                    .ok_or(ImageReloadError::MissingImportSettings);
+                let settings = accepted_reload_settings(&attempt, source_directory, &record);
                 let admitted = source_directory
                     .ok_or(ImageReloadError::MissingSourceDirectory)
                     .and_then(|source_directory| {
@@ -554,6 +579,55 @@ fn spawn_image_reload_jobs(
     }
     stats.pending = pending.len().min(u32::MAX as usize) as u32;
     Ok(())
+}
+
+fn accepted_reload_settings(
+    attempt: &ImageReloadAttempt,
+    source_directory: Option<&ImageSourceDirectory>,
+    record: &nara_asset::AssetRecord,
+) -> Result<ImageImportSettings, ImageReloadError> {
+    match attempt.request.source_change_kind() {
+        AssetSourceChangeKind::Modified => attempt
+            .settings
+            .ok_or(ImageReloadError::MissingImportSettings),
+        AssetSourceChangeKind::MetaModified => {
+            admit_metadata_reload_settings(source_directory, record)
+        }
+        AssetSourceChangeKind::Removed => Err(ImageReloadError::InvalidSourceChange),
+    }
+}
+
+#[cfg(feature = "serde")]
+fn admit_metadata_reload_settings(
+    source_directory: Option<&ImageSourceDirectory>,
+    record: &nara_asset::AssetRecord,
+) -> Result<ImageImportSettings, ImageReloadError> {
+    let source_directory = source_directory.ok_or(ImageReloadError::MissingSourceDirectory)?;
+    let bytes = source_directory
+        .read_metadata_bytes(record)
+        .map_err(ImageReloadError::Import)?;
+    let candidate = AssetMetaIdentityCandidate::decode_json_bytes_owned(bytes.into_boxed_slice())
+        .map_err(|_| ImageReloadError::MetadataInvalid)?;
+    let identity = candidate.identity();
+    if identity.stable_id() != record.stable_id()
+        || identity.path() != record.path()
+        || identity.source_kind() != record.source_kind()
+    {
+        return Err(ImageReloadError::MetadataIdentityMismatch);
+    }
+    candidate
+        .admit::<ImageImportSettings>()
+        .map(|candidate| candidate.into_meta().into_parts().1)
+        .map_err(|_| ImageReloadError::MetadataInvalid)
+}
+
+#[cfg(not(feature = "serde"))]
+fn admit_metadata_reload_settings(
+    source_directory: Option<&ImageSourceDirectory>,
+    _record: &nara_asset::AssetRecord,
+) -> Result<ImageImportSettings, ImageReloadError> {
+    source_directory.ok_or(ImageReloadError::MissingSourceDirectory)?;
+    Err(ImageReloadError::MetadataSupportUnavailable)
 }
 
 fn poll_image_reload_results(
@@ -753,7 +827,12 @@ pub(super) fn image_reload_diagnostic(path: &AssetPath, error: &ImageReloadError
     diagnostic = with_image_diagnostic_field(diagnostic, path_field);
 
     match error {
-        ImageReloadError::MissingSourceDirectory | ImageReloadError::MissingImportSettings => {}
+        ImageReloadError::MissingSourceDirectory
+        | ImageReloadError::MissingImportSettings
+        | ImageReloadError::MetadataSupportUnavailable
+        | ImageReloadError::MetadataInvalid
+        | ImageReloadError::MetadataIdentityMismatch
+        | ImageReloadError::InvalidSourceChange => {}
         ImageReloadError::Import(error) => {
             diagnostic = with_image_public_identifier(diagnostic, "stage", error.stage().as_str());
             match error {
