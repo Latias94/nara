@@ -70,6 +70,7 @@ const CLEAR_COLOR: [f32; 4] = [0.055, 0.06, 0.075, 1.0];
 const EDITOR_GPU_UNAVAILABLE_TITLE: &str = "Nara Editor - GPU unavailable";
 const GAME_VIEW_PENDING_REPAINT_DELAY: Duration = Duration::from_millis(16);
 const PLAY_DRIVE_CADENCE: Duration = Duration::from_millis(16);
+const PLAY_LIFECYCLE_POLL_DELAY: Duration = Duration::from_millis(16);
 
 #[derive(Debug, Error)]
 pub enum EditorRunError {
@@ -1894,7 +1895,10 @@ impl NativeEditorHost {
                 .deadline(now, play_state_after_update, selected_after_ui);
         let wake_deadline = earliest_deadline(
             earliest_deadline(
-                cadence_deadline,
+                earliest_deadline(
+                    cadence_deadline,
+                    play_lifecycle_poll_deadline(now, play_state_after_update),
+                ),
                 self.canary.as_ref().map(NativeEditorCanary::deadline),
             ),
             self.application.session_close_retry_deadline(),
@@ -2001,7 +2005,10 @@ impl NativeEditorHost {
         self.play_cadence.observe_after(now, state, selected);
         let deadline = earliest_deadline(
             earliest_deadline(
-                self.play_cadence.deadline(now, state, selected),
+                earliest_deadline(
+                    self.play_cadence.deadline(now, state, selected),
+                    play_lifecycle_poll_deadline(now, state),
+                ),
                 self.canary.as_ref().map(NativeEditorCanary::deadline),
             ),
             self.application.session_close_retry_deadline(),
@@ -2065,6 +2072,17 @@ fn play_lifecycle_requires_runtime_drive(state: EditorPlayState) -> bool {
             | EditorPlayState::Running
             | EditorPlayState::Stopping
     )
+}
+
+fn play_lifecycle_poll_deadline(now: Instant, state: EditorPlayState) -> Option<Instant> {
+    matches!(
+        state,
+        EditorPlayState::PreparingPlay
+            | EditorPlayState::Starting
+            | EditorPlayState::RetiringPlay
+            | EditorPlayState::Stopping
+    )
+    .then_some(now + PLAY_LIFECYCLE_POLL_DELAY)
 }
 
 impl ApplicationHandler for NativeEditorHost {
@@ -2343,7 +2361,8 @@ mod tests {
 
     use super::{
         EditorApplicationDispatch, EditorGpuRecovery, EditorPlayCadence, EditorViewportSelection,
-        game_view_wait_pending, play_lifecycle_requires_runtime_drive,
+        game_view_wait_pending, play_lifecycle_poll_deadline,
+        play_lifecycle_requires_runtime_drive,
     };
 
     #[test]
@@ -2364,6 +2383,32 @@ mod tests {
         assert!(!play_lifecycle_requires_runtime_drive(
             EditorPlayState::RetirementIncomplete
         ));
+    }
+
+    #[test]
+    fn transitional_runtime_lifecycle_schedules_bounded_follow_up_drive() {
+        let now = Instant::now();
+
+        for state in [
+            EditorPlayState::PreparingPlay,
+            EditorPlayState::Starting,
+            EditorPlayState::RetiringPlay,
+            EditorPlayState::Stopping,
+        ] {
+            assert_eq!(
+                play_lifecycle_poll_deadline(now, state),
+                Some(now + Duration::from_millis(16))
+            );
+        }
+
+        assert_eq!(
+            play_lifecycle_poll_deadline(now, EditorPlayState::Running),
+            None
+        );
+        assert_eq!(
+            play_lifecycle_poll_deadline(now, EditorPlayState::CloseIncomplete),
+            None
+        );
     }
 
     #[test]

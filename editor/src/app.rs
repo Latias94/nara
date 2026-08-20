@@ -960,7 +960,7 @@ impl EditorApplication {
         {
             retained
                 .session
-                .drive_editor_frame_with_runtime(real_delta, false);
+                .drive_editor_frame_with_runtime(real_delta, drive_runtime);
             return self.finish_replacement_handoff(actions_observed);
         }
         match &mut self.state {
