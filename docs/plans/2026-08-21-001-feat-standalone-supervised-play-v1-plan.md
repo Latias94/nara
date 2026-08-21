@@ -641,7 +641,9 @@ sequenceDiagram
   unavailable before Cargo, while declaration alone cannot bypass child READY admission.
 
 **Verification:** accepted ADR, OQ-039 text, implementation ledger, registration, and plan all
-name the same SPL scope and leave generic transport/remote/live-edit work deferred.
+name the same SPL scope and leave generic transport/remote/live-edit work deferred. The focused
+SPL-U0 contract evidence is recorded in
+`docs/knowledge/engineering/verification/2026-08/2026-08-21T060000Z-spl-u0-supervised-play-contract.md`.
 
 ### SPL-U1. Establish the private cancellable process substrate
 

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8d3d915f308f71383c7d5d5212b6637a4eb6b601cca8970c4b72959f4834da04"
+source_fingerprint: "6326d296b55593935061d433a937e351827091d34270ff65bef63307aefd129e"
 ---
 
 # Current State
@@ -12,7 +12,7 @@ source_fingerprint: "8d3d915f308f71383c7d5d5212b6637a4eb6b601cca8970c4b72959f483
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8d3d915f308f71383c7d5d5212b6637a4eb6b601cca8970c4b72959f4834da04`
+- Source fingerprint: `6326d296b55593935061d433a937e351827091d34270ff65bef63307aefd129e`
 - Immutable records: 554
 - Active lane heads: 1
 
@@ -40,6 +40,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [SPL-U0 supervised Play contract and launch-context verification](verification/2026-08/2026-08-21T060000Z-spl-u0-supervised-play-contract.md) - Verifies the versioned execution declaration, capability-free source receipt, and explicit project-root contract before build or process effects.
 - **Verification Evidence**: [EIR-U6 standalone image import product closure](verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md) - Verifies the one-window Editor image import trajectory, safe last-good failure, Runtime closure exclusion, and final EIR lane closure.
 - **Verification Evidence**: [EIR-U5 same-generation authoring image publication and referenced hydration](verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md) - Verifies atomic image choices and prepared resources, referenced-only hydration, generic Save/Reopen, retirement, and exact source-proof boundaries.
 - **Verification Evidence**: [EIR-U4 image import Inspector and native wake](verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md) - Verifies the UI-neutral image import projection, private egui Inspector, exact frame-bound action, last-good diagnostics, and bounded native polling wake.
@@ -51,7 +52,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EPB-U2 bounded Host project source index](verification/2026-08/2026-08-19T182322Z-epb-u2-bounded-host-project-source-index-9ac12073205d4064a4bc76729225caf8.md) - Verifies deterministic capability-bound source indexing, atomic last-good refresh, bounded lineage revalidation, and Runtime-closure isolation.
 - **Verification Evidence**: [EPB-U1 bounded handle directory enumeration](verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md) - Verifies bounded independent Windows directory enumeration and truthful unsupported platform behavior.
 - **Verification Evidence**: [SGE-U5 standalone generic Editor product closure](verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md) - Verifies the modular generic authoring workspace, lossless Recovery trajectory, and one-window native product canary.
-- **Verification Evidence**: [SGE-U4 exact export product agreement correction](verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md) - Verifies that Export binds both built products to the exact ordered startup closure before publication.
 
 # Integration Notes
 

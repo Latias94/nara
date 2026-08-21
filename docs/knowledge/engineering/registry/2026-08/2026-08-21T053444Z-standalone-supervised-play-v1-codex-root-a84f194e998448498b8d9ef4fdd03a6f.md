@@ -9,7 +9,7 @@ producer_id: "codex-root"
 run_id: "spl-u0-supervised-play-20260821"
 related_plan: "docs/plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md"
 git_branch: "refactor/engine-foundation-contracts"
-git_commit: "415f5b2"
+git_commit: "90d7545"
 registration_id: "standalone-supervised-play-v1-codex-root"
 source_workspace: "F:\\SourceCodes\\Rust\\nara"
 ---
