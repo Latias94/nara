@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c5274603dc7f6310b1fa37d7af3c408500dd17da20dbb3953c9cb33ec6431273"
+source_fingerprint: "efc1fb26e9aa352068197e766fbdaf23303749433ecdecc045779c74e2146219"
 ---
 
 # Current State
@@ -12,16 +12,16 @@ source_fingerprint: "c5274603dc7f6310b1fa37d7af3c408500dd17da20dbb3953c9cb33ec64
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c5274603dc7f6310b1fa37d7af3c408500dd17da20dbb3953c9cb33ec6431273`
-- Immutable records: 550
-- Active lane heads: 1
+- Source fingerprint: `efc1fb26e9aa352068197e766fbdaf23303749433ecdecc045779c74e2146219`
+- Immutable records: 552
+- Active lane heads: 0
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
-- [Editor Image Import and Reimport v1: EIR-U6 standalone product closure active](registry/2026-08/2026-08-21T005809Z-editor-image-import-reimport-v1-codex-root-0a63693fff3d415fadd50f3370d154e0.md): `active` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
+- [Editor Image Import and Reimport v1 complete](registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md): `completed` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
 - [Editor Project Browser and Source Index v1 complete; no successor active](registry/2026-08/2026-08-19T213600Z-editor-project-browser-source-index-v1-codex-root-6c28391e9cd8451f92b821dba9d0c9e3.md): `completed` (editor-project-browser-source-index-v1-codex-root; producer `codex-root`)
 - [Editor Scene Composition and Scene View v1 complete; no successor active](registry/2026-08/2026-08-16T122618Z-editor-scene-composition-view-v1-codex-root-cf2e6d93a351485c8381f6834cdd4e70.md): `completed` (editor-scene-composition-view-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
@@ -39,6 +39,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [EIR-U6 standalone image import product closure](verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md) - Verifies the one-window Editor image import trajectory, safe last-good failure, Runtime closure exclusion, and final EIR lane closure.
 - **Verification Evidence**: [EIR-U5 same-generation authoring image publication and referenced hydration](verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md) - Verifies atomic image choices and prepared resources, referenced-only hydration, generic Save/Reopen, retirement, and exact source-proof boundaries.
 - **Verification Evidence**: [EIR-U4 image import Inspector and native wake](verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md) - Verifies the UI-neutral image import projection, private egui Inspector, exact frame-bound action, last-good diagnostics, and bounded native polling wake.
 - **Verification Evidence**: [EIR-U3 bounded Editor image import and reimport transaction](verification/2026-08/2026-08-20T094524Z-eir-u3-bounded-editor-image-import-and-reimport-transaction-e6cb2cf25cdf4321a15368421154678d.md) - Verifies the bounded Host catalog, atomic metadata publication, task-owned image import, exact retained-pixel leases, retryable close, and failure-atomic reimport workflow.
@@ -50,7 +51,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EPB-U1 bounded handle directory enumeration](verification/2026-08/2026-08-19T180000Z-epb-u1-bounded-handle-directory-enumeration.md) - Verifies bounded independent Windows directory enumeration and truthful unsupported platform behavior.
 - **Verification Evidence**: [SGE-U5 standalone generic Editor product closure](verification/2026-08/2026-08-19T110847Z-sge-u5-standalone-generic-editor-product-closure-25fbee67d7ea41a9bc8406abe6e8b221.md) - Verifies the modular generic authoring workspace, lossless Recovery trajectory, and one-window native product canary.
 - **Verification Evidence**: [SGE-U4 exact export product agreement correction](verification/2026-08/2026-08-19T053624Z-sge-u4-exact-export-product-agreement-correction-b12661d46b56425bbc61c2497e894401.md) - Verifies that Export binds both built products to the exact ordered startup closure before publication.
-- **Verification Evidence**: [SGE-U4 first-party authoring bundle and runtime agreement](verification/2026-08/2026-08-19T050321Z-sge-u4-first-party-authoring-bundle-and-runtime-agreement-da2f757f57b84c7fb6bae1de2774de87.md) - Verifies canonical starter and Reference Game bundles, clean-room generic Editor Open, and strict selected-native runtime agreement.
 
 # Integration Notes
 

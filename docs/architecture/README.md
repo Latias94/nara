@@ -8,9 +8,11 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
-   plan is active only at EIR-U6 under
-   [registration `0a63693fff3d415fadd50f3370d154e0`](../knowledge/engineering/registry/2026-08/2026-08-21T005809Z-editor-image-import-reimport-v1-codex-root-0a63693fff3d415fadd50f3370d154e0.md).
+3. The completed [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
+   plan closes at `ec64e4c` with
+   [verification `ae97ce2c7330420d8b6851967fd7c8b4`](../knowledge/engineering/verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md)
+   and completed
+   [registration `6a48e230cc9c4e2eb1faf8121a85d9ea`](../knowledge/engineering/registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md).
    EIR-U0 accepted [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md).
    EIR-U1/EIR-U2 completed the typed recipe, strict-consumer, reload, and fixture migration at
    `334f946`, with the reviewed metadata-reload correction at `88f4a7a` and
@@ -28,8 +30,9 @@ an index, not another source of architecture decisions.
    EIR-U5 completed same-generation UI authoring publication and referenced-only hydration across
    `a404a41` and source-proof correction `94157a1`, under
    [verification `b2dfa722baf349b9a75cc324086024ac`](../knowledge/engineering/verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md).
-   EIR-U6 owns only the standalone Editor product trajectory and final evidence closure; all
-   unrelated Editor successors remain inactive.
+   EIR-U6 proves the one-window standalone product trajectory, safe last-good failure, and exact
+   Runtime closure exclusion at `ec64e4c`. EIR-U0 through EIR-U6 are complete; no unrelated Editor
+   successor is active automatically.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with
