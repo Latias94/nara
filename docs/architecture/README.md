@@ -11,10 +11,12 @@ an index, not another source of architecture decisions.
 3. The active
    [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    plan is the sole active implementation lane. It is registered by
-   [record `a84f194e998448498b8d9ef4fdd03a6f`](../knowledge/engineering/registry/2026-08/2026-08-21T053444Z-standalone-supervised-play-v1-codex-root-a84f194e998448498b8d9ef4fdd03a6f.md).
+   [record `079f447a577b42929a258328ab95b1fe`](../knowledge/engineering/registry/2026-08/2026-08-21T101853Z-standalone-supervised-play-v1-codex-root-079f447a577b42929a258328ab95b1fe.md).
    SPL-U0 accepts [ADR 0116](adr/0116-standalone-supervised-editor-play.md), narrows OQ-039 to one
    local external-window desktop placement, and must land the capability-free admission contract
-   before build or process effects begin. Completed predecessor plans remain immutable evidence.
+   before build or process effects begin. SPL-U0 through SPL-U2 are verified through `ab211bc`;
+   child READY, ordinary Editor lifecycle effects, and the final product trajectories remain later
+   gates. Completed predecessor plans remain immutable evidence.
    The completed [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
    plan closes at `ec64e4c` with
    [verification `ae97ce2c7330420d8b6851967fd7c8b4`](../knowledge/engineering/verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md)

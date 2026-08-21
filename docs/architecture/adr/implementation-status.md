@@ -1,18 +1,21 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified**: 2026-08-21 @ SPL-U1 process substrate verification `07b590e` / record `9b5f75ac859c466ba7f94deb74851778`
+**Last Verified**: 2026-08-21 @ SPL-U2 bounded build and generation verification `ab211bc` / record `e0c5ea801f5e432484dfc710ae3ce00b`
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. The completed
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
-successor is the sole active lane under registration `a84f194e998448498b8d9ef4fdd03a6f`.
+successor is the sole active lane under registration `079f447a577b42929a258328ab95b1fe`.
 SPL-U0 accepts ADR 0116 and narrows OQ-039 to one local external-window desktop placement. Its
 manifest, source-receipt, launch-context, and value-only admission contract gates pass at `90d7545`.
 SPL-U1 adds the private Windows process-tree owner, supported Linux x86_64 process-group adapter,
 bounded cancellable output, exact spawn authority allowlist, and terminal cleanup receipt at
 `07b590e`; Windows focused tests and a Linux cross-target check pass, while native Unix process
-evidence remains a later release gate. Cargo selection, immutable generations, READY, and ordinary
-Editor lifecycle effects remain unclaimed.
+evidence remains a later release gate. SPL-U2 adds the pure bounded Cargo facts/JSON selector, the
+single desktop build-attempt owner, and the Editor-owned immutable executable-generation store at
+`ab211bc`, verified by record `e0c5ea801f5e432484dfc710ae3ce00b`. Child READY, capability-free
+launch context, Host admission, and ordinary Editor lifecycle effects remain unclaimed for SPL-U3
+and SPL-U4.
 The completed
 [Editor Image Import and Reimport v1](../../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
 plan closes at `ec64e4c` with verification record `ae97ce2c7330420d8b6851967fd7c8b4`
