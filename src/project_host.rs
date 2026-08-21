@@ -1,5 +1,6 @@
 mod composition;
 mod ingest;
+mod product_launch;
 
 #[cfg(feature = "serde")]
 #[allow(
@@ -39,6 +40,10 @@ pub use composition::{
     compiled_product_capabilities, resolve_product_recipe,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
+#[doc(hidden)]
+pub use product_launch::{
+    ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
+};
 #[cfg(feature = "runtime-ui")]
 #[doc(hidden)]
 pub const PROJECT_PRIMARY_UI_SURFACE_ID: u64 = crate::product::PROJECT_PRIMARY_UI_SURFACE_ID;

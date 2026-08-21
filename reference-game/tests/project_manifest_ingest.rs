@@ -10,7 +10,7 @@ use std::fs::OpenOptions;
 
 use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
-    project::{ProductCapability, RuntimePreset},
+    project::{ProductCapability, ProjectExecutionContract, RuntimePreset},
     project_host::ingest_project_manifest,
     tasks::TaskPoolKind,
 };
@@ -147,6 +147,10 @@ fn desktop_profile_requests_the_exact_content_presentation_and_adapter_set() {
             "desktop-winit",
             "render-wgpu",
         ]
+    );
+    assert_eq!(
+        candidate.settings().execution.contract.as_ref(),
+        Some(&ProjectExecutionContract::DesktopSupervisedPlayV1)
     );
 }
 

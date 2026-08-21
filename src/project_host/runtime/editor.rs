@@ -8,6 +8,7 @@ mod authoring_preview;
 mod authoring_runtime;
 mod content_refresh;
 mod document_open;
+mod external_play;
 #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
 mod game_view;
 mod image_import;

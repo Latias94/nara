@@ -54,6 +54,9 @@ requested = [
     "render-wgpu",
 ]
 
+[profiles.desktop.execution]
+contract = "desktop-supervised-play/v1"
+
 [profiles.desktop.runtime]
 preset = "local-headless"
 fixed_timestep_seconds = 0.1

@@ -122,6 +122,84 @@ schema_bundle = "../outside.bundle.json"
 }
 
 #[test]
+fn execution_contract_is_profile_local_exact_and_forward_compatible() {
+    let source = r#"
+schema_version = 1
+
+[project]
+name = "Execution Contract"
+
+[profiles.desktop.execution]
+contract = "desktop-supervised-play/v1"
+
+[profiles.future.execution]
+contract = "desktop-supervised-play/v2"
+"#;
+    let load = ProjectManifest::parse_toml_str(source);
+    assert!(!load.has_errors(), "{:?}", load.diagnostics);
+    let manifest = load.manifest.unwrap();
+
+    assert!(
+        manifest
+            .resolve_profile(None)
+            .unwrap()
+            .execution
+            .contract
+            .is_none()
+    );
+    assert_eq!(
+        manifest
+            .resolve_profile(Some("desktop"))
+            .unwrap()
+            .execution
+            .contract,
+        Some(ProjectExecutionContract::DesktopSupervisedPlayV1)
+    );
+    assert_eq!(
+        manifest
+            .resolve_profile(Some("future"))
+            .unwrap()
+            .execution
+            .contract,
+        Some(ProjectExecutionContract::Unsupported(
+            "desktop-supervised-play/v2".to_owned()
+        ))
+    );
+
+    let encoded = manifest.to_canonical_toml_bytes().unwrap();
+    let reparsed = ProjectManifest::parse_toml_bytes(&encoded);
+    assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics);
+    assert_eq!(reparsed.manifest.unwrap(), manifest);
+}
+
+#[test]
+fn execution_contract_rejects_an_unbounded_or_non_identifier_value() {
+    let oversized = "x".repeat(MAX_PROJECT_EXECUTION_CONTRACT_BYTES + 1);
+    for contract in [
+        String::new(),
+        "desktop supervised play/v1".to_owned(),
+        oversized,
+    ] {
+        let source = format!(
+            r#"
+schema_version = 1
+
+[project]
+name = "Invalid Execution Contract"
+
+[profiles.desktop.execution]
+contract = "{contract}"
+"#
+        );
+        let load = ProjectManifest::parse_toml_str(&source);
+        assert!(
+            load.has_errors(),
+            "contract should be rejected: {contract:?}"
+        );
+    }
+}
+
+#[test]
 fn profile_cannot_override_the_project_wide_authoring_bundle() {
     let load = ProjectManifest::parse_toml_str(
         r#"

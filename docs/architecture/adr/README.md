@@ -161,3 +161,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0113](0113-editor-ui-prefab-authoring-and-canvas-authority.md): Editor UI Prefab Authoring and Canvas Authority
 - [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md): Standalone Generic Editor Authoring and Execution Boundary
 - [ADR 0115](0115-editor-image-import-metadata-and-authoring-publication.md): Editor Image Import Metadata and Authoring Publication
+- [ADR 0116](0116-standalone-supervised-editor-play.md): Standalone Supervised Editor Play

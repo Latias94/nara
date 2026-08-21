@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "efc1fb26e9aa352068197e766fbdaf23303749433ecdecc045779c74e2146219"
+source_fingerprint: "8d3d915f308f71383c7d5d5212b6637a4eb6b601cca8970c4b72959f4834da04"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "efc1fb26e9aa352068197e766fbdaf23303749433ecdecc045779c74e21
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `efc1fb26e9aa352068197e766fbdaf23303749433ecdecc045779c74e2146219`
-- Immutable records: 552
-- Active lane heads: 0
+- Source fingerprint: `8d3d915f308f71383c7d5d5212b6637a4eb6b601cca8970c4b72959f4834da04`
+- Immutable records: 554
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -36,6 +36,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
+- [Standalone Supervised Play v1 active](registry/2026-08/2026-08-21T053444Z-standalone-supervised-play-v1-codex-root-a84f194e998448498b8d9ef4fdd03a6f.md): `active` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
 
 # Recent Evidence
 

@@ -8,7 +8,14 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The completed [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
+3. The active
+   [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
+   plan is the sole active implementation lane. It is registered by
+   [record `a84f194e998448498b8d9ef4fdd03a6f`](../knowledge/engineering/registry/2026-08/2026-08-21T053444Z-standalone-supervised-play-v1-codex-root-a84f194e998448498b8d9ef4fdd03a6f.md).
+   SPL-U0 accepts [ADR 0116](adr/0116-standalone-supervised-editor-play.md), narrows OQ-039 to one
+   local external-window desktop placement, and must land the capability-free admission contract
+   before build or process effects begin. Completed predecessor plans remain immutable evidence.
+   The completed [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
    plan closes at `ec64e4c` with
    [verification `ae97ce2c7330420d8b6851967fd7c8b4`](../knowledge/engineering/verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md)
    and completed
@@ -32,7 +39,7 @@ an index, not another source of architecture decisions.
    [verification `b2dfa722baf349b9a75cc324086024ac`](../knowledge/engineering/verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md).
    EIR-U6 proves the one-window standalone product trajectory, safe last-good failure, and exact
    Runtime closure exclusion at `ec64e4c`. EIR-U0 through EIR-U6 are complete; no unrelated Editor
-   successor is active automatically.
+   successor is active automatically beyond the explicitly registered SPL lane.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with

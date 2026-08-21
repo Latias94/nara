@@ -30,6 +30,7 @@ pub struct EffectiveProjectSettings {
     pub window: EffectiveWindowSettings,
     pub input: EffectiveInputSettings,
     pub diagnostics: EffectiveDiagnosticsSettings,
+    pub execution: EffectiveProjectExecutionSettings,
 }
 
 impl EffectiveProjectSettings {
@@ -59,6 +60,7 @@ impl EffectiveProjectSettings {
             window: manifest.window.clone().lower(),
             input: manifest.input.clone().lower()?,
             diagnostics: manifest.diagnostics.lower()?,
+            execution: EffectiveProjectExecutionSettings::default(),
         };
         settings.enforce_product_invariants();
         Ok(settings)
@@ -109,6 +111,40 @@ impl EffectiveProjectSettings {
                 .force_catch_up_policy(FixedCatchUpPolicy::PreserveDebt);
         }
     }
+}
+
+pub const DESKTOP_SUPERVISED_PLAY_V1_CONTRACT: &str = "desktop-supervised-play/v1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectExecutionContract {
+    DesktopSupervisedPlayV1,
+    Unsupported(String),
+}
+
+impl ProjectExecutionContract {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::DesktopSupervisedPlayV1 => DESKTOP_SUPERVISED_PLAY_V1_CONTRACT,
+            Self::Unsupported(identifier) => identifier,
+        }
+    }
+
+    pub fn is_desktop_supervised_play_v1(&self) -> bool {
+        matches!(self, Self::DesktopSupervisedPlayV1)
+    }
+
+    pub(crate) fn from_identifier(identifier: &str) -> Self {
+        if identifier == DESKTOP_SUPERVISED_PLAY_V1_CONTRACT {
+            Self::DesktopSupervisedPlayV1
+        } else {
+            Self::Unsupported(identifier.to_owned())
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EffectiveProjectExecutionSettings {
+    pub contract: Option<ProjectExecutionContract>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

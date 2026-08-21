@@ -1,5 +1,8 @@
 use nara_fs::ContentDigest;
-use nara_project::{ProductCapability, ProductCapabilitySet, ProjectManifest, RuntimePreset};
+use nara_project::{
+    ProductCapability, ProductCapabilitySet, ProjectExecutionContract, ProjectManifest,
+    RuntimePreset,
+};
 use nara_reflect::AuthoringSchemaBundle;
 use nara_scene::SceneDocumentCandidate;
 use toml::Value;
@@ -113,6 +116,9 @@ requested = ["runtime-2d"]
 [profiles.desktop.capabilities]
 requested = ["runtime-2d", "presentation-2d", "desktop-winit", "render-wgpu"]
 
+[profiles.desktop.execution]
+contract = "desktop-supervised-play/v1"
+
 [profiles.desktop.runtime]
 preset = "local-headless"
 fixed_timestep_seconds = 0.02
@@ -190,6 +196,8 @@ pub(super) fn validate(
         return Err("generated headless product contract disagrees with the starter");
     }
     if desktop.requested_capabilities != expected_desktop
+        || desktop.execution.contract.as_ref()
+            != Some(&ProjectExecutionContract::DesktopSupervisedPlayV1)
         || desktop.runtime_preset != RuntimePreset::LocalHeadless
         || !desktop.window.enabled
         || desktop.window.width != 1280

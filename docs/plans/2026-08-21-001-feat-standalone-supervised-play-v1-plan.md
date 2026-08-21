@@ -600,7 +600,13 @@ sequenceDiagram
 - `docs/architecture/open-questions.md`
 - `docs/architecture/adr/implementation-status.md`
 - `docs/knowledge/engineering/registry/**`
-- narrow Host/product launch-context source files identified by the existing runtime owner
+- `crates/nara_project/src/{profile,effective,lib,tests}.rs`
+- `src/project_host/product_launch.rs`
+- `src/project_host/runtime/editor/external_play.rs`
+- `src/project_host.rs` and `src/project_host/runtime/editor.rs` module wiring
+- `src/project_workflow/starter/product_contract.rs`
+- `tests/project_workflow_creation.rs`
+- `reference-game/nara.toml` and `reference-game/tests/project_manifest_ingest.rs`
 - a hidden shared artifact-fact module under the existing `project_workflow`/Host owner if U1 proves
   Export and Editor would otherwise duplicate pure Cargo JSON selection
 
@@ -610,7 +616,8 @@ sequenceDiagram
   desktop child, one-shot attestation, no general transport.
 - Define `EditorExternalPlaySourceReceipt` as a persistent, capability-free fact set containing
   project/profile identity, manifest/schema/content/executable-relevant digests, selected product
-  target, launch-context version, and bounded relative source facts. It may reuse existing opaque
+  target, launch-context version, and bounded relative source facts. The U0 value contract uses a
+  fixed desktop target and leaves executable identity to the later immutable-generation unit. It may reuse existing opaque
   lineage/digest types when they are already capability-free and redacted. It must not contain
   `DirectoryCapability`, `FileIdentity`, a native handle, or a raw root path as durable identity.
 - Define the explicit launch-context contract needed to avoid `current_exe`/CWD inference. Preserve

@@ -6,11 +6,12 @@ use nara_tasks::TaskConfigError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::MAX_PROJECT_EXECUTION_CONTRACT_BYTES;
 use crate::capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 use crate::effective::{
     EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectiveProjectPaths,
     EffectiveProjectSettings, EffectiveRuntimeSettings, EffectiveStartupSettings,
-    EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings,
+    EffectiveTaskSettings, EffectiveUiSettings, EffectiveWindowSettings, ProjectExecutionContract,
 };
 use crate::path::{ProjectPath, ProjectPathError};
 use crate::sections::{
@@ -45,6 +46,8 @@ pub struct ProjectProfileOverlay {
     pub input: ProjectInputPatch,
     #[serde(default)]
     pub diagnostics: ProjectDiagnosticsPatch,
+    #[serde(default)]
+    pub execution: ProjectExecutionPatch,
 }
 
 impl ProjectProfileOverlay {
@@ -71,6 +74,8 @@ impl ProjectProfileOverlay {
             .validate_into(diagnostics, &format!("{prefix}.input"));
         self.diagnostics
             .validate_into(diagnostics, &format!("{prefix}.diagnostics"));
+        self.execution
+            .validate_into(diagnostics, &format!("{prefix}.execution"));
     }
 
     pub(crate) fn apply_to(
@@ -90,7 +95,73 @@ impl ProjectProfileOverlay {
         self.window.apply_to(&mut settings.window);
         self.input.apply_to(&mut settings.input)?;
         self.diagnostics.apply_to(&mut settings.diagnostics)?;
+        self.execution.apply_to(settings);
         Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectExecutionPatch {
+    #[serde(default)]
+    pub contract: Option<String>,
+}
+
+impl ProjectExecutionPatch {
+    fn validate_into(&self, diagnostics: &mut DiagnosticReport, prefix: &str) {
+        let Some(contract) = self.contract.as_deref() else {
+            return;
+        };
+        let field_path = format!("{prefix}.contract");
+
+        if contract.is_empty() {
+            diagnostics.push(with_field_path(
+                error(
+                    "project.execution.empty-contract",
+                    "An execution contract identifier cannot be empty",
+                ),
+                &field_path,
+            ));
+            return;
+        }
+
+        if contract.len() > MAX_PROJECT_EXECUTION_CONTRACT_BYTES {
+            let diagnostic = with_field_path(
+                error(
+                    "project.execution.contract-too-long",
+                    "An execution contract identifier exceeds the byte limit",
+                ),
+                &field_path,
+            );
+            let diagnostic = with_public_u64(diagnostic, "bytes", contract.len() as u64);
+            diagnostics.push(with_public_u64(
+                diagnostic,
+                "maximum_bytes",
+                MAX_PROJECT_EXECUTION_CONTRACT_BYTES as u64,
+            ));
+            return;
+        }
+
+        if !contract.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'-' | b'_' | b'.' | b'/')
+        }) {
+            diagnostics.push(with_field_path(
+                error(
+                    "project.execution.invalid-contract",
+                    "An execution contract identifier contains unsupported characters",
+                ),
+                &field_path,
+            ));
+        }
+    }
+
+    fn apply_to(&self, settings: &mut EffectiveProjectSettings) {
+        settings.execution.contract = self
+            .contract
+            .as_deref()
+            .map(ProjectExecutionContract::from_identifier);
     }
 }
 

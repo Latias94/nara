@@ -128,6 +128,10 @@ fn desktop_2d_v1_is_one_closed_prevalidated_project_plan() {
             .contains(nara::project::ProductCapability::RenderWgpu)
     );
     assert_eq!(
+        desktop.execution.contract.as_ref(),
+        Some(&nara::project::ProjectExecutionContract::DesktopSupervisedPlayV1)
+    );
+    assert_eq!(
         manifest.authoring.schema_bundle.as_deref(),
         Some("schema/authoring.bundle.json")
     );

@@ -681,12 +681,12 @@ flowchart LR
 
 ## OQ-039: Editor Play Placement and Local Transport
 
-- **Status**: open
+- **Status**: partially resolved
 - **Owner**: concrete Editor Host, executable runtime owner, tooling command/observation domains
 - **Trigger**: A child-process Play mode, crash-isolated preview, remote target, or a second
   production placement must preserve the current Editor Play semantics; or in-process placement
   causes a measured safety, reload, or lifecycle failure.
-- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093, 0112, 0114
+- **Related ADRs**: 0034, 0047, 0058, 0076, 0082, 0084, 0093, 0112, 0114, 0116
 - **Question**: What smallest versioned local connection preserves control, observation,
   content/schema/executable lineage, fault, retirement, crash, and restart semantics for the
   supervised project process selected by ADR 0114, while leaving ADR 0112's trusted in-process
@@ -698,8 +698,12 @@ flowchart LR
   transport, remote equivalence, or a public universal runtime-session trait. ADR 0112's private
   in-process Game View remains an explicitly trusted first-party Adapter.
 - **Accepted bounded decision**: ADR 0114 resolves ordinary product placement: project gameplay code
-  does not load into the long-lived generic Editor process. This question remains open for the
-  concrete local protocol and second-placement implementation.
+  does not load into the long-lived generic Editor process. ADR 0116 additionally selects one local
+  external-window desktop placement with an exact profile declaration, immutable executable
+  generation, child-only launch context, first-playable-present READY attestation, bounded logs, and
+  explicit process-tree cleanup. The question remains open for embedded frame transport, post-start
+  controls, live edit, remote targets, reconnect, high-frequency observation, multiple simultaneous
+  children, and any general transport or runtime-session Interface.
 
 ## OQ-040: Editor-to-Play Live Edit
 

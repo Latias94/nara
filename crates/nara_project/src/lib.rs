@@ -11,6 +11,8 @@ pub const MAX_PROJECT_FIXED_STEPS_PER_FRAME: u32 = 256;
 pub const MAX_PROJECT_FIXED_DEBT_STEPS: u32 = MAX_PROJECT_FIXED_STEPS_PER_FRAME * 64;
 /// Maximum authored logical width or height for the primary UI surface.
 pub const MAX_PROJECT_UI_LOGICAL_EXTENT: u32 = 65_536;
+/// Maximum bytes retained for one profile execution contract identifier.
+pub const MAX_PROJECT_EXECUTION_CONTRACT_BYTES: usize = 128;
 
 mod capability;
 mod defaults;
@@ -23,20 +25,21 @@ mod validation;
 
 pub use capability::{ProductCapability, ProductCapabilitySet, RuntimePreset};
 pub use effective::{
-    EffectiveDiagnosticsSettings, EffectiveInputSettings, EffectivePrimaryUiSurface,
-    EffectiveProjectInfo, EffectiveProjectPaths, EffectiveProjectSettings,
-    EffectiveRuntimeSettings, EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea,
-    EffectiveUiSettings, EffectiveWindowSettings,
+    DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, EffectiveDiagnosticsSettings, EffectiveInputSettings,
+    EffectivePrimaryUiSurface, EffectiveProjectExecutionSettings, EffectiveProjectInfo,
+    EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
+    EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
+    EffectiveWindowSettings, ProjectExecutionContract,
 };
 pub use manifest::{
     ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError,
 };
 pub use path::{ProjectPath, ProjectPathError};
 pub use profile::{
-    ProjectCapabilitiesPatch, ProjectDiagnosticsPatch, ProjectInputPatch, ProjectPathsPatch,
-    ProjectProfileError, ProjectProfileOverlay, ProjectRuntimePatch, ProjectStartupPatch,
-    ProjectTaskPoolPatch, ProjectTaskShutdownPatch, ProjectTasksPatch, ProjectUiPatch,
-    ProjectWindowPatch,
+    ProjectCapabilitiesPatch, ProjectDiagnosticsPatch, ProjectExecutionPatch, ProjectInputPatch,
+    ProjectPathsPatch, ProjectProfileError, ProjectProfileOverlay, ProjectRuntimePatch,
+    ProjectStartupPatch, ProjectTaskPoolPatch, ProjectTaskShutdownPatch, ProjectTasksPatch,
+    ProjectUiPatch, ProjectWindowPatch,
 };
 pub use sections::{
     ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectDiagnosticsManifest,
@@ -48,21 +51,23 @@ pub use sections::{
 
 pub mod prelude {
     pub use crate::{
-        CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT, EffectiveDiagnosticsSettings,
-        EffectiveInputSettings, EffectivePrimaryUiSurface, EffectiveProjectInfo,
+        CURRENT_PROJECT_SCHEMA_VERSION, DEFAULT_MANIFEST_BYTE_LIMIT,
+        DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, EffectiveDiagnosticsSettings, EffectiveInputSettings,
+        EffectivePrimaryUiSurface, EffectiveProjectExecutionSettings, EffectiveProjectInfo,
         EffectiveProjectPaths, EffectiveProjectSettings, EffectiveRuntimeSettings,
         EffectiveStartupSettings, EffectiveTaskSettings, EffectiveUiSafeArea, EffectiveUiSettings,
-        EffectiveWindowSettings, MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
+        EffectiveWindowSettings, MAX_PROJECT_EXECUTION_CONTRACT_BYTES,
+        MAX_PROJECT_FIXED_DEBT_STEPS, MAX_PROJECT_FIXED_STEPS_PER_FRAME,
         MAX_PROJECT_UI_LOGICAL_EXTENT, ProductCapability, ProductCapabilitySet,
         ProjectAuthoringManifest, ProjectCapabilitiesManifest, ProjectCapabilitiesPatch,
-        ProjectDiagnosticsManifest, ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest,
-        ProjectManifest, ProjectManifestLoad, ProjectManifestMutationError,
-        ProjectManifestWriteError, ProjectPath, ProjectPathError, ProjectPathsManifest,
-        ProjectPresentMode, ProjectProfileError, ProjectProfileKind, ProjectProfileOverlay,
-        ProjectRuntimeManifest, ProjectStartupManifest, ProjectTaskPoolManifest,
-        ProjectTaskPoolPatch, ProjectTaskShutdownManifest, ProjectTaskShutdownPatch,
-        ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest, ProjectUiPatch,
-        ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
+        ProjectDiagnosticsManifest, ProjectExecutionContract, ProjectExecutionPatch,
+        ProjectFixedCatchUpPolicy, ProjectInfo, ProjectInputManifest, ProjectManifest,
+        ProjectManifestLoad, ProjectManifestMutationError, ProjectManifestWriteError, ProjectPath,
+        ProjectPathError, ProjectPathsManifest, ProjectPresentMode, ProjectProfileError,
+        ProjectProfileKind, ProjectProfileOverlay, ProjectRuntimeManifest, ProjectStartupManifest,
+        ProjectTaskPoolManifest, ProjectTaskPoolPatch, ProjectTaskShutdownManifest,
+        ProjectTaskShutdownPatch, ProjectTasksManifest, ProjectTasksPatch, ProjectUiManifest,
+        ProjectUiPatch, ProjectUiSafeAreaManifest, ProjectUiSurfaceManifest, ProjectWindowManifest,
         ProjectWindowMode, RuntimePreset,
     };
 }
