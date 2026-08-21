@@ -132,18 +132,14 @@ impl EditorImageLastGoodStore {
             .collect()
     }
 
-    pub(super) fn retain_verified_by_source_index(
+    pub(super) fn retain_catalog_eligible(
         &mut self,
-        generation: ProjectSourceIndexGeneration,
         mut retain: impl FnMut(&AssetPath, &EditorImageLastGood) -> bool,
     ) {
         let previous_len = self.images.len();
         self.images
             .retain(|asset_path, image| retain(asset_path, image));
         self.changed |= self.images.len() != previous_len;
-        for image in self.images.values_mut() {
-            image.verify_source_index(generation);
-        }
     }
 
     #[must_use]

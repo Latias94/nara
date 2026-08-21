@@ -710,16 +710,13 @@ impl EditorImageImportHost {
         };
         match attempt.advance(project) {
             Ok(Some(snapshot)) => {
-                self.last_good.retain_verified_by_source_index(
-                    source_index.generation(),
-                    |asset_path, image| {
-                        snapshot.retains_imported_image(
-                            asset_path,
-                            image.stable_id(),
-                            image.source_identity(),
-                        )
-                    },
-                );
+                self.last_good.retain_catalog_eligible(|asset_path, image| {
+                    snapshot.retains_imported_image(
+                        asset_path,
+                        image.stable_id(),
+                        image.source_identity(),
+                    )
+                });
                 self.catalog = Some(Arc::new(snapshot));
                 self.catalog_attempt = None;
                 self.catalog_failure = None;

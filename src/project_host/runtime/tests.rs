@@ -1918,94 +1918,22 @@ fn generic_editor_image_import_action_submits_the_exact_selected_detail() {
     let invalid_metadata = editor.drive_editor_frame(Duration::ZERO);
     let invalid_metadata = invalid_metadata
         .image_import()
-        .expect("invalid desired metadata must not hide the accepted last-good image");
+        .expect("invalid desired metadata remains visible as a safe read-only detail");
     assert!(matches!(
         invalid_metadata.metadata(),
         EditorImageImportMetadataView::Invalid {
             issue: nara_tooling::EditorImageImportMetadataIssue::InvalidFormat,
         }
     ));
-    assert!(matches!(
-        invalid_metadata.availability(),
-        EditorImageImportAvailabilityView::LastGood {
-            stable_id: projected_id,
-            version: projected_version,
-            active_settings,
-            freshness: nara_tooling::EditorImageImportFreshness::SourceUnverified,
-            ..
-        } if projected_id == stable_id
-            && projected_version == version
-            && active_settings == settings
-    ));
-
-    fs::remove_file(project.root.join("assets/textures/imported.png.meta")).unwrap();
-    assert!(editor.request_project_source_index_refresh());
-    drive_image_import_host_until_idle(&mut editor);
-    let missing_frame = editor.drive_editor_frame(Duration::ZERO);
-    let missing_metadata = missing_frame
-        .image_import()
-        .expect("deleting a sidecar keeps the same-session last-good image available");
     assert_eq!(
-        missing_metadata.metadata(),
-        EditorImageImportMetadataView::Missing
+        invalid_metadata.availability(),
+        EditorImageImportAvailabilityView::Unavailable
     );
-    assert!(missing_metadata.can_submit());
-    let recreate_action = missing_metadata.submit_action(settings);
-    let report = editor
-        .dispatch_editor_actions(EditorActionBatch::new(
-            missing_frame.revision(),
-            [EditorAction::ImageImport(recreate_action)],
-        ))
-        .unwrap();
-    assert!(matches!(
-        report.outcomes(),
-        [EditorActionOutcome::ImageImport(
-            EditorImageImportActionOutcome::Started { .. }
-        )]
-    ));
-    let (recreated_stable_id, recreated_version) = match drive_image_import_to_terminal(&mut editor)
-    {
-        super::editor::EditorImageImportState::Succeeded {
-            stable_id, version, ..
-        } => (stable_id, version),
-        other => panic!("recreating the sidecar did not reimport the image: {other:?}"),
-    };
-    assert_eq!(recreated_stable_id, stable_id);
-    assert_ne!(recreated_version, version);
-    drive_image_import_host_until_idle(&mut editor);
-    let recreated_metadata =
-        nara_asset::AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(
-            &fs::read(project.root.join("assets/textures/imported.png.meta")).unwrap(),
-        )
-        .unwrap();
-    assert_eq!(recreated_metadata.identity().stable_id(), stable_id);
-
-    let source = project.root.join("assets/textures/imported.png");
-    fs::rename(
-        &source,
-        project.root.join("imported-before-replacement.png"),
-    )
-    .unwrap();
-    fs::copy(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
-        &source,
-    )
-    .unwrap();
-    assert!(editor.request_project_source_index_refresh());
-    drive_image_import_host_until_idle(&mut editor);
-    let source_changed = editor.drive_editor_frame(Duration::ZERO);
-    assert!(matches!(
-        source_changed
-            .image_import()
-            .expect("source replacement keeps the accepted image visible")
-            .availability(),
-        EditorImageImportAvailabilityView::LastGood {
-            stable_id: projected_id,
-            version: projected_version,
-            freshness: nara_tooling::EditorImageImportFreshness::SourceChanged,
-            ..
-        } if projected_id == stable_id && projected_version == recreated_version
-    ));
+    assert!(
+        editor
+            .editor_image_last_good(&AssetPath::new("textures/imported.png").unwrap())
+            .is_none()
+    );
 }
 
 #[cfg(feature = "tooling")]

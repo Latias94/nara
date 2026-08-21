@@ -205,9 +205,16 @@ impl EditorImageImportHost {
                     },
                     None => EditorImageSourceObservation::Unavailable,
                 };
+                let settings_changed = desired.is_some_and(|(stable_id, settings)| {
+                    stable_id == last_good.stable_id()
+                        && settings.settings_hash() != last_good.settings_hash()
+                });
                 let freshness = match (source_observation, desired) {
                     (EditorImageSourceObservation::Changed, _) => {
                         EditorImageImportFreshness::SourceChanged
+                    }
+                    (EditorImageSourceObservation::Unverified, _) if settings_changed => {
+                        EditorImageImportFreshness::SettingsChanged
                     }
                     (EditorImageSourceObservation::Unverified, _) => {
                         EditorImageImportFreshness::SourceUnverified
