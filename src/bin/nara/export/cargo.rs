@@ -6,7 +6,10 @@ use std::{
 };
 
 use nara::project_workflow::{
-    __private::{ProjectExportBuildPreparation, ProjectExportCargoArtifact},
+    __private::{
+        CargoCompilerArtifactFacts, CargoJsonMessage, CargoJsonMessageError,
+        ProjectExportBuildPreparation, ProjectExportCargoArtifact,
+    },
     ProjectExportBinaryTarget, ProjectExportBuildError, ProjectExportBuildReceipt,
     StartupContentClosureReceipt,
 };
@@ -35,6 +38,8 @@ pub(crate) enum CargoBuildAdapterError {
     OutputLimitExceeded,
     #[error("Cargo emitted malformed JSON")]
     Json(#[source] serde_json::Error),
+    #[error(transparent)]
+    CargoMessage(#[from] CargoJsonMessageError),
     #[error("Cargo emitted an invalid compiler-artifact field: {field}")]
     InvalidArtifactField { field: &'static str },
     #[error("Cargo emitted a compiler artifact for an unexpected binary target")]
@@ -220,7 +225,8 @@ fn parse_messages(
     selector: &mut ArtifactSelector,
 ) -> Result<(), CargoBuildAdapterError> {
     for value in serde_json::Deserializer::from_reader(reader).into_iter::<Value>() {
-        selector.observe(value.map_err(CargoBuildAdapterError::Json)?)?;
+        let value = value.map_err(CargoBuildAdapterError::Json)?;
+        selector.observe(CargoJsonMessage::parse(value)?)?;
     }
     Ok(())
 }
@@ -245,84 +251,75 @@ impl ArtifactSelector {
         }
     }
 
-    fn observe(&mut self, value: Value) -> Result<(), CargoBuildAdapterError> {
-        let object = value
-            .as_object()
-            .ok_or(CargoBuildAdapterError::InvalidArtifactField { field: "message" })?;
-        let reason = string_field(object.get("reason"), "reason")?;
-        match reason {
-            "compiler-artifact" => self.observe_artifact(object),
-            "build-finished" => {
+    fn observe(&mut self, message: CargoJsonMessage) -> Result<(), CargoBuildAdapterError> {
+        match message {
+            CargoJsonMessage::CompilerArtifact(artifact) => self.observe_artifact(&artifact),
+            CargoJsonMessage::BuildFinished { success } => {
                 if self.build_finished.is_some() {
                     return Err(CargoBuildAdapterError::BuildFinishedMissing);
                 }
-                self.build_finished = Some(bool_field(object.get("success"), "success")?);
+                self.build_finished = Some(success);
                 Ok(())
             }
-            "compiler-message" | "build-script-executed" => Ok(()),
-            _ => Err(CargoBuildAdapterError::InvalidArtifactField { field: "reason" }),
+            CargoJsonMessage::CompilerDiagnostic(_) | CargoJsonMessage::BuildScriptExecuted => {
+                Ok(())
+            }
         }
     }
 
     fn observe_artifact(
         &mut self,
-        object: &serde_json::Map<String, Value>,
+        artifact: &CargoCompilerArtifactFacts,
     ) -> Result<(), CargoBuildAdapterError> {
-        let manifest_path = Path::new(string_field(object.get("manifest_path"), "manifest_path")?);
-        if !paths_match(manifest_path, &self.manifest_path) {
+        if !paths_match(artifact.manifest_path(), &self.manifest_path) {
             return Ok(());
         }
-        let target = object
-            .get("target")
-            .and_then(Value::as_object)
-            .ok_or(CargoBuildAdapterError::InvalidArtifactField { field: "target" })?;
-        let kinds = string_array(target.get("kind"), "target.kind")?;
-        if kinds.as_slice() != ["bin"] {
+        if !strings_match(artifact.target_kind(), &["bin"]) {
             return Ok(());
         }
-        if string_array(target.get("crate_types"), "target.crate_types")?.as_slice() != ["bin"] {
+        if !strings_match(artifact.target_crate_types(), &["bin"]) {
             return Err(CargoBuildAdapterError::InvalidArtifactField {
                 field: "target.crate_types",
             });
         }
-        let target_name = string_field(target.get("name"), "target.name")?;
-        let target_role = match target_name {
+        let target_role = match artifact.target_name() {
             "headless" => ProjectExportBinaryTarget::Headless,
             "desktop" => ProjectExportBinaryTarget::Desktop,
             _ => return Err(CargoBuildAdapterError::UnexpectedBinaryTarget),
         };
-        let source_path = Path::new(string_field(target.get("src_path"), "target.src_path")?);
-        if !paths_match(source_path, &self.source_paths[target_index(target_role)]) {
+        if !paths_match(
+            artifact.target_source_path(),
+            &self.source_paths[target_index(target_role)],
+        ) {
             return Err(CargoBuildAdapterError::InvalidArtifactField {
                 field: "target.src_path",
             });
         }
-        if string_array(object.get("features"), "features")?.as_slice() != [DESKTOP_FEATURE] {
+        if !strings_match(artifact.features(), &[DESKTOP_FEATURE]) {
             return Err(CargoBuildAdapterError::InvalidArtifactField { field: "features" });
         }
-        if let Some(required_features) = target.get("required-features") {
+        if let Some(required_features) = artifact.target_required_features() {
             let expected_required_features = match target_role {
                 ProjectExportBinaryTarget::Headless => &[][..],
                 ProjectExportBinaryTarget::Desktop => &[DESKTOP_FEATURE][..],
             };
-            if string_array(Some(required_features), "target.required-features")?.as_slice()
-                != expected_required_features
-            {
+            if !strings_match(required_features, expected_required_features) {
                 return Err(CargoBuildAdapterError::InvalidArtifactField {
                     field: "target.required-features",
                 });
             }
         }
-        let profile = object
-            .get("profile")
-            .and_then(Value::as_object)
-            .ok_or(CargoBuildAdapterError::InvalidArtifactField { field: "profile" })?;
-        if bool_field(profile.get("test"), "profile.test")? {
+        if artifact.profile_test() {
             return Err(CargoBuildAdapterError::InvalidArtifactField {
                 field: "profile.test",
             });
         }
-        let executable = PathBuf::from(string_field(object.get("executable"), "executable")?);
+        let executable = artifact
+            .executable()
+            .ok_or(CargoBuildAdapterError::InvalidArtifactField {
+                field: "executable",
+            })?
+            .to_path_buf();
         if !executable.is_absolute() {
             return Err(CargoBuildAdapterError::InvalidArtifactField {
                 field: "executable",
@@ -330,7 +327,7 @@ impl ArtifactSelector {
         }
         let selected = SelectedArtifact {
             target: target_role,
-            package_id: string_field(object.get("package_id"), "package_id")?.to_owned(),
+            package_id: artifact.package_id().to_owned(),
             executable,
         };
         let slot = &mut self.selected[target_index(target_role)];
@@ -364,35 +361,12 @@ struct SelectedArtifact {
     executable: PathBuf,
 }
 
-fn string_field<'a>(
-    value: Option<&'a Value>,
-    field: &'static str,
-) -> Result<&'a str, CargoBuildAdapterError> {
-    value
-        .and_then(Value::as_str)
-        .ok_or(CargoBuildAdapterError::InvalidArtifactField { field })
-}
-
-fn bool_field(value: Option<&Value>, field: &'static str) -> Result<bool, CargoBuildAdapterError> {
-    value
-        .and_then(Value::as_bool)
-        .ok_or(CargoBuildAdapterError::InvalidArtifactField { field })
-}
-
-fn string_array<'a>(
-    value: Option<&'a Value>,
-    field: &'static str,
-) -> Result<Vec<&'a str>, CargoBuildAdapterError> {
-    value
-        .and_then(Value::as_array)
-        .ok_or(CargoBuildAdapterError::InvalidArtifactField { field })?
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .ok_or(CargoBuildAdapterError::InvalidArtifactField { field })
-        })
-        .collect()
+fn strings_match(actual: &[String], expected: &[&str]) -> bool {
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| actual == expected)
 }
 
 fn paths_match(left: &Path, right: &Path) -> bool {
@@ -441,7 +415,13 @@ mod tests {
             .observe(artifact_message(&root, "desktop"))
             .unwrap();
         selector
-            .observe(json!({"reason": "build-finished", "success": true}))
+            .observe(
+                CargoJsonMessage::parse(json!({
+                    "reason": "build-finished",
+                    "success": true
+                }))
+                .unwrap(),
+            )
             .unwrap();
 
         let [headless, desktop] = selector.finish().unwrap();
@@ -465,8 +445,8 @@ mod tests {
         ));
     }
 
-    fn artifact_message(root: &Path, target: &str) -> Value {
-        json!({
+    fn artifact_message(root: &Path, target: &str) -> CargoJsonMessage {
+        CargoJsonMessage::parse(json!({
             "reason": "compiler-artifact",
             "package_id": "path+file:///project#nara-game@0.1.0",
             "manifest_path": root.join("Cargo.toml"),
@@ -480,7 +460,9 @@ mod tests {
             "profile": {"test": false},
             "features": ["desktop"],
             "executable": root.join("target/release").join(target),
-        })
+            "fresh": true,
+        }))
+        .unwrap()
     }
 
     fn test_root() -> PathBuf {

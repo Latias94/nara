@@ -3,6 +3,8 @@
 //! The initial public surface owns only the immutable `desktop-2d/v1` creation plan. Native paths,
 //! Cargo process messages, CLI parsing, and desktop presentation remain Adapter concerns.
 
+#[cfg(feature = "project-workflow-cargo-facts")]
+mod cargo_facts;
 mod check;
 mod creation;
 mod dependency;
@@ -57,8 +59,16 @@ pub use starter::{
 /// This Module is not a product extension seam. Public workflow consumers receive the resulting
 /// opaque build receipt and never parse Cargo JSON or import executable native paths themselves.
 #[doc(hidden)]
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-workflow-cargo-facts")]
 pub mod __private {
+    pub use super::cargo_facts::{
+        CargoArtifactMismatchField, CargoCompilerArtifactFacts, CargoCompilerDiagnostic,
+        CargoDesktopArtifactFacts, CargoDesktopBuildDecoder, CargoDesktopBuildError,
+        CargoDesktopBuildFacts, CargoDesktopBuildInvocation, CargoDesktopInvocationError,
+        CargoDiagnosticLevel, CargoDiagnostics, CargoJsonMessage, CargoJsonMessageError,
+        CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact, CargoPackageSourceKind,
+    };
+    #[cfg(feature = "project-workflow-cli")]
     pub use super::export::{
         ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
     };

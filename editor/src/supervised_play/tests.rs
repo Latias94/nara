@@ -57,7 +57,7 @@ fn helper_process() {
     }
 }
 
-fn helper_command(mode: &str) -> SupervisedProcessCommand {
+pub(super) fn helper_command(mode: &str) -> SupervisedProcessCommand {
     let executable = env::current_exe().expect("the test executable is available");
     let working_directory = executable
         .parent()

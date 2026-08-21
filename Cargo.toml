@@ -260,7 +260,8 @@ project-workflow = [
     "dep:getrandom",
     "dep:toml",
 ]
-project-workflow-cli = ["project-workflow", "dep:serde_json"]
+project-workflow-cargo-facts = ["project-workflow", "dep:serde_json"]
+project-workflow-cli = ["project-workflow-cargo-facts"]
 
 [[bin]]
 name = "nara"
