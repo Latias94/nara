@@ -9,8 +9,8 @@ an index, not another source of architecture decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
 3. The [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
-   plan is active only at EIR-U5 under
-   [registration `245355740b684b4d93569c53f383d8e4`](../knowledge/engineering/registry/2026-08/2026-08-20T121502Z-editor-image-import-reimport-v1-codex-root-245355740b684b4d93569c53f383d8e4.md).
+   plan is active only at EIR-U6 under
+   [registration `0a63693fff3d415fadd50f3370d154e0`](../knowledge/engineering/registry/2026-08/2026-08-21T005809Z-editor-image-import-reimport-v1-codex-root-0a63693fff3d415fadd50f3370d154e0.md).
    EIR-U0 accepted [ADR 0115](adr/0115-editor-image-import-metadata-and-authoring-publication.md).
    EIR-U1/EIR-U2 completed the typed recipe, strict-consumer, reload, and fixture migration at
    `334f946`, with the reviewed metadata-reload correction at `88f4a7a` and
@@ -25,8 +25,11 @@ an index, not another source of architecture decisions.
    last-good projection, and bounded native pending-work wake across `1620786` and correction
    `6797956`, under
    [verification `d109ae1760a2463a862ffd4c0148caaf`](../knowledge/engineering/verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md).
-   EIR-U5 owns only same-generation UI authoring publication and referenced-image hydration;
-   EIR-U6 and all unrelated Editor successors remain inactive.
+   EIR-U5 completed same-generation UI authoring publication and referenced-only hydration across
+   `a404a41` and source-proof correction `94157a1`, under
+   [verification `b2dfa722baf349b9a75cc324086024ac`](../knowledge/engineering/verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md).
+   EIR-U6 owns only the standalone Editor product trajectory and final evidence closure; all
+   unrelated Editor successors remain inactive.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with

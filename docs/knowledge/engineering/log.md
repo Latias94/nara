@@ -4,6 +4,10 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-08-21
+* **Work Registration**: [Editor Image Import and Reimport v1: EIR-U6 standalone product closure active](registry/2026-08/2026-08-21T005809Z-editor-image-import-reimport-v1-codex-root-0a63693fff3d415fadd50f3370d154e0.md) - Records EIR-U5 completion and activates only the standalone Editor image import product trajectory and final evidence closure.
+* **Verification Evidence**: [EIR-U5 same-generation authoring image publication and referenced hydration](verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md) - Verifies atomic image choices and prepared resources, referenced-only hydration, generic Save/Reopen, retirement, and exact source-proof boundaries.
+
 ## 2026-08-20
 * **Work Registration**: [Editor Image Import and Reimport v1: EIR-U5 authoring publication active](registry/2026-08/2026-08-20T121502Z-editor-image-import-reimport-v1-codex-root-245355740b684b4d93569c53f383d8e4.md) - Records EIR-U4 completion and activates only same-generation UI authoring publication and referenced-image hydration.
 * **Verification Evidence**: [EIR-U4 image import Inspector and native wake](verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md) - Verifies the UI-neutral image import projection, private egui Inspector, exact frame-bound action, last-good diagnostics, and bounded native polling wake.
@@ -137,5 +141,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Work Registration**: [Presented UI evidence correction: PUEC-U3 active](registry/2026-08/2026-08-13T110559Z-engine-foundation-contract-completion-codex-root-89b571c863044efa8609cb87ff03535a.md) - Records receipt-bound presented observation conformance and advances the correction to post-readiness product measurement.
 * **Verification Evidence**: [PUEC-U2 receipt-bound presented observation](verification/2026-08/2026-08-13T110513Z-puec-u2-receipt-bound-presented-observation-97aa78c6bbf74fada0b7d99219e271a6.md) - Proves that the presentation owner publishes one immutable observation from the exact accepted WGPU packet only after committing its matching receipt.
 * **Verification Evidence**: [PUEC-U1 exact WGPU frame identity](verification/2026-08/2026-08-13T090735Z-puec-u1-exact-wgpu-frame-identity-5207658a400a48c99783ed034b5b5125.md) - Proves that WGPU transaction and completion evidence retains distinct App-frame and Render-transaction identities.
-* **Work Registration**: [Presented UI evidence correction: PUEC-U2 active](registry/2026-08/2026-08-13T090735Z-engine-foundation-contract-completion-codex-root-3b54121221f24d2280c683d38ce79a76.md) - Records exact WGPU dual-frame identity and advances the correction to receipt-bound presented observation.
-* **Work Registration**: [Presented UI evidence correction active; RUP-U3 paused](registry/2026-08/2026-08-13T085410Z-engine-foundation-contract-completion-codex-root-4b3770a6c8614a42a91f13e2c5dc9e96.md) - Owner-local WGPU and presentation reproduction pauses RUP-U3 for exact evidence identity correction.
