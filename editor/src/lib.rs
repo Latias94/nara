@@ -2,6 +2,7 @@
 
 mod app;
 mod platform;
+mod supervised_play;
 
 pub use app::{
     EditorApplication, EditorApplicationOpenError, EditorApplicationState, EditorApplicationUpdate,
