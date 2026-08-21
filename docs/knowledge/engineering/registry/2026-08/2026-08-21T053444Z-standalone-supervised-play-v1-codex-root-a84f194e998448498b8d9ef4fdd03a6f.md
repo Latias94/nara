@@ -20,18 +20,20 @@ SPL-U0 through SPL-U5: one local supervised desktop child process, explicit laun
 
 # Current Claim
 
-SPL-U0 has accepted ADR 0116 and narrowed OQ-039 to one local external-window desktop
-placement. The profile execution declaration, capability-free source receipt codec, and explicit
-project-root selection contract are implemented and covered by focused tests. Host admission from
-current saved documents, Cargo effects, child supervision, READY, and lifecycle integration remain
-unclaimed until their later units pass.
+SPL-U0 has accepted ADR 0116 and narrowed OQ-039 to one local external-window desktop placement.
+SPL-U1 now supplies the private Windows process-tree owner, supported Linux x86_64 process-group
+adapter, bounded cancellable output, spawn authority allowlist, and terminal cleanup receipt.
+Windows focused tests and a Linux cross-target check pass; native supported-Unix process evidence,
+Host admission from current saved documents, Cargo generations, READY, and lifecycle integration
+remain unclaimed until their later gates pass.
 
 # Latest Links
 
 - ADR: `docs/architecture/adr/0116-standalone-supervised-editor-play.md`
 - Focused code: `src/project_host/runtime/editor/external_play.rs`
-- Focused tests: `crates/nara_project/src/tests.rs`, `src/project_host/product_launch.rs`
-- Verification: `docs/knowledge/engineering/verification/2026-08/2026-08-21T060000Z-spl-u0-supervised-play-contract.md`
+- Process code: `editor/src/supervised_play/process/**`, `editor/src/supervised_play/log.rs`
+- Focused tests: `editor/src/supervised_play/tests.rs`
+- Verification: `docs/knowledge/engineering/verification/2026-08/2026-08-21T090132Z-spl-u1-private-supervised-process-substrate-9b5f75ac859c466ba7f94deb74851778.md`
 
 # Handoff
 

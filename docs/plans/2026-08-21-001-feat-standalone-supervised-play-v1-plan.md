@@ -692,6 +692,10 @@ SPL-U0 contract evidence is recorded in
 **Verification:** focused state/log tests, one Windows Job test, one supported-Unix process-group
 test, and one spawn-boundary canary; no Cargo build is needed to prove the owner contract.
 
+SPL-U1 Windows process-owner and supported-Linux compile evidence is recorded in
+`docs/knowledge/engineering/verification/2026-08/2026-08-21T090132Z-spl-u1-private-supervised-process-substrate-9b5f75ac859c466ba7f94deb74851778.md`.
+The supported-Unix native process-group trajectory remains a later release gate.
+
 ### SPL-U2. Build one exact desktop artifact and publish an immutable generation
 
 **Depends on:** SPL-U0 and SPL-U1.

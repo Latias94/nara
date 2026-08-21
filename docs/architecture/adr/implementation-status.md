@@ -1,14 +1,18 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified**: 2026-08-21 @ SPL-U0 contract verification `90d7545` / record `8ffa9628a3e245e4c137df5a46196731`
+**Last Verified**: 2026-08-21 @ SPL-U1 process substrate verification `07b590e` / record `9b5f75ac859c466ba7f94deb74851778`
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. The completed
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
 successor is the sole active lane under registration `a84f194e998448498b8d9ef4fdd03a6f`.
 SPL-U0 accepts ADR 0116 and narrows OQ-039 to one local external-window desktop placement. Its
-manifest, source-receipt, launch-context, and value-only admission contract gates pass at `90d7545`;
-no build or process effect is yet claimed.
+manifest, source-receipt, launch-context, and value-only admission contract gates pass at `90d7545`.
+SPL-U1 adds the private Windows process-tree owner, supported Linux x86_64 process-group adapter,
+bounded cancellable output, exact spawn authority allowlist, and terminal cleanup receipt at
+`07b590e`; Windows focused tests and a Linux cross-target check pass, while native Unix process
+evidence remains a later release gate. Cargo selection, immutable generations, READY, and ordinary
+Editor lifecycle effects remain unclaimed.
 The completed
 [Editor Image Import and Reimport v1](../../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
 plan closes at `ec64e4c` with verification record `ae97ce2c7330420d8b6851967fd7c8b4`
