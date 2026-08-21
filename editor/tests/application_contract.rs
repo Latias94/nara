@@ -472,10 +472,10 @@ fn reference_game_opens_through_the_same_ordinary_editor_api() {
     ));
     let mutation = ui_frame
         .lower_discrete_field_edit(discrete.key(), proposed)
-        .expect("ordinary UI scalar lowering must use the preservation-safe command");
+        .expect("ordinary UI field lowering must use the preservation-safe command");
     assert!(matches!(
         mutation,
-        EditorDocumentMutation::ApplyAuthoringScalarEdit { .. }
+        EditorDocumentMutation::ApplyAuthoringFieldEdit { .. }
     ));
     let action_frame = current_frame(&application).revision();
     let edited = application.submit_and_drive(

@@ -1,11 +1,14 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use nara_asset::{
-    AssetMeta, AssetMetaFileLimits, AssetMetaIdentity, AssetPath, AssetRecord, AssetSourceKind,
-    AssetVersion, Handle, ImportSettingsHash, StableAssetId,
+    AssetId, AssetMeta, AssetMetaIdentity, AssetPath, AssetRecord, AssetSourceKind, AssetVersion,
+    StableAssetId,
 };
-use nara_fs::{ContentDigest, FileIdentity, RelativePath};
-use nara_image::{ImageAsset, ImageImportSettings};
+use nara_fs::{FileIdentity, RelativePath};
+use nara_image::ImageImportSettings;
 
 use crate::project_host::{
     authoring::{
@@ -21,13 +24,17 @@ use super::catalog::{
     EditorImageCatalogAttempt, EditorImageCatalogBuildError, EditorImageCatalogSnapshot,
     EditorImageMetadataStatus,
 };
+use super::hydration::{EditorImageHydrationFailure, EditorImageHydrationHost};
+use super::metadata_byte_limit;
+use super::store::{EditorImageLastGood, EditorImageLastGoodStore, EditorImageSourceProof};
+#[cfg(feature = "runtime-ui")]
+use crate::project_host::runtime::editor::authoring_images;
 use crate::project_host::runtime::editor::authoring_runtime::{
     EditorAuthoringRuntime, EditorImageRuntimeFailure, EditorImageRuntimeTask,
     EditorImageRuntimeTerminal, EditorImageSourceCompletion,
 };
 
 const MAX_STABLE_ID_ATTEMPTS: usize = 16;
-const MAX_LAST_GOOD_IMAGES: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct EditorImageImportGeneration(u64);
@@ -85,54 +92,6 @@ pub(crate) enum EditorImageImportState {
     ReconcileRequired {
         generation: EditorImageImportGeneration,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct EditorImageLastGood {
-    stable_id: StableAssetId,
-    handle: Handle<ImageAsset>,
-    source_identity: FileIdentity,
-    source_index_generation: ProjectSourceIndexGeneration,
-    source_digest: ContentDigest,
-    settings_hash: ImportSettingsHash,
-    version: AssetVersion,
-}
-
-impl EditorImageLastGood {
-    #[must_use]
-    pub(crate) const fn stable_id(&self) -> StableAssetId {
-        self.stable_id
-    }
-
-    #[must_use]
-    pub(crate) const fn handle(&self) -> Handle<ImageAsset> {
-        self.handle
-    }
-
-    #[must_use]
-    pub(crate) const fn source_identity(&self) -> FileIdentity {
-        self.source_identity
-    }
-
-    #[must_use]
-    pub(super) const fn source_index_generation(&self) -> ProjectSourceIndexGeneration {
-        self.source_index_generation
-    }
-
-    #[must_use]
-    pub(crate) const fn source_digest(&self) -> ContentDigest {
-        self.source_digest
-    }
-
-    #[must_use]
-    pub(crate) const fn settings_hash(&self) -> ImportSettingsHash {
-        self.settings_hash
-    }
-
-    #[must_use]
-    pub(crate) const fn version(&self) -> AssetVersion {
-        self.version
-    }
 }
 
 struct PendingImageImport {
@@ -262,7 +221,8 @@ pub(crate) struct EditorImageImportHost {
     pending: Option<PendingImageImport>,
     latest: Option<EditorImageImportLatestAttempt>,
     retained_details: BTreeMap<Arc<str>, EditorImageImportLatestDetail>,
-    last_good: BTreeMap<AssetPath, EditorImageLastGood>,
+    last_good: EditorImageLastGoodStore,
+    hydration: EditorImageHydrationHost,
     refresh: Option<RefreshObligation>,
     reconciliation: Option<ReconciliationObligation>,
     #[cfg(test)]
@@ -280,7 +240,8 @@ impl Default for EditorImageImportHost {
             pending: None,
             latest: None,
             retained_details: BTreeMap::new(),
-            last_good: BTreeMap::new(),
+            last_good: EditorImageLastGoodStore::default(),
+            hydration: EditorImageHydrationHost::default(),
             refresh: None,
             reconciliation: None,
             #[cfg(test)]
@@ -340,12 +301,59 @@ impl EditorImageImportHost {
     }
 
     #[must_use]
+    pub(crate) fn authoring_image_asset_ids(&self) -> BTreeSet<AssetId> {
+        self.last_good.asset_ids()
+    }
+
+    pub(crate) fn initialize_authoring_hydration(
+        &mut self,
+        project: &AuthoringProjectSessionSnapshot,
+    ) {
+        self.hydration.initialize(project);
+    }
+
+    #[must_use]
+    pub(crate) const fn last_good_store_changed(&self) -> bool {
+        self.last_good.changed()
+    }
+
+    pub(crate) fn acknowledge_last_good_store_changed(&mut self) {
+        self.last_good.acknowledge_changed();
+    }
+
+    #[must_use]
+    pub(crate) fn authoring_catalog_publication_ready(&self) -> bool {
+        !self.hydration.has_pending_work()
+    }
+
+    pub(crate) fn take_hydration_failure(&mut self) -> Option<EditorImageHydrationFailure> {
+        self.hydration.take_failure()
+    }
+
+    #[must_use]
     pub(crate) fn has_pending_work(&self) -> bool {
-        self.catalog_attempt.is_some() || self.pending.is_some() || self.refresh.is_some()
+        self.catalog_attempt.is_some()
+            || self.pending.is_some()
+            || self.refresh.is_some()
+            || self.hydration.has_pending_work()
+    }
+
+    #[must_use]
+    pub(crate) fn request_blocker(&self) -> Option<EditorImageImportFailure> {
+        if self.pending.is_some() || self.hydration.has_pending_work() {
+            Some(EditorImageImportFailure::Busy)
+        } else if self.reconciliation.is_some() {
+            Some(EditorImageImportFailure::ReconcileRequired)
+        } else if self.refresh.is_some() {
+            Some(EditorImageImportFailure::StaleFrame)
+        } else {
+            None
+        }
     }
 
     pub(crate) fn cancel_pending(&mut self) {
         self.pending = None;
+        self.hydration.cancel_pending();
     }
 
     #[cfg(test)]
@@ -362,6 +370,10 @@ impl EditorImageImportHost {
         self.advance_catalog(project);
         self.advance_reconciliation(project);
         self.advance_import(project, runtime);
+        if self.pending.is_none() {
+            self.hydration
+                .advance(project, runtime, &mut self.last_good);
+        }
     }
 
     pub(crate) fn request(
@@ -373,16 +385,8 @@ impl EditorImageImportHost {
         expected_detail_revision: u64,
         settings: ImageImportSettings,
     ) -> EditorImageImportRequestResult {
-        if self.pending.is_some() {
-            return EditorImageImportRequestResult::Rejected(EditorImageImportFailure::Busy);
-        }
-        if self.reconciliation.is_some() {
-            return EditorImageImportRequestResult::Rejected(
-                EditorImageImportFailure::ReconcileRequired,
-            );
-        }
-        if self.refresh.is_some() {
-            return EditorImageImportRequestResult::Rejected(EditorImageImportFailure::StaleFrame);
+        if let Some(failure) = self.request_blocker() {
+            return EditorImageImportRequestResult::Rejected(failure);
         }
         if !frame.matches_action(project_relative_path, expected_detail_revision) {
             return EditorImageImportRequestResult::Rejected(EditorImageImportFailure::StaleFrame);
@@ -423,9 +427,7 @@ impl EditorImageImportHost {
                 EditorImageImportFailure::SourceUnavailable,
             );
         };
-        if self.last_good.len() >= MAX_LAST_GOOD_IMAGES
-            && !self.last_good.contains_key(entry.asset_path())
-        {
+        if !self.last_good.can_insert(entry.asset_path()) {
             return EditorImageImportRequestResult::Rejected(
                 EditorImageImportFailure::LastGoodLimitExceeded,
             );
@@ -523,6 +525,12 @@ impl EditorImageImportHost {
                 return self.fail_request(generation, EditorImageImportFailure::MetadataInvalid);
             }
         };
+
+        #[cfg(feature = "runtime-ui")]
+        if authoring_images::validate_authoring_image_choice(stable_id, entry.asset_path()).is_err()
+        {
+            return self.fail_request(generation, EditorImageImportFailure::CatalogRejected);
+        }
 
         let metadata = AssetMeta::new(
             AssetMetaIdentity::new(
@@ -702,6 +710,16 @@ impl EditorImageImportHost {
         };
         match attempt.advance(project) {
             Ok(Some(snapshot)) => {
+                self.last_good.retain_verified_by_source_index(
+                    source_index.generation(),
+                    |asset_path, image| {
+                        snapshot.retains_imported_image(
+                            asset_path,
+                            image.stable_id(),
+                            image.source_identity(),
+                        )
+                    },
+                );
                 self.catalog = Some(Arc::new(snapshot));
                 self.catalog_attempt = None;
                 self.catalog_failure = None;
@@ -753,16 +771,20 @@ impl EditorImageImportHost {
                         .source_index_snapshot()
                         .map(|snapshot| snapshot.generation())
                         .ok_or(EditorImageImportFailure::StaleFrame)?;
-                    let last_good = EditorImageLastGood {
-                        stable_id: pending.stable_id,
+                    let last_good = EditorImageLastGood::new(
+                        pending.stable_id,
                         handle,
-                        source_identity: source.identity(),
-                        source_index_generation,
+                        source.identity(),
+                        EditorImageSourceProof::SourceIndex {
+                            generation: source_index_generation,
+                        },
                         source_digest,
                         settings_hash,
                         version,
-                    };
-                    self.last_good.insert(pending.asset_path.clone(), last_good);
+                    );
+                    if !self.last_good.insert(pending.asset_path.clone(), last_good) {
+                        return Err(EditorImageImportFailure::LastGoodLimitExceeded);
+                    }
                     if let Some(detail) = self
                         .latest
                         .as_ref()
@@ -913,16 +935,16 @@ impl EditorImageImportHost {
         let Some(last_good) = self.last_good.get_mut(&asset_path) else {
             return;
         };
-        if last_good.stable_id != stable_id
-            || last_good.version != version
+        if last_good.stable_id() != stable_id
+            || last_good.version() != version
             || source_index
                 .entry(&relative_path)
                 .and_then(crate::project_host::authoring::ProjectSourceIndexEntry::scoped_identity)
-                != Some(last_good.source_identity)
+                != Some(last_good.source_identity())
         {
             return;
         }
-        last_good.source_index_generation = source_index.generation();
+        last_good.verify_source_index(source_index.generation());
     }
 
     fn schedule_refresh(
@@ -977,7 +999,7 @@ impl EditorImageImportHost {
             settings,
             metadata,
         };
-        if self.last_good.contains_key(entry.asset_path()) {
+        if self.last_good.get(entry.asset_path()).is_some() {
             self.retained_details
                 .insert(Arc::clone(&relative_path), detail.clone());
         }
@@ -1014,10 +1036,6 @@ fn fresh_stable_id(catalog: &EditorImageCatalogSnapshot) -> Option<StableAssetId
     (0..MAX_STABLE_ID_ATTEMPTS)
         .filter_map(|_| StableAssetId::try_random().ok())
         .find(|stable_id| !catalog.contains_stable_id(*stable_id))
-}
-
-fn metadata_byte_limit() -> u64 {
-    u64::try_from(AssetMetaFileLimits::default().encoded_bytes().get()).unwrap_or(u64::MAX)
 }
 
 fn map_publication_rejection(_reason: FilePublicationRejection) -> EditorImageImportFailure {

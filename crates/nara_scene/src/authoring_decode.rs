@@ -195,29 +195,98 @@ pub struct AuthoringRecordFact {
     schema_declared_asset_references: Vec<DeclaredAssetReference>,
 }
 
-/// One preservation-safe scalar edit targeting an Available direct component record.
+pub const MAX_AUTHORING_FIELD_WRITES: usize = 8;
+const MAX_AUTHORING_FIELD_VALUE_NODES: usize = 256;
+const MAX_AUTHORING_FIELD_LOGICAL_BYTES: usize = 64 * 1024;
+
+/// One exact field write within a preservation-safe authoring edit.
 #[derive(Debug, Clone, PartialEq)]
-pub struct AuthoringScalarEdit {
-    entity: SceneEntityId,
-    component: ComponentTypeId,
+pub struct AuthoringFieldWrite {
     field: ComponentFieldId,
     value: ComponentValue,
 }
 
-impl AuthoringScalarEdit {
+impl AuthoringFieldWrite {
     #[must_use]
+    pub const fn new(field: ComponentFieldId, value: ComponentValue) -> Self {
+        Self { field, value }
+    }
+
+    #[must_use]
+    pub const fn field(&self) -> &ComponentFieldId {
+        &self.field
+    }
+
+    #[must_use]
+    pub const fn value(&self) -> &ComponentValue {
+        &self.value
+    }
+}
+
+/// One bounded preservation-safe field edit targeting an Available direct component record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuthoringFieldEdit {
+    entity: SceneEntityId,
+    component: ComponentTypeId,
+    component_version: ComponentSchemaVersion,
+    writes: Vec<AuthoringFieldWrite>,
+}
+
+impl AuthoringFieldEdit {
+    #[must_use]
+    pub fn single(
+        entity: SceneEntityId,
+        component: ComponentTypeId,
+        component_version: ComponentSchemaVersion,
+        field: ComponentFieldId,
+        value: ComponentValue,
+    ) -> Result<Self, AuthoringFieldEditError> {
+        Self::new(
+            entity,
+            component,
+            component_version,
+            [AuthoringFieldWrite::new(field, value)],
+        )
+    }
+
     pub fn new(
         entity: SceneEntityId,
         component: ComponentTypeId,
-        field: ComponentFieldId,
-        value: ComponentValue,
-    ) -> Self {
-        Self {
+        component_version: ComponentSchemaVersion,
+        writes: impl IntoIterator<Item = AuthoringFieldWrite>,
+    ) -> Result<Self, AuthoringFieldEditError> {
+        let writes = writes
+            .into_iter()
+            .take(MAX_AUTHORING_FIELD_WRITES + 1)
+            .collect::<Vec<_>>();
+        if writes.is_empty() {
+            return Err(AuthoringFieldEditError::Empty);
+        }
+        if writes.len() > MAX_AUTHORING_FIELD_WRITES {
+            return Err(AuthoringFieldEditError::WriteLimitExceeded);
+        }
+        let mut fields = BTreeSet::new();
+        let mut value_nodes = 0usize;
+        let mut logical_bytes = 0usize;
+        for write in &writes {
+            if !fields.insert(write.field.clone()) {
+                return Err(AuthoringFieldEditError::DuplicateField);
+            }
+            let cost = write.value.cost();
+            value_nodes = value_nodes.saturating_add(cost.nodes());
+            logical_bytes = logical_bytes.saturating_add(cost.logical_bytes());
+        }
+        if value_nodes > MAX_AUTHORING_FIELD_VALUE_NODES
+            || logical_bytes > MAX_AUTHORING_FIELD_LOGICAL_BYTES
+        {
+            return Err(AuthoringFieldEditError::ValueBudgetExceeded);
+        }
+        Ok(Self {
             entity,
             component,
-            field,
-            value,
-        }
+            component_version,
+            writes,
+        })
     }
 
     #[must_use]
@@ -231,15 +300,37 @@ impl AuthoringScalarEdit {
     }
 
     #[must_use]
-    pub const fn field(&self) -> &ComponentFieldId {
-        &self.field
+    pub const fn component_version(&self) -> ComponentSchemaVersion {
+        self.component_version
     }
 
     #[must_use]
-    pub const fn value(&self) -> &ComponentValue {
-        &self.value
+    pub fn writes(&self) -> &[AuthoringFieldWrite] {
+        &self.writes
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthoringFieldEditError {
+    Empty,
+    WriteLimitExceeded,
+    DuplicateField,
+    ValueBudgetExceeded,
+}
+
+impl Display for AuthoringFieldEditError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::Empty => "an authoring field edit requires at least one write",
+            Self::WriteLimitExceeded => "the authoring field edit write limit was exceeded",
+            Self::DuplicateField => "an authoring field edit cannot write one field twice",
+            Self::ValueBudgetExceeded => "the authoring field edit value budget was exceeded",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl Error for AuthoringFieldEditError {}
 
 impl AuthoringRecordFact {
     #[must_use]
@@ -860,14 +951,14 @@ impl AuthoringDocumentState {
     }
 }
 
-pub(crate) struct PreparedSceneAuthoringScalarEdit {
+pub(crate) struct PreparedSceneAuthoringFieldEdit {
     pub(crate) document: SceneDocument,
     pub(crate) state: AuthoringDocumentState,
     pub(crate) patch: ScenePatchDocument,
     pub(crate) report: ScenePatchReport,
 }
 
-pub(crate) struct PreparedPrefabAuthoringScalarEdit {
+pub(crate) struct PreparedPrefabAuthoringFieldEdit {
     pub(crate) document: PrefabDocument,
     pub(crate) state: AuthoringDocumentState,
     pub(crate) patch: ScenePatchDocument,
@@ -1683,17 +1774,17 @@ fn authoring_reopen_kind_rejection(
     ))
 }
 
-pub(crate) fn prepare_scene_authoring_scalar_edit(
+pub(crate) fn prepare_scene_authoring_field_edit(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
-    edit: &AuthoringScalarEdit,
-) -> Result<PreparedSceneAuthoringScalarEdit, ScenePatchReport> {
-    let (mut candidate, patch, inverse) = prepare_scalar_edit(document.clone(), state, edit)?;
+    edit: &AuthoringFieldEdit,
+) -> Result<PreparedSceneAuthoringFieldEdit, ScenePatchReport> {
+    let (mut candidate, patch, inverse) = prepare_field_edit(document.clone(), state, edit)?;
     if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-format-invalid",
-            "Authoring scalar edit exceeds the persistent Scene format boundary",
+            "scene.authoring-field-edit-format-invalid",
+            "Authoring field edit exceeds the persistent Scene format boundary",
         ));
     }
     candidate.canonicalize();
@@ -1710,13 +1801,13 @@ pub(crate) fn prepare_scene_authoring_scalar_edit(
         diagnostics: error.into_diagnostics(),
     })?;
     if candidate_state.unavailable_manifest != state.unavailable_manifest {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
             "scene.authoring-unavailable-manifest-changed",
-            "Authoring scalar edit changed the unavailable-record manifest",
+            "Authoring field edit changed the unavailable-record manifest",
         ));
     }
-    Ok(PreparedSceneAuthoringScalarEdit {
+    Ok(PreparedSceneAuthoringFieldEdit {
         document: candidate,
         state: candidate_state,
         patch,
@@ -1728,22 +1819,22 @@ pub(crate) fn prepare_scene_authoring_scalar_edit(
     })
 }
 
-pub(crate) fn prepare_prefab_authoring_scalar_edit(
+pub(crate) fn prepare_prefab_authoring_field_edit(
     document: &PrefabDocument,
     state: &AuthoringDocumentState,
-    edit: &AuthoringScalarEdit,
-) -> Result<PreparedPrefabAuthoringScalarEdit, ScenePatchReport> {
+    edit: &AuthoringFieldEdit,
+) -> Result<PreparedPrefabAuthoringFieldEdit, ScenePatchReport> {
     let scene = document.instantiate();
-    let (candidate_scene, patch, inverse) = prepare_scalar_edit(scene, state, edit)?;
+    let (candidate_scene, patch, inverse) = prepare_field_edit(scene, state, edit)?;
     let mut candidate = PrefabDocument::new(
         candidate_scene.roots.clone(),
         candidate_scene.entities.clone(),
     );
     if crate::format::validate_prefab_publication_shape(&candidate, state.limits).is_err() {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-format-invalid",
-            "Authoring scalar edit exceeds the persistent Prefab format boundary",
+            "scene.authoring-field-edit-format-invalid",
+            "Authoring field edit exceeds the persistent Prefab format boundary",
         ));
     }
     candidate.canonicalize();
@@ -1760,13 +1851,13 @@ pub(crate) fn prepare_prefab_authoring_scalar_edit(
         diagnostics: error.into_diagnostics(),
     })?;
     if candidate_state.unavailable_manifest != state.unavailable_manifest {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
             "scene.authoring-unavailable-manifest-changed",
-            "Authoring scalar edit changed the unavailable-record manifest",
+            "Authoring field edit changed the unavailable-record manifest",
         ));
     }
-    Ok(PreparedPrefabAuthoringScalarEdit {
+    Ok(PreparedPrefabAuthoringFieldEdit {
         document: candidate,
         state: candidate_state,
         patch,
@@ -1782,9 +1873,9 @@ pub(crate) fn prepare_scene_authoring_history_patch(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
-) -> Result<PreparedSceneAuthoringScalarEdit, ScenePatchReport> {
-    let edit = scalar_edit_from_history_patch(patch)?;
-    let prepared = prepare_scene_authoring_scalar_edit(document, state, &edit)?;
+) -> Result<PreparedSceneAuthoringFieldEdit, ScenePatchReport> {
+    let edit = field_edit_from_history_patch(patch)?;
+    let prepared = prepare_scene_authoring_field_edit(document, state, &edit)?;
     if prepared.patch != *patch {
         return Err(authoring_history_patch_rejection());
     }
@@ -1795,43 +1886,60 @@ pub(crate) fn prepare_prefab_authoring_history_patch(
     document: &PrefabDocument,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
-) -> Result<PreparedPrefabAuthoringScalarEdit, ScenePatchReport> {
-    let edit = scalar_edit_from_history_patch(patch)?;
-    let prepared = prepare_prefab_authoring_scalar_edit(document, state, &edit)?;
+) -> Result<PreparedPrefabAuthoringFieldEdit, ScenePatchReport> {
+    let edit = field_edit_from_history_patch(patch)?;
+    let prepared = prepare_prefab_authoring_field_edit(document, state, &edit)?;
     if prepared.patch != *patch {
         return Err(authoring_history_patch_rejection());
     }
     Ok(prepared)
 }
 
-fn scalar_edit_from_history_patch(
+fn field_edit_from_history_patch(
     patch: &ScenePatchDocument,
-) -> Result<AuthoringScalarEdit, ScenePatchReport> {
-    let [
-        ScenePatchOperation::SetField {
-            entity,
-            component,
-            field,
-            value,
-            ..
-        },
-    ] = patch.operations.as_slice()
+) -> Result<AuthoringFieldEdit, ScenePatchReport> {
+    let Some(ScenePatchOperation::SetField {
+        entity,
+        component,
+        component_version,
+        ..
+    }) = patch.operations.first()
     else {
         return Err(authoring_history_patch_rejection());
     };
-    Ok(AuthoringScalarEdit::new(
+    let writes = patch
+        .operations
+        .iter()
+        .map(|operation| match operation {
+            ScenePatchOperation::SetField {
+                entity: candidate_entity,
+                component: candidate_component,
+                component_version: candidate_version,
+                field,
+                value,
+            } if candidate_entity == entity
+                && candidate_component == component
+                && candidate_version == component_version =>
+            {
+                Ok(AuthoringFieldWrite::new(field.clone(), value.clone()))
+            }
+            _ => Err(authoring_history_patch_rejection()),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    AuthoringFieldEdit::new(
         entity.clone(),
         component.clone(),
-        field.clone(),
-        value.clone(),
-    ))
+        *component_version,
+        writes,
+    )
+    .map_err(|_| authoring_history_patch_rejection())
 }
 
 fn authoring_history_patch_rejection() -> ScenePatchReport {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic_error(
         "scene.authoring-history-patch-unavailable",
-        "Degraded authoring history only accepts its admitted scalar field edits",
+        "Degraded authoring history only accepts its admitted bounded field edits",
     ));
     ScenePatchReport {
         applied: false,
@@ -1840,10 +1948,10 @@ fn authoring_history_patch_rejection() -> ScenePatchReport {
     }
 }
 
-fn prepare_scalar_edit(
+fn prepare_field_edit(
     mut candidate: SceneDocument,
     state: &AuthoringDocumentState,
-    edit: &AuthoringScalarEdit,
+    edit: &AuthoringFieldEdit,
 ) -> Result<(SceneDocument, ScenePatchDocument, ScenePatchDocument), ScenePatchReport> {
     let available = state.record_facts.iter().any(|fact| {
         fact.readiness == AuthoringRecordReadiness::Available
@@ -1854,124 +1962,149 @@ fn prepare_scalar_edit(
             )
     });
     if !available {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-unavailable",
-            "Authoring scalar edit requires an Available direct component record",
+            "scene.authoring-field-edit-unavailable",
+            "Authoring field edit requires an Available direct component record",
         ));
     }
 
     let Some(schema_entry) = state.basis.schemas.get(&edit.component) else {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-schema-missing",
-            "Authoring scalar edit has no admitted component schema",
+            "scene.authoring-field-edit-schema-missing",
+            "Authoring field edit has no admitted component schema",
         ));
     };
-    let Some(field) = schema_entry
-        .schema
-        .fields()
-        .iter()
-        .find(|field| field.id() == &edit.field)
-    else {
-        return Err(scalar_edit_rejection(
-            edit,
-            "scene.authoring-scalar-edit-field-missing",
-            "Authoring scalar edit targets an unknown component field",
-        ));
-    };
-    let scalar_kind = matches!(
-        field.value_kind(),
-        ComponentValueKind::Bool
-            | ComponentValueKind::I64
-            | ComponentValueKind::U64
-            | ComponentValueKind::F64
-            | ComponentValueKind::String
-    );
-    if !scalar_kind
-        || !field.has_capability(ComponentCapability::Edit)
-        || field.has_capability(ComponentCapability::AssetRef)
-        || field.has_capability(ComponentCapability::EntityRef)
-        || edit.value.kind() != field.value_kind()
-    {
-        return Err(scalar_edit_rejection(
-            edit,
-            "scene.authoring-scalar-edit-not-preservation-safe",
-            "Authoring edit is outside the preservation-safe scalar whitelist",
-        ));
-    }
-
     let Some(entity) = candidate
         .entities
         .iter_mut()
         .find(|entity| entity.id == edit.entity)
     else {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-entity-missing",
-            "Authoring scalar edit targets a missing entity",
+            "scene.authoring-field-edit-entity-missing",
+            "Authoring field edit targets a missing entity",
         ));
     };
     let Some(record) = entity.components.get_mut(&edit.component) else {
-        return Err(scalar_edit_rejection(
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-component-missing",
-            "Authoring scalar edit targets a missing component record",
+            "scene.authoring-field-edit-component-missing",
+            "Authoring field edit targets a missing component record",
         ));
     };
-    if record.version != schema_entry.schema.version() {
-        return Err(scalar_edit_rejection(
+    if record.version != schema_entry.schema.version() || edit.component_version != record.version {
+        return Err(field_edit_rejection(
             edit,
-            "scene.authoring-scalar-edit-version-mismatch",
-            "Authoring scalar edit requires the current component schema version",
+            "scene.authoring-field-edit-version-mismatch",
+            "Authoring field edit requires the current component schema version",
         ));
     }
-    let previous = record
-        .value
-        .replace_path(field.path(), edit.value.clone())
-        .map_err(|_| {
-            scalar_edit_rejection(
+
+    let mut patch = Vec::with_capacity(edit.writes.len());
+    let mut inverse = Vec::with_capacity(edit.writes.len());
+    for write in &edit.writes {
+        let Some(field) = schema_entry
+            .schema
+            .fields()
+            .iter()
+            .find(|field| field.id() == &write.field)
+        else {
+            return Err(field_edit_rejection(
                 edit,
-                "scene.authoring-scalar-edit-path-invalid",
-                "Authoring scalar edit field path is absent from the component value",
-            )
-        })?;
-    let patch = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: edit.entity.clone(),
-        component: edit.component.clone(),
-        component_version: record.version,
-        field: edit.field.clone(),
-        value: edit.value.clone(),
-    }]);
-    let inverse = ScenePatchDocument::new([ScenePatchOperation::SetField {
-        entity: edit.entity.clone(),
-        component: edit.component.clone(),
-        component_version: record.version,
-        field: edit.field.clone(),
-        value: previous,
-    }]);
-    Ok((candidate, patch, inverse))
+                "scene.authoring-field-edit-field-missing",
+                "Authoring field edit targets an unknown component field",
+            ));
+        };
+        if !authoring_field_write_is_preservation_safe(field, &write.value) {
+            return Err(field_edit_rejection(
+                edit,
+                "scene.authoring-field-edit-not-preservation-safe",
+                "Authoring field edit is outside the preservation-safe value whitelist",
+            ));
+        }
+        let previous = record
+            .value
+            .replace_path(field.path(), write.value.clone())
+            .map_err(|_| {
+                field_edit_rejection(
+                    edit,
+                    "scene.authoring-field-edit-path-invalid",
+                    "Authoring field edit path is absent from the component value",
+                )
+            })?;
+        patch.push(ScenePatchOperation::SetField {
+            entity: edit.entity.clone(),
+            component: edit.component.clone(),
+            component_version: record.version,
+            field: write.field.clone(),
+            value: write.value.clone(),
+        });
+        inverse.push(ScenePatchOperation::SetField {
+            entity: edit.entity.clone(),
+            component: edit.component.clone(),
+            component_version: record.version,
+            field: write.field.clone(),
+            value: previous,
+        });
+    }
+    inverse.reverse();
+    Ok((
+        candidate,
+        ScenePatchDocument::new(patch),
+        ScenePatchDocument::new(inverse),
+    ))
 }
 
-fn scalar_edit_rejection(
-    edit: &AuthoringScalarEdit,
+fn authoring_field_write_is_preservation_safe(
+    field: &nara_reflect::ComponentFieldSchema,
+    value: &ComponentValue,
+) -> bool {
+    if !field.has_capability(ComponentCapability::Edit)
+        || field.has_capability(ComponentCapability::EntityRef)
+    {
+        return false;
+    }
+    match field.value_kind() {
+        ComponentValueKind::Bool
+        | ComponentValueKind::I64
+        | ComponentValueKind::U64
+        | ComponentValueKind::F64
+        | ComponentValueKind::String => {
+            !field.has_capability(ComponentCapability::AssetRef)
+                && value.kind() == field.value_kind()
+        }
+        ComponentValueKind::AssetRef => {
+            field.has_capability(ComponentCapability::AssetRef)
+                && crate::patch::field_value_matches(field, value)
+        }
+        ComponentValueKind::Null
+        | ComponentValueKind::List
+        | ComponentValueKind::Map
+        | ComponentValueKind::EntityRef => false,
+    }
+}
+
+fn field_edit_rejection(
+    edit: &AuthoringFieldEdit,
     code: &'static str,
     summary: &'static str,
 ) -> ScenePatchReport {
     let mut diagnostics = DiagnosticReport::default();
-    diagnostics.push(with_public_locator(
+    let diagnostic = with_public_locator(
         with_public_locator(
-            with_public_locator(
-                diagnostic_error(code, summary),
-                "entity-id",
-                edit.entity.as_str(),
-            ),
-            "component-id",
-            edit.component.as_str(),
+            diagnostic_error(code, summary),
+            "entity-id",
+            edit.entity.as_str(),
         ),
-        "field-id",
-        edit.field.as_str(),
-    ));
+        "component-id",
+        edit.component.as_str(),
+    );
+    diagnostics.push(match edit.writes.first() {
+        Some(write) => with_public_locator(diagnostic, "field-id", write.field.as_str()),
+        None => with_public_locator(diagnostic, "write-count", &edit.writes.len().to_string()),
+    });
     ScenePatchReport {
         applied: false,
         inverse: None,

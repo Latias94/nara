@@ -1,5 +1,5 @@
 use nara_reflect::ComponentValueKind;
-use nara_scene::AuthoringScalarEdit;
+use nara_scene::{AuthoringFieldEdit, AuthoringFieldWrite, MAX_AUTHORING_FIELD_WRITES};
 use nara_tooling::{
     EditorAtomicFieldEdit, EditorAtomicFieldEditError, EditorDocumentMutation, EditorFieldTarget,
     EditorFieldWrite, PrefabCompositionCommand, PrefabCompositionDraftError,
@@ -16,16 +16,16 @@ use super::EditorUiAuthoringFrame;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EditorUiMutationAuthority {
-    PreservationSafeScalar,
+    PreservationSafeField,
     TrustedCompiled,
 }
 
 impl EditorUiAuthoringFrame {
     /// Returns whether this exact field can publish a mutation in the current execution lane.
     ///
-    /// Generic authoring admits only one discrete, preservation-safe scalar write. Composite,
-    /// continuous, direct-manipulation, and structural editing remain read-only until their
-    /// owner modules provide equally strict authoring commands.
+    /// Generic authoring admits one bounded discrete edit over a preservation-safe direct record.
+    /// Continuous, direct-manipulation, and structural editing remain read-only until their owner
+    /// modules provide equally strict authoring commands.
     #[doc(hidden)]
     #[must_use]
     pub fn field_editing_enabled(&self, key: &UiAuthoringFieldKey) -> bool {
@@ -40,20 +40,21 @@ impl EditorUiAuthoringFrame {
         }
         match self.mutation_authority {
             EditorUiMutationAuthority::TrustedCompiled => true,
-            EditorUiMutationAuthority::PreservationSafeScalar => {
+            EditorUiMutationAuthority::PreservationSafeField => {
                 descriptor.commit_policy() == UiAuthoringCommitPolicy::Discrete
-                    && matches!(
-                        descriptor.members(),
-                        [member]
-                            if matches!(
-                                member.value_kind(),
-                                ComponentValueKind::Bool
-                                    | ComponentValueKind::I64
-                                    | ComponentValueKind::U64
-                                    | ComponentValueKind::F64
-                                    | ComponentValueKind::String
-                            )
-                    )
+                    && !descriptor.members().is_empty()
+                    && descriptor.members().len() <= MAX_AUTHORING_FIELD_WRITES
+                    && descriptor.members().iter().all(|member| {
+                        matches!(
+                            member.value_kind(),
+                            ComponentValueKind::Bool
+                                | ComponentValueKind::I64
+                                | ComponentValueKind::U64
+                                | ComponentValueKind::F64
+                                | ComponentValueKind::String
+                                | ComponentValueKind::AssetRef
+                        )
+                    })
             }
         }
     }
@@ -102,6 +103,25 @@ impl EditorUiAuthoringFrame {
         let descriptor = projection
             .field(key)
             .ok_or(EditorUiAuthoringEditError::FieldNotInFrame)?;
+        if let UiAuthoringFieldValue::Brush {
+            kind: nara_ui::__private::UiBrushAuthoringKind::Image,
+            reference,
+            ..
+        } = &value
+        {
+            let choices = self
+                .image_choices()
+                .map_err(EditorUiAuthoringEditError::InvalidStructure)?;
+            if !choices
+                .choices()
+                .iter()
+                .any(|choice| choice.project_path() == reference)
+            {
+                return Err(EditorUiAuthoringEditError::InvalidStructure(
+                    UiStructureRejection::ImageChoiceUnavailable,
+                ));
+            }
+        }
         let patch = descriptor
             .lower_edit(value)
             .map_err(EditorUiAuthoringEditError::InvalidValue)?;
@@ -113,7 +133,7 @@ impl EditorUiAuthoringFrame {
 
     /// Lowers one discrete field edit into the lane-specific document mutation.
     ///
-    /// The generic lane deliberately converts only a single scalar write to the nominal
+    /// The generic lane converts the descriptor's bounded member set to the nominal
     /// preservation-safe command instead of routing through a raw Prefab patch.
     pub fn lower_discrete_field_edit(
         &self,
@@ -128,19 +148,21 @@ impl EditorUiAuthoringFrame {
             EditorUiMutationAuthority::TrustedCompiled => {
                 Ok(EditorDocumentMutation::ApplyPrefabFieldEdit { edit })
             }
-            EditorUiMutationAuthority::PreservationSafeScalar => {
-                let [write] = edit.writes() else {
-                    return Err(EditorUiAuthoringEditError::DescriptorMismatch);
-                };
-                Ok(EditorDocumentMutation::ApplyAuthoringScalarEdit {
+            EditorUiMutationAuthority::PreservationSafeField => {
+                let writes = edit.writes().iter().map(|write| {
+                    AuthoringFieldWrite::new(write.field().clone(), write.value().clone())
+                });
+                let edit = AuthoringFieldEdit::new(
+                    edit.target().entity().clone(),
+                    edit.target().component().clone(),
+                    edit.target().component_version(),
+                    writes,
+                )
+                .map_err(EditorUiAuthoringEditError::AuthoringFieldEdit)?;
+                Ok(EditorDocumentMutation::ApplyAuthoringFieldEdit {
                     document: self.document,
                     base_revision: self.revision,
-                    edit: AuthoringScalarEdit::new(
-                        edit.target().entity().clone(),
-                        edit.target().component().clone(),
-                        write.field().clone(),
-                        write.value().clone(),
-                    ),
+                    edit,
                 })
             }
         }
@@ -356,6 +378,8 @@ pub enum EditorUiAuthoringEditError {
     DescriptorMismatch,
     #[error("the bounded tooling edit rejected the UI descriptor output: {0}")]
     AtomicEdit(EditorAtomicFieldEditError),
+    #[error("the bounded authoring field edit rejected the UI descriptor output: {0}")]
+    AuthoringFieldEdit(nara_scene::AuthoringFieldEditError),
     #[error("the UI structure intent is invalid: {0}")]
     InvalidStructure(UiStructureRejection),
     #[error("the bounded Prefab composition draft is invalid: {0}")]

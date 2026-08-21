@@ -18,7 +18,7 @@ use nara::tooling::{
 use nara::{
     fs::ContentDigest,
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
-    scene::{AuthoringScalarEdit, SceneEntityId},
+    scene::{AuthoringFieldEdit, SceneEntityId},
     tooling::{
         EditorAction, EditorActionBatch, EditorAuthoringReadiness, EditorDocumentMutation,
         EditorNavigationAction, EditorPersistenceAction, EditorPersistenceResult, EditorPlayAction,
@@ -294,15 +294,17 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
     let scene = selected.workspace().active_scene.as_ref().unwrap();
     let edited = dispatch(
         &mut application,
-        EditorAction::Mutate(EditorDocumentMutation::ApplyAuthoringScalarEdit {
+        EditorAction::Mutate(EditorDocumentMutation::ApplyAuthoringFieldEdit {
             document: scene.document,
             base_revision: scene.revision,
-            edit: AuthoringScalarEdit::new(
+            edit: AuthoringFieldEdit::single(
                 SceneEntityId::new(SIGNAL_ENTITY).unwrap(),
                 ComponentTypeId::new(NAME_COMPONENT),
+                ComponentSchemaVersion::ONE,
                 ComponentFieldId::new("value"),
                 ComponentValue::String(EDITED_NAME.to_owned()),
-            ),
+            )
+            .unwrap(),
         }),
     );
     let edited_scene = edited.workspace().active_scene.as_ref().unwrap();

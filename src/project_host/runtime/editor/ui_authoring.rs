@@ -1,92 +1,33 @@
 use std::sync::Arc;
 
-use nara_asset::AssetSourceKind;
 use nara_scene::{
     __private::AuthoringPreviewOmission, PrefabAuthoringSession, SceneAuthoringRevision,
 };
 use nara_tooling::{
     EditorDocumentId, EditorDocumentSourceBinding, EditorFrameRevision, EditorGestureCancelReason,
-    EditorGestureStamp, EditorGestureView, EditorProjectContentGeneration, EditorSelectionSet,
+    EditorGestureStamp, EditorGestureView, EditorSelectionSet,
 };
 use nara_ui::__private::{
-    UiAuthoringProjection, UiAuthoringProjectionError, UiImageChoice, UiImageChoiceGeneration,
-    UiImageChoiceSet, UiStructureRejection, project_prefab_authoring,
+    UiAuthoringProjection, UiAuthoringProjectionError, UiImageChoiceGeneration, UiImageChoiceSet,
+    UiStructureRejection, project_prefab_authoring,
 };
 
 use super::{
-    AuthoringProjectSessionSnapshot, EditorProjectSession,
+    EditorProjectSession,
     authoring_preview::{self, EditorAuthoringPreviewOmissions},
     single_error, single_warning,
 };
-use crate::project_host::ProjectContentSnapshot;
 
 mod mutation;
 
 pub use mutation::EditorUiAuthoringEditError;
 use mutation::EditorUiMutationAuthority;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct EditorUiImageChoices {
-    generation: UiImageChoiceGeneration,
-    choices: Result<Arc<UiImageChoiceSet>, UiStructureRejection>,
-}
-
-impl EditorUiImageChoices {
-    pub(super) fn from_authoring_snapshot(snapshot: &AuthoringProjectSessionSnapshot) -> Self {
-        let generation = UiImageChoiceGeneration::new(snapshot.attempt_generation().get());
-        let choices = snapshot
-            .asset_records()
-            .filter(|record| record.source_kind() == &AssetSourceKind::Image)
-            .map(|record| {
-                UiImageChoice::new(record.stable_id().to_string(), record.path().as_str())
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|choices| UiImageChoiceSet::new(generation, choices))
-            .map(Arc::new);
-        Self {
-            generation,
-            choices,
-        }
-    }
-
-    pub(super) fn from_snapshot(
-        snapshot: &ProjectContentSnapshot,
-        generation: EditorProjectContentGeneration,
-    ) -> Self {
-        let generation = UiImageChoiceGeneration::new(generation.get());
-        let choices = snapshot
-            .images()
-            .iter()
-            .map(|content| {
-                let source = content.image().source();
-                UiImageChoice::new(source.stable_id().to_string(), source.path().as_str())
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .and_then(|choices| UiImageChoiceSet::new(generation, choices))
-            .map(Arc::new);
-        Self {
-            generation,
-            choices,
-        }
-    }
-
-    const fn generation(&self) -> UiImageChoiceGeneration {
-        self.generation
-    }
-
-    fn choices(&self) -> Result<&UiImageChoiceSet, UiStructureRejection> {
-        match &self.choices {
-            Ok(choices) => Ok(choices.as_ref()),
-            Err(error) => Err(*error),
-        }
-    }
-}
-
 /// Root-private immutable UI authoring frame shared by current and future Editor Adapters.
 ///
 /// The Nara UI payload never owns tooling identity. This Host frame is the only place where one
 /// exact Editor document/session/revision/selection fact is paired with that payload.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct EditorUiAuthoringFrame {
     editor_frame: EditorFrameRevision,
     document: EditorDocumentId,
@@ -96,7 +37,7 @@ pub struct EditorUiAuthoringFrame {
     gesture: Option<EditorGestureView>,
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
     canvas_generation: Option<u64>,
-    image_choices: EditorUiImageChoices,
+    image_choices: Arc<UiImageChoiceSet>,
     mutation_authority: EditorUiMutationAuthority,
     omissions: EditorAuthoringPreviewOmissions,
     projection: Result<Arc<UiAuthoringProjection>, UiAuthoringProjectionError>,
@@ -148,14 +89,14 @@ impl EditorUiAuthoringFrame {
     /// Returns the exact project-content generation owning the current image catalog.
     #[doc(hidden)]
     #[must_use]
-    pub const fn image_choice_generation(&self) -> UiImageChoiceGeneration {
+    pub fn image_choice_generation(&self) -> UiImageChoiceGeneration {
         self.image_choices.generation()
     }
 
     /// Returns the current bounded image catalog or its typed Host projection failure.
     #[doc(hidden)]
     pub fn image_choices(&self) -> Result<&UiImageChoiceSet, UiStructureRejection> {
-        self.image_choices.choices()
+        Ok(self.image_choices.as_ref())
     }
 
     pub fn projection(&self) -> Result<&UiAuthoringProjection, UiAuthoringProjectionError> {
@@ -178,7 +119,6 @@ pub(super) struct EditorUiAuthoringProjectionKey {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     gesture: Option<EditorGestureStamp>,
-    image_choice_generation: UiImageChoiceGeneration,
 }
 
 #[derive(Debug, Clone)]
@@ -284,12 +224,11 @@ impl EditorProjectSession {
             self.last_gesture_cancellation = Some(EditorGestureCancelReason::InvalidPreview);
             gesture = None;
         }
-        let image_choice_generation = self.ui_authoring_image_choices.generation();
+        let image_catalog = self.authoring_images.receipt();
         let mut key = EditorUiAuthoringProjectionKey {
             document,
             revision,
             gesture: gesture.as_ref().map(EditorGestureView::stamp),
-            image_choice_generation,
         };
         let (projection, omissions) = match self
             .ui_authoring_projection_cache
@@ -376,6 +315,7 @@ impl EditorProjectSession {
                     revision,
                     gesture.as_ref().map(EditorGestureView::stamp),
                     projection.as_ref(),
+                    image_catalog.as_ref(),
                     primary_surface,
                 );
                 let generation = self.ui_preview.geometry_generation();
@@ -391,9 +331,8 @@ impl EditorProjectSession {
         };
         #[cfg(not(feature = "presentation-ui"))]
         let canvas_generation = None;
-        let image_choices = self.ui_authoring_image_choices.clone();
         let mutation_authority = if self.authoring_project().is_some() {
-            EditorUiMutationAuthority::PreservationSafeScalar
+            EditorUiMutationAuthority::PreservationSafeField
         } else {
             EditorUiMutationAuthority::TrustedCompiled
         };
@@ -406,7 +345,7 @@ impl EditorProjectSession {
             gesture,
             last_gesture_cancellation: self.last_gesture_cancellation.take(),
             canvas_generation,
-            image_choices,
+            image_choices: image_catalog.share_choices(),
             mutation_authority,
             omissions,
             projection,

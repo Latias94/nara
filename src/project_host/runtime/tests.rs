@@ -1,3 +1,10 @@
+#[cfg(all(
+    feature = "tooling",
+    feature = "runtime-ui",
+    feature = "presentation-ui"
+))]
+mod authoring_images;
+
 use std::{
     error::Error,
     fmt,
@@ -46,7 +53,7 @@ use nara_reflect::{
     ComponentValue, ComponentValueKind, PersistentComponentSchemaOwnerId,
 };
 #[cfg(feature = "tooling")]
-use nara_scene::{AuthoringScalarEdit, SCENE_COMPONENTS_SCHEMA_OWNER_ID};
+use nara_scene::{AuthoringFieldEdit, SCENE_COMPONENTS_SCHEMA_OWNER_ID};
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 use nara_scene::{PrefabDocument, PrefabInstance, SCENE_COMPONENTS_SCHEMA_PROVIDER};
 use nara_scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord};
@@ -810,6 +817,9 @@ prefabs = "prefabs"
 [startup]
 default_scene = "startup.scene.json"
 
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
 [runtime]
 preset = "local-headless"
 
@@ -825,6 +835,18 @@ logical_height = 540
     let prefab_entity = nara_identity::SceneEntityId::new("retry").unwrap();
     let prefab_anchor = nara_identity::SceneEntityId::new("ui-anchor").unwrap();
     let plain_anchor = nara_identity::SceneEntityId::new("plain-anchor").unwrap();
+    let image_settings = ImageImportSettings::new(ImageColorSpace::Linear);
+    let image_path = "textures/strict-refresh.png";
+    let image_bytes = fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+    )
+    .unwrap();
+    project.write_canonical_image(
+        image_path,
+        "5c5773fd-a572-4555-8d90-f9fd60c7f676",
+        image_settings,
+        &image_bytes,
+    );
     fs::write(
         project.root.join("prefabs/reference-ui.prefab.json"),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(prefab_entity.clone())
@@ -862,9 +884,21 @@ logical_height = 540
         source: AssetRef::path("plain.prefab.json").unwrap(),
         overrides: ScenePatchDocument::default(),
     });
+    let image = SceneEntityRecord::new(nara_identity::SceneEntityId::new("strict-image").unwrap())
+        .with_component(
+            ComponentTypeId::new("nara.transform.Transform2d"),
+            identity_transform_record(),
+        )
+        .with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(&AssetRef::path(image_path).unwrap()),
+            ),
+        );
     fs::write(
         project.root.join("scenes/startup.scene.json"),
-        SceneDocument::from_ordered_roots([anchor, plain])
+        SceneDocument::from_ordered_roots([anchor, plain, image])
             .to_json_string()
             .unwrap(),
     )
@@ -874,6 +908,10 @@ logical_height = 540
         super::editor::TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
+    assert_eq!(
+        editor.editor_authoring_image_catalog_facts(),
+        (1, vec![(image_path.to_owned(), image_settings)])
+    );
     let scene_document = editor.workspace().active_document().unwrap();
     let frame = editor.current_frame();
     let scene_revision = frame.workspace().document(scene_document).unwrap().revision;
@@ -1024,6 +1062,10 @@ logical_height = 540
     ));
     assert_eq!(editor.test_project_content_revision(), last_good_content);
     assert_eq!(
+        editor.editor_authoring_image_catalog_facts(),
+        (1, vec![(image_path.to_owned(), image_settings)])
+    );
+    assert_eq!(
         editor
             .test_project_content_budget_snapshot()
             .active_generations(),
@@ -1082,6 +1124,10 @@ logical_height = 540
         refreshed_frame.project_content(),
         EditorProjectContentView::Current { generation } if generation.get() == 2
     ));
+    assert_eq!(
+        editor.editor_authoring_image_catalog_facts(),
+        (2, vec![(image_path.to_owned(), image_settings)])
+    );
     let budget = editor.test_project_content_budget_snapshot();
     assert_eq!(budget.active_generations(), 1);
     assert_eq!(budget.generation_high_water(), 2);
@@ -1337,6 +1383,11 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
 
     let mut editor = open_generic_editor_with_ready_index(&project);
     drive_image_import_host_until_idle(&mut editor);
+    #[cfg(feature = "runtime-ui")]
+    assert_eq!(
+        editor.editor_authoring_image_catalog_facts(),
+        (1, Vec::new())
+    );
     let linear = ImageImportSettings::new(ImageColorSpace::Linear);
     let stale_frame = editor.current_frame();
     assert!(editor.request_project_source_index_refresh());
@@ -1370,16 +1421,20 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         super::editor::EditorImageImportRequestResult::Started(_)
     ));
     assert!(editor.project_source_index_work_pending());
-    assert!(matches!(
-        editor.request_editor_image_import(
-            frame.revision(),
-            "assets/textures/imported.png",
-            linear,
+    let concurrent = editor.request_editor_image_import(
+        frame.revision(),
+        "assets/textures/imported.png",
+        linear,
+    );
+    assert!(
+        matches!(
+            concurrent,
+            super::editor::EditorImageImportRequestResult::Rejected(
+                super::editor::EditorImageImportFailure::Busy
+            )
         ),
-        super::editor::EditorImageImportRequestResult::Rejected(
-            super::editor::EditorImageImportFailure::Busy
-        )
-    ));
+        "a concurrent request returned {concurrent:?}"
+    );
 
     let first_state = drive_image_import_to_terminal(&mut editor);
     let (stable_id, first_version) = match first_state {
@@ -1389,6 +1444,11 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
         other => panic!("the initial image import did not succeed: {other:?}"),
     };
     drive_image_import_host_until_idle(&mut editor);
+    #[cfg(feature = "runtime-ui")]
+    assert_eq!(
+        editor.editor_authoring_image_catalog_facts(),
+        (2, vec![("textures/imported.png".to_owned(), linear)])
+    );
     let refreshed_index = editor.project_source_index_snapshot().unwrap();
     assert!(refreshed_index.generation() > import_basis_generation);
     assert!(
@@ -1433,11 +1493,42 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
             super::editor::EditorImageImportFailure::ReconcileRequired
         )
     ));
-    assert_eq!(
-        editor.editor_image_last_good(&asset_path),
-        Some(&first_last_good)
+    assert_same_image_product(
+        editor.editor_image_last_good(&asset_path).unwrap(),
+        &first_last_good,
     );
     drive_image_import_host_until_idle(&mut editor);
+    assert_same_image_product(
+        editor.editor_image_last_good(&asset_path).unwrap(),
+        &first_last_good,
+    );
+    #[cfg(feature = "runtime-ui")]
+    assert_eq!(
+        editor.editor_authoring_image_catalog_facts(),
+        (2, vec![("textures/imported.png".to_owned(), linear)])
+    );
+    assert!(
+        editor.apply_project_browser_local_action(EditorProjectBrowserLocalAction::Select {
+            relative_path: Some(Arc::from("assets/textures/imported.png")),
+        })
+    );
+    let settings_changed = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        settings_changed
+            .image_import()
+            .expect("settings drift retains the accepted last-good image")
+            .availability(),
+        EditorImageImportAvailabilityView::LastGood {
+            stable_id: projected_id,
+            version: projected_version,
+            active_settings,
+            freshness: nara_tooling::EditorImageImportFreshness::SettingsChanged,
+            ..
+        } if projected_id == stable_id
+            && projected_version == first_version
+            && active_settings
+                == ToolingImageImportSettings::new(EditorImageColorSpace::Linear)
+    ));
 
     fs::write(
         project.root.join("assets/textures/imported.png"),
@@ -1459,9 +1550,9 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
             ..
         }
     ));
-    assert_eq!(
-        editor.editor_image_last_good(&asset_path),
-        Some(&first_last_good)
+    assert_same_image_product(
+        editor.editor_image_last_good(&asset_path).unwrap(),
+        &first_last_good,
     );
 
     let desired = nara_asset::AssetMetaCandidate::<ImageImportSettings>::decode_json_bytes(
@@ -1530,9 +1621,9 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
             ..
         }
     ));
-    assert_eq!(
-        editor.editor_image_last_good(&asset_path),
-        Some(&second_last_good)
+    assert_same_image_product(
+        editor.editor_image_last_good(&asset_path).unwrap(),
+        &second_last_good,
     );
     drive_image_import_host_until_idle(&mut editor);
 
@@ -1558,9 +1649,9 @@ fn generic_editor_image_import_publishes_metadata_and_preserves_last_good_on_fai
             ..
         }
     ));
-    assert_eq!(
-        editor.editor_image_last_good(&asset_path),
-        Some(&second_last_good)
+    assert_same_image_product(
+        editor.editor_image_last_good(&asset_path).unwrap(),
+        &second_last_good,
     );
 
     fs::write(
@@ -2414,6 +2505,18 @@ fn drive_image_import_to_terminal(
 }
 
 #[cfg(feature = "tooling")]
+fn assert_same_image_product(
+    actual: &super::editor::EditorImageLastGood,
+    expected: &super::editor::EditorImageLastGood,
+) {
+    assert_eq!(actual.stable_id(), expected.stable_id());
+    assert_eq!(actual.source_identity(), expected.source_identity());
+    assert_eq!(actual.source_digest(), expected.source_digest());
+    assert_eq!(actual.settings_hash(), expected.settings_hash());
+    assert_eq!(actual.version(), expected.version());
+}
+
+#[cfg(feature = "tooling")]
 fn drive_image_import_host_until_idle(editor: &mut super::editor::EditorProjectSession) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
@@ -2487,15 +2590,17 @@ fn make_authoring_name_dirty(
                 .map(|slot| slot.revision())
         })
         .expect("the editable authoring document is open");
-    let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+    let report = editor.apply_workspace_command(EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
         document,
         base_revision,
-        edit: AuthoringScalarEdit::new(
+        edit: AuthoringFieldEdit::single(
             nara_identity::SceneEntityId::new("editable-name").unwrap(),
             ComponentTypeId::new("nara.scene.Name"),
+            ComponentSchemaVersion::ONE,
             ComponentFieldId::new("value"),
             ComponentValue::String(value.to_owned()),
-        ),
+        )
+        .unwrap(),
     });
     assert!(report.applied, "{report:?}");
 }
@@ -3151,15 +3256,17 @@ schema_bundle = "schemas/authoring.bundle.json"
         .dispatch_editor_actions(EditorActionBatch::new(
             frame.revision(),
             [EditorAction::Mutate(
-                EditorDocumentMutation::ApplyAuthoringScalarEdit {
+                EditorDocumentMutation::ApplyAuthoringFieldEdit {
                     document: prefab_document,
                     base_revision: prefab_revision,
-                    edit: AuthoringScalarEdit::new(
+                    edit: AuthoringFieldEdit::single(
                         nara_identity::SceneEntityId::new("panel").unwrap(),
                         ComponentTypeId::new("nara.scene.Name"),
+                        ComponentSchemaVersion::ONE,
                         ComponentFieldId::new("value"),
                         ComponentValue::String("Saved Panel".to_owned()),
-                    ),
+                    )
+                    .unwrap(),
                 },
             )],
         ))
@@ -5679,6 +5786,147 @@ requested = ["runtime-2d"]
         project
     }
 
+    #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+    fn configure_authoring_ui(&self, name: &str) {
+        fs::write(
+            self.root.join("nara.toml"),
+            format!(
+                r#"schema_version = 1
+
+[project]
+name = "{name}"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-ui"]
+
+[ui.primary_surface]
+logical_width = 960
+logical_height = 540
+"#,
+            ),
+        )
+        .unwrap();
+    }
+
+    #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+    fn write_canonical_image(
+        &self,
+        path: &str,
+        stable_id: &str,
+        settings: ImageImportSettings,
+        bytes: &[u8],
+    ) {
+        let asset_path = AssetPath::new(path).unwrap();
+        let source = self.root.join("assets").join(path);
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, bytes).unwrap();
+        let metadata = AssetMeta::new(
+            AssetMetaIdentity::new(
+                StableAssetId::parse_str(stable_id).unwrap(),
+                asset_path,
+                AssetSourceKind::Image,
+            ),
+            settings,
+        );
+        fs::write(
+            self.root.join("assets").join(format!("{path}.meta")),
+            metadata.to_json_string().unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+    fn write_ui_authoring_documents(
+        &self,
+        brush_image: Option<&str>,
+        additional_scene_image: Option<&str>,
+    ) {
+        let root = nara_identity::SceneEntityId::new("ui-root").unwrap();
+        let image = nara_identity::SceneEntityId::new("image-node").unwrap();
+        let prefab = PrefabDocument::new(
+            [root.clone()],
+            [
+                SceneEntityRecord::new(root.clone())
+                    .with_children([image.clone()])
+                    .with_component(
+                        ComponentTypeId::new("nara.ui.UiRoot"),
+                        SceneComponentRecord::new(
+                            ComponentSchemaVersion::ONE,
+                            ComponentValue::map([(
+                                "layer",
+                                ComponentValue::String("base".to_owned()),
+                            )]),
+                        ),
+                    )
+                    .with_component(
+                        ComponentTypeId::new("nara.ui.UiNode"),
+                        ui_node_record("flow", "percent", 1.0, "percent", 1.0),
+                    ),
+                SceneEntityRecord::new(image)
+                    .with_component(
+                        ComponentTypeId::new("nara.ui.UiNode"),
+                        ui_node_record("absolute", "px", 128.0, "px", 128.0),
+                    )
+                    .with_component(
+                        ComponentTypeId::new("nara.ui.UiVisual"),
+                        ui_visual_record(brush_image),
+                    ),
+            ],
+        );
+        fs::write(
+            self.root.join("prefabs/ui.prefab.json"),
+            prefab.to_json_string().unwrap(),
+        )
+        .unwrap();
+
+        let mut anchor =
+            SceneEntityRecord::new(nara_identity::SceneEntityId::new("ui-anchor").unwrap());
+        anchor.prefab = Some(PrefabInstance {
+            source: AssetRef::path("ui.prefab.json").unwrap(),
+            overrides: ScenePatchDocument::default(),
+        });
+        let mut entities = vec![anchor];
+        if let Some(path) = additional_scene_image {
+            entities.push(
+                SceneEntityRecord::new(
+                    nara_identity::SceneEntityId::new("additional-sprite").unwrap(),
+                )
+                .with_component(
+                    ComponentTypeId::new("nara.transform.Transform2d"),
+                    identity_transform_record(),
+                )
+                .with_component(
+                    ComponentTypeId::new("nara.sprite.Sprite"),
+                    SceneComponentRecord::new(
+                        ComponentSchemaVersion::ONE,
+                        sprite_value(&AssetRef::path(path).unwrap()),
+                    ),
+                ),
+            );
+        }
+        fs::write(
+            self.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots(entities)
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+    }
+
     fn snapshot_and_plan(&self, disable_tilemap: bool) -> (ProjectContentSnapshot, RuntimePlan) {
         let root = self.capability();
         let manifest = root
@@ -5986,6 +6234,31 @@ fn ui_visual_record(image: Option<&str>) -> SceneComponentRecord {
             ),
         ]),
     )
+}
+
+#[cfg(all(feature = "tooling", feature = "runtime-ui"))]
+fn ui_visual_background_image_path<'a>(
+    document: &'a PrefabDocument,
+    entity: &str,
+) -> Option<&'a str> {
+    let record = document
+        .entities
+        .iter()
+        .find(|candidate| candidate.id.as_str() == entity)?
+        .components
+        .get(&ComponentTypeId::new("nara.ui.UiVisual"))?;
+    let ComponentValue::Map(visual) = &record.value else {
+        return None;
+    };
+    let ComponentValue::Map(background) = visual.get("background")? else {
+        return None;
+    };
+    let ComponentValue::Map(image) = background.get("image")? else {
+        return None;
+    };
+    (image.get("kind")?.as_str()? == "path")
+        .then(|| image.get("value")?.as_str())
+        .flatten()
 }
 
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]

@@ -367,24 +367,6 @@ impl UiAuthoringFieldDescriptor {
         if let UiAuthoringEditability::ReadOnly(reason) = self.editability {
             return Err(UiAuthoringEditError::ReadOnly(reason));
         }
-        if let UiAuthoringFieldValue::Brush {
-            kind: UiBrushAuthoringKind::Image,
-            reference,
-            ..
-        } = &value
-            && !matches!(
-                &self.value,
-                UiAuthoringFieldValue::Brush {
-                    kind: UiBrushAuthoringKind::Image,
-                    reference: accepted_reference,
-                    ..
-                } if accepted_reference == reference
-            )
-        {
-            return Err(UiAuthoringEditError::ReadOnly(
-                UiAuthoringReadOnlyReason::AssetSelectionDeferred,
-            ));
-        }
         let values = lower_descriptor_values(&self.kind, value)?;
         if values.len() != self.members.len() {
             return Err(UiAuthoringEditError::DescriptorMismatch);
@@ -433,7 +415,7 @@ impl UiAuthoringFieldDescriptor {
                     || component != &self.key.component
                     || *component_version != self.component_version
                     || field != &member.field
-                    || (value.kind() != member.value_kind
+                    || (!component_value_matches_schema_kind(value, member.value_kind)
                         && !(member.optional && matches!(value, ComponentValue::Null)))
                 {
                     return Err(UiAuthoringEditError::DescriptorMismatch);
@@ -1085,7 +1067,7 @@ impl UiAuthoringProjection {
                 .find(|candidate| candidate.id == *field)
                 .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
             if *component_version != schema.version
-                || (value.kind() != field.value_kind
+                || (!component_value_matches_schema_kind(value, field.value_kind)
                     && (field.required || !matches!(value, ComponentValue::Null)))
             {
                 return Err(UiAuthoringEditError::DescriptorMismatch);
@@ -1964,9 +1946,7 @@ fn parse_descriptor_value(
                 UiBrushAuthoringKind::Role if matches!(image, ComponentValue::Null) => {
                     role.to_owned()
                 }
-                UiBrushAuthoringKind::Image if role.is_empty() => {
-                    project_asset_path(image)?.to_owned()
-                }
+                UiBrushAuthoringKind::Image if role.is_empty() => project_asset_path(image)?,
                 UiBrushAuthoringKind::Solid
                 | UiBrushAuthoringKind::Role
                 | UiBrushAuthoringKind::Image => return None,
@@ -2095,16 +2075,21 @@ fn lower_descriptor_values(
     }
 }
 
-fn project_asset_path(value: &ComponentValue) -> Option<&str> {
-    let ComponentValue::Map(fields) = value else {
-        return None;
-    };
-    if fields.len() != 2 || fields.get("kind")?.as_str()? != "path" {
-        return None;
+fn project_asset_path(value: &ComponentValue) -> Option<String> {
+    codec::read_asset_ref(value, "image brush")
+        .ok()?
+        .as_path()
+        .map(|path| path.as_str().to_owned())
+}
+
+fn component_value_matches_schema_kind(
+    value: &ComponentValue,
+    expected: ComponentValueKind,
+) -> bool {
+    match expected {
+        ComponentValueKind::AssetRef => codec::read_asset_ref(value, "asset reference").is_ok(),
+        _ => value.kind() == expected,
     }
-    let path = fields.get("value")?.as_str()?;
-    AssetRef::path(path.to_owned()).ok()?;
-    Some(path)
 }
 
 fn lower_color(
@@ -2270,6 +2255,18 @@ mod tests {
         ])
     }
 
+    fn solid_brush_value(red: f64, green: f64, blue: f64, alpha: f64) -> ComponentValue {
+        ComponentValue::map([
+            ("kind", ComponentValue::String("solid".to_owned())),
+            ("red", ComponentValue::f64(red).unwrap()),
+            ("green", ComponentValue::f64(green).unwrap()),
+            ("blue", ComponentValue::f64(blue).unwrap()),
+            ("alpha", ComponentValue::f64(alpha).unwrap()),
+            ("role", ComponentValue::String(String::new())),
+            ("image", ComponentValue::Null),
+        ])
+    }
+
     fn ui_prefab(position: &str, width: (&str, f64)) -> PrefabDocument {
         let root = id("root");
         let button = id("button");
@@ -2368,6 +2365,66 @@ mod tests {
                 if entity.as_str() == "button"
                     && component.as_str() == "nara.ui.UiNode"
         )));
+    }
+
+    #[test]
+    fn brush_asset_reference_lowers_and_validates_its_semantic_schema_kind() {
+        let mut prefab = ui_prefab("absolute", ("px", 180.0));
+        prefab
+            .entities
+            .iter_mut()
+            .find(|entity| entity.id.as_str() == "button")
+            .unwrap()
+            .components
+            .insert(
+                UiAuthoringComponentKind::Visual.component_type(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::new(2).unwrap(),
+                    ComponentValue::map([
+                        ("background", solid_brush_value(0.2, 0.4, 0.8, 1.0)),
+                        ("border_width", ComponentValue::f64(0.0).unwrap()),
+                        ("border_brush", solid_brush_value(0.0, 0.0, 0.0, 0.0)),
+                        (
+                            "radii",
+                            ComponentValue::map([
+                                ("top_left", ComponentValue::f64(0.0).unwrap()),
+                                ("top_right", ComponentValue::f64(0.0).unwrap()),
+                                ("bottom_right", ComponentValue::f64(0.0).unwrap()),
+                                ("bottom_left", ComponentValue::f64(0.0).unwrap()),
+                            ]),
+                        ),
+                    ]),
+                ),
+            );
+        let projection = project_prefab_authoring(&prefab).unwrap();
+        let background = projection
+            .fields()
+            .iter()
+            .find(|field| {
+                field.key().entity().as_str() == "button"
+                    && field.key().primary_field().as_str() == "background.kind"
+            })
+            .unwrap();
+        let patch = background
+            .lower_edit(UiAuthoringFieldValue::Brush {
+                kind: UiBrushAuthoringKind::Image,
+                red: 1.0,
+                green: 1.0,
+                blue: 1.0,
+                alpha: 1.0,
+                reference: "textures/button.png".to_owned(),
+            })
+            .unwrap();
+
+        assert_eq!(background.validate_patch(&patch), Ok(()));
+        assert_eq!(
+            projection.validate_field_patch(
+                background.key(),
+                UiAuthoringCommitPolicy::Discrete,
+                &patch,
+            ),
+            Ok(())
+        );
     }
 
     #[test]

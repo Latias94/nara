@@ -249,22 +249,39 @@ impl EditorProjectSession {
                 return;
             }
         };
+        #[cfg(feature = "runtime-ui")]
+        let replacement_authoring_images = match self
+            .authoring_images
+            .prepare_replacement_successor(&replacement_authoring_runtime)
+        {
+            Ok(successor) => successor,
+            Err(_) => {
+                self.reject_project_content_refresh(
+                    request,
+                    EditorProjectContentRefreshFailure::PreviewRejected,
+                );
+                let _ = self.diagnostics.extend(single_error(
+                    "project.editor.content-refresh-image-catalog-rejected",
+                    "the saved project content could not publish a complete authoring image catalog",
+                ));
+                return;
+            }
+        };
         #[cfg(feature = "presentation-ui")]
-        let replacement_ui_preview =
-            match super::ui_preview::EditorUiPreviewSession::new(&successor) {
-                Ok(preview) => preview,
-                Err(_) => {
-                    self.reject_project_content_refresh(
-                        request,
-                        EditorProjectContentRefreshFailure::PreviewRejected,
-                    );
-                    let _ = self.diagnostics.extend(single_error(
-                        "project.editor.content-refresh-ui-preview-rejected",
-                        "the saved project content could not replace the Editor UI preview owner",
-                    ));
-                    return;
-                }
-            };
+        let replacement_ui_preview = match super::ui_preview::EditorUiPreviewSession::new() {
+            Ok(preview) => preview,
+            Err(_) => {
+                self.reject_project_content_refresh(
+                    request,
+                    EditorProjectContentRefreshFailure::PreviewRejected,
+                );
+                let _ = self.diagnostics.extend(single_error(
+                    "project.editor.content-refresh-ui-preview-rejected",
+                    "the saved project content could not replace the Editor UI preview owner",
+                ));
+                return;
+            }
+        };
 
         let generation = EditorProjectContentGeneration::new(self.next_project_content_generation);
         let Some(next_generation) = self.next_project_content_generation.checked_add(1) else {
@@ -279,21 +296,20 @@ impl EditorProjectSession {
             return;
         };
         #[cfg(feature = "runtime-ui")]
-        let replacement_ui_authoring_image_choices =
-            super::ui_authoring::EditorUiImageChoices::from_snapshot(&successor, generation);
-
-        #[cfg(feature = "runtime-ui")]
+        if self
+            .authoring_images
+            .publish_successor(replacement_authoring_images)
+            .is_err()
         {
-            self.ui_authoring_frame = None;
-            self.ui_authoring_projection_cache = None;
+            self.reject_project_content_refresh(
+                request,
+                EditorProjectContentRefreshFailure::PreviewRejected,
+            );
+            return;
         }
-        {
-            let Some(lane) = self.trusted_compiled_mut() else {
-                self.failed_content_refresh = Some(request);
-                return;
-            };
-            lane.snapshot = successor;
-        }
+        self.trusted_compiled_mut()
+            .expect("content refresh begins from the trusted compiled lane")
+            .snapshot = successor;
         self.authoring_runtime = replacement_authoring_runtime;
         #[cfg(feature = "presentation-ui")]
         {
@@ -301,7 +317,7 @@ impl EditorProjectSession {
         }
         #[cfg(feature = "runtime-ui")]
         {
-            self.ui_authoring_image_choices = replacement_ui_authoring_image_choices;
+            self.ui_authoring_frame = None;
         }
         self.next_project_content_generation = next_generation;
         self.project_content = EditorProjectContentView::Current { generation };

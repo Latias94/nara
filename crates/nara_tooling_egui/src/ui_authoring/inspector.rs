@@ -150,6 +150,7 @@ enum EguiUiStructureFocus {
 pub(crate) struct EguiUiAuthoringPanel {
     scope: Option<EguiUiAuthoringScope>,
     text_drafts: HashMap<EguiUiFieldDraftKey, EguiUiTextDraft>,
+    discrete_drafts: HashMap<EguiUiFieldDraftKey, UiAuthoringFieldValue>,
     field_errors: HashMap<EguiUiFieldDraftKey, String>,
     continuous: Option<EguiUiContinuousDraft>,
     structure_dialog: Option<EguiUiStructureDialog>,
@@ -171,6 +172,7 @@ impl EguiUiAuthoringPanel {
             }
             self.scope = next;
             self.text_drafts.clear();
+            self.discrete_drafts.clear();
             self.field_errors.clear();
             self.continuous = None;
             self.structure_dialog = None;
@@ -552,7 +554,9 @@ impl EguiUiAuthoringPanel {
             .continuous
             .as_ref()
             .filter(|draft| draft.key == draft_key)
-            .map_or_else(|| field.value().clone(), |draft| draft.value.clone());
+            .map(|draft| draft.value.clone())
+            .or_else(|| self.discrete_drafts.get(&draft_key).cloned())
+            .unwrap_or_else(|| field.value().clone());
         let mut proposed = displayed.clone();
         let response = ui
             .horizontal(|ui| {
@@ -563,6 +567,7 @@ impl EguiUiAuthoringPanel {
                     &draft_key,
                     &mut self.text_drafts,
                     &mut proposed,
+                    input.image_choices(),
                     editable,
                     label.id,
                 )
@@ -585,17 +590,29 @@ impl EguiUiAuthoringPanel {
         }
         if field.commit_policy() == UiAuthoringCommitPolicy::Continuous {
             self.handle_continuous_field(input, field, draft_key, proposed, response, actions);
-        } else if response.commit_requested {
-            match input.lower_discrete_field_edit(field.key(), proposed) {
-                Ok(mutation) => {
-                    self.field_errors.remove(&draft_key);
-                    if let Some(draft) = self.text_drafts.get_mut(&draft_key) {
-                        draft.dirty = false;
+        } else {
+            if response.escape_pressed {
+                self.discrete_drafts.remove(&draft_key);
+                self.field_errors.remove(&draft_key);
+                return;
+            }
+            if response.changed {
+                self.discrete_drafts
+                    .insert(draft_key.clone(), proposed.clone());
+            }
+            if response.commit_requested {
+                match input.lower_discrete_field_edit(field.key(), proposed) {
+                    Ok(mutation) => {
+                        self.discrete_drafts.remove(&draft_key);
+                        self.field_errors.remove(&draft_key);
+                        if let Some(draft) = self.text_drafts.get_mut(&draft_key) {
+                            draft.dirty = false;
+                        }
+                        actions.push(EditorAction::Mutate(mutation));
                     }
-                    actions.push(EditorAction::Mutate(mutation));
-                }
-                Err(error) => {
-                    self.field_errors.insert(draft_key, error);
+                    Err(error) => {
+                        self.field_errors.insert(draft_key, error);
+                    }
                 }
             }
         }
@@ -1203,6 +1220,7 @@ fn show_typed_control(
     draft_key: &EguiUiFieldDraftKey,
     text_drafts: &mut HashMap<EguiUiFieldDraftKey, EguiUiTextDraft>,
     value: &mut UiAuthoringFieldValue,
+    image_choices: Result<&UiImageChoiceSet, UiStructureRejection>,
     enabled: bool,
     label_id: egui::Id,
 ) -> EguiUiControlResponse {
@@ -1312,6 +1330,7 @@ fn show_typed_control(
         ) => {
             let before = (*kind, *red, *green, *blue, *alpha, reference.clone());
             ui.add_enabled_ui(enabled, |ui| {
+                let before_kind = *kind;
                 ComboBox::from_id_salt((draft_key, "brush"))
                     .selected_text(brush_label(*kind))
                     .show_ui(ui, |ui| {
@@ -1323,6 +1342,9 @@ fn show_typed_control(
                             ui.selectable_value(kind, candidate, brush_label(candidate));
                         }
                     });
+                if *kind != before_kind {
+                    reference.clear();
+                }
                 match kind {
                     UiBrushAuthoringKind::Solid => {
                         let mut rgba = [*red as f32, *green as f32, *blue as f32, *alpha as f32];
@@ -1332,18 +1354,48 @@ fn show_typed_control(
                         *blue = f64::from(rgba[2]);
                         *alpha = f64::from(rgba[3]);
                     }
-                    UiBrushAuthoringKind::Role | UiBrushAuthoringKind::Image => {
-                        ui.add_enabled(
-                            !matches!(kind, UiBrushAuthoringKind::Image),
-                            TextEdit::singleline(reference),
-                        );
+                    UiBrushAuthoringKind::Role => {
+                        ui.add(TextEdit::singleline(reference));
                     }
+                    UiBrushAuthoringKind::Image => match image_choices {
+                        Ok(choices) => {
+                            let selected = choices
+                                .choices()
+                                .iter()
+                                .find(|choice| choice.project_path() == reference.as_str())
+                                .map_or("Select image", |choice| choice.project_path());
+                            ComboBox::from_id_salt((draft_key, "image"))
+                                .selected_text(selected)
+                                .show_ui(ui, |ui| {
+                                    for choice in choices.choices() {
+                                        ui.selectable_value(
+                                            reference,
+                                            choice.project_path().to_owned(),
+                                            choice.project_path(),
+                                        );
+                                    }
+                                });
+                        }
+                        Err(_) => {
+                            ui.label(RichText::new("No prepared images").weak());
+                        }
+                    },
                 }
             });
             let after = (*kind, *red, *green, *blue, *alpha, reference.clone());
+            let value_complete = match *kind {
+                UiBrushAuthoringKind::Solid => reference.is_empty(),
+                UiBrushAuthoringKind::Role => !reference.trim().is_empty(),
+                UiBrushAuthoringKind::Image => image_choices.is_ok_and(|choices| {
+                    choices
+                        .choices()
+                        .iter()
+                        .any(|choice| choice.project_path() == reference.as_str())
+                }),
+            };
             return EguiUiControlResponse {
                 changed: after != before,
-                commit_requested: after != before,
+                commit_requested: after != before && value_complete,
                 escape_pressed: ui.input(|input| input.key_pressed(egui::Key::Escape)),
             };
         }

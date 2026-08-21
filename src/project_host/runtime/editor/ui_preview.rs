@@ -1,31 +1,26 @@
 use std::sync::Arc;
 
-use nara_asset::{
-    AssetEvents, AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetStates, Assets, Handle,
-};
+use nara_asset::{AssetId, Handle};
 use nara_core::Vec2;
 use nara_ecs::Entity;
-use nara_image::{
-    ImageAsset, PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash,
-    image_resource_key,
-};
 use nara_render::{
     __private::{EditorRenderGeneration, build_editor_render_frame_packet},
-    Color, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderImage2d,
-    RenderResourceSnapshot, RenderTarget, ViewportRect,
+    Color, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderImage2d, RenderTarget,
+    ViewportRect,
 };
 use nara_scene::SceneAuthoringRevision;
 use nara_tooling::{EditorDocumentId, EditorGestureStamp};
 use nara_ui::__private::{
     UiAuthoringCanvasCompileError, UiAuthoringCanvasCompileRequest, UiAuthoringCanvasCompiler,
     UiAuthoringCanvasProjection, UiAuthoringCanvasReady, UiAuthoringCanvasUnavailableReason,
-    UiAuthoringDiagnostic, UiAuthoringProjection,
+    UiAuthoringDiagnostic, UiAuthoringProjection, UiImageChoiceGeneration,
 };
-use nara_ui::UiImageId;
-use nara_ui_render::{UiPaintPacket, UiPreparedImages, UiPresentationPlanner};
+use nara_ui_render::{UiPaintPacket, UiPresentationPlanner};
 use thiserror::Error;
 
-use crate::{product::AcceptedPrimaryUiSurfaceProfile, project_host::ProjectContentSnapshot};
+use crate::product::AcceptedPrimaryUiSurfaceProfile;
+
+use super::authoring_images::EditorAuthoringImageCatalogReceipt;
 
 const EDITOR_UI_TARGET_ID: u64 = 3;
 
@@ -95,7 +90,6 @@ impl EditorUiPreviewCandidate {
 pub(super) struct EditorUiPreviewSession {
     compiler: UiAuthoringCanvasCompiler,
     planner: UiPresentationPlanner,
-    prepared_images: UiPreparedImages,
     render_generation: EditorRenderGeneration,
     target: Handle<RenderImage2d>,
     next_frame_index: u64,
@@ -112,6 +106,7 @@ struct EditorUiPreviewKey {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     gesture: Option<EditorGestureStamp>,
+    image_generation: UiImageChoiceGeneration,
     profile: Option<AcceptedPrimaryUiSurfaceProfile>,
 }
 
@@ -128,23 +123,13 @@ impl std::fmt::Debug for EditorUiPreviewSession {
 }
 
 impl EditorUiPreviewSession {
-    pub(super) fn new(snapshot: &ProjectContentSnapshot) -> Result<Self, UiPreviewError> {
-        let prepared_images = prepare_project_images(snapshot)?;
-        Self::new_with_prepared_images(prepared_images)
-    }
-
-    pub(super) fn new_authoring() -> Result<Self, UiPreviewError> {
-        Self::new_with_prepared_images(UiPreparedImages::new())
-    }
-
-    fn new_with_prepared_images(prepared_images: UiPreparedImages) -> Result<Self, UiPreviewError> {
+    pub(super) fn new() -> Result<Self, UiPreviewError> {
         let compiler = UiAuthoringCanvasCompiler::new()?;
         let render_generation = EditorRenderGeneration::try_acquire()
             .ok_or(UiPreviewError::RenderGenerationExhausted)?;
         Ok(Self {
             compiler,
             planner: UiPresentationPlanner::default(),
-            prepared_images,
             render_generation,
             target: Handle::new(AssetId::from_raw(EDITOR_UI_TARGET_ID)),
             next_frame_index: 0,
@@ -165,12 +150,14 @@ impl EditorUiPreviewSession {
         revision: SceneAuthoringRevision,
         gesture: Option<EditorGestureStamp>,
         projection: &UiAuthoringProjection,
+        images: &EditorAuthoringImageCatalogReceipt,
         profile: Option<AcceptedPrimaryUiSurfaceProfile>,
     ) -> UiAuthoringCanvasProjection {
         let key = EditorUiPreviewKey {
             document,
             revision,
             gesture,
+            image_generation: images.generation(),
             profile,
         };
         if self.key == Some(key) && !self.rebuild_requested {
@@ -187,7 +174,7 @@ impl EditorUiPreviewSession {
             return self.projection.clone();
         };
 
-        match self.try_prepare(document, revision, gesture, projection, profile) {
+        match self.try_prepare(document, revision, gesture, projection, images, profile) {
             Ok(candidate) => {
                 let canvas = candidate.canvas().clone();
                 self.geometry_generation = Some(candidate.geometry_generation());
@@ -211,6 +198,7 @@ impl EditorUiPreviewSession {
         revision: SceneAuthoringRevision,
         gesture: Option<EditorGestureStamp>,
         projection: &UiAuthoringProjection,
+        images: &EditorAuthoringImageCatalogReceipt,
         profile: AcceptedPrimaryUiSurfaceProfile,
     ) -> Result<EditorUiPreviewCandidate, UiPreviewError> {
         let transform = profile
@@ -235,7 +223,7 @@ impl EditorUiPreviewSession {
         let paint_packet = self.planner.plan(
             Arc::clone(canvas_candidate.frame()),
             target,
-            &self.prepared_images,
+            images.prepared_images(),
         )?;
         let viewport = ViewportRect::from_extent(extent).ok_or(UiPreviewError::InvalidProfile)?;
         let mut views = ExtractedViews::default();
@@ -291,78 +279,6 @@ impl EditorUiPreviewSession {
     }
 }
 
-fn prepare_project_images(
-    snapshot: &ProjectContentSnapshot,
-) -> Result<UiPreparedImages, UiPreviewError> {
-    let mut imported = Vec::with_capacity(snapshot.images().len());
-    for (index, content) in snapshot.images().iter().enumerate() {
-        let source = content.image().source();
-        let record = AssetRecord::new(
-            source.stable_id(),
-            source.path().clone(),
-            AssetSourceKind::Image,
-        );
-        let image = snapshot
-            .share_image_for_consumer(index)
-            .ok_or(UiPreviewError::ImageSnapshotInvalid)?;
-        imported.push((record, image));
-    }
-    prepare_images(imported)
-}
-
-fn prepare_images(
-    imported: impl IntoIterator<Item = (AssetRecord, ImageAsset)>,
-) -> Result<UiPreparedImages, UiPreviewError> {
-    let mut server = AssetServer::new();
-    let mut images = Assets::<ImageAsset>::default();
-    let mut states = AssetStates::default();
-    let mut events = AssetEvents::default();
-    let mut prepared_images = UiPreparedImages::new();
-
-    for (record, image) in imported {
-        let source_hash = image.source().source_hash();
-        let artifact_hash = image.source().artifact().key().digest();
-        let path = record.path().as_str().to_owned();
-        let stable_id = record.stable_id().to_string();
-        let handle = server.reserve_record::<ImageAsset>(&record)?;
-        images.commit_loaded(
-            handle,
-            image,
-            &mut states,
-            &mut events,
-            Some(source_hash),
-            Some(artifact_hash),
-        )?;
-        let image = images
-            .get(handle)
-            .ok_or(UiPreviewError::ImageSnapshotInvalid)?;
-        let state = states
-            .state(handle.id())
-            .ok_or(UiPreviewError::ImageSnapshotInvalid)?;
-        let prepared = PreparedImageSnapshot::new(
-            RenderResourceSnapshot::new(
-                image_resource_key(handle),
-                state.version(),
-                images.slot_revision(handle),
-                image_descriptor_hash(image),
-            ),
-            PreparedImageResource::from_image(image),
-        );
-        for alias in [
-            path.clone(),
-            format!("path:{path}"),
-            format!("project://{path}"),
-            stable_id.clone(),
-            format!("stable:{stable_id}"),
-        ] {
-            if let Ok(id) = UiImageId::new(alias) {
-                prepared_images.insert(id, prepared.clone());
-            }
-        }
-    }
-    Ok(prepared_images)
-}
-
 #[derive(Debug, Error)]
 pub(super) enum UiPreviewError {
     #[error(transparent)]
@@ -371,10 +287,6 @@ pub(super) enum UiPreviewError {
     Presentation(#[from] nara_ui_render::UiPresentationContentError),
     #[error(transparent)]
     Packet(#[from] nara_render::RenderFramePacketError),
-    #[error(transparent)]
-    Asset(#[from] nara_asset::AssetError),
-    #[error(transparent)]
-    AssetState(#[from] nara_asset::AssetStateError),
     #[error("the Editor UI render generation is exhausted")]
     RenderGenerationExhausted,
     #[error("the Editor UI frame index is exhausted")]
@@ -385,6 +297,4 @@ pub(super) enum UiPreviewError {
     InvalidProfile,
     #[error("the Editor UI render view was not published")]
     RenderViewMissing,
-    #[error("the project image snapshot could not be retained for the Editor UI Canvas")]
-    ImageSnapshotInvalid,
 }

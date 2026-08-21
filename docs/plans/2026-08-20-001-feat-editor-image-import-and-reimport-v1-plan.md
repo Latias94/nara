@@ -725,9 +725,13 @@ generic reopen.
   Editor image assets. Reject stable-ID/path conflicts and deduplicate an exact same product.
 - Derive both `EditorUiImageChoices` and `UiPreparedImages` from that receipt. Advance generations
   together and retire older Canvas/pick state before accepting input.
-- When a Prefab save introduces the reference, let existing ProjectContent refresh discover it.
-  Accept a strict successor only when stable ID, source/settings hash, and path match the Editor
-  image fact; then retire any redundant session copy when safe.
+- In Generic Authoring, persist the canonical reference, close the session, and let the next ordinary
+  open build a new accepted Authoring closure and hydrate that referenced image. Do not imply an
+  in-session ProjectContent refresh or cross-lane runtime handoff.
+- In the separate Trusted Compiled lane, let the existing strict ProjectContent refresh rebuild its
+  replacement runtime and authoring-image receipt from the successor closure. Publish the new
+  receipt only after the strict replacement is complete; never carry store-local handles or prepared
+  resources across runtime owners.
 - On generic reopen, hydrate only images reachable from the accepted Authoring closure through the
   same bounded import service. Keep unrelated valid image metadata lazy.
 
@@ -737,8 +741,10 @@ generic reopen.
   the same generation.
 - A stale/missing prepared resource makes the choice non-interactive; an older Canvas receipt cannot
   select or commit against a successor catalog.
-- Create or edit a UI Image node to use the imported path, save, refresh, close, and reopen. The image
-  renders with the same color space without project Rust execution.
+- Create or edit a UI Image node to use the imported path, save, close, and perform an ordinary
+  generic reopen. The image renders with the same color space without project Rust execution.
+- A separate strict content refresh publishes a replacement image receipt from its own runtime while
+  preserving the predecessor generation on failure.
 - An unreferenced canonical image is not eagerly decoded on reopen and becomes available after one
   explicit Reimport.
 - Failed hydration preserves the last complete authoring projection and reports a bounded resource

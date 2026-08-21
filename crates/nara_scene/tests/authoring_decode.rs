@@ -9,8 +9,8 @@ use nara_reflect::{
     ComponentValueKind, EntityReference, PersistentComponentSchemaOwnerId,
 };
 use nara_scene::{
-    AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringRecordReadiness,
-    AuthoringScalarEdit, AuthoringSessionAuthorityError, AuthoringSessionReplacementError,
+    AuthoringDocumentReadiness, AuthoringDocumentSource, AuthoringFieldEdit,
+    AuthoringRecordReadiness, AuthoringSessionAuthorityError, AuthoringSessionReplacementError,
     PrefabAuthoringSession, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
     SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneAuthoringSession,
     SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
@@ -181,7 +181,24 @@ fn authoring_preview_projects_only_exact_available_direct_records() {
 }
 
 #[test]
-fn available_scalar_edit_preserves_known_unbound_manifest_across_reopen() {
+fn single_authoring_field_edit_obeys_the_value_budget() {
+    let error = AuthoringFieldEdit::single(
+        scene_id("player"),
+        component_id("nara.scene.Name"),
+        ComponentSchemaVersion::ONE,
+        ComponentFieldId::new("value"),
+        ComponentValue::String("x".repeat(65 * 1024)),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        nara_scene::AuthoringFieldEditError::ValueBudgetExceeded
+    );
+}
+
+#[test]
+fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
     let (bundle, adapter) = scene_bundle_and_name_adapter();
     let owner = persistent_owner(OWNER);
     let entity = scene_id("player");
@@ -247,13 +264,15 @@ fn available_scalar_edit_preserves_known_unbound_manifest_across_reopen() {
 
     let mut session = SceneAuthoringSession::from_published_authoring_document(published);
     let before_revision = session.revision();
-    let edit = AuthoringScalarEdit::new(
+    let edit = AuthoringFieldEdit::single(
         entity,
         component_id("nara.scene.Name"),
+        ComponentSchemaVersion::ONE,
         ComponentFieldId::new("value"),
         ComponentValue::String("Renamed".to_owned()),
-    );
-    let report = session.apply_authoring_scalar_edit(edit);
+    )
+    .unwrap();
+    let report = session.apply_authoring_field_edit(edit);
 
     assert!(report.applied, "{:#?}", report.diagnostics);
     assert_ne!(session.revision(), before_revision);

@@ -376,10 +376,12 @@ impl PersistenceFileState {
         self.publication.mark_uncertain();
     }
 
+    #[cfg(test)]
     fn uncertain(&self) -> bool {
         self.publication.uncertain()
     }
 
+    #[cfg(test)]
     fn observed_identity(&self) -> FileIdentity {
         match self.publication.binding() {
             FilePublicationBinding::Existing { identity, .. } => identity,
@@ -1079,7 +1081,7 @@ mod tests {
         PersistentComponentSchemaOwnerId,
     };
     use nara_scene::{
-        AuthoringDocumentSource, AuthoringScalarEdit, PrefabDocument,
+        AuthoringDocumentSource, AuthoringFieldEdit, PrefabDocument,
         SCENE_COMPONENTS_SCHEMA_OWNER_ID, SCENE_COMPONENTS_SCHEMA_PROVIDER, SceneAuthoringSession,
         SceneComponentRecord, SceneEntityId, SceneEntityRecord,
     };
@@ -1390,15 +1392,17 @@ mod tests {
         let base_revision = workspace.scene(document).unwrap().revision();
         let report = workspace.apply_command(
             &ComponentRegistry::new(),
-            EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+            EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
                 document,
                 base_revision,
-                edit: AuthoringScalarEdit::new(
+                edit: AuthoringFieldEdit::single(
                     entity,
                     nara_reflect::ComponentTypeId::new("nara.scene.Name"),
+                    nara_reflect::ComponentSchemaVersion::ONE,
                     ComponentFieldId::new("value"),
                     ComponentValue::String("Renamed".to_owned()),
-                ),
+                )
+                .unwrap(),
             },
         );
         assert!(report.applied, "{:#?}", report.diagnostics);

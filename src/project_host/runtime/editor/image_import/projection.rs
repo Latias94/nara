@@ -15,6 +15,7 @@ use crate::project_host::authoring::{ProjectSourceIndexGeneration, ProjectSource
 
 use super::{
     catalog::{EditorImageMetadataInvalidity, EditorImageMetadataStatus},
+    store::EditorImageSourceProof,
     transaction::{
         EditorImageImportFailure, EditorImageImportFrame, EditorImageImportHost,
         EditorImageImportLatestDetail, EditorImageImportLatestMetadata,
@@ -190,15 +191,18 @@ impl EditorImageImportHost {
                     Some((identity, _)) if identity != last_good.source_identity() => {
                         EditorImageSourceObservation::Changed
                     }
-                    Some((identity, generation))
-                        if generation == last_good.source_index_generation() =>
-                    {
-                        EditorImageSourceObservation::Verified {
+                    Some((identity, generation)) => match last_good.source_proof() {
+                        EditorImageSourceProof::SourceIndex {
+                            generation: admitted,
+                        } if generation == admitted => EditorImageSourceObservation::Verified {
                             identity,
                             digest: last_good.source_digest(),
+                        },
+                        EditorImageSourceProof::SourceIndex { .. }
+                        | EditorImageSourceProof::AuthoringClosure { .. } => {
+                            EditorImageSourceObservation::Unverified
                         }
-                    }
-                    Some(_) => EditorImageSourceObservation::Unverified,
+                    },
                     None => EditorImageSourceObservation::Unavailable,
                 };
                 let freshness = match (source_observation, desired) {

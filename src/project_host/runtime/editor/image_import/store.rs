@@ -1,0 +1,157 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use nara_asset::{AssetId, AssetPath, AssetVersion, Handle, ImportSettingsHash, StableAssetId};
+use nara_fs::{ContentDigest, FileIdentity};
+use nara_image::ImageAsset;
+
+use crate::project_host::authoring::{
+    AuthoringProjectAttemptGeneration, ProjectSourceIndexGeneration,
+};
+
+pub(super) const MAX_LAST_GOOD_IMAGES: usize = 4_096;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EditorImageSourceProof {
+    SourceIndex {
+        generation: ProjectSourceIndexGeneration,
+    },
+    AuthoringClosure {
+        attempt_generation: AuthoringProjectAttemptGeneration,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EditorImageLastGood {
+    stable_id: StableAssetId,
+    handle: Handle<ImageAsset>,
+    source_identity: FileIdentity,
+    source_proof: EditorImageSourceProof,
+    source_digest: ContentDigest,
+    settings_hash: ImportSettingsHash,
+    version: AssetVersion,
+}
+
+impl EditorImageLastGood {
+    #[must_use]
+    pub(super) const fn new(
+        stable_id: StableAssetId,
+        handle: Handle<ImageAsset>,
+        source_identity: FileIdentity,
+        source_proof: EditorImageSourceProof,
+        source_digest: ContentDigest,
+        settings_hash: ImportSettingsHash,
+        version: AssetVersion,
+    ) -> Self {
+        Self {
+            stable_id,
+            handle,
+            source_identity,
+            source_proof,
+            source_digest,
+            settings_hash,
+            version,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn stable_id(&self) -> StableAssetId {
+        self.stable_id
+    }
+
+    #[must_use]
+    pub(crate) const fn handle(&self) -> Handle<ImageAsset> {
+        self.handle
+    }
+
+    #[must_use]
+    pub(crate) const fn source_identity(&self) -> FileIdentity {
+        self.source_identity
+    }
+
+    #[must_use]
+    pub(crate) const fn source_proof(&self) -> EditorImageSourceProof {
+        self.source_proof
+    }
+
+    #[must_use]
+    pub(crate) const fn source_digest(&self) -> ContentDigest {
+        self.source_digest
+    }
+
+    #[must_use]
+    pub(crate) const fn settings_hash(&self) -> ImportSettingsHash {
+        self.settings_hash
+    }
+
+    #[must_use]
+    pub(crate) const fn version(&self) -> AssetVersion {
+        self.version
+    }
+
+    pub(super) fn verify_source_index(&mut self, generation: ProjectSourceIndexGeneration) {
+        self.source_proof = EditorImageSourceProof::SourceIndex { generation };
+    }
+}
+
+#[derive(Default)]
+pub(super) struct EditorImageLastGoodStore {
+    images: BTreeMap<AssetPath, EditorImageLastGood>,
+    changed: bool,
+}
+
+impl EditorImageLastGoodStore {
+    #[must_use]
+    pub(super) fn get(&self, asset_path: &AssetPath) -> Option<&EditorImageLastGood> {
+        self.images.get(asset_path)
+    }
+
+    pub(super) fn get_mut(&mut self, asset_path: &AssetPath) -> Option<&mut EditorImageLastGood> {
+        self.images.get_mut(asset_path)
+    }
+
+    #[must_use]
+    pub(super) fn can_insert(&self, asset_path: &AssetPath) -> bool {
+        self.images.len() < MAX_LAST_GOOD_IMAGES || self.images.contains_key(asset_path)
+    }
+
+    pub(super) fn insert(&mut self, asset_path: AssetPath, image: EditorImageLastGood) -> bool {
+        if !self.can_insert(&asset_path) {
+            return false;
+        }
+        let changed = self.images.get(&asset_path) != Some(&image);
+        self.images.insert(asset_path, image);
+        self.changed |= changed;
+        true
+    }
+
+    #[must_use]
+    pub(super) fn asset_ids(&self) -> BTreeSet<AssetId> {
+        self.images
+            .values()
+            .map(|image| image.handle().id())
+            .collect()
+    }
+
+    pub(super) fn retain_verified_by_source_index(
+        &mut self,
+        generation: ProjectSourceIndexGeneration,
+        mut retain: impl FnMut(&AssetPath, &EditorImageLastGood) -> bool,
+    ) {
+        let previous_len = self.images.len();
+        self.images
+            .retain(|asset_path, image| retain(asset_path, image));
+        self.changed |= self.images.len() != previous_len;
+        for image in self.images.values_mut() {
+            image.verify_source_index(generation);
+        }
+    }
+
+    #[must_use]
+    pub(super) const fn changed(&self) -> bool {
+        self.changed
+    }
+
+    pub(super) fn acknowledge_changed(&mut self) {
+        self.changed = false;
+    }
+}

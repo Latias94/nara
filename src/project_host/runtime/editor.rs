@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, fmt, sync::Arc, time::Duration};
 
 mod actions;
+#[cfg(feature = "runtime-ui")]
+mod authoring_images;
 #[cfg(any(feature = "presentation-2d", feature = "runtime-ui"))]
 mod authoring_preview;
 mod authoring_runtime;
@@ -34,6 +36,7 @@ pub use game_view::{
 #[cfg(test)]
 pub(crate) use image_import::{
     EditorImageImportFailure, EditorImageImportRequestResult, EditorImageImportState,
+    EditorImageLastGood,
 };
 pub use open::{
     EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
@@ -43,9 +46,9 @@ pub use open::{
 #[cfg(feature = "presentation-2d")]
 pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
 #[cfg(feature = "runtime-ui")]
-pub use ui_authoring::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
+use ui_authoring::EditorUiAuthoringProjectionCache;
 #[cfg(feature = "runtime-ui")]
-use ui_authoring::{EditorUiAuthoringProjectionCache, EditorUiImageChoices};
+pub use ui_authoring::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
 #[cfg(feature = "presentation-ui")]
 pub use ui_preview::EditorUiPreviewCandidate;
 
@@ -104,6 +107,7 @@ use crate::project_host::{
 use super::{
     PROJECT_MANIFEST, ProjectHost, RuntimePlan, RuntimePluginOverlay, runtime_plan_failure_report,
     runtime_plan_selected_report, single_error, single_warning,
+    single_warning_with_project_relative,
 };
 use crate::project_host::persistence::{
     EditorPersistenceReceipt, OpenedSceneReopen, PrefabPersistenceHost, ScenePersistenceHost,
@@ -715,7 +719,7 @@ pub struct EditorProjectSession {
     last_gesture_cancellation: Option<EditorGestureCancelReason>,
     authoring_runtime: authoring_runtime::EditorAuthoringRuntime,
     #[cfg(feature = "runtime-ui")]
-    ui_authoring_image_choices: EditorUiImageChoices,
+    authoring_images: authoring_images::EditorAuthoringImageHost,
     #[cfg(feature = "presentation-ui")]
     ui_preview: ui_preview::EditorUiPreviewSession,
     #[cfg(feature = "runtime-ui")]
@@ -886,6 +890,19 @@ impl EditorProjectSession {
         self.image_import.last_good(asset_path)
     }
 
+    #[cfg(all(test, feature = "runtime-ui"))]
+    pub(crate) fn editor_authoring_image_catalog_facts(
+        &self,
+    ) -> (u64, Vec<(String, ImageImportSettings)>) {
+        let receipt = self.authoring_images.receipt();
+        let products = receipt
+            .products()
+            .iter()
+            .map(|product| (product.path().as_str().to_owned(), product.settings()))
+            .collect();
+        (receipt.generation().get(), products)
+    }
+
     #[cfg(test)]
     pub(crate) fn request_editor_image_import(
         &mut self,
@@ -893,6 +910,9 @@ impl EditorProjectSession {
         project_relative_path: &str,
         settings: ImageImportSettings,
     ) -> image_import::EditorImageImportRequestResult {
+        if let Some(failure) = self.image_import.request_blocker() {
+            return image_import::EditorImageImportRequestResult::Rejected(failure);
+        }
         let source_index = match self.published_frame.as_ref() {
             Some(frame) if frame.model.revision() == frame_revision => {
                 frame.source_index.as_ref().map(Arc::clone)
@@ -949,15 +969,96 @@ impl EditorProjectSession {
     }
 
     fn advance_editor_image_import(&mut self) {
-        let EditorProjectSession {
-            execution,
-            authoring_runtime,
-            image_import,
-            ..
-        } = self;
-        if let EditorExecutionLane::Authoring(project) = execution {
-            image_import.advance(project, authoring_runtime);
+        {
+            let EditorProjectSession {
+                execution,
+                authoring_runtime,
+                image_import,
+                ..
+            } = self;
+            if let EditorExecutionLane::Authoring(project) = execution {
+                image_import.advance(project, authoring_runtime);
+            }
         }
+
+        #[cfg(feature = "runtime-ui")]
+        self.publish_authoring_image_successor_if_changed();
+
+        if let Some(failure) = self.image_import.take_hydration_failure() {
+            let code = match failure.kind() {
+                image_import::EditorImageHydrationFailureKind::ClosureInvalid => {
+                    "project.editor.authoring-image-closure-invalid"
+                }
+                image_import::EditorImageHydrationFailureKind::CapacityExceeded => {
+                    "project.editor.authoring-image-capacity-exceeded"
+                }
+                image_import::EditorImageHydrationFailureKind::SourceUnavailable => {
+                    "project.editor.authoring-image-source-unavailable"
+                }
+                image_import::EditorImageHydrationFailureKind::SourceChanged => {
+                    "project.editor.authoring-image-source-changed"
+                }
+                image_import::EditorImageHydrationFailureKind::MetadataUnavailable => {
+                    "project.editor.authoring-image-metadata-unavailable"
+                }
+                image_import::EditorImageHydrationFailureKind::MetadataChanged => {
+                    "project.editor.authoring-image-metadata-changed"
+                }
+                image_import::EditorImageHydrationFailureKind::Runtime(_) => {
+                    "project.editor.authoring-image-runtime-rejected"
+                }
+                image_import::EditorImageHydrationFailureKind::ResultMismatch => {
+                    "project.editor.authoring-image-result-mismatch"
+                }
+            };
+            let _ = self
+                .diagnostics
+                .extend(single_warning_with_project_relative(
+                    code,
+                    "a referenced authoring image could not be restored; the last complete image catalog remains active",
+                    "asset",
+                    failure.asset_path().as_str(),
+                ));
+        }
+    }
+
+    #[cfg(feature = "runtime-ui")]
+    fn publish_authoring_image_successor_if_changed(&mut self) {
+        if !self.image_import.authoring_catalog_publication_ready()
+            || !self.image_import.last_good_store_changed()
+        {
+            return;
+        }
+        let selected = self.image_import.authoring_image_asset_ids();
+        let successor = match self
+            .authoring_images
+            .prepare_selected_successor(&self.authoring_runtime, &selected)
+        {
+            Ok(Some(successor)) => successor,
+            Ok(None) => {
+                self.image_import.acknowledge_last_good_store_changed();
+                return;
+            }
+            Err(_) => {
+                let _ = self.diagnostics.extend(single_warning(
+                    "project.editor.authoring-image-catalog-rejected",
+                    "the updated authoring image facts were rejected; the last complete image catalog remains active",
+                ));
+                return;
+            }
+        };
+
+        if self.authoring_images.publish_successor(successor).is_err() {
+            let _ = self.diagnostics.extend(single_warning(
+                "project.editor.authoring-image-catalog-rejected",
+                "the updated authoring image catalog became stale before publication",
+            ));
+            return;
+        }
+        self.image_import.acknowledge_last_good_store_changed();
+        self.ui_authoring_frame = None;
+        #[cfg(feature = "presentation-ui")]
+        self.ui_preview.retire();
     }
 
     /// Returns the complete unavailable-record manifest for the active generic authoring
@@ -1020,11 +1121,16 @@ impl EditorProjectSession {
             &preview_registry,
         )
         .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
+        let mut image_import = image_import::EditorImageImportHost::default();
+        image_import.initialize_authoring_hydration(&parts.snapshot);
         #[cfg(feature = "runtime-ui")]
-        let ui_authoring_image_choices =
-            EditorUiImageChoices::from_authoring_snapshot(&parts.snapshot);
+        let authoring_images = authoring_images::EditorAuthoringImageHost::capture_selected(
+            &authoring_runtime,
+            &image_import.authoring_image_asset_ids(),
+        )
+        .map_err(|_| editor_open_error("project.editor.authoring-image-init-failed"))?;
         #[cfg(feature = "presentation-ui")]
-        let ui_preview = ui_preview::EditorUiPreviewSession::new_authoring().map_err(|_error| {
+        let ui_preview = ui_preview::EditorUiPreviewSession::new().map_err(|_error| {
             editor_open_error("project.editor.authoring-ui-preview-init-failed")
         })?;
         let project_root = parts.snapshot.project_root();
@@ -1092,7 +1198,7 @@ impl EditorProjectSession {
             prefab_lane: None,
             pending_document_open: None,
             project_browser: project_browser::EditorProjectBrowserHost::new(),
-            image_import: image_import::EditorImageImportHost::default(),
+            image_import,
             authoring_prefab_source_observations: BTreeMap::new(),
             #[cfg(test)]
             reject_next_prefab_source_binding: false,
@@ -1111,7 +1217,7 @@ impl EditorProjectSession {
             last_gesture_cancellation: None,
             authoring_runtime,
             #[cfg(feature = "runtime-ui")]
-            ui_authoring_image_choices,
+            authoring_images,
             #[cfg(feature = "presentation-ui")]
             ui_preview,
             #[cfg(feature = "runtime-ui")]
@@ -1202,24 +1308,30 @@ impl EditorProjectSession {
             .map_err(|error| EditorProjectOpenError {
                 diagnostics: error.diagnostics().clone(),
             })?;
-        let initial_content_generation = EditorProjectContentGeneration::new(1);
-        #[cfg(feature = "runtime-ui")]
-        let ui_authoring_image_choices =
-            EditorUiImageChoices::from_snapshot(&snapshot, initial_content_generation);
-        #[cfg(feature = "presentation-ui")]
-        let ui_preview = ui_preview::EditorUiPreviewSession::new(&snapshot).map_err(|_error| {
-            EditorProjectOpenError {
-                diagnostics: single_error(
-                    "project.editor.ui-preview-init-failed",
-                    "the Editor UI preview owner could not be initialized",
-                ),
-            }
-        })?;
         let authoring_runtime = authoring_runtime::EditorAuthoringRuntime::new(
             snapshot.clone(),
             plan.schema_validation().snapshot(),
         )
         .map_err(|diagnostics| EditorProjectOpenError { diagnostics })?;
+        let initial_content_generation = EditorProjectContentGeneration::new(1);
+        #[cfg(feature = "runtime-ui")]
+        let authoring_images = authoring_images::EditorAuthoringImageHost::capture(
+            &authoring_runtime,
+        )
+        .map_err(|_| EditorProjectOpenError {
+            diagnostics: single_error(
+                "project.editor.authoring-image-init-failed",
+                "the Editor authoring image catalog could not be initialized",
+            ),
+        })?;
+        #[cfg(feature = "presentation-ui")]
+        let ui_preview =
+            ui_preview::EditorUiPreviewSession::new().map_err(|_error| EditorProjectOpenError {
+                diagnostics: single_error(
+                    "project.editor.ui-preview-init-failed",
+                    "the Editor UI preview owner could not be initialized",
+                ),
+            })?;
         let scenes_path = RelativePath::new(candidate.settings().paths.scenes.as_str())
             .map_err(|_| editor_open_error("project.editor.scenes-path-invalid"))?;
         let scenes = project_root
@@ -1318,7 +1430,7 @@ impl EditorProjectSession {
             last_gesture_cancellation: None,
             authoring_runtime,
             #[cfg(feature = "runtime-ui")]
-            ui_authoring_image_choices,
+            authoring_images,
             #[cfg(feature = "presentation-ui")]
             ui_preview,
             #[cfg(feature = "runtime-ui")]

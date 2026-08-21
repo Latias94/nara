@@ -11,7 +11,7 @@ use nara_fs::{
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
-    AuthoringDocumentReadiness, AuthoringRecordFact, AuthoringScalarEdit, PrefabAuthoringSession,
+    AuthoringDocumentReadiness, AuthoringFieldEdit, AuthoringRecordFact, PrefabAuthoringSession,
     PrefabDocument, PublishedAuthoringPrefabDocument, PublishedAuthoringSceneDocument,
     SceneAuthoringContentState, SceneAuthoringHistoryStatus, SceneAuthoringRevision,
     SceneAuthoringSession, SceneDocument, SceneEntityId, ScenePatchDocument, ScenePatchReport,
@@ -711,11 +711,11 @@ impl EditorWorkspace {
                 base_revision,
                 patch,
             } => self.apply_prefab_patch(registry, document, base_revision, patch),
-            EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+            EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
                 document,
                 base_revision,
                 edit,
-            } => self.apply_authoring_scalar_edit(document, base_revision, edit),
+            } => self.apply_authoring_field_edit(document, base_revision, edit),
             EditorWorkspaceCommand::ComposeScene {
                 document,
                 base_revision,
@@ -772,11 +772,11 @@ impl EditorWorkspace {
                 base_revision,
                 command,
             } => self.apply_authoring_inspector_command(document, base_revision, command),
-            EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+            EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
                 document,
                 base_revision,
                 edit,
-            } => self.apply_authoring_scalar_edit(document, base_revision, edit),
+            } => self.apply_authoring_field_edit(document, base_revision, edit),
             EditorWorkspaceCommand::Undo {
                 document,
                 base_revision,
@@ -1032,11 +1032,11 @@ impl EditorWorkspace {
         report_for_prefab_patch_slot(document, active_document, slot, patch_report)
     }
 
-    fn apply_authoring_scalar_edit(
+    fn apply_authoring_field_edit(
         &mut self,
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
-        edit: AuthoringScalarEdit,
+        edit: AuthoringFieldEdit,
     ) -> EditorWorkspaceCommandReport {
         let (active_document, slot) =
             match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
@@ -1044,8 +1044,8 @@ impl EditorWorkspace {
                 Err(report) => return report,
             };
         let patch_report = match slot {
-            EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_scalar_edit(edit),
-            EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_scalar_edit(edit),
+            EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_field_edit(edit),
+            EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_field_edit(edit),
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -2165,10 +2165,10 @@ pub enum EditorWorkspaceCommand {
         base_revision: SceneAuthoringRevision,
         patch: ScenePatchDocument,
     },
-    ApplyAuthoringScalarEdit {
+    ApplyAuthoringFieldEdit {
         document: EditorDocumentId,
         base_revision: SceneAuthoringRevision,
-        edit: AuthoringScalarEdit,
+        edit: AuthoringFieldEdit,
     },
     ComposeScene {
         document: EditorDocumentId,
@@ -4003,7 +4003,7 @@ mod tests {
     }
 
     #[test]
-    fn degraded_authoring_scalar_gate_preserves_manifest_and_is_failure_atomic() {
+    fn degraded_authoring_field_gate_preserves_manifest_and_is_failure_atomic() {
         let resolved =
             nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER)
                 .unwrap();
@@ -4161,15 +4161,17 @@ mod tests {
         assert_eq!(slot.unavailable_record_manifest(), Some(&expected_manifest));
 
         let unavailable_edit =
-            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
                 document,
                 base_revision: accepted_revision,
-                edit: AuthoringScalarEdit::new(
+                edit: AuthoringFieldEdit::single(
                     entity.clone(),
                     visibility,
+                    ComponentSchemaVersion::ONE,
                     ComponentFieldId::new("value"),
                     ComponentValue::String("hidden".to_owned()),
-                ),
+                )
+                .unwrap(),
             });
         assert!(!unavailable_edit.applied);
         let raw_patch =

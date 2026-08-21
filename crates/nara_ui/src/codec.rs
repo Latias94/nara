@@ -785,7 +785,10 @@ fn read_optional_asset_ref(
     }
 }
 
-fn read_asset_ref(value: &ComponentValue, field: &str) -> Result<AssetRef, ComponentCodecError> {
+pub(crate) fn read_asset_ref(
+    value: &ComponentValue,
+    field: &str,
+) -> Result<AssetRef, ComponentCodecError> {
     expect_fields(value, field, &["kind", "value"])?;
     let kind = read_string(value.field("kind")?, &format!("{field}.kind"))?;
     let reference = read_string(value.field("value")?, &format!("{field}.value"))?;

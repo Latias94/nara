@@ -518,6 +518,12 @@ impl AuthoringProjectSessionSnapshot {
         self.assets.iter().map(AuthoringAssetSource::record)
     }
 
+    pub(crate) fn image_asset_sources(&self) -> impl Iterator<Item = &AuthoringAssetSource> {
+        self.assets
+            .iter()
+            .filter(|source| source.record().source_kind() == &AssetSourceKind::Image)
+    }
+
     #[must_use]
     pub(crate) const fn usage(&self) -> AuthoringProjectAdmissionUsage {
         self.usage

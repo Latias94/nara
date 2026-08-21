@@ -9,7 +9,7 @@ use nara_reflect::{
     ComponentValueKind,
 };
 use nara_scene::{
-    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, AuthoringScalarEdit,
+    AuthoringFieldEdit, AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness,
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
 };
@@ -129,7 +129,7 @@ impl SceneInspectorState {
         else {
             return inspector_authoring_component_error_report(
                 "tooling.inspector-authoring-component-missing",
-                "inspector scalar command targets a component that is not in the authoring document",
+                "inspector field command targets a component that is not in the authoring document",
                 &entity,
                 &component,
             );
@@ -137,13 +137,17 @@ impl SceneInspectorState {
         if record.version != component_version {
             return inspector_authoring_component_error_report(
                 "tooling.inspector-authoring-version-mismatch",
-                "inspector scalar command does not match the persistent component version",
+                "inspector field command does not match the persistent component version",
                 &entity,
                 &component,
             );
         }
-        let patch_report = session
-            .apply_authoring_scalar_edit(AuthoringScalarEdit::new(entity, component, field, value));
+        let edit =
+            match AuthoringFieldEdit::single(entity, component, component_version, field, value) {
+                Ok(edit) => edit,
+                Err(_) => return inspector_authoring_command_error_report(),
+            };
+        let patch_report = session.apply_authoring_field_edit(edit);
         SceneInspectorCommandReport {
             applied: patch_report.applied,
             patch: Some(patch),
@@ -857,7 +861,7 @@ fn inspector_authoring_command_error_report() -> SceneInspectorCommandReport {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic::error(
         "tooling.inspector-authoring-command-unsupported",
-        "generically published authoring documents only accept preservation-safe scalar writes",
+        "generically published authoring documents only accept preservation-safe field writes",
     ));
     SceneInspectorCommandReport {
         applied: false,

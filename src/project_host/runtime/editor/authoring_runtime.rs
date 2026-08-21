@@ -1,7 +1,9 @@
+use std::collections::BTreeSet;
+
 use nara_app::App;
 use nara_asset::{
-    AssetEvents, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion, Assets,
-    Handle,
+    AssetEvents, AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion,
+    Assets, Handle,
 };
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Mut, World};
@@ -29,6 +31,10 @@ use std::{
 use crate::project_host::{ProjectContentSnapshot, authoring::AuthoringProjectSessionSnapshot};
 
 use super::super::{publish_snapshot_images, single_error};
+#[cfg(feature = "runtime-ui")]
+use super::authoring_images::{
+    EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError,
+};
 #[cfg(feature = "presentation-2d")]
 use super::preview::{EditorPreviewCandidate, EditorPreviewSession, EditorPreviewSource};
 
@@ -422,6 +428,41 @@ impl EditorAuthoringRuntime {
             return None;
         }
         world.get_resource::<Assets<ImageAsset>>()?.get(handle)
+    }
+
+    #[cfg(feature = "runtime-ui")]
+    pub(super) fn capture_authoring_image_catalog_candidate(
+        &self,
+    ) -> Result<EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError> {
+        let world = self.app.world();
+        let server = world
+            .get_resource::<AssetServer>()
+            .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
+        let images = world
+            .get_resource::<Assets<ImageAsset>>()
+            .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
+        let states = world
+            .get_resource::<AssetStates>()
+            .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
+        EditorAuthoringImageCatalogCandidate::capture(server, images, states)
+    }
+
+    #[cfg(feature = "runtime-ui")]
+    pub(super) fn capture_selected_authoring_image_catalog_candidate(
+        &self,
+        selected: &BTreeSet<AssetId>,
+    ) -> Result<EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError> {
+        let world = self.app.world();
+        let server = world
+            .get_resource::<AssetServer>()
+            .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
+        let images = world
+            .get_resource::<Assets<ImageAsset>>()
+            .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
+        let states = world
+            .get_resource::<AssetStates>()
+            .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
+        EditorAuthoringImageCatalogCandidate::capture_selected(server, images, states, selected)
     }
 
     pub(super) fn shutdown_tasks(&self) -> EditorAuthoringRuntimeCloseProgress {

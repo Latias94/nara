@@ -2777,7 +2777,7 @@ fn require_field_capability(
     ))
 }
 
-fn field_value_matches(field: &ComponentFieldSchema, value: &ComponentValue) -> bool {
+pub(crate) fn field_value_matches(field: &ComponentFieldSchema, value: &ComponentValue) -> bool {
     if !field.required && matches!(value, ComponentValue::Null) {
         return true;
     }

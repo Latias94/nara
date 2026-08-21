@@ -410,11 +410,11 @@ impl EditorProjectSession {
                 base_revision,
                 patch,
             },
-            EditorDocumentMutation::ApplyAuthoringScalarEdit {
+            EditorDocumentMutation::ApplyAuthoringFieldEdit {
                 document,
                 base_revision,
                 edit,
-            } => EditorWorkspaceCommand::ApplyAuthoringScalarEdit {
+            } => EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
                 document,
                 base_revision,
                 edit,

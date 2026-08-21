@@ -890,14 +890,14 @@ impl PrefabAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn apply_authoring_scalar_edit(
+    pub fn apply_authoring_field_edit(
         &mut self,
-        edit: crate::AuthoringScalarEdit,
+        edit: crate::AuthoringFieldEdit,
     ) -> ScenePatchReport {
         let Some(state) = self.authority.published() else {
-            return authoring_scalar_edit_session_rejection();
+            return authoring_field_edit_session_rejection();
         };
-        let prepared = match crate::authoring_decode::prepare_prefab_authoring_scalar_edit(
+        let prepared = match crate::authoring_decode::prepare_prefab_authoring_field_edit(
             &self.document,
             state,
             &edit,
@@ -905,7 +905,7 @@ impl PrefabAuthoringSession {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };
-        let crate::authoring_decode::PreparedPrefabAuthoringScalarEdit {
+        let crate::authoring_decode::PreparedPrefabAuthoringFieldEdit {
             document,
             state,
             patch,
@@ -1332,14 +1332,14 @@ impl SceneAuthoringSession {
     }
 
     #[cfg(feature = "serde")]
-    pub fn apply_authoring_scalar_edit(
+    pub fn apply_authoring_field_edit(
         &mut self,
-        edit: crate::AuthoringScalarEdit,
+        edit: crate::AuthoringFieldEdit,
     ) -> ScenePatchReport {
         let Some(state) = self.authority.published() else {
-            return authoring_scalar_edit_session_rejection();
+            return authoring_field_edit_session_rejection();
         };
-        let prepared = match crate::authoring_decode::prepare_scene_authoring_scalar_edit(
+        let prepared = match crate::authoring_decode::prepare_scene_authoring_field_edit(
             &self.document,
             state,
             &edit,
@@ -1347,7 +1347,7 @@ impl SceneAuthoringSession {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };
-        let crate::authoring_decode::PreparedSceneAuthoringScalarEdit {
+        let crate::authoring_decode::PreparedSceneAuthoringFieldEdit {
             document,
             state,
             patch,
@@ -1787,10 +1787,10 @@ fn admitted_document_patch_rejection() -> ScenePatchReport {
 }
 
 #[cfg(feature = "serde")]
-fn authoring_scalar_edit_session_rejection() -> ScenePatchReport {
+fn authoring_field_edit_session_rejection() -> ScenePatchReport {
     history_error_report(
-        "scene.authoring-scalar-edit-session-unavailable",
-        "Authoring scalar edits require a document admitted through the authoring boundary",
+        "scene.authoring-field-edit-session-unavailable",
+        "Authoring field edits require a document admitted through the authoring boundary",
     )
 }
 

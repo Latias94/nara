@@ -151,6 +151,24 @@ impl EditorImageCatalogSnapshot {
     pub(super) fn contains_stable_id(&self, stable_id: StableAssetId) -> bool {
         self.known_stable_ids.contains(&stable_id)
     }
+
+    #[must_use]
+    pub(super) fn retains_imported_image(
+        &self,
+        asset_path: &AssetPath,
+        stable_id: StableAssetId,
+        source_identity: FileIdentity,
+    ) -> bool {
+        self.entries.iter().any(|entry| {
+            entry.asset_path() == asset_path
+                && entry.source_identity() == Some(source_identity)
+                && matches!(
+                    entry.metadata(),
+                    EditorImageMetadataStatus::Ready(metadata)
+                        if metadata.stable_id() == stable_id
+                )
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
