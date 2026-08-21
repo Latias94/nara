@@ -1,0 +1,31 @@
+{
+  "kind": "scene",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "ui-anchor"
+    ],
+    "entities": [
+      {
+        "id": "ui-anchor",
+        "children": [],
+        "components": {},
+        "prefab": {
+          "source": {
+            "kind": "path",
+            "value": "ui.prefab.json"
+          },
+          "overrides": {
+            "format_version": 1,
+            "operations": []
+          }
+        }
+      }
+    ]
+  }
+}

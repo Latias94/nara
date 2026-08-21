@@ -1,7 +1,8 @@
 use egui::{TextureId, Vec2, epaint::Primitive};
 use egui_wgpu::wgpu;
 use nara::{
-    asset::{AssetId, Handle},
+    asset::{AssetId, AssetVersion, Handle, ImportArtifactDigest, SourceHash},
+    image::ImageColorSpace,
     prelude::Vec2 as NaraVec2,
     project_host::{
         EditorGameStartActivation, EditorGameStartRequest, EditorGameViewCandidate,
@@ -387,9 +388,41 @@ impl EditorUiCanvasIdentity {
 pub(super) struct PreparedEditorUiCanvas {
     identity: EditorUiCanvasIdentity,
     canvas: nara::ui::__private::UiAuthoringCanvasReady,
+    images: Box<[EditorUiCanvasImageFact]>,
     submission: WgpuSubmittedImageReceipt,
     texture_id: TextureId,
     texture_registration_generation: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct EditorUiCanvasImageFact {
+    id: String,
+    asset_version: AssetVersion,
+    descriptor_hash: ImportArtifactDigest,
+    source_hash: SourceHash,
+    color_space: ImageColorSpace,
+}
+
+impl EditorUiCanvasImageFact {
+    pub(super) fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub(super) const fn asset_version(&self) -> AssetVersion {
+        self.asset_version
+    }
+
+    pub(super) const fn descriptor_hash(&self) -> ImportArtifactDigest {
+        self.descriptor_hash
+    }
+
+    pub(super) const fn source_hash(&self) -> SourceHash {
+        self.source_hash
+    }
+
+    pub(super) const fn color_space(&self) -> ImageColorSpace {
+        self.color_space
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -423,6 +456,7 @@ impl EditorUiCanvasPickStamp {
 pub(super) struct EditorUiCanvasPresentedObservation<'a> {
     stamp: EditorUiCanvasPickStamp,
     canvas: &'a nara::ui::__private::UiAuthoringCanvasReady,
+    images: &'a [EditorUiCanvasImageFact],
 }
 
 impl EditorUiCanvasPresentedObservation<'_> {
@@ -432,6 +466,10 @@ impl EditorUiCanvasPresentedObservation<'_> {
 
     pub(super) fn fact_count(&self) -> usize {
         self.canvas.facts().len()
+    }
+
+    pub(super) const fn images(&self) -> &[EditorUiCanvasImageFact] {
+        self.images
     }
 
     pub(super) fn entity_origin(&self, entity: &SceneEntityId) -> Option<[f32; 2]> {
@@ -470,15 +508,20 @@ impl EditorUiCanvasPresentedObservation<'_> {
 struct PresentedEditorUiCanvas {
     stamp: EditorUiCanvasPickStamp,
     canvas: nara::ui::__private::UiAuthoringCanvasReady,
+    images: Box<[EditorUiCanvasImageFact]>,
 }
 
 pub(super) struct EditorUiCanvasPresenter {
+    capture_image_facts: bool,
     presented: Option<PresentedEditorUiCanvas>,
 }
 
 impl EditorUiCanvasPresenter {
-    pub(super) const fn new() -> Self {
-        Self { presented: None }
+    pub(super) const fn new(capture_image_facts: bool) -> Self {
+        Self {
+            capture_image_facts,
+            presented: None,
+        }
     }
 
     pub(super) fn prepare(
@@ -493,6 +536,25 @@ impl EditorUiCanvasPresenter {
             candidate.into_parts();
         let identity =
             EditorUiCanvasIdentity::new(document, revision, gesture, geometry_generation);
+        let images = if self.capture_image_facts {
+            paint_packet
+                .images()
+                .iter()
+                .map(|image| {
+                    let snapshot = image.snapshot();
+                    EditorUiCanvasImageFact {
+                        id: image.id().as_str().to_owned(),
+                        asset_version: snapshot.identity().asset_version(),
+                        descriptor_hash: snapshot.identity().descriptor_hash(),
+                        source_hash: snapshot.resource().source_hash(),
+                        color_space: snapshot.resource().color_space(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice()
+        } else {
+            Box::default()
+        };
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(EditorRunError::Platform(
                 "the UI Canvas candidate did not retain its image target".to_owned(),
@@ -525,6 +587,7 @@ impl EditorUiCanvasPresenter {
         Ok(PreparedEditorUiCanvas {
             identity,
             canvas,
+            images,
             submission,
             texture_id: binding.texture_id,
             texture_registration_generation: binding.registration_generation,
@@ -592,6 +655,7 @@ impl EditorUiCanvasPresenter {
         (presented.stamp == stamp).then_some(EditorUiCanvasPresentedObservation {
             stamp,
             canvas: &presented.canvas,
+            images: &presented.images,
         })
     }
 
@@ -624,6 +688,7 @@ impl EditorUiCanvasPresenter {
                 receipt,
             },
             canvas: prepared.canvas,
+            images: prepared.images,
         });
         Ok(())
     }

@@ -31,8 +31,25 @@ The project must declare a valid authoring schema bundle. Admission failures rem
 running Editor and are shown through Recovery, where the project can be repaired and retried.
 
 The ordinary authoring lane currently supports the admitted Scene and Prefab workspace, safe scalar
-editing, persistence, Scene preview, and UI Canvas preview. Records without an installed exact
-authoring adapter remain visible but read-only. Supported saves preserve their exact owner,
-version, value, placement, and reference facts in canonical project source. Ordinary Play/Run is
-intentionally unavailable until Nara has a separate external execution Host; the Editor never
-falls back to compiling or executing project Rust in-process.
+editing, persistence, Scene preview, UI Canvas preview, and explicit PNG image Import/Reimport.
+Records without an installed exact authoring adapter remain visible but read-only. Supported saves
+preserve their exact owner, version, value, placement, and reference facts in canonical project
+source. Ordinary Play/Run is intentionally unavailable until Nara has a separate external
+execution Host; the Editor never falls back to compiling or executing project Rust in-process.
+
+## Import a PNG image
+
+Open the Project sidebar, select a PNG under the project's configured assets root, choose `sRGB`
+or `Linear`, and press `Import`. The Editor creates or updates the adjacent canonical `.meta` file
+and publishes the accepted image into the current authoring session. A UI Prefab can then select
+that logical image path from its brush field and show it in the native UI Canvas.
+
+`Reimport` applies a changed color-space recipe through the same explicit transaction. Saving a
+Prefab records only the logical image reference. Reopening the same project hydrates referenced
+images from the admitted authoring closure; it does not compile project Rust. If decoding or
+publication fails, the current last-good image and Canvas remain available and the failure is
+reported through bounded Editor diagnostics.
+
+The first workflow is deliberately narrow: PNG only, one explicit image transaction at a time,
+and manual Import/Reimport. It does not provide file watching, batch import, an import cache, other
+image formats, or implicit project-code execution.

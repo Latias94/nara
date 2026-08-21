@@ -41,6 +41,7 @@ use crate::{
 mod canary;
 mod game_input;
 mod generic_open_canary;
+mod image_import_canary;
 mod ui_canary;
 mod viewport;
 
@@ -54,6 +55,7 @@ pub use ui_canary::{
 use canary::{EditorGameViewCanaryFrameInput, EditorGameViewCanaryHost};
 use game_input::EditorGameInputRouter;
 use generic_open_canary::EditorGenericOpenCanaryHost;
+use image_import_canary::EditorImageImportCanaryHost;
 use viewport::{
     EditorGamePrepareOutcome, EditorGamePresenter, EditorScenePickRequest, EditorScenePresenter,
     EditorUiCanvasIdentity, EditorUiCanvasPickRequest, EditorUiCanvasPresenter, EditorViewportSlot,
@@ -107,6 +109,14 @@ impl EditorRunError {
 }
 
 pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+    if image_import_canary::requested() && generic_open_canary::requested() {
+        return Err(EditorRunError::usage(
+            "only one native Editor canary may be requested per launch",
+        ));
+    }
+    if image_import_canary::requested() {
+        return run_image_import_canary(options);
+    }
     if generic_open_canary::requested() {
         return run_generic_open_canary(options);
     }
@@ -136,8 +146,24 @@ fn run_generic_open_canary(options: EditorLaunchOptions) -> Result<(), EditorRun
     )?;
     let canary = match host.canary.take() {
         Some(NativeEditorCanary::GenericOpen(canary)) => canary,
-        Some(NativeEditorCanary::GameView(_)) | None => {
+        Some(NativeEditorCanary::GameView(_) | NativeEditorCanary::ImageImport(_)) | None => {
             unreachable!("the guarded launch installs one generic Open/Recovery canary")
+        }
+    };
+    drop(host);
+    canary.finish()
+}
+
+fn run_image_import_canary(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+    let (application, canary) = EditorImageImportCanaryHost::new(options)?;
+    let mut host = drive_native_editor(
+        application,
+        Some(NativeEditorCanary::ImageImport(Box::new(canary))),
+    )?;
+    let canary = match host.canary.take() {
+        Some(NativeEditorCanary::ImageImport(canary)) => canary,
+        Some(NativeEditorCanary::GameView(_) | NativeEditorCanary::GenericOpen(_)) | None => {
+            unreachable!("the guarded launch installs one image import canary")
         }
     };
     drop(host);
@@ -160,7 +186,7 @@ pub fn run_trusted_compiled_game_view_canary(
     )?;
     match host.canary.take() {
         Some(NativeEditorCanary::GameView(canary)) => canary.finish(),
-        Some(NativeEditorCanary::GenericOpen(_)) | None => {
+        Some(NativeEditorCanary::GenericOpen(_) | NativeEditorCanary::ImageImport(_)) | None => {
             unreachable!("the canary launch installs one Game View canary host")
         }
     }
@@ -215,6 +241,47 @@ struct NativeEditorHost {
 enum NativeEditorCanary {
     GameView(Box<EditorGameViewCanaryHost>),
     GenericOpen(Box<EditorGenericOpenCanaryHost>),
+    ImageImport(Box<EditorImageImportCanaryHost>),
+}
+
+struct NativeEditorCanaryAdvance {
+    action: Option<EditorAction>,
+    redraw: bool,
+    exit: bool,
+}
+
+impl NativeEditorCanaryAdvance {
+    const fn idle() -> Self {
+        Self {
+            action: None,
+            redraw: false,
+            exit: false,
+        }
+    }
+
+    const fn redraw() -> Self {
+        Self {
+            action: None,
+            redraw: true,
+            exit: false,
+        }
+    }
+
+    fn action(action: EditorAction) -> Self {
+        Self {
+            action: Some(action),
+            redraw: true,
+            exit: false,
+        }
+    }
+
+    const fn exit() -> Self {
+        Self {
+            action: None,
+            redraw: false,
+            exit: true,
+        }
+    }
 }
 
 impl NativeEditorCanary {
@@ -222,20 +289,21 @@ impl NativeEditorCanary {
         match self {
             Self::GameView(canary) => canary.deadline(),
             Self::GenericOpen(canary) => canary.deadline(),
+            Self::ImageImport(canary) => canary.deadline(),
         }
     }
 
     fn tracked_sprite_sort_key(&self) -> Option<i32> {
         match self {
             Self::GameView(canary) => Some(canary.tracked_sprite_sort_key()),
-            Self::GenericOpen(_) => None,
+            Self::GenericOpen(_) | Self::ImageImport(_) => None,
         }
     }
 
     const fn viewport_extent_override(&self) -> Option<Extent2d> {
         match self {
             Self::GameView(canary) => canary.viewport_extent_override(),
-            Self::GenericOpen(_) => None,
+            Self::GenericOpen(_) | Self::ImageImport(_) => None,
         }
     }
 }
@@ -336,6 +404,8 @@ impl NativeEditorHost {
         application: EditorApplication,
         canary: Option<NativeEditorCanary>,
     ) -> Result<Self, EditorRunError> {
+        let capture_ui_image_facts =
+            matches!(canary.as_ref(), Some(NativeEditorCanary::ImageImport(_)));
         Ok(Self {
             application,
             context: egui::Context::default(),
@@ -346,7 +416,7 @@ impl NativeEditorHost {
             pending_textures: egui::TexturesDelta::default(),
             viewport_slot: EditorViewportSlot::new(),
             scene_presenter: EditorScenePresenter::new(),
-            ui_canvas_presenter: EditorUiCanvasPresenter::new(),
+            ui_canvas_presenter: EditorUiCanvasPresenter::new(capture_ui_image_facts),
             game_presenter: EditorGamePresenter::new(),
             game_input: EditorGameInputRouter::default(),
             viewport_selection: EditorViewportSelection::Authoring,
@@ -1687,19 +1757,47 @@ impl NativeEditorHost {
             (None, None) => {}
         }
 
-        let mut generic_canary_advanced = false;
-        if presentation.window().is_some()
-            && let Some(NativeEditorCanary::GenericOpen(canary)) = self.canary.as_mut()
-        {
-            let advance =
-                canary.advance_workspace(rendered_state, &mut self.application, window.id())?;
-            generic_canary_advanced = advance.redraw;
-            if let Some(action) = advance.action {
-                batch = append_editor_action(batch, action);
-            }
-            if advance.exit {
-                event_loop.exit();
-                return Ok(());
+        let mut native_canary_advanced = false;
+        if presentation.window().is_some() {
+            match self.canary.as_mut() {
+                Some(NativeEditorCanary::GenericOpen(canary)) => {
+                    let advance = canary.advance_workspace(
+                        rendered_state,
+                        &mut self.application,
+                        window.id(),
+                    )?;
+                    native_canary_advanced = advance.redraw;
+                    if let Some(action) = advance.action {
+                        batch = append_editor_action(batch, action);
+                    }
+                    if advance.exit {
+                        event_loop.exit();
+                        return Ok(());
+                    }
+                }
+                Some(NativeEditorCanary::ImageImport(canary)) => {
+                    let observation = self
+                        .ui_canvas_presenter
+                        .presented_observation(&self.viewport_slot, ui_authoring_identity);
+                    let advance = canary.advance_workspace(
+                        rendered_state,
+                        &mut self.application,
+                        &editor_frame,
+                        ui_authoring_frame.as_deref(),
+                        observation.as_ref(),
+                        window.id(),
+                        read_only,
+                    )?;
+                    native_canary_advanced = advance.redraw;
+                    if let Some(action) = advance.action {
+                        batch = append_editor_action(batch, action);
+                    }
+                    if advance.exit {
+                        event_loop.exit();
+                        return Ok(());
+                    }
+                }
+                Some(NativeEditorCanary::GameView(_)) | None => {}
             }
         }
 
@@ -1923,7 +2021,7 @@ impl NativeEditorHost {
             || selected_after_ui != displayed_viewport
             || camera_changed
             || project_browser_local_changed
-            || generic_canary_advanced
+            || native_canary_advanced
             || image_import_completed
             || after_frame.project_browser().work_observed()
             || after_frame.project_browser().has_pending_work()
@@ -2067,6 +2165,9 @@ impl NativeEditorHost {
                 canary.timeout_error(observation.as_ref(), active_start)
             }
             NativeEditorCanary::GenericOpen(canary) => {
+                canary.timeout_error(self.application.state())
+            }
+            NativeEditorCanary::ImageImport(canary) => {
                 canary.timeout_error(self.application.state())
             }
         })

@@ -20,7 +20,7 @@ use nara::{
     },
     scene::{SceneComponentRecord, SceneDocument, SceneEntityRecord},
 };
-use project_content_fixture::{TestProject, scene_id};
+use project_content_fixture::{TestProject, image_meta, scene_id, valid_png_bytes};
 
 #[test]
 fn public_check_returns_the_exact_loader_owned_startup_closure() {
@@ -69,6 +69,49 @@ fn public_check_returns_the_exact_loader_owned_startup_closure() {
             ),
         ]
     );
+}
+
+#[test]
+fn unreferenced_import_does_not_enter_the_checked_startup_closure() {
+    let project = TestProject::with_prefab_startup();
+    let baseline = check_project(ProjectCheckRequest::new(
+        project.root_capability(),
+        ProductRecipe::new(),
+    ))
+    .unwrap();
+
+    project.write_asset(
+        "textures/unreferenced.png",
+        valid_png_bytes(),
+        &image_meta(
+            "1f112c40-b33b-44aa-97c0-198b51e10c58",
+            "textures/unreferenced.png",
+        ),
+    );
+
+    let successor = check_project(ProjectCheckRequest::new(
+        project.root_capability(),
+        ProductRecipe::new(),
+    ))
+    .unwrap();
+
+    assert_eq!(successor.manifest_digest(), baseline.manifest_digest());
+    assert_eq!(successor.content_digest(), baseline.content_digest());
+    assert_eq!(
+        successor.closure_plan_digest(),
+        baseline.closure_plan_digest()
+    );
+    assert_eq!(
+        successor.schema_fingerprint(),
+        baseline.schema_fingerprint()
+    );
+    assert_eq!(successor.members(), baseline.members());
+    assert!(successor.members().iter().all(|member| {
+        !member
+            .path()
+            .as_str()
+            .starts_with("assets/textures/unreferenced.png")
+    }));
 }
 
 #[test]

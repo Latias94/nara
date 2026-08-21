@@ -4,7 +4,6 @@
 mod project_content_fixture;
 
 use std::{
-    fs,
     num::NonZeroU32,
     sync::{
         Arc,
@@ -33,7 +32,7 @@ use nara::{
     },
     scene::SceneEntitySource,
 };
-use project_content_fixture::TestProject;
+use project_content_fixture::{TestProject, image_meta, valid_png_bytes};
 
 const BOOT_OUTCOME_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-boot-outcome");
 const BOOT_OUTCOME_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
@@ -217,7 +216,7 @@ fn execute_to_terminal(run: &mut HeadlessRun<BootOutcome>) -> HeadlessRunReport<
 #[test]
 fn ordinary_recipe_headless_facade_owns_project_start_and_close() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let recipe = boot_recipe();
     let mut run = HeadlessRun::from_recipe(
         project.root_capability(),
@@ -237,36 +236,10 @@ fn ordinary_recipe_headless_facade_owns_project_start_and_close() {
     );
 }
 
-fn select_local_headless_profile(project: &TestProject) {
-    fs::write(
-        project.path().join("nara.toml"),
-        r#"schema_version = 1
-
-[project]
-name = "Runtime Boot Test"
-
-[paths]
-assets = "assets"
-scenes = "scenes"
-prefabs = "prefabs"
-
-[startup]
-default_scene = "startup.scene.json"
-
-[runtime]
-preset = "local-headless"
-
-[capabilities]
-requested = ["runtime-2d"]
-"#,
-    )
-    .unwrap();
-}
-
 #[test]
 fn product_action_boots_authorized_content_runs_one_tick_and_closes() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let mut run = project_run(&project);
 
     let first = execute_to_terminal(&mut run);
@@ -311,9 +284,48 @@ fn product_action_boots_authorized_content_runs_one_tick_and_closes() {
 }
 
 #[test]
+fn unreferenced_import_preserves_the_headless_startup_closure() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let mut baseline_run = project_run(&project);
+    let baseline = execute_to_terminal(&mut baseline_run);
+    let baseline_closure = baseline
+        .startup_content_closure()
+        .expect("the baseline Headless Run must publish its startup closure");
+    let baseline_content = baseline_closure.content_digest();
+    let baseline_plan = baseline_closure.closure_plan_digest();
+    let baseline_members = baseline_closure.members().to_vec();
+
+    project.write_asset(
+        "textures/unreferenced.png",
+        valid_png_bytes(),
+        &image_meta(
+            "92fca27e-d243-46bd-9cb4-6506f9f888de",
+            "textures/unreferenced.png",
+        ),
+    );
+
+    let mut successor_run = project_run(&project);
+    let successor = execute_to_terminal(&mut successor_run);
+    let successor_closure = successor
+        .startup_content_closure()
+        .expect("the successor Headless Run must publish its startup closure");
+
+    assert_eq!(successor_closure.content_digest(), baseline_content);
+    assert_eq!(successor_closure.closure_plan_digest(), baseline_plan);
+    assert_eq!(successor_closure.members(), baseline_members);
+    assert!(successor_closure.members().iter().all(|member| {
+        !member
+            .path()
+            .as_str()
+            .starts_with("assets/textures/unreferenced.png")
+    }));
+}
+
+#[test]
 fn project_content_failure_returns_without_a_runtime_outcome() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     project.write_scene_bytes(b"{");
     let mut run = project_run(&project);
 
@@ -327,7 +339,7 @@ fn project_content_failure_returns_without_a_runtime_outcome() {
 #[test]
 fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let released = Arc::new(AtomicBool::new(false));
     let instances = Arc::new(AtomicUsize::new(0));
     let intent = HeadlessRunIntent::new(NonZeroU32::new(1).unwrap())
@@ -369,7 +381,7 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
 #[test]
 fn product_action_stops_on_the_first_terminal_snapshot() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let intent = HeadlessRunIntent::new(NonZeroU32::new(4).unwrap())
         .stop_when(|outcome: &BootOutcome| outcome.tick >= 2)
         .with_recipe(boot_recipe());
@@ -387,7 +399,7 @@ fn product_action_stops_on_the_first_terminal_snapshot() {
 #[test]
 fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let recipe = boot_recipe()
         .add_plugin::<ExitAfterTickPlugin>()
         .expect("the exit recipe is statically valid");
@@ -412,7 +424,7 @@ fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
 #[test]
 fn product_action_reports_a_tick_limit_before_publishing_success() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let intent = HeadlessRunIntent::new(NonZeroU32::new(2).unwrap())
         .stop_when(|_: &BootOutcome| false)
         .with_recipe(boot_recipe());
@@ -431,7 +443,7 @@ fn product_action_reports_a_tick_limit_before_publishing_success() {
 #[test]
 fn source_label_cannot_downgrade_a_trusted_product_command_rejection() {
     let project = TestProject::with_prefab_startup();
-    select_local_headless_profile(&project);
+    project.select_local_headless_profile();
     let commands = (1..=4_097)
         .map(|sequence| {
             GameplayCommandSubmission::new(

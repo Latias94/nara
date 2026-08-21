@@ -6,7 +6,7 @@ use std::{
 };
 
 use nara::tooling::{
-    EditorAction, EditorDocumentId, EditorDocumentKind, EditorProjectBrowserAction,
+    EditorDocumentId, EditorDocumentKind, EditorProjectBrowserAction,
     EditorProjectBrowserBudgetUsage, EditorProjectBrowserDiagnosticPhase,
     EditorProjectBrowserDiagnosticView, EditorProjectBrowserEntry, EditorProjectBrowserLocalAction,
     EditorProjectBrowserStatus, EditorProjectSourceKind, EditorProjectSourceOpenCapability,
@@ -15,7 +15,7 @@ use winit::window::WindowId;
 
 use crate::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
 
-use super::EditorRunError;
+use super::{EditorRunError, NativeEditorCanaryAdvance};
 
 mod contract;
 mod fixture;
@@ -109,46 +109,6 @@ struct EditorGenericOpenCanaryEvidence {
     entry_count: usize,
     scene_document: EditorDocumentId,
     prefab_document: EditorDocumentId,
-}
-
-pub(super) struct EditorGenericOpenCanaryAdvance {
-    pub(super) action: Option<EditorAction>,
-    pub(super) redraw: bool,
-    pub(super) exit: bool,
-}
-
-impl EditorGenericOpenCanaryAdvance {
-    fn idle() -> Self {
-        Self {
-            action: None,
-            redraw: false,
-            exit: false,
-        }
-    }
-
-    fn redraw() -> Self {
-        Self {
-            action: None,
-            redraw: true,
-            exit: false,
-        }
-    }
-
-    fn action(action: EditorAction) -> Self {
-        Self {
-            action: Some(action),
-            redraw: true,
-            exit: false,
-        }
-    }
-
-    fn exit() -> Self {
-        Self {
-            action: None,
-            redraw: false,
-            exit: true,
-        }
-    }
 }
 
 pub(super) struct EditorGenericOpenCanaryHost {
@@ -274,7 +234,7 @@ impl EditorGenericOpenCanaryHost {
         rendered_state: EditorApplicationState,
         application: &mut EditorApplication,
         window_id: WindowId,
-    ) -> Result<EditorGenericOpenCanaryAdvance, EditorRunError> {
+    ) -> Result<NativeEditorCanaryAdvance, EditorRunError> {
         self.require_before_deadline(application.state())?;
         self.observe_window(window_id, application.state())?;
         let stage = self.stage.clone();
@@ -296,7 +256,7 @@ impl EditorGenericOpenCanaryHost {
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 if browser.has_pending_work() {
-                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    return Ok(NativeEditorCanaryAdvance::idle());
                 }
                 let snapshot =
                     require_ready_browser_snapshot(browser, application.state(), &stage)?;
@@ -333,7 +293,7 @@ impl EditorGenericOpenCanaryHost {
                 }
                 self.stage =
                     EditorGenericOpenCanaryStage::AwaitingProjectBrowserPresentation(baseline);
-                Ok(EditorGenericOpenCanaryAdvance::redraw())
+                Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingProjectBrowserPresentation(baseline) => {
                 require_project_browser_sidebar_presentation(application, &stage)?;
@@ -350,7 +310,7 @@ impl EditorGenericOpenCanaryHost {
                     ));
                 }
                 self.stage = EditorGenericOpenCanaryStage::AwaitingSceneFilter(baseline);
-                Ok(EditorGenericOpenCanaryAdvance::redraw())
+                Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingSceneFilter(baseline) => {
                 require_project_browser_sidebar_presentation(application, &stage)?;
@@ -358,7 +318,7 @@ impl EditorGenericOpenCanaryHost {
                 let browser = frame.project_browser();
                 require_path_filter(browser, EXTERNAL_SCENE_FILTER, application.state(), &stage)?;
                 if browser.has_pending_work() {
-                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    return Ok(NativeEditorCanaryAdvance::idle());
                 }
                 require_browser_matches_baseline(browser, &baseline, application.state(), &stage)?;
                 require_filtered_row(
@@ -381,7 +341,7 @@ impl EditorGenericOpenCanaryHost {
                     ));
                 }
                 self.stage = EditorGenericOpenCanaryStage::AwaitingSceneSelection(baseline);
-                Ok(EditorGenericOpenCanaryAdvance::redraw())
+                Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingSceneSelection(baseline) => {
                 require_project_browser_sidebar_presentation(application, &stage)?;
@@ -428,7 +388,7 @@ impl EditorGenericOpenCanaryHost {
                         browser: baseline,
                         scene_document,
                     });
-                Ok(EditorGenericOpenCanaryAdvance::redraw())
+                Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingPrefabFilter(scene) => {
                 require_project_browser_sidebar_presentation(application, &stage)?;
@@ -436,7 +396,7 @@ impl EditorGenericOpenCanaryHost {
                 let browser = frame.project_browser();
                 require_path_filter(browser, EXTERNAL_PREFAB_FILTER, application.state(), &stage)?;
                 if browser.has_pending_work() {
-                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    return Ok(NativeEditorCanaryAdvance::idle());
                 }
                 require_browser_matches_baseline(
                     browser,
@@ -473,7 +433,7 @@ impl EditorGenericOpenCanaryHost {
                     ));
                 }
                 self.stage = EditorGenericOpenCanaryStage::AwaitingPrefabSelection(scene);
-                Ok(EditorGenericOpenCanaryAdvance::redraw())
+                Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingPrefabSelection(scene) => {
                 require_project_browser_sidebar_presentation(application, &stage)?;
@@ -530,7 +490,7 @@ impl EditorGenericOpenCanaryHost {
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 if browser.has_pending_work() {
-                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    return Ok(NativeEditorCanaryAdvance::idle());
                 }
                 let snapshot =
                     require_ready_browser_snapshot(browser, application.state(), &stage)?;
@@ -571,7 +531,7 @@ impl EditorGenericOpenCanaryHost {
                 }
                 let Some(progress) = browser.scan_progress() else {
                     if browser.has_pending_work() {
-                        return Ok(EditorGenericOpenCanaryAdvance::idle());
+                        return Ok(NativeEditorCanaryAdvance::idle());
                     }
                     return Err(canary_state_error(
                         &stage,
@@ -580,21 +540,21 @@ impl EditorGenericOpenCanaryHost {
                     ));
                 };
                 if progress.phase() != EditorProjectBrowserDiagnosticPhase::LineageRevalidation {
-                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    return Ok(NativeEditorCanaryAdvance::idle());
                 }
                 drop(frame);
                 self.guarded_project
                     .replace_scripts_root()
                     .map_err(canary_refresh_mutation_error)?;
                 self.stage = EditorGenericOpenCanaryStage::AwaitingLastGoodFailure(refreshed);
-                Ok(EditorGenericOpenCanaryAdvance::redraw())
+                Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingLastGoodFailure(refreshed) => {
                 require_project_browser_sidebar_presentation(application, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 if browser.has_pending_work() {
-                    return Ok(EditorGenericOpenCanaryAdvance::idle());
+                    return Ok(NativeEditorCanaryAdvance::idle());
                 }
                 if browser.status() != EditorProjectBrowserStatus::Unavailable {
                     return Err(canary_state_error(
@@ -621,9 +581,9 @@ impl EditorGenericOpenCanaryHost {
                     prefab_document: refreshed.documents.prefab_document,
                 };
                 self.stage = EditorGenericOpenCanaryStage::Complete(evidence);
-                Ok(EditorGenericOpenCanaryAdvance::exit())
+                Ok(NativeEditorCanaryAdvance::exit())
             }
-            EditorGenericOpenCanaryStage::Complete(_) => Ok(EditorGenericOpenCanaryAdvance::idle()),
+            EditorGenericOpenCanaryStage::Complete(_) => Ok(NativeEditorCanaryAdvance::idle()),
         }
     }
 

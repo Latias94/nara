@@ -1,0 +1,19 @@
+{
+  "kind": "asset_meta",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "asset": {
+      "stable_id": "139a6316-e18c-4763-bf67-f3f594f88d35",
+      "path": "textures/ready.png",
+      "source_kind": "image"
+    },
+    "settings": {
+      "color_space": "srgb"
+    }
+  }
+}

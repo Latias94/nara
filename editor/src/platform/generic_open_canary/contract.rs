@@ -10,17 +10,17 @@ use nara::tooling::{
 
 use crate::{EditorApplication, EditorApplicationState};
 
-use super::super::EditorRunError;
+use super::super::{EditorRunError, NativeEditorCanaryAdvance};
 use super::{
-    BrowserBaseline, EXTERNAL_PREFAB_PATH, EXTERNAL_SCENE_PATH, EditorGenericOpenCanaryAdvance,
-    EditorGenericOpenCanaryStage, LINEAGE_CHANGED_CODE, OpenDocumentsState, RefreshedBrowserState,
-    SCRIPTS_ROOT_PATH, TEMP_ROOT_PREFIX,
+    BrowserBaseline, EXTERNAL_PREFAB_PATH, EXTERNAL_SCENE_PATH, EditorGenericOpenCanaryStage,
+    LINEAGE_CHANGED_CODE, OpenDocumentsState, RefreshedBrowserState, SCRIPTS_ROOT_PATH,
+    TEMP_ROOT_PREFIX,
 };
 
 pub(super) fn project_browser_action(
     action: EditorProjectBrowserAction,
-) -> EditorGenericOpenCanaryAdvance {
-    EditorGenericOpenCanaryAdvance::action(EditorAction::ProjectBrowser(action))
+) -> NativeEditorCanaryAdvance {
+    NativeEditorCanaryAdvance::action(EditorAction::ProjectBrowser(action))
 }
 
 pub(super) fn require_current_frame(

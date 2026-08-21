@@ -1,0 +1,49 @@
+schema_version = 1
+
+[project]
+name = "Standalone Image Import"
+stable_id = "standalone-image-import-fixture"
+version = "0.1.0"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+scripts = "scripts"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d", "runtime-ui"]
+
+[ui.primary_surface]
+logical_width = 960
+logical_height = 540
+
+[profiles.desktop.capabilities]
+requested = [
+    "runtime-2d",
+    "runtime-ui",
+    "presentation-2d",
+    "presentation-ui",
+    "desktop-winit",
+    "render-wgpu",
+]
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+
+[profiles.desktop.window]
+enabled = true
+title = "Nara Image Import Fixture"
+width = 1200
+height = 800
+present_mode = "fifo"
+resizable = true

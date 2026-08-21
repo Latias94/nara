@@ -1,0 +1,399 @@
+{
+  "kind": "prefab",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "roots": [
+      "ui-root"
+    ],
+    "entities": [
+      {
+        "id": "ui-root",
+        "children": [
+          "image-node"
+        ],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 10.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "flow"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 20.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "percent"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 1.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiRoot": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "layer": {
+                  "type": "string",
+                  "value": "base"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": "image-node",
+        "children": [],
+        "components": {
+          "nara.ui.UiNode": {
+            "version": 1,
+            "value": {
+              "type": "map",
+              "value": {
+                "style": {
+                  "type": "map",
+                  "value": {
+                    "align_items": {
+                      "type": "string",
+                      "value": "stretch"
+                    },
+                    "flex_direction": {
+                      "type": "string",
+                      "value": "column"
+                    },
+                    "flex_grow": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "flex_shrink": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "gap": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "height": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 128.0
+                        }
+                      }
+                    },
+                    "justify_content": {
+                      "type": "string",
+                      "value": "start"
+                    },
+                    "left": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 10.0
+                        }
+                      }
+                    },
+                    "overflow": {
+                      "type": "string",
+                      "value": "visible"
+                    },
+                    "padding": {
+                      "type": "map",
+                      "value": {
+                        "bottom": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "left": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "right": {
+                          "type": "f64",
+                          "value": 0.0
+                        },
+                        "top": {
+                          "type": "f64",
+                          "value": 0.0
+                        }
+                      }
+                    },
+                    "position_mode": {
+                      "type": "string",
+                      "value": "absolute"
+                    },
+                    "stacking_context": {
+                      "type": "bool",
+                      "value": false
+                    },
+                    "top": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 20.0
+                        }
+                      }
+                    },
+                    "visible": {
+                      "type": "bool",
+                      "value": true
+                    },
+                    "width": {
+                      "type": "map",
+                      "value": {
+                        "kind": {
+                          "type": "string",
+                          "value": "px"
+                        },
+                        "value": {
+                          "type": "f64",
+                          "value": 128.0
+                        }
+                      }
+                    },
+                    "z_index": {
+                      "type": "i64",
+                      "value": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "nara.ui.UiVisual": {
+            "version": 2,
+            "value": {
+              "type": "map",
+              "value": {
+                "background": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 1.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.8
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.4
+                    },
+                    "image": {
+                      "type": "null"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "solid"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.2
+                    },
+                    "role": {
+                      "type": "string",
+                      "value": ""
+                    }
+                  }
+                },
+                "border_brush": {
+                  "type": "map",
+                  "value": {
+                    "alpha": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "blue": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "green": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "image": {
+                      "type": "null"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "value": "solid"
+                    },
+                    "red": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "role": {
+                      "type": "string",
+                      "value": ""
+                    }
+                  }
+                },
+                "border_width": {
+                  "type": "f64",
+                  "value": 0.0
+                },
+                "radii": {
+                  "type": "map",
+                  "value": {
+                    "bottom_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "bottom_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_left": {
+                      "type": "f64",
+                      "value": 0.0
+                    },
+                    "top_right": {
+                      "type": "f64",
+                      "value": 0.0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }
+}
