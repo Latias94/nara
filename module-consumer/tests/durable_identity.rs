@@ -1,0 +1,286 @@
+#[path = "support/durable_identity.rs"]
+mod support;
+
+use bevy_ecs::{component::Component, entity::Entity, world::World};
+use nara_asset::{AssetDatabaseError, AssetRef};
+use nara_identity::{
+    EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
+    RuntimeEntityReference, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
+    spawn_identity_entity,
+};
+use nara_scene::{
+    InMemoryPrefabSourceResolver, Name, SceneDocumentCandidate, SceneEntitySource,
+    spawn_scene_with_prefab_resolver_and_asset_database,
+};
+use nara_scene_module_consumer::frozen_scene_registry;
+use serde::{Deserialize, Serialize};
+use support::{
+    ACTOR_ID, ACTOR_PATH, ConversionError, SCENE_ID, SCENE_PATH, SHARED_ID, SHARED_PATH,
+    copy_as_new, fixture_bytes, load_prefab, merge_source, merged_database, prefab_resolver,
+    resolve_source, stabilize_v1_scene_bytes, stable_id, stable_scene,
+};
+
+#[test]
+fn two_resolved_sources_merge_and_spawn_through_the_public_scene_module() {
+    let registry = frozen_scene_registry().unwrap();
+    let database = merged_database();
+    assert_eq!(database.len(), 3);
+    let scene = stable_scene(&registry, &database);
+    let resolver = prefab_resolver(&database, &registry);
+    let mut world = World::new();
+
+    let spawned = spawn_scene_with_prefab_resolver_and_asset_database(
+        &mut world, &registry, &scene, &resolver, &database,
+    );
+
+    assert!(
+        !spawned.diagnostics.has_errors(),
+        "{:?}",
+        spawned.diagnostics
+    );
+    let instance = spawned.instance.unwrap();
+    assert_eq!(instance.len(), 5);
+    let mut projected_shared = world.query::<(Entity, &SceneEntitySource, &Name)>();
+    let projected_shared = projected_shared
+        .iter(&world)
+        .filter(|(_, source, name)| {
+            source.instance_id == instance.instance_id()
+                && source.source_entity_id.as_str() == "opaque/shared"
+                && name.as_str() == "Shared"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(projected_shared.len(), 2);
+    let mut depths = projected_shared
+        .iter()
+        .map(|(entity, source, _)| {
+            assert_eq!(
+                instance.resolve(&world, &source.entity_id),
+                EntityLookup::Resolved(*entity)
+            );
+            source
+                .projection_path
+                .as_ref()
+                .unwrap()
+                .source_chain()
+                .len()
+        })
+        .collect::<Vec<_>>();
+    depths.sort();
+    assert_eq!(depths, [1, 2]);
+}
+
+#[test]
+fn duplicate_uuid_in_second_resolved_source_preserves_the_published_database() {
+    let first = resolve_source(&[SCENE_PATH, ACTOR_PATH]);
+    let second = resolve_source(&[SHARED_PATH, "source-b/collision.prefab.ron"]);
+    let mut published = first.database;
+    let before = published.clone();
+
+    let error = merge_source(&mut published, &second).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetDatabaseError::DuplicateStableId { stable_id: id, .. } if id == stable_id(ACTOR_ID)
+    ));
+    assert_eq!(published, before);
+    assert!(
+        published
+            .record_for_stable_id(stable_id(SHARED_ID))
+            .is_none()
+    );
+}
+
+#[test]
+fn copy_as_new_changes_only_references_inside_the_explicit_copied_closure() {
+    let registry = frozen_scene_registry().unwrap();
+    let database = merged_database();
+    let scene = stable_scene(&registry, &database);
+    let actor = load_prefab(&database, &registry, stable_id(ACTOR_ID));
+    let shared = load_prefab(&database, &registry, stable_id(SHARED_ID));
+    let original_bytes =
+        [SCENE_PATH, ACTOR_PATH, SHARED_PATH].map(|path| (path, fixture_bytes(path)));
+
+    let copied = copy_as_new(&scene, &actor, &database);
+
+    assert_eq!(copied.stable_ids.len(), 2);
+    assert_ne!(copied.stable_ids[&stable_id(SCENE_ID)], stable_id(SCENE_ID));
+    let copied_actor = copied.stable_ids[&stable_id(ACTOR_ID)];
+    assert_ne!(copied_actor, stable_id(ACTOR_ID));
+    assert_ne!(copied_actor, copied.stable_ids[&stable_id(SCENE_ID)]);
+    assert_eq!(copied.database.len(), 5);
+    assert_eq!(
+        scene.entities[0].prefab.as_ref().unwrap().source,
+        AssetRef::StableId(stable_id(ACTOR_ID))
+    );
+    assert_eq!(
+        copied.scene.entities[0].prefab.as_ref().unwrap().source,
+        AssetRef::StableId(copied_actor)
+    );
+    assert_eq!(copied.scene.entities[1], scene.entities[1]);
+    assert_eq!(copied.actor, actor);
+    let copied_name = copied.actor.entities[0].components.values().next().unwrap();
+    assert_eq!(copied_name.value.as_str().unwrap(), ACTOR_PATH);
+    for (path, bytes) in original_bytes {
+        assert_eq!(fixture_bytes(path), bytes);
+    }
+
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(AssetRef::StableId(copied_actor), copied.actor)
+        .with_prefab(AssetRef::StableId(stable_id(SHARED_ID)), shared);
+    let mut world = World::new();
+    let spawned = spawn_scene_with_prefab_resolver_and_asset_database(
+        &mut world,
+        &registry,
+        &copied.scene,
+        &resolver,
+        &copied.database,
+    );
+    assert!(
+        !spawned.diagnostics.has_errors(),
+        "{:?}",
+        spawned.diagnostics
+    );
+    assert_eq!(spawned.instance.unwrap().len(), 5);
+}
+
+#[test]
+fn explicit_v1_conversion_publishes_a_real_candidate_and_preserves_unresolved_bytes() {
+    let registry = frozen_scene_registry().unwrap();
+    let database = merged_database();
+    let mut encoded = fixture_bytes(SCENE_PATH);
+    let original = encoded.clone();
+
+    stabilize_v1_scene_bytes(&mut encoded, &registry, &database).unwrap();
+
+    assert_ne!(encoded, original);
+    let converted = SceneDocumentCandidate::decode_ron_bytes(&encoded)
+        .unwrap()
+        .canonicalize(&registry)
+        .unwrap()
+        .publish_with_asset_database(&registry, &database)
+        .unwrap();
+    let after = SceneDocumentCandidate::decode_ron_bytes(&fixture_bytes("after/startup.scene.ron"))
+        .unwrap()
+        .canonicalize(&registry)
+        .unwrap()
+        .publish_with_asset_database(&registry, &database)
+        .unwrap();
+    assert_eq!(converted.document(), after.document());
+
+    let mut unresolved = original;
+    let before = unresolved.clone();
+    let first_only = resolve_source(&[SCENE_PATH, ACTOR_PATH]);
+    let error =
+        stabilize_v1_scene_bytes(&mut unresolved, &registry, &first_only.database).unwrap_err();
+    assert!(
+        matches!(error, ConversionError::UnresolvedPrefab { ref entity, .. }
+        if entity.as_str() == "shared-instance")
+    );
+    assert!(error.to_string().contains(SHARED_PATH));
+    assert_eq!(unresolved, before);
+}
+
+/// Application-private save data binds an authored local ID to one persistent instance owner.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SavedAuthoredBinding {
+    instance_owner: PersistentRuntimeReference,
+    authored_entity: SceneEntityId,
+}
+
+#[derive(Component)]
+struct InstanceOwner(SpawnedSceneInstance);
+
+#[test]
+fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_changes() {
+    let registry = frozen_scene_registry().unwrap();
+    let database = merged_database();
+    let scene = stable_scene(&registry, &database);
+    let resolver = prefab_resolver(&database, &registry);
+    let alpha = persistent_owner("11111111-1111-4111-8111-111111111111");
+    let beta = persistent_owner("22222222-2222-4222-8222-222222222222");
+    let local = SceneEntityId::new("actor-instance").unwrap();
+    let mut original = World::new();
+    let original_alpha = spawn_owned_instance(
+        &mut original,
+        &registry,
+        &scene,
+        &resolver,
+        &database,
+        alpha.clone(),
+    );
+    let original_beta = spawn_owned_instance(
+        &mut original,
+        &registry,
+        &scene,
+        &resolver,
+        &database,
+        beta.clone(),
+    );
+    assert_ne!(original_alpha.instance_id(), original_beta.instance_id());
+    let saved = SavedAuthoredBinding {
+        instance_owner: alpha.clone(),
+        authored_entity: local.clone(),
+    };
+    let encoded = ron::ser::to_string(&saved).unwrap();
+    let saved: SavedAuthoredBinding = ron::from_str(&encoded).unwrap();
+    drop(original);
+
+    let mut restored = World::new();
+    let restored_beta =
+        spawn_owned_instance(&mut restored, &registry, &scene, &resolver, &database, beta);
+    let restored_alpha = spawn_owned_instance(
+        &mut restored,
+        &registry,
+        &scene,
+        &resolver,
+        &database,
+        alpha,
+    );
+    assert_ne!(original_alpha.instance_id(), restored_alpha.instance_id());
+    assert_eq!(original_alpha.instance_id(), restored_beta.instance_id());
+    let EntityLookup::Resolved(owner_entity) = restored.resource::<WorldIdentityDomain>().lookup(
+        &restored,
+        &RuntimeEntityReference::persistent(saved.instance_owner),
+    ) else {
+        panic!("the saved instance owner UUID must resolve");
+    };
+    let selected = &restored.get::<InstanceOwner>(owner_entity).unwrap().0;
+    assert_eq!(selected.instance_id(), restored_alpha.instance_id());
+    let target = selected.resolve(&restored, &saved.authored_entity);
+    assert_eq!(target, restored_alpha.resolve(&restored, &local));
+    assert_ne!(target, restored_beta.resolve(&restored, &local));
+    assert!(matches!(target, EntityLookup::Resolved(_)));
+}
+
+fn persistent_owner(id: &str) -> PersistentRuntimeReference {
+    PersistentRuntimeReference::new(
+        PersistentRuntimeNamespaceId::new("durable-identity-consumer").unwrap(),
+        PersistentRuntimeId::parse_str(id).unwrap(),
+    )
+}
+
+fn spawn_owned_instance(
+    world: &mut World,
+    registry: &nara_reflect::ComponentRegistry,
+    scene: &nara_scene::SceneDocument,
+    resolver: &InMemoryPrefabSourceResolver,
+    database: &nara_asset::ProjectAssetDatabase,
+    owner: PersistentRuntimeReference,
+) -> SpawnedSceneInstance {
+    let report = spawn_scene_with_prefab_resolver_and_asset_database(
+        world, registry, scene, resolver, database,
+    );
+    assert!(!report.diagnostics.has_errors(), "{:?}", report.diagnostics);
+    let instance = report.instance.unwrap();
+    let token = spawn_identity_entity(world).unwrap();
+    world.resource_scope(
+        |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+            domain.register_persistent(world, token, owner).unwrap();
+        },
+    );
+    world
+        .entity_mut(token.entity())
+        .insert(InstanceOwner(instance.clone()));
+    instance
+}

@@ -1,0 +1,29 @@
+(
+    kind: "scene",
+    format_version: 1,
+    engine_min_version: "0.1.0",
+    generator: (name: "durable-identity-consumer", version: "0.0.0"),
+    payload: (
+        roots: ["actor-instance", "shared-instance"],
+        entities: [
+            (
+                id: "actor-instance",
+                children: [],
+                components: {},
+                prefab: Some((
+                    source: (kind: "stable_id", value: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+                    overrides: (format_version: 1, operations: []),
+                )),
+            ),
+            (
+                id: "shared-instance",
+                children: [],
+                components: {},
+                prefab: Some((
+                    source: (kind: "stable_id", value: "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+                    overrides: (format_version: 1, operations: []),
+                )),
+            ),
+        ],
+    ),
+)

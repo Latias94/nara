@@ -8,8 +8,8 @@ publish = false
 
 [workspace]
 resolver = "3"
-members = ["fs-consumer", "project-workflow-consumer"]
-default-members = [".", "fs-consumer", "project-workflow-consumer"]
+members = ["fs-consumer", "project-workflow-consumer", "material-consumer"]
+default-members = [".", "fs-consumer", "project-workflow-consumer", "material-consumer"]
 
 [dependencies]
 nara_reflect = { path = "../crates/nara_reflect" }
@@ -17,3 +17,9 @@ nara_scene = { path = "../crates/nara_scene", default-features = false, features
 
 [dev-dependencies]
 bevy_ecs = "0.19"
+nara_app = { path = "../crates/nara_app" }
+nara_asset = { path = "../crates/nara_asset", default-features = false, features = ["serde"] }
+nara_ecs = { path = "../crates/nara_ecs" }
+nara_identity = { path = "../crates/nara_identity", features = ["serde"] }
+ron = "0.8"
+serde = { version = "1", features = ["derive"] }

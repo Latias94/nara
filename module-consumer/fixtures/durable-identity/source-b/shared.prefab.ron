@@ -1,0 +1,16 @@
+(
+    kind: "prefab",
+    format_version: 1,
+    engine_min_version: "0.1.0",
+    generator: (name: "durable-identity-consumer", version: "0.0.0"),
+    payload: (
+        roots: ["opaque/shared"],
+        entities: [(
+            id: "opaque/shared",
+            children: [],
+            components: {
+                "nara.scene.Name": (version: 1, value: (type: string, value: "Shared")),
+            },
+        )],
+    ),
+)
