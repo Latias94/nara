@@ -207,7 +207,8 @@ impl<P: Plugin> SchemaContribution<P> {
 /// [`PluginGroup`], so the same value can be used by direct `App` composition and by the
 /// file-backed Project Host. Schema contributions install their provider authority before their
 /// plugin builds in a direct `App`, while a file-backed Host preloads the same provider set into
-/// its admitted registry snapshot.
+/// its admitted registry snapshot. The contribution owns registration; its plugin builds runtime
+/// behavior without registering the provider a second time.
 #[derive(Clone, Default)]
 pub struct ProductRecipe {
     entries: BTreeMap<PluginId, ProductRecipeEntry>,

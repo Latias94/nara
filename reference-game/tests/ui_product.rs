@@ -396,7 +396,11 @@ fn assert_retry_activation(
         );
     }
     assert_eq!(outcome.retry_batches, vec![1], "{outcome:#?}");
-    assert_eq!(outcome.status.phase(), WaveRetryPhase::Pending, "{outcome:#?}");
+    assert_eq!(
+        outcome.status.phase(),
+        WaveRetryPhase::Pending,
+        "{outcome:#?}"
+    );
     assert_eq!(outcome.status.last_rejection(), None, "{outcome:#?}");
 }
 

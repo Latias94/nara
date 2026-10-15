@@ -5,7 +5,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use nara::project_workflow::{
+use crate::project_workflow::{
     __private::{
         CargoCompilerArtifactFacts, CargoJsonMessage, CargoJsonMessageError,
         ProjectExportBuildPreparation, ProjectExportCargoArtifact,
@@ -17,7 +17,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 use super::acceptance::{self, ExportAcceptanceError};
-use crate::host_fs::{self, HostDirectoryError, HostFileError};
+use crate::project_tooling::host_fs::{self, HostDirectoryError, HostFileError};
 
 const MAX_TOOL_IDENTITY_BYTES: usize = 16 * 1024;
 const MAX_CARGO_JSON_BYTES: u64 = 64 * 1024 * 1024;
@@ -106,7 +106,7 @@ fn build_with_target_directory(
         .arg("--no-default-features")
         .arg("--features")
         .arg(DESKTOP_FEATURE)
-        .arg("--bins")
+        .args(["--bin", "headless", "--bin", "desktop"])
         .arg("--target")
         .arg(&target_triple)
         .arg("--manifest-path")

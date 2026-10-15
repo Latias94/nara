@@ -31,6 +31,12 @@ const CLEANUP_TIMEOUT_SUMMARY: &str = "Headless runtime cleanup exceeded its dea
 const UI_OBSERVATION_ENV: &str = "NARA_REFERENCE_UI_OBSERVATION";
 
 fn main() -> ExitCode {
+    if let Some(exit) = nara::project_tooling::run_project_tool_mode(
+        env::args_os().skip(1),
+        nara_reference_game::project_recipe,
+    ) {
+        return exit;
+    }
     let maximum_ticks = match parse_maximum_ticks(env::args_os().skip(1)) {
         Some(maximum_ticks) => maximum_ticks,
         None => {
@@ -59,12 +65,41 @@ fn main() -> ExitCode {
             let _ = observer.emit();
         });
     let deadline = Instant::now() + Duration::from_secs(5);
+    let mut observation_failure = None;
     let terminal = drive_to_terminal(
-        || classify_run_report(run.execute_bounded()),
+        || {
+            let report = run.execute_bounded();
+            if matches!(report.outcome(), HeadlessRunOutcome::Completed(_)) {
+                let result = report
+                    .startup_content_closure()
+                    .ok_or_else(|| {
+                        io::Error::other(
+                            "headless run completed without its admitted startup closure",
+                        )
+                    })
+                    .and_then(|closure| {
+                        nara::project_tooling::record_product_observation(
+                            nara::project_tooling::ProductObservationTarget::Headless,
+                            closure,
+                        )
+                    });
+                if let Err(error) = result {
+                    observation_failure = Some(error);
+                }
+            }
+            classify_run_report(report)
+        },
         deadline,
         Instant::now,
         || std::thread::park_timeout(Duration::from_millis(1)),
     );
+    if let Some(error) = observation_failure {
+        emit_static_error(
+            "reference-game.product-observation.failed",
+            &error.to_string(),
+        );
+        return ExitCode::FAILURE;
+    }
     if matches!(&terminal, CliRunTerminal::Completed(_))
         && let Err(error) = marker.verify_success()
     {
@@ -76,14 +111,8 @@ fn main() -> ExitCode {
     let mut stdout = stdout.lock();
     let stderr = io::stderr();
     let mut stderr = stderr.lock();
-    let emit_ui_observation =
-        env::var_os(UI_OBSERVATION_ENV).as_deref() == Some(OsStr::new("1"));
-    write_terminal(
-        terminal,
-        &mut stdout,
-        &mut stderr,
-        emit_ui_observation,
-    )
+    let emit_ui_observation = env::var_os(UI_OBSERVATION_ENV).as_deref() == Some(OsStr::new("1"));
+    write_terminal(terminal, &mut stdout, &mut stderr, emit_ui_observation)
 }
 
 fn parse_maximum_ticks(arguments: impl IntoIterator<Item = OsString>) -> Option<NonZeroU32> {
@@ -117,9 +146,7 @@ enum CliRunTerminal {
     CleanupTimedOut(DiagnosticReport),
 }
 
-fn classify_run_report(
-    report: HeadlessRunReport<ReferenceProductObservation>,
-) -> CliRunProgress {
+fn classify_run_report(report: HeadlessRunReport<ReferenceProductObservation>) -> CliRunProgress {
     match report.outcome() {
         HeadlessRunOutcome::Completed(snapshot) => {
             CliRunProgress::Completed(Box::new(snapshot.clone()))

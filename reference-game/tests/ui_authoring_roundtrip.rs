@@ -63,10 +63,8 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
                 value: ComponentValue::String(EDITED_RETRY_ACTION.to_owned()),
             },
         ]);
-        let report = patch.apply_to_scene(
-            &mut document,
-            loaded.plan.schema_validation().registry(),
-        );
+        let report =
+            patch.apply_to_scene(&mut document, loaded.plan.schema_validation().registry());
         assert!(report.applied, "typed prefab patch must apply: {report:#?}");
 
         let edited = PrefabDocument::new(document.roots, document.entities);
@@ -77,11 +75,8 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
                 .expect("edited prefab must use the canonical writer")
         )
     };
-    fs::write(
-        project.file("prefabs/reference-ui.prefab.json"),
-        encoded,
-    )
-    .expect("edited prefab must be writable");
+    fs::write(project.file("prefabs/reference-ui.prefab.json"), encoded)
+        .expect("edited prefab must be writable");
 
     let reloaded = try_load_project_content_from_path(project.path())
         .expect("edited reference project must reload through the ordinary loader");
@@ -115,14 +110,20 @@ fn action_node<'a>(capture: &'a ProductUiCapture, action: &str) -> &'a SemanticC
     capture
         .semantic_facts
         .iter()
-        .find(|fact| fact.actions.iter().any(|candidate| candidate.as_str() == action))
+        .find(|fact| {
+            fact.actions
+                .iter()
+                .any(|candidate| candidate.as_str() == action)
+        })
         .expect("expected authored action must remain semantic")
 }
 
 fn retry_width(entities: &[nara::scene::SceneEntityRecord], entity_id: &str) -> f64 {
     component_in(entities, entity_id)
         .value
-        .get_path(&ComponentFieldPath::from_fields(["style", "width", "value"]))
+        .get_path(&ComponentFieldPath::from_fields([
+            "style", "width", "value",
+        ]))
         .expect("UiNode width path must exist")
         .as_f64()
         .expect("UiNode width must be a finite float")

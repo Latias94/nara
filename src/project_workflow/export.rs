@@ -22,7 +22,7 @@ pub use build::{
 };
 
 #[doc(hidden)]
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 pub use build::{
     ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
 };

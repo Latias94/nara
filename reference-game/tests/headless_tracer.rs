@@ -14,7 +14,7 @@ use nara::{
 };
 use nara_reference_game::{
     REFERENCE_GAME_PLUGIN_ID, ReferenceGamePlugin, WaveOutcome, bundled_wave_run,
-    bundled_wave_run_with_completed_tick_observer,
+    bundled_wave_run_with_completed_tick_observer, reference_game_contribution,
 };
 use project_content_fixture::project_root_capability;
 
@@ -104,7 +104,9 @@ fn missing_declared_registry_plugin_fails_pure_planning_and_is_retryable() {
     app.add_plugins((
         HeadlessRuntimePlugins,
         nara::advanced_prelude::StartupSceneActivationPlugin,
-        ReferenceGamePlugin,
+        nara::ProductRecipe::new()
+            .add_contribution(reference_game_contribution().unwrap())
+            .unwrap(),
     ))
     .unwrap();
 }
@@ -131,7 +133,9 @@ fn missing_startup_activation_dependency_is_rejected_before_plugin_build() {
 
     app.add_plugins((
         nara::advanced_prelude::StartupSceneActivationPlugin,
-        ReferenceGamePlugin,
+        nara::ProductRecipe::new()
+            .add_contribution(reference_game_contribution().unwrap())
+            .unwrap(),
     ))
     .unwrap();
 }

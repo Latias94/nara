@@ -4,14 +4,14 @@ use std::{
     path::Path,
 };
 
-use nara::fs::{
+use crate::fs::{
     CapabilityRights, DirectoryCapability, FileCapability, FsError, HostCapabilityOptions,
     TrustMode,
 };
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub(crate) enum HostDirectoryError {
+pub enum HostDirectoryError {
     #[error("failed to open the authorized directory")]
     Open(#[source] io::Error),
     #[error("the opened directory cannot satisfy the filesystem capability contract")]
@@ -19,18 +19,18 @@ pub(crate) enum HostDirectoryError {
 }
 
 #[derive(Debug, Error)]
-pub(crate) enum HostFileError {
+pub enum HostFileError {
     #[error("failed to open the authorized file")]
     Open(#[source] io::Error),
     #[error("the opened file cannot satisfy the filesystem capability contract")]
     Capability(#[source] FsError),
 }
 
-pub(crate) fn writable_directory(path: &Path) -> Result<DirectoryCapability, HostDirectoryError> {
+pub fn writable_directory(path: &Path) -> Result<DirectoryCapability, HostDirectoryError> {
     directory(path, CapabilityRights::ReadWrite)
 }
 
-pub(crate) fn readable_directory(path: &Path) -> Result<DirectoryCapability, HostDirectoryError> {
+pub fn readable_directory(path: &Path) -> Result<DirectoryCapability, HostDirectoryError> {
     directory(path, CapabilityRights::ReadOnly)
 }
 
@@ -46,7 +46,7 @@ fn directory(
     .map_err(HostDirectoryError::Capability)
 }
 
-pub(crate) fn readable_file(path: &Path) -> Result<FileCapability, HostFileError> {
+pub fn readable_file(path: &Path) -> Result<FileCapability, HostFileError> {
     let file = open_file(path).map_err(HostFileError::Open)?;
     FileCapability::from_host_handle(file, TrustMode::TrustedLocal, 1)
         .map_err(HostFileError::Capability)

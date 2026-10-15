@@ -103,11 +103,13 @@ fn assert_committed_content() {
         snapshot.expanded_startup_scene(),
         cloned.expanded_startup_scene(),
     ));
-    assert!(snapshot
-        .prefabs()
-        .iter()
-        .zip(cloned.prefabs())
-        .all(|(source, clone)| std::ptr::eq(source.document(), clone.document())));
+    assert!(
+        snapshot
+            .prefabs()
+            .iter()
+            .zip(cloned.prefabs())
+            .all(|(source, clone)| std::ptr::eq(source.document(), clone.document()))
+    );
     assert_eq!(
         snapshot.images()[0].image().pixels().as_ptr(),
         cloned.images()[0].image().pixels().as_ptr(),

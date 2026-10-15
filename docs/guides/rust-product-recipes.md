@@ -84,6 +84,46 @@ let recipe = ProductRecipe::new()
 The recipe rejects duplicate plugin IDs and mismatched provider declarations before any `App` or
 runtime is created.
 
+## Strict tools use the compiled project
+
+The project owns one recipe function shared by headless, desktop, Check, Export, and startup-Scene
+Repair. Add the `project-tooling` Nara feature to the headless dependency, declare the tool entry in
+the project's Cargo manifest, and dispatch it before normal argument parsing or gameplay startup:
+
+```toml
+[package.metadata.nara]
+project-tool-protocol = 1
+```
+
+```rust
+fn main() -> std::process::ExitCode {
+    if let Some(exit) = nara::project_tooling::run_project_tool_mode(
+        std::env::args_os().skip(1),
+        project_recipe,
+    ) {
+        return exit;
+    }
+    run_game()
+}
+```
+
+`project_recipe` returns `Result<ProductRecipe, E>`. Tool mode calls it once after admitting the
+request; normal game startup calls the same definition through its ordinary entry. Keep component
+and migration registration in the contribution's provider callback. Its runtime plugin does not
+register that provider again.
+
+`nara check`, `nara export`, and `nara repair startup-scene` first discover and build the existing
+`headless` target. A new project can generate its initial lockfile during bootstrap; existing
+lockfiles are respected with `--locked`. Strict checking then runs inside that executable with its
+native schema. Export retains the checked closure, build agreement, and publication capabilities in
+that process. The parent CLI receives bounded display summaries, never reconstructed authority.
+
+Default tools require no window, graphics backend, or editor toolkit. Explicitly checking the
+`desktop` profile builds the matching Cargo feature. Missing or unsupported tool metadata rejects
+an old headless entry before launch, since old entries may ignore arguments and start gameplay.
+The declaration is a compatibility contract for trusted Rust and Cargo code, not a sandbox or proof
+that arbitrary project code obeys the entry contract. The generated starter includes this wiring.
+
 ## Use the same recipe in each path
 
 Direct `App` composition retains raw one-shot plugin support. A one-shot value cannot enter a

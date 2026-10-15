@@ -6,8 +6,8 @@ use std::{
 
 use nara_diagnostic::DiagnosticReport;
 use nara_fs::{
-    ContentDigest, ExpectedTarget, FsError, LockMode, PublicationAtomicity,
-    PublicationSourceBinding, RelativeComponent, RelativePath, ReplaceReceipt, StageStatus,
+    ContentDigest, ExpectedTarget, FsError, LockMode, RelativeComponent, RelativePath,
+    ReplaceReceipt, StageStatus, TemporaryFileFailure,
 };
 use nara_project::{
     DEFAULT_MANIFEST_BYTE_LIMIT, ProjectManifest, ProjectManifestMutationError,
@@ -72,8 +72,8 @@ pub enum ProjectStartupSceneRepairError {
     PreparedFactsUnavailable,
     #[error("the filesystem cannot provide atomic manifest replacement")]
     UnsupportedPublication,
-    #[error("manifest publication did not produce a classifiable terminal result")]
-    PublicationUnresolved(#[source] FsError),
+    #[error("manifest publication failed with retained temporary cleanup ownership")]
+    TemporaryFile(#[source] TemporaryFileFailure),
 }
 
 impl ProjectStartupSceneRepairError {
@@ -91,7 +91,7 @@ impl ProjectStartupSceneRepairError {
             | Self::Replacement(_)
             | Self::PreparedFactsUnavailable
             | Self::UnsupportedPublication
-            | Self::PublicationUnresolved(_) => None,
+            | Self::TemporaryFile(_) => None,
         }
     }
 }
@@ -311,31 +311,46 @@ pub fn repair_startup_scene(
         return Err(ProjectStartupSceneRepairError::StaleIssue);
     }
     verify_manifest_digest(&manifest, issue.manifest_digest)?;
-    let matrix = nara_fs::platform_capability_matrix();
-    if matrix.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
-        || matrix.replace_source_binding() == PublicationSourceBinding::Unsupported
-    {
-        return Err(ProjectStartupSceneRepairError::UnsupportedPublication);
-    }
+    manifest_parent
+        .preflight_replace(ExpectedTarget::Identity(issue.manifest_identity))
+        .map_err(|_| ProjectStartupSceneRepairError::UnsupportedPublication)?;
 
-    let mut temporary =
-        create_temporary(&manifest_parent).map_err(ProjectStartupSceneRepairError::Filesystem)?;
-    temporary
+    let mut temporary = create_temporary(&manifest_parent)
+        .map_err(ProjectStartupSceneRepairError::TemporaryFile)?;
+    if let Err(source) = temporary
         .write_all(&published_bytes)
         .and_then(|()| temporary.flush())
-        .map_err(|source| {
-            ProjectStartupSceneRepairError::Filesystem(FsError::Io {
-                operation: nara_fs::FsOperation::Write,
-                source,
-            })
-        })?;
-    let sync = temporary
-        .sync()
-        .map_err(ProjectStartupSceneRepairError::Filesystem)?;
+    {
+        return Err(ProjectStartupSceneRepairError::TemporaryFile(
+            TemporaryFileFailure::with_cleanup(
+                FsError::Io {
+                    operation: nara_fs::FsOperation::Write,
+                    source,
+                },
+                temporary.into_cleanup(),
+            ),
+        ));
+    }
+    let sync = match temporary.sync() {
+        Ok(sync) => sync,
+        Err(source) => {
+            return Err(ProjectStartupSceneRepairError::TemporaryFile(
+                TemporaryFileFailure::with_cleanup(source, temporary.into_cleanup()),
+            ));
+        }
+    };
     if sync.progress().data_synced() != StageStatus::Achieved
         || sync.progress().file_metadata_synced() != StageStatus::Achieved
     {
-        return Err(ProjectStartupSceneRepairError::UnsupportedPublication);
+        return Err(ProjectStartupSceneRepairError::TemporaryFile(
+            TemporaryFileFailure::with_cleanup(
+                FsError::Unproven {
+                    operation: nara_fs::FsOperation::SyncFile,
+                    proof: "manifest candidate lacks required synchronization",
+                },
+                temporary.into_cleanup(),
+            ),
+        ));
     }
     let publication = match manifest_parent.replace_temp(
         temporary,
@@ -343,11 +358,8 @@ pub fn repair_startup_scene(
         ExpectedTarget::Identity(issue.manifest_identity),
     ) {
         Ok(receipt) => receipt,
-        Err(FsError::TargetStateMismatch) => {
-            return Err(ProjectStartupSceneRepairError::StaleIssue);
-        }
-        Err(error) => {
-            return Err(ProjectStartupSceneRepairError::PublicationUnresolved(error));
+        Err(failure) => {
+            return Err(ProjectStartupSceneRepairError::TemporaryFile(failure));
         }
     };
     drop(lock);
@@ -483,7 +495,7 @@ fn startup_scene_digest(
 
 fn create_temporary(
     parent: &nara_fs::DirectoryCapability,
-) -> Result<nara_fs::TemporaryFile, FsError> {
+) -> Result<nara_fs::TemporaryFile, TemporaryFileFailure> {
     for _ in 0..TEMPORARY_NAME_ATTEMPTS {
         let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
         let name = RelativeComponent::new(format!(
@@ -493,11 +505,12 @@ fn create_temporary(
         .expect("the engine-owned temporary filename is valid");
         match parent.create_temp(&name) {
             Ok(temporary) => return Ok(temporary),
-            Err(FsError::AlreadyExists { .. }) => continue,
+            Err(error) if matches!(error.error(), FsError::AlreadyExists { .. }) => continue,
             Err(error) => return Err(error),
         }
     }
     Err(FsError::AlreadyExists {
         operation: nara_fs::FsOperation::CreateTemporary,
-    })
+    }
+    .into())
 }

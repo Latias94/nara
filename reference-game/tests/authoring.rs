@@ -18,7 +18,7 @@ use nara::{
 };
 use nara_reference_game::{
     EnemyRole, InitialHealth, InitialVelocity2d, PlayerRole, REFERENCE_GAME_SCHEMA_OWNER_ID,
-    REFERENCE_GAME_SCHEMA_PROVIDER, ReferenceGamePlugin, RuntimeOnlyTag, WaveSpawn, Weapon,
+    REFERENCE_GAME_SCHEMA_PROVIDER, RuntimeOnlyTag, WaveSpawn, Weapon, reference_game_contribution,
 };
 
 const LINEAGE_PROBE_ID: &str = "nara.test.LineageProbe";
@@ -88,7 +88,12 @@ fn authored_components_register_and_round_trip_while_runtime_state_stays_out_of_
         nara::advanced_prelude::StartupSceneActivationPlugin,
     ))
     .unwrap();
-    app.add_plugin(ReferenceGamePlugin).unwrap();
+    app.add_plugins(
+        nara::ProductRecipe::new()
+            .add_contribution(reference_game_contribution().unwrap())
+            .unwrap(),
+    )
+    .unwrap();
     let app = app.seal().unwrap();
 
     let registry = nara::reflect::component_registry(app.world()).unwrap();
@@ -566,11 +571,14 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     let scene_candidate = SceneDocumentCandidate::decode_json_bytes(scene_json.as_bytes()).unwrap();
     assert_eq!(scene_candidate.to_json_string().unwrap(), scene_json);
     let mut session = SceneAuthoringSession::new(SceneDocument::default());
+    let empty_revision = session.revision();
     session
         .try_replace_file_candidate(scene_candidate, &registry)
         .unwrap();
     assert_eq!(session.document(), &document);
-    assert_eq!(session.revision().generation(), 1);
+    let loaded_revision = session.revision();
+    assert_ne!(loaded_revision.source_id(), empty_revision.source_id());
+    assert_eq!(loaded_revision.generation(), 0);
     assert_eq!(session.history_status().undo_depth, 0);
     assert!(!session.source_upgrade_required());
 
@@ -590,7 +598,11 @@ fn canonical_scene_and_stable_field_patch_round_trip_into_the_live_world() {
     let patch_report = session.apply_file_patch_candidate(patch_candidate, &registry);
     assert!(patch_report.applied, "{:#?}", patch_report.diagnostics);
     assert!(patch_report.inverse.is_some());
-    assert_eq!(session.revision().generation(), 2);
+    assert_eq!(session.revision().source_id(), loaded_revision.source_id());
+    assert_eq!(
+        session.revision().generation(),
+        loaded_revision.generation() + 1
+    );
     assert_eq!(session.history_status().undo_depth, 1);
     assert!(session.is_live_dirty());
 

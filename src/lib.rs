@@ -101,6 +101,9 @@ pub mod project_host;
 #[cfg(feature = "project-workflow")]
 pub mod project_workflow;
 
+#[cfg(feature = "project-tooling")]
+pub mod project_tooling;
+
 #[cfg(feature = "runtime-core")]
 mod project_diagnostic_ids;
 

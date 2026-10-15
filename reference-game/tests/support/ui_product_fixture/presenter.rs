@@ -18,7 +18,9 @@ use nara::{
         PluginId, PluginShutdownContext, PluginShutdownObligationId, RuntimeDriverScope,
         RuntimeGeneration, RuntimeWorldAccessError,
     },
-    ecs::{Entity, Mut, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs},
+    ecs::{
+        Entity, Mut, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs,
+    },
     gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
     prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
@@ -31,8 +33,8 @@ use nara_reference_game::{
 use nara_render::RenderTarget;
 use nara_ui::{
     UiAccessibilityInput, UiActionConsumerId, UiActionCursor, UiActionEvent, UiActionJournal,
-    UiPresentationReceipt, UiRouteDisposition, UiSurfaceContentTransform,
-    active_ui_surface_slots, dispatch_ui_accessibility_input, update_ui_surface_slot,
+    UiPresentationReceipt, UiRouteDisposition, UiSurfaceContentTransform, active_ui_surface_slots,
+    dispatch_ui_accessibility_input, update_ui_surface_slot,
 };
 use nara_ui_render::{
     UiBackendSubmissionIdentity, UiPaintPacket, UiPreparedImages, UiPresentationAttemptId,
@@ -281,7 +283,10 @@ fn install_component_presenter(app: &mut App) -> Result<(), PluginError> {
 fn shutdown_component_presenter(
     context: &mut PluginShutdownContext<'_>,
 ) -> Result<(), PluginError> {
-    if !context.world().contains_resource::<ComponentUiActionTrace>() {
+    if !context
+        .world()
+        .contains_resource::<ComponentUiActionTrace>()
+    {
         return Ok(());
     }
     if !context.world().contains_resource::<UiActionJournal>() {

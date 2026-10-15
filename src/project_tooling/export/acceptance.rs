@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use nara::{
+use crate::{
     fs::{ContentDigest, FsError},
     project_workflow::{
         __private::ProjectExportProductAgreement, ProjectExportBinaryTarget,
@@ -19,7 +19,8 @@ use nara::{
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::host_fs::{self, HostFileError};
+use crate::project_tooling::host_fs::{self, HostFileError};
+use crate::project_tooling::product_observation::product_profile;
 
 const PROCESS_DEADLINE: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -277,7 +278,7 @@ fn startup_bundle_digest(
         .members()
         .iter()
         .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
-        .map(nara::project_workflow::StartupContentMemberReceipt::digest)
+        .map(crate::project_workflow::StartupContentMemberReceipt::digest)
         .ok_or(ExportAcceptanceError::MissingAuthoringSchemaBundle)
 }
 
@@ -376,6 +377,7 @@ fn observe_product_command(
     let observation = working_directory.join(format!("{attempt}.json"));
     let mut child = command
         .current_dir(working_directory)
+        .stdout(std::process::Stdio::null())
         .env(OBSERVATION_ATTEMPT_ENV, &attempt)
         .env(OBSERVATION_FILE_ENV, &observation)
         .spawn()
@@ -534,21 +536,8 @@ fn observation_predecessor(
     ContentDigest::of_bytes(&facts)
 }
 
-pub(super) const fn product_profile(target: ProjectExportBinaryTarget) -> &'static str {
-    match target {
-        ProjectExportBinaryTarget::Headless => "default",
-        ProjectExportBinaryTarget::Desktop => "desktop",
-    }
-}
-
 pub(super) fn digest_hex(digest: ContentDigest) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(64);
-    for byte in digest.as_bytes() {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
+    crate::project_tooling::product_observation::digest_hex(digest)
 }
 
 struct AcceptanceWorkingDirectory {

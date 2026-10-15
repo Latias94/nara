@@ -15,7 +15,7 @@ use crate::{
     },
 };
 
-const HEADLESS_NARA_FEATURES: [&str; 2] = ["runtime-2d", "serde"];
+const HEADLESS_NARA_FEATURES: [&str; 3] = ["runtime-2d", "serde", "project-tooling"];
 const DESKTOP_NARA_FEATURES: [&str; 3] = [
     "nara/presentation-2d",
     "nara/desktop-winit",
@@ -50,11 +50,14 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+[package.metadata.nara]
+project-tool-protocol = 1
+
 [workspace]
 resolver = "3"
 
 [dependencies]
-nara = {{ {}, default-features = false, features = ["{}", "{}"] }}
+nara = {{ {}, default-features = false, features = ["{}", "{}", "{}"] }}
 
 [features]
 default = []
@@ -77,6 +80,7 @@ required-features = ["desktop"]
         dependency,
         HEADLESS_NARA_FEATURES[0],
         HEADLESS_NARA_FEATURES[1],
+        HEADLESS_NARA_FEATURES[2],
         DESKTOP_NARA_FEATURES[0],
         DESKTOP_NARA_FEATURES[1],
         DESKTOP_NARA_FEATURES[2]
@@ -281,12 +285,17 @@ fn validate_cargo_manifest(
         .get("package")
         .and_then(Value::as_table)
         .ok_or("generated Cargo package table is absent")?;
-    if package.len() != 5
-        || package.get("name").and_then(Value::as_str) != Some(slug.as_str())
+    if package.get("name").and_then(Value::as_str) != Some(slug.as_str())
         || package.get("version").and_then(Value::as_str) != Some("0.1.0")
         || package.get("edition").and_then(Value::as_str) != Some("2024")
         || package.get("rust-version").and_then(Value::as_str) != Some("1.95")
         || package.get("publish").and_then(Value::as_bool) != Some(false)
+        || package
+            .get("metadata")
+            .and_then(|value| value.get("nara"))
+            .and_then(|value| value.get("project-tool-protocol"))
+            .and_then(Value::as_integer)
+            != Some(1)
     {
         return Err("generated Cargo package contract disagrees with the starter");
     }

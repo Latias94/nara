@@ -81,11 +81,7 @@ fn import_file(
     let file = source.open(&record)?;
     importer
         .admit_file(
-            ImageFileImportRequest::new(
-                record,
-                file,
-                ImageImportSettings::default(),
-            ),
+            ImageFileImportRequest::new(record, file, ImageImportSettings::default()),
             handle,
             expected_version,
             server,

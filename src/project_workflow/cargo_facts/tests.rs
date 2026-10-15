@@ -6,6 +6,29 @@ use super::*;
 const ROOT_PACKAGE_ID: &str = "path+file:///project#sample-game@0.1.0";
 
 #[test]
+fn headless_metadata_requires_its_declared_tool_entry_without_desktop_capabilities() {
+    let root = test_root();
+    let manifest = root.join("Cargo.toml");
+    let mut value = metadata_value(&root);
+    value["packages"][0]["features"] = json!({});
+    value["packages"][0]["metadata"] = json!({"nara":{"project-tool-protocol":1}});
+    value["packages"][0]["targets"][0]["name"] = json!("headless");
+    value["packages"][0]["targets"][0]["src_path"] = json!(root.join("src/bin/headless.rs"));
+    value["packages"][0]["targets"][0]["required-features"] = json!([]);
+    let facts =
+        CargoHeadlessMetadataFacts::parse(&serde_json::to_vec(&value).unwrap(), &manifest).unwrap();
+    assert_eq!(facts.package_id(), ROOT_PACKAGE_ID);
+    assert_eq!(facts.source_path(), root.join("src/bin/headless.rs"));
+    for metadata in [Value::Null, json!({"nara":{"project-tool-protocol":999}})] {
+        value["packages"][0]["metadata"] = metadata;
+        assert!(matches!(
+            CargoHeadlessMetadataFacts::parse(&serde_json::to_vec(&value).unwrap(), &manifest),
+            Err(CargoMetadataFactsError::ProjectToolProtocol)
+        ));
+    }
+}
+
+#[test]
 fn metadata_selects_exact_root_desktop_target_and_path_safe_graph() {
     let root = test_root();
     let manifest = root.join("Cargo.toml");

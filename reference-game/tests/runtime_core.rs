@@ -1,5 +1,7 @@
 use nara::prelude::{App, ComponentTypeId, HeadlessRuntimePlugins};
-use nara_reference_game::{ReferenceGamePlugin, ReferenceWavePlugin, WaveOutcome, WaveSnapshot};
+use nara_reference_game::{
+    ReferenceWavePlugin, WaveOutcome, WaveSnapshot, reference_game_contribution,
+};
 
 #[test]
 fn rust_code_first_plugins_publish_the_complete_game_schema() {
@@ -7,7 +9,9 @@ fn rust_code_first_plugins_publish_the_complete_game_schema() {
     app.add_plugins((
         HeadlessRuntimePlugins,
         nara::advanced_prelude::StartupSceneActivationPlugin,
-        ReferenceGamePlugin,
+        nara::ProductRecipe::new()
+            .add_contribution(reference_game_contribution().unwrap())
+            .unwrap(),
         ReferenceWavePlugin,
     ))
     .unwrap();

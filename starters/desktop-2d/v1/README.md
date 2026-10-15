@@ -35,6 +35,14 @@ cargo run --features desktop --bin desktop -- --verify-first-present
 The final command opens the real Winit/WGPU product, requires one exact presented frame, and exits
 through normal runtime cleanup.
 
+Check, Export, and startup-Scene Repair build the existing headless executable and enter its explicit
+tool mode before gameplay. Define custom systems, persistent components, and migrations once in
+`product_recipe()` with `SchemaContribution`; the same recipe serves both binaries and strict tools.
+The generated `package.metadata.nara.project-tool-protocol = 1` declares that entry contract. Older
+projects must migrate their headless entry before using these commands. Project Rust and Cargo code
+remain trusted native code. Default tooling has no window or graphics backend; checking the explicit
+`desktop` profile builds its desktop feature set.
+
 Publish and accept a source-carrying startup-closure candidate into an absent destination:
 
 ```text

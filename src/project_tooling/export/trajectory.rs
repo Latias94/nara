@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use nara::{
+use crate::{
     fs::{ContentDigest, RelativeComponent},
     project_workflow::{
         ProjectExportBinaryTarget, ProjectExportMemberKind, ProjectExportMemberReceipt,
@@ -21,12 +21,84 @@ use super::{
     acceptance::{self, ProductProcessObservationReceipt},
     cargo,
 };
-use crate::{args::CheckArguments, check, host_fs};
+use crate::project_tooling::host_fs;
+
+struct CheckArguments {
+    project: PathBuf,
+    profile: Option<String>,
+}
+
+mod check {
+    use super::*;
+
+    pub(super) fn execute(
+        arguments: CheckArguments,
+    ) -> Result<StartupContentClosureReceipt, crate::project_workflow::ProjectCheckError> {
+        let root = host_fs::readable_directory(&arguments.project).unwrap();
+        let request =
+            crate::project_workflow::ProjectCheckRequest::new(root, crate::ProductRecipe::new());
+        let request = match arguments.profile {
+            Some(profile) => request.with_profile(profile),
+            None => request,
+        };
+        crate::project_workflow::check_project(request)
+    }
+}
 
 const PROJECT_SLUG: &str = "fresh-project-trajectory";
 const REPLACEMENT_SCENE: &str = "repaired.scene.json";
 const EDITED_CLEAR_COLOR_R: f64 = 0.14;
 static NEXT_TRAJECTORY: AtomicU64 = AtomicU64::new(1);
+
+#[test]
+fn missing_startup_scene_diagnostic_preserves_the_selected_profile() {
+    let root = TrajectoryRoot::new();
+    for directory in ["assets", "scenes", "prefabs", "schema"] {
+        fs::create_dir(root.path().join(directory)).unwrap();
+    }
+    let manifest = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/runtime-runner/renamed-root/project/nara.toml"
+    ));
+    fs::write(
+        root.path().join("nara.toml"),
+        format!("{manifest}\n[profiles.tools.startup]\ndefault_scene = \"missing.scene.json\"\n"),
+    )
+    .unwrap();
+    let capability = host_fs::readable_directory(root.path()).unwrap();
+    let manifest = capability
+        .open_file(&crate::fs::RelativePath::new("nara.toml").unwrap())
+        .unwrap();
+    let candidate = crate::project_host::ingest_project_manifest(&manifest, Some("tools")).unwrap();
+    let plan = crate::project_host::resolve_product_recipe(&candidate, crate::ProductRecipe::new())
+        .unwrap();
+    fs::write(
+        root.path().join("schema/authoring.bundle.json"),
+        plan.schema_validation()
+            .authoring_schema_bundle()
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let error = crate::project_tooling::execute(
+        crate::project_tooling::ProjectToolRequest::Check {
+            project: root.path().to_owned(),
+            profile: Some("tools".to_owned()),
+        },
+        crate::ProductRecipe::new(),
+    )
+    .unwrap_err();
+    let diagnostic = crate::project_tooling::protocol::encode_response("check", Err(error));
+    let diagnostic = diagnostic["diagnostic"].as_str().unwrap();
+    assert!(
+        diagnostic.contains("startup Scene `missing.scene.json` is missing"),
+        "{diagnostic}"
+    );
+    assert!(
+        diagnostic.contains("--profile tools"),
+        "repair must preserve the selected profile: {diagnostic}"
+    );
+}
 
 #[test]
 #[ignore = "runs nested Cargo builds and a real headless/Winit/WGPU product trajectory"]
@@ -666,7 +738,7 @@ fn validate_export_command_observation(
         );
         assert_eq!(
             product.get("profile").and_then(Value::as_str),
-            Some(acceptance::product_profile(target))
+            Some(crate::project_tooling::product_observation::product_profile(target))
         );
         assert_eq!(
             product.get("executable"),

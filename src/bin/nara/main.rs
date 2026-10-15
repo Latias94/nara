@@ -1,11 +1,11 @@
 use std::process::ExitCode;
 
-use nara::project_workflow::{ProjectCreationOutcome, ProjectStartupSceneRepairOutcome};
+use nara::project_tooling::{ProjectToolSummary, host_fs};
+use nara::project_workflow::ProjectCreationOutcome;
 
 mod args;
 mod check;
 mod export;
-mod host_fs;
 mod new;
 mod repair;
 
@@ -44,33 +44,17 @@ fn main() -> ExitCode {
 }
 
 fn run_check(arguments: args::CheckArguments) -> ExitCode {
-    let profile = arguments.profile.clone();
     match check::execute(arguments) {
-        Ok(receipt) => {
+        Ok(ProjectToolSummary::Checked { startup_members }) => {
             println!(
                 "Project check passed with {} startup-closure members.",
-                receipt.members().len()
+                startup_members
             );
             ExitCode::SUCCESS
         }
+        Ok(_) => ExitCode::FAILURE,
         Err(error) => {
-            if let Some(issue) = error.startup_scene_issue() {
-                eprintln!(
-                    "error: startup Scene `{}` is missing under the project Scene root `{}`.",
-                    issue.selected_scene(),
-                    issue.scenes_path()
-                );
-                match profile {
-                    Some(profile) => eprintln!(
-                        "repair: nara repair startup-scene <project-directory> --profile {profile} --replacement <scenes-root-relative-scene>"
-                    ),
-                    None => eprintln!(
-                        "repair: nara repair startup-scene <project-directory> --replacement <scenes-root-relative-scene>"
-                    ),
-                }
-            } else {
-                eprintln!("error: {error}");
-            }
+            eprintln!("error: {error}");
             ExitCode::FAILURE
         }
     }
@@ -78,20 +62,11 @@ fn run_check(arguments: args::CheckArguments) -> ExitCode {
 
 fn run_repair(arguments: args::RepairArguments) -> ExitCode {
     match repair::execute(arguments) {
-        Ok(ProjectStartupSceneRepairOutcome::Repaired(receipt)) => {
-            println!(
-                "Repaired startup Scene selection to {}.",
-                receipt.publication().replacement()
-            );
+        Ok(ProjectToolSummary::Repaired { replacement }) => {
+            println!("Repaired startup Scene selection to {}.", replacement);
             ExitCode::SUCCESS
         }
-        Ok(ProjectStartupSceneRepairOutcome::PublishedButNotRepaired(outcome)) => {
-            eprintln!(
-                "error: the manifest was published but the project did not pass its fresh check: {}",
-                outcome.error()
-            );
-            ExitCode::FAILURE
-        }
+        Ok(_) => ExitCode::FAILURE,
         Err(error) => {
             eprintln!("error: {error}");
             ExitCode::FAILURE
@@ -101,40 +76,17 @@ fn run_repair(arguments: args::RepairArguments) -> ExitCode {
 
 fn run_export(arguments: args::ExportArguments) -> ExitCode {
     match export::execute(arguments) {
-        Ok(export::ExportCommandOutcome::Accepted {
-            receipt,
-            acceptance,
+        Ok(ProjectToolSummary::Exported {
+            startup_members,
+            product_observations,
         }) => {
-            if let Err(error) = export::record_acceptance_observation(&receipt, &acceptance) {
-                eprintln!("error: {error}");
-                return ExitCode::FAILURE;
-            }
             println!(
                 "Exported and accepted a candidate with {} startup-closure members through {} exact product observations.",
-                receipt.plan().members().len(),
-                acceptance.products().len()
+                startup_members, product_observations
             );
             ExitCode::SUCCESS
         }
-        Ok(export::ExportCommandOutcome::Rejected(error)) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-        Ok(export::ExportCommandOutcome::Orphaned(error)) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-        Ok(export::ExportCommandOutcome::Unresolved(error)) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-        Ok(export::ExportCommandOutcome::PublishedButUnaccepted { receipt, error }) => {
-            eprintln!(
-                "error: candidate with {} startup-closure members was published but acceptance failed: {error}",
-                receipt.plan().members().len()
-            );
-            ExitCode::FAILURE
-        }
+        Ok(_) => ExitCode::FAILURE,
         Err(error) => {
             eprintln!("error: {error}");
             ExitCode::FAILURE

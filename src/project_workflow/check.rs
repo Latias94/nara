@@ -196,6 +196,10 @@ impl ProjectStartupSceneIssue {
     pub const fn selected_scene(&self) -> &ProjectPath {
         &self.selected_scene
     }
+
+    pub(crate) fn profile(&self) -> Option<&str> {
+        self.profile.as_deref()
+    }
 }
 
 impl fmt::Debug for ProjectStartupSceneIssue {

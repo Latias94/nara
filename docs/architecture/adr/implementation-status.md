@@ -20,6 +20,19 @@ workspace Play, Reference Game, example, native surface-retirement, and focused 
 in the integrated worktree (records `7e531ba1a4644ad9a36ccf7876fd2e61` and
 `dd39a41fb70c462bacd772d8fd26b752`). Overlapping Host/SPL changes remain uncommitted; this does not
 claim an independently buildable committed HEAD or completion of U6-U13.
+U6 now delegates strict Check, Export, and startup-Scene Repair to the compiled project's
+headless tool mode, reusing its typed contribution and retaining capability/closure/publication
+authority inside that process. The real custom-schema, native-type-rename, first-build, Repair,
+and exact two-product Export workflows pass within the 198-test integrated checkpoint
+`6a8e83bd2e48414b9573ab094aa2240e`; Reference composition/all-target evidence is
+`78587446992944bfbb5116ba39974108`. Missing/unsupported tool declaration and failed bootstrap
+return errors before gameplay or output publication. Default generated headless tooling has no
+WGPU/Winit/egui normal dependency. Overlapping pre-existing Cargo, Host, and SPL edits remain
+preserved outside owned-path commits.
+U12's owned slow-work preparation, changed-observation/quiet-frame handling, and Closing retry
+pass focused Editor/Host/UI and generated-starter Play tests (`281475e6f27a491c97010730686c0f7c`,
+`95bcfe8e121b489490fe8b9a2e02c1fd`, `20e375e5915c4d0b9eb7681308249f22`). Native supervised-Play
+canary and final static checks remain pending; U12 and the remaining U7-U11/U13 are not complete.
 These focused results do not mark the remaining foundation or supervised-Play units complete.
 The preceding
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)

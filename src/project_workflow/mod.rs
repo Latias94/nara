@@ -65,10 +65,11 @@ pub mod __private {
         CargoArtifactMismatchField, CargoCompilerArtifactFacts, CargoCompilerDiagnostic,
         CargoDesktopArtifactFacts, CargoDesktopBuildDecoder, CargoDesktopBuildError,
         CargoDesktopBuildFacts, CargoDesktopBuildInvocation, CargoDesktopInvocationError,
-        CargoDiagnosticLevel, CargoDiagnostics, CargoJsonMessage, CargoJsonMessageError,
-        CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact, CargoPackageSourceKind,
+        CargoDiagnosticLevel, CargoDiagnostics, CargoHeadlessMetadataFacts, CargoJsonMessage,
+        CargoJsonMessageError, CargoMetadataFacts, CargoMetadataFactsError, CargoPackageGraphFact,
+        CargoPackageSourceKind,
     };
-    #[cfg(feature = "project-workflow-cli")]
+    #[cfg(feature = "project-tooling")]
     pub use super::export::{
         ProjectExportBuildPreparation, ProjectExportCargoArtifact, ProjectExportProductAgreement,
     };

@@ -7,6 +7,12 @@ use nara_game::open_project_root;
 const CLEANUP_DEADLINE_SECONDS: u64 = 5;
 
 fn main() -> ExitCode {
+    if let Some(exit) = nara::project_tooling::run_project_tool_mode(
+        std::env::args_os().skip(1),
+        || Ok::<_, std::convert::Infallible>(nara_game::product_recipe()),
+    ) {
+        return exit;
+    }
     let project_root = match open_project_root() {
         Ok(project_root) => project_root,
         Err(error) => {

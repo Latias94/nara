@@ -16,10 +16,7 @@ use std::num::NonZeroU32;
 use nara::{
     ProductRecipe, ProductRecipeError, SchemaContribution,
     advanced_prelude::add_startup_scene_activation_systems,
-    app::{
-        PluginCategory, PluginDeclaration, PluginError, PluginId, PluginPreflightContext,
-        PluginSchemaProviderId,
-    },
+    app::{PluginCategory, PluginDeclaration, PluginError, PluginId, PluginSchemaProviderId},
     ecs::{SystemSet, schedule::IntoScheduleConfigs},
     fs::DirectoryCapability,
     gameplay::{
@@ -131,30 +128,7 @@ impl Plugin for ReferenceGamePlugin {
         &REFERENCE_GAME_PLUGIN_DECLARATION
     }
 
-    fn preflight(&self, context: &PluginPreflightContext<'_>) -> Result<(), PluginError> {
-        let registry = nara::reflect::registry_for_plugin_preflight(
-            context,
-            REFERENCE_GAME_PLUGIN_ID,
-            REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
-        )?;
-        REFERENCE_GAME_SCHEMA_PROVIDER
-            .preflight(registry)
-            .map_err(|error| {
-                PluginError::component_registration(
-                    REFERENCE_GAME_PLUGIN_ID,
-                    REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
-                    error,
-                )
-            })
-    }
-
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        nara::reflect::register_schema_provider_for_plugin(
-            app,
-            REFERENCE_GAME_PLUGIN_ID,
-            REFERENCE_GAME_SCHEMA_PROVIDER_ID.as_str(),
-            &REFERENCE_GAME_SCHEMA_PROVIDER,
-        )?;
         {
             let world = app.world_mut()?;
             world.register_component::<Health>();
@@ -281,7 +255,8 @@ impl Plugin for ReferenceProjectOutcomePlugin {
     }
 }
 
-fn reference_game_contribution()
+/// Contributes the reference game's systems and persistent schema as one definition.
+pub fn reference_game_contribution()
 -> Result<SchemaContribution<ReferenceGamePlugin>, ProductRecipeError> {
     SchemaContribution::<ReferenceGamePlugin>::for_default([REFERENCE_GAME_SCHEMA_PROVIDER])
 }

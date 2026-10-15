@@ -1,4 +1,4 @@
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 use std::array;
 use std::fmt;
 
@@ -11,9 +11,9 @@ use crate::project_host::StartupContentClosureReceipt;
 const MAX_BUILD_INPUT_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
 const BUILD_INPUT_DOMAIN: &[u8] = b"nara.project-export-build-input.v1\0";
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 const EXPECTED_PROFILE: &str = "release";
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 const EXPECTED_FEATURE: &str = "desktop";
 
 const BUILD_INPUT_PATHS: [&str; 5] = [
@@ -169,7 +169,7 @@ struct PreparedExecutable {
 
 /// Build-input checkpoint captured before the private Cargo Adapter starts `cargo build --locked`.
 #[doc(hidden)]
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 pub struct ProjectExportBuildPreparation {
     project_root: DirectoryCapability,
     revision: BuildInputRevision,
@@ -179,7 +179,7 @@ pub struct ProjectExportBuildPreparation {
     authoring_schema_bundle_digest: ContentDigest,
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 impl ProjectExportBuildPreparation {
     pub fn capture(
         startup_content: &StartupContentClosureReceipt,
@@ -271,7 +271,7 @@ impl ProjectExportBuildPreparation {
     }
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 impl fmt::Debug for ProjectExportBuildPreparation {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -309,7 +309,7 @@ pub struct ProjectExportProductAgreement {
 }
 
 impl ProjectExportProductAgreement {
-    #[cfg(feature = "project-workflow-cli")]
+    #[cfg(feature = "project-tooling")]
     pub fn new(
         target: ProjectExportBinaryTarget,
         executable_digest: ContentDigest,
@@ -363,7 +363,7 @@ impl fmt::Debug for ProjectExportProductAgreement {
     }
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 fn bind_product_agreements(
     agreements: [ProjectExportProductAgreement; 2],
     executables: [&ProjectExportExecutableReceipt; 2],
@@ -401,7 +401,7 @@ fn bind_product_agreements(
 
 /// One structurally matched Cargo compiler-artifact selected by the private Adapter.
 #[doc(hidden)]
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 pub struct ProjectExportCargoArtifact {
     target: ProjectExportBinaryTarget,
     package_id: String,
@@ -411,7 +411,7 @@ pub struct ProjectExportCargoArtifact {
     file: FileCapability,
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 impl ProjectExportCargoArtifact {
     pub fn new(
         target: ProjectExportBinaryTarget,
@@ -442,7 +442,7 @@ impl ProjectExportCargoArtifact {
     }
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 struct ArtifactInvocation {
     package_id: String,
     target_triple: String,
@@ -450,7 +450,7 @@ struct ArtifactInvocation {
     features: Box<[String]>,
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 impl ArtifactInvocation {
     fn matching(
         first: &ProjectExportCargoArtifact,
@@ -527,7 +527,7 @@ struct BuildInputMember {
     digest: ContentDigest,
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 fn normalize_features(
     features: impl IntoIterator<Item = String>,
 ) -> Result<Box<[String]>, ProjectExportBuildError> {
@@ -540,7 +540,7 @@ fn normalize_features(
     Ok(features.into_boxed_slice())
 }
 
-#[cfg(feature = "project-workflow-cli")]
+#[cfg(feature = "project-tooling")]
 fn bounded_ascii(
     value: String,
     field: &'static str,

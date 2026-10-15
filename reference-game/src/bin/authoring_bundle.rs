@@ -14,8 +14,8 @@ use std::fs::OpenOptions;
 
 use nara::{
     fs::{
-        CapabilityRights, ContentDigest, DirectoryCapability, ExpectedTarget, FsError,
-        FsOperation, HostCapabilityOptions, RelativeComponent, RelativePath, TrustMode,
+        CapabilityRights, ContentDigest, DirectoryCapability, ExpectedTarget, FsError, FsOperation,
+        HostCapabilityOptions, RelativeComponent, RelativePath, TemporaryFileFailure, TrustMode,
     },
     project_host::{ingest_project_manifest, resolve_product_recipe},
     reflect::{AuthoringSchemaBundleError, AuthoringSchemaBundleLimits},
@@ -28,11 +28,26 @@ fn main() -> ExitCode {
             println!("{message}");
             ExitCode::SUCCESS
         }
-        Err(error) => {
-            eprintln!("authoring-bundle: {error}");
-            ExitCode::FAILURE
-        }
+        Err(error) => finish_failure(error),
     }
+}
+
+fn finish_failure(mut error: BundleToolError) -> ExitCode {
+    eprintln!("authoring-bundle: {error}");
+    if let BundleToolError::CreateTemporary(failure)
+    | BundleToolError::WriteTemporary(failure)
+    | BundleToolError::SyncTemporary(failure)
+    | BundleToolError::PublishBundle(failure) = &mut error
+        && !failure.retry_cleanup()
+    {
+        let cleanup = failure.cleanup().expect("failed cleanup retains its owner");
+        eprintln!(
+            "cleanup pending: temporary bundle {:?}, identity {:?}; remove it before retrying --write",
+            cleanup.name().to_str(),
+            cleanup.identity(),
+        );
+    }
+    ExitCode::FAILURE
 }
 
 fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<&'static str, BundleToolError> {
@@ -80,21 +95,34 @@ fn run_in_project(project_root: &Path, command: Command) -> Result<&'static str,
                 }
                 Err(source) => return Err(BundleToolError::ReadBundle(source)),
             };
-            let temporary_name = RelativeComponent::new(&format!(
-                ".nara-authoring-bundle-{}.tmp",
-                process::id()
-            ))
-            .map_err(|_| BundleToolError::TemporaryName)?;
+            parent
+                .preflight_replace(expected_target)
+                .map_err(BundleToolError::PublishPreflight)?;
+            let temporary_name =
+                RelativeComponent::new(&format!(".nara-authoring-bundle-{}.tmp", process::id()))
+                    .map_err(|_| BundleToolError::TemporaryName)?;
             let mut temporary = parent
                 .create_temp(&temporary_name)
                 .map_err(BundleToolError::CreateTemporary)?;
-            temporary
+            if let Err(source) = temporary
                 .write_all(&expected)
                 .and_then(|()| temporary.flush())
-                .map_err(BundleToolError::WriteTemporary)?;
-            temporary
-                .sync()
-                .map_err(BundleToolError::SyncTemporary)?;
+            {
+                return Err(BundleToolError::WriteTemporary(
+                    TemporaryFileFailure::with_cleanup(
+                        FsError::Io {
+                            operation: FsOperation::Write,
+                            source,
+                        },
+                        temporary.into_cleanup(),
+                    ),
+                ));
+            }
+            if let Err(source) = temporary.sync() {
+                return Err(BundleToolError::SyncTemporary(
+                    TemporaryFileFailure::with_cleanup(source, temporary.into_cleanup()),
+                ));
+            }
             let receipt = parent
                 .replace_temp(temporary, &target, expected_target)
                 .map_err(BundleToolError::PublishBundle)?;
@@ -133,8 +161,8 @@ fn canonical_bundle_bytes(
         .authoring_schema_bundle
         .as_ref()
         .ok_or(BundleToolError::BundlePathMissing)?;
-    let bundle_path = RelativePath::new(bundle_path.as_str())
-        .map_err(|_| BundleToolError::ParseBundlePath)?;
+    let bundle_path =
+        RelativePath::new(bundle_path.as_str()).map_err(|_| BundleToolError::ParseBundlePath)?;
     let recipe = project_recipe().map_err(|_| BundleToolError::ComposeRecipe)?;
     let plan = resolve_product_recipe(&candidate, recipe)
         .map_err(|_| BundleToolError::ResolveProductPlan)?;
@@ -224,10 +252,11 @@ enum BundleToolError {
     ReadBundle(FsError),
     ResolveBundleParent(FsError),
     TemporaryName,
-    CreateTemporary(FsError),
-    WriteTemporary(io::Error),
-    SyncTemporary(FsError),
-    PublishBundle(FsError),
+    PublishPreflight(FsError),
+    CreateTemporary(TemporaryFileFailure),
+    WriteTemporary(TemporaryFileFailure),
+    SyncTemporary(TemporaryFileFailure),
+    PublishBundle(TemporaryFileFailure),
     PublicationUnverified,
     SyncParent(FsError),
     Stale,
@@ -264,13 +293,14 @@ impl Display for BundleToolError {
                 formatter.write_str("declared bundle parent could not be resolved")
             }
             Self::TemporaryName => formatter.write_str("temporary bundle name is invalid"),
+            Self::PublishPreflight(_) => formatter.write_str("bundle publication is unsupported by this capability"),
             Self::CreateTemporary(_) => {
                 formatter.write_str("temporary bundle could not be created")
             }
-            Self::WriteTemporary(_) => {
+            Self::WriteTemporary(..) => {
                 formatter.write_str("temporary bundle could not be written")
             }
-            Self::SyncTemporary(_) => {
+            Self::SyncTemporary(..) => {
                 formatter.write_str("temporary bundle could not be synchronized")
             }
             Self::PublishBundle(_) => {
@@ -296,11 +326,12 @@ impl Error for BundleToolError {
             | Self::OpenProjectManifest(source)
             | Self::ReadBundle(source)
             | Self::ResolveBundleParent(source)
-            | Self::CreateTemporary(source)
-            | Self::SyncTemporary(source)
-            | Self::PublishBundle(source)
+            | Self::PublishPreflight(source)
             | Self::SyncParent(source) => Some(source),
-            Self::WriteTemporary(source) => Some(source),
+            Self::CreateTemporary(source)
+            | Self::PublishBundle(source)
+            | Self::WriteTemporary(source)
+            | Self::SyncTemporary(source) => Some(source),
             Self::Encode(source) => Some(source),
             Self::Usage
             | Self::ParseProjectManifestPath
@@ -326,6 +357,49 @@ mod tests {
     use super::{BundleToolError, Command, run_in_project};
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    #[cfg(windows)]
+    #[test]
+    fn failure_exit_cleans_retained_candidate() {
+        use nara::fs::{
+            CapabilityRights, DirectoryCapability, ExpectedTarget, HostCapabilityOptions,
+            RelativeComponent, TrustMode,
+        };
+        let root = std::env::temp_dir().join(format!(
+            "nara-bundle-exit-{}-{}",
+            std::process::id(),
+            NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&root).unwrap();
+        let parent = DirectoryCapability::from_host_handle(
+            super::host_directory(&root, CapabilityRights::ReadWrite).unwrap(),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, TrustMode::TrustedLocal),
+        )
+        .unwrap();
+        let candidate = parent
+            .create_temp(&RelativeComponent::new("candidate.tmp").unwrap())
+            .unwrap();
+        fs::write(root.join("bundle.json"), b"external bundle").unwrap();
+        let failure = parent
+            .replace_temp(
+                candidate,
+                &RelativeComponent::new("bundle.json").unwrap(),
+                ExpectedTarget::Missing,
+            )
+            .unwrap_err();
+        assert!(root.join("candidate.tmp").exists());
+        assert_eq!(
+            super::finish_failure(BundleToolError::PublishBundle(failure)),
+            std::process::ExitCode::FAILURE
+        );
+        assert!(!root.join("candidate.tmp").exists());
+        assert_eq!(
+            fs::read(root.join("bundle.json")).unwrap(),
+            b"external bundle"
+        );
+        drop(parent);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn check_reads_the_bundle_path_declared_by_the_manifest() {

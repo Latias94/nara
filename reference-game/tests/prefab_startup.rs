@@ -37,10 +37,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         include_str!("../scenes/startup.scene.json"),
     );
     assert_eq!(
-        format!(
-            "{}\n",
-            enemy_prefab.document().to_json_string().unwrap(),
-        ),
+        format!("{}\n", enemy_prefab.document().to_json_string().unwrap(),),
         include_str!("../prefabs/enemy.prefab.json"),
     );
 
