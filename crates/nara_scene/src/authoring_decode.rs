@@ -308,6 +308,22 @@ impl AuthoringFieldEdit {
     pub fn writes(&self) -> &[AuthoringFieldWrite] {
         &self.writes
     }
+
+    /// Lowers this edit into the same field operations used by document transactions.
+    #[must_use]
+    pub fn to_patch(&self) -> ScenePatchDocument {
+        ScenePatchDocument::new(
+            self.writes
+                .iter()
+                .map(|write| ScenePatchOperation::SetField {
+                    entity: self.entity.clone(),
+                    component: self.component.clone(),
+                    component_version: self.component_version,
+                    field: write.field.clone(),
+                    value: write.value.clone(),
+                }),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1774,12 +1790,15 @@ fn authoring_reopen_kind_rejection(
     ))
 }
 
-pub(crate) fn prepare_scene_authoring_field_edit(
+pub(crate) fn prepare_scene_authoring_patch(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
-    edit: &AuthoringFieldEdit,
+    patch: &ScenePatchDocument,
 ) -> Result<PreparedSceneAuthoringFieldEdit, ScenePatchReport> {
-    let (mut candidate, patch, inverse) = prepare_field_edit(document.clone(), state, edit)?;
+    let edits = field_edits_from_patch(patch)?;
+    let edit = &edits[0];
+    let (mut candidate, inverse) = prepare_field_edits(document.clone(), state, &edits)?;
+    field_edits_from_patch(&inverse)?;
     if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
         return Err(field_edit_rejection(
             edit,
@@ -1810,7 +1829,7 @@ pub(crate) fn prepare_scene_authoring_field_edit(
     Ok(PreparedSceneAuthoringFieldEdit {
         document: candidate,
         state: candidate_state,
-        patch,
+        patch: patch.clone(),
         report: ScenePatchReport {
             applied: true,
             inverse: Some(inverse),
@@ -1819,13 +1838,16 @@ pub(crate) fn prepare_scene_authoring_field_edit(
     })
 }
 
-pub(crate) fn prepare_prefab_authoring_field_edit(
+pub(crate) fn prepare_prefab_authoring_patch(
     document: &PrefabDocument,
     state: &AuthoringDocumentState,
-    edit: &AuthoringFieldEdit,
+    patch: &ScenePatchDocument,
 ) -> Result<PreparedPrefabAuthoringFieldEdit, ScenePatchReport> {
+    let edits = field_edits_from_patch(patch)?;
+    let edit = &edits[0];
     let scene = document.instantiate();
-    let (candidate_scene, patch, inverse) = prepare_field_edit(scene, state, edit)?;
+    let (candidate_scene, inverse) = prepare_field_edits(scene, state, &edits)?;
+    field_edits_from_patch(&inverse)?;
     let mut candidate = PrefabDocument::new(
         candidate_scene.roots.clone(),
         candidate_scene.entities.clone(),
@@ -1860,7 +1882,7 @@ pub(crate) fn prepare_prefab_authoring_field_edit(
     Ok(PreparedPrefabAuthoringFieldEdit {
         document: candidate,
         state: candidate_state,
-        patch,
+        patch: patch.clone(),
         report: ScenePatchReport {
             applied: true,
             inverse: Some(inverse),
@@ -1869,83 +1891,78 @@ pub(crate) fn prepare_prefab_authoring_field_edit(
     })
 }
 
-pub(crate) fn prepare_scene_authoring_history_patch(
-    document: &SceneDocument,
-    state: &AuthoringDocumentState,
+fn field_edits_from_patch(
     patch: &ScenePatchDocument,
-) -> Result<PreparedSceneAuthoringFieldEdit, ScenePatchReport> {
-    let edit = field_edit_from_history_patch(patch)?;
-    let prepared = prepare_scene_authoring_field_edit(document, state, &edit)?;
-    if prepared.patch != *patch {
-        return Err(authoring_history_patch_rejection());
+) -> Result<Vec<AuthoringFieldEdit>, ScenePatchReport> {
+    if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
+        || patch.is_empty()
+        || patch.operations.len() > MAX_AUTHORING_FIELD_WRITES
+    {
+        return Err(authoring_field_patch_rejection());
     }
-    Ok(prepared)
-}
-
-pub(crate) fn prepare_prefab_authoring_history_patch(
-    document: &PrefabDocument,
-    state: &AuthoringDocumentState,
-    patch: &ScenePatchDocument,
-) -> Result<PreparedPrefabAuthoringFieldEdit, ScenePatchReport> {
-    let edit = field_edit_from_history_patch(patch)?;
-    let prepared = prepare_prefab_authoring_field_edit(document, state, &edit)?;
-    if prepared.patch != *patch {
-        return Err(authoring_history_patch_rejection());
-    }
-    Ok(prepared)
-}
-
-fn field_edit_from_history_patch(
-    patch: &ScenePatchDocument,
-) -> Result<AuthoringFieldEdit, ScenePatchReport> {
-    let Some(ScenePatchOperation::SetField {
-        entity,
-        component,
-        component_version,
-        ..
-    }) = patch.operations.first()
-    else {
-        return Err(authoring_history_patch_rejection());
-    };
-    let writes = patch
+    let mut fields = BTreeSet::new();
+    let mut value_nodes = 0usize;
+    let mut logical_bytes = 0usize;
+    patch
         .operations
         .iter()
         .map(|operation| match operation {
             ScenePatchOperation::SetField {
-                entity: candidate_entity,
-                component: candidate_component,
-                component_version: candidate_version,
+                entity,
+                component,
+                component_version,
                 field,
                 value,
-            } if candidate_entity == entity
-                && candidate_component == component
-                && candidate_version == component_version =>
-            {
-                Ok(AuthoringFieldWrite::new(field.clone(), value.clone()))
+            } => {
+                let cost = value.cost();
+                value_nodes = value_nodes.saturating_add(cost.nodes());
+                logical_bytes = logical_bytes.saturating_add(cost.logical_bytes());
+                if !fields.insert((entity, component, field))
+                    || value_nodes > MAX_AUTHORING_FIELD_VALUE_NODES
+                    || logical_bytes > MAX_AUTHORING_FIELD_LOGICAL_BYTES
+                {
+                    return Err(authoring_field_patch_rejection());
+                }
+                AuthoringFieldEdit::single(
+                    entity.clone(),
+                    component.clone(),
+                    *component_version,
+                    field.clone(),
+                    value.clone(),
+                )
+                .map_err(|_| authoring_field_patch_rejection())
             }
-            _ => Err(authoring_history_patch_rejection()),
+            _ => Err(authoring_field_patch_rejection()),
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    AuthoringFieldEdit::new(
-        entity.clone(),
-        component.clone(),
-        *component_version,
-        writes,
-    )
-    .map_err(|_| authoring_history_patch_rejection())
+        .collect()
 }
 
-fn authoring_history_patch_rejection() -> ScenePatchReport {
+fn authoring_field_patch_rejection() -> ScenePatchReport {
     let mut diagnostics = DiagnosticReport::default();
     diagnostics.push(diagnostic_error(
-        "scene.authoring-history-patch-unavailable",
-        "Degraded authoring history only accepts its admitted bounded field edits",
+        "scene.authoring-field-patch-unavailable",
+        "Authoring transactions require bounded distinct preservation-safe field writes",
     ));
     ScenePatchReport {
         applied: false,
         inverse: None,
         diagnostics,
     }
+}
+
+fn prepare_field_edits(
+    mut candidate: SceneDocument,
+    state: &AuthoringDocumentState,
+    edits: &[AuthoringFieldEdit],
+) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
+    let mut inverse = Vec::with_capacity(edits.len());
+    for edit in edits {
+        let (next, _, undo) = prepare_field_edit(candidate, state, edit)?;
+        candidate = next;
+        inverse.extend(undo.operations);
+    }
+    inverse.reverse();
+    Ok((candidate, ScenePatchDocument::new(inverse)))
 }
 
 fn prepare_field_edit(

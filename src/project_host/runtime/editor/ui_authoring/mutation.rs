@@ -7,8 +7,8 @@ use nara_tooling::{
 };
 use nara_ui::__private::{
     UiAuthoringCommitPolicy, UiAuthoringDirectEdit, UiAuthoringEditError, UiAuthoringEditability,
-    UiAuthoringFieldKey, UiAuthoringFieldValue, UiPreparedStructure, UiStructureIntent,
-    UiStructureRejection,
+    UiAuthoringFieldKey, UiAuthoringFieldValue, UiAuthoringProjection, UiImageChoiceSet,
+    UiPreparedStructure, UiStructureIntent, UiStructureRejection,
 };
 use thiserror::Error;
 
@@ -301,66 +301,72 @@ impl EditorUiAuthoringFrame {
         if target.document() != self.document || target.base_revision() != self.revision {
             return false;
         }
-        let key = UiAuthoringFieldKey::new(
-            target.entity().clone(),
-            target.component().clone(),
-            target.field().clone(),
-        );
-        self.projection().ok().is_some_and(|projection| {
-            let version_matches = projection.field(&key).is_some_and(|descriptor| {
-                descriptor.component_version() == target.component_version()
-            });
-            if !version_matches {
-                return false;
-            }
-            let patch = edit.to_patch();
-            match commit_policy {
-                UiAuthoringCommitPolicy::Discrete => projection
-                    .validate_field_patch(&key, commit_policy, &patch)
-                    .is_ok(),
-                UiAuthoringCommitPolicy::Continuous => projection
-                    .validate_field_patch(&key, commit_policy, &patch)
-                    .or_else(|_| projection.validate_direct_patch(&key, &patch))
-                    .is_ok(),
-            }
-        })
+        self.projection()
+            .ok()
+            .is_some_and(|projection| projection_admits_field_edit(projection, edit, commit_policy))
     }
+}
 
-    pub(in super::super) fn admits_structure_command(
-        &self,
-        command: &PrefabCompositionCommand,
-    ) -> bool {
-        let Ok(projection) = self.projection() else {
-            return false;
-        };
-        match command {
-            PrefabCompositionCommand::CreateEntity { draft, placement } => projection
-                .revalidate_create_recipe(draft.components(), placement, self.image_choices().ok())
-                .is_ok(),
-            PrefabCompositionCommand::MoveEntity { entity, to } => match projection
-                .prepare_structure(
-                    &UiStructureIntent::Move {
-                        target: entity.clone(),
-                        placement: to.clone(),
-                    },
-                    None,
-                ) {
-                Ok(UiPreparedStructure::Move { target, placement }) => {
-                    target == *entity && placement == *to
-                }
-                Ok(UiPreparedStructure::NoOp { target }) => target == *entity,
-                _ => false,
+pub(in super::super) fn projection_admits_field_edit(
+    projection: &UiAuthoringProjection,
+    edit: &EditorAtomicFieldEdit,
+    commit_policy: UiAuthoringCommitPolicy,
+) -> bool {
+    let target = edit.target();
+    let key = UiAuthoringFieldKey::new(
+        target.entity().clone(),
+        target.component().clone(),
+        target.field().clone(),
+    );
+    let version_matches = projection
+        .field(&key)
+        .is_some_and(|descriptor| descriptor.component_version() == target.component_version());
+    if !version_matches {
+        return false;
+    }
+    let patch = edit.to_patch();
+    match commit_policy {
+        UiAuthoringCommitPolicy::Discrete => projection
+            .validate_field_patch(&key, commit_policy, &patch)
+            .is_ok(),
+        UiAuthoringCommitPolicy::Continuous => projection
+            .validate_field_patch(&key, commit_policy, &patch)
+            .or_else(|_| projection.validate_direct_patch(&key, &patch))
+            .is_ok(),
+    }
+}
+
+pub(in super::super) fn projection_admits_structure_command(
+    projection: &UiAuthoringProjection,
+    command: &PrefabCompositionCommand,
+    image_choices: Option<&UiImageChoiceSet>,
+) -> bool {
+    match command {
+        PrefabCompositionCommand::CreateEntity { draft, placement } => projection
+            .revalidate_create_recipe(draft.components(), placement, image_choices)
+            .is_ok(),
+        PrefabCompositionCommand::MoveEntity { entity, to } => match projection.prepare_structure(
+            &UiStructureIntent::Move {
+                target: entity.clone(),
+                placement: to.clone(),
             },
-            PrefabCompositionCommand::RemoveEntity { entity } => matches!(
-                projection.prepare_structure(
-                    &UiStructureIntent::Delete {
-                        target: entity.clone(),
-                    },
-                    None,
-                ),
-                Ok(UiPreparedStructure::Delete { target }) if target == *entity
+            None,
+        ) {
+            Ok(UiPreparedStructure::Move { target, placement }) => {
+                target == *entity && placement == *to
+            }
+            Ok(UiPreparedStructure::NoOp { target }) => target == *entity,
+            _ => false,
+        },
+        PrefabCompositionCommand::RemoveEntity { entity } => matches!(
+            projection.prepare_structure(
+                &UiStructureIntent::Delete {
+                    target: entity.clone(),
+                },
+                None,
             ),
-        }
+            Ok(UiPreparedStructure::Delete { target }) if target == *entity
+        ),
     }
 }
 

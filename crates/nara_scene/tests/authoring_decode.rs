@@ -198,6 +198,132 @@ fn single_authoring_field_edit_obeys_the_value_budget() {
 }
 
 #[test]
+fn cross_component_authoring_transaction_preserves_unknown_records_and_one_undo() {
+    let (bundle, adapter, document, patch) = cross_component_authoring_fixture();
+    let published =
+        SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(source("scenes/transaction.scene.json"), &bundle, &[adapter])
+            .unwrap()
+            .publish();
+    let manifest = published.unavailable_manifest().clone();
+    let mut session = SceneAuthoringSession::from_published_authoring_document(published);
+    let original = session.document().clone();
+    let revision = session.revision();
+    let report = session.apply_authoring_patch(&patch);
+
+    assert!(report.applied, "{:?}", report.diagnostics);
+    assert_eq!(session.revision().generation(), revision.generation() + 1);
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    let accepted = session.document().clone();
+    let accepted_revision = session.revision();
+    let accepted_state = session.content_state();
+    let accepted_history = session.history_status();
+    let mut invalid = patch.clone();
+    invalid.operations[1] = ScenePatchOperation::SetField {
+        entity: scene_id("player"),
+        component: component_id("nara.future.Unknown"),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new("value"),
+        value: ComponentValue::U64(99),
+    };
+    let rejected = session.apply_authoring_patch(&invalid);
+    assert!(!rejected.applied);
+    assert_eq!(session.document(), &accepted);
+    assert_eq!(session.revision(), accepted_revision);
+    assert_eq!(session.content_state(), accepted_state);
+    assert_eq!(session.history_status(), accepted_history);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &original);
+    assert_eq!(session.history_status().undo_depth, 0);
+    assert_eq!(session.history_status().redo_depth, 1);
+    assert!(session.redo_authoring().applied);
+    assert_eq!(session.document(), &accepted);
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+}
+
+#[test]
+fn authoring_transaction_bounds_forward_and_inverse_values_before_publication() {
+    for large_source in [false, true] {
+        let (bundle, adapter, mut document, mut patch) = cross_component_authoring_fixture();
+        if large_source {
+            for component in ["nara.scene.Name", "nara.scene.Visibility"] {
+                document.entities[0]
+                    .components
+                    .get_mut(&component_id(component))
+                    .unwrap()
+                    .value = ComponentValue::String("x".repeat(40 * 1024));
+            }
+        } else {
+            for operation in &mut patch.operations {
+                let ScenePatchOperation::SetField { value, .. } = operation else {
+                    unreachable!("the fixture contains only field writes");
+                };
+                *value = ComponentValue::String("x".repeat(40 * 1024));
+            }
+        }
+        let published = SceneDocumentCandidate::decode_json_bytes(
+            document.to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(source("scenes/bounded.scene.json"), &bundle, &[adapter])
+        .unwrap()
+        .publish();
+        let mut session = SceneAuthoringSession::from_published_authoring_document(published);
+        let original = session.document().clone();
+        let revision = session.revision();
+        let rejected = session.apply_authoring_patch(&patch);
+
+        assert!(!rejected.applied);
+        assert!(
+            rejected.diagnostics.iter().any(|entry| {
+                entry.code().as_str() == "scene.authoring-field-patch-unavailable"
+            })
+        );
+        assert_eq!(session.document(), &original);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_status().undo_depth, 0);
+    }
+}
+
+#[test]
+fn cross_component_prefab_authoring_transaction_undo_restores_every_target() {
+    let (bundle, adapter, document, patch) = cross_component_authoring_fixture();
+    let document = PrefabDocument::new(document.roots, document.entities);
+    let published =
+        PrefabDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(
+                source("prefabs/transaction.prefab.json"),
+                &bundle,
+                &[adapter],
+            )
+            .unwrap()
+            .publish();
+    let manifest = published.unavailable_manifest().clone();
+    let mut session = PrefabAuthoringSession::from_published_authoring_document(published);
+    let original = session.document().clone();
+    let revision = session.revision();
+    let report = session.apply_authoring_patch(&patch);
+    assert!(report.applied, "{:?}", report.diagnostics);
+    assert_eq!(session.revision().generation(), revision.generation() + 1);
+    assert_eq!(session.history_status().undo_depth, 1);
+    let accepted = session.document().clone();
+
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &original);
+    assert_eq!(session.history_status().undo_depth, 0);
+    assert_eq!(session.history_status().redo_depth, 1);
+    assert!(session.redo_authoring().applied);
+    assert_eq!(session.document(), &accepted);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+}
+
+#[test]
 fn available_field_edit_preserves_known_unbound_manifest_across_reopen() {
     let (bundle, adapter) = scene_bundle_and_name_adapter();
     let owner = persistent_owner(OWNER);
@@ -674,6 +800,61 @@ fn unknown_component_value_tag_rejects_before_authoring_candidate() {
         SceneDocumentCandidate::decode_json_bytes(&serde_json::to_vec(&encoded).unwrap()),
         Err(SceneFormatError::Payload { .. })
     ));
+}
+
+fn cross_component_authoring_fixture() -> (
+    AuthoringSchemaBundle,
+    nara_scene::__private::AuthoringAdapterReceipt,
+    SceneDocument,
+    ScenePatchDocument,
+) {
+    let (bundle, _) = scene_bundle_and_name_adapter();
+    let resolved =
+        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
+    let name = component_id("nara.scene.Name");
+    let visibility = component_id("nara.scene.Visibility");
+    let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_trusted_provider(
+        resolved.contribution_receipt(),
+        "nara.scene.first-party-authoring-adapter",
+        1,
+        1,
+        [name.clone(), visibility.clone()],
+    )
+    .unwrap();
+    let entity = scene_id("player");
+    let owner = persistent_owner(OWNER);
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity.clone())
+        .with_component(
+            name.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Player".to_owned()),
+            )
+            .with_owner(owner.clone()),
+        )
+        .with_component(
+            visibility.clone(),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("visible".to_owned()),
+            )
+            .with_owner(owner),
+        )
+        .with_component(
+            component_id("nara.future.Unknown"),
+            SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(7))
+                .with_owner(persistent_owner("nara.future")),
+        )]);
+    let patch = ScenePatchDocument::new([(name, "Hero"), (visibility, "hidden")].into_iter().map(
+        |(component, value)| ScenePatchOperation::SetField {
+            entity: entity.clone(),
+            component,
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("value"),
+            value: ComponentValue::String(value.to_owned()),
+        },
+    ));
+    (bundle, adapter, document, patch)
 }
 
 fn scene_bundle_and_name_adapter() -> (

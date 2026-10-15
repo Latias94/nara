@@ -125,7 +125,6 @@ impl EditorProjectSession {
             model: Arc::clone(&frame),
             source_index,
             image_import,
-            dispatched: false,
         });
         frame
     }

@@ -5,7 +5,10 @@ use std::{collections::BTreeSet, error::Error, fmt};
 use nara_reflect::{ComponentFieldId, ComponentValue, ComponentValueKind};
 use nara_scene::{ScenePatchDocument, ScenePatchOperation};
 
-use crate::{EditorDocumentId, EditorFieldTarget};
+use crate::EditorFieldTarget;
+
+#[cfg(test)]
+use crate::EditorDocumentId;
 
 pub const MAX_EDITOR_ATOMIC_FIELD_WRITES: usize = 8;
 const MAX_EDITOR_ATOMIC_VALUE_NODES: usize = 256;
@@ -227,14 +230,6 @@ impl EditorGestureAction {
             Self::Begin { baseline } => Some(baseline.target()),
             Self::Preview { edit, .. } | Self::Commit { edit, .. } => Some(edit.target()),
             Self::Cancel { .. } => None,
-        }
-    }
-
-    #[must_use]
-    pub const fn revision_advancing_document(&self) -> Option<EditorDocumentId> {
-        match self {
-            Self::Commit { edit, .. } => Some(edit.target().document()),
-            Self::Begin { .. } | Self::Preview { .. } | Self::Cancel { .. } => None,
         }
     }
 }

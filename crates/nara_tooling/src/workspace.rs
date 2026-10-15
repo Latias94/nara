@@ -742,8 +742,8 @@ impl EditorWorkspace {
 
     /// Applies the closed command vocabulary for generically published authoring documents.
     ///
-    /// This path never constructs or consults a Runtime component registry. Raw patches and
-    /// composition commands are rejected before they can reach a document session.
+    /// This path never constructs or consults a Runtime component registry. Field-only patches
+    /// use preservation-safe admission; unsupported structural operations remain unavailable.
     pub fn apply_authoring_command(
         &mut self,
         command: EditorWorkspaceCommand,
@@ -777,6 +777,26 @@ impl EditorWorkspace {
                 base_revision,
                 edit,
             } => self.apply_authoring_field_edit(document, base_revision, edit),
+            EditorWorkspaceCommand::ApplyScenePatch {
+                document,
+                base_revision,
+                patch,
+            } => self.apply_authoring_patch(
+                document,
+                base_revision,
+                EditorDocumentKind::Scene,
+                patch,
+            ),
+            EditorWorkspaceCommand::ApplyPrefabPatch {
+                document,
+                base_revision,
+                patch,
+            } => self.apply_authoring_patch(
+                document,
+                base_revision,
+                EditorDocumentKind::Prefab,
+                patch,
+            ),
             EditorWorkspaceCommand::Undo {
                 document,
                 base_revision,
@@ -791,9 +811,7 @@ impl EditorWorkspace {
                 }
                 self.mark_external_changed(document)
             }
-            EditorWorkspaceCommand::ApplyScenePatch { document, .. }
-            | EditorWorkspaceCommand::ApplyPrefabPatch { document, .. }
-            | EditorWorkspaceCommand::ComposeScene { document, .. }
+            EditorWorkspaceCommand::ComposeScene { document, .. }
             | EditorWorkspaceCommand::ComposePrefab { document, .. } => {
                 authoring_command_error_report(self.active_document, document)
             }
@@ -1046,6 +1064,28 @@ impl EditorWorkspace {
         let patch_report = match slot {
             EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_field_edit(edit),
             EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_field_edit(edit),
+        };
+        report_for_document_patch(document, active_document, slot, patch_report)
+    }
+
+    fn apply_authoring_patch(
+        &mut self,
+        document: EditorDocumentId,
+        base_revision: SceneAuthoringRevision,
+        kind: EditorDocumentKind,
+        patch: ScenePatchDocument,
+    ) -> EditorWorkspaceCommandReport {
+        let (active_document, slot) =
+            match self.resolve_exact_authoring_document_mutation_slot(document, base_revision) {
+                Ok(exact) => exact,
+                Err(report) => return report,
+            };
+        if slot.kind() != kind {
+            return authoring_command_error_report(active_document, document);
+        }
+        let patch_report = match slot {
+            EditorDocumentSlot::Scene(slot) => slot.session.apply_authoring_patch(&patch),
+            EditorDocumentSlot::Prefab(slot) => slot.session.apply_authoring_patch(&patch),
         };
         report_for_document_patch(document, active_document, slot, patch_report)
     }
@@ -2492,7 +2532,7 @@ fn authoring_command_error_report(
     workspace_error_report(
         WorkspaceDocumentContext::new(active_document, Some(document)),
         "tooling.workspace-authoring-command-unsupported",
-        "generic authoring does not accept raw patches or composition commands",
+        "generic authoring does not accept this document kind or composition command",
     )
 }
 
@@ -4110,18 +4150,17 @@ mod tests {
         assert!(visibility_view.fields.is_empty());
 
         let edit_base_revision = workspace.document_revision(document).unwrap();
-        let edit =
-            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyInspectorCommand {
-                document,
-                base_revision: edit_base_revision,
-                command: SceneInspectorCommand::SetField {
-                    entity: entity.clone(),
-                    component: name.clone(),
-                    component_version: ComponentSchemaVersion::ONE,
-                    field: ComponentFieldId::new("value"),
-                    value: ComponentValue::String("Renamed".to_owned()),
-                },
-            });
+        let edit = workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
+            document,
+            base_revision: edit_base_revision,
+            patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
+                entity: entity.clone(),
+                component: name.clone(),
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("value"),
+                value: ComponentValue::String("Renamed".to_owned()),
+            }]),
+        });
         assert!(edit.applied, "{:#?}", edit.diagnostics);
         assert_ne!(edit.revision, Some(edit_base_revision));
 
@@ -4178,18 +4217,17 @@ mod tests {
             workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
                 document,
                 base_revision: accepted_revision,
-                patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
+                patch: ScenePatchDocument::new([ScenePatchOperation::RemoveComponent {
                     entity: entity.clone(),
                     component: name,
-                    component_version: ComponentSchemaVersion::ONE,
-                    field: ComponentFieldId::new("value"),
-                    value: ComponentValue::String("Bypass".to_owned()),
                 }]),
             });
         assert!(!raw_patch.applied);
-        assert!(raw_patch.diagnostics.iter().any(|entry| {
-            entry.code().as_str() == "tooling.workspace-authoring-command-unsupported"
-        }));
+        assert!(
+            raw_patch.diagnostics.iter().any(|entry| {
+                entry.code().as_str() == "scene.authoring-field-patch-unavailable"
+            })
+        );
         let structure = workspace.apply_authoring_command(EditorWorkspaceCommand::ComposeScene {
             document,
             base_revision: accepted_revision,

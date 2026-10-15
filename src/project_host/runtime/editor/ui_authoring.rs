@@ -22,6 +22,7 @@ mod mutation;
 
 pub use mutation::EditorUiAuthoringEditError;
 use mutation::EditorUiMutationAuthority;
+pub(super) use mutation::{projection_admits_field_edit, projection_admits_structure_command};
 
 /// Root-private immutable UI authoring frame shared by current and future Editor Adapters.
 ///

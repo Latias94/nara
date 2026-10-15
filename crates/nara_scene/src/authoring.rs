@@ -894,13 +894,19 @@ impl PrefabAuthoringSession {
         &mut self,
         edit: crate::AuthoringFieldEdit,
     ) -> ScenePatchReport {
+        self.apply_authoring_patch(&edit.to_patch())
+    }
+
+    /// Commits one bounded field-only transaction while preserving unavailable source records.
+    #[cfg(feature = "serde")]
+    pub fn apply_authoring_patch(&mut self, patch: &ScenePatchDocument) -> ScenePatchReport {
         let Some(state) = self.authority.published() else {
             return authoring_field_edit_session_rejection();
         };
-        let prepared = match crate::authoring_decode::prepare_prefab_authoring_field_edit(
+        let prepared = match crate::authoring_decode::prepare_prefab_authoring_patch(
             &self.document,
             state,
-            &edit,
+            patch,
         ) {
             Ok(prepared) => prepared,
             Err(report) => return report,
@@ -1024,7 +1030,7 @@ impl PrefabAuthoringSession {
         let report =
             self.history
                 .apply_history(&mut self.document, direction, |patch, document| {
-                    let prepared = crate::authoring_decode::prepare_prefab_authoring_history_patch(
+                    let prepared = crate::authoring_decode::prepare_prefab_authoring_patch(
                         document, state, patch,
                     )?;
                     next_state = Some(prepared.state);
@@ -1336,13 +1342,19 @@ impl SceneAuthoringSession {
         &mut self,
         edit: crate::AuthoringFieldEdit,
     ) -> ScenePatchReport {
+        self.apply_authoring_patch(&edit.to_patch())
+    }
+
+    /// Commits one bounded field-only transaction while preserving unavailable source records.
+    #[cfg(feature = "serde")]
+    pub fn apply_authoring_patch(&mut self, patch: &ScenePatchDocument) -> ScenePatchReport {
         let Some(state) = self.authority.published() else {
             return authoring_field_edit_session_rejection();
         };
-        let prepared = match crate::authoring_decode::prepare_scene_authoring_field_edit(
+        let prepared = match crate::authoring_decode::prepare_scene_authoring_patch(
             &self.document,
             state,
-            &edit,
+            patch,
         ) {
             Ok(prepared) => prepared,
             Err(report) => return report,
@@ -1667,7 +1679,7 @@ impl SceneAuthoringSession {
         let report =
             self.history
                 .apply_history(&mut self.document, direction, |patch, document| {
-                    let prepared = crate::authoring_decode::prepare_scene_authoring_history_patch(
+                    let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
                         document, state, patch,
                     )?;
                     next_state = Some(prepared.state);
