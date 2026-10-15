@@ -93,7 +93,16 @@ Direct `App` composition retains raw one-shot plugin support. A one-shot value c
 let mut app = App::new();
 app.add_plugins((MinimalPlugins, recipe()?))?;
 app.add_plugins(OneShotDebugPlugin::new())?;
+let mut runtime = RuntimeInstance::start(app)?;
+runtime.drive(std::time::Duration::ZERO)?;
+runtime.finish()?;
 ```
+
+`App` configures the runtime and has no execution methods. `RuntimeInstance` owns startup, time,
+faults, and shutdown. A failed start retains its cleanup owner; an incomplete `finish` returns the
+same owner for explicit retirement retry. A terminal plugin shutdown failure is also an error even
+after physical retirement completes. Embedded UI hosts request Stop and advance close progress
+without waiting for completion on their UI thread.
 
 File-backed product Hosts accept the same recipe while retaining project loading, admission,
 publication, and close authority:

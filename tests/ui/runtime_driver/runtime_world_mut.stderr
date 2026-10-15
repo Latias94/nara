@@ -1,0 +1,11 @@
+error[E0599]: no method named `world_mut` found for struct `RuntimeInstance` in the current scope
+ --> tests/ui/runtime_driver/runtime_world_mut.rs:5:13
+  |
+5 |     runtime.world_mut();
+  |             ^^^^^^^^^
+  |
+help: there is a method `world` with a similar name
+  |
+5 -     runtime.world_mut();
+5 +     runtime.world();
+  |

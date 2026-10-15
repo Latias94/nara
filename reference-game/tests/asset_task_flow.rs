@@ -53,11 +53,43 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
         .resource_mut::<AssetServer>()
         .reserve_record::<ImageAsset>(&record)
         .unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
+    let imported = {
+        let world = app.world();
+        let source = image_source_directory(temp.path()).open(&record).unwrap();
+        world
+            .resource::<ImageImporter>()
+            .admit_file(
+                ImageFileImportRequest::new(record.clone(), source, ImageImportSettings::default()),
+                handle,
+                AssetVersion::ZERO,
+                world.resource::<AssetServer>(),
+                world.resource::<Assets<ImageAsset>>(),
+                world.resource::<AssetStates>(),
+            )
+            .unwrap()
+            .import(TaskCancellationToken::new())
+            .unwrap()
+    };
+    let server = app.world().resource::<AssetServer>().clone();
+    app.world_mut().unwrap().resource_scope(
+        |world, mut images: nara::ecs::Mut<Assets<ImageAsset>>| {
+            world.resource_scope(|world, mut states: nara::ecs::Mut<AssetStates>| {
+                imported
+                    .commit(
+                        &server,
+                        &mut images,
+                        &mut states,
+                        &mut world.resource_mut::<AssetEvents>(),
+                    )
+                    .unwrap();
+            });
+        },
+    );
+    app.insert_resource(ReloadTestPort).unwrap();
+    app.__register_driver_port::<ReloadTestPort>(ReloadTestPort::apply_driver_input_in_world)
         .unwrap();
+    let mut app = RuntimeInstance::start(app).unwrap();
+    request_reload(&mut app, record.path().clone());
 
     drive_until(&mut app, |app| {
         app.world()
@@ -81,11 +113,7 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
     let mut oversized = TEXTURE_BYTES.to_vec();
     oversized.push(0);
     fs::write(&texture_path, oversized).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
-        .unwrap();
+    request_reload(&mut app, record.path().clone());
     drive_until(&mut app, |app| {
         app.world().resource::<ImageReloadStats>().failed > 0
     });
@@ -107,13 +135,42 @@ fn public_asset_task_flow_preserves_last_good_after_failed_reload() {
         last_good_version
     );
     assert_eq!(app.world().resource::<ImageReloadStats>().pending, 0);
-    app.shutdown_plugins().unwrap();
+    app.finish().unwrap();
 }
 
-fn drive_until(app: &mut App, mut complete: impl FnMut(&App) -> bool) {
+#[derive(Resource)]
+struct ReloadTestPort;
+
+impl nara::app::__RuntimeDriverPort for ReloadTestPort {
+    type Input = AssetPath;
+    type Output = ();
+    fn apply_driver_input(&mut self, _input: Self::Input) {}
+}
+
+impl ReloadTestPort {
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        path: AssetPath,
+    ) -> Result<(), (nara::app::RuntimeWorldAccessError, AssetPath)> {
+        world
+            .resource_mut::<AssetSourceChanges>()
+            .modified(path)
+            .unwrap();
+        Ok(())
+    }
+}
+
+fn request_reload(runtime: &mut RuntimeInstance, path: AssetPath) {
+    runtime
+        .with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(path))
+        .unwrap()
+        .unwrap();
+}
+
+fn drive_until(app: &mut RuntimeInstance, mut complete: impl FnMut(&RuntimeInstance) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !complete(app) && Instant::now() < deadline {
-        app.update().unwrap();
+        app.drive(Duration::ZERO).unwrap();
         thread::yield_now();
     }
     assert!(complete(app), "asset task flow exceeded the test deadline");

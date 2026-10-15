@@ -65,6 +65,7 @@ pub(crate) enum EditorImageImportFailure {
     MetadataPublicationUncertain,
     Runtime(EditorImageRuntimeFailure),
     ResultMismatch,
+    CleanupPending,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -225,8 +226,11 @@ pub(crate) struct EditorImageImportHost {
     hydration: EditorImageHydrationHost,
     refresh: Option<RefreshObligation>,
     reconciliation: Option<ReconciliationObligation>,
+    publication_cleanup: Option<FilePublicationHost>,
     #[cfg(test)]
     reject_next_valid_metadata_receipt: bool,
+    #[cfg(test)]
+    fail_next_metadata_after_write: bool,
 }
 
 impl Default for EditorImageImportHost {
@@ -244,8 +248,11 @@ impl Default for EditorImageImportHost {
             hydration: EditorImageHydrationHost::default(),
             refresh: None,
             reconciliation: None,
+            publication_cleanup: None,
             #[cfg(test)]
             reject_next_valid_metadata_receipt: false,
+            #[cfg(test)]
+            fail_next_metadata_after_write: false,
         }
     }
 }
@@ -340,7 +347,9 @@ impl EditorImageImportHost {
 
     #[must_use]
     pub(crate) fn request_blocker(&self) -> Option<EditorImageImportFailure> {
-        if self.pending.is_some() || self.hydration.has_pending_work() {
+        if self.publication_cleanup.is_some() {
+            Some(EditorImageImportFailure::CleanupPending)
+        } else if self.pending.is_some() || self.hydration.has_pending_work() {
             Some(EditorImageImportFailure::Busy)
         } else if self.reconciliation.is_some() {
             Some(EditorImageImportFailure::ReconcileRequired)
@@ -356,9 +365,33 @@ impl EditorImageImportHost {
         self.hydration.cancel_pending();
     }
 
+    pub(crate) fn retry_publication_cleanup(&mut self) -> bool {
+        let Some(publication) = self.publication_cleanup.as_mut() else {
+            return true;
+        };
+        if !publication.retry_cleanup() {
+            return false;
+        }
+        self.publication_cleanup = None;
+        true
+    }
+
     #[cfg(test)]
     pub(crate) fn test_reject_next_valid_metadata_receipt(&mut self) {
         self.reject_next_valid_metadata_receipt = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_fail_next_metadata_after_write(&mut self) {
+        self.fail_next_metadata_after_write = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_allow_publication_cleanup(&mut self) {
+        self.publication_cleanup
+            .as_mut()
+            .expect("the test requires retained metadata cleanup")
+            .test_allow_cleanup();
     }
 
     pub(crate) fn advance(
@@ -385,6 +418,7 @@ impl EditorImageImportHost {
         expected_detail_revision: u64,
         settings: ImageImportSettings,
     ) -> EditorImageImportRequestResult {
+        self.retry_publication_cleanup();
         if let Some(failure) = self.request_blocker() {
             return EditorImageImportRequestResult::Rejected(failure);
         }
@@ -549,7 +583,17 @@ impl EditorImageImportHost {
         let metadata_changed = previous_settings != Some(settings);
         let mut detail_revision = source_index.generation().get();
         if metadata_changed {
-            match publication.publish(encoded.as_bytes()) {
+            #[cfg(test)]
+            if std::mem::take(&mut self.fail_next_metadata_after_write) {
+                publication.test_fail_after_write();
+            }
+            let outcome = publication.publish(encoded.as_bytes());
+            if publication.has_cleanup() {
+                debug_assert!(self.publication_cleanup.is_none());
+                self.publication_cleanup = Some(publication);
+                return self.fail_request(generation, EditorImageImportFailure::CleanupPending);
+            }
+            match outcome {
                 FilePublicationOutcome::Published(candidate) => {
                     #[cfg(test)]
                     if std::mem::take(&mut self.reject_next_valid_metadata_receipt) {

@@ -16,22 +16,25 @@ fn asset_plugin_resolves_manual_changes_into_generation_requests() {
         .modified(AssetPath::new("textures/player.png").unwrap())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let requests = app.world().resource::<CapturedReloadRequests>();
+    let requests = runtime.world().resource::<CapturedReloadRequests>();
     let request = requests.0.first().unwrap();
     assert_eq!(request.path().as_str(), "textures/player.png");
     assert_eq!(request.generation().raw(), 1);
     assert_eq!(request.expected_version(), AssetVersion::ZERO);
     assert_eq!(request.request_kind(), AssetReloadRequestKind::LoadOrReload);
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(request.asset_id())
             .unwrap()
             .load_state(),
         &crate::LoadState::Loading
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -44,18 +47,21 @@ fn resolver_terminates_unknown_source_changes_instead_of_retaining_them() {
         .modified(AssetPath::new("textures/missing.png").unwrap())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let requests = app.world().resource::<AssetReloadRequests>();
+    let requests = runtime.world().resource::<AssetReloadRequests>();
     assert!(requests.is_empty());
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetReloadDiagnostics>()
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["asset.reload-record-missing"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -83,10 +89,12 @@ fn missing_record_invalidates_an_existing_runtime_identity() {
         .modified(path)
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(asset_id)
             .unwrap()
@@ -94,14 +102,15 @@ fn missing_record_invalidates_an_existing_runtime_identity() {
         None
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetLoadGenerations>()
             .current(asset_id)
             .raw(),
         2
     );
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(asset_id)
             .unwrap()
@@ -109,18 +118,24 @@ fn missing_record_invalidates_an_existing_runtime_identity() {
         crate::LoadState::Failed { message } if message == "asset.reload-record-missing"
     ));
     assert!(
-        app.world().resource::<AssetEvents>().iter().any(|event| {
-            event.id() == asset_id && event.kind() == AssetEventKind::ReloadRejected
-        })
+        runtime
+            .world()
+            .resource::<AssetEvents>()
+            .iter()
+            .any(|event| {
+                event.id() == asset_id && event.kind() == AssetEventKind::ReloadRejected
+            })
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetReloadDiagnostics>()
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["asset.reload-record-missing"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -159,10 +174,12 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
         .modified(source.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(dependent_asset_id)
             .unwrap()
@@ -170,14 +187,15 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
         None
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetLoadGenerations>()
             .current(dependent_asset_id)
             .raw(),
         2
     );
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(dependent_asset_id)
             .unwrap()
@@ -185,11 +203,18 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
         crate::LoadState::Failed { message }
             if message == "asset.reload-dependent-record-missing"
     ));
-    assert!(app.world().resource::<AssetEvents>().iter().any(|event| {
-        event.id() == dependent_asset_id && event.kind() == AssetEventKind::ReloadRejected
-    }));
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetEvents>()
+            .iter()
+            .any(|event| {
+                event.id() == dependent_asset_id && event.kind() == AssetEventKind::ReloadRejected
+            })
+    );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetReloadDiagnostics>()
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
@@ -197,7 +222,8 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
         vec!["asset.reload-dependent-record-missing"]
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<CapturedReloadRequests>()
             .0
             .iter()
@@ -205,6 +231,7 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
             .collect::<Vec<_>>(),
         vec!["textures/source.png"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -243,10 +270,12 @@ fn missing_source_record_still_resolves_known_dependents() {
         .modified(missing_source.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<CapturedReloadRequests>()
             .0
             .iter()
@@ -255,12 +284,14 @@ fn missing_source_record_still_resolves_known_dependents() {
         vec!["textures/dependent.png"]
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetLoadGenerations>()
             .current(missing_source_id)
             .raw(),
         2
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -285,11 +316,12 @@ fn resolver_rejects_a_known_source_without_a_reload_consumer() {
         .modified(AssetPath::new("textures/player.png").unwrap())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    assert!(app.world().resource::<AssetReloadRequests>().is_empty());
+    assert!(runtime.world().resource::<AssetReloadRequests>().is_empty());
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(asset_id)
             .unwrap()
@@ -298,13 +330,15 @@ fn resolver_rejects_a_known_source_without_a_reload_consumer() {
             if message == "asset.reload-source-consumer-missing"
     ));
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetReloadDiagnostics>()
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["asset.reload-source-consumer-missing"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -334,16 +368,18 @@ fn resolver_rejects_unsupported_source_kinds_with_typed_diagnostics() {
         .modified(record.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<CapturedReloadRequests>()
             .0
             .is_empty()
     );
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(asset_id)
             .unwrap()
@@ -351,7 +387,7 @@ fn resolver_rejects_unsupported_source_kinds_with_typed_diagnostics() {
         crate::LoadState::Failed { message }
             if message == "asset.reload-source-consumer-missing"
     ));
-    let diagnostic = app
+    let diagnostic = runtime
         .world()
         .resource::<AssetReloadDiagnostics>()
         .iter()
@@ -371,10 +407,15 @@ fn resolver_rejects_unsupported_source_kinds_with_typed_diagnostics() {
         nara_diagnostic::DiagnosticValueRef::Identifier("scene")
     );
     assert!(
-        app.world().resource::<AssetEvents>().iter().any(|event| {
-            event.id() == asset_id && event.kind() == AssetEventKind::ReloadRejected
-        })
+        runtime
+            .world()
+            .resource::<AssetEvents>()
+            .iter()
+            .any(|event| {
+                event.id() == asset_id && event.kind() == AssetEventKind::ReloadRejected
+            })
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -397,9 +438,10 @@ fn resolver_errors_are_recorded_as_reload_diagnostics() {
         .modified(AssetPath::new("textures/player.png").unwrap())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let diagnostics = app.world().resource::<AssetReloadDiagnostics>();
+    let diagnostics = runtime.world().resource::<AssetReloadDiagnostics>();
     assert!(diagnostics.has_errors());
     assert_eq!(diagnostics.iter().len(), 1);
     let diagnostic = diagnostics.iter().next().unwrap();
@@ -441,7 +483,8 @@ fn resolver_errors_are_recorded_as_reload_diagnostics() {
     let diagnostic_debug = format!("{diagnostic:?}");
     assert!(!diagnostic_debug.contains(&stable_id().to_string()));
     assert!(!diagnostic_debug.contains(&dependent_stable_id().to_string()));
-    assert!(app.world().resource::<AssetReloadRequests>().is_empty());
+    assert!(runtime.world().resource::<AssetReloadRequests>().is_empty());
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -474,9 +517,10 @@ fn identity_conflict_invalidates_every_known_runtime_identity() {
         .modified(target.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let states = app.world().resource::<AssetStates>();
+    let states = runtime.world().resource::<AssetStates>();
     for asset_id in [path_asset_id, stable_asset_id] {
         assert!(matches!(
             states.state(asset_id).unwrap().load_state(),
@@ -484,7 +528,7 @@ fn identity_conflict_invalidates_every_known_runtime_identity() {
                 if message == "asset.reload-source-change-resolve-failed"
         ));
     }
-    let rejected = app
+    let rejected = runtime
         .world()
         .resource::<AssetEvents>()
         .iter()
@@ -492,7 +536,8 @@ fn identity_conflict_invalidates_every_known_runtime_identity() {
         .map(|event| event.id())
         .collect::<BTreeSet<_>>();
     assert_eq!(rejected, BTreeSet::from([path_asset_id, stable_asset_id]));
-    assert!(app.world().resource::<AssetReloadRequests>().is_empty());
+    assert!(runtime.world().resource::<AssetReloadRequests>().is_empty());
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -525,9 +570,10 @@ fn dependency_records_enqueue_dependent_assets() {
         .modified(AssetPath::new("textures/source.png").unwrap())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let paths = app
+    let paths = runtime
         .world()
         .resource::<CapturedReloadRequests>()
         .0
@@ -535,6 +581,7 @@ fn dependency_records_enqueue_dependent_assets() {
         .map(|request| request.path().as_str().to_string())
         .collect::<Vec<_>>();
     assert_eq!(paths, vec!["textures/source.png", "textures/dependent.png"]);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -578,9 +625,10 @@ fn dependency_records_enqueue_transitive_dependents_once() {
         .modified(AssetPath::new("textures/source.png").unwrap())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let paths = app
+    let paths = runtime
         .world()
         .resource::<CapturedReloadRequests>()
         .0
@@ -595,6 +643,7 @@ fn dependency_records_enqueue_transitive_dependents_once() {
             "textures/transitive.png"
         ]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -631,9 +680,10 @@ fn coalesced_sources_enqueue_a_shared_dependent_once() {
         changes.modified(second.path().clone()).unwrap();
     }
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let captured = app.world().resource::<CapturedReloadRequests>();
+    let captured = runtime.world().resource::<CapturedReloadRequests>();
     assert_eq!(
         captured
             .0
@@ -649,10 +699,12 @@ fn coalesced_sources_enqueue_a_shared_dependent_once() {
         .unwrap()
         .asset_id();
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetLoadGenerations>()
             .current(dependent_id)
             .raw(),
         1
     );
+    runtime.finish().unwrap();
 }

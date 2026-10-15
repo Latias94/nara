@@ -1,6 +1,9 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use nara_app::{App, CoreStage, FixedTime, PluginError, ScheduleCompatibilityError, StartupStage};
+use nara_app::{
+    App, CoreStage, FixedTime, PluginError, RuntimeInstance, ScheduleCompatibilityError,
+    StartupStage,
+};
 use nara_ecs::{Resource, SystemSet, schedule::IntoScheduleConfigs, system::Commands};
 
 #[derive(Resource)]
@@ -123,8 +126,9 @@ fn seal_reasserts_final_deferred_application() {
     app.set_schedule_apply_final_deferred(CoreStage::FixedUpdate, false)
         .unwrap();
 
-    app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
-    let final_deferred_applied = app.world().contains_resource::<FinalDeferredApplied>();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    let final_deferred_applied = runtime.world().contains_resource::<FinalDeferredApplied>();
 
     assert!(final_deferred_applied);
 }
@@ -137,8 +141,9 @@ fn seal_reasserts_final_deferred_application_for_cleanup_anchor() {
     app.set_schedule_apply_final_deferred(CoreStage::Cleanup, false)
         .unwrap();
 
-    app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
-    let final_deferred_applied = app.world().contains_resource::<FinalDeferredApplied>();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+    let final_deferred_applied = runtime.world().contains_resource::<FinalDeferredApplied>();
 
     assert!(final_deferred_applied);
 }

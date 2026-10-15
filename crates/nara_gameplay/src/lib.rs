@@ -260,8 +260,7 @@ mod tests {
 
     use super::*;
     use nara_app::{
-        AppRunError, CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter,
-        ScheduleCompatibilityError,
+        CoreStage, PluginError, RuntimeFaultKind, RuntimeFaultReporter, ScheduleCompatibilityError,
     };
     use nara_core::{ByteLimit, ItemLimit};
     use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
@@ -444,17 +443,19 @@ mod tests {
             .press(KeyCode::Space)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<GameplayCommandQueue>()
                 .stats()
                 .pending_commands,
             1
         );
-        app.run_once(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
 
-        let observed = &app.world().resource::<CommandsByTick>().0;
+        let observed = &runtime.world().resource::<CommandsByTick>().0;
         assert_eq!(observed.len(), 3);
         assert_eq!(observed[0].0, 1);
         assert_eq!(observed[0].1.len(), 1);
@@ -465,11 +466,15 @@ mod tests {
         );
         assert!(observed[1].1.is_empty());
         assert!(observed[2].1.is_empty());
-        assert!(app.world().resource::<GameplayCommandQueue>().is_idle());
+        assert!(runtime.world().resource::<GameplayCommandQueue>().is_idle());
         assert_eq!(
-            app.world().resource::<GameplayCommandBatch>().active_tick(),
+            runtime
+                .world()
+                .resource::<GameplayCommandBatch>()
+                .active_tick(),
             None
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -508,27 +513,40 @@ mod tests {
                 .unwrap();
         }
 
-        app.world_mut()
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Press(KeyCode::Enter),
+                )
+            })
             .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter)
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        app.world_mut()
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Release(KeyCode::Enter),
+                )
+            })
             .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .release(KeyCode::Enter)
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        app.world_mut()
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Press(KeyCode::Enter),
+                )
+            })
             .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Enter)
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let commands = &app.world().resource::<CommandsByTick>().0[0].1;
+        let commands = &runtime.world().resource::<CommandsByTick>().0[0].1;
         assert_eq!(commands.len(), 3);
         assert_eq!(
             commands
@@ -544,6 +562,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["interact.started", "interact.released", "interact.started"]
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -599,14 +618,16 @@ mod tests {
             .press(KeyCode::Enter)
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let commands = &app.world().resource::<CommandsByTick>().0[0].1;
+        let commands = &runtime.world().resource::<CommandsByTick>().0[0].1;
         assert_eq!(commands.len(), 1);
         let envelope = &commands[0];
         assert_eq!(envelope.command_type().as_str(), "ui.select");
         assert_eq!(envelope.target(), Some(&target));
         assert_eq!(envelope.payload(), &payload);
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -622,13 +643,20 @@ mod tests {
         )
         .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let observed = &app.world().resource::<CommandsByTick>().0;
+        let observed = &runtime.world().resource::<CommandsByTick>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].1.len(), 1);
         assert_eq!(observed[0].1[0].command_type().as_str(), "semantic.retry");
-        assert!(app.world().resource::<LocalGameplayCommands>().is_empty());
+        assert!(
+            runtime
+                .world()
+                .resource::<LocalGameplayCommands>()
+                .is_empty()
+        );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -676,23 +704,33 @@ mod tests {
                 GameplayCommandTypeId::new("cancel.released").unwrap(),
             ))
             .unwrap();
-        app.world_mut()
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Press(KeyCode::Escape),
+                )
+            })
             .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .press(KeyCode::Escape)
             .unwrap();
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
-        app.world_mut()
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                nara_input::apply_keyboard_driver_input(
+                    scope,
+                    nara_input::ButtonDriverInput::Release(KeyCode::Escape),
+                )
+            })
             .unwrap()
-            .resource_mut::<nara_input::ButtonInput<KeyCode>>()
-            .release(KeyCode::Escape)
             .unwrap();
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
-        let observed = &app.world().resource::<CommandsByTick>().0;
+        let observed = &runtime.world().resource::<CommandsByTick>().0;
         assert!(observed[0].1.is_empty());
         assert_eq!(observed[1].1.len(), 1);
         assert_eq!(observed[1].1[0].command_type().as_str(), "cancel.released");
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1357,25 +1395,21 @@ mod tests {
             .press(KeyCode::Enter)
             .unwrap();
 
-        let error = app
-            .run_once(Duration::ZERO)
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let error = runtime
+            .drive(Duration::ZERO)
             .expect_err("local intent loss must cross the direct runtime boundary");
-        assert_eq!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::LocalIntentLoss,
-                fault_source: "nara.gameplay.local-action",
-                detail: None,
-            }
-        );
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::LocalIntentLoss);
+        assert_eq!(error.fault().source(), "nara.gameplay.local-action");
 
-        let fault = app
+        let fault = runtime
             .world()
             .resource::<RuntimeFaultReporter>()
             .fault()
             .expect("local intent loss should report a runtime fault");
         assert_eq!(fault.kind(), RuntimeFaultKind::LocalIntentLoss);
         assert_eq!(fault.source(), "nara.gameplay.local-action");
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1543,31 +1577,30 @@ mod tests {
         assert_eq!(stale_batch.len(), 1);
         app.world_mut().unwrap().insert_resource(stale_batch);
 
-        let error = app
-            .run_once(FixedTime::DEFAULT_TIMESTEP)
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let error = runtime
+            .drive(FixedTime::DEFAULT_TIMESTEP)
             .expect_err("the stale batch must cross the direct runtime boundary");
-        assert_eq!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::GameplayLifecycle,
-                fault_source: "nara.gameplay.fixed-admit",
-                detail: None,
-            }
-        );
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::GameplayLifecycle);
+        assert_eq!(error.fault().source(), "nara.gameplay.fixed-admit");
 
-        assert!(app.world().resource::<CommandsByTick>().0.is_empty());
-        assert!(app.world().resource::<BatchLifecycle>().0.is_empty());
+        assert!(runtime.world().resource::<CommandsByTick>().0.is_empty());
+        assert!(runtime.world().resource::<BatchLifecycle>().0.is_empty());
         assert_eq!(
-            app.world().resource::<GameplayCommandBatch>().active_tick(),
+            runtime
+                .world()
+                .resource::<GameplayCommandBatch>()
+                .active_tick(),
             None
         );
-        let stats = app.world().resource::<GameplayCommandQueue>().stats();
+        let stats = runtime.world().resource::<GameplayCommandQueue>().stats();
         assert_eq!(stats.active_commands, 0);
         assert_eq!(stats.quarantined_commands, 1);
         assert_eq!(stats.retained_commands, 1);
         assert_eq!(stats.lifecycle_faults, 2);
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<GameplayCommandQueue>()
                 .quarantined_commands()[0]
                 .command_type()
@@ -1575,18 +1608,20 @@ mod tests {
             "stale"
         );
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<GameplayCommandQueue>()
                 .last_lifecycle_error(),
             Some(&GameplayCommandLifecycleError::BatchAlreadyActive)
         );
-        let fault = app
+        let fault = runtime
             .world()
             .resource::<RuntimeFaultReporter>()
             .fault()
             .expect("a lifecycle invariant should report a runtime fault");
         assert_eq!(fault.kind(), RuntimeFaultKind::GameplayLifecycle);
         assert_eq!(fault.source(), "nara.gameplay.fixed-admit");
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1621,16 +1656,18 @@ mod tests {
             ))
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
-            app.world().resource::<BatchLifecycle>().0,
+            runtime.world().resource::<BatchLifecycle>().0,
             [
                 ("consume".to_owned(), Some(1), 1),
                 ("capture".to_owned(), Some(1), 1),
                 ("after_ack".to_owned(), None, 0),
             ]
         );
+        runtime.finish().unwrap();
     }
 
     #[test]

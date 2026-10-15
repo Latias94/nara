@@ -19,12 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         WgpuBackendPlugins,
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
-    let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
-        app.seal()?,
-        nara::app::RuntimeObligationLedger::new(),
-        nara::app::RuntimeClosePolicy::default(),
-    )?;
-    let mut runtime = candidate.complete_startup()?.promote();
+    let mut runtime = nara::app::RuntimeInstance::start(app)?;
     let run_result = WinitRunner::default().run(&mut runtime);
     finish_runtime_after_winit(run_result, runtime)
 }

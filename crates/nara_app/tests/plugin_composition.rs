@@ -7,11 +7,10 @@ use std::{
 };
 
 use nara_app::{
-    AddPluginsError, App, Plugin, PluginCapability, PluginCategory, PluginDeclaration,
-    PluginDefinition, PluginDefinitionId, PluginError, PluginGroup, PluginGroupBuilder,
-    PluginGroupId, PluginHook, PluginHookMutation, PluginId, PluginInstantiationError,
-    PluginLifecycleState, PluginPlan, PluginPlanError, PluginPrepareFailure,
-    PluginProductCapability, PluginServiceId, PluginShutdownContext, PluginShutdownError,
+    AddPluginsError, App, Plugin, PluginCategory, PluginDeclaration, PluginDefinition,
+    PluginDefinitionId, PluginError, PluginGroup, PluginGroupBuilder, PluginGroupId, PluginHook,
+    PluginHookMutation, PluginId, PluginInstantiationError, PluginLifecycleState, PluginPlan,
+    PluginPlanError, PluginPrepareFailure, PluginProductCapability, PluginShutdownContext,
     PluginShutdownObligationId, PluginSlot, PluginSlotId, RuntimeAdmissionReservation,
     RuntimeCandidateRetirementState, RuntimeCloseContext, RuntimeCloseParticipant,
     RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
@@ -26,8 +25,6 @@ const ALTERNATE_ID: PluginId = PluginId::new("nara.test.plan.alternate");
 const VIOLATOR_ID: PluginId = PluginId::new("nara.test.plan.violator");
 const MISSING_ID: PluginId = PluginId::new("nara.test.plan.missing");
 const OPTIONAL_CONSUMER_ID: PluginId = PluginId::new("nara.test.plan.optional-consumer");
-const CAPABILITY_CONSUMER_ID: PluginId = PluginId::new("nara.test.plan.capability-consumer");
-const SERVICE_CONSUMER_ID: PluginId = PluginId::new("nara.test.plan.service-consumer");
 const CONFLICT_A_ID: PluginId = PluginId::new("nara.test.plan.conflict-a");
 const CONFLICT_B_ID: PluginId = PluginId::new("nara.test.plan.conflict-b");
 const CYCLE_A_ID: PluginId = PluginId::new("nara.test.plan.cycle-a");
@@ -45,10 +42,6 @@ const CORE_SLOT: PluginSlotId = PluginSlotId::new("nara.test.plan.slot.core");
 const OPTIONAL_SLOT: PluginSlotId = PluginSlotId::new("nara.test.plan.slot.optional");
 const ABSENT_SLOT: PluginSlotId = PluginSlotId::new("nara.test.plan.slot.absent");
 const TEST_GROUP: PluginGroupId = PluginGroupId::new("nara.test.plan.group");
-const TEST_SERVICE: PluginServiceId = PluginServiceId::new("nara.test.plan.service");
-const ABSENT_SERVICE: PluginServiceId = PluginServiceId::new("nara.test.plan.absent-service");
-const ABSENT_CAPABILITY: PluginCapability =
-    PluginCapability::new("nara.test.plan.absent-capability");
 const TEST_OBLIGATION: PluginShutdownObligationId =
     PluginShutdownObligationId::new("nara.test.plan.obligation.owner");
 const PRODUCT_ALTERNATIVE_A: PluginProductCapability =
@@ -63,29 +56,20 @@ const CORE_POLICY_A: PluginDefinitionId =
 const CORE_POLICY_B: PluginDefinitionId =
     PluginDefinitionId::new("nara.test.plan.core.policy-b", 1);
 const ABSENT_ID: PluginId = PluginId::new("nara.test.plan.absent");
-const CORE_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(CORE_ID, PluginCategory::Core).provides_services(&[TEST_SERVICE]);
+const CORE_DECLARATION: PluginDeclaration = PluginDeclaration::new(CORE_ID, PluginCategory::Core);
 const CORE_VARIANT_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(CORE_ID, PluginCategory::Runtime).provides_services(&[TEST_SERVICE]);
+    PluginDeclaration::new(CORE_ID, PluginCategory::Runtime);
 const OPTIONAL_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(OPTIONAL_ID, PluginCategory::Runtime);
 const ALTERNATE_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(ALTERNATE_ID, PluginCategory::Runtime);
 const CONSUMER_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(CONSUMER_ID, PluginCategory::Runtime)
-        .requires_plugins(&[CORE_ID])
-        .requires_services(&[TEST_SERVICE]);
+    PluginDeclaration::new(CONSUMER_ID, PluginCategory::Runtime).requires_plugins(&[CORE_ID]);
 const MISSING_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(MISSING_ID, PluginCategory::Runtime).requires_plugins(&[ABSENT_ID]);
 const OPTIONAL_CONSUMER_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(OPTIONAL_CONSUMER_ID, PluginCategory::Runtime)
         .requires_plugins(&[OPTIONAL_ID]);
-const CAPABILITY_CONSUMER_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(CAPABILITY_CONSUMER_ID, PluginCategory::Runtime)
-        .requires_capabilities(&[ABSENT_CAPABILITY]);
-const SERVICE_CONSUMER_DECLARATION: PluginDeclaration =
-    PluginDeclaration::new(SERVICE_CONSUMER_ID, PluginCategory::Runtime)
-        .requires_services(&[ABSENT_SERVICE]);
 const CONFLICT_A_DECLARATION: PluginDeclaration =
     PluginDeclaration::new(CONFLICT_A_ID, PluginCategory::Runtime).conflicts(&[CONFLICT_B_ID]);
 const CONFLICT_B_DECLARATION: PluginDeclaration =
@@ -140,7 +124,6 @@ macro_rules! noop_plugin {
 }
 
 noop_plugin!(OptionalConsumerPlugin, OPTIONAL_CONSUMER_DECLARATION);
-noop_plugin!(CapabilityConsumerPlugin, CAPABILITY_CONSUMER_DECLARATION);
 noop_plugin!(ProductAlternativeAPlugin, PRODUCT_ALTERNATIVE_A_DECLARATION);
 noop_plugin!(ProductAlternativeBPlugin, PRODUCT_ALTERNATIVE_B_DECLARATION);
 
@@ -167,7 +150,6 @@ impl PluginGroup for ProductAlternativeGroupB {
             .add_definition(PluginDefinition::for_default::<ProductAlternativeBPlugin>())
     }
 }
-noop_plugin!(ServiceConsumerPlugin, SERVICE_CONSUMER_DECLARATION);
 noop_plugin!(ConflictAPlugin, CONFLICT_A_DECLARATION);
 noop_plugin!(ConflictBPlugin, CONFLICT_B_DECLARATION);
 noop_plugin!(CycleAPlugin, CYCLE_A_DECLARATION);
@@ -779,22 +761,7 @@ fn different_plugins_cannot_claim_the_same_stable_slot() {
 }
 
 #[test]
-fn pure_plan_reports_missing_capability_service_conflict_and_cycles() {
-    assert_eq!(
-        PluginPlan::resolve(PluginDefinition::for_default::<CapabilityConsumerPlugin>())
-            .unwrap_err(),
-        PluginPlanError::MissingCapability {
-            plugin: CAPABILITY_CONSUMER_ID,
-            required: ABSENT_CAPABILITY,
-        }
-    );
-    assert_eq!(
-        PluginPlan::resolve(PluginDefinition::for_default::<ServiceConsumerPlugin>()).unwrap_err(),
-        PluginPlanError::MissingService {
-            plugin: SERVICE_CONSUMER_ID,
-            required: ABSENT_SERVICE,
-        }
-    );
+fn pure_plan_reports_conflicts_and_cycles() {
     assert_eq!(
         PluginPlan::resolve(ConflictPlugins).unwrap_err(),
         PluginPlanError::Conflict {
@@ -1433,7 +1400,6 @@ fn runtime_finish_failure_retires_plugin_then_host_and_retries_only_pending_owne
 enum HookViolation {
     Plugin,
     Group,
-    Runner,
 }
 
 #[derive(Debug, Default)]
@@ -1463,20 +1429,16 @@ impl Plugin for HookViolationPlugin {
             HookViolation::Group => {
                 let _ = app.add_plugins(HookNestedGroup);
             }
-            HookViolation::Runner => {
-                let _ = app.set_runner(|_| Ok(nara_app::AppExit::Success));
-            }
         }
         Ok(())
     }
 }
 
 #[test]
-fn ignored_hook_plugin_group_and_runner_mutation_are_sticky_failures() {
+fn ignored_hook_plugin_and_group_mutation_are_sticky_failures() {
     for (violation, expected_mutation) in [
         (HookViolation::Plugin, PluginHookMutation::PluginMembership),
         (HookViolation::Group, PluginHookMutation::PluginMembership),
-        (HookViolation::Runner, PluginHookMutation::RunnerSelection),
     ] {
         let mut app = App::new();
         let Err(error) = app.add_plugins(HookViolationPlugin(violation)) else {
@@ -1493,7 +1455,6 @@ fn ignored_hook_plugin_group_and_runner_mutation_are_sticky_failures() {
         assert!(app.plugin_failure_report().is_some());
         assert!(!app.has_plugin(OPTIONAL_ID));
         assert!(!app.has_plugin(ALTERNATE_ID));
-        assert!(!app.has_raw_runner());
         assert!(app.seal().is_err());
     }
 }
@@ -1518,42 +1479,29 @@ impl Plugin for FinishHookViolationPlugin {
             HookViolation::Group => {
                 let _ = app.add_plugins(HookNestedGroup);
             }
-            HookViolation::Runner => {
-                let _ = app.set_runner(|_| Ok(nara_app::AppExit::Success));
-            }
         }
         Ok(())
     }
 }
 
 #[test]
-fn ignored_finish_hook_composition_and_runner_mutation_are_sticky_failures() {
+fn ignored_finish_hook_composition_mutation_is_sticky() {
     for (violation, expected_mutation) in [
         (HookViolation::Plugin, PluginHookMutation::PluginMembership),
         (HookViolation::Group, PluginHookMutation::PluginMembership),
-        (HookViolation::Runner, PluginHookMutation::RunnerSelection),
     ] {
         let mut app = App::new();
         app.add_plugins(FinishHookViolationPlugin(violation))
             .unwrap();
-        let error = app.run_once(Duration::ZERO).unwrap_err();
+        let error = app.seal().unwrap_err();
         assert!(matches!(
-            error.plugin_error(),
-            Some(PluginError::HookMutationForbidden {
+            error,
+            PluginError::HookMutationForbidden {
                 plugin: VIOLATOR_ID,
                 hook: PluginHook::Finish,
                 mutation,
-            }) if *mutation == expected_mutation
+            } if mutation == expected_mutation
         ));
-        assert_eq!(
-            app.plugin_failure_report()
-                .and_then(|report| report.primary())
-                .map(nara_app::PluginFailure::hook),
-            Some(PluginHook::Finish)
-        );
-        assert!(!app.has_plugin(OPTIONAL_ID));
-        assert!(!app.has_plugin(ALTERNATE_ID));
-        assert!(!app.has_raw_runner());
     }
 }
 
@@ -1593,9 +1541,7 @@ fn direct_app_sealing_requires_declared_shutdown_obligations() {
     registered
         .add_plugins(ObligationPlugin { register: true })
         .unwrap();
-    let sealed = registered.seal().unwrap();
-    assert!(!sealed.started());
-    assert!(!sealed.has_raw_runner());
+    registered.seal().unwrap();
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1828,7 +1774,7 @@ impl<const INDEX: u8> Plugin for ShutdownProbePlugin<INDEX> {
 }
 
 #[test]
-fn shutdown_is_reverse_once_only_and_aggregates_error_and_panic() {
+fn managed_close_is_reverse_once_only_and_observes_error_and_panic() {
     let log = Arc::new(Mutex::new(Vec::new()));
     let mut app = App::new();
     app.add_plugins((
@@ -1844,32 +1790,18 @@ fn shutdown_is_reverse_once_only_and_aggregates_error_and_panic() {
     ))
     .unwrap();
 
-    let PluginShutdownError::Failure(report) = app.shutdown_plugins().unwrap_err() else {
-        panic!("shutdown failures must be aggregated");
-    };
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.request_control(nara_app::RuntimeControl::Stop);
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+    assert!(runtime.close_evidence().plugin_shutdown_failed());
     assert_eq!(
         *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         ["c", "b", "a"]
     );
-    assert_eq!(
-        report
-            .shutdown_failures()
-            .iter()
-            .map(nara_app::PluginFailure::plugin)
-            .collect::<Vec<_>>(),
-        [SHUTDOWN_C_PLUGIN_ID, SHUTDOWN_B_PLUGIN_ID]
-    );
-    assert!(report.shutdown_complete());
-
-    assert!(matches!(
-        app.shutdown_plugins(),
-        Err(PluginShutdownError::Failure(_))
-    ));
-    assert_eq!(
-        *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
-        ["c", "b", "a"]
-    );
-    drop(app);
+    runtime.drive(Duration::ZERO).unwrap();
+    drop(runtime);
     assert_eq!(
         *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         ["c", "b", "a"]
@@ -1888,6 +1820,10 @@ fn app_drop_catches_shutdown_panic_during_an_outer_unwind() {
     }));
 
     assert!(result.is_err());
+    assert_eq!(
+        nara_app::drive_runtime_quarantine().current_thread_retained(),
+        0
+    );
     assert_eq!(
         *log.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         ["c"]
@@ -1926,11 +1862,13 @@ fn committed_hook_failures_shutdown_immediately_and_preserve_typed_reports() {
 
     let mut shutdown_app = App::new();
     shutdown_app.add_plugins(FailingShutdownPlugin).unwrap();
-    let PluginShutdownError::Failure(report) = shutdown_app.shutdown_plugins().unwrap_err() else {
-        panic!("shutdown rejection must produce a typed failure report");
-    };
-    assert!(report.primary().is_none());
-    assert_eq!(report.shutdown_failures().len(), 1);
-    assert_eq!(report.shutdown_failures()[0].hook(), PluginHook::Shutdown);
-    assert!(report.shutdown_complete());
+    let failure = nara_app::RuntimeInstance::start(shutdown_app)
+        .unwrap()
+        .finish()
+        .unwrap_err();
+    assert_eq!(
+        failure.retirement_state(),
+        RuntimeCandidateRetirementState::Retired
+    );
+    assert!(failure.close_evidence().plugin_shutdown_failed());
 }

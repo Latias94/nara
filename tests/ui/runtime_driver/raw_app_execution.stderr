@@ -1,0 +1,5 @@
+error[E0599]: no method named `run_once` found for struct `App` in the current scope
+ --> tests/ui/runtime_driver/raw_app_execution.rs:5:9
+  |
+5 |     app.run_once();
+  |         ^^^^^^^^ method not found in `App`

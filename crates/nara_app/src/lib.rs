@@ -1,10 +1,15 @@
 //! Application lifecycle and plugin orchestration for nara.
+//!
+//! Configure an [`App`], consume it with [`RuntimeInstance::start`], and advance the runtime with
+//! [`RuntimeInstance::drive`]. Embedded hosts request controls and keep driving until physical close
+//! completes; finite headless programs can consume the runtime with [`RuntimeInstance::finish`].
+//! Staged admission and publication remain public only for first-party cross-crate Host composition.
 
 use std::{
     collections::BTreeSet,
     fmt::{self, Display, Formatter},
     num::NonZeroU32,
-    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -12,10 +17,10 @@ use std::{
 use nara_ecs::{
     Resource, World,
     error::{ErrorHandler, FallbackErrorHandler},
-    observer::{IntoObserver, Observer},
+    observer::IntoObserver,
     schedule::{
         InternedScheduleLabel, InternedSystemSet, IntoScheduleConfigs, Schedule,
-        ScheduleBuildSettings, ScheduleLabel, Schedules, SystemSet,
+        ScheduleBuildSettings, ScheduleLabel, SystemSet,
     },
     system::ScheduleSystem,
 };
@@ -25,17 +30,16 @@ mod plugin;
 mod runtime;
 
 pub use plugin::{
-    AddPluginsError, EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginCapability,
-    PluginCategory, PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition,
-    PluginDefinitionId, PluginDefinitionKey, PluginError, PluginFailure, PluginFailureReport,
-    PluginGroup, PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation, PluginId,
+    AddPluginsError, EditedPluginGroup, EditedPluginGroupMarker, Plugin, PluginCategory,
+    PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionId,
+    PluginDefinitionKey, PluginError, PluginFailure, PluginFailureReport, PluginGroup,
+    PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation, PluginId,
     PluginInstantiationError, PluginLifecycleState, PluginPlan, PluginPlanEntry, PluginPlanError,
     PluginPlanFingerprint, PluginPreflightContext, PluginPreflightResource, PluginPrepareError,
-    PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId, PluginServiceId,
-    PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
-    PluginSlotId, PluginSlotPresence, Plugins, ReplayablePlugins, ResolvedPluginGroup,
-    RetainedPluginInstantiationFailure, RuntimeConstructionError, RuntimeConstructionFailure,
-    SealedApp,
+    PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId, PluginShutdownContext,
+    PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId, PluginSlotPresence,
+    Plugins, ReplayablePlugins, ResolvedPluginGroup, RetainedPluginInstantiationFailure,
+    RuntimeConstructionError, RuntimeConstructionFailure, SealedApp,
 };
 pub use runtime::*;
 
@@ -176,29 +180,13 @@ pub enum AppRunError {
         prior: Box<AppRunError>,
         teardown: Box<AppRunError>,
     },
-    #[error("app runner and runtime authority both failed: runner={runner}; authority={authority}")]
-    RunnerAuthority {
-        runner: Box<AppRunError>,
-        authority: Box<AppRunError>,
-    },
     #[error("time frame planning failed: {error}")]
     Time { error: TimeFrameError },
-    #[error("direct app runtime faulted: kind={kind:?}, source={fault_source}")]
-    DirectRuntime {
-        kind: RuntimeFaultKind,
-        fault_source: &'static str,
-        detail: Option<RuntimeFaultDetail>,
-    },
     #[error("managed runtime faulted: kind={kind:?}, source={fault_source}")]
     ManagedRuntime {
         kind: RuntimeFaultKind,
         fault_source: &'static str,
         detail: Option<RuntimeFaultDetail>,
-    },
-    #[error("app shutdown reported plugin cleanup failures")]
-    Shutdown {
-        prior: Option<Box<AppRunError>>,
-        report: Box<PluginFailureReport>,
     },
 }
 
@@ -227,14 +215,6 @@ impl AppRunError {
     }
 
     #[must_use]
-    pub fn runner_authority(runner: AppRunError, authority: AppRunError) -> Self {
-        Self::RunnerAuthority {
-            runner: Box::new(runner),
-            authority: Box::new(authority),
-        }
-    }
-
-    #[must_use]
     pub const fn time(error: TimeFrameError) -> Self {
         Self::Time { error }
     }
@@ -242,15 +222,6 @@ impl AppRunError {
     #[must_use]
     pub const fn managed_runtime(kind: RuntimeFaultKind, source: &'static str) -> Self {
         Self::ManagedRuntime {
-            kind,
-            fault_source: source,
-            detail: None,
-        }
-    }
-
-    #[must_use]
-    pub const fn direct_runtime(kind: RuntimeFaultKind, source: &'static str) -> Self {
-        Self::DirectRuntime {
             kind,
             fault_source: source,
             detail: None,
@@ -268,17 +239,6 @@ impl AppRunError {
         }
     }
 
-    /// Converts a canonical runtime fault into a direct-runtime app error without losing its
-    /// validated diagnostic metadata.
-    #[must_use]
-    pub const fn direct_runtime_fault(fault: &RuntimeFault) -> Self {
-        Self::DirectRuntime {
-            kind: fault.kind(),
-            fault_source: fault.source(),
-            detail: fault.detail(),
-        }
-    }
-
     /// Returns validated engine-owned diagnostic metadata retained by a runtime failure.
     #[must_use]
     pub fn runtime_fault_detail(&self) -> Option<RuntimeFaultDetail> {
@@ -289,12 +249,7 @@ impl AppRunError {
         &self,
     ) -> Option<(RuntimeFaultKind, &'static str, Option<RuntimeFaultDetail>)> {
         match self {
-            Self::DirectRuntime {
-                kind,
-                fault_source,
-                detail,
-            }
-            | Self::ManagedRuntime {
+            Self::ManagedRuntime {
                 kind,
                 fault_source,
                 detail,
@@ -302,10 +257,6 @@ impl AppRunError {
             Self::RunnerTeardown { prior, teardown } => prior
                 .runtime_fault_parts()
                 .or_else(|| teardown.runtime_fault_parts()),
-            Self::RunnerAuthority { runner, authority } => authority
-                .runtime_fault_parts()
-                .or_else(|| runner.runtime_fault_parts()),
-            Self::Shutdown { prior, .. } => prior.as_deref().and_then(Self::runtime_fault_parts),
             Self::Plugin { .. } | Self::Runner { .. } | Self::Time { .. } => None,
         }
     }
@@ -318,15 +269,7 @@ impl AppRunError {
                 Some(error) => Some(error),
                 None => teardown.plugin_error(),
             },
-            Self::RunnerAuthority { runner, authority } => match runner.plugin_error() {
-                Some(error) => Some(error),
-                None => authority.plugin_error(),
-            },
-            Self::Runner { .. }
-            | Self::Time { .. }
-            | Self::DirectRuntime { .. }
-            | Self::ManagedRuntime { .. }
-            | Self::Shutdown { .. } => None,
+            Self::Runner { .. } | Self::Time { .. } | Self::ManagedRuntime { .. } => None,
         }
     }
 
@@ -334,17 +277,10 @@ impl AppRunError {
     pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
         match self {
             Self::Plugin { report, .. } => report.as_deref(),
-            Self::Shutdown { report, .. } => Some(report.as_ref()),
             Self::RunnerTeardown { prior, teardown } => prior
                 .plugin_failure_report()
                 .or_else(|| teardown.plugin_failure_report()),
-            Self::RunnerAuthority { runner, authority } => runner
-                .plugin_failure_report()
-                .or_else(|| authority.plugin_failure_report()),
-            Self::Runner { .. }
-            | Self::Time { .. }
-            | Self::DirectRuntime { .. }
-            | Self::ManagedRuntime { .. } => None,
+            Self::Runner { .. } | Self::Time { .. } | Self::ManagedRuntime { .. } => None,
         }
     }
 }
@@ -367,28 +303,12 @@ impl From<FixedTimeError> for AppRunError {
     }
 }
 
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum AppScheduleRunError {
-    #[error("app plugin lifecycle prevents schedule execution: {0}")]
-    Plugin(PluginError),
-    #[error("a custom schedule cannot run from inside a plugin hook")]
-    PluginHookActive,
-    #[error("built-in schedules cannot run through the custom schedule entry point")]
-    BuiltInSchedule,
-    #[error("the requested schedule is not registered")]
-    MissingSchedule,
-    #[error("runtime rejected custom schedule execution: {0}")]
-    Runtime(#[source] AppRunError),
-}
-
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AppExit {
     #[default]
     Success,
     Requested,
 }
-
-pub type RunnerFn = Box<dyn FnOnce(&mut App) -> Result<AppExit, AppRunError>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Resource)]
 pub struct RealTime {
@@ -1207,40 +1127,14 @@ struct InstalledRuntimeAuthorityValidator {
     validator: Arc<runtime::__RuntimeAuthorityValidator>,
 }
 
-struct RuntimeAuthorityBoundary {
-    app_identity: Arc<()>,
-    reporter: RuntimeFaultReporter,
-    generation: Option<RuntimeGeneration>,
-    error_handler: Option<ErrorHandler>,
-    fault_bridge: Option<runtime::RuntimeFaultBridgeIdentity>,
-    validator: Option<Arc<runtime::__RuntimeAuthorityValidator>>,
-}
-
 pub struct App {
-    instance_identity: Arc<()>,
-    world: World,
-    schedules: Schedules,
-    runner: Option<RunnerFn>,
-    plugins: Vec<InstalledPlugin>,
+    owner: runtime::RuntimeOwner,
     plugin_entries: Vec<PluginPlanEntry>,
     plugin_definition_witnesses: Vec<plugin::PluginDefinitionWitness>,
     plugin_groups: Vec<ResolvedPluginGroup>,
     disabled_plugin_slots: BTreeSet<PluginSlotId>,
     plugin_plan_fingerprint: PluginPlanFingerprint,
     registered_shutdown_obligations: BTreeSet<(PluginId, PluginShutdownObligationId)>,
-    runtime_obligations: RuntimeObligationLedger,
-    runtime_fault_reporter: RuntimeFaultReporter,
-    managed_runtime_generation: Option<RuntimeGeneration>,
-    runtime_error_handler: Option<ErrorHandler>,
-    runtime_fault_bridge: Option<runtime::RuntimeFaultBridgeIdentity>,
-    runtime_fault_bridge_guard: Option<runtime::RuntimeFaultBridgeEpoch>,
-    runtime_authority_validator: Option<InstalledRuntimeAuthorityValidator>,
-    pending_observers: Vec<Observer>,
-    plugin_lifecycle: PluginLifecycleState,
-    plugin_failure_report: Option<PluginFailureReport>,
-    active_plugin_hook: Option<(PluginId, PluginHook)>,
-    execution_started: bool,
-    started: bool,
 }
 
 impl Default for App {
@@ -1249,74 +1143,17 @@ impl Default for App {
     }
 }
 
-impl Drop for App {
-    fn drop(&mut self) {
-        self.shutdown_plugins_internal();
-        // A raw App has no retained retry state, so release it through one best-effort close pass.
-        let _ = catch_unwind(AssertUnwindSafe(|| {
-            self.runtime_obligations.drive_close_once(&mut self.world);
-        }));
-    }
-}
-
 impl App {
     #[must_use]
     pub fn new() -> Self {
-        let mut world = World::new();
-        world.insert_resource(RealTime::default());
-        world.insert_resource(VirtualTime::default());
-        world.insert_resource(RuntimeTimeSettings::default());
-        world.insert_resource(FixedTime::default());
-        world.insert_resource(RenderTime::default());
-        world.insert_resource(RuntimeFrameStatus::default());
-        world.insert_resource(AppExitRequests::default());
-        let runtime_fault_reporter = RuntimeFaultReporter::new();
-        runtime::initialize_runtime_fault_bridge(&mut world, runtime_fault_reporter.clone());
-
-        let mut schedules = Schedules::new();
-        for stage in StartupStage::ALL {
-            schedules.insert(Schedule::new(stage));
-        }
-        for stage in CoreStage::ALL {
-            schedules.insert(Schedule::new(stage));
-        }
-        schedules
-            .get_mut(CoreStage::FixedUpdate)
-            .expect("the fixed-update schedule is created above")
-            .configure_sets(
-                (
-                    FixedUpdateSet::Prepare,
-                    FixedUpdateSet::Simulate,
-                    FixedUpdateSet::Finalize,
-                )
-                    .chain(),
-            );
-
         Self {
-            instance_identity: Arc::new(()),
-            world,
-            schedules,
-            runner: None,
-            plugins: Vec::new(),
+            owner: runtime::RuntimeOwner::new(),
             plugin_entries: Vec::new(),
             plugin_definition_witnesses: Vec::new(),
             plugin_groups: Vec::new(),
             disabled_plugin_slots: BTreeSet::new(),
             plugin_plan_fingerprint: plugin::empty_plan_fingerprint(),
             registered_shutdown_obligations: BTreeSet::new(),
-            runtime_obligations: RuntimeObligationLedger::new(),
-            runtime_fault_reporter,
-            managed_runtime_generation: None,
-            runtime_error_handler: None,
-            runtime_fault_bridge: None,
-            runtime_fault_bridge_guard: None,
-            runtime_authority_validator: None,
-            pending_observers: Vec::new(),
-            plugin_lifecycle: PluginLifecycleState::Configuring,
-            plugin_failure_report: None,
-            active_plugin_hook: None,
-            execution_started: false,
-            started: false,
         }
     }
 
@@ -1324,28 +1161,28 @@ impl App {
         runtime_obligations: RuntimeObligationLedger,
     ) -> Self {
         let mut app = Self::new();
-        app.runtime_obligations = runtime_obligations;
+        app.owner.obligations = runtime_obligations;
         app
     }
 
     #[must_use]
     pub fn world(&self) -> &World {
-        &self.world
+        &self.owner.world
     }
 
     #[must_use]
-    pub const fn plugin_lifecycle_state(&self) -> PluginLifecycleState {
-        self.plugin_lifecycle
+    pub fn plugin_lifecycle_state(&self) -> PluginLifecycleState {
+        self.owner.plugin_lifecycle
     }
 
     #[must_use]
-    pub const fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
-        self.plugin_failure_report.as_ref()
+    pub fn plugin_failure_report(&self) -> Option<&PluginFailureReport> {
+        self.owner.plugin_failure_report.as_ref()
     }
 
     pub fn world_mut(&mut self) -> Result<&mut World, PluginError> {
         self.ensure_mutation_allowed()?;
-        Ok(&mut self.world)
+        Ok(&mut self.owner.world)
     }
 
     /// Installs the one hidden runtime authority validator owned by a domain plugin.
@@ -1361,20 +1198,20 @@ impl App {
         validator: Arc<runtime::__RuntimeAuthorityValidator>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_mutation_allowed()?;
-        if self.runtime_authority_validator.is_some() {
+        if self.owner.runtime_authority_validator.is_some() {
             return Err(PluginError::SetupFailed {
                 plugin,
                 message: "a runtime authority validator is already installed".to_owned(),
             });
         }
-        self.runtime_authority_validator =
+        self.owner.runtime_authority_validator =
             Some(InstalledRuntimeAuthorityValidator { plugin, validator });
         Ok(self)
     }
 
     pub fn insert_resource<R: Resource>(&mut self, resource: R) -> Result<&mut Self, PluginError> {
         self.ensure_mutation_allowed()?;
-        self.world.insert_resource(resource);
+        self.owner.world.insert_resource(resource);
         Ok(self)
     }
 
@@ -1383,16 +1220,15 @@ impl App {
         R: Resource + nara_ecs::world::FromWorld,
     {
         self.ensure_mutation_allowed()?;
-        self.world.init_resource::<R>();
+        self.owner.world.init_resource::<R>();
         Ok(self)
     }
 
     /// Registers systems with Nara's schedule set.
     ///
     /// Managed runtimes route unhandled schedule, run-condition, and default command failures into
-    /// the sticky runtime fault channel. A raw App may configure its
-    /// [`bevy_ecs::error::FallbackErrorHandler`] before first execution; that selected handler and
-    /// the canonical reporter then become one fixed bridge. Later bridge mutation faults closed.
+    /// the sticky runtime fault channel. Admission binds the canonical reporter and one engine
+    /// error handler before startup. Later bridge mutation faults closed.
     /// Explicit per-system or per-command handlers remain caller-owned error policy.
     pub fn add_systems<M>(
         &mut self,
@@ -1400,15 +1236,14 @@ impl App {
         systems: impl IntoScheduleConfigs<ScheduleSystem, M>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.schedules.add_systems(schedule, systems);
+        self.owner.schedules.add_systems(schedule, systems);
         Ok(self)
     }
 
     /// Registers an observer whose unhandled failures enter the managed runtime fault channel.
     ///
-    /// Nara materializes registered observers after the App's final error authority is known. A raw
-    /// App freezes its configured fallback handler at first execution; a managed runtime binds the
-    /// observer to its reserved runtime route before startup and project-content admission.
+    /// Nara materializes registered observers after the final managed error authority is known.
+    /// Admission binds each observer to its reserved runtime route before startup and content checks.
     /// Registered observers become active only at that first execution or admission boundary, so
     /// they do not observe events triggered while the App is still being configured. Callers that
     /// need a different error policy should build and drive that observer outside Nara's managed
@@ -1418,40 +1253,8 @@ impl App {
         observer: impl IntoObserver<M>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.pending_observers.push(observer.into_observer());
+        self.owner.pending_observers.push(observer.into_observer());
         Ok(self)
-    }
-
-    fn materialize_pending_observers(&mut self, error_handler: ErrorHandler) {
-        for observer in std::mem::take(&mut self.pending_observers) {
-            self.world.spawn(observer.with_error_handler(error_handler));
-        }
-        self.world.flush();
-    }
-
-    fn begin_runtime_execution(&mut self) {
-        self.execution_started = true;
-        if self.runtime_error_handler.is_none() {
-            let error_handler = self.world.fallback_error_handler();
-            if !self.world.contains_resource::<FallbackErrorHandler>() {
-                self.world
-                    .insert_resource(FallbackErrorHandler(error_handler));
-            }
-            self.runtime_error_handler = Some(error_handler);
-            self.runtime_fault_bridge = runtime::RuntimeFaultBridgeIdentity::capture(&self.world);
-        }
-        let error_handler = self
-            .runtime_error_handler
-            .expect("runtime execution binds one fallback error handler");
-        self.materialize_pending_observers(error_handler);
-    }
-
-    pub(crate) fn bind_managed_runtime_error_handler(&mut self, error_handler: ErrorHandler) {
-        self.world
-            .insert_resource(FallbackErrorHandler(error_handler));
-        self.runtime_error_handler = Some(error_handler);
-        self.runtime_fault_bridge = runtime::RuntimeFaultBridgeIdentity::capture(&self.world);
-        self.materialize_pending_observers(error_handler);
     }
 
     pub fn configure_sets<M>(
@@ -1460,7 +1263,7 @@ impl App {
         sets: impl IntoScheduleConfigs<InternedSystemSet, M>,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.schedules.configure_sets(schedule, sets);
+        self.owner.schedules.configure_sets(schedule, sets);
         Ok(self)
     }
 
@@ -1469,7 +1272,7 @@ impl App {
         schedule: impl ScheduleLabel,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.schedules.entry(schedule);
+        self.owner.schedules.entry(schedule);
         Ok(self)
     }
 
@@ -1484,7 +1287,10 @@ impl App {
         settings: ScheduleBuildSettings,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.schedules.entry(schedule).set_build_settings(settings);
+        self.owner
+            .schedules
+            .entry(schedule)
+            .set_build_settings(settings);
         Ok(self)
     }
 
@@ -1497,7 +1303,8 @@ impl App {
         apply_final_deferred: bool,
     ) -> Result<&mut Self, PluginError> {
         self.ensure_configuration_mutation_allowed()?;
-        self.schedules
+        self.owner
+            .schedules
             .entry(schedule)
             .set_apply_final_deferred(apply_final_deferred);
         Ok(self)
@@ -1505,7 +1312,7 @@ impl App {
 
     #[must_use]
     pub fn get_schedule(&self, schedule: impl ScheduleLabel) -> Option<&Schedule> {
-        self.schedules.get(schedule)
+        self.owner.schedules.get(schedule)
     }
 
     /// Returns raw mutable access to a custom schedule before App sealing.
@@ -1523,69 +1330,7 @@ impl App {
         if is_built_in_schedule(schedule) {
             return Err(PluginError::RawBuiltInScheduleMutationForbidden);
         }
-        Ok(self.schedules.get_mut(schedule))
-    }
-
-    /// Runs one registered custom schedule after sealing the App.
-    ///
-    /// The same sticky runtime-authority boundary used by built-in schedules is checked before and
-    /// after normal execution. A prior fault prevents every system in the requested schedule from
-    /// running. System panics keep Rust's unwind behavior. The post-run authority check still
-    /// records a sticky fault before the original panic resumes, so a caller that catches the
-    /// unwind cannot observe an apparently healthy App.
-    pub fn run_schedule(
-        &mut self,
-        schedule: impl ScheduleLabel,
-    ) -> Result<(), AppScheduleRunError> {
-        self.ensure_mutation_allowed()
-            .map_err(AppScheduleRunError::Plugin)?;
-        if self.active_plugin_hook.is_some() {
-            return Err(AppScheduleRunError::PluginHookActive);
-        }
-        let schedule = schedule.intern();
-        if is_built_in_schedule(schedule) {
-            return Err(AppScheduleRunError::BuiltInSchedule);
-        }
-        if self.schedules.get(schedule).is_none() {
-            return Err(AppScheduleRunError::MissingSchedule);
-        }
-        self.seal_internal().map_err(AppScheduleRunError::Plugin)?;
-        self.begin_runtime_execution();
-        let authority_boundary = self
-            .begin_runtime_authority_boundary()
-            .map_err(AppScheduleRunError::Runtime)?;
-        let Some(schedule) = self.schedules.get_mut(schedule) else {
-            return Err(AppScheduleRunError::MissingSchedule);
-        };
-        let run_result = catch_unwind(AssertUnwindSafe(|| schedule.run(&mut self.world)));
-        let authority_result = self
-            .validate_runtime_authority_boundary_against(&authority_boundary)
-            .map_err(AppScheduleRunError::Runtime);
-        match run_result {
-            Ok(()) => authority_result,
-            Err(payload) => {
-                let _ = authority_result;
-                resume_unwind(payload)
-            }
-        }
-    }
-
-    pub fn set_runner(
-        &mut self,
-        runner: impl FnOnce(&mut App) -> Result<AppExit, AppRunError> + 'static,
-    ) -> Result<&mut Self, PluginError> {
-        if let Some((plugin, hook)) = self.active_plugin_hook {
-            let error = PluginError::HookMutationForbidden {
-                plugin,
-                hook,
-                mutation: PluginHookMutation::RunnerSelection,
-            };
-            self.poison(plugin, hook, error.clone());
-            return Err(error);
-        }
-        self.ensure_configuration_mutation_allowed()?;
-        self.runner = Some(Box::new(runner));
-        Ok(self)
+        Ok(self.owner.schedules.get_mut(schedule))
     }
 
     pub fn add_plugins<M>(
@@ -1607,13 +1352,6 @@ impl App {
             .any(|entry| entry.plugin_id() == id)
     }
 
-    #[must_use]
-    pub fn has_capability(&self, capability: PluginCapability) -> bool {
-        self.plugin_entries
-            .iter()
-            .any(|entry| entry.declaration().provides.contains(&capability))
-    }
-
     pub fn installed_plugins(&self) -> impl Iterator<Item = PluginDeclaration> + '_ {
         self.plugin_entries.iter().map(|entry| *entry.declaration())
     }
@@ -1631,26 +1369,11 @@ impl App {
         self.plugin_plan_fingerprint
     }
 
-    #[must_use]
-    pub const fn has_raw_runner(&self) -> bool {
-        self.runner.is_some()
-    }
-
-    #[must_use]
-    pub const fn started(&self) -> bool {
-        self.started
-    }
-
-    #[must_use]
-    pub(crate) const fn execution_started(&self) -> bool {
-        self.execution_started
-    }
-
     pub fn register_plugin_shutdown_obligation(
         &mut self,
         obligation: PluginShutdownObligationId,
     ) -> Result<&mut Self, PluginError> {
-        let Some((plugin, PluginHook::Build)) = self.active_plugin_hook else {
+        let Some((plugin, PluginHook::Build)) = self.owner.active_plugin_hook else {
             return Err(PluginError::ShutdownObligationOutsideBuild);
         };
         let declared = self
@@ -1688,16 +1411,14 @@ impl App {
     where
         P: RuntimeCloseParticipant,
     {
-        let Some((plugin, PluginHook::Build)) = self.active_plugin_hook else {
+        let Some((plugin, PluginHook::Build)) = self.owner.active_plugin_hook else {
             return Err(PluginError::ShutdownObligationOutsideBuild);
         };
         self.register_plugin_shutdown_obligation(obligation)?;
-        if let Err(failure) = self
-            .runtime_obligations
-            .register(participant_id, participant)
-        {
+        if let Err(failure) = self.owner.obligations.register(participant_id, participant) {
             let (ledger_error, participant) = failure.into_parts();
-            self.runtime_obligations
+            self.owner
+                .obligations
                 .retain_for_retirement(participant_id, participant);
             let participant_id = match ledger_error {
                 RuntimeObligationLedgerError::Duplicate { id } => id,
@@ -1713,20 +1434,20 @@ impl App {
         Ok(self)
     }
 
-    pub(crate) fn take_runtime_obligations(&mut self) -> RuntimeObligationLedger {
-        std::mem::take(&mut self.runtime_obligations)
-    }
-
+    /// Freezes configuration for advanced Host composition without executing startup.
+    ///
+    /// Ordinary execution consumes configuration directly through [`RuntimeInstance::start`].
+    #[doc(hidden)]
     pub fn seal(mut self) -> Result<SealedApp, PluginError> {
         self.seal_internal()?;
         Ok(SealedApp { app: self })
     }
 
     pub(crate) fn seal_internal(&mut self) -> Result<(), PluginError> {
-        if self.active_plugin_hook.is_some() {
+        if self.owner.active_plugin_hook.is_some() {
             return Err(PluginError::FinishReentered);
         }
-        match self.plugin_lifecycle {
+        match self.owner.plugin_lifecycle {
             PluginLifecycleState::Ready => return Ok(()),
             PluginLifecycleState::Poisoned => return Err(self.primary_plugin_error()),
             PluginLifecycleState::ShuttingDown | PluginLifecycleState::ShutdownComplete => {
@@ -1749,43 +1470,47 @@ impl App {
                         obligation: *obligation,
                     };
                     self.poison(entry.plugin_id(), PluginHook::Build, error.clone());
-                    self.shutdown_plugins_internal();
+                    self.owner.shutdown_plugins_internal();
                     return Err(error);
                 }
             }
         }
 
-        self.plugin_lifecycle = PluginLifecycleState::Finishing;
-        for index in 0..self.plugins.len() {
-            let plugin = Arc::clone(&self.plugins[index].plugin);
-            let plugin_id = self.plugins[index].plugin_id;
-            self.active_plugin_hook = Some((plugin_id, PluginHook::Finish));
+        self.owner.plugin_lifecycle = PluginLifecycleState::Finishing;
+        for index in 0..self.owner.plugins.len() {
+            let plugin = Arc::clone(&self.owner.plugins[index].plugin);
+            let plugin_id = self.owner.plugins[index].plugin_id;
+            self.owner.active_plugin_hook = Some((plugin_id, PluginHook::Finish));
             let result = catch_unwind(AssertUnwindSafe(|| plugin.finish(self)))
                 .map_err(|_| PluginError::HookPanicked {
                     plugin: plugin_id,
                     hook: PluginHook::Finish,
                 })
                 .and_then(|result| result);
-            self.active_plugin_hook = None;
+            self.owner.active_plugin_hook = None;
             if let Err(error) = result {
                 self.poison(plugin_id, PluginHook::Finish, error);
                 break;
             }
-            if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
+            if self.owner.plugin_lifecycle == PluginLifecycleState::Poisoned {
                 break;
             }
         }
 
-        if self.plugin_lifecycle == PluginLifecycleState::Finishing {
+        if self.owner.plugin_lifecycle == PluginLifecycleState::Finishing {
             if let Err(error) = self.validate_public_schedule_compatibility() {
-                self.shutdown_plugins_internal();
+                self.owner.shutdown_plugins_internal();
                 return Err(error);
             }
-            let authority_failure = self.runtime_authority_validator.as_ref().and_then(|owner| {
-                (owner.validator)(&self.world, None)
-                    .err()
-                    .map(|fault| (owner.plugin, fault))
-            });
+            let authority_failure =
+                self.owner
+                    .runtime_authority_validator
+                    .as_ref()
+                    .and_then(|owner| {
+                        (owner.validator)(&self.owner.world, None)
+                            .err()
+                            .map(|fault| (owner.plugin, fault))
+                    });
             if let Some((plugin, fault)) = authority_failure {
                 let error = PluginError::SetupFailed {
                     plugin,
@@ -1796,20 +1521,21 @@ impl App {
                     ),
                 };
                 self.poison(plugin, PluginHook::Finish, error.clone());
-                self.shutdown_plugins_internal();
+                self.owner.shutdown_plugins_internal();
                 return Err(error);
             }
-            self.plugin_lifecycle = PluginLifecycleState::Ready;
+            self.owner.plugin_lifecycle = PluginLifecycleState::Ready;
             return Ok(());
         }
 
-        self.shutdown_plugins_internal();
+        self.owner.shutdown_plugins_internal();
         Err(self.primary_plugin_error())
     }
 
     fn validate_public_schedule_compatibility(&mut self) -> Result<(), PluginError> {
+        let state = &mut *self.owner;
         for schedule in [CoreStage::FixedUpdate, CoreStage::Cleanup] {
-            let public_schedule = self
+            let public_schedule = state
                 .schedules
                 .get_mut(schedule)
                 .expect("public schedules remain registered for the App lifetime");
@@ -1822,10 +1548,10 @@ impl App {
             }
             public_schedule.set_build_settings(build_settings);
             public_schedule.set_apply_final_deferred(true);
-            if let Err(error) = public_schedule.initialize(&mut self.world) {
+            if let Err(error) = public_schedule.initialize(&mut state.world) {
                 return Err(ScheduleCompatibilityError::BuildFailed {
                     schedule,
-                    message: error.to_string(public_schedule.graph(), &self.world),
+                    message: error.to_string(public_schedule.graph(), &state.world),
                 }
                 .into());
             }
@@ -1833,21 +1559,8 @@ impl App {
         Ok(())
     }
 
-    pub fn shutdown_plugins(&mut self) -> Result<(), PluginShutdownError> {
-        if self.active_plugin_hook.is_some() {
-            return Err(PluginShutdownError::HookActive);
-        }
-        self.shutdown_plugins_internal();
-        if let Some(report) = &self.plugin_failure_report
-            && (report.primary.is_some() || !report.shutdown_failures.is_empty())
-        {
-            return Err(PluginShutdownError::Failure(Box::new(report.clone())));
-        }
-        Ok(())
-    }
-
     fn ensure_mutation_allowed(&self) -> Result<(), PluginError> {
-        match self.plugin_lifecycle {
+        match self.owner.plugin_lifecycle {
             PluginLifecycleState::Poisoned => Err(self.primary_plugin_error()),
             PluginLifecycleState::ShuttingDown | PluginLifecycleState::ShutdownComplete => {
                 Err(PluginError::LifecycleShutdown)
@@ -1860,7 +1573,7 @@ impl App {
 
     fn ensure_configuration_mutation_allowed(&self) -> Result<(), PluginError> {
         self.ensure_mutation_allowed()?;
-        if self.plugin_lifecycle == PluginLifecycleState::Ready {
+        if self.owner.plugin_lifecycle == PluginLifecycleState::Ready {
             Err(PluginError::AppSealed)
         } else {
             Ok(())
@@ -1868,7 +1581,8 @@ impl App {
     }
 
     fn primary_plugin_error(&self) -> PluginError {
-        self.plugin_failure_report
+        self.owner
+            .plugin_failure_report
             .as_ref()
             .and_then(|report| report.primary.as_ref())
             .map(|failure| failure.error().clone())
@@ -1877,6 +1591,7 @@ impl App {
 
     fn poison(&mut self, plugin: PluginId, hook: PluginHook, error: PluginError) {
         let report = self
+            .owner
             .plugin_failure_report
             .get_or_insert_with(|| PluginFailureReport {
                 primary: None,
@@ -1886,11 +1601,11 @@ impl App {
         if report.primary.is_none() {
             report.primary = Some(plugin::failure(plugin, hook, error));
         }
-        self.plugin_lifecycle = PluginLifecycleState::Poisoned;
+        self.owner.plugin_lifecycle = PluginLifecycleState::Poisoned;
     }
 
     pub(crate) fn reject_hook_composition_mutation(&mut self) -> Result<(), PluginError> {
-        if let Some((plugin, hook)) = self.active_plugin_hook {
+        if let Some((plugin, hook)) = self.owner.active_plugin_hook {
             let error = PluginError::HookMutationForbidden {
                 plugin,
                 hook,
@@ -1916,7 +1631,7 @@ impl App {
         batch: plugin::PluginCommitBatch,
     ) -> Result<(), PluginError> {
         self.reject_hook_composition_mutation()?;
-        if self.plugin_lifecycle != PluginLifecycleState::Configuring {
+        if self.owner.plugin_lifecycle != PluginLifecycleState::Configuring {
             return Err(PluginError::AppSealed);
         }
         if batch.prefix_len != self.plugin_entries.len()
@@ -1933,10 +1648,10 @@ impl App {
             .enumerate()
         {
             let plugin_id = entry.plugin_id();
-            self.active_plugin_hook = Some((plugin_id, PluginHook::Preflight));
-            let context = plugin::preflight_context(&batch.entries, &self.world);
+            self.owner.active_plugin_hook = Some((plugin_id, PluginHook::Preflight));
+            let context = plugin::preflight_context(&batch.entries, &self.owner.world);
             let preflight = catch_unwind(AssertUnwindSafe(|| plugin.preflight(&context)));
-            self.active_plugin_hook = None;
+            self.owner.active_plugin_hook = None;
             match preflight {
                 Err(_) => {
                     let error = PluginError::HookPanicked {
@@ -1944,7 +1659,7 @@ impl App {
                         hook: PluginHook::Preflight,
                     };
                     self.poison(plugin_id, PluginHook::Preflight, error.clone());
-                    self.shutdown_plugins_internal();
+                    self.owner.shutdown_plugins_internal();
                     return Err(error);
                 }
                 Ok(Err(error)) if committed_in_batch == 0 => return Err(error),
@@ -1954,7 +1669,7 @@ impl App {
                         source: Box::new(error),
                     };
                     self.poison(plugin_id, PluginHook::Preflight, error.clone());
-                    self.shutdown_plugins_internal();
+                    self.owner.shutdown_plugins_internal();
                     return Err(error);
                 }
                 Ok(Ok(())) => {}
@@ -1962,25 +1677,25 @@ impl App {
 
             self.plugin_entries.push(entry.clone());
             self.plugin_definition_witnesses.push(witness.clone());
-            self.plugins.push(InstalledPlugin {
+            self.owner.plugins.push(InstalledPlugin {
                 plugin: Arc::clone(&plugin),
                 plugin_id,
                 shutdown_complete: false,
             });
-            self.active_plugin_hook = Some((plugin_id, PluginHook::Build));
+            self.owner.active_plugin_hook = Some((plugin_id, PluginHook::Build));
             let build = catch_unwind(AssertUnwindSafe(|| plugin.build(self)))
                 .map_err(|_| PluginError::HookPanicked {
                     plugin: plugin_id,
                     hook: PluginHook::Build,
                 })
                 .and_then(|result| result);
-            self.active_plugin_hook = None;
+            self.owner.active_plugin_hook = None;
             if let Err(error) = build {
                 self.poison(plugin_id, PluginHook::Build, error.clone());
             }
-            if self.plugin_lifecycle == PluginLifecycleState::Poisoned {
+            if self.owner.plugin_lifecycle == PluginLifecycleState::Poisoned {
                 let error = self.primary_plugin_error();
-                self.shutdown_plugins_internal();
+                self.owner.shutdown_plugins_internal();
                 return Err(error);
             }
         }
@@ -1990,6 +1705,36 @@ impl App {
         self.plugin_groups = batch.groups;
         self.disabled_plugin_slots = batch.disabled_slots;
         self.plugin_plan_fingerprint = batch.fingerprint;
+        Ok(())
+    }
+}
+
+impl runtime::RuntimeOwnerState {
+    fn materialize_pending_observers(&mut self, error_handler: ErrorHandler) {
+        for observer in std::mem::take(&mut self.pending_observers) {
+            self.world.spawn(observer.with_error_handler(error_handler));
+        }
+        self.world.flush();
+    }
+
+    pub(crate) fn bind_managed_runtime_error_handler(&mut self, error_handler: ErrorHandler) {
+        self.world
+            .insert_resource(FallbackErrorHandler(error_handler));
+        self.runtime_error_handler = Some(error_handler);
+        self.runtime_fault_bridge = runtime::RuntimeFaultBridgeIdentity::capture(&self.world);
+        self.materialize_pending_observers(error_handler);
+    }
+
+    fn shutdown_plugins(&mut self) -> Result<(), PluginShutdownError> {
+        if self.active_plugin_hook.is_some() {
+            return Err(PluginShutdownError::HookActive);
+        }
+        self.shutdown_plugins_internal();
+        if let Some(report) = &self.plugin_failure_report
+            && (report.primary.is_some() || !report.shutdown_failures.is_empty())
+        {
+            return Err(PluginShutdownError::Failure(Box::new(report.clone())));
+        }
         Ok(())
     }
 
@@ -2048,59 +1793,7 @@ impl App {
         };
     }
 
-    pub fn run(mut self) -> Result<AppExit, AppRunError> {
-        if let Err(error) = self.seal_internal() {
-            return Err(AppRunError::plugin(
-                error,
-                self.plugin_failure_report.clone(),
-            ));
-        }
-        self.begin_runtime_execution();
-        let runner = self
-            .runner
-            .take()
-            .unwrap_or_else(|| Box::new(default_runner));
-        let run_result = match self.begin_runtime_authority_boundary() {
-            Err(error) => Err(error),
-            Ok(authority_boundary) => {
-                let runner_result = runner(&mut self);
-                match (
-                    runner_result,
-                    self.validate_runtime_authority_boundary_against(&authority_boundary),
-                ) {
-                    (result, Ok(())) => result,
-                    (Ok(_), Err(authority)) => Err(authority),
-                    (Err(runner), Err(authority)) if runner == authority => Err(runner),
-                    (Err(runner), Err(authority)) => {
-                        Err(AppRunError::runner_authority(runner, authority))
-                    }
-                }
-            }
-        };
-        match self.shutdown_plugins() {
-            Ok(()) => run_result,
-            Err(PluginShutdownError::Failure(report)) => Err(AppRunError::Shutdown {
-                prior: run_result.err().map(Box::new),
-                report,
-            }),
-            Err(PluginShutdownError::HookActive) => match run_result {
-                Err(error) => Err(error),
-                Ok(_) => Err(AppRunError::runner(
-                    "runner returned while a plugin hook was still active",
-                )),
-            },
-        }
-    }
-
     pub(crate) fn complete_startup_once(&mut self) -> Result<(), AppRunError> {
-        if let Err(error) = self.seal_internal() {
-            return Err(AppRunError::plugin(
-                error,
-                self.plugin_failure_report.clone(),
-            ));
-        }
-        self.begin_runtime_execution();
-
         if !self.started {
             for stage in StartupStage::ALL {
                 self.run_managed_schedule(stage)?;
@@ -2126,174 +1819,24 @@ impl App {
     }
 
     fn run_managed_schedule(&mut self, schedule: impl ScheduleLabel) -> Result<(), AppRunError> {
-        let fault_bridge_epoch = self.begin_runtime_fault_bridge_epoch()?;
+        self.validate_managed_runtime_authority()
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
+        let epoch = self
+            .begin_fault_bridge_epoch()
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
         if let Some(schedule) = self.schedules.get_mut(schedule) {
             schedule.run(&mut self.world);
         }
-        self.validate_runtime_authority_boundary()?;
-        self.validate_runtime_fault_bridge_epoch_against(
-            fault_bridge_epoch,
-            &self.runtime_fault_reporter,
-            self.managed_runtime_generation,
-        )?;
-        Ok(())
-    }
-
-    fn validate_runtime_authority_boundary(&self) -> Result<(), AppRunError> {
-        self.validate_runtime_authority_boundary_parts(
-            &self.runtime_fault_reporter,
-            self.managed_runtime_generation,
-            self.runtime_error_handler,
-            self.runtime_fault_bridge,
-            self.runtime_authority_validator
-                .as_ref()
-                .map(|owner| &owner.validator),
-        )
-    }
-
-    fn begin_runtime_authority_boundary(
-        &mut self,
-    ) -> Result<RuntimeAuthorityBoundary, AppRunError> {
-        self.begin_runtime_fault_bridge_epoch()?;
-        Ok(RuntimeAuthorityBoundary {
-            app_identity: Arc::clone(&self.instance_identity),
-            reporter: self.runtime_fault_reporter.clone(),
-            generation: self.managed_runtime_generation,
-            error_handler: self.runtime_error_handler,
-            fault_bridge: self.runtime_fault_bridge,
-            validator: self
-                .runtime_authority_validator
-                .as_ref()
-                .map(|owner| Arc::clone(&owner.validator)),
-        })
-    }
-
-    fn validate_runtime_authority_boundary_against(
-        &self,
-        boundary: &RuntimeAuthorityBoundary,
-    ) -> Result<(), AppRunError> {
-        if !Arc::ptr_eq(&self.instance_identity, &boundary.app_identity) {
-            let fault = runtime::record_app_instance_authority_fault(&boundary.reporter);
-            return Err(match boundary.generation {
-                Some(_) => AppRunError::managed_runtime_fault(&fault),
-                None => AppRunError::direct_runtime_fault(&fault),
-            });
-        }
-        self.validate_runtime_authority_boundary_parts(
-            &boundary.reporter,
-            boundary.generation,
-            boundary.error_handler,
-            boundary.fault_bridge,
-            boundary.validator.as_ref(),
-        )?;
-        self.validate_runtime_fault_bridge_guard_against(&boundary.reporter, boundary.generation)
-    }
-
-    fn begin_runtime_fault_bridge_epoch(
-        &mut self,
-    ) -> Result<runtime::RuntimeFaultBridgeEpoch, AppRunError> {
-        self.begin_runtime_fault_bridge_epoch_with_maintenance(|world| {
-            world.increment_change_tick();
-            world.check_change_ticks();
-        })
-    }
-
-    fn begin_runtime_fault_bridge_epoch_with_maintenance(
-        &mut self,
-        maintenance: impl FnOnce(&mut World),
-    ) -> Result<runtime::RuntimeFaultBridgeEpoch, AppRunError> {
-        self.validate_runtime_authority_boundary()?;
-        self.validate_runtime_fault_bridge_guard_against(
-            &self.runtime_fault_reporter,
-            self.managed_runtime_generation,
-        )?;
-        if runtime::run_runtime_fault_bridge_maintenance(&mut self.world, maintenance).is_err() {
-            return Err(Self::runtime_fault_bridge_authority_error(
-                &self.runtime_fault_reporter,
-                self.managed_runtime_generation,
-            ));
-        }
-        self.validate_runtime_authority_boundary()?;
-        let epoch = runtime::RuntimeFaultBridgeEpoch::capture(&self.world).ok_or_else(|| {
-            Self::runtime_fault_bridge_authority_error(
-                &self.runtime_fault_reporter,
-                self.managed_runtime_generation,
-            )
-        })?;
-        self.world.increment_change_tick();
-        self.runtime_fault_bridge_guard = Some(epoch);
-        Ok(epoch)
-    }
-
-    fn validate_runtime_fault_bridge_guard_against(
-        &self,
-        reporter: &RuntimeFaultReporter,
-        generation: Option<RuntimeGeneration>,
-    ) -> Result<(), AppRunError> {
-        let Some(expected) = self.runtime_fault_bridge_guard else {
-            return Ok(());
-        };
-        self.validate_runtime_fault_bridge_epoch_against(expected, reporter, generation)
-    }
-
-    fn validate_runtime_fault_bridge_epoch_against(
-        &self,
-        expected: runtime::RuntimeFaultBridgeEpoch,
-        reporter: &RuntimeFaultReporter,
-        generation: Option<RuntimeGeneration>,
-    ) -> Result<(), AppRunError> {
-        if expected.is_unchanged(&self.world) {
-            Ok(())
-        } else {
-            Err(Self::runtime_fault_bridge_authority_error(
-                reporter, generation,
-            ))
-        }
-    }
-
-    fn runtime_fault_bridge_authority_error(
-        reporter: &RuntimeFaultReporter,
-        generation: Option<RuntimeGeneration>,
-    ) -> AppRunError {
-        let fault = runtime::record_runtime_fault_bridge_authority_fault(reporter);
-        match generation {
-            Some(_) => AppRunError::managed_runtime_fault(&fault),
-            None => AppRunError::direct_runtime_fault(&fault),
-        }
-    }
-
-    fn validate_runtime_authority_boundary_parts(
-        &self,
-        reporter: &RuntimeFaultReporter,
-        generation: Option<RuntimeGeneration>,
-        error_handler: Option<ErrorHandler>,
-        fault_bridge: Option<runtime::RuntimeFaultBridgeIdentity>,
-        authority: Option<&Arc<runtime::__RuntimeAuthorityValidator>>,
-    ) -> Result<(), AppRunError> {
-        if let Some(generation) = generation {
-            runtime::validate_managed_fault_boundary(
-                &self.world,
-                reporter,
-                error_handler,
-                fault_bridge,
-                generation,
-                authority,
-            )
-        } else {
-            runtime::validate_direct_authority_boundary(
-                &self.world,
-                reporter,
-                error_handler,
-                fault_bridge,
-                authority,
-            )
-        }
+        self.validate_managed_runtime_authority()
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
+        self.validate_fault_bridge_epoch(epoch)
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault))
     }
 
     pub(crate) fn validate_managed_runtime_authority(&self) -> Result<(), runtime::RuntimeFault> {
-        let Some(generation) = self.managed_runtime_generation else {
-            return Ok(());
-        };
+        let generation = self.managed_runtime_generation.ok_or_else(|| {
+            runtime::record_runtime_fault_bridge_authority_fault(&self.runtime_fault_reporter)
+        })?;
         runtime::validate_managed_runtime_authority(
             &self.world,
             &self.runtime_fault_reporter,
@@ -2326,7 +1869,8 @@ impl App {
         paused_stages_only: bool,
     ) -> Result<AppFrameOutcome, AppRunError> {
         debug_assert!(self.started, "managed frames require completed startup");
-        self.validate_runtime_authority_boundary()?;
+        self.validate_managed_runtime_authority()
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
 
         let frame_started_at = Instant::now();
         let time_frame_plan =
@@ -2383,7 +1927,8 @@ impl App {
         real_delta: Duration,
     ) -> Result<AppFrameOutcome, AppRunError> {
         debug_assert!(self.started, "exact stepping requires completed startup");
-        self.validate_runtime_authority_boundary()?;
+        self.validate_managed_runtime_authority()
+            .map_err(|fault| AppRunError::managed_runtime_fault(&fault))?;
         required_frame_resource::<RuntimeTimeSettings>(
             &self.world,
             TimeFrameResource::RuntimeTimeSettings,
@@ -2434,23 +1979,6 @@ impl App {
         self.world.clear_trackers();
         Ok(AppFrameOutcome { exit, status })
     }
-
-    /// Runs one frame using real elapsed time supplied by the runner.
-    ///
-    /// Startup is a committed one-time lifecycle phase. The frame clock plan is built from the
-    /// resources left by startup; a planning failure does not roll startup back or run it again,
-    /// but it commits no clock state, runs no core schedule, and does not clear frame trackers.
-    /// Runtime faults reported during a schedule return [`AppRunError::DirectRuntime`] at that
-    /// schedule boundary and prevent later schedules from running. Already completed lifecycle
-    /// work is not rolled back; the sticky fault rejects every later frame before new work begins.
-    pub fn run_once(&mut self, real_delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
-        self.complete_startup_once()?;
-        self.run_frame_transaction(real_delta, false)
-    }
-
-    pub fn update(&mut self) -> Result<AppFrameOutcome, AppRunError> {
-        self.run_once(Duration::ZERO)
-    }
 }
 
 fn stage_runs_while_paused(stage: CoreStage) -> bool {
@@ -2468,11 +1996,6 @@ fn stage_runs_while_paused(stage: CoreStage) -> bool {
     )
 }
 
-fn default_runner(app: &mut App) -> Result<AppExit, AppRunError> {
-    let outcome = app.run_once(Duration::ZERO)?;
-    Ok(outcome.exit.unwrap_or(AppExit::Success))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2483,8 +2006,16 @@ mod tests {
     };
     use std::sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     };
+
+    fn run_frame(app: &mut App, delta: Duration) -> Result<AppFrameOutcome, AppRunError> {
+        app.seal_internal()
+            .map_err(|error| AppRunError::plugin(error, app.plugin_failure_report().cloned()))?;
+        app.owner.admit_configuration_for_tests();
+        app.owner.complete_startup_once()?;
+        app.owner.run_managed_frame(delta)
+    }
 
     #[derive(Debug, Default, Resource)]
     struct Frames(u32);
@@ -2538,51 +2069,48 @@ mod tests {
     struct Order(Vec<&'static str>);
 
     #[derive(Debug, Default, PartialEq, Eq, Resource)]
-    struct DirectFaultBridgeProbe {
+    struct ManagedFaultBridgeProbe {
         update_runs: usize,
         last_runs: usize,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
-    struct DirectFaultBridgeSchedule;
-
     #[derive(Debug, Error)]
-    #[error("direct handler probe failure")]
-    struct DirectHandlerProbeError;
+    #[error("managed handler probe failure")]
+    struct ManagedHandlerProbeError;
 
-    static DIRECT_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static CONFIGURED_HANDLER_CALLS: AtomicUsize = AtomicUsize::new(0);
 
-    fn count_direct_update(mut probe: ResMut<DirectFaultBridgeProbe>) {
+    fn count_managed_update(mut probe: ResMut<ManagedFaultBridgeProbe>) {
         probe.update_runs += 1;
     }
 
-    fn count_direct_last(mut probe: ResMut<DirectFaultBridgeProbe>) {
+    fn count_managed_last(mut probe: ResMut<ManagedFaultBridgeProbe>) {
         probe.last_runs += 1;
     }
 
-    fn ignore_direct_bevy_error(_error: BevyError, _context: ErrorContext) {}
+    fn ignore_managed_bevy_error(_error: BevyError, _context: ErrorContext) {}
 
-    fn count_direct_bevy_error(_error: BevyError, _context: ErrorContext) {
-        DIRECT_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
+    fn count_managed_bevy_error(_error: BevyError, _context: ErrorContext) {
+        CONFIGURED_HANDLER_CALLS.fetch_add(1, Ordering::SeqCst);
     }
 
-    fn fail_direct_system() -> Result<(), BevyError> {
-        Err(BevyError::error(DirectHandlerProbeError))
+    fn fail_managed_system() -> Result<(), BevyError> {
+        Err(BevyError::error(ManagedHandlerProbeError))
     }
 
-    fn replace_direct_reporter_and_report(world: &mut World) {
+    fn replace_managed_reporter_and_report(world: &mut World) {
         let replacement = RuntimeFaultReporter::new();
         assert!(replacement.report(RuntimeFault::engine(
             RuntimeFaultKind::System,
             "nara.test.replaced-direct-reporter",
         )));
         world.insert_resource(replacement);
-        world.resource_mut::<DirectFaultBridgeProbe>().update_runs += 1;
+        world.resource_mut::<ManagedFaultBridgeProbe>().update_runs += 1;
     }
 
-    fn replace_and_restore_direct_reporter(
+    fn replace_and_restore_managed_reporter(
         mut reporter: ResMut<RuntimeFaultReporter>,
-        mut probe: ResMut<DirectFaultBridgeProbe>,
+        mut probe: ResMut<ManagedFaultBridgeProbe>,
     ) {
         let canonical = reporter.clone();
         *reporter = RuntimeFaultReporter::new();
@@ -2594,35 +2122,33 @@ mod tests {
         probe.update_runs += 1;
     }
 
-    fn replace_and_restore_direct_error_handler(
+    fn replace_and_restore_managed_error_handler(
         mut handler: ResMut<FallbackErrorHandler>,
-        mut probe: ResMut<DirectFaultBridgeProbe>,
+        mut probe: ResMut<ManagedFaultBridgeProbe>,
     ) {
         let canonical = *handler;
-        *handler = FallbackErrorHandler(ignore_direct_bevy_error);
+        *handler = FallbackErrorHandler(ignore_managed_bevy_error);
         *handler = canonical;
         probe.update_runs += 1;
     }
 
-    fn direct_fault_bridge_app() -> App {
+    fn managed_fault_bridge_app() -> App {
         let mut app = App::new();
-        app.init_resource::<DirectFaultBridgeProbe>()
+        app.init_resource::<ManagedFaultBridgeProbe>()
             .unwrap()
-            .add_systems(CoreStage::Update, count_direct_update)
+            .add_systems(CoreStage::Update, count_managed_update)
             .unwrap()
-            .add_systems(CoreStage::Last, count_direct_last)
+            .add_systems(CoreStage::Last, count_managed_last)
             .unwrap();
         app
     }
 
-    fn assert_direct_fault_bridge_error(error: AppRunError) {
+    fn assert_managed_fault_bridge_error(error: RuntimeDriveError) {
         assert_eq!(
-            error,
-            AppRunError::direct_runtime(
-                RuntimeFaultKind::FaultReporterAuthority,
-                "nara.app.runtime-fault-reporter",
-            )
+            error.fault().kind(),
+            RuntimeFaultKind::FaultReporterAuthority
         );
+        assert_eq!(error.fault().source(), "nara.app.runtime-fault-reporter");
     }
 
     const RAW_APP_CLOSE_PLUGIN_ID: PluginId = PluginId::new("nara.test.raw-app-close");
@@ -2693,14 +2219,77 @@ mod tests {
             &mut self,
             _context: &mut RuntimeCloseContext<'_>,
         ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-            self.polls.fetch_add(1, Ordering::SeqCst);
-            Ok(RuntimeCloseProgress::Pending)
+            let polls = self.polls.fetch_add(1, Ordering::SeqCst);
+            Ok(if polls == 0 {
+                RuntimeCloseProgress::Pending
+            } else {
+                RuntimeCloseProgress::Complete
+            })
         }
     }
 
     struct FirstCollidingClosePlugin {
         begins: Arc<AtomicUsize>,
         polls: Arc<AtomicUsize>,
+    }
+
+    #[derive(Clone, Default)]
+    struct ControlledClose {
+        ready: Arc<AtomicBool>,
+        begins: Arc<AtomicUsize>,
+        polls: Arc<AtomicUsize>,
+    }
+
+    impl RuntimeCloseParticipant for ControlledClose {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.begins.fetch_add(1, Ordering::SeqCst);
+            Ok(if self.ready.load(Ordering::SeqCst) {
+                RuntimeCloseProgress::Complete
+            } else {
+                RuntimeCloseProgress::Pending
+            })
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.polls.fetch_add(1, Ordering::SeqCst);
+            Ok(if self.ready.load(Ordering::SeqCst) {
+                RuntimeCloseProgress::Complete
+            } else {
+                RuntimeCloseProgress::Pending
+            })
+        }
+    }
+
+    struct ControlledClosePlugin {
+        close: ControlledClose,
+        reject_build: bool,
+    }
+
+    impl Plugin for ControlledClosePlugin {
+        fn declaration() -> &'static PluginDeclaration {
+            &RAW_APP_CLOSE_PLUGIN_DECLARATION
+        }
+
+        fn build(&self, app: &mut App) -> Result<(), PluginError> {
+            app.register_plugin_runtime_close_participant(
+                RAW_APP_CLOSE_OBLIGATION,
+                RAW_APP_CLOSE_PARTICIPANT_ID,
+                self.close.clone(),
+            )?;
+            if self.reject_build {
+                return Err(PluginError::SetupFailed {
+                    plugin: RAW_APP_CLOSE_PLUGIN_ID,
+                    message: "injected build failure after close registration".to_owned(),
+                });
+            }
+            Ok(())
+        }
     }
 
     impl Plugin for FirstCollidingClosePlugin {
@@ -2883,12 +2472,12 @@ mod tests {
         );
 
         assert_eq!(
-            app.run_once(real_delta).unwrap_err(),
+            run_frame(app, real_delta).unwrap_err(),
             AppRunError::Time { error: expected }
         );
 
         assert_eq!(time_state(app), before);
-        assert!(app.started);
+        assert!(app.owner.started);
         assert!(
             app.world()
                 .entity(tracked)
@@ -2958,8 +2547,8 @@ mod tests {
         app.add_systems(CoreStage::Update, (spawn_entity, count_frame))
             .unwrap();
 
-        app.update().unwrap();
-        app.update().unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
 
         let spawned_count = {
             let world = app.world_mut().unwrap();
@@ -2978,7 +2567,7 @@ mod tests {
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
 
-        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let outcome = run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         let real_time = app.world().resource::<RealTime>();
         let virtual_time = app.world().resource::<VirtualTime>();
@@ -3000,7 +2589,7 @@ mod tests {
             .unwrap();
         assert!(!app.world().contains_resource::<FrameExecutionStart>());
 
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
 
         assert_eq!(
             app.world().resource::<FrameExecutionStartObservations>().0,
@@ -3015,7 +2604,7 @@ mod tests {
         app.add_systems(CoreStage::FixedUpdate, observe_fixed_time)
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
+        run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP * 3).unwrap();
 
         let step = FixedTime::DEFAULT_TIMESTEP;
         assert_eq!(
@@ -3044,7 +2633,7 @@ mod tests {
         )
         .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
             app.world().resource::<Order>().0,
@@ -3061,7 +2650,7 @@ mod tests {
             .unwrap();
 
         let step = FixedTime::DEFAULT_TIMESTEP;
-        app.run_once(step * 3 + step / 2).unwrap();
+        run_frame(&mut app, step * 3 + step / 2).unwrap();
 
         let observations = &app.world().resource::<FrameStatusObservations>().0;
         assert_eq!(observations.len(), 1);
@@ -3085,7 +2674,7 @@ mod tests {
         };
         app.add_systems(CoreStage::Last, record_removals).unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
 
         assert_eq!(app.world().resource::<RemovalCount>().0, 1);
         assert!(
@@ -3286,7 +2875,7 @@ mod tests {
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
 
-        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let outcome = run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
             app.world().resource::<RealTime>().delta,
@@ -3306,7 +2895,7 @@ mod tests {
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
 
-        let outcome = app.run_once(FixedTime::DEFAULT_TIMESTEP * 2).unwrap();
+        let outcome = run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP * 2).unwrap();
 
         assert_eq!(
             app.world().resource::<VirtualTime>().delta,
@@ -3326,7 +2915,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = app.run_once(Duration::from_secs(1)).unwrap();
+        let outcome = run_frame(&mut app, Duration::from_secs(1)).unwrap();
 
         assert_eq!(
             app.world().resource::<RealTime>().delta,
@@ -3382,7 +2971,7 @@ mod tests {
         app.add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP / 2).unwrap();
+        run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP / 2).unwrap();
 
         assert_eq!(app.world().resource::<Frames>().0, 0);
         assert_eq!(app.world().resource::<FixedTime>().steps_this_frame(), 0);
@@ -3398,7 +2987,7 @@ mod tests {
             .unwrap();
 
         let step = FixedTime::DEFAULT_TIMESTEP;
-        app.run_once(step * 5 + step / 2).unwrap();
+        run_frame(&mut app, step * 5 + step / 2).unwrap();
 
         assert_eq!(app.world().resource::<Frames>().0, 2);
         let fixed = app.world().resource::<FixedTime>();
@@ -3428,7 +3017,7 @@ mod tests {
             .unwrap();
 
         let step = FixedTime::DEFAULT_TIMESTEP;
-        app.run_once(step * 5 + step / 2).unwrap();
+        run_frame(&mut app, step * 5 + step / 2).unwrap();
 
         let fixed = app.world().resource::<FixedTime>();
         assert_eq!(fixed.tick(), 2);
@@ -3438,7 +3027,7 @@ mod tests {
         let alpha = app.world().resource::<RenderTime>().interpolation_alpha;
         assert!((alpha - 0.5).abs() < f32::EPSILON);
 
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
 
         let fixed = app.world().resource::<FixedTime>();
         assert_eq!(fixed.tick(), 4);
@@ -3464,7 +3053,7 @@ mod tests {
             .unwrap();
 
         let step = FixedTime::DEFAULT_TIMESTEP;
-        let error = app.run_once(step * 5).unwrap_err();
+        let error = run_frame(&mut app, step * 5).unwrap_err();
 
         assert_eq!(
             error,
@@ -3481,7 +3070,7 @@ mod tests {
         assert_eq!(app.world().resource::<FixedTime>().debt(), Duration::ZERO);
         assert_eq!(app.world().resource::<Frames>().0, 0);
 
-        app.run_once(step * 4).unwrap();
+        run_frame(&mut app, step * 4).unwrap();
         assert_eq!(app.world().resource::<FixedTime>().tick(), 2);
         assert_eq!(app.world().resource::<FixedTime>().debt(), step * 2);
     }
@@ -3497,7 +3086,7 @@ mod tests {
             .unwrap();
         let step = FixedTime::DEFAULT_TIMESTEP;
 
-        app.run_once(step).unwrap();
+        run_frame(&mut app, step).unwrap();
 
         assert_eq!(app.world().resource::<StartupRuns>().0, 1);
         assert_eq!(app.world().resource::<Frames>().0, 0);
@@ -3516,7 +3105,7 @@ mod tests {
             .unwrap();
         let step = FixedTime::DEFAULT_TIMESTEP;
 
-        app.run_once(step * 2).unwrap();
+        run_frame(&mut app, step * 2).unwrap();
 
         let fixed_time = app.world().resource::<FixedTime>();
         assert_eq!(app.world().resource::<StartupRuns>().0, 1);
@@ -3537,7 +3126,7 @@ mod tests {
         let step = FixedTime::DEFAULT_TIMESTEP;
 
         assert_eq!(
-            app.run_once(step * 5).unwrap_err(),
+            run_frame(&mut app, step * 5).unwrap_err(),
             AppRunError::Time {
                 error: TimeFrameError::Fixed(FixedTimeError::CatchUpDebtExceeded {
                     pending_steps: 5,
@@ -3547,7 +3136,7 @@ mod tests {
             }
         );
 
-        assert!(app.started);
+        assert!(app.owner.started);
         assert_eq!(app.world().resource::<StartupRuns>().0, 1);
         assert_eq!(app.world().resource::<Frames>().0, 0);
         assert_eq!(*app.world().resource::<RealTime>(), RealTime::default());
@@ -3566,7 +3155,7 @@ mod tests {
             .resource_mut::<FixedTime>()
             .set_max_debt_steps(3)
             .unwrap();
-        app.run_once(step * 5).unwrap();
+        run_frame(&mut app, step * 5).unwrap();
 
         assert_eq!(app.world().resource::<StartupRuns>().0, 1);
         assert_eq!(app.world().resource::<Frames>().0, 1);
@@ -3582,14 +3171,14 @@ mod tests {
         app.add_systems(CoreStage::Update, count_frame).unwrap();
 
         assert_eq!(
-            app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap_err(),
+            run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap_err(),
             AppRunError::Time {
                 error: TimeFrameError::MissingResource {
                     resource: TimeFrameResource::FixedTime,
                 },
             }
         );
-        assert!(app.started);
+        assert!(app.owner.started);
         assert_eq!(app.world().resource::<StartupRuns>().0, 1);
         assert_eq!(app.world().resource::<Frames>().0, 0);
         assert_eq!(*app.world().resource::<RealTime>(), RealTime::default());
@@ -3599,7 +3188,7 @@ mod tests {
         );
 
         app.insert_resource(FixedTime::default()).unwrap();
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(app.world().resource::<StartupRuns>().0, 1);
         assert_eq!(app.world().resource::<Frames>().0, 1);
@@ -3608,7 +3197,7 @@ mod tests {
     #[test]
     fn time_frame_plan_rejects_every_clock_overflow_without_state_changes() {
         let mut scaled_delta_app = App::new();
-        scaled_delta_app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut scaled_delta_app, Duration::ZERO).unwrap();
         scaled_delta_app
             .insert_resource(
                 RuntimeTimeSettings::default()
@@ -3628,7 +3217,7 @@ mod tests {
         );
 
         let mut real_elapsed_app = App::new();
-        real_elapsed_app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut real_elapsed_app, Duration::ZERO).unwrap();
         *real_elapsed_app
             .world_mut()
             .unwrap()
@@ -3646,7 +3235,7 @@ mod tests {
         );
 
         let mut real_frame_app = App::new();
-        real_frame_app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut real_frame_app, Duration::ZERO).unwrap();
         *real_frame_app
             .world_mut()
             .unwrap()
@@ -3661,7 +3250,7 @@ mod tests {
         );
 
         let mut virtual_elapsed_app = App::new();
-        virtual_elapsed_app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut virtual_elapsed_app, Duration::ZERO).unwrap();
         *virtual_elapsed_app
             .world_mut()
             .unwrap()
@@ -3679,7 +3268,7 @@ mod tests {
         );
 
         let mut virtual_frame_app = App::new();
-        virtual_frame_app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut virtual_frame_app, Duration::ZERO).unwrap();
         *virtual_frame_app
             .world_mut()
             .unwrap()
@@ -3694,7 +3283,7 @@ mod tests {
         );
 
         let mut fixed_pending_app = App::new();
-        fixed_pending_app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut fixed_pending_app, Duration::ZERO).unwrap();
         {
             let mut fixed = fixed_pending_app
                 .world_mut()
@@ -3728,7 +3317,7 @@ mod tests {
             .add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
         assert_eq!(
-            tick_app.run_once(step * 2).unwrap_err(),
+            run_frame(&mut tick_app, step * 2).unwrap_err(),
             AppRunError::Time {
                 error: TimeFrameError::Fixed(FixedTimeError::TickOverflow {
                     tick: u64::MAX - 1,
@@ -3750,7 +3339,7 @@ mod tests {
             .add_systems(CoreStage::FixedUpdate, count_frame)
             .unwrap();
         assert_eq!(
-            elapsed_app.run_once(step * 2).unwrap_err(),
+            run_frame(&mut elapsed_app, step * 2).unwrap_err(),
             AppRunError::Time {
                 error: TimeFrameError::Fixed(FixedTimeError::ElapsedOverflow {
                     elapsed: Duration::MAX - step,
@@ -3778,23 +3367,23 @@ mod tests {
             .unwrap();
 
         let step = FixedTime::DEFAULT_TIMESTEP;
-        app.run_once(step * 5).unwrap();
+        run_frame(&mut app, step * 5).unwrap();
         assert_eq!(app.world().resource::<FixedTime>().debt(), step * 3);
 
         app.insert_resource(RuntimeTimeSettings::default().with_paused(true))
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
         assert_eq!(app.world().resource::<FixedTime>().tick(), 2);
         assert_eq!(app.world().resource::<FixedTime>().debt(), step * 3);
 
         app.insert_resource(RuntimeTimeSettings::default().with_time_scale(0.0).unwrap())
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
         assert_eq!(app.world().resource::<FixedTime>().tick(), 2);
         assert_eq!(app.world().resource::<FixedTime>().debt(), step * 3);
 
         app.insert_resource(RuntimeTimeSettings::default()).unwrap();
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
         assert_eq!(app.world().resource::<FixedTime>().tick(), 4);
         assert_eq!(app.world().resource::<FixedTime>().debt(), step);
     }
@@ -3804,7 +3393,7 @@ mod tests {
         let mut app = App::new();
         app.add_systems(CoreStage::Update, request_exit).unwrap();
 
-        let outcome = app.run_once(Duration::ZERO).unwrap();
+        let outcome = run_frame(&mut app, Duration::ZERO).unwrap();
 
         assert_eq!(outcome.exit, Some(AppExit::Requested));
         assert_eq!(app.world().resource::<AppExitRequests>().requested(), None);
@@ -3823,7 +3412,7 @@ mod tests {
             .unwrap();
         app.add_systems(CoreStage::Update, push_update).unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
             app.world().resource::<Order>().0,
@@ -3849,7 +3438,7 @@ mod tests {
         app.add_systems(CoreStage::Cleanup, push_cleanup).unwrap();
         app.add_systems(CoreStage::Last, push_last).unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        run_frame(&mut app, Duration::ZERO).unwrap();
 
         assert_eq!(
             app.world().resource::<Order>().0,
@@ -3890,24 +3479,26 @@ mod tests {
             observe_boundary.in_set(FixedUpdateSet::Simulate),
         )
         .unwrap();
-        app.schedules
+        app.owner
+            .schedules
             .get_mut(CoreStage::FixedUpdate)
             .expect("FixedUpdate is an engine-owned schedule")
             .remove_build_pass::<nara_ecs::schedule::passes::AutoInsertApplyDeferredPass>();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        run_frame(&mut app, FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert!(app.world().resource::<BoundaryObserved>().0);
     }
 
     #[test]
-    fn direct_app_rejects_removed_replaced_or_reinserted_fault_reporter() {
+    fn managed_app_rejects_removed_replaced_or_reinserted_fault_reporter() {
         for mutation in 0..3 {
-            let mut app = direct_fault_bridge_app();
-            app.run_once(Duration::ZERO).unwrap();
-            let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+            let app = managed_fault_bridge_app();
+            let mut runtime = RuntimeInstance::start(app).unwrap();
+            runtime.drive(Duration::ZERO).unwrap();
+            let canonical = runtime.world().resource::<RuntimeFaultReporter>().clone();
 
-            let world = app.world_mut().unwrap();
+            let world = runtime.world_mut_for_tests();
             match mutation {
                 0 => {
                     world.remove_resource::<RuntimeFaultReporter>();
@@ -3922,10 +3513,10 @@ mod tests {
                 _ => unreachable!(),
             }
 
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
             assert_eq!(
-                *app.world().resource::<DirectFaultBridgeProbe>(),
-                DirectFaultBridgeProbe {
+                *runtime.world().resource::<ManagedFaultBridgeProbe>(),
+                ManagedFaultBridgeProbe {
                     update_runs: 1,
                     last_runs: 1,
                 }
@@ -3934,25 +3525,26 @@ mod tests {
                 canonical.fault().unwrap().kind(),
                 RuntimeFaultKind::FaultReporterAuthority
             );
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
         }
     }
 
     #[test]
-    fn direct_app_rejects_removed_replaced_or_reinserted_error_handler() {
+    fn managed_app_rejects_removed_replaced_or_reinserted_error_handler() {
         for mutation in 0..3 {
-            let mut app = direct_fault_bridge_app();
-            app.run_once(Duration::ZERO).unwrap();
-            let canonical = *app.world().resource::<FallbackErrorHandler>();
-            let reporter = app.world().resource::<RuntimeFaultReporter>().clone();
+            let app = managed_fault_bridge_app();
+            let mut runtime = RuntimeInstance::start(app).unwrap();
+            runtime.drive(Duration::ZERO).unwrap();
+            let canonical = *runtime.world().resource::<FallbackErrorHandler>();
+            let reporter = runtime.world().resource::<RuntimeFaultReporter>().clone();
 
-            let world = app.world_mut().unwrap();
+            let world = runtime.world_mut_for_tests();
             match mutation {
                 0 => {
                     world.remove_resource::<FallbackErrorHandler>();
                 }
                 1 => {
-                    world.insert_resource(FallbackErrorHandler(ignore_direct_bevy_error));
+                    world.insert_resource(FallbackErrorHandler(ignore_managed_bevy_error));
                 }
                 2 => {
                     world.remove_resource::<FallbackErrorHandler>();
@@ -3961,10 +3553,10 @@ mod tests {
                 _ => unreachable!(),
             }
 
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
             assert_eq!(
-                *app.world().resource::<DirectFaultBridgeProbe>(),
-                DirectFaultBridgeProbe {
+                *runtime.world().resource::<ManagedFaultBridgeProbe>(),
+                ManagedFaultBridgeProbe {
                     update_runs: 1,
                     last_runs: 1,
                 }
@@ -3973,52 +3565,56 @@ mod tests {
                 reporter.fault().unwrap().kind(),
                 RuntimeFaultKind::FaultReporterAuthority
             );
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
         }
     }
 
     #[test]
-    fn direct_app_freezes_a_pre_execution_error_handler_configuration() {
-        DIRECT_HANDLER_CALLS.store(0, Ordering::SeqCst);
-        let mut app = direct_fault_bridge_app();
-        app.add_systems(CoreStage::Update, fail_direct_system)
+    fn managed_admission_owns_the_error_handler_before_startup() {
+        CONFIGURED_HANDLER_CALLS.store(0, Ordering::SeqCst);
+        let mut app = managed_fault_bridge_app();
+        app.add_systems(CoreStage::Update, fail_managed_system)
             .unwrap();
-        app.insert_resource(FallbackErrorHandler(count_direct_bevy_error))
+        app.insert_resource(FallbackErrorHandler(count_managed_bevy_error))
             .unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let error = runtime.drive(Duration::ZERO).unwrap_err();
 
-        assert_eq!(DIRECT_HANDLER_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::System);
+        assert_eq!(CONFIGURED_HANDLER_CALLS.load(Ordering::SeqCst), 0);
         assert_eq!(
-            *app.world().resource::<DirectFaultBridgeProbe>(),
-            DirectFaultBridgeProbe {
-                update_runs: 1,
-                last_runs: 1,
-            }
+            runtime
+                .world()
+                .resource::<ManagedFaultBridgeProbe>()
+                .last_runs,
+            0
         );
     }
 
     #[test]
-    fn direct_schedule_rejects_in_place_fault_bridge_mutation_after_restore() {
+    fn managed_schedule_rejects_in_place_fault_bridge_mutation_after_restore() {
         for mutation in 0..2 {
             let mut app = App::new();
-            app.init_resource::<DirectFaultBridgeProbe>().unwrap();
+            app.init_resource::<ManagedFaultBridgeProbe>().unwrap();
             match mutation {
                 0 => app
-                    .add_systems(CoreStage::Update, replace_and_restore_direct_reporter)
+                    .add_systems(CoreStage::Update, replace_and_restore_managed_reporter)
                     .unwrap(),
                 1 => app
-                    .add_systems(CoreStage::Update, replace_and_restore_direct_error_handler)
+                    .add_systems(CoreStage::Update, replace_and_restore_managed_error_handler)
                     .unwrap(),
                 _ => unreachable!(),
             };
-            app.add_systems(CoreStage::Last, count_direct_last).unwrap();
-            let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+            app.add_systems(CoreStage::Last, count_managed_last)
+                .unwrap();
+            let mut runtime = RuntimeInstance::start(app).unwrap();
+            let canonical = runtime.world().resource::<RuntimeFaultReporter>().clone();
 
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
             assert_eq!(
-                *app.world().resource::<DirectFaultBridgeProbe>(),
-                DirectFaultBridgeProbe {
+                *runtime.world().resource::<ManagedFaultBridgeProbe>(),
+                ManagedFaultBridgeProbe {
                     update_runs: 1,
                     last_runs: 0,
                 }
@@ -4027,143 +3623,33 @@ mod tests {
                 canonical.fault().unwrap().kind(),
                 RuntimeFaultKind::FaultReporterAuthority
             );
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+            assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
             assert_eq!(
-                app.world().resource::<DirectFaultBridgeProbe>().update_runs,
+                runtime
+                    .world()
+                    .resource::<ManagedFaultBridgeProbe>()
+                    .update_runs,
                 1
             );
         }
     }
 
     #[test]
-    fn direct_change_tick_maintenance_cannot_hide_fault_bridge_mutation() {
-        for mutation in 0..2 {
-            let mut app = direct_fault_bridge_app();
-            app.run_once(Duration::ZERO).unwrap();
-            let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
-
-            let error = app
-                .begin_runtime_fault_bridge_epoch_with_maintenance(|world| {
-                    world.increment_change_tick();
-                    match mutation {
-                        0 => {
-                            let mut reporter = world.resource_mut::<RuntimeFaultReporter>();
-                            let canonical = reporter.clone();
-                            *reporter = RuntimeFaultReporter::new();
-                            *reporter = canonical;
-                        }
-                        1 => {
-                            let mut handler = world.resource_mut::<FallbackErrorHandler>();
-                            let canonical = *handler;
-                            *handler = FallbackErrorHandler(ignore_direct_bevy_error);
-                            *handler = canonical;
-                        }
-                        _ => unreachable!(),
-                    }
-                })
-                .unwrap_err();
-
-            assert_direct_fault_bridge_error(error);
-            assert_eq!(
-                canonical.fault().unwrap().kind(),
-                RuntimeFaultKind::FaultReporterAuthority
-            );
-            assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
-        }
-    }
-
-    #[test]
-    fn custom_schedule_rejects_in_place_reporter_mutation_after_restore() {
+    fn managed_schedule_cannot_hide_a_fault_behind_a_replaced_world_reporter() {
         let mut app = App::new();
-        app.init_resource::<DirectFaultBridgeProbe>()
+        app.init_resource::<ManagedFaultBridgeProbe>()
             .unwrap()
-            .init_schedule(DirectFaultBridgeSchedule)
+            .add_systems(CoreStage::Update, replace_managed_reporter_and_report)
             .unwrap()
-            .add_systems(
-                DirectFaultBridgeSchedule,
-                replace_and_restore_direct_reporter,
-            )
+            .add_systems(CoreStage::Last, count_managed_last)
             .unwrap();
-        let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let canonical = runtime.world().resource::<RuntimeFaultReporter>().clone();
 
-        let error = app.run_schedule(DirectFaultBridgeSchedule).unwrap_err();
-        let AppScheduleRunError::Runtime(error) = error else {
-            panic!("custom schedule bridge mutation must be a runtime error");
-        };
-        assert_direct_fault_bridge_error(error);
+        assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
         assert_eq!(
-            app.world().resource::<DirectFaultBridgeProbe>().update_runs,
-            1
-        );
-        assert_eq!(
-            canonical.fault().unwrap().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
-
-        let error = app.run_schedule(DirectFaultBridgeSchedule).unwrap_err();
-        let AppScheduleRunError::Runtime(error) = error else {
-            panic!("sticky bridge fault must reject the custom schedule");
-        };
-        assert_direct_fault_bridge_error(error);
-        assert_eq!(
-            app.world().resource::<DirectFaultBridgeProbe>().update_runs,
-            1
-        );
-    }
-
-    #[test]
-    fn custom_runner_rejects_in_place_reporter_mutation_after_restore() {
-        let mut app = App::new();
-        let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
-        app.set_runner(|app| {
-            {
-                let world = app
-                    .world_mut()
-                    .expect("runner keeps App mutation authority");
-                let mut reporter = world.resource_mut::<RuntimeFaultReporter>();
-                let canonical = reporter.clone();
-                *reporter = RuntimeFaultReporter::new();
-                assert!(reporter.report(RuntimeFault::engine(
-                    RuntimeFaultKind::System,
-                    "nara.test.temporary-runner-reporter",
-                )));
-                *reporter = canonical;
-            }
-
-            let error = app.run_once(Duration::ZERO).unwrap_err();
-            assert_eq!(
-                error,
-                AppRunError::direct_runtime(
-                    RuntimeFaultKind::FaultReporterAuthority,
-                    "nara.app.runtime-fault-reporter",
-                )
-            );
-            Err(error)
-        })
-        .unwrap();
-
-        assert_direct_fault_bridge_error(app.run().unwrap_err());
-        assert_eq!(
-            canonical.fault().unwrap().kind(),
-            RuntimeFaultKind::FaultReporterAuthority
-        );
-    }
-
-    #[test]
-    fn direct_schedule_cannot_hide_a_fault_behind_a_replaced_world_reporter() {
-        let mut app = App::new();
-        app.init_resource::<DirectFaultBridgeProbe>()
-            .unwrap()
-            .add_systems(CoreStage::Update, replace_direct_reporter_and_report)
-            .unwrap()
-            .add_systems(CoreStage::Last, count_direct_last)
-            .unwrap();
-        let canonical = app.world().resource::<RuntimeFaultReporter>().clone();
-
-        assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
-        assert_eq!(
-            *app.world().resource::<DirectFaultBridgeProbe>(),
-            DirectFaultBridgeProbe {
+            *runtime.world().resource::<ManagedFaultBridgeProbe>(),
+            ManagedFaultBridgeProbe {
                 update_runs: 1,
                 last_runs: 0,
             }
@@ -4172,39 +3658,18 @@ mod tests {
             canonical.fault().unwrap().kind(),
             RuntimeFaultKind::FaultReporterAuthority
         );
-        assert_direct_fault_bridge_error(app.run_once(Duration::ZERO).unwrap_err());
+        assert_managed_fault_bridge_error(runtime.drive(Duration::ZERO).unwrap_err());
         assert_eq!(
-            app.world().resource::<DirectFaultBridgeProbe>().update_runs,
+            runtime
+                .world()
+                .resource::<ManagedFaultBridgeProbe>()
+                .update_runs,
             1
         );
     }
 
     #[test]
-    fn run_consumes_app_with_custom_runner() {
-        let mut app = App::new();
-        app.set_runner(|app| {
-            app.run_once(Duration::ZERO)?;
-            Ok(AppExit::Requested)
-        })
-        .unwrap();
-
-        assert_eq!(app.run().unwrap(), AppExit::Requested);
-    }
-
-    #[test]
-    fn runner_failure_is_reported_without_panic() {
-        let mut app = App::new();
-        app.set_runner(|_app| Err(AppRunError::runner("window creation failed")))
-            .unwrap();
-
-        assert_eq!(
-            app.run().unwrap_err(),
-            AppRunError::runner("window creation failed")
-        );
-    }
-
-    #[test]
-    fn dropping_raw_app_begins_and_polls_registered_runtime_close_once() {
+    fn dropping_configuration_waits_for_one_registered_close_attempt() {
         let begins = Arc::new(AtomicUsize::new(0));
         let polls = Arc::new(AtomicUsize::new(0));
         let mut app = App::new();
@@ -4217,11 +3682,40 @@ mod tests {
         drop(app);
 
         assert_eq!(begins.load(Ordering::SeqCst), 1);
-        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 
     #[test]
-    fn running_raw_app_begins_and_polls_registered_runtime_close_once() {
+    fn ordinary_start_moves_the_configured_owner_and_closes_it_once() {
+        let mut app = App::new();
+        let identity = app.world().id();
+        let close = ControlledClose::default();
+        close.ready.store(true, Ordering::SeqCst);
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        app.init_resource::<Frames>().unwrap();
+        app.add_systems(CoreStage::Update, count_frame).unwrap();
+
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        assert_eq!(identity, runtime.world().id());
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(runtime.world().resource::<Frames>().0, 1);
+        assert!(matches!(
+            runtime.request_control(RuntimeControl::Stop),
+            RuntimeControlRequestResult::Accepted(_)
+        ));
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.finish().unwrap();
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        assert_eq!(close.polls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn finish_polls_one_close_attempt_until_complete() {
         let begins = Arc::new(AtomicUsize::new(0));
         let polls = Arc::new(AtomicUsize::new(0));
         let mut app = App::new();
@@ -4230,11 +3724,177 @@ mod tests {
             polls: Arc::clone(&polls),
         })
         .unwrap();
-        app.set_runner(|_| Ok(AppExit::Success)).unwrap();
 
-        assert_eq!(app.run().unwrap(), AppExit::Success);
+        RuntimeInstance::start(app).unwrap().finish().unwrap();
+
         assert_eq!(begins.load(Ordering::SeqCst), 1);
-        assert_eq!(polls.load(Ordering::SeqCst), 1);
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+    }
+
+    #[test]
+    fn finish_returns_the_owner_after_one_incomplete_attempt() {
+        let close = ControlledClose::default();
+        let mut app = App::new();
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        let runtime = RuntimeInstance::start_with_options(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap();
+
+        let mut retirement = runtime.finish().unwrap_err();
+
+        assert_eq!(
+            retirement.retirement_state(),
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        assert_eq!(close.polls.load(Ordering::SeqCst), 1);
+        close.ready.store(true, Ordering::SeqCst);
+        assert_eq!(
+            retirement.drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn finish_succeeds_after_retrying_a_historical_close_timeout() {
+        let close = ControlledClose::default();
+        let mut app = App::new();
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        let mut runtime = RuntimeInstance::start_with_options(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap();
+        runtime.request_control(RuntimeControl::Stop);
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        assert_eq!(runtime.state(), RuntimeState::CloseIncomplete);
+        close.ready.store(true, Ordering::SeqCst);
+
+        let evidence = runtime.finish().unwrap();
+
+        assert!(
+            evidence
+                .causes()
+                .contains(&RuntimeCloseCause::DeadlineExceeded)
+        );
+        assert!(!evidence.plugin_shutdown_failed());
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn ordinary_start_failure_completes_one_close_attempt_before_returning() {
+        let begins = Arc::new(AtomicUsize::new(0));
+        let polls = Arc::new(AtomicUsize::new(0));
+        let mut app = App::new();
+        app.add_plugin(RawAppClosePlugin {
+            begins: Arc::clone(&begins),
+            polls: Arc::clone(&polls),
+        })
+        .unwrap();
+        app.add_systems(StartupStage::Runtime, fail_managed_system)
+            .unwrap();
+
+        let failure = RuntimeInstance::start(app).unwrap_err();
+
+        assert!(matches!(failure.error(), RuntimeStartError::Startup(_)));
+        assert_eq!(
+            failure.retirement_state(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        assert_eq!(begins.load(Ordering::SeqCst), 1);
+        assert_eq!(polls.load(Ordering::SeqCst), 2);
+        drop(failure);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+    }
+
+    #[test]
+    fn ordinary_startup_failure_retains_retryable_close_ownership() {
+        let close = ControlledClose::default();
+        let mut app = App::new();
+        app.add_plugin(ControlledClosePlugin {
+            close: close.clone(),
+            reject_build: false,
+        })
+        .unwrap();
+        app.add_systems(
+            StartupStage::Runtime,
+            |reporter: Res<RuntimeFaultReporter>| {
+                reporter.report(RuntimeFault::engine(
+                    RuntimeFaultKind::System,
+                    "nara.test.ordinary-startup-failure",
+                ));
+            },
+        )
+        .unwrap();
+
+        let mut failure = RuntimeInstance::start_with_options(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap_err();
+        assert!(matches!(failure.error(), RuntimeStartError::Startup(_)));
+        assert_eq!(
+            failure.retirement_state(),
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        close.ready.store(true, Ordering::SeqCst);
+        assert_eq!(
+            failure.drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
+        let polls = close.polls.load(Ordering::SeqCst);
+        drop(failure);
+        assert_eq!(close.polls.load(Ordering::SeqCst), polls);
+    }
+
+    #[test]
+    fn ordinary_build_failure_retains_the_registered_close_participant() {
+        let close = ControlledClose::default();
+        let mut app = App::new();
+        assert!(
+            app.add_plugin(ControlledClosePlugin {
+                close: close.clone(),
+                reject_build: true,
+            })
+            .is_err()
+        );
+        assert_eq!(close.begins.load(Ordering::SeqCst), 0);
+
+        let mut failure = RuntimeInstance::start_with_options(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::new(Duration::ZERO),
+        )
+        .unwrap_err();
+        assert!(matches!(failure.error(), RuntimeStartError::Preparation(_)));
+        assert_eq!(
+            failure.retirement_state(),
+            RuntimeCandidateRetirementState::RetirementIncomplete
+        );
+        close.ready.store(true, Ordering::SeqCst);
+        assert_eq!(
+            failure.drive_retirement(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        assert_eq!(close.begins.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -4272,8 +3932,9 @@ mod tests {
         drop(app);
 
         assert_eq!(first_begins.load(Ordering::SeqCst), 1);
-        assert_eq!(first_polls.load(Ordering::SeqCst), 1);
+        assert_eq!(first_polls.load(Ordering::SeqCst), 2);
         assert_eq!(second_begins.load(Ordering::SeqCst), 1);
-        assert_eq!(second_polls.load(Ordering::SeqCst), 1);
+        assert_eq!(second_polls.load(Ordering::SeqCst), 2);
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
     }
 }

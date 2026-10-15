@@ -1,0 +1,21 @@
+error: lifetime may not live long enough
+ --> tests/ui/runtime_driver/scope_escape.rs:5:52
+  |
+5 |     let _scope = runtime.with_driver_scope(|scope| scope);
+  |                                             ------ ^^^^^ returning this value requires that `'1` must outlive `'2`
+  |                                             |    |
+  |                                             |    return type of closure is &'2 mut nara::nara_app::RuntimeDriverScope<'_>
+  |                                             has type `&'1 mut nara::nara_app::RuntimeDriverScope<'_>`
+
+error: lifetime may not live long enough
+ --> tests/ui/runtime_driver/scope_escape.rs:5:52
+  |
+5 |     let _scope = runtime.with_driver_scope(|scope| scope);
+  |                                             ------ ^^^^^ returning this value requires that `'3` must outlive `'4`
+  |                                             |    |
+  |                                             |    return type of closure is &mut nara::nara_app::RuntimeDriverScope<'4>
+  |                                             has type `&mut nara::nara_app::RuntimeDriverScope<'3>`
+  |
+  = note: requirement occurs because of a mutable reference to `nara::nara_app::RuntimeDriverScope<'_>`
+  = note: mutable references are invariant over their type parameter
+  = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance

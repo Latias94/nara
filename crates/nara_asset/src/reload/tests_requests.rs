@@ -23,13 +23,14 @@ fn registered_reload_consumer_must_claim_requests_in_the_same_frame() {
         .modified(record.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let requests = app.world().resource::<AssetReloadRequests>();
+    let requests = runtime.world().resource::<AssetReloadRequests>();
     assert!(requests.is_empty());
     assert_eq!(requests.retained_payload_bytes(), 0);
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(asset_id)
             .unwrap()
@@ -38,18 +39,24 @@ fn registered_reload_consumer_must_claim_requests_in_the_same_frame() {
             if message == "asset.reload-consumer-did-not-claim"
     ));
     assert!(
-        app.world().resource::<AssetEvents>().iter().any(|event| {
-            event.id() == asset_id && event.kind() == AssetEventKind::ReloadRejected
-        })
+        runtime
+            .world()
+            .resource::<AssetEvents>()
+            .iter()
+            .any(|event| {
+                event.id() == asset_id && event.kind() == AssetEventKind::ReloadRejected
+            })
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetReloadDiagnostics>()
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["asset.reload-consumer-did-not-claim"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -84,18 +91,25 @@ fn stale_unclaimed_request_cannot_overwrite_newer_asset_state() {
     )
     .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    assert!(app.world().resource::<AssetReloadRequests>().is_empty());
-    let state = app
+    assert!(runtime.world().resource::<AssetReloadRequests>().is_empty());
+    let state = runtime
         .world()
         .resource::<AssetStates>()
         .state(asset_id)
         .unwrap();
     assert_eq!(state.version(), AssetVersion::from_raw(1));
     assert_eq!(state.load_state(), &crate::LoadState::Loaded);
-    assert!(app.world().resource::<AssetEvents>().is_empty());
-    assert!(app.world().resource::<AssetReloadDiagnostics>().is_empty());
+    assert!(runtime.world().resource::<AssetEvents>().is_empty());
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetReloadDiagnostics>()
+            .is_empty()
+    );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -129,17 +143,24 @@ fn unclaimed_request_cannot_overwrite_a_newer_asset_version() {
     )
     .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let state = app
+    let state = runtime
         .world()
         .resource::<AssetStates>()
         .state(asset_id)
         .unwrap();
     assert_eq!(state.version(), AssetVersion::from_raw(1));
     assert_eq!(state.load_state(), &crate::LoadState::Loaded);
-    assert!(app.world().resource::<AssetEvents>().is_empty());
-    assert!(app.world().resource::<AssetReloadDiagnostics>().is_empty());
+    assert!(runtime.world().resource::<AssetEvents>().is_empty());
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetReloadDiagnostics>()
+            .is_empty()
+    );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -166,10 +187,12 @@ fn replacing_request_limits_does_not_drop_image_consumer_authority() {
         .modified(record.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<CapturedReloadRequests>()
             .0
             .iter()
@@ -177,6 +200,7 @@ fn replacing_request_limits_does_not_drop_image_consumer_authority() {
             .collect::<Vec<_>>(),
         vec!["textures/reconfigured.png"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -222,17 +246,18 @@ fn reload_request_item_limit_rejects_excess_work_without_retention() {
         .modified(accepted.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let captured = app.world().resource::<CapturedReloadRequests>();
+    let captured = runtime.world().resource::<CapturedReloadRequests>();
     assert_eq!(captured.0.len(), 1);
     assert_eq!(captured.0[0].path(), accepted.path());
-    let requests = app.world().resource::<AssetReloadRequests>();
+    let requests = runtime.world().resource::<AssetReloadRequests>();
     assert!(requests.is_empty());
     assert_eq!(requests.retained_payload_bytes(), 0);
     for rejected_id in [first_rejected_id, second_rejected_id] {
         assert!(matches!(
-            app.world()
+            runtime.world()
                 .resource::<AssetStates>()
                 .state(rejected_id)
                 .unwrap()
@@ -240,11 +265,17 @@ fn reload_request_item_limit_rejects_excess_work_without_retention() {
             crate::LoadState::Failed { message }
                 if message == "asset.reload-request-item-limit-exceeded"
         ));
-        assert!(app.world().resource::<AssetEvents>().iter().any(|event| {
-            event.id() == rejected_id && event.kind() == AssetEventKind::ReloadRejected
-        }));
+        assert!(
+            runtime
+                .world()
+                .resource::<AssetEvents>()
+                .iter()
+                .any(|event| {
+                    event.id() == rejected_id && event.kind() == AssetEventKind::ReloadRejected
+                })
+        );
     }
-    let diagnostics = app.world().resource::<AssetReloadDiagnostics>();
+    let diagnostics = runtime.world().resource::<AssetReloadDiagnostics>();
     assert_eq!(
         diagnostics
             .iter()
@@ -284,6 +315,7 @@ fn reload_request_item_limit_rejects_excess_work_without_retention() {
             nara_diagnostic::DiagnosticValueRef::Redacted
         );
     }
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -313,19 +345,21 @@ fn reload_request_byte_limit_rejects_work_without_retention() {
         .modified(record.path().clone())
         .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<CapturedReloadRequests>()
             .0
             .is_empty()
     );
-    let requests = app.world().resource::<AssetReloadRequests>();
+    let requests = runtime.world().resource::<AssetReloadRequests>();
     assert!(requests.is_empty());
     assert_eq!(requests.retained_payload_bytes(), 0);
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(asset_id)
             .unwrap()
@@ -334,13 +368,15 @@ fn reload_request_byte_limit_rejects_work_without_retention() {
             if message == "asset.reload-request-byte-limit-exceeded"
     ));
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetReloadDiagnostics>()
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
             .collect::<Vec<_>>(),
         vec!["asset.reload-request-byte-limit-exceeded"]
     );
+    runtime.finish().unwrap();
 }
 
 #[test]

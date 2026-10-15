@@ -138,13 +138,15 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
         .id();
     place_roots(app.world_mut().unwrap(), &[sprite]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let extracted = app.world().resource::<ExtractedSprites>();
+    let extracted = runtime.world().resource::<ExtractedSprites>();
     assert_eq!(extracted.len(), 1);
     assert_eq!(extracted.as_slice()[0].world_center, Vec2::ZERO);
     assert_eq!(extracted.as_slice()[0].world_x_axis, Vec2::new(8.0, 0.0));
     assert_eq!(extracted.as_slice()[0].world_y_axis, Vec2::new(0.0, 4.0));
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -163,8 +165,9 @@ fn sprite_extraction_preserves_rotation_axes() {
         .id();
     place_roots(app.world_mut().unwrap(), &[sprite]);
 
-    app.run_once(Duration::ZERO).unwrap();
-    let extracted = app.world().resource::<ExtractedSprites>().as_slice()[0];
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice()[0];
 
     assert!(
         extracted
@@ -176,6 +179,7 @@ fn sprite_extraction_preserves_rotation_axes() {
             .world_y_axis
             .abs_diff_eq(Vec2::new(-1.0, 0.0), 0.000_001)
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -223,9 +227,10 @@ fn extraction_uses_authored_structure_when_entity_allocation_is_reversed() {
         };
         place_roots(app.world_mut().unwrap(), &[red, blue]);
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let extracted = app.world().resource::<ExtractedSprites>();
+        let extracted = runtime.world().resource::<ExtractedSprites>();
         assert_eq!(
             extracted
                 .as_slice()
@@ -234,11 +239,13 @@ fn extraction_uses_authored_structure_when_entity_allocation_is_reversed() {
                 .collect::<Vec<_>>(),
             vec![0, 1]
         );
-        extracted
+        let colors = extracted
             .as_slice()
             .iter()
             .map(|sprite| sprite.color)
-            .collect()
+            .collect();
+        runtime.finish().unwrap();
+        colors
     }
 
     let expected = vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0)];
@@ -270,9 +277,10 @@ fn tilemap_cells_lower_to_world_positions() {
         .id();
     place_roots(app.world_mut().unwrap(), &[tilemap]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let extracted = app.world().resource::<ExtractedSprites>();
+    let extracted = runtime.world().resource::<ExtractedSprites>();
     assert_eq!(extracted.len(), 1);
     assert_eq!(
         extracted.as_slice()[0].kind,
@@ -285,6 +293,7 @@ fn tilemap_cells_lower_to_world_positions() {
     assert_eq!(extracted.as_slice()[0].world_x_axis, Vec2::new(5.0, 0.0));
     assert_eq!(extracted.as_slice()[0].world_y_axis, Vec2::new(0.0, 10.0));
     assert_eq!(extracted.as_slice()[0].layer, 2);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -309,10 +318,11 @@ fn parented_sprite_uses_the_completed_global_affine() {
         (parent, child)
     };
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
     let expected = parent_transform.matrix() * child_transform.matrix();
-    let extracted = app.world().resource::<ExtractedSprites>().as_slice()[0];
+    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice()[0];
     assert_eq!(extracted.entity, child);
     assert!(
         extracted
@@ -329,7 +339,8 @@ fn parented_sprite_uses_the_completed_global_affine() {
             .world_y_axis
             .abs_diff_eq(expected.transform_vector2(Vec2::new(0.0, 1.0)), 0.000_001)
     );
-    assert!(app.world().get::<GlobalTransform2d>(parent).is_some());
+    assert!(runtime.world().get::<GlobalTransform2d>(parent).is_some());
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -349,23 +360,29 @@ fn moving_a_sprite_parent_updates_extraction_without_mutating_child_local_state(
         (parent, child)
     };
 
-    app.run_once(Duration::ZERO).unwrap();
-    let first_center = app.world().resource::<ExtractedSprites>().as_slice()[0].world_center;
+    app.add_systems(
+        CoreStage::Update,
+        move |time: nara_ecs::Res<nara_app::RealTime>,
+              mut transforms: nara_ecs::Query<&mut Transform2d>| {
+            if time.frame == 2 {
+                transforms.get_mut(parent).unwrap().translation = Vec2::new(20.0, 30.0);
+            }
+        },
+    )
+    .unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let first_center = runtime.world().resource::<ExtractedSprites>().as_slice()[0].world_center;
+    runtime.drive(Duration::ZERO).unwrap();
 
-    app.world_mut()
-        .unwrap()
-        .get_mut::<Transform2d>(parent)
-        .unwrap()
-        .translation = Vec2::new(20.0, 30.0);
-    app.run_once(Duration::ZERO).unwrap();
-
-    let world = app.world();
+    let world = runtime.world();
     assert_eq!(*world.get::<Transform2d>(child).unwrap(), child_local);
     assert_eq!(first_center, Vec2::new(4.0, -2.0));
     assert_eq!(
         world.resource::<ExtractedSprites>().as_slice()[0].world_center,
         Vec2::new(24.0, 28.0)
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -387,10 +404,11 @@ fn parented_tilemap_uses_the_completed_global_affine() {
         child
     };
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
     let expected = parent_transform.matrix() * child_transform.matrix();
-    let extracted = app.world().resource::<ExtractedSprites>().as_slice()[0];
+    let extracted = runtime.world().resource::<ExtractedSprites>().as_slice()[0];
     assert_eq!(extracted.entity, child);
     assert!(
         extracted
@@ -407,6 +425,7 @@ fn parented_tilemap_uses_the_completed_global_affine() {
             .world_y_axis
             .abs_diff_eq(expected.transform_vector2(Vec2::new(0.0, 10.0)), 0.000_001)
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -493,12 +512,14 @@ fn queueing_records_missing_prepared_texture_snapshot() {
         .id();
     place_roots(app.world_mut().unwrap(), &[sprite]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let queued = app.world().resource::<QueuedSpriteItems>();
-    let stats = app.world().resource::<SpriteRenderStats>();
+    let queued = runtime.world().resource::<QueuedSpriteItems>();
+    let stats = runtime.world().resource::<SpriteRenderStats>();
     assert!(queued.is_empty());
     assert_eq!(stats.unprepared_textures, 1);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -526,11 +547,12 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
         .id();
     place_roots(app.world_mut().unwrap(), &[sprite]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let queued = app.world().resource::<QueuedSpriteItems>();
-    let batches = app.world().resource::<SpriteBatches>();
-    let stats = app.world().resource::<SpriteRenderStats>();
+    let queued = runtime.world().resource::<QueuedSpriteItems>();
+    let batches = runtime.world().resource::<SpriteBatches>();
+    let stats = runtime.world().resource::<SpriteRenderStats>();
     assert_eq!(queued.len(), 1);
     assert_eq!(
         queued.as_slice()[0]
@@ -552,6 +574,7 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
         Some(image_resource_key(image))
     );
     assert_eq!(stats.unprepared_textures, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -728,9 +751,10 @@ fn same_image_with_different_samplers_splits_batches() {
         &[default_sampler, nearest_sampler],
     );
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let batches = app.world().resource::<SpriteBatches>();
+    let batches = runtime.world().resource::<SpriteBatches>();
     assert_eq!(batches.len(), 2);
     assert_eq!(
         batches.as_slice()[0]
@@ -750,6 +774,7 @@ fn same_image_with_different_samplers_splits_batches() {
         batches.as_slice()[0].material.sampler,
         batches.as_slice()[1].material.sampler
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -846,9 +871,10 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
         .id();
     place_roots(app.world_mut().unwrap(), &[tilemap]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let batches = app.world().resource::<SpriteBatches>();
+    let batches = runtime.world().resource::<SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(batches.as_slice()[0].kind, SpriteBatchKind::Tilemap);
     assert_eq!(batches.as_slice()[0].target, target);
@@ -857,6 +883,7 @@ fn app_pipeline_extracts_tilemaps_into_batches() {
             .center
             .abs_diff_eq(Vec2::new(0.1, 0.1), 0.000_001)
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -882,9 +909,10 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
         .id();
     place_roots(app.world_mut().unwrap(), &[tilemap]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let extracted = app.world().resource::<ExtractedSprites>();
+    let extracted = runtime.world().resource::<ExtractedSprites>();
     assert_eq!(extracted.len(), 1);
     assert_eq!(extracted.as_slice()[0].material.image, Some(image));
     assert_eq!(
@@ -892,11 +920,13 @@ fn tilemap_extraction_applies_tileset_image_and_atlas_uvs() {
         TextureUvRect::new(Vec2::new(0.25, 0.5), Vec2::new(0.25, 0.5))
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<SpriteRenderStats>()
             .invalid_tile_regions,
         0
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -922,12 +952,14 @@ fn tilemap_extraction_skips_out_of_range_atlas_tiles() {
         .id();
     place_roots(app.world_mut().unwrap(), &[tilemap]);
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    assert_eq!(app.world().resource::<ExtractedSprites>().len(), 0);
-    let stats = app.world().resource::<SpriteRenderStats>();
+    assert_eq!(runtime.world().resource::<ExtractedSprites>().len(), 0);
+    let stats = runtime.world().resource::<SpriteRenderStats>();
     assert_eq!(stats.invalid_tile_regions, 1);
     assert_eq!(stats.extracted_tile_cells, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]

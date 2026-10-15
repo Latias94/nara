@@ -16,6 +16,10 @@ use crate::{PresentationUiPlugins, RuntimeUiPlugins};
 #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
 use std::time::Duration;
 
+#[path = "test_driver.rs"]
+mod driver;
+use driver::BridgeRuntime;
+
 #[derive(Debug, Default, Resource)]
 struct FakeBackendFrame(Option<nara_ui_render::__private::UiBackendPresentationFrame>);
 
@@ -256,6 +260,7 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
     let surface_id = UiSurfaceId::new(7).expect("test surface should be non-zero");
     let root = install_test_surface_and_root(&mut app, surface_id.get(), 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the bridge should compile one explicitly routed UI frame");
 
@@ -268,19 +273,14 @@ fn bridge_mirrors_and_retires_explicit_host_surface_routes() {
         .expect("UI runtime should remain installed")
         .expect("the active surface should have one compiled frame");
 
-    nara_ui::retire_ui_surface(
-        app.world_mut().expect("test app should expose its world"),
-        surface_id,
-    )
-    .expect("test surface retirement should succeed");
+    app.retire_surface(surface_id)
+        .expect("test surface retirement should succeed");
     app.update()
         .expect("route retirement should be synchronized without a stale packet");
 
-    let compile = nara_ui_render::compile_ui_paint_packets(
-        app.world_mut().expect("test app should expose its world"),
-        &[frame],
-    )
-    .expect("the UI packet compiler should remain available");
+    let compile = app
+        .compile_packets(vec![frame])
+        .expect("the UI packet compiler should remain available");
     assert_eq!(compile.admitted_packets, 0);
     assert_eq!(compile.rejected_packets, 1);
 }
@@ -320,18 +320,8 @@ fn explicit_winit_accessibility_publication_uses_the_exact_presented_receipt() {
     install_fake_backend(&mut app, FakeBackendMode::Present);
     install_test_surface_and_root(&mut app, 71, nara_window::WindowId::PRIMARY.get());
 
-    let candidate = nara_app::RuntimeAdmissionReservation::try_acquire()
-        .expect("the focused test should acquire one runtime route")
-        .admit(
-            app.seal().expect("the focused test app should seal"),
-            nara_app::RuntimeObligationLedger::new(),
-            nara_app::RuntimeClosePolicy::default(),
-        )
-        .expect("the focused test runtime should be admitted");
-    let mut runtime = candidate
-        .complete_startup()
-        .expect("the focused test runtime should start")
-        .promote();
+    let mut runtime =
+        nara_app::RuntimeInstance::start(app).expect("the focused test runtime should start");
 
     runtime
         .drive(Duration::ZERO)
@@ -373,19 +363,9 @@ fn explicit_winit_accessibility_publication_uses_the_exact_presented_receipt() {
     );
     assert_eq!(snapshot.presentation_epoch(), receipt.presentation_epoch());
 
-    assert!(matches!(
-        runtime.request_control(nara_app::RuntimeControl::Stop),
-        nara_app::RuntimeControlRequestResult::Accepted(_)
-    ));
-    for _ in 0..4 {
-        if runtime.state() == nara_app::RuntimeState::Stopped {
-            break;
-        }
-        runtime
-            .drive(Duration::ZERO)
-            .expect("the focused test runtime should close cleanly");
-    }
-    assert_eq!(runtime.state(), nara_app::RuntimeState::Stopped);
+    runtime
+        .finish()
+        .expect("the focused test runtime should close cleanly");
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "presentation-ui"))]
@@ -401,6 +381,7 @@ fn compiled_desktop_ui_without_contribution_drives_without_platform_state() {
     install_fake_backend(&mut app, FakeBackendMode::Present);
     install_test_surface_and_root(&mut app, 70, 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("a compiled but unrequested accessibility adapter must not affect the UI frame");
 
@@ -423,28 +404,25 @@ fn compiled_desktop_ui_without_contribution_drives_without_platform_state() {
 #[test]
 fn host_minimize_suspends_routes_and_restore_requires_fresh_presentation() {
     let mut app = App::new();
+    app.add_plugin(nara_window::WindowPlugin {
+        primary_window: None,
+    })
+    .expect("the resize driver needs the window event owner");
     app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
         .expect("runtime and presentation UI products should install");
     install_fake_backend(&mut app, FakeBackendMode::Present);
     let surface_id = UiSurfaceId::new(30).unwrap();
     install_test_surface_and_root(&mut app, surface_id.get(), 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update().expect("the initial surface should present");
     let initial_receipt = app
         .world()
         .resource::<UiPresentationBridgeStats>()
         .last_presented_receipt
         .expect("the initial surface should own one receipt");
-    *app.world_mut().unwrap().resource_mut::<FakeBackendMode>() = FakeBackendMode::HoldAcceptance;
-    {
-        let world = app.world_mut().unwrap();
-        let mut query = world.query::<&mut nara_window::Window>();
-        let mut window = query
-            .iter_mut(world)
-            .find(|window| window.id == nara_window::WindowId::PRIMARY)
-            .expect("the primary window should remain installed");
-        window.resolution = nara_window::WindowResolution::new(640, 360);
-    }
+    app.set_backend_mode(FakeBackendMode::HoldAcceptance);
+    app.resize_primary_window(nara_window::WindowResolution::new(640, 360));
     app.update()
         .expect("the resized surface should retain one uncommitted backend acceptance");
     assert_eq!(
@@ -456,15 +434,7 @@ fn host_minimize_suspends_routes_and_restore_requires_fresh_presentation() {
             .resource::<UiPresentationAttemptLedger>()
             .is_empty()
     );
-    {
-        let world = app.world_mut().unwrap();
-        let mut query = world.query::<&mut nara_window::Window>();
-        let mut window = query
-            .iter_mut(world)
-            .find(|window| window.id == nara_window::WindowId::PRIMARY)
-            .expect("the primary window should remain installed");
-        window.resolution = nara_window::WindowResolution::new(0, 720);
-    }
+    app.resize_primary_window(nara_window::WindowResolution::new(0, 720));
 
     app.update()
         .expect("zero extent should suspend without submitting the old packet");
@@ -501,17 +471,8 @@ fn host_minimize_suspends_routes_and_restore_requires_fresh_presentation() {
         1
     );
 
-    *app.world_mut().unwrap().resource_mut::<FakeBackendMode>() =
-        FakeBackendMode::PresentAndReleaseHeld;
-    {
-        let world = app.world_mut().unwrap();
-        let mut query = world.query::<&mut nara_window::Window>();
-        let mut window = query
-            .iter_mut(world)
-            .find(|window| window.id == nara_window::WindowId::PRIMARY)
-            .expect("the primary window should remain installed");
-        window.resolution = nara_window::WindowResolution::new(1_024, 768);
-    }
+    app.set_backend_mode(FakeBackendMode::PresentAndReleaseHeld);
+    app.resize_primary_window(nara_window::WindowResolution::new(1_024, 768));
     app.update()
         .expect("a valid 4:3 target should restore and present a fresh generation");
 
@@ -560,19 +521,10 @@ fn missing_window_suspends_and_a_recreated_endpoint_restores_the_same_surface_li
     install_fake_backend(&mut app, FakeBackendMode::Present);
     let surface_id = UiSurfaceId::new(31).unwrap();
     install_test_surface_and_root(&mut app, surface_id.get(), 1);
+    let mut app = BridgeRuntime::start(app);
     app.update().expect("the initial surface should present");
 
-    let removed_window = {
-        let world = app.world_mut().unwrap();
-        let mut query = world.query::<(Entity, &nara_window::Window)>();
-        let (entity, window) = query
-            .iter(world)
-            .find(|(_, window)| window.id == nara_window::WindowId::PRIMARY)
-            .expect("the primary window should remain installed");
-        let window = window.clone();
-        assert!(world.despawn(entity));
-        window
-    };
+    let removed_window = app.remove_primary_window();
     app.update()
         .expect("a missing endpoint should suspend instead of retaining stale authority");
     assert_eq!(
@@ -580,9 +532,7 @@ fn missing_window_suspends_and_a_recreated_endpoint_restores_the_same_surface_li
         UiSurfaceAvailability::Suspended(UiSurfaceSuspensionReason::EndpointUnavailable)
     );
 
-    app.world_mut()
-        .unwrap()
-        .spawn((removed_window, nara_window::PrimaryWindow));
+    app.restore_primary_window(removed_window);
     app.update()
         .expect("recreating the endpoint should restore with fresh generations");
     let restored = nara_ui::ui_surface_slot_snapshots(app.world()).unwrap()[0];
@@ -604,6 +554,7 @@ fn host_acceptance_commits_one_exact_receipt_without_a_post_submit_failure() {
     install_fake_backend(&mut app, FakeBackendMode::Present);
     install_test_surface_and_root(&mut app, 8, 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the fake backend should accept the UI packet");
 
@@ -647,6 +598,7 @@ fn host_aborts_an_unconsumed_backend_frame_before_later_acceptance() {
     install_fake_backend(&mut app, FakeBackendMode::Ignore);
     install_test_surface_and_root(&mut app, 12, 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the ignored backend frame should remain prepared");
     {
@@ -661,9 +613,7 @@ fn host_aborts_an_unconsumed_backend_frame_before_later_acceptance() {
             .is_empty()
     );
 
-    *app.world_mut()
-        .expect("test app should expose its world")
-        .resource_mut::<FakeBackendMode>() = FakeBackendMode::Present;
+    app.set_backend_mode(FakeBackendMode::Present);
     app.update()
         .expect("a later backend frame should still present successfully");
 
@@ -687,6 +637,7 @@ fn host_discards_a_late_backend_acceptance_after_committing_its_successor() {
     let surface_id = UiSurfaceId::new(13).expect("test surface should be non-zero");
     install_test_surface_and_root(&mut app, surface_id.get(), 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the fake backend should hold the first accepted packet");
     let stale_epoch = app
@@ -706,9 +657,7 @@ fn host_discards_a_late_backend_acceptance_after_committing_its_successor() {
             .is_empty()
     );
 
-    *app.world_mut()
-        .expect("test app should expose its world")
-        .resource_mut::<FakeBackendMode>() = FakeBackendMode::PresentAndReleaseHeld;
+    app.set_backend_mode(FakeBackendMode::PresentAndReleaseHeld);
     app.update().expect(
         "the Host should abort the old attempt, commit its successor, then discard the late acceptance",
     );
@@ -758,18 +707,14 @@ fn a_newer_unpresented_candidate_cannot_replace_the_presented_observation() {
     install_fake_backend(&mut app, FakeBackendMode::Present);
     let root = install_test_surface_and_root(&mut app, 14, 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update().expect("the initial candidate should present");
     let presented = latest_presented_ui_observation(app.world())
         .expect("the initial packet should publish an observation");
     let presented_frame = presented.frame();
 
-    app.world_mut()
-        .expect("test app should expose its world")
-        .entity_mut(root)
-        .insert(UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0)));
-    *app.world_mut()
-        .expect("test app should expose its world")
-        .resource_mut::<FakeBackendMode>() = FakeBackendMode::HoldAcceptance;
+    app.set_visual(root, UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0)));
+    app.set_backend_mode(FakeBackendMode::HoldAcceptance);
     app.update()
         .expect("the newer candidate should remain unpresented");
 
@@ -797,18 +742,14 @@ fn a_rejected_successor_keeps_the_previous_presented_observation() {
     let root = install_test_surface_and_root(&mut app, 15, 1);
     install_fake_backend(&mut app, FakeBackendMode::Present);
 
+    let mut app = BridgeRuntime::start(app);
     app.update().expect("the initial candidate should present");
     let presented = latest_presented_ui_observation(app.world())
         .expect("the initial packet should publish an observation");
     let presented_frame = presented.frame();
 
-    app.world_mut()
-        .expect("test app should expose its world")
-        .entity_mut(root)
-        .insert(UiVisual::solid(UiColor::rgba(0.0, 1.0, 0.0, 1.0)));
-    *app.world_mut()
-        .expect("test app should expose its world")
-        .resource_mut::<FakeBackendMode>() = FakeBackendMode::FaultWindow(1);
+    app.set_visual(root, UiVisual::solid(UiColor::rgba(0.0, 1.0, 0.0, 1.0)));
+    app.set_backend_mode(FakeBackendMode::FaultWindow(1));
     app.update()
         .expect("the rejected successor should terminate without replacing presentation");
 
@@ -834,6 +775,7 @@ fn host_device_fault_retires_only_matching_backend_generation() {
     install_test_surface_and_root(&mut app, 21, 2);
     install_test_surface_and_root(&mut app, 22, 3);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the fake backend should defer two generations before faulting one of them");
 
@@ -850,9 +792,7 @@ fn host_device_fault_retires_only_matching_backend_generation() {
     assert_eq!(stats.deferred_packets, 2);
     assert_eq!(stats.aborted_packets, 2);
 
-    *app.world_mut()
-        .expect("test app should expose its world")
-        .resource_mut::<FakeBackendMode>() = FakeBackendMode::PresentGeneration;
+    app.set_backend_mode(FakeBackendMode::PresentGeneration);
     app.update()
         .expect("the unrelated backend generation should retry and present");
 
@@ -882,6 +822,7 @@ fn host_target_fault_isolated_from_an_unrelated_surface_acceptance() {
     install_test_surface_and_root(&mut app, 9, 1);
     install_test_surface_and_root(&mut app, 10, 2);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the fake backend should publish both outcomes");
 
@@ -911,6 +852,7 @@ fn deferred_attempt_is_superseded_when_its_behavior_changes_before_retry() {
     install_fake_backend(&mut app, FakeBackendMode::Deferred);
     let root = install_test_surface_and_root(&mut app, 11, 1);
 
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the fake backend should defer the first packet");
     assert_eq!(
@@ -920,13 +862,8 @@ fn deferred_attempt_is_superseded_when_its_behavior_changes_before_retry() {
         1
     );
 
-    app.world_mut()
-        .expect("test app should expose its world")
-        .entity_mut(root)
-        .insert(UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0)));
-    *app.world_mut()
-        .expect("test app should expose its world")
-        .resource_mut::<FakeBackendMode>() = FakeBackendMode::Present;
+    app.set_visual(root, UiVisual::solid(UiColor::rgba(1.0, 0.0, 0.0, 1.0)));
+    app.set_backend_mode(FakeBackendMode::Present);
     app.update()
         .expect("the changed frame should supersede the deferred packet");
 
@@ -946,14 +883,13 @@ fn host_external_backend_rendezvous_reexports_the_exact_deferred_retry() {
     app.add_plugins((RuntimeUiPlugins, PresentationUiPlugins))
         .expect("runtime and presentation UI products should install");
     install_test_surface_and_root(&mut app, 23, 1);
+    let mut app = BridgeRuntime::start(app);
     app.update()
         .expect("the Runtime should prepare one external backend frame");
 
-    let first = nara_ui_render::__private::take_ui_backend_presentation_frame(
-        app.world_mut()
-            .expect("the test app should expose its world"),
-    )
-    .expect("the external Host should reserve the prepared UI frame");
+    let first = app
+        .take_backend_frame()
+        .expect("the external Host should reserve the prepared UI frame");
     let (_, submissions) = first.into_parts();
     let backend_generation = nara_ui_render::UiPresentationBackendGeneration::new(91, 4).unwrap();
     let mut submitted =
@@ -964,24 +900,15 @@ fn host_external_backend_rendezvous_reexports_the_exact_deferred_retry() {
         .pop()
         .unwrap()
         .deferred("external Editor window deferral".to_owned());
-    nara_ui_render::__private::commit_ui_backend_outcome(
-        app.world_mut()
-            .expect("the test app should expose its world"),
-        completed,
-    )
-    .expect("the Runtime should reclaim its exact deferred permit");
-    commit_runtime_ui_presentations(
-        app.world_mut()
-            .expect("the test app should expose its world"),
-    );
+    app.commit_backend_outcome(completed)
+        .expect("the Runtime should reclaim its exact deferred permit");
+    app.commit_presentations();
 
     app.update()
         .expect("the Runtime should re-export the exact eligible retry");
-    let retry = nara_ui_render::__private::take_ui_backend_presentation_frame(
-        app.world_mut()
-            .expect("the test app should expose its world"),
-    )
-    .expect("the external Host should receive the deferred retry");
+    let retry = app
+        .take_backend_frame()
+        .expect("the external Host should receive the deferred retry");
     let (_, submissions) = retry.into_parts();
     assert_eq!(submissions[0].submission().identity(), first_identity);
     assert_eq!(
@@ -991,16 +918,9 @@ fn host_external_backend_rendezvous_reexports_the_exact_deferred_retry() {
     let mut submitted =
         nara_ui_render::__private::bind_backend_submission_batch(submissions, backend_generation)
             .unwrap();
-    nara_ui_render::__private::commit_ui_backend_outcome(
-        app.world_mut()
-            .expect("the test app should expose its world"),
-        submitted.pop().unwrap().presented(),
-    )
-    .expect("the exact retry should reach one terminal presented outcome");
-    commit_runtime_ui_presentations(
-        app.world_mut()
-            .expect("the test app should expose its world"),
-    );
+    app.commit_backend_outcome(submitted.pop().unwrap().presented())
+        .expect("the exact retry should reach one terminal presented outcome");
+    app.commit_presentations();
 
     let stats = app.world().resource::<UiPresentationBridgeStats>();
     assert_eq!(stats.deferred_packets, 1);

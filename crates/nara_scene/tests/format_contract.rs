@@ -10,11 +10,12 @@ use nara_reflect::{
     ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_scene::{
-    InMemoryPrefabSourceResolver, PrefabDocument, PrefabDocumentCandidate, PrefabInstance,
-    PrefabSourceResolver, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
-    SceneDocumentCandidate, SceneEntityId, SceneEntityRecord, SceneFileBudgetKind, SceneFileLimits,
-    SceneFormatError, ScenePatchDocument, ScenePatchDocumentCandidate, ScenePatchOperation,
-    ScenePlacement, ScenePlacementOwner, register_scene_components,
+    AuthoringSessionReplacementError, InMemoryPrefabSourceResolver, PrefabDocument,
+    PrefabDocumentCandidate, PrefabInstance, PrefabSourceResolver, SceneAuthoringSession,
+    SceneComponentRecord, SceneDocument, SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
+    SceneFileBudgetKind, SceneFileLimits, SceneFormatError, ScenePatchDocument,
+    ScenePatchDocumentCandidate, ScenePatchOperation, ScenePlacement, ScenePlacementOwner,
+    register_scene_components,
 };
 use serde::Serialize;
 
@@ -970,6 +971,9 @@ fn semantic_scene_publication_requires_frozen_registry_and_is_atomic() {
             &registry,
         )
         .unwrap_err();
+    let AuthoringSessionReplacementError::Publication(error) = error else {
+        panic!("invalid scene content must fail file publication");
+    };
 
     assert!(
         error
@@ -1052,6 +1056,9 @@ fn migration_value_growth_respects_candidate_limits_and_is_failure_atomic() {
     let error = session
         .try_replace_file_candidate(candidate, &registry)
         .unwrap_err();
+    let AuthoringSessionReplacementError::Publication(error) = error else {
+        panic!("migration growth must fail file publication");
+    };
 
     assert!(error.diagnostics().iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.file-component-value-budget-exceeded"
@@ -1815,6 +1822,9 @@ fn assert_scene_migration_shape_rejected(
     let error = session
         .try_replace_file_candidate(candidate, registry)
         .unwrap_err();
+    let AuthoringSessionReplacementError::Publication(error) = error else {
+        panic!("migration shape must fail file publication for case {case}");
+    };
 
     assert_shape_budget_error(case, expected_code, error.diagnostics());
     assert_eq!(session.document(), &before, "scene case {case}");

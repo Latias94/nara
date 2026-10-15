@@ -434,6 +434,7 @@ fn project_failure_reason(failure: EditorImageImportFailure) -> EditorImageImpor
         EditorImageImportFailure::MetadataEncoding
         | EditorImageImportFailure::MetadataPublicationRejected
         | EditorImageImportFailure::MetadataPublicationFailed
+        | EditorImageImportFailure::CleanupPending
         | EditorImageImportFailure::MetadataPublicationUncertain => {
             EditorImageImportFailureReason::MetadataPublication
         }
@@ -480,6 +481,7 @@ fn project_rejection(failure: EditorImageImportFailure) -> EditorImageImportActi
         | EditorImageImportFailure::MetadataEncoding
         | EditorImageImportFailure::MetadataPublicationRejected
         | EditorImageImportFailure::MetadataPublicationFailed
+        | EditorImageImportFailure::CleanupPending
         | EditorImageImportFailure::MetadataPublicationUncertain
         | EditorImageImportFailure::Runtime(_)
         | EditorImageImportFailure::ResultMismatch => EditorImageImportActionRejection::Unavailable,

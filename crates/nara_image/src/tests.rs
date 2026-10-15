@@ -43,6 +43,151 @@ use crate::reload::{
     image_reload_diagnostic, record_image_reload_failure,
 };
 
+enum ImagePipelineEdit {
+    SourceChange {
+        path: AssetPath,
+        kind: AssetSourceChangeKind,
+    },
+    Invalidate(AssetId),
+    Insert {
+        handle: Handle<ImageAsset>,
+        image: ImageAsset,
+    },
+    ReplaceThenFail {
+        handle: Handle<ImageAsset>,
+        image: ImageAsset,
+    },
+    Reimport {
+        record: AssetRecord,
+        handle: Handle<ImageAsset>,
+        settings: ImageImportSettings,
+    },
+    Remove(Handle<ImageAsset>),
+    PendingReplacement(ImageAsset),
+}
+
+#[derive(Default, Resource)]
+struct ImagePipelinePort;
+
+impl nara_app::__RuntimeDriverPort for ImagePipelinePort {
+    type Input = ImagePipelineEdit;
+    type Output = Option<AssetVersion>;
+
+    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
+        unreachable!("image pipeline edits coordinate concrete image resources")
+    }
+}
+
+impl ImagePipelinePort {
+    fn apply_driver_input_in_world(
+        world: &mut nara_ecs::World,
+        input: ImagePipelineEdit,
+    ) -> Result<Option<AssetVersion>, (nara_app::RuntimeWorldAccessError, ImagePipelineEdit)> {
+        match input {
+            ImagePipelineEdit::SourceChange { path, kind } => {
+                let mut changes = world.resource_mut::<AssetSourceChanges>();
+                match kind {
+                    AssetSourceChangeKind::Modified => changes.modified(path).unwrap(),
+                    AssetSourceChangeKind::MetaModified => changes.meta_modified(path).unwrap(),
+                    AssetSourceChangeKind::Removed => changes.removed(path).unwrap(),
+                };
+            }
+            ImagePipelineEdit::Invalidate(id) => {
+                world
+                    .resource_mut::<AssetStates>()
+                    .invalidate_publication(id);
+            }
+            ImagePipelineEdit::Insert { handle, image } => {
+                world
+                    .resource_mut::<Assets<ImageAsset>>()
+                    .insert(handle, image);
+            }
+            ImagePipelineEdit::ReplaceThenFail { handle, image } => {
+                let version =
+                    world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+                        let mut states = world.resource_mut::<AssetStates>();
+                        let expected = states.version(handle.id()).unwrap();
+                        let version = images
+                            .commit_reload(
+                                handle,
+                                expected,
+                                image,
+                                &mut states,
+                                &mut AssetEvents::default(),
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                        images
+                            .record_reload_failure(
+                                handle,
+                                &mut states,
+                                &mut AssetEvents::default(),
+                                "decode failed",
+                            )
+                            .unwrap();
+                        version
+                    });
+                return Ok(Some(version));
+            }
+            ImagePipelineEdit::Reimport {
+                record,
+                handle,
+                settings,
+            } => {
+                world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+                    world.resource_scope(|world, mut states: nara_ecs::Mut<AssetStates>| {
+                        let server = world.resource::<AssetServer>();
+                        let bytes = rgba_png(1, 1, &[0, 0, 255, 255]);
+                        let imported = ImageImporter::default()
+                            .import_image(
+                                bytes_request_with_settings(&record, &bytes, settings),
+                                handle,
+                                states.version(handle.id()).unwrap(),
+                                server,
+                                &images,
+                                &states,
+                            )
+                            .unwrap();
+                        imported
+                            .commit(
+                                server,
+                                &mut images,
+                                &mut states,
+                                &mut AssetEvents::default(),
+                            )
+                            .unwrap();
+                    });
+                });
+            }
+            ImagePipelineEdit::Remove(handle) => {
+                world.resource_scope(|world, mut images: nara_ecs::Mut<Assets<ImageAsset>>| {
+                    images
+                        .remove_with_state(
+                            handle,
+                            &mut world.resource_mut::<AssetStates>(),
+                            &mut AssetEvents::default(),
+                        )
+                        .unwrap();
+                });
+            }
+            ImagePipelineEdit::PendingReplacement(image) => {
+                world.resource_mut::<PendingImageReplacement>().image = Some(image);
+            }
+        }
+        Ok(None)
+    }
+}
+
+fn edit_image_pipeline(
+    runtime: &mut nara_app::RuntimeInstance,
+    edit: ImagePipelineEdit,
+) -> Option<AssetVersion> {
+    runtime
+        .with_driver_scope(|scope| scope.__apply_port::<ImagePipelinePort>(edit).unwrap())
+        .unwrap()
+}
+
 fn stable_id() -> StableAssetId {
     StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap()
 }
@@ -788,14 +933,13 @@ fn admitted_file_import_reports_the_digest_of_the_authorized_source() {
 }
 
 fn imported_image_for_request(
-    app: &App,
+    world: &nara_ecs::World,
     importer: &ImageImporter,
     record: &AssetRecord,
     request: &AssetReloadRequest,
     pixels: &[u8],
 ) -> ImageImportedAsset {
     let bytes = rgba_png(1, 1, pixels);
-    let world = app.world();
     importer
         .import_image(
             bytes_request(record, &bytes),
@@ -1485,17 +1629,19 @@ fn shared_host_freezes_one_overlap_ceiling_for_different_importer_limits() {
 
 #[test]
 fn prepare_system_writes_backend_neutral_image_resource() {
-    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+    let (app, handle) = app_with_loaded_image(ImageImporter::default());
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let prepared = app
+    let prepared = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     let resource = prepared.get_ready(image_resource_key(handle)).unwrap();
     assert_eq!(resource.extent(), ImageExtent::new(1, 1));
     assert_eq!(resource.pixel_len(), 4);
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -1519,9 +1665,10 @@ fn retained_publication_prepares_during_loading_and_after_reload_failure() {
         world.insert_resource(images);
         world.insert_resource(states);
 
-        app.update().unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let prepared = app
+        let prepared = runtime
             .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>();
         let resource = prepared.get_ready(image_resource_key(handle)).unwrap();
@@ -1534,57 +1681,64 @@ fn retained_publication_prepares_during_loading_and_after_reload_failure() {
                 .asset_version(),
             version
         );
-        assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+        assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
+        runtime.finish().unwrap();
     }
 }
 
 #[test]
 fn revoked_publication_removes_prepared_resources_and_cannot_prepare_retained_pixels() {
     for prepare_before_invalidation in [false, true] {
-        let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+        let (app, handle) = app_with_loaded_image(ImageImporter::default());
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
         if prepare_before_invalidation {
-            app.update().unwrap();
+            runtime.drive(Duration::ZERO).unwrap();
         }
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<AssetStates>()
-            .invalidate_publication(handle.id());
+        edit_image_pipeline(&mut runtime, ImagePipelineEdit::Invalidate(handle.id()));
 
-        app.update().unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert!(
-            app.world()
+            runtime
+                .world()
                 .resource::<Assets<ImageAsset>>()
                 .get(handle)
                 .is_some()
         );
         assert!(
-            app.world()
+            runtime
+                .world()
                 .resource::<PreparedRenderResources<PreparedImageResource>>()
                 .get_ready(image_resource_key(handle))
                 .is_none()
         );
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<ImagePrepareStats>()
                 .skipped_unavailable,
             1
         );
         assert_eq!(
-            app.world().resource::<ImagePrepareStats>().removed,
+            runtime.world().resource::<ImagePrepareStats>().removed,
             u32::from(prepare_before_invalidation)
         );
+        runtime.finish().unwrap();
     }
 }
 
 #[test]
 fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
-    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-    app.update().unwrap();
-    let world = app.world_mut().unwrap();
-    let mut images = world.remove_resource::<Assets<ImageAsset>>().unwrap();
-    let mut states = world.remove_resource::<AssetStates>().unwrap();
-    let source = images.get(handle).unwrap().source().clone();
+    let (app, handle) = app_with_loaded_image(ImageImporter::default());
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let source = runtime
+        .world()
+        .resource::<Assets<ImageAsset>>()
+        .get(handle)
+        .unwrap()
+        .source()
+        .clone();
     let replacement = ImageAsset::new(
         source,
         ImageExtent::new(1, 1),
@@ -1592,31 +1746,18 @@ fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
         vec![255, 0, 0, 255],
     )
     .unwrap();
-    let version = images
-        .commit_reload(
+    let version = edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::ReplaceThenFail {
             handle,
-            states.version(handle.id()).unwrap(),
-            replacement,
-            &mut states,
-            &mut AssetEvents::default(),
-            None,
-            None,
-        )
-        .unwrap();
-    images
-        .record_reload_failure(
-            handle,
-            &mut states,
-            &mut AssetEvents::default(),
-            "decode failed",
-        )
-        .unwrap();
-    world.insert_resource(images);
-    world.insert_resource(states);
+            image: replacement,
+        },
+    )
+    .unwrap();
 
-    app.update().unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let prepared = app
+    let prepared = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     assert_eq!(
@@ -1634,13 +1775,15 @@ fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
             .asset_version(),
         version
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
 fn unchanged_image_snapshot_reuses_the_prepared_resource() {
-    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-    app.update().unwrap();
-    let first = app
+    let (app, handle) = app_with_loaded_image(ImageImporter::default());
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    let first = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>()
         .get(image_resource_key(handle))
@@ -1648,23 +1791,25 @@ fn unchanged_image_snapshot_reuses_the_prepared_resource() {
         .snapshot()
         .clone();
 
-    app.update().unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let second = app
+    let second = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>()
         .get(image_resource_key(handle))
         .unwrap()
         .snapshot();
     assert_eq!(&first, second);
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 0);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]
 fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unchanged() {
-    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-    app.update().unwrap();
-    let first = app
+    let (app, handle) = app_with_loaded_image(ImageImporter::default());
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let first = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>()
         .get(image_resource_key(handle))
@@ -1673,45 +1818,47 @@ fn direct_image_replacement_reprepares_when_asset_version_and_descriptor_are_unc
         .clone();
     let version = first.asset_version();
     let descriptor = first.descriptor_hash();
-    let source = app
+    let source = runtime
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap()
         .source()
         .clone();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<Assets<ImageAsset>>()
-        .insert(
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::Insert {
             handle,
-            ImageAsset::new(
+            image: ImageAsset::new(
                 source,
                 ImageExtent::new(1, 1),
                 ImageFormat::Rgba8,
                 vec![255, 0, 255, 255],
             )
             .unwrap(),
-        );
+        },
+    );
 
-    app.update().unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let prepared = app
+    let prepared = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     let second = prepared.get(image_resource_key(handle)).unwrap().snapshot();
     assert_eq!(second.asset_version(), version);
     assert_eq!(second.descriptor_hash(), descriptor);
     assert_ne!(second.slot_revision(), first.slot_revision());
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
     assert_eq!(prepared.len(), 1);
+    runtime.finish().unwrap();
 }
 
 #[test]
 fn prepare_system_invalidates_when_image_descriptor_changes() {
-    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-    app.update().unwrap();
-    let old_snapshot = app
+    let (app, handle) = app_with_loaded_image(ImageImporter::default());
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let old_snapshot = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>()
         .get(image_resource_key(handle))
@@ -1719,53 +1866,23 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
         .snapshot()
         .clone();
 
-    let changed_importer = ImageImporter::default();
-    let record = image_record("textures/player.png");
-    let server = app
-        .world_mut()
-        .unwrap()
-        .remove_resource::<AssetServer>()
+    let expected_version = runtime
+        .world()
+        .resource::<AssetStates>()
+        .version(handle.id())
         .unwrap();
-    let mut images = app
-        .world_mut()
-        .unwrap()
-        .remove_resource::<Assets<ImageAsset>>()
-        .unwrap();
-    let mut states = app
-        .world_mut()
-        .unwrap()
-        .remove_resource::<AssetStates>()
-        .unwrap();
-    let expected_version = states.version(handle.id()).unwrap();
-    let changed = changed_importer
-        .import_image(
-            bytes_request_with_settings(
-                &record,
-                &rgba_png(1, 1, &[0, 0, 255, 255]),
-                ImageImportSettings::new(ImageColorSpace::Linear),
-            ),
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::Reimport {
+            record: image_record("textures/player.png"),
             handle,
-            expected_version,
-            &server,
-            &images,
-            &states,
-        )
-        .unwrap();
-    changed
-        .commit(
-            &server,
-            &mut images,
-            &mut states,
-            &mut AssetEvents::default(),
-        )
-        .unwrap();
-    app.world_mut().unwrap().insert_resource(server);
-    app.world_mut().unwrap().insert_resource(images);
-    app.world_mut().unwrap().insert_resource(states);
+            settings: ImageImportSettings::new(ImageColorSpace::Linear),
+        },
+    );
 
-    app.update().unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
-    let prepared = app
+    let prepared = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     let new_snapshot = prepared
@@ -1778,51 +1895,43 @@ fn prepare_system_invalidates_when_image_descriptor_changes() {
         new_snapshot.asset_version().raw(),
         expected_version.raw() + 1
     );
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
     assert_eq!(prepared.len(), 1);
+    runtime.finish().unwrap();
 }
 
 #[test]
 fn prepare_system_removes_prepared_resources_for_removed_images() {
-    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
-    app.update().unwrap();
+    let (app, handle) = app_with_loaded_image(ImageImporter::default());
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .is_some()
     );
 
-    let mut images = app
-        .world_mut()
-        .unwrap()
-        .remove_resource::<Assets<ImageAsset>>()
-        .unwrap();
-    let mut states = app
-        .world_mut()
-        .unwrap()
-        .remove_resource::<AssetStates>()
-        .unwrap();
-    images
-        .remove_with_state(handle, &mut states, &mut AssetEvents::default())
-        .unwrap();
-    app.world_mut().unwrap().insert_resource(images);
-    app.world_mut().unwrap().insert_resource(states);
+    edit_image_pipeline(&mut runtime, ImagePipelineEdit::Remove(handle));
 
-    app.update().unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .is_none()
     );
-    assert_eq!(app.world().resource::<ImagePrepareStats>().removed, 1);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().removed, 1);
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .is_empty()
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -1850,32 +1959,36 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
         .resource_mut::<AssetSourceChanges>()
         .modified(record.path().clone())
         .unwrap();
-    drive_image_jobs(&mut app);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
 
-    let first_hash = app
+    let first_hash = runtime
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
         .unwrap()
         .source()
         .source_hash();
-    assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 1);
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .is_some()
     );
 
     fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
-        .unwrap();
-    drive_image_jobs(&mut app);
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
 
-    let image = app
+    let image = runtime
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
@@ -1886,24 +1999,27 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
         ImageImportSettings::new(ImageColorSpace::Linear)
     );
     assert_eq!(image.color_space(), ImageColorSpace::Linear);
-    assert_eq!(app.world().resource::<ImageReloadStats>().applied, 2);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 2);
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<ImageImporter>()
             .budget_snapshot()
             .high_water_publication_overlap_bytes(),
         image.pixels().len()
     );
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .len(),
         1
     );
-    assert_app_image_budget_released(&app);
+    assert_app_image_budget_released(runtime.world());
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[cfg(feature = "serde")]
@@ -1948,9 +2064,10 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         .resource_mut::<AssetSourceChanges>()
         .meta_modified(record.path().clone())
         .unwrap();
-    drive_image_jobs(&mut app);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
 
-    let image = app
+    let image = runtime
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
@@ -1962,12 +2079,16 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         last_good_hash
     );
     assert_eq!(
-        app.world().resource::<AssetStates>().version(handle.id()),
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .version(handle.id()),
         Some(last_good_version)
     );
-    assert_eq!(app.world().resource::<ImageReloadStats>().failed, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().failed, 1);
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -1975,13 +2096,14 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         Some(last_good_version)
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .is_some()
     );
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -1999,14 +2121,16 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         linear,
     );
     fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .meta_modified(record.path().clone())
-        .unwrap();
-    drive_image_jobs(&mut app);
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::MetaModified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
 
-    let image = app
+    let image = runtime
         .world()
         .resource::<Assets<ImageAsset>>()
         .get(handle)
@@ -2022,11 +2146,14 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         last_good_hash
     );
     assert_eq!(
-        app.world().resource::<AssetStates>().version(handle.id()),
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .version(handle.id()),
         Some(AssetVersion::from_raw(last_good_version.raw() + 1))
     );
-    assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
-    assert_app_image_budget_released(&app);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 1);
+    assert_app_image_budget_released(runtime.world());
 
     let changed_identity = AssetMeta::new(
         AssetMetaIdentity::new(
@@ -2037,15 +2164,18 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         linear,
     );
     fs::write(&metadata_path, changed_identity.to_json_string().unwrap()).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .meta_modified(record.path().clone())
-        .unwrap();
-    drive_image_jobs(&mut app);
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::MetaModified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -2053,27 +2183,32 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
         None
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .is_none()
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .is_some()
     );
 
     fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
-        .unwrap();
-    drive_image_jobs(&mut app);
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Modified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -2083,14 +2218,17 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     );
 
     fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .meta_modified(record.path().clone())
-        .unwrap();
-    drive_image_jobs(&mut app);
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::MetaModified,
+        },
+    );
+    drive_image_jobs(&mut runtime);
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -2098,7 +2236,8 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
             .is_some()
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .unwrap()
@@ -2107,6 +2246,7 @@ fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     );
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2129,16 +2269,18 @@ fn image_plugin_rejects_first_load_without_accepted_settings() {
         .resource_mut::<AssetSourceChanges>()
         .modified(record.path().clone())
         .unwrap();
-    drive_image_jobs(&mut app);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .is_none()
     );
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -2146,14 +2288,16 @@ fn image_plugin_rejects_first_load_without_accepted_settings() {
         LoadState::Failed { message } if message == "image.reload-settings-missing"
     ));
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetEvents>()
             .iter()
             .any(|event| event.kind() == AssetEventKind::LoadFailed)
     );
-    assert_app_image_budget_released(&app);
+    assert_app_image_budget_released(runtime.world());
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2213,10 +2357,12 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         .resource_mut::<AssetSourceChanges>()
         .modified(record.path().clone())
         .unwrap();
-    drive_image_jobs(&mut app);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap()
@@ -2225,20 +2371,22 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         last_good_hash
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .version(handle.id())
             .unwrap(),
         last_good_version
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetLoadGenerations>()
             .current(handle.id())
             > successful_generation
     );
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -2246,12 +2394,13 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         LoadState::Failed { message } if message == "image.import-budget-exceeded"
     ));
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetEvents>()
             .iter()
             .any(|event| event.kind() == AssetEventKind::ReloadFailed)
     );
-    let diagnostic = app
+    let diagnostic = runtime
         .world()
         .resource::<AssetReloadDiagnostics>()
         .iter()
@@ -2268,9 +2417,10 @@ fn budget_rejected_reload_preserves_last_good_value_and_asset_version() {
         diagnostic_field(diagnostic, "observed"),
         oversized.len().to_string()
     );
-    assert_app_image_budget_released(&app);
+    assert_app_image_budget_released(runtime.world());
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2281,10 +2431,10 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
     let (handle, request) = reserve_loading_request(&mut app, &record);
     let importer = ImageImporter::default();
     let first_imported =
-        imported_image_for_request(&app, &importer, &record, &request, &[255, 0, 0, 255]);
+        imported_image_for_request(app.world(), &importer, &record, &request, &[255, 0, 0, 255]);
     let first_hash = first_imported.image().source().source_hash();
     let second_imported =
-        imported_image_for_request(&app, &importer, &record, &request, &[0, 255, 0, 255]);
+        imported_image_for_request(app.world(), &importer, &record, &request, &[0, 255, 0, 255]);
     let (started_tx, started_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
 
@@ -2307,16 +2457,19 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
     track_image_task(&mut app, request.clone(), first);
     track_image_task(&mut app, request, second);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .is_none()
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -2325,11 +2478,12 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
     );
 
     release_tx.send(()).unwrap();
-    wait_for_completed_tasks(&app, 2);
-    app.update().unwrap();
+    wait_for_completed_tasks(runtime.world(), 2);
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap()
@@ -2337,8 +2491,9 @@ fn ordered_image_stream_waits_for_earlier_task_before_reverse_completion_apply()
             .source_hash(),
         first_hash
     );
-    assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
-    assert_eq!(app.world().resource::<ImageReloadStats>().stale, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().stale, 1);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2348,7 +2503,7 @@ fn result_becoming_stale_after_poll_is_retired_once_before_apply() {
     let (handle, request, last_good_hash) =
         reserve_loaded_image_request(&mut app, &record, &[255, 0, 0, 255]);
     let replacement = imported_image_for_request(
-        &app,
+        app.world(),
         &ImageImporter::default(),
         &record,
         &request,
@@ -2372,10 +2527,12 @@ fn result_becoming_stale_after_poll_is_retired_once_before_apply() {
     )
     .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap()
@@ -2383,11 +2540,12 @@ fn result_becoming_stale_after_poll_is_retired_once_before_apply() {
             .source_hash(),
         last_good_hash
     );
-    assert!(app.world().resource::<AssetEvents>().is_empty());
-    let stats = app.world().resource::<ImageReloadStats>();
+    assert!(runtime.world().resource::<AssetEvents>().is_empty());
+    let stats = runtime.world().resource::<ImageReloadStats>();
     assert_eq!(stats.applied, 0);
     assert_eq!(stats.stale, 1);
     assert_eq!(stats.pending, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2659,11 +2817,13 @@ fn queue_rejection_records_failure_and_never_leaves_loading_state() {
         changes.modified(second_record.path().clone()).unwrap();
     }
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    assert_eq!(app.world().resource::<ImageReloadStats>().rejected, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().rejected, 1);
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(first_handle.id())
             .unwrap()
@@ -2671,7 +2831,8 @@ fn queue_rejection_records_failure_and_never_leaves_loading_state() {
         &LoadState::Loading
     );
     assert!(matches!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(second_handle.id())
             .unwrap()
@@ -2679,12 +2840,16 @@ fn queue_rejection_records_failure_and_never_leaves_loading_state() {
         LoadState::Failed { .. }
     ));
 
-    let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+    let report = runtime
+        .world()
+        .resource::<TaskPools>()
+        .run_pending_for_tests();
     assert_eq!(report.executed, 1);
-    app.update().unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(first_handle.id())
             .unwrap()
@@ -2692,17 +2857,19 @@ fn queue_rejection_records_failure_and_never_leaves_loading_state() {
         &LoadState::Loaded
     );
     assert!(matches!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(second_handle.id())
             .unwrap()
             .load_state(),
         LoadState::Failed { .. }
     ));
-    assert_eq!(app.world().resource::<ImageReloadStats>().pending, 0);
-    assert_app_image_budget_released(&app);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().pending, 0);
+    assert_app_image_budget_released(runtime.world());
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2720,17 +2887,18 @@ fn panicked_image_reload_preserves_last_good_and_records_structured_failure() {
 
     let report = app.world().resource::<TaskPools>().run_pending_for_tests();
     assert_eq!(report.executed, 1);
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
             .load_state(),
         LoadState::Failed { message } if message == "image.reload-task-failed"
     ));
-    let diagnostic = app
+    let diagnostic = runtime
         .world()
         .resource::<AssetReloadDiagnostics>()
         .iter()
@@ -2740,11 +2908,15 @@ fn panicked_image_reload_preserves_last_good_and_records_structured_failure() {
     assert_eq!(diagnostic_field(diagnostic, "reason"), "panicked");
     assert_eq!(diagnostic_field(diagnostic, "panic-payload"), "[REDACTED]");
     assert_diagnostic_report_sinks_hide(
-        app.world().resource::<AssetReloadDiagnostics>().report(),
+        runtime
+            .world()
+            .resource::<AssetReloadDiagnostics>()
+            .report(),
         &[PANIC_PAYLOAD_CANARY],
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap()
@@ -2753,11 +2925,13 @@ fn panicked_image_reload_preserves_last_good_and_records_structured_failure() {
         last_good_hash
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetEvents>()
             .iter()
             .any(|event| event.kind() == AssetEventKind::ReloadFailed)
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2773,17 +2947,18 @@ fn requested_task_cancellation_records_structured_load_failure() {
     assert!(task.cancel());
     track_image_task(&mut app, request, task);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(matches!(
-        app.world()
+        runtime.world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
             .load_state(),
         LoadState::Failed { message } if message == "image.reload-task-cancelled"
     ));
-    let diagnostic = app
+    let diagnostic = runtime
         .world()
         .resource::<AssetReloadDiagnostics>()
         .iter()
@@ -2792,9 +2967,13 @@ fn requested_task_cancellation_records_structured_load_failure() {
     assert_eq!(diagnostic.code().as_str(), "image.reload-task-cancelled");
     assert_eq!(diagnostic_field(diagnostic, "reason"), "requested");
     assert_eq!(diagnostic_field(diagnostic, "before-start"), "true");
-    assert_eq!(app.world().resource::<ImageReloadStats>().cancelled, 1);
-    let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().cancelled, 1);
+    let report = runtime
+        .world()
+        .resource::<TaskPools>()
+        .run_pending_for_tests();
     assert_eq!(report.executed, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -2805,9 +2984,9 @@ fn same_generation_coalesce_keeps_loading_until_replacement_is_ready() {
     let (handle, request) = reserve_loading_request(&mut app, &record);
     let importer = ImageImporter::default();
     let first_imported =
-        imported_image_for_request(&app, &importer, &record, &request, &[255, 0, 0, 255]);
+        imported_image_for_request(app.world(), &importer, &record, &request, &[255, 0, 0, 255]);
     let replacement_imported =
-        imported_image_for_request(&app, &importer, &record, &request, &[0, 255, 0, 255]);
+        imported_image_for_request(app.world(), &importer, &record, &request, &[0, 255, 0, 255]);
     let replacement_hash = replacement_imported.image().source().source_hash();
     let spawn_request = TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN).with_overload(
         TaskOverloadPolicy::CoalescePending(TaskCoalesceKey::new(handle.id().raw())),
@@ -2831,31 +3010,38 @@ fn same_generation_coalesce_keeps_loading_until_replacement_is_ready() {
     let replacement = accepted_image_handle(replacement_outcome);
     track_image_task(&mut app, request, replacement);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
             .load_state(),
         &LoadState::Loading
     );
-    assert_eq!(app.world().resource::<ImageReloadStats>().cancelled, 1);
-    assert_eq!(app.world().resource::<ImageReloadStats>().failed, 0);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().cancelled, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().failed, 0);
     assert!(
-        !app.world()
+        !runtime
+            .world()
             .resource::<AssetEvents>()
             .iter()
             .any(|event| event.kind() == AssetEventKind::LoadFailed)
     );
 
-    let report = app.world().resource::<TaskPools>().run_pending_for_tests();
+    let report = runtime
+        .world()
+        .resource::<TaskPools>()
+        .run_pending_for_tests();
     assert_eq!(report.executed, 1);
-    app.update().unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .unwrap()
@@ -2863,8 +3049,9 @@ fn same_generation_coalesce_keeps_loading_until_replacement_is_ready() {
             .source_hash(),
         replacement_hash
     );
-    assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
-    assert_eq!(app.world().resource::<ImageReloadStats>().pending, 0);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().applied, 1);
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().pending, 0);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -3223,7 +3410,8 @@ fn stale_removal_cannot_delete_a_newer_same_frame_publication() {
         .resource_mut::<AssetSourceChanges>()
         .modified(record.path().clone())
         .unwrap();
-    drive_image_jobs(&mut app);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
 
     let replacement = import_uncommitted(
         &ImageImporter::default(),
@@ -3232,19 +3420,21 @@ fn stale_removal_cannot_delete_a_newer_same_frame_publication() {
     )
     .into_image();
     let replacement_hash = replacement.source().source_hash();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<PendingImageReplacement>()
-        .image = Some(replacement);
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .removed(record.path().clone())
-        .unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::PendingReplacement(replacement),
+    );
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Removed,
+        },
+    );
 
-    app.update().unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let world = app.world();
+    let world = runtime.world();
     assert_eq!(
         world
             .resource::<Assets<ImageAsset>>()
@@ -3267,6 +3457,7 @@ fn stale_removal_cannot_delete_a_newer_same_frame_publication() {
     assert_eq!(stats.removed, 0);
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -3288,23 +3479,28 @@ fn image_plugin_removes_runtime_and_prepared_image() {
         .resource_mut::<AssetSourceChanges>()
         .modified(record.path().clone())
         .unwrap();
-    drive_image_jobs(&mut app);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    drive_image_jobs(&mut runtime);
 
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .removed(record.path().clone())
-        .unwrap();
-    app.update().unwrap();
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Removed,
+        },
+    );
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<Assets<ImageAsset>>()
             .get(handle)
             .is_none()
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetStates>()
             .state(handle.id())
             .unwrap()
@@ -3312,18 +3508,21 @@ fn image_plugin_removes_runtime_and_prepared_image() {
         &LoadState::Removed
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .get_ready(image_resource_key(handle))
             .is_none()
     );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<PreparedRenderResources<PreparedImageResource>>()
             .is_empty()
     );
 
     remove_temp_root(&temp_root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -3653,6 +3852,9 @@ fn app_with_loaded_image(importer: ImageImporter) -> (App, Handle<ImageAsset>) {
     ))
     .unwrap();
     app.add_plugin(ImagePreparePlugin).unwrap();
+    app.init_resource::<ImagePipelinePort>().unwrap();
+    app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
+        .unwrap();
     app.world_mut().unwrap().insert_resource(server);
     app.world_mut().unwrap().insert_resource(images);
     app.world_mut().unwrap().insert_resource(states);
@@ -3736,6 +3938,9 @@ fn app_with_image_plugin_configuration(
 ) -> App {
     let mut app = App::new();
     app.insert_resource(task_pools).unwrap();
+    app.init_resource::<ImagePipelinePort>().unwrap();
+    app.__register_driver_port::<ImagePipelinePort>(ImagePipelinePort::apply_driver_input_in_world)
+        .unwrap();
     app.add_plugins((
         nara_reflect::ComponentRegistryPlugin,
         nara_tasks::TaskPlugin::default(),
@@ -3793,10 +3998,13 @@ fn host_directory(path: &Path) -> fs::File {
     }
 }
 
-fn drive_image_jobs(app: &mut App) {
-    app.update().unwrap();
-    let _ = app.world().resource::<TaskPools>().run_pending_for_tests();
-    app.update().unwrap();
+fn drive_image_jobs(runtime: &mut nara_app::RuntimeInstance) {
+    runtime.drive(Duration::ZERO).unwrap();
+    let _ = runtime
+        .world()
+        .resource::<TaskPools>()
+        .run_pending_for_tests();
+    runtime.drive(Duration::ZERO).unwrap();
 }
 
 fn accepted_image_handle(
@@ -3912,10 +4120,9 @@ fn reserve_loaded_image_request(
     )
 }
 
-fn wait_for_completed_tasks(app: &App, expected: u64) {
+fn wait_for_completed_tasks(world: &nara_ecs::World, expected: u64) {
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app
-        .world()
+    while world
         .resource::<TaskPools>()
         .stats()
         .for_kind(TaskPoolKind::Io)
@@ -3926,7 +4133,7 @@ fn wait_for_completed_tasks(app: &App, expected: u64) {
         thread::yield_now();
     }
     assert!(
-        app.world()
+        world
             .resource::<TaskPools>()
             .stats()
             .for_kind(TaskPoolKind::Io)
@@ -4131,8 +4338,8 @@ fn diagnostic_field(diagnostic: &Diagnostic, key: &str) -> String {
         .into_owned()
 }
 
-fn assert_app_image_budget_released(app: &App) {
-    assert_budget_released(app.world().resource::<ImageImporter>().budget_snapshot());
+fn assert_app_image_budget_released(world: &nara_ecs::World) {
+    assert_budget_released(world.resource::<ImageImporter>().budget_snapshot());
 }
 
 fn assert_budget_released(snapshot: ImageImportBudgetSnapshot) {

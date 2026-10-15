@@ -800,6 +800,9 @@ prefabs = "prefabs"
 [startup]
 default_scene = "startup.scene.json"
 
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
 [runtime]
 preset = "local-headless"
 
@@ -1118,8 +1121,8 @@ fn runtime_edit_is_generation_and_safe_point_bound() {
     );
     drive_until(&mut editor, EditorPlayState::Running, 32);
 
-    let play = editor.current_frame().play();
     let frame = editor.current_frame();
+    let play = frame.play();
     let document = frame.workspace().active_document.unwrap();
     let wrong = nara::tooling::EditorRuntimeEditRequest {
         generation: play.generation().unwrap().saturating_add(1),

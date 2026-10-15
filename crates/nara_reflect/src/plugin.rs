@@ -431,9 +431,7 @@ mod tests {
         time::Duration,
     };
 
-    use nara_app::{
-        AppRunError, AppScheduleRunError, CoreStage, FrameExecutionStart, RealTime, VirtualTime,
-    };
+    use nara_app::{CoreStage, FrameExecutionStart, RealTime, VirtualTime};
     use nara_ecs::schedule::ScheduleLabel;
 
     use super::*;
@@ -445,9 +443,6 @@ mod tests {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
     struct RegistryMutationSchedule;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
-    struct RegistryProbeSchedule;
 
     #[derive(Debug, Default, Resource)]
     struct RegistryProbeRuns(u32);
@@ -541,7 +536,7 @@ mod tests {
             .resource::<ComponentRegistryResource>()
             .registry
             .snapshot()
-            .expect("the registry is frozen before direct App execution");
+            .expect("the registry is frozen before managed execution");
         world.insert_resource(ComponentRegistryResource::from_snapshot(snapshot));
     }
 
@@ -669,194 +664,124 @@ mod tests {
     }
 
     #[test]
-    fn direct_app_rejects_registry_rewrap_during_frame() {
+    fn managed_frame_rejects_registry_rewrap_and_keeps_the_fault_sticky() {
         let mut app = App::new();
         app.add_plugins((ComponentRegistryPlugin, RegistryFrameRewrapPlugin))
             .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
 
-        let error = app.run_once(Duration::ZERO).unwrap_err();
+        let first = runtime.drive(Duration::ZERO).unwrap_err();
+        let repeated = runtime.drive(Duration::ZERO).unwrap_err();
 
-        assert!(matches!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                ..
-            }
-        ));
+        assert_eq!(first, repeated);
+        assert_eq!(first.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+        runtime.finish().unwrap();
     }
 
     #[test]
-    fn direct_app_rejects_registry_rewrap_in_custom_schedule() {
+    fn ignored_nested_schedule_mutation_faults_before_the_next_stage() {
         let mut app = App::new();
         app.add_plugin(ComponentRegistryPlugin).unwrap();
         app.init_resource::<RegistryProbeRuns>().unwrap();
-        app.init_schedule(RegistryMutationSchedule).unwrap();
-        app.init_schedule(RegistryProbeSchedule).unwrap();
-        app.add_systems(RegistryMutationSchedule, rewrap_registry_during_frame)
+        let mut nested = nara_ecs::schedule::Schedule::new(RegistryMutationSchedule);
+        nested.add_systems(rewrap_registry_during_frame);
+        app.world_mut().unwrap().add_schedule(nested);
+        app.add_systems(CoreStage::Update, |world: &mut World| {
+            world.run_schedule(RegistryMutationSchedule);
+        })
+        .unwrap();
+        app.add_systems(CoreStage::PostUpdate, record_registry_probe_run)
             .unwrap();
-        app.add_systems(RegistryProbeSchedule, record_registry_probe_run)
-            .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
 
-        let first_error = app.run_schedule(RegistryMutationSchedule).unwrap_err();
-        let sticky_error = app.run_schedule(RegistryProbeSchedule).unwrap_err();
+        let first = runtime.drive(Duration::ZERO).unwrap_err();
+        let repeated = runtime.drive(Duration::ZERO).unwrap_err();
 
-        assert_eq!(sticky_error, first_error);
-        assert!(matches!(
-            &first_error,
-            AppScheduleRunError::Runtime(AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                ..
-            })
-        ));
-        assert_eq!(app.world().resource::<RegistryProbeRuns>().0, 0);
+        assert_eq!(first, repeated);
+        assert_eq!(first.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+        assert_eq!(runtime.world().resource::<RegistryProbeRuns>().0, 0);
+        runtime.finish().unwrap();
     }
 
     #[test]
-    fn caught_schedule_unwind_cannot_bypass_the_next_authority_boundary() {
+    fn caught_schedule_unwind_cannot_bypass_the_next_managed_boundary() {
         let mut app = App::new();
         app.add_plugin(ComponentRegistryPlugin).unwrap();
         app.init_resource::<RegistryProbeRuns>().unwrap();
-        app.init_schedule(RegistryMutationSchedule).unwrap();
-        app.init_schedule(RegistryProbeSchedule).unwrap();
-        app.add_systems(RegistryMutationSchedule, rewrap_registry_then_panic)
+        let mut nested = nara_ecs::schedule::Schedule::new(RegistryMutationSchedule);
+        nested.add_systems(rewrap_registry_then_panic);
+        app.world_mut().unwrap().add_schedule(nested);
+        app.add_systems(CoreStage::Update, |world: &mut World| {
+            world.run_schedule(RegistryMutationSchedule);
+        })
+        .unwrap();
+        app.add_systems(CoreStage::PostUpdate, record_registry_probe_run)
             .unwrap();
-        app.add_systems(RegistryProbeSchedule, record_registry_probe_run)
-            .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
 
         let unwind = catch_unwind(AssertUnwindSafe(|| {
-            let _ = app.run_schedule(RegistryMutationSchedule);
+            let _ = runtime.drive(Duration::ZERO);
         }));
-        let recorded_fault = app
-            .world()
-            .resource::<RuntimeFaultReporter>()
-            .fault()
-            .expect("the unwinding schedule must record its authority fault");
-        let error = app.run_schedule(RegistryProbeSchedule).unwrap_err();
-
         assert!(unwind.is_err());
-        assert_eq!(recorded_fault.kind(), RuntimeFaultKind::RuntimeAuthority);
-        assert!(matches!(
-            error,
-            AppScheduleRunError::Runtime(AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                ..
+        let error = runtime.drive(Duration::ZERO).unwrap_err();
+
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+        assert_eq!(runtime.world().resource::<RegistryProbeRuns>().0, 0);
+        runtime.finish().unwrap();
+    }
+
+    #[derive(Default, Resource)]
+    struct RegistryRewrapPort;
+
+    impl nara_app::__RuntimeDriverPort for RegistryRewrapPort {
+        type Input = ();
+        type Output = ();
+
+        fn apply_driver_input(&mut self, (): ()) {}
+    }
+
+    impl RegistryRewrapPort {
+        fn apply_driver_input_in_world(
+            world: &mut World,
+            (): (),
+        ) -> Result<(), (nara_app::RuntimeWorldAccessError, ())> {
+            rewrap_registry_during_frame(world);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn managed_boundary_rejects_registry_replacement_before_committing_clock_state() {
+        let mut app = App::new();
+        app.add_plugin(ComponentRegistryPlugin).unwrap();
+        app.init_resource::<RegistryRewrapPort>().unwrap();
+        app.__register_driver_port::<RegistryRewrapPort>(
+            RegistryRewrapPort::apply_driver_input_in_world,
+        )
+        .unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        let real_time = *runtime.world().resource::<RealTime>();
+        let virtual_time = *runtime.world().resource::<VirtualTime>();
+        let frame_execution_start = *runtime.world().resource::<FrameExecutionStart>();
+
+        let scope_error = runtime
+            .with_driver_scope(|scope| {
+                scope.__apply_port::<RegistryRewrapPort>(()).unwrap();
             })
-        ));
-        assert_eq!(app.world().resource::<RegistryProbeRuns>().0, 0);
-    }
-
-    #[test]
-    fn direct_app_run_rejects_runner_ignored_registry_authority_fault() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.init_schedule(RegistryMutationSchedule).unwrap();
-        app.add_systems(RegistryMutationSchedule, rewrap_registry_during_frame)
-            .unwrap();
-        app.set_runner(|app| {
-            let _ignored = app.run_schedule(RegistryMutationSchedule);
-            Ok(nara_app::AppExit::Success)
-        })
-        .unwrap();
-
-        let error = app.run().unwrap_err();
-
-        assert!(matches!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn direct_app_run_does_not_duplicate_a_propagated_authority_fault() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.init_schedule(RegistryMutationSchedule).unwrap();
-        app.add_systems(RegistryMutationSchedule, rewrap_registry_during_frame)
-            .unwrap();
-        app.set_runner(|app| {
-            let AppScheduleRunError::Runtime(error) = app
-                .run_schedule(RegistryMutationSchedule)
-                .expect_err("registry replacement must fault the custom schedule")
-            else {
-                panic!("registry replacement returned a non-runtime schedule error");
-            };
-            Err(error)
-        })
-        .unwrap();
-
-        let error = app.run().unwrap_err();
-
-        assert!(matches!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn direct_app_run_rejects_runner_replacing_the_app_instance() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.set_runner(|app| {
-            *app = App::new();
-            Ok(nara_app::AppExit::Success)
-        })
-        .unwrap();
-
-        let error = app.run().unwrap_err();
-
-        assert!(matches!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                fault_source: "nara.app.instance-authority",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn direct_frame_rejects_replaced_registry_before_committing_clock_state() {
-        let mut app = App::new();
-        app.add_plugin(ComponentRegistryPlugin).unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        let real_time = *app.world().resource::<RealTime>();
-        let virtual_time = *app.world().resource::<VirtualTime>();
-        let frame_execution_start = *app.world().resource::<FrameExecutionStart>();
-        let snapshot = app
-            .world()
-            .resource::<ComponentRegistryResource>()
-            .registry
-            .snapshot()
-            .expect("the registry is frozen after the first frame");
-        app.world_mut()
-            .unwrap()
-            .insert_resource(ComponentRegistryResource::from_snapshot(snapshot));
-
-        let error = app.run_once(Duration::from_millis(1)).unwrap_err();
-
-        assert!(matches!(
-            error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::RuntimeAuthority,
-                ..
-            }
-        ));
-        assert_eq!(*app.world().resource::<RealTime>(), real_time);
-        assert_eq!(*app.world().resource::<VirtualTime>(), virtual_time);
-        let current_frame_execution_start = *app.world().resource::<FrameExecutionStart>();
+            .unwrap_err();
         assert_eq!(
-            current_frame_execution_start.frame(),
-            frame_execution_start.frame()
+            scope_error.fault().unwrap().kind(),
+            RuntimeFaultKind::RuntimeAuthority
         );
-        assert_eq!(
-            current_frame_execution_start.started_at(),
-            frame_execution_start.started_at()
-        );
+        let error = runtime.drive(Duration::from_millis(1)).unwrap_err();
+
+        assert_eq!(error.fault().kind(), RuntimeFaultKind::RuntimeAuthority);
+        assert_eq!(*runtime.world().resource::<RealTime>(), real_time);
+        assert_eq!(*runtime.world().resource::<VirtualTime>(), virtual_time);
+        let current = *runtime.world().resource::<FrameExecutionStart>();
+        assert_eq!(current.frame(), frame_execution_start.frame());
+        assert_eq!(current.started_at(), frame_execution_start.started_at());
+        runtime.finish().unwrap();
     }
 }

@@ -187,42 +187,15 @@ fn encode_declaration(encoder: &mut FingerprintEncoder, declaration: &PluginDecl
     encoder.bytes(b"plugin-category", &[declaration.category as u8]);
     encode_id_list(
         encoder,
-        b"provides-count",
-        b"provides",
-        declaration.provides.iter().map(|id| id.as_str()),
-    );
-    encode_id_list(
-        encoder,
         b"requires-plugin-count",
         b"requires-plugin",
         declaration.requires_plugins.iter().map(|id| id.as_str()),
     );
     encode_id_list(
         encoder,
-        b"requires-capability-count",
-        b"requires-capability",
-        declaration
-            .requires_capabilities
-            .iter()
-            .map(|id| id.as_str()),
-    );
-    encode_id_list(
-        encoder,
         b"conflict-count",
         b"conflict",
         declaration.conflicts.iter().map(|id| id.as_str()),
-    );
-    encode_id_list(
-        encoder,
-        b"provides-service-count",
-        b"provides-service",
-        declaration.provides_services.iter().map(|id| id.as_str()),
-    );
-    encode_id_list(
-        encoder,
-        b"requires-service-count",
-        b"requires-service",
-        declaration.requires_services.iter().map(|id| id.as_str()),
     );
     encode_id_list(
         encoder,

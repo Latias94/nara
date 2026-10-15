@@ -53,7 +53,8 @@ fn asset_plugin_owns_the_complete_task_update_chain() {
     )
     .unwrap();
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut app = nara::app::RuntimeInstance::start(app).unwrap();
+    app.drive(Duration::ZERO).unwrap();
 
     assert_eq!(
         app.world().resource::<IntegrationOrder>().0,

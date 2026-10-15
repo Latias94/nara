@@ -1192,7 +1192,7 @@ mod tests {
         observed.0.push((keyboard.is_changed(), mouse.is_changed()));
     }
 
-    fn observed_changes_after(mutate: impl FnOnce(&mut App)) -> (bool, bool) {
+    fn observed_changes_after(binding: InputBinding) -> (bool, bool) {
         let mut app = App::new();
         app.add_plugin(InputPlugin).unwrap();
         app.insert_resource(InputChangeObservations::default())
@@ -1202,21 +1202,28 @@ mod tests {
                 observe_input_changes.after(InputSet::ResolveActions),
             )
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<InputChangeObservations>()
-            .0
-            .clear();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| match binding {
+                InputBinding::Key(key) => {
+                    apply_keyboard_driver_input(scope, ButtonDriverInput::Press(key)).unwrap();
+                }
+                InputBinding::Mouse(button) => {
+                    apply_mouse_driver_input(scope, ButtonDriverInput::Press(button)).unwrap();
+                }
+            })
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        mutate(&mut app);
-        app.run_once(Duration::ZERO).unwrap();
-
-        *app.world()
+        let observed = *runtime
+            .world()
             .resource::<InputChangeObservations>()
             .0
             .last()
-            .unwrap()
+            .unwrap();
+        runtime.finish().unwrap();
+        observed
     }
 
     #[test]
@@ -1342,10 +1349,12 @@ mod tests {
             .press(KeyCode::Space)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<ObservedOutcomes>()
                 .0
                 .iter()
@@ -1354,17 +1363,19 @@ mod tests {
             [ActionPhase::Started]
         );
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<ButtonInput<KeyCode>>()
                 .transitions()
                 .len(),
             0
         );
 
-        app.run_once(Duration::ZERO).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<ObservedOutcomes>()
                 .0
                 .iter()
@@ -1373,11 +1384,13 @@ mod tests {
             [ActionPhase::Released]
         );
         assert!(
-            app.world()
+            runtime
+                .world()
                 .resource::<ButtonInput<KeyCode>>()
                 .transitions()
                 .is_empty()
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1409,23 +1422,11 @@ mod tests {
     #[test]
     fn keyboard_and_mouse_change_ticks_remain_independent() {
         assert_eq!(
-            observed_changes_after(|app| {
-                app.world_mut()
-                    .unwrap()
-                    .resource_mut::<ButtonInput<KeyCode>>()
-                    .press(KeyCode::Space)
-                    .unwrap();
-            }),
+            observed_changes_after(InputBinding::Key(KeyCode::Space)),
             (true, false)
         );
         assert_eq!(
-            observed_changes_after(|app| {
-                app.world_mut()
-                    .unwrap()
-                    .resource_mut::<ButtonInput<MouseButton>>()
-                    .press(MouseButton::Left)
-                    .unwrap();
-            }),
+            observed_changes_after(InputBinding::Mouse(MouseButton::Left)),
             (false, true)
         );
     }
@@ -1542,15 +1543,17 @@ mod tests {
             .press(KeyCode::Space)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].action.as_str(), "jump");
         assert_eq!(observed[0].binding, InputBinding::Key(KeyCode::Space));
         assert_eq!(observed[0].phase, ActionPhase::Started);
         assert!(observed[0].value.digital);
-        assert!(app.world().resource::<ActionOutcomes>().is_empty());
+        assert!(runtime.world().resource::<ActionOutcomes>().is_empty());
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1565,24 +1568,28 @@ mod tests {
             .unwrap()
             .resource_mut::<ActionMap>()
             .bind_key(ActionId::new("jump").unwrap(), KeyCode::Space);
-        app.world_mut()
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_keyboard_driver_input(scope, ButtonDriverInput::Press(KeyCode::Space))
+            })
             .unwrap()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Space)
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        app.world_mut()
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_keyboard_driver_input(scope, ButtonDriverInput::Release(KeyCode::Space))
+            })
             .unwrap()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .release(KeyCode::Space)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].phase, ActionPhase::Released);
         assert!(!observed[0].value.digital);
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1603,15 +1610,17 @@ mod tests {
             .press(MouseButton::Left)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].action.as_str(), "select");
         assert_eq!(observed[0].binding, InputBinding::Mouse(MouseButton::Left));
         assert_eq!(observed[0].phase, ActionPhase::Started);
         assert!(observed[0].value.digital);
-        assert!(app.world().resource::<ActionOutcomes>().is_empty());
+        assert!(runtime.world().resource::<ActionOutcomes>().is_empty());
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1626,25 +1635,29 @@ mod tests {
             .unwrap()
             .resource_mut::<ActionMap>()
             .bind_mouse(ActionId::new("select").unwrap(), MouseButton::Left);
-        app.world_mut()
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_mouse_driver_input(scope, ButtonDriverInput::Press(MouseButton::Left))
+            })
             .unwrap()
-            .resource_mut::<ButtonInput<MouseButton>>()
-            .press(MouseButton::Left)
             .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-        app.world_mut()
+        runtime.drive(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                apply_mouse_driver_input(scope, ButtonDriverInput::Release(MouseButton::Left))
+            })
             .unwrap()
-            .resource_mut::<ButtonInput<MouseButton>>()
-            .release(MouseButton::Left)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].binding, InputBinding::Mouse(MouseButton::Left));
         assert_eq!(observed[0].phase, ActionPhase::Released);
         assert!(!observed[0].value.digital);
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1670,9 +1683,11 @@ mod tests {
             .press(KeyCode::Enter)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        assert!(app.world().resource::<ObservedOutcomes>().0.is_empty());
+        assert!(runtime.world().resource::<ObservedOutcomes>().0.is_empty());
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1703,9 +1718,10 @@ mod tests {
             .press(KeyCode::Character('w'))
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(
             observed
                 .iter()
@@ -1716,6 +1732,7 @@ mod tests {
                 InputBinding::Key(KeyCode::Character('w'))
             ]
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1737,10 +1754,12 @@ mod tests {
             .press(KeyCode::Space)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .resource::<ObservedOutcomes>()
                 .0
                 .iter()
@@ -1748,6 +1767,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["first", "second"]
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1771,9 +1791,10 @@ mod tests {
             keyboard.release(KeyCode::Enter).unwrap();
         }
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(
             observed
                 .iter()
@@ -1782,10 +1803,12 @@ mod tests {
             [ActionPhase::Started, ActionPhase::Released]
         );
         assert!(
-            !app.world()
+            !runtime
+                .world()
                 .resource::<ButtonInput<KeyCode>>()
                 .pressed(KeyCode::Enter)
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1836,10 +1859,12 @@ mod tests {
             .press(KeyCode::Enter)
             .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let observed = &app.world().resource::<ObservedOutcomes>().0;
+        let observed = &runtime.world().resource::<ObservedOutcomes>().0;
         assert_eq!(observed.len(), 1);
         assert_eq!(observed[0].action.as_str(), "confirm");
+        runtime.finish().unwrap();
     }
 }

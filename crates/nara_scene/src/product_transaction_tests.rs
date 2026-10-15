@@ -535,44 +535,86 @@ fn overlay_lifecycle_rejection_preserves_completed_hierarchy_generation() {
     let mut app = App::new();
     app.add_plugin(HierarchyPlugin).unwrap();
     app.insert_resource(RunState(1)).unwrap();
+    app.init_resource::<OverlayLifecycleRejectionPort>()
+        .unwrap();
+    app.__register_driver_port::<OverlayLifecycleRejectionPort>(
+        OverlayLifecycleRejectionPort::apply_driver_input_in_world,
+    )
+    .unwrap();
     let initial = spawn_scene(app.world_mut().unwrap(), &registry, &document);
     assert!(!initial.diagnostics.has_errors());
     let current = spawned_instance(&initial).clone();
-    app.update().unwrap();
-    let completed_before = completed_topology_generation(app.world())
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    let completed_before = completed_topology_generation(runtime.world())
         .expect("the initial scene hierarchy must complete before replacement");
+    let report = runtime
+        .with_driver_scope(|scope| {
+            scope
+                .__apply_port::<OverlayLifecycleRejectionPort>((registry, document, current, child))
+                .unwrap()
+        })
+        .unwrap();
 
-    {
-        let world = app.world_mut().unwrap();
+    assert!(has_diagnostic(
+        &report,
+        "scene.product-overlay-lifecycle-ineligible"
+    ));
+    assert_eq!(runtime.world().resource::<LifecycleCanary>().0, 0);
+    assert_eq!(
+        completed_topology_generation(runtime.world()),
+        Some(completed_before),
+        "rejected candidate preparation must not dirty the published hierarchy"
+    );
+    runtime.finish().unwrap();
+}
+
+#[derive(Default, Resource)]
+struct OverlayLifecycleRejectionPort;
+
+impl nara_app::__RuntimeDriverPort for OverlayLifecycleRejectionPort {
+    type Input = (
+        ComponentRegistry,
+        SceneDocument,
+        SpawnedSceneInstance,
+        SceneEntityId,
+    );
+    type Output = SceneSpawnReport;
+
+    fn apply_driver_input(&mut self, _input: Self::Input) -> SceneSpawnReport {
+        unreachable!("the overlay transaction needs the scene world")
+    }
+}
+
+impl OverlayLifecycleRejectionPort {
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        (registry, document, current, child): <Self as nara_app::__RuntimeDriverPort>::Input,
+    ) -> Result<
+        SceneSpawnReport,
+        (
+            nara_app::RuntimeWorldAccessError,
+            <Self as nara_app::__RuntimeDriverPort>::Input,
+        ),
+    > {
         world.init_resource::<LifecycleCanary>();
         world.register_component::<RuntimeValue>();
         world.add_observer(
             |_: On<Add, RuntimeValue>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
         );
         world.flush();
+        Ok(replace_scene_with_product(
+            world,
+            &registry,
+            &document,
+            &current,
+            transaction_limits(1, 1),
+            &[],
+            |overlay| {
+                overlay.insert_component(child, RuntimeValue(1));
+            },
+        ))
     }
-    let report = replace_scene_with_product(
-        app.world_mut().unwrap(),
-        &registry,
-        &document,
-        &current,
-        transaction_limits(1, 1),
-        &[],
-        |overlay| {
-            overlay.insert_component(child.clone(), RuntimeValue(1));
-        },
-    );
-
-    assert!(has_diagnostic(
-        &report,
-        "scene.product-overlay-lifecycle-ineligible"
-    ));
-    assert_eq!(app.world().resource::<LifecycleCanary>().0, 0);
-    assert_eq!(
-        completed_topology_generation(app.world()),
-        Some(completed_before),
-        "rejected candidate preparation must not dirty the published hierarchy"
-    );
 }
 
 #[test]

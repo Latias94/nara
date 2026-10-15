@@ -127,6 +127,9 @@ impl Plugin for EditorGameViewBridgePlugin {
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
         app.insert_resource(EditorGameViewBridge::new(self.config))?
+            .__register_driver_port::<EditorGameViewBridge>(
+                EditorGameViewBridge::apply_driver_input_in_world,
+            )?
             .add_systems(CoreStage::Last, capture_editor_game_view_candidate)?;
         Ok(())
     }
@@ -883,19 +886,16 @@ impl __RuntimeDriverPort for EditorGameViewBridge {
             }
         }
     }
+}
 
+impl EditorGameViewBridge {
     fn apply_driver_input_in_world(
         world: &mut World,
-        input: Self::Input,
-    ) -> Result<Self::Output, (nara_app::RuntimeWorldAccessError, Self::Input)> {
-        if !world.contains_resource::<Self>() {
-            return Err((
-                nara_app::RuntimeWorldAccessError::MissingResource {
-                    type_name: std::any::type_name::<Self>(),
-                },
-                input,
-            ));
-        }
+        input: EditorGameViewBridgeInput,
+    ) -> Result<
+        EditorGameViewBridgeOutput,
+        (nara_app::RuntimeWorldAccessError, EditorGameViewBridgeInput),
+    > {
         Ok(
             world.resource_scope(|world, mut bridge: Mut<'_, EditorGameViewBridge>| {
                 #[cfg(not(feature = "presentation-ui"))]

@@ -15,8 +15,8 @@ use crate::{
 };
 
 use super::{
-    Plugin, PluginCapability, PluginDeclaration, PluginError, PluginGroupId, PluginId,
-    PluginSchemaProviderId, PluginServiceId, PluginSlotId,
+    Plugin, PluginDeclaration, PluginError, PluginGroupId, PluginId, PluginSchemaProviderId,
+    PluginSlotId,
     definition::{PluginDefinition, PluginDefinitionKey, PluginPrepareError},
     fingerprint::{
         FingerprintEncoder, PluginPlanFingerprint, encode_definition, encode_edit, fingerprint_plan,
@@ -208,16 +208,6 @@ pub enum PluginPlanError {
         plugin: PluginId,
         required: PluginId,
     },
-    #[error("plugin {plugin} requires missing capability {required}")]
-    MissingCapability {
-        plugin: PluginId,
-        required: PluginCapability,
-    },
-    #[error("plugin {plugin} requires missing service {required}")]
-    MissingService {
-        plugin: PluginId,
-        required: PluginServiceId,
-    },
     #[error("plugin {plugin} requires missing schema provider {required}")]
     MissingSchemaProvider {
         plugin: PluginId,
@@ -321,17 +311,21 @@ impl PluginPlan {
         self.fingerprint
     }
 
+    /// Freezes a replayable definition for advanced Host composition.
+    #[doc(hidden)]
     pub fn instantiate(&self) -> Result<SealedApp, PluginInstantiationError> {
         self.instantiate_retained()
             .map_err(RetainedPluginInstantiationFailure::into_error)
     }
 
     /// Instantiates this repeatable plan while retaining failed App ownership for bounded cleanup.
+    #[doc(hidden)]
     pub fn instantiate_retained(&self) -> Result<SealedApp, RetainedPluginInstantiationFailure> {
         self.instantiate_retained_with_close_policy(RuntimeClosePolicy::default())
     }
 
     /// Instantiates this repeatable plan with an explicit failed-preparation cleanup policy.
+    #[doc(hidden)]
     pub fn instantiate_retained_with_close_policy(
         &self,
         close_policy: RuntimeClosePolicy,
@@ -357,6 +351,8 @@ impl PluginPlan {
     /// The supplied ledger exists before plugin preparation begins. Every failure path retains the
     /// fresh App, caller reservations, and plugin-registered close participants in one retryable
     /// owner.
+    /// This bridge stays public for first-party Hosts in other workspace crates.
+    #[doc(hidden)]
     pub fn instantiate_runtime_candidate(
         &self,
         reservation: RuntimeAdmissionReservation,
@@ -467,6 +463,7 @@ impl PluginInstantiationError {
 }
 
 /// Plugin-instantiation failure that keeps every acquired runtime owner retryable.
+#[doc(hidden)]
 #[must_use = "plugin instantiation failures may retain unfinished cleanup authority"]
 pub struct RetainedPluginInstantiationFailure {
     error: PluginInstantiationError,
@@ -526,6 +523,7 @@ impl std::error::Error for RetainedPluginInstantiationFailure {
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub enum RuntimeConstructionError {
     #[error("runtime plugin construction failed: {0}")]
     Plugin(PluginInstantiationError),
@@ -539,6 +537,7 @@ enum RuntimeConstructionCleanup {
 }
 
 /// Construction failure that retains the one pre-publication owner until cleanup completes.
+#[doc(hidden)]
 #[must_use = "runtime construction failures may retain unfinished cleanup authority"]
 pub struct RuntimeConstructionFailure {
     error: RuntimeConstructionError,
@@ -621,6 +620,8 @@ pub enum AddPluginsError {
     Plugin(#[from] PluginError),
 }
 
+/// Frozen configuration retained by the first-party staged-admission bridge.
+#[doc(hidden)]
 pub struct SealedApp {
     pub(crate) app: App,
 }
@@ -630,7 +631,6 @@ impl Debug for SealedApp {
         formatter
             .debug_struct("SealedApp")
             .field("plugin_plan_fingerprint", &self.plugin_plan_fingerprint())
-            .field("started", &self.app.started())
             .finish_non_exhaustive()
     }
 }
@@ -644,16 +644,6 @@ impl SealedApp {
     #[must_use]
     pub const fn plugin_plan_fingerprint(&self) -> PluginPlanFingerprint {
         self.app.configuration_fingerprint()
-    }
-
-    #[must_use]
-    pub const fn has_raw_runner(&self) -> bool {
-        self.app.has_raw_runner()
-    }
-
-    #[must_use]
-    pub const fn started(&self) -> bool {
-        self.app.started()
     }
 }
 
@@ -1100,14 +1090,6 @@ fn validate_closure(
     drafts: &[PluginDraft],
     selected: &BTreeMap<PluginId, usize>,
 ) -> Result<(), PluginPlanError> {
-    let capabilities = drafts
-        .iter()
-        .flat_map(|draft| draft.declaration.provides.iter().copied())
-        .collect::<BTreeSet<_>>();
-    let services = drafts
-        .iter()
-        .flat_map(|draft| draft.declaration.provides_services.iter().copied())
-        .collect::<BTreeSet<_>>();
     let schema = drafts
         .iter()
         .flat_map(|draft| draft.declaration.provides_schema.iter().copied())
@@ -1123,22 +1105,7 @@ fn validate_closure(
                 });
             }
         }
-        for required in declaration.requires_capabilities {
-            if !capabilities.contains(required) {
-                return Err(PluginPlanError::MissingCapability {
-                    plugin: declaration.id,
-                    required: *required,
-                });
-            }
-        }
-        for required in declaration.requires_services {
-            if !services.contains(required) {
-                return Err(PluginPlanError::MissingService {
-                    plugin: declaration.id,
-                    required: *required,
-                });
-            }
-        }
+
         for required in declaration.requires_schema {
             if !schema.contains(required) {
                 return Err(PluginPlanError::MissingSchemaProvider {

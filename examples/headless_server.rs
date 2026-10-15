@@ -34,20 +34,29 @@ fn main() -> Result<(), Box<dyn Error>> {
         .resource_mut::<GameplayCommandQueue>()
         .submit(command)?;
 
-    let outcome = app.run_once(Duration::from_secs_f64(1.0 / 60.0))?;
+    let mut runtime = RuntimeInstance::start(app)?;
+    let outcome = runtime.drive(Duration::from_secs_f64(1.0 / 60.0))?;
 
-    assert_eq!(outcome.exit, None);
-    assert_eq!(app.world().resource::<ObservedCommands>().0.len(), 1);
+    assert_eq!(outcome.frame().unwrap().exit, None);
+    assert_eq!(runtime.world().resource::<ObservedCommands>().0.len(), 1);
     assert_eq!(
-        app.world().resource::<ObservedCommands>().0[0].tick().get(),
+        runtime.world().resource::<ObservedCommands>().0[0]
+            .tick()
+            .get(),
         1
     );
-    assert!(app.world().resource::<GameplayCommandQueue>().is_idle());
-    assert!(!app.world().contains_resource::<nara::input::PointerState>());
+    assert!(runtime.world().resource::<GameplayCommandQueue>().is_idle());
     assert!(
-        !app.world()
+        !runtime
+            .world()
+            .contains_resource::<nara::input::PointerState>()
+    );
+    assert!(
+        !runtime
+            .world()
             .contains_resource::<nara::window::WindowEvents>()
     );
 
+    runtime.finish()?;
     Ok(())
 }

@@ -1,5 +1,6 @@
 use image::ImageEncoder;
 use nara::advanced_prelude::*;
+use nara::hierarchy::{HierarchyPlacement, HierarchyPlacementOwner, HierarchyWriter};
 
 const TEXTURE_STABLE_ID: &str = "2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f";
 
@@ -50,33 +51,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         world.insert_resource(asset_server);
         world.insert_resource(images);
         world.insert_resource(states);
-        world.spawn((
-            Name::new("camera"),
-            Transform2d::default(),
-            Camera2d {
-                target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(500))),
-                viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
-                viewport_height: 64.0,
-                clear_color: Some(Color::rgb(0.02, 0.03, 0.04)),
-                ..Camera2d::default()
-            },
-        ));
-        world.spawn((
-            Name::new("imported texture sprite"),
-            Transform2d::default(),
-            Sprite::from_texture(texture, Vec2::new(32.0, 32.0)),
-        ));
+        let camera = world
+            .spawn((
+                Name::new("camera"),
+                Transform2d::default(),
+                Camera2d {
+                    target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(
+                        500,
+                    ))),
+                    viewport: Some(ViewportRect::new(0, 0, 64, 64).unwrap()),
+                    viewport_height: 64.0,
+                    clear_color: Some(Color::rgb(0.02, 0.03, 0.04)),
+                    ..Camera2d::default()
+                },
+            ))
+            .id();
+        let sprite = world
+            .spawn((
+                Name::new("imported texture sprite"),
+                Transform2d::default(),
+                Sprite::from_texture(texture, Vec2::new(32.0, 32.0)),
+            ))
+            .id();
+        let mut hierarchy = HierarchyWriter::new(world);
+        hierarchy.place(
+            camera,
+            HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        )?;
+        hierarchy.place(
+            sprite,
+            HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+        )?;
     }
 
-    app.update()?;
+    let mut runtime = RuntimeInstance::start(app)?;
+    runtime.drive(std::time::Duration::ZERO)?;
 
-    let prepared = app
+    let prepared = runtime
         .world()
         .resource::<PreparedRenderResources<PreparedImageResource>>();
     assert!(prepared.get_ready(image_resource_key(texture)).is_some());
-    assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    assert_eq!(runtime.world().resource::<ImagePrepareStats>().prepared, 1);
 
-    let batches = app.world().resource::<nara::sprite_render::SpriteBatches>();
+    let batches = runtime
+        .world()
+        .resource::<nara::sprite_render::SpriteBatches>();
     assert_eq!(batches.total_instances(), 1);
     assert_eq!(
         batches.as_slice()[0]
@@ -86,13 +105,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(image_resource_key(texture))
     );
     assert_eq!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetServer>()
             .stable_id(texture.id())
             .map(|id| id.to_string()),
         Some(TEXTURE_STABLE_ID.to_string())
     );
 
+    runtime.finish()?;
     Ok(())
 }
 

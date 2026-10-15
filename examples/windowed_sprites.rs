@@ -1,6 +1,9 @@
 use std::error::Error;
 
 use image::ImageEncoder;
+use nara::hierarchy::{
+    HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
+};
 use nara::{advanced_prelude::*, backend_prelude::*};
 
 #[path = "support/runtime_retirement.rs"]
@@ -25,12 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
     app.world_mut()?.insert_resource(AssetServer::new());
-    let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
-        app.seal()?,
-        nara::app::RuntimeObligationLedger::new(),
-        nara::app::RuntimeClosePolicy::default(),
-    )?;
-    let mut runtime = candidate.complete_startup()?.promote();
+    let mut runtime = nara::app::RuntimeInstance::start(app)?;
     let run_result = WinitRunner::default().run(&mut runtime);
     finish_runtime_after_winit(run_result, runtime)
 }
@@ -43,30 +41,36 @@ fn setup_scene(
 ) {
     let texture = import_demo_texture(&mut asset_server, &mut images, &mut states);
 
-    commands.spawn((
-        Name::new("camera"),
-        Transform2d::default(),
-        Camera2d {
-            clear_color: Some(Color::rgb(0.05, 0.06, 0.07)),
-            viewport_height: 720.0,
-            ..Camera2d::default()
-        },
-    ));
+    let camera = commands
+        .spawn((
+            Name::new("camera"),
+            Transform2d::default(),
+            Camera2d {
+                clear_color: Some(Color::rgb(0.05, 0.06, 0.07)),
+                viewport_height: 720.0,
+                ..Camera2d::default()
+            },
+        ))
+        .id();
 
-    commands.spawn((
-        Name::new("imported texture"),
-        Transform2d::from_translation(Vec2::new(-80.0, 20.0)),
-        Sprite::from_texture(texture, Vec2::new(80.0, 80.0)).with_layer(1),
-    ));
-    commands.spawn((
-        Name::new("rose square"),
-        Transform2d {
-            translation: Vec2::new(40.0, -20.0),
-            rotation: 0.35,
-            scale: Vec2::splat(1.0),
-        },
-        Sprite::from_color(Vec2::new(96.0, 48.0), Color::rgb(0.95, 0.25, 0.35)).with_layer(2),
-    ));
+    let texture_sprite = commands
+        .spawn((
+            Name::new("imported texture"),
+            Transform2d::from_translation(Vec2::new(-80.0, 20.0)),
+            Sprite::from_texture(texture, Vec2::new(80.0, 80.0)).with_layer(1),
+        ))
+        .id();
+    let color_sprite = commands
+        .spawn((
+            Name::new("rose square"),
+            Transform2d {
+                translation: Vec2::new(40.0, -20.0),
+                rotation: 0.35,
+                scale: Vec2::splat(1.0),
+            },
+            Sprite::from_color(Vec2::new(96.0, 48.0), Color::rgb(0.95, 0.25, 0.35)).with_layer(2),
+        ))
+        .id();
 
     let mut tilemap = Tilemap::new(Vec2::new(32.0, 32.0)).with_layer(0);
     for x in -4..=4 {
@@ -76,11 +80,22 @@ fn setup_scene(
                 .with_color(Color::rgb(0.18, 0.36, 0.22)),
         );
     }
-    commands.spawn((
-        Name::new("floor"),
-        Transform2d::from_translation(Vec2::new(0.0, 0.0)),
-        tilemap,
-    ));
+    let floor = commands
+        .spawn((
+            Name::new("floor"),
+            Transform2d::from_translation(Vec2::new(0.0, 0.0)),
+            tilemap,
+        ))
+        .id();
+    commands.apply_hierarchy_batch(
+        [camera, texture_sprite, color_sprite, floor]
+            .into_iter()
+            .map(|entity| HierarchyOperation::Place {
+                entity,
+                placement: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+            })
+            .collect(),
+    );
 }
 
 fn import_demo_texture(

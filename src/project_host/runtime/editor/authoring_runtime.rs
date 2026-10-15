@@ -1,12 +1,15 @@
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, time::Duration};
 
-use nara_app::App;
+use nara_app::{
+    __RuntimeDriverPort, App, RuntimeControl, RuntimeInstance, RuntimeState,
+    RuntimeWorldAccessError,
+};
 use nara_asset::{
     AssetEvents, AssetId, AssetRecord, AssetServer, AssetSourceKind, AssetStates, AssetVersion,
     Assets, Handle,
 };
 use nara_diagnostic::DiagnosticReport;
-use nara_ecs::{Mut, World};
+use nara_ecs::{Mut, Resource, World};
 use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
 use nara_image::{
     ImageAsset, ImageFileImportRequest, ImageImportError, ImageImportSettings, ImageImportedAsset,
@@ -23,10 +26,7 @@ use nara_tasks::{
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
 
 #[cfg(test)]
-use std::{
-    sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender},
-    time::Duration,
-};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender};
 
 use crate::project_host::{ProjectContentSnapshot, authoring::AuthoringProjectSessionSnapshot};
 
@@ -162,7 +162,7 @@ pub(super) enum EditorAuthoringRuntimeCloseProgress {
 /// Scene preview is an optional private subsystem of this runtime. Other authoring workflows must
 /// reuse this owner instead of creating another `App`, task pool, or image store.
 pub(super) struct EditorAuthoringRuntime {
-    app: App,
+    runtime: RuntimeInstance,
     #[cfg(feature = "presentation-2d")]
     preview: EditorPreviewSession,
     #[cfg(test)]
@@ -194,8 +194,10 @@ impl EditorAuthoringRuntime {
             &project,
         )
         .map_err(|error| error.diagnostics)?;
+        let runtime = RuntimeInstance::start(app)
+            .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
         Ok(Self {
-            app,
+            runtime,
             #[cfg(feature = "presentation-2d")]
             preview,
             #[cfg(test)]
@@ -217,8 +219,10 @@ impl EditorAuthoringRuntime {
                 .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
             project,
         )?;
+        let runtime = RuntimeInstance::start(app)
+            .map_err(|_| runtime_error("project.editor.preview-runtime-start-failed"))?;
         Ok(Self {
-            app,
+            runtime,
             #[cfg(feature = "presentation-2d")]
             preview,
             #[cfg(test)]
@@ -253,7 +257,7 @@ impl EditorAuthoringRuntime {
         revision: SceneAuthoringRevision,
     ) -> bool {
         self.preview
-            .requires_source_projection(self.app.world(), document, revision)
+            .requires_source_projection(self.runtime.world(), document, revision)
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -261,7 +265,7 @@ impl EditorAuthoringRuntime {
         &mut self,
         source: Option<EditorPreviewSource>,
     ) -> Option<DiagnosticReport> {
-        self.preview.drive(&mut self.app, source)
+        self.preview.drive(&mut self.runtime, source)
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -284,95 +288,21 @@ impl EditorAuthoringRuntime {
         project_relative_path: RelativePath,
         settings: ImageImportSettings,
     ) -> Result<EditorImageRuntimeTask, EditorImageRuntimeFailure> {
-        let world = self
-            .app
-            .world_mut()
-            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?;
-        let handle = world
-            .resource_mut::<AssetServer>()
-            .reserve_record::<ImageAsset>(&record)
-            .map_err(|_| EditorImageRuntimeFailure::AssetIdentity)?;
-        let expected_version = world
-            .resource::<AssetStates>()
-            .version(handle.id())
-            .unwrap_or(AssetVersion::ZERO);
-        let importer = world.resource::<ImageImporter>().clone();
-        let encoded_limit =
-            u64::try_from(importer.limits().max_encoded_bytes().get()).unwrap_or(u64::MAX);
-        let admitted = importer
-            .admit_file(
-                ImageFileImportRequest::new(record, source, settings),
-                handle,
-                expected_version,
-                &world.resource::<AssetServer>(),
-                &world.resource::<Assets<ImageAsset>>(),
-                &world.resource::<AssetStates>(),
-            )
-            .map_err(|_| EditorImageRuntimeFailure::ImportAdmission)?;
-        #[cfg(test)]
-        let test_gate = self.next_image_import_gate.take();
-        let task = world
-            .resource::<TaskPools>()
-            .spawn(
-                TaskPoolKind::Io,
-                TaskSpawnRequest::new(attempt_generation, EDITOR_IMAGE_IMPORT_TASK_DOMAIN),
-                move |cancellation| {
-                    let imported = match admitted.import(cancellation.clone()) {
-                        Ok(imported) => imported,
-                        Err(error) => {
-                            return EditorImageTaskOutput::Rejected(map_image_import_error(&error));
-                        }
-                    };
-                    #[cfg(test)]
-                    if let Some(gate) = test_gate {
-                        let _ = gate.started.send(());
-                        loop {
-                            if gate.cancellation == EditorImageImportTestCancellation::Cooperative
-                                && cancellation.is_cancelled()
-                            {
-                                return EditorImageTaskOutput::Rejected(
-                                    EditorImageRuntimeFailure::TaskCancelled,
-                                );
-                            }
-                            match gate.release.recv_timeout(Duration::from_millis(2)) {
-                                Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
-                                Err(RecvTimeoutError::Timeout) => {}
-                            }
-                        }
-                    }
-                    if cancellation.is_cancelled() {
-                        return EditorImageTaskOutput::Rejected(
-                            EditorImageRuntimeFailure::TaskCancelled,
-                        );
-                    }
-                    let source = match project_root.open_file(&project_relative_path) {
-                        Ok(source) if source.identity() == source_identity => source,
-                        _ => {
-                            return EditorImageTaskOutput::Rejected(
-                                EditorImageRuntimeFailure::SourceChanged,
-                            );
-                        }
-                    };
-                    if source
-                        .verify_digest(imported.source_digest(), encoded_limit)
-                        .is_err()
-                    {
-                        return EditorImageTaskOutput::Rejected(
-                            EditorImageRuntimeFailure::SourceChanged,
-                        );
-                    }
-                    EditorImageTaskOutput::Imported {
-                        source: EditorImageSourceCompletion {
-                            identity: source.identity(),
-                            digest: imported.source_digest(),
-                        },
-                        imported,
-                    }
-                },
-            )
-            .into_handle()
-            .map_err(|_| EditorImageRuntimeFailure::TaskAdmission)?;
-        Ok(EditorImageRuntimeTask { handle, task })
+        let request = EditorImageImportAdmission {
+            attempt_generation,
+            record,
+            source,
+            source_identity,
+            project_root,
+            project_relative_path,
+            settings,
+            #[cfg(test)]
+            test_gate: self.next_image_import_gate.take(),
+        };
+        self.runtime
+            .with_driver_scope(|scope| scope.__apply_port::<EditorImageAdmissionPort>(request))
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
     }
 
     pub(super) fn poll_image_import(
@@ -402,19 +332,10 @@ impl EditorAuthoringRuntime {
         &mut self,
         imported: ImageImportedAsset,
     ) -> Result<AssetVersion, ImageImportError> {
-        let world = self
-            .app
-            .world_mut()
-            .map_err(|_| ImageImportError::Publication(ImagePublicationFailureKind::Stale))?;
-        let server = world.resource::<AssetServer>().clone();
-        world.resource_scope(
-            |world, mut images: Mut<'_, Assets<ImageAsset>>| -> Result<_, _> {
-                world.resource_scope(|world, mut states: Mut<'_, AssetStates>| -> Result<_, _> {
-                    let mut events = world.resource_mut::<AssetEvents>();
-                    imported.commit_retained(&server, &mut images, &mut states, &mut events)
-                })
-            },
-        )
+        self.runtime
+            .with_driver_scope(|scope| scope.__apply_port::<EditorImagePublicationPort>(imported))
+            .map_err(|_| ImageImportError::Publication(ImagePublicationFailureKind::Stale))?
+            .map_err(|_| ImageImportError::Publication(ImagePublicationFailureKind::Stale))?
     }
 
     #[must_use]
@@ -423,7 +344,7 @@ impl EditorAuthoringRuntime {
         handle: Handle<ImageAsset>,
         expected_version: AssetVersion,
     ) -> Option<&ImageAsset> {
-        let world = self.app.world();
+        let world = self.runtime.world();
         if world.get_resource::<AssetStates>()?.version(handle.id()) != Some(expected_version) {
             return None;
         }
@@ -434,7 +355,7 @@ impl EditorAuthoringRuntime {
     pub(super) fn capture_authoring_image_catalog_candidate(
         &self,
     ) -> Result<EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError> {
-        let world = self.app.world();
+        let world = self.runtime.world();
         let server = world
             .get_resource::<AssetServer>()
             .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
@@ -452,7 +373,7 @@ impl EditorAuthoringRuntime {
         &self,
         selected: &BTreeSet<AssetId>,
     ) -> Result<EditorAuthoringImageCatalogCandidate, EditorAuthoringImageCatalogError> {
-        let world = self.app.world();
+        let world = self.runtime.world();
         let server = world
             .get_resource::<AssetServer>()
             .ok_or(EditorAuthoringImageCatalogError::RuntimeUnavailable)?;
@@ -465,14 +386,24 @@ impl EditorAuthoringRuntime {
         EditorAuthoringImageCatalogCandidate::capture_selected(server, images, states, selected)
     }
 
-    pub(super) fn shutdown_tasks(&self) -> EditorAuthoringRuntimeCloseProgress {
-        let Some(pools) = self.app.world().get_resource::<TaskPools>() else {
-            return EditorAuthoringRuntimeCloseProgress::Incomplete(TaskShutdownReport::default());
-        };
-        let Ok(report) = pools.shutdown_blocking() else {
-            return EditorAuthoringRuntimeCloseProgress::Incomplete(TaskShutdownReport::default());
-        };
-        if report.is_complete() {
+    pub(super) fn shutdown_tasks(&mut self) -> EditorAuthoringRuntimeCloseProgress {
+        match self.runtime.state() {
+            RuntimeState::CloseIncomplete => {
+                let _ = self.runtime.request_control(RuntimeControl::RetryClose);
+            }
+            RuntimeState::Running | RuntimeState::Paused | RuntimeState::Faulted => {
+                let _ = self.runtime.request_control(RuntimeControl::Stop);
+            }
+            RuntimeState::Stepping | RuntimeState::Stopping | RuntimeState::Stopped => {}
+        }
+        let _ = self.runtime.drive(Duration::ZERO);
+        let report = self
+            .runtime
+            .world()
+            .get_resource::<TaskShutdownReport>()
+            .cloned()
+            .unwrap_or_default();
+        if self.runtime.state() == RuntimeState::Stopped && report.is_complete() {
             EditorAuthoringRuntimeCloseProgress::Complete(report)
         } else {
             EditorAuthoringRuntimeCloseProgress::Incomplete(report)
@@ -519,13 +450,10 @@ impl EditorAuthoringRuntime {
 
     #[cfg(test)]
     pub(super) fn image_import_budget_host(&self) -> nara_image::ImageImportBudgetHost {
-        self.app.world().resource::<ImageImporter>().budget_host()
-    }
-}
-
-impl Drop for EditorAuthoringRuntime {
-    fn drop(&mut self) {
-        let _ = self.shutdown_tasks();
+        self.runtime
+            .world()
+            .resource::<ImageImporter>()
+            .budget_host()
     }
 }
 
@@ -538,30 +466,31 @@ fn map_image_import_error(error: &ImageImportError) -> EditorImageRuntimeFailure
 
 fn build_authoring_app() -> Result<App, DiagnosticReport> {
     let mut app = App::new();
-    let task_pools = TaskPools::try_new(Default::default())
-        .map_err(|_| runtime_error("project.editor.task-pool-install-failed"))?;
-    app.insert_resource(task_pools)
-        .map_err(|_| runtime_error("project.editor.task-pool-install-failed"))?;
-    let plugin_installation = app
-        .add_plugins((
-            ComponentRegistryPlugin,
-            nara_hierarchy::HierarchyPlugin,
-            nara_scene::SceneComponentsPlugin,
-            nara_diagnostic::DiagnosticsPlugin::default(),
-            nara_tasks::TaskPlugin::default(),
-            nara_asset::AssetPlugin,
-            nara_transform::TransformPlugin,
-            nara_render::RenderComponentsPlugin,
-        ))
-        .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()));
-    if plugin_installation.is_err() {
-        if let Some(pools) = app.world().get_resource::<TaskPools>() {
-            let _ = pools.shutdown_blocking();
-        }
-        return Err(runtime_error(
-            "project.editor.preview-plugin-install-failed",
-        ));
-    }
+    app.add_plugins((
+        ComponentRegistryPlugin,
+        nara_hierarchy::HierarchyPlugin,
+        nara_scene::SceneComponentsPlugin,
+        nara_diagnostic::DiagnosticsPlugin::default(),
+        nara_tasks::TaskPlugin::default(),
+        nara_asset::AssetPlugin,
+        nara_transform::TransformPlugin,
+        nara_render::RenderComponentsPlugin,
+    ))
+    .and_then(|app| app.add_plugins(nara_image::ImagePlugin::default()))
+    .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
+    app.insert_resource(EditorImageAdmissionPort)
+        .and_then(|app| app.insert_resource(EditorImagePublicationPort))
+        .and_then(|app| {
+            app.__register_driver_port::<EditorImageAdmissionPort>(
+                EditorImageAdmissionPort::apply_driver_input_in_world,
+            )
+        })
+        .and_then(|app| {
+            app.__register_driver_port::<EditorImagePublicationPort>(
+                EditorImagePublicationPort::apply_driver_input_in_world,
+            )
+        })
+        .map_err(|_| runtime_error("project.editor.preview-state-install-failed"))?;
     #[cfg(feature = "presentation-2d")]
     app.add_plugins((
         nara_render::RenderPlugin,
@@ -570,6 +499,174 @@ fn build_authoring_app() -> Result<App, DiagnosticReport> {
     ))
     .map_err(|_| runtime_error("project.editor.preview-plugin-install-failed"))?;
     Ok(app)
+}
+
+struct EditorImageImportAdmission {
+    attempt_generation: u64,
+    record: AssetRecord,
+    source: FileCapability,
+    source_identity: FileIdentity,
+    project_root: DirectoryCapability,
+    project_relative_path: RelativePath,
+    settings: ImageImportSettings,
+    #[cfg(test)]
+    test_gate: Option<EditorImageImportTestGate>,
+}
+
+#[derive(Resource)]
+struct EditorImageAdmissionPort;
+
+impl __RuntimeDriverPort for EditorImageAdmissionPort {
+    type Input = EditorImageImportAdmission;
+    type Output = Result<EditorImageRuntimeTask, EditorImageRuntimeFailure>;
+
+    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
+        Err(EditorImageRuntimeFailure::RuntimeUnavailable)
+    }
+}
+
+impl EditorImageAdmissionPort {
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        input: EditorImageImportAdmission,
+    ) -> Result<
+        Result<EditorImageRuntimeTask, EditorImageRuntimeFailure>,
+        (RuntimeWorldAccessError, EditorImageImportAdmission),
+    > {
+        Ok(spawn_image_import_in_world(world, input))
+    }
+}
+
+fn spawn_image_import_in_world(
+    world: &mut World,
+    request: EditorImageImportAdmission,
+) -> Result<EditorImageRuntimeTask, EditorImageRuntimeFailure> {
+    let EditorImageImportAdmission {
+        attempt_generation,
+        record,
+        source,
+        source_identity,
+        project_root,
+        project_relative_path,
+        settings,
+        #[cfg(test)]
+        test_gate,
+    } = request;
+    let handle = world
+        .resource_mut::<AssetServer>()
+        .reserve_record::<ImageAsset>(&record)
+        .map_err(|_| EditorImageRuntimeFailure::AssetIdentity)?;
+    let expected_version = world
+        .resource::<AssetStates>()
+        .version(handle.id())
+        .unwrap_or(AssetVersion::ZERO);
+    let importer = world.resource::<ImageImporter>().clone();
+    let encoded_limit =
+        u64::try_from(importer.limits().max_encoded_bytes().get()).unwrap_or(u64::MAX);
+    let admitted = importer
+        .admit_file(
+            ImageFileImportRequest::new(record, source, settings),
+            handle,
+            expected_version,
+            &world.resource::<AssetServer>(),
+            &world.resource::<Assets<ImageAsset>>(),
+            &world.resource::<AssetStates>(),
+        )
+        .map_err(|_| EditorImageRuntimeFailure::ImportAdmission)?;
+    let task = world
+        .resource::<TaskPools>()
+        .spawn(
+            TaskPoolKind::Io,
+            TaskSpawnRequest::new(attempt_generation, EDITOR_IMAGE_IMPORT_TASK_DOMAIN),
+            move |cancellation| {
+                let imported = match admitted.import(cancellation.clone()) {
+                    Ok(imported) => imported,
+                    Err(error) => {
+                        return EditorImageTaskOutput::Rejected(map_image_import_error(&error));
+                    }
+                };
+                #[cfg(test)]
+                if let Some(gate) = test_gate {
+                    let _ = gate.started.send(());
+                    loop {
+                        if gate.cancellation == EditorImageImportTestCancellation::Cooperative
+                            && cancellation.is_cancelled()
+                        {
+                            return EditorImageTaskOutput::Rejected(
+                                EditorImageRuntimeFailure::TaskCancelled,
+                            );
+                        }
+                        match gate.release.recv_timeout(Duration::from_millis(2)) {
+                            Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
+                            Err(RecvTimeoutError::Timeout) => {}
+                        }
+                    }
+                }
+                if cancellation.is_cancelled() {
+                    return EditorImageTaskOutput::Rejected(
+                        EditorImageRuntimeFailure::TaskCancelled,
+                    );
+                }
+                let source = match project_root.open_file(&project_relative_path) {
+                    Ok(source) if source.identity() == source_identity => source,
+                    _ => {
+                        return EditorImageTaskOutput::Rejected(
+                            EditorImageRuntimeFailure::SourceChanged,
+                        );
+                    }
+                };
+                if source
+                    .verify_digest(imported.source_digest(), encoded_limit)
+                    .is_err()
+                {
+                    return EditorImageTaskOutput::Rejected(
+                        EditorImageRuntimeFailure::SourceChanged,
+                    );
+                }
+                EditorImageTaskOutput::Imported {
+                    source: EditorImageSourceCompletion {
+                        identity: source.identity(),
+                        digest: imported.source_digest(),
+                    },
+                    imported,
+                }
+            },
+        )
+        .into_handle()
+        .map_err(|_| EditorImageRuntimeFailure::TaskAdmission)?;
+    Ok(EditorImageRuntimeTask { handle, task })
+}
+
+#[derive(Resource)]
+struct EditorImagePublicationPort;
+
+impl __RuntimeDriverPort for EditorImagePublicationPort {
+    type Input = ImageImportedAsset;
+    type Output = Result<AssetVersion, ImageImportError>;
+
+    fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
+        Err(ImageImportError::Publication(
+            ImagePublicationFailureKind::Stale,
+        ))
+    }
+}
+
+impl EditorImagePublicationPort {
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        imported: ImageImportedAsset,
+    ) -> Result<Result<AssetVersion, ImageImportError>, (RuntimeWorldAccessError, ImageImportedAsset)>
+    {
+        let server = world.resource::<AssetServer>().clone();
+        Ok(world.resource_scope(
+            |world, mut images: Mut<'_, Assets<ImageAsset>>| -> Result<_, _> {
+                world.resource_scope(|world, mut states: Mut<'_, AssetStates>| -> Result<_, _> {
+                    let mut events = world.resource_mut::<AssetEvents>();
+                    imported.commit_retained(&server, &mut images, &mut states, &mut events)
+                })
+            },
+        ))
+    }
 }
 
 fn publish_authoring_image_records(

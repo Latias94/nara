@@ -1,7 +1,7 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified Implementation**: 2026-10-15 @ foundation U2/U3 records `7fee7000828c4c1e9146bca1233008b7` / `868d1a8a5a8e4218b4d52b2d02f5dc7b`; earlier SPL-U2 evidence remains `ab211bc` / `e0c5ea801f5e432484dfc710ae3ce00b`
+**Last Verified Implementation**: 2026-10-15 @ foundation U5 records `7e531ba1a4644ad9a36ccf7876fd2e61` / `dd39a41fb70c462bacd772d8fd26b752`; earlier SPL-U2 evidence remains `ab211bc` / `e0c5ea801f5e432484dfc710ae3ce00b`
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. The active
 [2D foundation refactor](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
@@ -14,8 +14,12 @@ identity revocation/recovery (128 resource/image tests and a native Windows WGPU
 U4's capability-instance preflight and retained temporary cleanup are implemented in the worktree
 and verified by record `4f79a46cf5c4455a8700d9090c13e386` (59 Windows and 57 native Linux filesystem
 tests, focused Host ownership tests, and both real CLI failure exits). Overlapping pre-existing SPL
-filesystem/tooling edits remain uncommitted. U5 has moved execution into the same RuntimeOwner and
-is migrating consumers/removing raw App execution; its whole-consumer validation is still in progress.
+filesystem/tooling edits remain uncommitted. U5 moves execution into the same RuntimeOwner, removes
+raw App execution, and migrates consumers. Core/module, compiler/privacy, independent-consumer,
+workspace Play, Reference Game, example, native surface-retirement, and focused static checks pass
+in the integrated worktree (records `7e531ba1a4644ad9a36ccf7876fd2e61` and
+`dd39a41fb70c462bacd772d8fd26b752`). Overlapping Host/SPL changes remain uncommitted; this does not
+claim an independently buildable committed HEAD or completion of U6-U13.
 These focused results do not mark the remaining foundation or supervised-Play units complete.
 The preceding
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)

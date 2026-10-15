@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use nara_app::{App, CoreStage};
+use nara_app::{App, CoreStage, RuntimeInstance};
 use nara_asset::{AssetId, Handle};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
@@ -284,10 +284,10 @@ impl EditorPreviewSession {
 
     pub(super) fn drive(
         &mut self,
-        app: &mut App,
+        runtime: &mut RuntimeInstance,
         source: Option<EditorPreviewSource>,
     ) -> Option<DiagnosticReport> {
-        match self.try_drive(app, source) {
+        match self.try_drive(runtime, source) {
             Ok(()) => {
                 self.last_failure = None;
                 None
@@ -302,7 +302,7 @@ impl EditorPreviewSession {
 
     fn try_drive(
         &mut self,
-        app: &mut App,
+        runtime: &mut RuntimeInstance,
         source: Option<EditorPreviewSource>,
     ) -> Result<(), DiagnosticReport> {
         self.candidate = None;
@@ -324,27 +324,31 @@ impl EditorPreviewSession {
             .input
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(request);
-        app.run_once(Duration::ZERO)
+        let outcome = runtime
+            .drive(Duration::ZERO)
             .map_err(|_| preview_error("project.editor.preview-frame-failed"))?;
+        if outcome.frame().is_none() {
+            return Err(preview_error("project.editor.preview-frame-unavailable"));
+        }
 
         let stamp = EditorPreviewDocumentStamp {
             document: source.document,
             revision: source.revision,
         };
-        let runtime_state = app.world().resource::<EditorPreviewRuntimeState>();
+        let runtime_state = runtime.world().resource::<EditorPreviewRuntimeState>();
         if runtime_state.accepted != Some(stamp) {
             return Err(runtime_state.diagnostics.clone());
         }
-        let views = app.world().resource::<ExtractedViews>();
+        let views = runtime.world().resource::<ExtractedViews>();
         let packet = build_editor_render_frame_packet(
             self.generation,
-            app.world().resource::<RenderFrame>().index,
+            runtime.world().resource::<RenderFrame>().index,
             views,
         )
         .map_err(|_| preview_error("project.editor.preview-packet-rejected"))?
         .ok_or_else(|| preview_error("project.editor.preview-view-missing"))?;
         let target = packet.view().target;
-        let queued = app.world().resource::<QueuedSpriteItems>();
+        let queued = runtime.world().resource::<QueuedSpriteItems>();
         let mut hits = Vec::with_capacity(queued.len());
         for (ordinal, item) in queued.as_slice().iter().enumerate() {
             if item.view_index != 0 || item.target != target {
@@ -352,7 +356,7 @@ impl EditorPreviewSession {
                     "project.editor.preview-queue-target-mismatch",
                 ));
             }
-            let source = app
+            let source = runtime
                 .world()
                 .get::<SceneEntitySource>(item.entity)
                 .ok_or_else(|| preview_error("project.editor.preview-source-identity-missing"))?;
@@ -367,14 +371,14 @@ impl EditorPreviewSession {
             .geometry_revision
             .checked_add(1)
             .ok_or_else(|| preview_error("project.editor.preview-geometry-exhausted"))?;
-        let world_snapshot = WorldIdentitySnapshot::capture_default(app.world())
+        let world_snapshot = WorldIdentitySnapshot::capture_default(runtime.world())
             .map_err(|_| preview_error("project.editor.preview-identity-snapshot-failed"))?;
         self.candidate = Some(EditorPreviewCandidate {
             document: source.document,
             revision: source.revision,
             geometry_revision,
             packet,
-            sprite_batches: app.world().resource::<SpriteBatches>().clone(),
+            sprite_batches: runtime.world().resource::<SpriteBatches>().clone(),
             hits,
             omissions: runtime_state
                 .omissions

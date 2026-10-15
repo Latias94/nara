@@ -13,14 +13,21 @@ use std::{
 
 use bevy_ecs::error::{BevyError, ErrorHandler, FallbackErrorHandler};
 use nara_ecs::{
-    Command, Mut, Resource, World, change_detection::Tick, component::Mutable,
-    lifecycle::HookContext, world::DeferredWorld,
+    Command, Mut, Resource, World,
+    change_detection::Tick,
+    component::Mutable,
+    lifecycle::HookContext,
+    observer::Observer,
+    schedule::{IntoScheduleConfigs, Schedule, Schedules},
+    world::DeferredWorld,
 };
 use thiserror::Error;
 
 use crate::{
-    App, AppFrameOutcome, AppRunError, PluginLifecycleState, PluginShutdownError,
-    RuntimeTimeSettings, SealedApp,
+    App, AppExitRequests, AppFrameOutcome, AppRunError, CoreStage, FixedTime, FixedUpdateSet,
+    InstalledPlugin, InstalledRuntimeAuthorityValidator, PluginFailureReport, PluginHook, PluginId,
+    PluginLifecycleState, PluginShutdownError, RealTime, RenderTime, RuntimeFrameStatus,
+    RuntimeTimeSettings, SealedApp, StartupStage, VirtualTime,
 };
 
 mod fault_route;
@@ -40,6 +47,7 @@ static TOTAL_REAPED_RUNTIME_OWNERS: AtomicU64 = AtomicU64::new(0);
 /// Hidden product plumbing for an engine-owned authority that must be checked at App and managed
 /// runtime safe points. This is intentionally one callback rather than a public event bus or a
 /// general extension registry; the owning domain keeps the identity and fault reporter it needs.
+#[doc(hidden)]
 pub type __RuntimeAuthorityValidator =
     dyn Fn(&World, Option<RuntimeGeneration>) -> Result<(), RuntimeFault> + Send + Sync;
 
@@ -134,25 +142,6 @@ pub(crate) fn initialize_runtime_fault_bridge(world: &mut World, reporter: Runti
     world.insert_resource(FallbackErrorHandler::default());
 }
 
-pub(crate) fn validate_managed_fault_boundary(
-    world: &World,
-    reporter: &RuntimeFaultReporter,
-    expected_handler: Option<ErrorHandler>,
-    expected_bridge: Option<RuntimeFaultBridgeIdentity>,
-    generation: RuntimeGeneration,
-    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
-) -> Result<(), AppRunError> {
-    validate_managed_runtime_authority(
-        world,
-        reporter,
-        expected_handler,
-        expected_bridge,
-        generation,
-        authority,
-    )
-    .map_err(|fault| AppRunError::managed_runtime_fault(&fault))
-}
-
 pub(crate) fn validate_managed_runtime_authority(
     world: &World,
     reporter: &RuntimeFaultReporter,
@@ -183,62 +172,10 @@ pub(crate) fn validate_managed_runtime_authority(
     Err(canonical)
 }
 
-pub(crate) fn validate_direct_authority_boundary(
-    world: &World,
-    reporter: &RuntimeFaultReporter,
-    expected_handler: Option<ErrorHandler>,
-    expected_bridge: Option<RuntimeFaultBridgeIdentity>,
-    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
-) -> Result<(), AppRunError> {
-    validate_direct_runtime_authority(
-        world,
-        reporter,
-        expected_handler,
-        expected_bridge,
-        authority,
-    )
-    .map_err(|fault| AppRunError::direct_runtime_fault(&fault))
-}
-
-pub(crate) fn record_app_instance_authority_fault(reporter: &RuntimeFaultReporter) -> RuntimeFault {
-    reporter.record_canonical(RuntimeFault::engine(
-        RuntimeFaultKind::RuntimeAuthority,
-        "nara.app.instance-authority",
-    ))
-}
-
 pub(crate) fn record_runtime_fault_bridge_authority_fault(
     reporter: &RuntimeFaultReporter,
 ) -> RuntimeFault {
     reporter.record_canonical(runtime_fault_bridge_authority_fault())
-}
-
-fn validate_direct_runtime_authority(
-    world: &World,
-    reporter: &RuntimeFaultReporter,
-    expected_handler: Option<ErrorHandler>,
-    expected_bridge: Option<RuntimeFaultBridgeIdentity>,
-    authority: Option<&Arc<__RuntimeAuthorityValidator>>,
-) -> Result<(), RuntimeFault> {
-    if let Some(fault) = reporter.fault() {
-        return Err(fault);
-    }
-    let fault = authority
-        .and_then(|validator| validator(world, None).err())
-        .or_else(|| {
-            validate_runtime_fault_bridge_authority(
-                world,
-                reporter,
-                expected_handler,
-                expected_bridge,
-            )
-            .err()
-        });
-    let Some(fault) = fault else {
-        return Ok(());
-    };
-    let canonical = reporter.record_canonical(fault);
-    Err(canonical)
 }
 
 fn validate_runtime_fault_bridge_authority(
@@ -792,6 +729,8 @@ pub struct RuntimeCloseContext<'world> {
     world: &'world mut World,
 }
 
+/// First-party platform bridge for one typed operation under managed fault authority.
+#[doc(hidden)]
 pub struct RuntimeDriverScope<'world> {
     world: &'world mut World,
     state: RuntimeState,
@@ -809,6 +748,7 @@ enum DriverScopeAuthorityPolicy {
 /// orphan rules prevent downstream adapters from adding driver access to an engine-owned resource.
 /// This is intentionally hidden and may be replaced without a compatibility migration; it is not
 /// the public shared Adapter contract tracked by OQ-038.
+/// Coordinated operations require explicit configuration through [`App::__register_driver_port`].
 #[doc(hidden)]
 pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
     type Input;
@@ -825,30 +765,11 @@ pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
     }
 
     fn apply_driver_input(&mut self, input: Self::Input) -> Self::Output;
+}
 
-    /// Applies one typed operation that must coordinate multiple Runtime-owned resources.
-    ///
-    /// The default keeps ordinary ports resource-local. First-party ports may override this
-    /// method to perform one failure-atomic transaction without exposing the managed `World` to
-    /// the external Host.
-    #[doc(hidden)]
-    fn apply_driver_input_in_world(
-        world: &mut World,
-        input: Self::Input,
-    ) -> Result<Self::Output, (RuntimeWorldAccessError, Self::Input)>
-    where
-        Self: Sized,
-    {
-        let Some(mut resource) = world.get_resource_mut::<Self>() else {
-            return Err((
-                RuntimeWorldAccessError::MissingResource {
-                    type_name: type_name::<Self>(),
-                },
-                input,
-            ));
-        };
-        Ok(resource.apply_driver_input(input))
-    }
+#[derive(Resource)]
+struct RegisteredDriverPort<R: __RuntimeDriverPort> {
+    apply: fn(&mut World, R::Input) -> Result<R::Output, (RuntimeWorldAccessError, R::Input)>,
 }
 
 /// Short-lived command application while a runtime candidate is still unpublished.
@@ -856,6 +777,7 @@ pub trait __RuntimeDriverPort: Resource<Mutability = Mutable> {
 /// This scope exists for product Hosts that must materialize validated project state before
 /// startup. The candidate revalidates its sticky fault bridge after the scope returns, so replacing
 /// protected runtime authority cannot silently publish a healthy runtime.
+#[doc(hidden)]
 pub struct RuntimeCandidateScope<'world> {
     world: &'world mut World,
 }
@@ -907,8 +829,8 @@ impl RuntimeDriverScope<'_> {
         &mut self,
         input: R::Input,
     ) -> Result<R::Output, RuntimeWorldAccessError> {
-        self.validate_port_input::<R>(&input)?;
-        R::apply_driver_input_in_world(self.world, input).map_err(|(error, _)| error)
+        self.__apply_owned_port::<R>(input)
+            .map_err(|(error, _)| error)
     }
 
     /// Applies one typed port operation while preserving an owned input on admission failure.
@@ -923,7 +845,48 @@ impl RuntimeDriverScope<'_> {
         if let Err(error) = self.validate_port_input::<R>(&input) {
             return Err((error, input));
         }
-        R::apply_driver_input_in_world(self.world, input)
+        if !self.world.contains_resource::<R>() {
+            return Err((
+                RuntimeWorldAccessError::MissingResource {
+                    type_name: type_name::<R>(),
+                },
+                input,
+            ));
+        }
+        if let Some(registered) = self.world.get_resource::<RegisteredDriverPort<R>>() {
+            let apply = registered.apply;
+            apply(self.world, input)
+        } else {
+            Ok(self.world.resource_mut::<R>().apply_driver_input(input))
+        }
+    }
+}
+
+impl App {
+    /// Configures one first-party, resource-typed operation that coordinates runtime resources.
+    ///
+    /// Registration occurs before configuration is frozen. Runtime callers can only select this
+    /// configured operation or a resource-local trait method; they cannot supply a World callback.
+    /// The operation returns owned input on rejection so move-only Host responsibilities survive.
+    #[doc(hidden)]
+    pub fn __register_driver_port<R: __RuntimeDriverPort>(
+        &mut self,
+        apply: fn(&mut World, R::Input) -> Result<R::Output, (RuntimeWorldAccessError, R::Input)>,
+    ) -> Result<&mut Self, crate::PluginError> {
+        self.ensure_configuration_mutation_allowed()?;
+        if self
+            .owner
+            .world
+            .contains_resource::<RegisteredDriverPort<R>>()
+        {
+            return Err(crate::PluginError::DuplicateDriverPort {
+                type_name: type_name::<R>(),
+            });
+        }
+        self.owner
+            .world
+            .insert_resource(RegisteredDriverPort::<R> { apply });
+        Ok(self)
     }
 }
 
@@ -1070,13 +1033,6 @@ impl RuntimeObligationLedger {
         Ok(())
     }
 
-    pub(crate) fn append(&mut self, mut other: Self) -> Result<(), RuntimeObligationLedgerError> {
-        self.preflight_append(&other)?;
-        self.ids.append(&mut other.ids);
-        self.entries.append(&mut other.entries);
-        Ok(())
-    }
-
     fn preflight_append(&self, other: &Self) -> Result<(), RuntimeObligationLedgerError> {
         if let Some(id) = self.ids.intersection(&other.ids).next().copied() {
             return Err(RuntimeObligationLedgerError::Duplicate { id });
@@ -1100,11 +1056,6 @@ impl RuntimeObligationLedger {
             complete: false,
             terminal_failure: false,
         });
-    }
-
-    pub(crate) fn drive_close_once(&mut self, world: &mut World) -> bool {
-        let mut evidence = RuntimeCloseEvidence::default();
-        self.drive_close_once_with_evidence(world, &mut evidence)
     }
 
     fn drive_close_once_with_evidence(
@@ -1318,6 +1269,7 @@ pub fn drive_runtime_quarantine() -> RuntimeQuarantineStatus {
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
 pub enum RuntimeAdmissionReservationError {
     #[error("managed runtime fault-route capacity is exhausted")]
     CapacityExhausted,
@@ -1327,6 +1279,8 @@ pub enum RuntimeAdmissionReservationError {
 ///
 /// Acquire this value before transferring a sealed App or close obligations. Once admission starts,
 /// every failure retains the route together with the runtime owner until retirement completes.
+/// This is a first-party Host bridge; ordinary callers use [`RuntimeInstance::start`].
+#[doc(hidden)]
 #[must_use = "a runtime admission reservation must be admitted or released"]
 pub struct RuntimeAdmissionReservation {
     route: Option<FaultRouteReservation>,
@@ -1365,11 +1319,8 @@ impl RuntimeAdmissionReservation {
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
 pub enum RuntimeAdmissionError {
-    #[error("a managed runtime requires an unstarted app")]
-    AppStarted,
-    #[error("a managed runtime cannot admit an app with a raw runner")]
-    RawRunnerInstalled,
     #[error("a managed runtime requires a sealed ready app, got {state:?}")]
     AppNotReady { state: PluginLifecycleState },
     #[error("runtime generations are exhausted")]
@@ -1378,6 +1329,7 @@ pub enum RuntimeAdmissionError {
     Obligation(#[from] RuntimeObligationLedgerError),
 }
 
+#[doc(hidden)]
 pub struct RuntimeAdmissionFailure {
     error: RuntimeAdmissionError,
     owner: Option<RuntimeOwner>,
@@ -1444,6 +1396,7 @@ impl Drop for RuntimeAdmissionFailure {
     }
 }
 
+#[doc(hidden)]
 pub struct RuntimeAdmissionRetirement {
     error: RuntimeAdmissionError,
     owner: RuntimeOwner,
@@ -1501,6 +1454,8 @@ impl RuntimeAdmissionRetirement {
     }
 }
 
+/// Unpublished execution owner used by first-party Hosts during content admission.
+#[doc(hidden)]
 pub struct RuntimeCandidate {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
@@ -1511,7 +1466,7 @@ impl Debug for RuntimeCandidate {
         formatter
             .debug_struct("RuntimeCandidate")
             .field("generation", &self.generation)
-            .field("started", &self.owner.app.started())
+            .field("started", &self.owner.started)
             .finish_non_exhaustive()
     }
 }
@@ -1524,53 +1479,33 @@ impl RuntimeCandidate {
         close_policy: RuntimeClosePolicy,
     ) -> Result<Self, RuntimeAdmissionFailure> {
         let app = sealed.app;
-        let reporter = app.runtime_fault_reporter.clone();
-        let route = reservation.activate(reporter.clone());
-        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy, Some(route));
+        let mut owner = app.owner;
+        owner.close_policy = close_policy;
+        let obligation_error = owner.prepend_host_obligations(obligations).err();
+        let reporter = owner.reporter().clone();
+        owner.fault_route = Some(reservation.activate(reporter));
+        let admission_error = if owner.plugin_lifecycle != PluginLifecycleState::Ready {
+            Some(RuntimeAdmissionError::AppNotReady {
+                state: owner.plugin_lifecycle,
+            })
+        } else {
+            obligation_error.map(Into::into)
+        };
+        if let Some(error) = admission_error {
+            return Err(RuntimeAdmissionFailure::new(error, owner));
+        }
         let route_handler = owner
             .fault_route
             .as_ref()
             .expect("an admitted runtime owner retains its activated fault route")
             .handler();
-        owner.app.bind_managed_runtime_error_handler(route_handler);
-
-        let admission_error = if owner.app.execution_started() {
-            Some(RuntimeAdmissionError::AppStarted)
-        } else if owner.app.has_raw_runner() {
-            Some(RuntimeAdmissionError::RawRunnerInstalled)
-        } else if owner.app.plugin_lifecycle_state() != PluginLifecycleState::Ready {
-            Some(RuntimeAdmissionError::AppNotReady {
-                state: owner.app.plugin_lifecycle_state(),
-            })
-        } else {
-            owner
-                .obligations
-                .preflight_append(&owner.app.runtime_obligations)
-                .err()
-                .map(Into::into)
-        };
-
-        if let Some(error) = admission_error {
-            let app_obligations = owner.app.take_runtime_obligations();
-            owner.obligations.append_for_retirement(app_obligations);
-            return Err(RuntimeAdmissionFailure::new(error, owner));
-        }
-
+        owner.bind_managed_runtime_error_handler(route_handler);
         let generation = match allocate_generation() {
             Ok(generation) => generation,
-            Err(error) => {
-                let app_obligations = owner.app.take_runtime_obligations();
-                owner.obligations.append_for_retirement(app_obligations);
-                return Err(RuntimeAdmissionFailure::new(error, owner));
-            }
+            Err(error) => return Err(RuntimeAdmissionFailure::new(error, owner)),
         };
-        let app_obligations = owner.app.take_runtime_obligations();
-        owner
-            .obligations
-            .append(app_obligations)
-            .expect("runtime obligation conflicts were preflighted");
-        owner.app.managed_runtime_generation = Some(generation);
-        owner.app.world.insert_resource(generation);
+        owner.managed_runtime_generation = Some(generation);
+        owner.world.insert_resource(generation);
 
         Ok(Self { owner, generation })
     }
@@ -1582,7 +1517,7 @@ impl RuntimeCandidate {
 
     #[must_use]
     pub fn world(&self) -> &World {
-        self.owner.app.world()
+        &self.owner.world
     }
 
     #[must_use]
@@ -1631,9 +1566,8 @@ impl RuntimeCandidate {
             ));
         }
         let fault_route = self.owner.fault_route_token();
-        let startup = with_runtime_system_fault_capture(fault_route, || {
-            self.owner.app.complete_startup_once()
-        });
+        let startup =
+            with_runtime_system_fault_capture(fault_route, || self.owner.complete_startup_once());
         let fault = match startup {
             Ok(Ok(())) => None,
             Ok(Err(error)) => Some(RuntimeFault::app(error)),
@@ -1642,12 +1576,11 @@ impl RuntimeCandidate {
         .or_else(|| reporter.fault())
         .or_else(|| {
             self.owner
-                .app
                 .prepare_managed_runtime()
                 .err()
                 .map(RuntimeFault::app)
         })
-        .or_else(|| self.owner.app.validate_managed_runtime_authority().err())
+        .or_else(|| self.owner.validate_managed_runtime_authority().err())
         .or_else(|| self.owner.validate_fault_bridge_epoch(bridge_epoch).err());
 
         if let Some(fault) = fault {
@@ -1691,36 +1624,26 @@ impl RuntimePreparationRetirement {
     }
 
     pub(crate) fn from_app(app: App, close_policy: RuntimeClosePolicy) -> Self {
-        Self::from_app_with_obligations(app, RuntimeObligationLedger::new(), close_policy)
-    }
-
-    pub(crate) fn from_app_with_obligations(
-        mut app: App,
-        mut obligations: RuntimeObligationLedger,
-        close_policy: RuntimeClosePolicy,
-    ) -> Self {
-        obligations.append_for_retirement(app.take_runtime_obligations());
-        let reporter = app.runtime_fault_reporter.clone();
-        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy, None);
+        let mut owner = app.owner;
+        owner.close_policy = close_policy;
         owner.begin_close();
         Self { owner: Some(owner) }
     }
 
     pub(crate) fn from_reserved_app(
-        mut app: App,
+        app: App,
         mut reservation: RuntimeAdmissionReservation,
         close_policy: RuntimeClosePolicy,
     ) -> Self {
-        let obligations = app.take_runtime_obligations();
-        let reporter = app.runtime_fault_reporter.clone();
-        let route = reservation.take_route().activate(reporter.clone());
-        let mut owner = RuntimeOwner::new(app, obligations, reporter, close_policy, Some(route));
+        let mut owner = app.owner;
+        owner.close_policy = close_policy;
+        owner.fault_route = Some(reservation.take_route().activate(owner.reporter().clone()));
         let route_handler = owner
             .fault_route
             .as_ref()
             .expect("a reserved preparation owner retains its activated fault route")
             .handler();
-        owner.app.bind_managed_runtime_error_handler(route_handler);
+        owner.bind_managed_runtime_error_handler(route_handler);
         owner.begin_close();
         Self { owner: Some(owner) }
     }
@@ -1751,6 +1674,7 @@ impl RuntimePreparationRetirement {
     }
 }
 
+#[doc(hidden)]
 pub struct ReadyRuntimeCandidate {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
@@ -1760,6 +1684,7 @@ pub struct ReadyRuntimeCandidate {
 ///
 /// The contained runtime cannot be replaced through this API. A product Host reserves the slot,
 /// publishes one ready candidate into it, then drives or retires that same owner.
+#[doc(hidden)]
 #[must_use = "runtime publication slots retain the published runtime owner"]
 pub struct RuntimePublicationSlot {
     state: RuntimePublicationSlotState,
@@ -1836,6 +1761,7 @@ impl RuntimePublicationSlot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[doc(hidden)]
 pub enum RuntimePublicationError {
     DestinationOccupied,
     CandidateFault(RuntimeFault),
@@ -1843,6 +1769,7 @@ pub enum RuntimePublicationError {
 }
 
 /// Retryable owner retained when atomic publication rejects a ready candidate.
+#[doc(hidden)]
 #[must_use = "failed runtime publication retains close authority until cleanup completes"]
 pub struct RuntimePublicationFailure {
     error: RuntimePublicationError,
@@ -1920,7 +1847,6 @@ impl ReadyRuntimeCandidate {
     pub fn promote(self) -> RuntimeInstance {
         let fault = self
             .owner
-            .app
             .validate_managed_runtime_authority()
             .err()
             .or_else(|| self.owner.reporter().fault())
@@ -1947,7 +1873,7 @@ impl ReadyRuntimeCandidate {
         }
 
         let Self { owner, generation } = self;
-        if let Err(error) = owner.app.validate_managed_runtime_authority() {
+        if let Err(error) = owner.validate_managed_runtime_authority() {
             let fault = owner.reporter().record_canonical(error);
             return Err(RuntimePublicationFailure::faulted(owner, generation, fault));
         }
@@ -1973,6 +1899,7 @@ impl ReadyRuntimeCandidate {
     }
 }
 
+#[doc(hidden)]
 pub struct RuntimeCandidateFailure {
     retirement: Box<RuntimeRetirement>,
 }
@@ -2060,6 +1987,19 @@ impl Debug for RuntimeRetirement {
             .finish_non_exhaustive()
     }
 }
+
+impl Display for RuntimeRetirement {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "runtime physical close is {:?}; causes={:?}",
+            self.retirement_state(),
+            self.close_evidence().causes(),
+        )
+    }
+}
+
+impl std::error::Error for RuntimeRetirement {}
 
 impl RuntimeRetirement {
     fn new(owner: RuntimeOwner, generation: RuntimeGeneration) -> Self {
@@ -2203,6 +2143,82 @@ impl RuntimeDriveError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum RuntimeStartError {
+    #[error("runtime capacity reservation failed: {0}")]
+    Reservation(#[source] RuntimeAdmissionReservationError),
+    #[error("runtime configuration failed: {0}")]
+    Preparation(#[source] crate::PluginError),
+    #[error("runtime admission failed: {0}")]
+    Admission(#[source] RuntimeAdmissionError),
+    #[error("runtime startup failed: {0:?}")]
+    Startup(RuntimeFault),
+}
+
+/// A failed ordinary launch retains the same runtime owner until physical close completes.
+#[must_use = "failed runtime startup retains retryable close ownership"]
+pub struct RuntimeStartFailure {
+    error: Box<RuntimeStartError>,
+    retirement: Box<RuntimePreparationRetirement>,
+}
+
+impl Debug for RuntimeStartFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeStartFailure")
+            .field("error", &self.error)
+            .field("retirement", &self.retirement_state())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Display for RuntimeStartFailure {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.error, formatter)
+    }
+}
+
+impl std::error::Error for RuntimeStartFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.error.as_ref())
+    }
+}
+
+impl RuntimeStartFailure {
+    fn new(error: RuntimeStartError, retirement: RuntimePreparationRetirement) -> Self {
+        Self {
+            error: Box::new(error),
+            retirement: Box::new(retirement),
+        }
+    }
+
+    fn from_owner(error: RuntimeStartError, mut owner: RuntimeOwner) -> Self {
+        owner.begin_close();
+        Self::new(error, RuntimePreparationRetirement { owner: Some(owner) })
+    }
+
+    #[must_use]
+    pub fn error(&self) -> &RuntimeStartError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn retirement_state(&self) -> RuntimeCandidateRetirementState {
+        self.retirement.retirement_state()
+    }
+
+    #[must_use]
+    pub fn close_evidence(&self) -> &RuntimeCloseEvidence {
+        self.retirement
+            .close_evidence()
+            .expect("ordinary startup failures always retain their runtime owner")
+    }
+
+    pub fn drive_retirement(&mut self) -> RuntimeCandidateRetirementState {
+        self.retirement.drive_retirement()
+    }
+}
+
 pub struct RuntimeInstance {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
@@ -2226,6 +2242,86 @@ impl Debug for RuntimeInstance {
 }
 
 impl RuntimeInstance {
+    /// Starts a configured application using the engine's managed execution lifecycle.
+    ///
+    /// Failure blocks for one finite physical-close attempt before returning its owner. If close
+    /// remains incomplete, the caller retains the failure and explicitly drives retirement again.
+    pub fn start(app: App) -> Result<Self, RuntimeStartFailure> {
+        Self::start_with_options(
+            app,
+            RuntimeObligationLedger::new(),
+            RuntimeClosePolicy::default(),
+        )
+    }
+
+    /// Starts an embedded runtime with Host-owned close obligations and a finite close policy.
+    ///
+    /// A failed launch blocks for one close attempt within that policy. Responsive UI hosts should
+    /// use staged admission and nonblocking retirement instead.
+    pub fn start_with_options(
+        app: App,
+        obligations: RuntimeObligationLedger,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<Self, RuntimeStartFailure> {
+        Self::start_inner(app, obligations, close_policy).map_err(|mut failure| {
+            failure
+                .retirement
+                .owner
+                .as_mut()
+                .expect("ordinary startup failure retains its runtime owner")
+                .finish_close_attempt();
+            failure
+        })
+    }
+
+    fn start_inner(
+        mut app: App,
+        obligations: RuntimeObligationLedger,
+        close_policy: RuntimeClosePolicy,
+    ) -> Result<Self, RuntimeStartFailure> {
+        app.owner.close_policy = close_policy;
+        if let Err(error) = app.owner.prepend_host_obligations(obligations) {
+            return Err(RuntimeStartFailure::from_owner(
+                RuntimeStartError::Admission(error.into()),
+                app.owner,
+            ));
+        }
+        let reservation = match RuntimeAdmissionReservation::try_acquire() {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                return Err(RuntimeStartFailure::new(
+                    RuntimeStartError::Reservation(error),
+                    RuntimePreparationRetirement::from_app(app, close_policy),
+                ));
+            }
+        };
+        if let Err(error) = app.seal_internal() {
+            return Err(RuntimeStartFailure::new(
+                RuntimeStartError::Preparation(error),
+                RuntimePreparationRetirement::from_reserved_app(app, reservation, close_policy),
+            ));
+        }
+        let candidate = match reservation.admit(
+            SealedApp { app },
+            RuntimeObligationLedger::new(),
+            close_policy,
+        ) {
+            Ok(candidate) => candidate,
+            Err(mut failure) => {
+                let error = RuntimeStartError::Admission(failure.error());
+                return Err(RuntimeStartFailure::from_owner(error, failure.take_owner()));
+            }
+        };
+        match candidate.complete_startup() {
+            Ok(ready) => Ok(ready.promote()),
+            Err(failure) => {
+                let error = RuntimeStartError::Startup(failure.fault().clone());
+                let RuntimeRetirement { owner, .. } = *failure.retirement;
+                Err(RuntimeStartFailure::from_owner(error, owner))
+            }
+        }
+    }
+
     fn from_promotion(
         owner: RuntimeOwner,
         generation: RuntimeGeneration,
@@ -2285,14 +2381,36 @@ impl RuntimeInstance {
         RuntimeRetirement::new(self.owner, self.generation)
     }
 
+    /// Blocks for one physical-close attempt within this runtime's existing close policy.
+    ///
+    /// This consumes a finite headless or one-shot runtime. An unfinished attempt returns the same
+    /// retirement owner for explicit retry; it never loops through automatic retries. UI hosts
+    /// should use [`Self::request_control`] and [`Self::drive`] to remain responsive.
+    /// A terminal plugin-shutdown failure also returns that owner with `Retired` state and retained
+    /// failure evidence. Historical timeouts do not turn a subsequently completed close into failure.
+    pub fn finish(self) -> Result<RuntimeCloseEvidence, RuntimeRetirement> {
+        let mut retirement = self.begin_retirement();
+        retirement.owner.finish_close_attempt();
+        match retirement.retirement_state() {
+            RuntimeCandidateRetirementState::Retired
+                if !retirement.close_evidence().plugin_shutdown_failed() =>
+            {
+                Ok(retirement.close_evidence().clone())
+            }
+            RuntimeCandidateRetirementState::Retired
+            | RuntimeCandidateRetirementState::Retiring
+            | RuntimeCandidateRetirementState::RetirementIncomplete => Err(retirement),
+        }
+    }
+
     #[must_use]
     pub fn world(&self) -> &World {
-        self.owner.app.world()
+        &self.owner.world
     }
 
     #[cfg(test)]
     pub(crate) fn world_mut_for_tests(&mut self) -> &mut World {
-        &mut self.owner.app.world
+        &mut self.owner.world
     }
 
     /// Grants a platform or Host one short-lived managed runtime scope.
@@ -2312,6 +2430,7 @@ impl RuntimeInstance {
     /// Returns [`RuntimeScopeError::Unavailable`] while stepping or after the runtime is stopped.
     /// Returns [`RuntimeScopeError::Faulted`] when healthy-scope authority was replaced or the
     /// operation reports a new canonical runtime fault.
+    #[doc(hidden)]
     pub fn with_driver_scope<R>(
         &mut self,
         operation: impl FnOnce(&mut RuntimeDriverScope<'_>) -> R,
@@ -2554,12 +2673,7 @@ impl RuntimeInstance {
     }
 
     fn set_frame_mode(&mut self, mode: RuntimeFrameMode) -> Result<(), RuntimeDriveError> {
-        let Some(mut settings) = self
-            .owner
-            .app
-            .world
-            .get_resource_mut::<RuntimeTimeSettings>()
-        else {
+        let Some(mut settings) = self.owner.world.get_resource_mut::<RuntimeTimeSettings>() else {
             return Err(self.enter_fault(RuntimeFault::engine(
                 RuntimeFaultKind::AppFrame,
                 "nara.app.missing-runtime-time-settings",
@@ -2580,8 +2694,8 @@ impl RuntimeInstance {
         };
         let fault_route = self.owner.fault_route_token();
         let result = with_runtime_system_fault_capture(fault_route, || match mode {
-            RuntimeFrameMode::Running => self.owner.app.run_managed_frame(real_delta),
-            RuntimeFrameMode::Paused => self.owner.app.run_paused_frame(real_delta),
+            RuntimeFrameMode::Running => self.owner.run_managed_frame(real_delta),
+            RuntimeFrameMode::Paused => self.owner.run_paused_frame(real_delta),
         });
         match result {
             Ok(result) => self.finish_app_drive(result, bridge_epoch),
@@ -2599,7 +2713,7 @@ impl RuntimeInstance {
         };
         let fault_route = self.owner.fault_route_token();
         let result = with_runtime_system_fault_capture(fault_route, || {
-            self.owner.app.run_exact_fixed_tick(real_delta)
+            self.owner.run_exact_fixed_tick(real_delta)
         });
         match result {
             Ok(result) => self.finish_app_drive(result, bridge_epoch),
@@ -2668,32 +2782,6 @@ impl RuntimeInstance {
     }
 }
 
-struct RuntimeOwnedValue<T>(Option<T>);
-
-impl<T> RuntimeOwnedValue<T> {
-    fn new(value: T) -> Self {
-        Self(Some(value))
-    }
-}
-
-impl<T> Deref for RuntimeOwnedValue<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        self.0
-            .as_ref()
-            .expect("runtime-owned value remains present while the owner is usable")
-    }
-}
-
-impl<T> DerefMut for RuntimeOwnedValue<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0
-            .as_mut()
-            .expect("runtime-owned value remains present while the owner is usable")
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PluginShutdownState {
     Pending,
@@ -2716,15 +2804,26 @@ enum OwnerCloseState {
     Complete,
 }
 
-struct RuntimeOwner {
+pub(super) struct RuntimeOwner {
     state: Option<RuntimeOwnerState>,
     quarantine_accounted: bool,
 }
 
-struct RuntimeOwnerState {
-    app: RuntimeOwnedValue<App>,
-    obligations: RuntimeOwnedValue<RuntimeObligationLedger>,
-    reporter: RuntimeFaultReporter,
+pub(super) struct RuntimeOwnerState {
+    pub(super) world: World,
+    pub(super) schedules: Schedules,
+    pub(super) plugins: Vec<InstalledPlugin>,
+    pub(super) runtime_fault_reporter: RuntimeFaultReporter,
+    pub(super) managed_runtime_generation: Option<RuntimeGeneration>,
+    pub(super) runtime_error_handler: Option<ErrorHandler>,
+    pub(super) runtime_fault_bridge: Option<RuntimeFaultBridgeIdentity>,
+    pub(super) runtime_authority_validator: Option<InstalledRuntimeAuthorityValidator>,
+    pub(super) pending_observers: Vec<Observer>,
+    pub(super) plugin_lifecycle: PluginLifecycleState,
+    pub(super) plugin_failure_report: Option<PluginFailureReport>,
+    pub(super) active_plugin_hook: Option<(PluginId, PluginHook)>,
+    pub(super) started: bool,
+    pub(super) obligations: RuntimeObligationLedger,
     fault_route: Option<FaultRouteLease>,
     close_policy: RuntimeClosePolicy,
     close_evidence: RuntimeCloseEvidence,
@@ -2732,23 +2831,9 @@ struct RuntimeOwnerState {
 }
 
 impl RuntimeOwner {
-    fn new(
-        app: App,
-        obligations: RuntimeObligationLedger,
-        reporter: RuntimeFaultReporter,
-        close_policy: RuntimeClosePolicy,
-        fault_route: Option<FaultRouteLease>,
-    ) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            state: Some(RuntimeOwnerState {
-                app: RuntimeOwnedValue::new(app),
-                obligations: RuntimeOwnedValue::new(obligations),
-                reporter,
-                fault_route,
-                close_policy,
-                close_evidence: RuntimeCloseEvidence::default(),
-                close_state: OwnerCloseState::Open,
-            }),
+            state: Some(RuntimeOwnerState::new()),
             quarantine_accounted: false,
         }
     }
@@ -2786,9 +2871,86 @@ impl DerefMut for RuntimeOwner {
 }
 
 impl RuntimeOwnerState {
+    fn prepend_host_obligations(
+        &mut self,
+        mut obligations: RuntimeObligationLedger,
+    ) -> Result<(), RuntimeObligationLedgerError> {
+        let admission = obligations.preflight_append(&self.obligations);
+        obligations.append_for_retirement(std::mem::take(&mut self.obligations));
+        self.obligations = obligations;
+        admission
+    }
+
+    #[cfg(test)]
+    pub(super) fn admit_configuration_for_tests(&mut self) {
+        if self.managed_runtime_generation.is_some() {
+            return;
+        }
+        let mut reservation = RuntimeAdmissionReservation::try_acquire().unwrap();
+        self.fault_route = Some(reservation.take_route().activate(self.reporter().clone()));
+        let handler = self.fault_route.as_ref().unwrap().handler();
+        self.bind_managed_runtime_error_handler(handler);
+        let generation = allocate_generation().unwrap();
+        self.managed_runtime_generation = Some(generation);
+        self.world.insert_resource(generation);
+    }
+
+    fn new() -> Self {
+        let mut world = World::new();
+        world.insert_resource(RealTime::default());
+        world.insert_resource(VirtualTime::default());
+        world.insert_resource(RuntimeTimeSettings::default());
+        world.insert_resource(FixedTime::default());
+        world.insert_resource(RenderTime::default());
+        world.insert_resource(RuntimeFrameStatus::default());
+        world.insert_resource(AppExitRequests::default());
+        let runtime_fault_reporter = RuntimeFaultReporter::new();
+        initialize_runtime_fault_bridge(&mut world, runtime_fault_reporter.clone());
+
+        let mut schedules = Schedules::new();
+        for stage in StartupStage::ALL {
+            schedules.insert(Schedule::new(stage));
+        }
+        for stage in CoreStage::ALL {
+            schedules.insert(Schedule::new(stage));
+        }
+        schedules
+            .get_mut(CoreStage::FixedUpdate)
+            .expect("the fixed-update schedule is created above")
+            .configure_sets(
+                (
+                    FixedUpdateSet::Prepare,
+                    FixedUpdateSet::Simulate,
+                    FixedUpdateSet::Finalize,
+                )
+                    .chain(),
+            );
+
+        Self {
+            world,
+            schedules,
+            plugins: Vec::new(),
+            obligations: RuntimeObligationLedger::new(),
+            runtime_fault_reporter,
+            fault_route: None,
+            close_policy: RuntimeClosePolicy::default(),
+            close_evidence: RuntimeCloseEvidence::default(),
+            close_state: OwnerCloseState::Open,
+            managed_runtime_generation: None,
+            runtime_error_handler: None,
+            runtime_fault_bridge: None,
+            runtime_authority_validator: None,
+            pending_observers: Vec::new(),
+            plugin_lifecycle: PluginLifecycleState::Configuring,
+            plugin_failure_report: None,
+            active_plugin_hook: None,
+            started: false,
+        }
+    }
+
     fn begin_close(&mut self) {
         if matches!(self.close_state, OwnerCloseState::Open) {
-            self.reporter.mark_closing();
+            self.runtime_fault_reporter.mark_closing();
             self.close_state = OwnerCloseState::Closing(OwnerCloseAttempt {
                 deadline: deadline_after(self.close_policy.timeout()),
                 plugin_shutdown: PluginShutdownState::Pending,
@@ -2800,13 +2962,33 @@ impl RuntimeOwnerState {
         match self.close_state {
             OwnerCloseState::Open => self.begin_close(),
             OwnerCloseState::Incomplete { plugin_shutdown } => {
-                self.reporter.mark_closing();
+                self.runtime_fault_reporter.mark_closing();
                 self.close_state = OwnerCloseState::Closing(OwnerCloseAttempt {
                     deadline: deadline_after(self.close_policy.timeout()),
                     plugin_shutdown,
                 });
             }
             OwnerCloseState::Closing(_) | OwnerCloseState::Complete => {}
+        }
+    }
+
+    fn finish_close_attempt(&mut self) {
+        self.retry_close();
+        loop {
+            self.drive_close();
+            let OwnerCloseState::Closing(attempt) = self.close_state else {
+                return;
+            };
+            let remaining = attempt.deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                self.close_evidence
+                    .record(RuntimeCloseCause::DeadlineExceeded);
+                self.close_state = OwnerCloseState::Incomplete {
+                    plugin_shutdown: attempt.plugin_shutdown,
+                };
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(1).min(remaining));
         }
     }
 
@@ -2819,18 +3001,18 @@ impl RuntimeOwnerState {
             match self.begin_fault_bridge_epoch() {
                 Ok(epoch) => Some(epoch),
                 Err(fault) => {
-                    self.reporter.record_canonical(fault);
+                    self.runtime_fault_reporter.record_canonical(fault);
                     None
                 }
             }
         } else {
             None
         };
-        let reporter = self.reporter.clone();
+        let reporter = self.runtime_fault_reporter.clone();
         let fault_route = self.fault_route_token();
         let close_pass = with_runtime_system_fault_capture(fault_route, || {
             if attempt.plugin_shutdown == PluginShutdownState::Pending {
-                attempt.plugin_shutdown = match self.app.shutdown_plugins() {
+                attempt.plugin_shutdown = match self.shutdown_plugins() {
                     Ok(()) => PluginShutdownState::Complete,
                     Err(PluginShutdownError::Failure(_)) => {
                         self.close_evidence
@@ -2843,7 +3025,7 @@ impl RuntimeOwnerState {
 
             let participant_failed = self
                 .obligations
-                .drive_close_once_with_evidence(&mut self.app.world, &mut self.close_evidence);
+                .drive_close_once_with_evidence(&mut self.world, &mut self.close_evidence);
             (attempt, participant_failed)
         });
         let (attempt, participant_failed) = match close_pass {
@@ -2857,12 +3039,12 @@ impl RuntimeOwnerState {
         if let Some(epoch) = bridge_epoch
             && let Err(fault) = self.validate_fault_bridge_epoch(epoch)
         {
-            self.reporter.record_canonical(fault);
+            self.runtime_fault_reporter.record_canonical(fault);
         }
 
         let all_complete = self.obligations.is_close_complete();
         if all_complete && attempt.plugin_shutdown == PluginShutdownState::Complete {
-            self.reporter.mark_closed();
+            self.runtime_fault_reporter.mark_closed();
             drop(self.fault_route.take());
             self.close_state = OwnerCloseState::Complete;
         } else if participant_failed || Instant::now() >= attempt.deadline {
@@ -2879,10 +3061,12 @@ impl RuntimeOwnerState {
     }
 
     fn reporter(&self) -> &RuntimeFaultReporter {
-        &self.reporter
+        &self.runtime_fault_reporter
     }
 
-    fn begin_fault_bridge_epoch(&mut self) -> Result<RuntimeFaultBridgeEpoch, RuntimeFault> {
+    pub(super) fn begin_fault_bridge_epoch(
+        &mut self,
+    ) -> Result<RuntimeFaultBridgeEpoch, RuntimeFault> {
         self.begin_fault_bridge_epoch_with_maintenance(|world| {
             world.increment_change_tick();
             world.check_change_ticks();
@@ -2894,15 +3078,15 @@ impl RuntimeOwnerState {
         maintenance: impl FnOnce(&mut World),
     ) -> Result<RuntimeFaultBridgeEpoch, RuntimeFault> {
         self.validate_fault_bridge_authority()?;
-        let revision = self.app.world.resource::<RuntimeFaultBridgeRevision>().0;
-        let reporter = self.reporter.clone();
+        let revision = self.world.resource::<RuntimeFaultBridgeRevision>().0;
+        let reporter = self.runtime_fault_reporter.clone();
         let fault_before = reporter.fault();
         let fault_route = self.fault_route_token();
         with_runtime_system_fault_capture(fault_route, || {
-            run_runtime_fault_bridge_maintenance(&mut self.app.world, maintenance)
+            run_runtime_fault_bridge_maintenance(&mut self.world, maintenance)
         })??;
         self.validate_fault_bridge_authority()?;
-        if self.app.world.resource::<RuntimeFaultBridgeRevision>().0 != revision {
+        if self.world.resource::<RuntimeFaultBridgeRevision>().0 != revision {
             return Err(runtime_fault_bridge_authority_fault());
         }
         if fault_before.is_none()
@@ -2910,18 +3094,18 @@ impl RuntimeOwnerState {
         {
             return Err(fault);
         }
-        let epoch = RuntimeFaultBridgeEpoch::capture(&self.app.world)
+        let epoch = RuntimeFaultBridgeEpoch::capture(&self.world)
             .ok_or_else(runtime_fault_bridge_authority_fault)?;
-        self.app.world.increment_change_tick();
+        self.world.increment_change_tick();
         Ok(epoch)
     }
 
-    fn validate_fault_bridge_epoch(
+    pub(super) fn validate_fault_bridge_epoch(
         &self,
         expected: RuntimeFaultBridgeEpoch,
     ) -> Result<(), RuntimeFault> {
         self.validate_fault_bridge_authority()?;
-        if expected.is_unchanged(&self.app.world) {
+        if expected.is_unchanged(&self.world) {
             Ok(())
         } else {
             Err(runtime_fault_bridge_authority_fault())
@@ -2932,14 +3116,14 @@ impl RuntimeOwnerState {
         let Some(fault_route) = &self.fault_route else {
             return Err(runtime_fault_bridge_authority_fault());
         };
-        if !fault_route.validate(&self.reporter) {
+        if !fault_route.validate(&self.runtime_fault_reporter) {
             return Err(runtime_fault_bridge_authority_fault());
         }
         validate_runtime_fault_bridge_authority(
-            &self.app.world,
-            &self.reporter,
+            &self.world,
+            &self.runtime_fault_reporter,
             Some(fault_route.handler()),
-            self.app.runtime_fault_bridge,
+            self.runtime_fault_bridge,
         )
     }
 
@@ -2952,11 +3136,10 @@ impl RuntimeOwnerState {
         authority_policy: DriverScopeAuthorityPolicy,
         operation: impl FnOnce(&mut World) -> R,
     ) -> Result<R, RuntimeFault> {
-        let reporter = self.reporter.clone();
+        let reporter = self.runtime_fault_reporter.clone();
         let fault_before = reporter.fault();
         if authority_policy == DriverScopeAuthorityPolicy::Full {
-            self.app
-                .validate_managed_runtime_authority()
+            self.validate_managed_runtime_authority()
                 .map_err(|fault| reporter.record_canonical(fault))?;
         }
         let bridge_epoch = (authority_policy == DriverScopeAuthorityPolicy::Full)
@@ -2966,8 +3149,7 @@ impl RuntimeOwnerState {
 
         let fault_route = self.fault_route_token();
         let result =
-            match with_runtime_system_fault_capture(fault_route, || operation(&mut self.app.world))
-            {
+            match with_runtime_system_fault_capture(fault_route, || operation(&mut self.world)) {
                 Ok(result) => result,
                 Err(fault) => return Err(reporter.record_canonical(fault)),
             };
@@ -2978,7 +3160,7 @@ impl RuntimeOwnerState {
             return Err(reporter.record_canonical(fault));
         }
         if authority_policy == DriverScopeAuthorityPolicy::Full
-            && let Err(fault) = self.app.validate_managed_runtime_authority()
+            && let Err(fault) = self.validate_managed_runtime_authority()
         {
             return Err(reporter.record_canonical(fault));
         }
@@ -3025,8 +3207,7 @@ impl Drop for RuntimeOwner {
         }
 
         let mut guard = RuntimeOwnerRetentionGuard::new(state);
-        guard.begin_close();
-        guard.drive_close();
+        guard.finish_close_attempt();
         if matches!(guard.close_state, OwnerCloseState::Complete) {
             drop(guard.take_state());
         }
@@ -3282,4 +3463,332 @@ fn with_runtime_system_fault_capture<R>(
 ) -> Result<R, RuntimeFault> {
     let _execution = fault_route.map(FaultRouteToken::enter).transpose()?;
     Ok(operation())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_ecs::{Event, On};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::{atomic::AtomicBool, mpsc};
+
+    struct TerminalShutdownFailure;
+
+    impl crate::Plugin for TerminalShutdownFailure {
+        fn declaration() -> &'static crate::PluginDeclaration {
+            static DECLARATION: crate::PluginDeclaration = crate::PluginDeclaration::new(
+                crate::PluginId::new("nara.test.terminal-shutdown-failure"),
+                crate::PluginCategory::Runtime,
+            );
+            &DECLARATION
+        }
+
+        fn build(&self, _app: &mut App) -> Result<(), crate::PluginError> {
+            Ok(())
+        }
+
+        fn shutdown(
+            &self,
+            _context: &mut crate::PluginShutdownContext<'_>,
+        ) -> Result<(), crate::PluginError> {
+            Err(crate::PluginError::SetupFailed {
+                plugin: Self::declaration().id,
+                message: "injected terminal shutdown failure".to_owned(),
+            })
+        }
+    }
+
+    #[test]
+    fn finish_reports_terminal_plugin_shutdown_failure_after_physical_close() {
+        let mut app = App::new();
+        app.add_plugin(TerminalShutdownFailure).unwrap();
+
+        let failure = RuntimeInstance::start(app).unwrap().finish().unwrap_err();
+
+        assert_eq!(
+            failure.retirement_state(),
+            RuntimeCandidateRetirementState::Retired
+        );
+        assert!(failure.close_evidence().plugin_shutdown_failed());
+    }
+
+    struct CountedHostClose {
+        begins: Arc<AtomicUsize>,
+        drops: Arc<AtomicUsize>,
+    }
+
+    impl RuntimeCloseParticipant for CountedHostClose {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.begins.fetch_add(1, Ordering::SeqCst);
+            Ok(RuntimeCloseProgress::Complete)
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            unreachable!("this participant completes at begin-close")
+        }
+    }
+
+    impl Drop for CountedHostClose {
+        fn drop(&mut self) {
+            self.drops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[derive(Event)]
+    struct ObserverInitializationProbe;
+
+    #[derive(Resource)]
+    struct UnconfiguredDriverPort;
+
+    impl __RuntimeDriverPort for UnconfiguredDriverPort {
+        type Input = Arc<AtomicBool>;
+        type Output = ();
+
+        fn apply_driver_input(&mut self, _input: Self::Input) {}
+    }
+
+    fn mark_configured_driver_call(
+        _world: &mut World,
+        called: Arc<AtomicBool>,
+    ) -> Result<(), (RuntimeWorldAccessError, Arc<AtomicBool>)> {
+        called.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    #[test]
+    fn missing_driver_resource_cannot_run_a_configured_world_operation() {
+        let mut app = App::new();
+        app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call)
+            .unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+
+        let result = runtime
+            .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
+            .unwrap();
+
+        assert_eq!(
+            result,
+            Err(RuntimeWorldAccessError::MissingResource {
+                type_name: type_name::<UnconfiguredDriverPort>(),
+            })
+        );
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn installed_driver_resource_does_not_select_an_unconfigured_world_operation() {
+        let mut app = App::new();
+        app.insert_resource(UnconfiguredDriverPort).unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+
+        runtime
+            .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
+            .unwrap()
+            .unwrap();
+
+        assert!(!called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn configured_driver_operation_is_unique_and_frozen_before_execution() {
+        let mut app = App::new();
+        app.insert_resource(UnconfiguredDriverPort).unwrap();
+        app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call)
+            .unwrap();
+        assert!(matches!(
+            app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call),
+            Err(crate::PluginError::DuplicateDriverPort { .. })
+        ));
+        app.seal_internal().unwrap();
+        assert!(matches!(
+            app.__register_driver_port::<UnconfiguredDriverPort>(mark_configured_driver_call),
+            Err(crate::PluginError::AppSealed)
+        ));
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let called = Arc::new(AtomicBool::new(false));
+
+        runtime
+            .with_driver_scope(|scope| scope.__apply_port::<UnconfiguredDriverPort>(called.clone()))
+            .unwrap()
+            .unwrap();
+
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn configured_driver_rejection_returns_the_original_owned_input() {
+        fn reject(
+            _world: &mut World,
+            input: Arc<AtomicBool>,
+        ) -> Result<(), (RuntimeWorldAccessError, Arc<AtomicBool>)> {
+            Err((
+                RuntimeWorldAccessError::MissingResource {
+                    type_name: "fixture",
+                },
+                input,
+            ))
+        }
+        let mut app = App::new();
+        app.insert_resource(UnconfiguredDriverPort).unwrap();
+        app.__register_driver_port::<UnconfiguredDriverPort>(reject)
+            .unwrap();
+        let mut runtime = RuntimeInstance::start(app).unwrap();
+        let input = Arc::new(AtomicBool::new(false));
+
+        let (_, returned) = runtime
+            .with_driver_scope(|scope| {
+                scope.__apply_owned_port::<UnconfiguredDriverPort>(input.clone())
+            })
+            .unwrap()
+            .unwrap_err();
+
+        assert!(Arc::ptr_eq(&input, &returned));
+    }
+
+    #[test]
+    fn admission_observer_initialization_unwind_retains_host_close_obligations() {
+        let begins = Arc::new(AtomicUsize::new(0));
+        let drops = Arc::new(AtomicUsize::new(0));
+        let mut obligations = RuntimeObligationLedger::new();
+        obligations
+            .register(
+                RuntimeCloseParticipantId::new("nara.test.observer-admission-host-close"),
+                CountedHostClose {
+                    begins: begins.clone(),
+                    drops: drops.clone(),
+                },
+            )
+            .unwrap();
+        let mut app = App::new();
+        app.world_mut().unwrap().add_observer(
+            |_: On<nara_ecs::lifecycle::Add, nara_ecs::observer::Observer>| {
+                panic!("injected pending observer initialization panic");
+            },
+        );
+        app.add_observer(|_: On<ObserverInitializationProbe>| {})
+            .unwrap();
+        let sealed = app.seal().unwrap();
+        let reservation = RuntimeAdmissionReservation::try_acquire().unwrap();
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            reservation.admit(sealed, obligations, RuntimeClosePolicy::default())
+        }));
+        let begins_before_retirement = begins.load(Ordering::SeqCst);
+        let drops_before_retirement = drops.load(Ordering::SeqCst);
+        let quarantine = drive_runtime_quarantine();
+
+        assert!(outcome.is_err());
+        assert_eq!(begins_before_retirement, 0);
+        assert_eq!(drops_before_retirement, 0);
+        assert_eq!(quarantine.current_thread_retained(), 0);
+        assert_eq!(begins.load(Ordering::SeqCst), 1);
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    struct WorkerClose {
+        release: Option<mpsc::Sender<()>>,
+        worker: Option<std::thread::JoinHandle<()>>,
+        joined: Arc<AtomicBool>,
+    }
+
+    impl RuntimeCloseParticipant for WorkerClose {
+        fn begin_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            self.release.take().unwrap().send(()).unwrap();
+            Ok(RuntimeCloseProgress::Pending)
+        }
+
+        fn poll_close(
+            &mut self,
+            _context: &mut RuntimeCloseContext<'_>,
+        ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
+            if self.worker.as_ref().unwrap().is_finished() {
+                self.worker.take().unwrap().join().unwrap();
+                self.joined.store(true, Ordering::SeqCst);
+                Ok(RuntimeCloseProgress::Complete)
+            } else {
+                Ok(RuntimeCloseProgress::Pending)
+            }
+        }
+    }
+
+    #[test]
+    fn normal_configuration_drop_joins_its_worker_before_returning() {
+        let (release, receiver) = mpsc::channel();
+        let joined = Arc::new(AtomicBool::new(false));
+        let worker = std::thread::spawn(move || {
+            receiver.recv().unwrap();
+            std::thread::sleep(Duration::from_millis(5));
+        });
+        let mut obligations = RuntimeObligationLedger::new();
+        obligations
+            .register(
+                RuntimeCloseParticipantId::new("nara.test.normal-drop-worker"),
+                WorkerClose {
+                    release: Some(release),
+                    worker: Some(worker),
+                    joined: joined.clone(),
+                },
+            )
+            .unwrap();
+        let app = App::new_with_runtime_obligations(obligations);
+
+        drop(app);
+
+        assert!(joined.load(Ordering::SeqCst));
+        assert_eq!(runtime_quarantine_status().current_thread_retained(), 0);
+    }
+
+    #[test]
+    fn managed_scope_maintenance_cannot_hide_restored_fault_bridge_mutation() {
+        fn ignored_handler(_: BevyError, _: nara_ecs::error::ErrorContext) {}
+
+        for mutation in 0..2 {
+            let mut runtime = RuntimeInstance::start(App::new()).unwrap();
+            let reporter = runtime.fault_reporter();
+            let failure = runtime
+                .owner
+                .capture_driver_scope(DriverScopeAuthorityPolicy::Full, |world| {
+                    run_runtime_fault_bridge_maintenance(world, |world| {
+                        world.increment_change_tick();
+                        match mutation {
+                            0 => {
+                                let mut reporter = world.resource_mut::<RuntimeFaultReporter>();
+                                let original = reporter.clone();
+                                *reporter = RuntimeFaultReporter::new();
+                                *reporter = original;
+                            }
+                            1 => {
+                                let mut handler = world.resource_mut::<FallbackErrorHandler>();
+                                let original = *handler;
+                                *handler = FallbackErrorHandler(ignored_handler);
+                                *handler = original;
+                            }
+                            _ => unreachable!(),
+                        }
+                    })
+                })
+                .unwrap_err();
+
+            assert_eq!(failure.kind(), RuntimeFaultKind::FaultReporterAuthority);
+            assert_eq!(
+                reporter.fault().unwrap().kind(),
+                RuntimeFaultKind::FaultReporterAuthority
+            );
+            assert_eq!(
+                runtime.drive(Duration::ZERO).unwrap_err().fault().kind(),
+                RuntimeFaultKind::FaultReporterAuthority
+            );
+        }
+    }
 }

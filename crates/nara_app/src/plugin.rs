@@ -57,8 +57,6 @@ macro_rules! stable_id {
 }
 
 stable_id!(PluginId);
-stable_id!(PluginCapability);
-stable_id!(PluginServiceId);
 stable_id!(PluginProductCapability);
 stable_id!(PluginSchemaProviderId);
 stable_id!(PluginShutdownObligationId);
@@ -83,12 +81,8 @@ pub enum PluginCategory {
 pub struct PluginDeclaration {
     pub id: PluginId,
     pub category: PluginCategory,
-    pub provides: &'static [PluginCapability],
     pub requires_plugins: &'static [PluginId],
-    pub requires_capabilities: &'static [PluginCapability],
     pub conflicts: &'static [PluginId],
-    pub provides_services: &'static [PluginServiceId],
-    pub requires_services: &'static [PluginServiceId],
     /// Product capabilities that must all be requested by a file-backed product Host.
     pub requires_product_capabilities: &'static [PluginProductCapability],
     /// Product capabilities of which at least one must be requested by a file-backed product Host.
@@ -107,12 +101,8 @@ impl PluginDeclaration {
         Self {
             id,
             category,
-            provides: &[],
             requires_plugins: &[],
-            requires_capabilities: &[],
             conflicts: &[],
-            provides_services: &[],
-            requires_services: &[],
             requires_product_capabilities: &[],
             requires_any_product_capabilities: &[],
             provides_schema: &[],
@@ -122,41 +112,14 @@ impl PluginDeclaration {
     }
 
     #[must_use]
-    pub const fn provides(mut self, capabilities: &'static [PluginCapability]) -> Self {
-        self.provides = capabilities;
-        self
-    }
-
-    #[must_use]
     pub const fn requires_plugins(mut self, plugins: &'static [PluginId]) -> Self {
         self.requires_plugins = plugins;
         self
     }
 
     #[must_use]
-    pub const fn requires_capabilities(
-        mut self,
-        capabilities: &'static [PluginCapability],
-    ) -> Self {
-        self.requires_capabilities = capabilities;
-        self
-    }
-
-    #[must_use]
     pub const fn conflicts(mut self, plugins: &'static [PluginId]) -> Self {
         self.conflicts = plugins;
-        self
-    }
-
-    #[must_use]
-    pub const fn provides_services(mut self, services: &'static [PluginServiceId]) -> Self {
-        self.provides_services = services;
-        self
-    }
-
-    #[must_use]
-    pub const fn requires_services(mut self, services: &'static [PluginServiceId]) -> Self {
-        self.requires_services = services;
         self
     }
 
@@ -232,14 +195,12 @@ impl Display for PluginHook {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginHookMutation {
     PluginMembership,
-    RunnerSelection,
 }
 
 impl Display for PluginHookMutation {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::PluginMembership => "plugin membership",
-            Self::RunnerSelection => "runner selection",
         })
     }
 }
@@ -372,6 +333,8 @@ pub enum PluginError {
     },
     #[error("App configuration is sealed")]
     AppSealed,
+    #[error("runtime driver operation for {type_name} was registered more than once")]
+    DuplicateDriverPort { type_name: &'static str },
     #[error("raw mutable access to engine-owned schedules is forbidden")]
     RawBuiltInScheduleMutationForbidden,
     #[error("schedule compatibility validation failed: {0}")]

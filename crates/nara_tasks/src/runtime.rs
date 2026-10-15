@@ -3448,13 +3448,18 @@ impl RuntimeCloseParticipant for TaskPoolsCloseParticipant {
         &mut self,
         context: &mut RuntimeCloseContext<'_>,
     ) -> Result<RuntimeCloseProgress, RuntimeCloseParticipantError> {
-        match self.close_owner.poll_close() {
+        let progress = self.close_owner.poll_close();
+        context
+            .insert_resource(self.close_owner.report())
+            .map_err(|_| {
+                RuntimeCloseParticipantError::terminal("nara.tasks.runtime-resource-access")
+            })?;
+        match progress {
             TaskPoolsCloseProgress::Pending => Ok(RuntimeCloseProgress::Pending),
             TaskPoolsCloseProgress::Incomplete => Err(RuntimeCloseParticipantError::new(
                 "nara.tasks.close-deadline",
             )),
             TaskPoolsCloseProgress::Complete => {
-                let report = self.close_owner.report();
                 let owns_world_facade =
                     self.instance_token.as_ref().is_some_and(|instance_token| {
                         context
@@ -3467,9 +3472,6 @@ impl RuntimeCloseParticipant for TaskPoolsCloseParticipant {
                         RuntimeCloseParticipantError::terminal("nara.tasks.runtime-resource-access")
                     })?;
                 }
-                context.insert_resource(report).map_err(|_| {
-                    RuntimeCloseParticipantError::terminal("nara.tasks.runtime-resource-access")
-                })?;
                 Ok(RuntimeCloseProgress::Complete)
             }
         }

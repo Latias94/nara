@@ -138,12 +138,7 @@ fn run_smoke_child(drop_backend_before_exit: bool) -> Result<(), Box<dyn Error>>
     ))?;
     app.add_systems(StartupStage::Scene, setup_scene)?
         .add_systems(CoreStage::Last, verify_resize_then_exit)?;
-    let candidate = nara::app::RuntimeAdmissionReservation::try_acquire()?.admit(
-        app.seal()?,
-        nara::app::RuntimeObligationLedger::new(),
-        nara::app::RuntimeClosePolicy::default(),
-    )?;
-    let mut runtime = candidate.complete_startup()?.promote();
+    let mut runtime = nara::app::RuntimeInstance::start(app)?;
 
     assert!(runtime.world().contains_resource::<WgpuRenderBackend>());
     assert!(

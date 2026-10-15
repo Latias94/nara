@@ -374,11 +374,9 @@ fn plugin_shutdown_shuts_down_only_plugin_owned_pools() {
             .get(),
         2
     );
-    assert!(
-        !replaced_runtime
-            .world()
-            .contains_resource::<TaskShutdownReport>()
-    );
+    let incomplete = replaced_runtime.world().resource::<TaskShutdownReport>();
+    assert!(!incomplete.is_complete());
+    assert!(incomplete.timed_out());
 
     drop(release_tx);
     exited_rx.recv_timeout(Duration::from_secs(10)).unwrap();
@@ -462,9 +460,16 @@ fn runtime_close_retains_timed_out_task_owners_until_retry_completes() {
 
     let mut runtime = start_runtime(app, Duration::from_secs(2));
     request_stop(&mut runtime);
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let pending = runtime.world().resource::<TaskShutdownReport>();
+    assert!(!pending.is_complete());
     drive_until_state(&mut runtime, RuntimeState::CloseIncomplete);
     assert!(runtime.world().contains_resource::<TaskPools>());
-    assert!(!runtime.world().contains_resource::<TaskShutdownReport>());
+    let incomplete = runtime.world().resource::<TaskShutdownReport>();
+    assert!(!incomplete.is_complete());
+    assert!(incomplete.timed_out());
+    assert_eq!(incomplete.for_kind(TaskPoolKind::Io).joined_workers, 0);
 
     drop(release_tx);
     exited_rx.recv_timeout(Duration::from_secs(10)).unwrap();

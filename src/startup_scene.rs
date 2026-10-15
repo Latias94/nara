@@ -607,7 +607,7 @@ impl Error for StartupSceneMaterializeError {}
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::OnceLock, time::Duration};
+    use std::sync::OnceLock;
 
     use super::*;
 
@@ -740,40 +740,27 @@ mod tests {
 
     #[test]
     fn direct_materialization_is_rejected_after_startup_finalizes() {
-        let mut app = App::new();
-        app.add_plugins((
-            nara_reflect::ComponentRegistryPlugin,
-            nara_scene::SceneComponentsPlugin,
-            StartupSceneActivationPlugin,
-        ))
-        .unwrap();
-        app.run_once(Duration::ZERO).unwrap();
-
-        let entity_count = app.world().entities().len();
+        let mut world = World::new();
+        world.insert_resource(StartupSceneActivationAuthority {
+            phase: StartupSceneActivationPhase::Finalized,
+        });
+        let entity_count = world.entities().len();
         let source = StartupSceneSource::direct(
             Arc::new(SceneDocument::from_ordered_roots([])),
             ByteLimit::new(1024).unwrap(),
         )
         .unwrap();
-        let error = materialize_startup_scene(app.world_mut().unwrap(), source).unwrap_err();
+        let error = materialize_startup_scene(&mut world, source).unwrap_err();
 
         assert_eq!(
             error.diagnostics().iter().next().unwrap().code().as_str(),
             "startup.scene.activation-window-closed"
         );
-        assert_eq!(app.world().entities().len(), entity_count);
-        assert!(
-            !app.world()
-                .contains_resource::<StartupSceneActivationInput>()
-        );
-        assert!(
-            !app.world()
-                .contains_resource::<StartupSceneActivationOwner>()
-        );
+        assert_eq!(world.entities().len(), entity_count);
+        assert!(!world.contains_resource::<StartupSceneActivationInput>());
+        assert!(!world.contains_resource::<StartupSceneActivationOwner>());
         assert_eq!(
-            app.world()
-                .resource::<StartupSceneActivationAuthority>()
-                .phase,
+            world.resource::<StartupSceneActivationAuthority>().phase,
             StartupSceneActivationPhase::Finalized
         );
     }

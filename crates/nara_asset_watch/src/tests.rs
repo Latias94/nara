@@ -51,9 +51,9 @@ fn install_watch_runtime(app: &mut App, queue: AssetWatchEventQueue) {
     .unwrap();
 }
 
-fn watch_pressure_value(app: &App, metric: &str) -> Option<u64> {
+fn watch_pressure_value(world: &nara_ecs::World, metric: &str) -> Option<u64> {
     let source = PressureSourceId::new("nara.asset-watch.queue").unwrap();
-    app.world()
+    world
         .resource::<RuntimePressureSnapshots>()
         .get(&source)
         .and_then(|snapshot| {
@@ -299,9 +299,10 @@ fn queue_overflow_rejects_the_whole_batch_and_requires_rescan() {
     app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let diagnostics = app.world().resource::<RuntimeDiagnostics>();
+    let diagnostics = runtime.world().resource::<RuntimeDiagnostics>();
     assert!(
         diagnostics
             .iter()
@@ -312,8 +313,12 @@ fn queue_overflow_rejects_the_whole_batch_and_requires_rescan() {
             .iter()
             .any(|entry| entry.code().as_str() == "asset-watch.rescan-required")
     );
-    assert_eq!(watch_pressure_value(&app, "discarded-events"), Some(3));
+    assert_eq!(
+        watch_pressure_value(runtime.world(), "discarded-events"),
+        Some(3)
+    );
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -419,21 +424,27 @@ fn sender_reports_disconnection_after_the_receiver_is_dropped() {
         drain_asset_watch_events.in_set(AssetTaskUpdateSet::Poll),
     )
     .unwrap();
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let diagnostics = app.world().resource::<RuntimeDiagnostics>();
+    let diagnostics = runtime.world().resource::<RuntimeDiagnostics>();
     assert!(
         diagnostics
             .iter()
             .any(|entry| entry.code().as_str() == "asset-watch.queue-disconnected")
     );
-    assert_eq!(watch_pressure_value(&app, "disconnect-rejections"), Some(1));
+    assert_eq!(
+        watch_pressure_value(runtime.world(), "disconnect-rejections"),
+        Some(1)
+    );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -457,16 +468,21 @@ fn malformed_rename_marks_callback_translation_loss() {
     app.insert_resource(AssetSourceRoot::new(&root)).unwrap();
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let diagnostics = app.world().resource::<RuntimeDiagnostics>();
+    let diagnostics = runtime.world().resource::<RuntimeDiagnostics>();
     assert!(
         diagnostics
             .iter()
             .any(|entry| entry.code().as_str() == "asset-watch.translation-failed")
     );
-    assert_eq!(watch_pressure_value(&app, "translation-failures"), Some(1));
+    assert_eq!(
+        watch_pressure_value(runtime.world(), "translation-failures"),
+        Some(1)
+    );
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -493,15 +509,18 @@ fn rescan_terminal_stops_the_live_watcher_backend() {
     install_asset_prerequisites(&mut app);
     app.insert_resource(watcher).unwrap();
     install_watch_runtime(&mut app, queue);
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
-    assert!(!app.world().resource::<AssetWatcher>().is_running());
+    assert!(!runtime.world().resource::<AssetWatcher>().is_running());
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -579,13 +598,15 @@ fn queued_watch_events_are_resolved_in_the_same_task_update() {
     install_reload_capture(&mut app);
     install_watch_runtime(&mut app, queue);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let requests = app.world().resource::<WatchCapturedReloadRequests>();
+    let requests = runtime.world().resource::<WatchCapturedReloadRequests>();
     let request = requests.0.first().unwrap();
     assert_eq!(request.path().as_str(), "textures/player.png");
     assert_eq!(request.request_kind(), AssetReloadRequestKind::LoadOrReload);
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -599,9 +620,10 @@ fn notify_backend_error_is_visible_in_runtime_diagnostics_and_pressure() {
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let diagnostic_codes = app
+    let diagnostic_codes = runtime
         .world()
         .resource::<RuntimeDiagnostics>()
         .iter()
@@ -610,7 +632,7 @@ fn notify_backend_error_is_visible_in_runtime_diagnostics_and_pressure() {
     assert!(diagnostic_codes.contains(&"asset-watch.backend-failed"));
     assert!(diagnostic_codes.contains(&"asset-watch.rescan-required"));
     let source = PressureSourceId::new("nara.asset-watch.queue").unwrap();
-    let pressure = app
+    let pressure = runtime
         .world()
         .resource::<RuntimePressureSnapshots>()
         .get(&source)
@@ -619,11 +641,13 @@ fn notify_backend_error_is_visible_in_runtime_diagnostics_and_pressure() {
         measurement.metric().as_str() == "backend-failures" && measurement.value() == 1
     }));
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -641,11 +665,12 @@ fn translation_failure_records_diagnostic_without_source_change() {
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    assert!(app.world().resource::<AssetSourceChanges>().is_empty());
+    assert!(runtime.world().resource::<AssetSourceChanges>().is_empty());
     let outside_path = outside.display().to_string();
-    let diagnostics = app.world().resource::<RuntimeDiagnostics>();
+    let diagnostics = runtime.world().resource::<RuntimeDiagnostics>();
     assert!(
         diagnostics
             .iter()
@@ -657,7 +682,7 @@ fn translation_failure_records_diagnostic_without_source_change() {
             .all(|entry| !entry.summary().as_str().contains(&outside_path))
     );
     let source = PressureSourceId::new("nara.asset-watch.queue").unwrap();
-    let pressure = app
+    let pressure = runtime
         .world()
         .resource::<RuntimePressureSnapshots>()
         .get(&source)
@@ -666,11 +691,13 @@ fn translation_failure_records_diagnostic_without_source_change() {
         measurement.metric().as_str() == "discarded-events" && measurement.value() == 1
     }));
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -694,26 +721,33 @@ fn downstream_source_change_overflow_requires_a_rescan() {
     .unwrap();
     install_watch_runtime(&mut app, queue);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    assert!(app.world().resource::<AssetSourceChanges>().is_empty());
+    assert!(runtime.world().resource::<AssetSourceChanges>().is_empty());
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<RuntimeDiagnostics>()
             .iter()
             .any(|entry| entry.code().as_str() == "asset-watch.source-change-admission-failed")
     );
     assert_eq!(
-        watch_pressure_value(&app, "source-admission-failures"),
+        watch_pressure_value(runtime.world(), "source-admission-failures"),
         Some(1)
     );
-    assert_eq!(watch_pressure_value(&app, "discarded-events"), Some(2));
+    assert_eq!(
+        watch_pressure_value(runtime.world(), "discarded-events"),
+        Some(2)
+    );
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<AssetWatchRuntimeStatus>()
             .requires_rescan()
     );
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -729,9 +763,10 @@ fn repeated_backend_failures_are_counted_without_unbounded_diagnostics() {
     install_asset_prerequisites(&mut app);
     install_watch_runtime(&mut app, queue);
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let diagnostics = app.world().resource::<RuntimeDiagnostics>();
+    let diagnostics = runtime.world().resource::<RuntimeDiagnostics>();
     assert_eq!(
         diagnostics
             .iter()
@@ -740,7 +775,7 @@ fn repeated_backend_failures_are_counted_without_unbounded_diagnostics() {
         1
     );
     let source = PressureSourceId::new("nara.asset-watch.queue").unwrap();
-    let pressure = app
+    let pressure = runtime
         .world()
         .resource::<RuntimePressureSnapshots>()
         .get(&source)
@@ -749,6 +784,7 @@ fn repeated_backend_failures_are_counted_without_unbounded_diagnostics() {
         measurement.metric().as_str() == "backend-failures" && measurement.value() == 2
     }));
     remove_temp_root(&root);
+    runtime.finish().unwrap();
 }
 
 #[test]

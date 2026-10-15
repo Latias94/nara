@@ -876,15 +876,24 @@ mod tests {
             },
         );
 
-        let outcome = app.run_once(std::time::Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let outcome = runtime.drive(std::time::Duration::ZERO).unwrap();
 
-        assert_eq!(outcome.exit, None);
+        assert_eq!(outcome.frame().unwrap().exit, None);
         assert!(
-            !app.world()
+            !runtime
+                .world()
                 .resource::<WindowCloseRequests>()
                 .is_requested(WindowId::PRIMARY)
         );
-        assert!(app.world().resource::<WindowEvents>().as_slice().is_empty());
+        assert!(
+            runtime
+                .world()
+                .resource::<WindowEvents>()
+                .as_slice()
+                .is_empty()
+        );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -898,10 +907,21 @@ mod tests {
             },
         );
 
-        let outcome = app.run_once(std::time::Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        let outcome = runtime.drive(std::time::Duration::ZERO).unwrap();
 
-        assert_eq!(outcome.exit, Some(nara_app::AppExit::Requested));
-        assert!(app.world().resource::<WindowEvents>().as_slice().is_empty());
+        assert_eq!(
+            outcome.frame().unwrap().exit,
+            Some(nara_app::AppExit::Requested)
+        );
+        assert!(
+            runtime
+                .world()
+                .resource::<WindowEvents>()
+                .as_slice()
+                .is_empty()
+        );
+        runtime.finish().unwrap();
     }
 
     #[test]

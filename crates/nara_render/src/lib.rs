@@ -1482,9 +1482,10 @@ mod tests {
             .expect("app should allow world mutation")
             .spawn((Camera2d::default(), Transform2d::default()));
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let views = app.world().resource::<ExtractedViews>();
+        let views = runtime.world().resource::<ExtractedViews>();
         assert_eq!(views.len(), 1);
         assert_eq!(views.as_slice()[0].target, RenderTarget::PrimaryWindow);
         assert_eq!(views.as_slice()[0].world_position, Vec2::ZERO);
@@ -1494,6 +1495,7 @@ mod tests {
             ViewportRect::new(0, 0, 1280, 720).unwrap()
         );
         assert_eq!(views.as_slice()[0].clear_color, Color::BLACK);
+        runtime.finish().unwrap();
     }
 
     fn test_extracted_view() -> ExtractedView {
@@ -1542,15 +1544,17 @@ mod tests {
                 Transform2d::default(),
             ));
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let views = app.world().resource::<ExtractedViews>();
+        let views = runtime.world().resource::<ExtractedViews>();
         assert_eq!(views.len(), 1);
         assert_eq!(
             views.as_slice()[0].viewport,
             ViewportRect::new(0, 0, 320, 180).unwrap()
         );
         assert_eq!(views.as_slice()[0].clear_color, Color::WHITE);
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1569,9 +1573,11 @@ mod tests {
                 clear_color: Color::WHITE,
             });
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        assert!(app.world().resource::<ExtractedViews>().is_empty());
+        assert!(runtime.world().resource::<ExtractedViews>().is_empty());
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1593,11 +1599,13 @@ mod tests {
             .id();
         place_parented(world, camera, root);
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let views = app.world().resource::<ExtractedViews>();
+        let views = runtime.world().resource::<ExtractedViews>();
         assert_eq!(views.len(), 1);
         assert_eq!(views.as_slice()[0].world_position, Vec2::new(110.0, 35.0));
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1762,22 +1770,24 @@ mod tests {
                 .id();
             (singular, rotated)
         };
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
             camera_world_position(
                 singular,
-                app.world().get::<GlobalTransform2d>(singular).unwrap()
+                runtime.world().get::<GlobalTransform2d>(singular).unwrap()
             ),
             Err(RenderViewExtractionError::SingularTransform { entity: singular })
         );
         assert_eq!(
             camera_world_position(
                 rotated,
-                app.world().get::<GlobalTransform2d>(rotated).unwrap()
+                runtime.world().get::<GlobalTransform2d>(rotated).unwrap()
             ),
             Err(RenderViewExtractionError::UnsupportedLinearTransform { entity: rotated })
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -1801,12 +1811,14 @@ mod tests {
                 .id();
             (within_tolerance, outside_tolerance)
         };
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
             camera_world_position(
                 within_tolerance,
-                app.world()
+                runtime
+                    .world()
                     .get::<GlobalTransform2d>(within_tolerance)
                     .unwrap()
             ),
@@ -1815,7 +1827,8 @@ mod tests {
         assert_eq!(
             camera_world_position(
                 outside_tolerance,
-                app.world()
+                runtime
+                    .world()
                     .get::<GlobalTransform2d>(outside_tolerance)
                     .unwrap()
             ),
@@ -1823,6 +1836,7 @@ mod tests {
                 entity: outside_tolerance,
             })
         );
+        runtime.finish().unwrap();
     }
 
     #[derive(Resource)]

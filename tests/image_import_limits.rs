@@ -113,15 +113,41 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         .resource_mut::<ProjectAssetDatabase>()
         .insert(record.clone())
         .unwrap();
-    let handle = app
-        .world_mut()
+    let mut initial = ImagePublicationContext::new(&record);
+    let imported = initial
+        .import(app.world().resource::<ImageImporter>(), &record, VALID_PNG)
+        .unwrap();
+    let mut events = AssetEvents::default();
+    imported
+        .commit(
+            &initial.server,
+            &mut initial.images,
+            &mut initial.states,
+            &mut events,
+        )
+        .unwrap();
+    let handle = initial.handle;
+    app.insert_resource(initial.server)
         .unwrap()
-        .resource_mut::<AssetServer>()
-        .reserve_record::<ImageAsset>(&record)
+        .insert_resource(initial.images)
+        .unwrap()
+        .insert_resource(initial.states)
+        .unwrap()
+        .insert_resource(events)
         .unwrap();
 
+    app.insert_resource(ReloadTestPort).unwrap();
+    app.__register_driver_port::<ReloadTestPort>(ReloadTestPort::apply_driver_input_in_world)
+        .unwrap();
+    let mut app = RuntimeInstance::start(app).unwrap();
     request_reload(&mut app, &record);
     drive_image_jobs(&mut app);
+    assert_eq!(
+        app.world()
+            .resource::<nara::image::ImageReloadStats>()
+            .applied,
+        1
+    );
     let last_good_hash = app
         .world()
         .resource::<Assets<ImageAsset>>()
@@ -138,15 +164,6 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         .world()
         .resource::<AssetLoadGenerations>()
         .current(handle.id());
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetReloadDiagnostics>()
-        .clear();
-    app.world_mut()
-        .unwrap()
-        .resource_mut::<AssetEvents>()
-        .drain();
-
     root.write(record.path().as_str(), ENCODED_PLUS_ONE_PNG);
     request_reload(&mut app, &record);
     drive_image_jobs(&mut app);
@@ -200,6 +217,7 @@ fn root_facade_plugin_reload_preserves_last_good_after_budget_rejection() {
         ENCODED_PLUS_ONE_PNG.len().to_string()
     );
     assert_budget_released(app.world().resource::<ImageImporter>().budget_snapshot());
+    app.finish().unwrap();
 }
 
 fn image_record() -> AssetRecord {
@@ -254,18 +272,41 @@ fn import_request(record: &AssetRecord, bytes: &[u8]) -> ImageBytesImportRequest
     )
 }
 
-fn request_reload(app: &mut App, record: &AssetRecord) {
-    app.world_mut()
+#[derive(Resource)]
+struct ReloadTestPort;
+
+impl nara::app::__RuntimeDriverPort for ReloadTestPort {
+    type Input = AssetPath;
+    type Output = ();
+
+    fn apply_driver_input(&mut self, _input: Self::Input) {}
+}
+
+impl ReloadTestPort {
+    fn apply_driver_input_in_world(
+        world: &mut World,
+        path: AssetPath,
+    ) -> Result<(), (nara::app::RuntimeWorldAccessError, AssetPath)> {
+        world.resource_mut::<AssetReloadDiagnostics>().clear();
+        world.resource_mut::<AssetEvents>().drain();
+        world
+            .resource_mut::<AssetSourceChanges>()
+            .modified(path)
+            .unwrap();
+        Ok(())
+    }
+}
+
+fn request_reload(app: &mut RuntimeInstance, record: &AssetRecord) {
+    app.with_driver_scope(|scope| scope.__apply_port::<ReloadTestPort>(record.path().clone()))
         .unwrap()
-        .resource_mut::<AssetSourceChanges>()
-        .modified(record.path().clone())
         .unwrap();
 }
 
-fn drive_image_jobs(app: &mut App) {
-    app.update().unwrap();
+fn drive_image_jobs(app: &mut RuntimeInstance) {
+    app.drive(std::time::Duration::ZERO).unwrap();
     let _ = app.world().resource::<TaskPools>().run_pending_for_tests();
-    app.update().unwrap();
+    app.drive(std::time::Duration::ZERO).unwrap();
 }
 
 fn diagnostic_field(diagnostic: &Diagnostic, key: &str) -> String {

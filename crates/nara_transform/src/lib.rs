@@ -352,7 +352,69 @@ mod tests {
             TransformPlugin,
         ))
         .expect("the spatial foundation should install");
+        app.init_resource::<ProjectionEditPort>().unwrap();
+        app.__register_driver_port::<ProjectionEditPort>(
+            ProjectionEditPort::apply_driver_input_in_world,
+        )
+        .unwrap();
         app
+    }
+
+    enum ProjectionEdit {
+        Scale { entity: Entity, scale: Vec2 },
+        RemoveTransform(Entity),
+        RetireParent { parent: Entity, child: Entity },
+    }
+
+    #[derive(Default, Resource)]
+    struct ProjectionEditPort;
+
+    impl __RuntimeDriverPort for ProjectionEditPort {
+        type Input = ProjectionEdit;
+        type Output = Result<(), TransformCompletionError>;
+
+        fn apply_driver_input(&mut self, _input: ProjectionEdit) -> Self::Output {
+            unreachable!("projection edits need the owned transform world")
+        }
+    }
+
+    impl ProjectionEditPort {
+        fn apply_driver_input_in_world(
+            world: &mut nara_ecs::World,
+            input: ProjectionEdit,
+        ) -> Result<
+            Result<(), TransformCompletionError>,
+            (nara_app::RuntimeWorldAccessError, ProjectionEdit),
+        > {
+            match input {
+                ProjectionEdit::Scale { entity, scale } => {
+                    world.get_mut::<Transform2d>(entity).unwrap().scale = scale;
+                }
+                ProjectionEdit::RemoveTransform(entity) => {
+                    world.entity_mut(entity).remove::<Transform2d>();
+                }
+                ProjectionEdit::RetireParent { parent, child } => {
+                    let child_from = HierarchyPlacement::current(world, child).unwrap();
+                    let parent_from = HierarchyPlacement::current(world, parent).unwrap();
+                    HierarchyWriter::new(world)
+                        .apply_batch(&[
+                            HierarchyOperation::Move {
+                                entity: child,
+                                from: child_from,
+                                to: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
+                            },
+                            HierarchyOperation::Remove {
+                                entity: parent,
+                                from: parent_from,
+                            },
+                        ])
+                        .unwrap();
+                    assert!(world.despawn(parent));
+                    return Ok(Ok(()));
+                }
+            }
+            Ok(propagation::complete_transform_projection(world))
+        }
     }
 
     fn place_ordered_hierarchy(
@@ -490,10 +552,12 @@ mod tests {
             (root, child, grandchild)
         };
 
-        app.run_once(Duration::ZERO)
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime
+            .drive(Duration::ZERO)
             .expect("startup completion should succeed");
 
-        let world = app.world();
+        let world = runtime.world();
         assert_eq!(
             world
                 .get::<GlobalTransform2d>(root)
@@ -515,6 +579,7 @@ mod tests {
                 .translation(),
             Vec2::new(11.0, 29.0)
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -531,25 +596,30 @@ mod tests {
             place_ordered_hierarchy(world, &[root], &[(child, root)]);
             (root, child)
         };
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let previous = app
+        let previous = runtime
             .world()
             .get::<GlobalTransform2d>(child)
             .unwrap()
             .matrix();
         assert!(
-            app.world()
+            runtime
+                .world()
                 .contains_resource::<__private::CompletedTransformProjection>()
         );
 
-        app.world_mut()
+        let error = runtime
+            .with_driver_scope(|scope| {
+                scope
+                    .__apply_port::<ProjectionEditPort>(ProjectionEdit::Scale {
+                        entity: root,
+                        scale: Vec2::new(f32::NAN, 1.0),
+                    })
+                    .unwrap()
+            })
             .unwrap()
-            .get_mut::<Transform2d>(root)
-            .unwrap()
-            .scale
-            .x = f32::NAN;
-        let error = propagation::complete_transform_projection(app.world_mut().unwrap())
             .expect_err("non-finite local state must reject the complete candidate");
 
         assert_eq!(
@@ -557,11 +627,13 @@ mod tests {
             TransformCompletionError::NonFiniteLocal { entity: root }
         );
         assert!(
-            !app.world()
+            !runtime
+                .world()
                 .contains_resource::<__private::CompletedTransformProjection>()
         );
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .get::<GlobalTransform2d>(child)
                 .unwrap()
                 .matrix(),
@@ -569,17 +641,24 @@ mod tests {
             "a failed candidate must not partially replace the prior projection"
         );
 
-        app.world_mut()
+        runtime
+            .with_driver_scope(|scope| {
+                scope
+                    .__apply_port::<ProjectionEditPort>(ProjectionEdit::Scale {
+                        entity: root,
+                        scale: Vec2::ONE,
+                    })
+                    .unwrap()
+            })
             .unwrap()
-            .get_mut::<Transform2d>(root)
-            .unwrap()
-            .scale = Vec2::ONE;
-        propagation::complete_transform_projection(app.world_mut().unwrap())
             .expect("a corrected generation should republish the projection");
+
         assert!(
-            app.world()
+            runtime
+                .world()
                 .contains_resource::<__private::CompletedTransformProjection>()
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -679,20 +758,26 @@ mod tests {
             .unwrap()
             .spawn(Transform2d::from_translation(Vec2::new(4.0, 8.0)))
             .id();
-        app.run_once(Duration::ZERO).unwrap();
-        assert!(app.world().get::<GlobalTransform2d>(entity).is_some());
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        assert!(runtime.world().get::<GlobalTransform2d>(entity).is_some());
 
-        app.world_mut()
+        runtime
+            .with_driver_scope(|scope| {
+                scope
+                    .__apply_port::<ProjectionEditPort>(ProjectionEdit::RemoveTransform(entity))
+                    .unwrap()
+            })
             .unwrap()
-            .entity_mut(entity)
-            .remove::<Transform2d>();
-        propagation::complete_transform_projection(app.world_mut().unwrap()).unwrap();
+            .unwrap();
 
-        assert!(app.world().get::<GlobalTransform2d>(entity).is_none());
+        assert!(runtime.world().get::<GlobalTransform2d>(entity).is_none());
         assert!(
-            app.world()
+            runtime
+                .world()
                 .contains_resource::<__private::CompletedTransformProjection>()
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -709,18 +794,21 @@ mod tests {
             place_ordered_hierarchy(world, &[root], &[(child, root)]);
             (root, child)
         };
-        app.run_once(Duration::ZERO).unwrap();
-        let previous = app
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        let previous = runtime
             .world()
             .get::<GlobalTransform2d>(child)
             .unwrap()
             .matrix();
 
-        app.world_mut()
+        let error = runtime
+            .with_driver_scope(|scope| {
+                scope
+                    .__apply_port::<ProjectionEditPort>(ProjectionEdit::RemoveTransform(root))
+                    .unwrap()
+            })
             .unwrap()
-            .entity_mut(root)
-            .remove::<Transform2d>();
-        let error = propagation::complete_transform_projection(app.world_mut().unwrap())
             .expect_err("a transform chain may not skip its structural parent");
 
         assert_eq!(
@@ -731,16 +819,19 @@ mod tests {
             }
         );
         assert!(
-            !app.world()
+            !runtime
+                .world()
                 .contains_resource::<__private::CompletedTransformProjection>()
         );
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .get::<GlobalTransform2d>(child)
                 .unwrap()
                 .matrix(),
             previous
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -751,12 +842,13 @@ mod tests {
         let child = world.spawn(Transform2d::default()).id();
         place_ordered_hierarchy(world, &[root], &[(child, root)]);
 
-        app.run_once(Duration::ZERO).unwrap();
-        let first = propagation::propagation_stats(app.world());
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
+        let first = propagation::propagation_stats(runtime.world());
         assert_eq!((first.2, first.3, first.4), (1, 2, 1));
 
-        app.run_once(Duration::ZERO).unwrap();
-        let second = propagation::propagation_stats(app.world());
+        runtime.drive(Duration::ZERO).unwrap();
+        let second = propagation::propagation_stats(runtime.world());
         assert_eq!(
             (second.2, second.3, second.4),
             (1, 2, 1),
@@ -767,6 +859,7 @@ mod tests {
             (2, 4),
             "each unchanged PostUpdate/Extract completion point should perform one participant change-tick scan only"
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -795,10 +888,12 @@ mod tests {
             (previous, DEPTH + WIDTH + 1)
         };
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .get::<GlobalTransform2d>(deep_leaf)
                 .unwrap()
                 .translation(),
@@ -806,7 +901,7 @@ mod tests {
         );
         assert_eq!(
             {
-                let stats = propagation::propagation_stats(app.world());
+                let stats = propagation::propagation_stats(runtime.world());
                 (stats.2, stats.3, stats.4)
             },
             (
@@ -815,6 +910,7 @@ mod tests {
                 (DEPTH.saturating_sub(1) + WIDTH) as u64
             )
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -833,38 +929,44 @@ mod tests {
             place_ordered_hierarchy(world, &[root], &edges);
         }
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        let stats = propagation::propagation_stats(app.world());
+        let stats = propagation::propagation_stats(runtime.world());
         assert_eq!(
             (stats.2, stats.3, stats.4),
             (1, 1, 0),
             "transform completion must scale with transform participants and transform edges"
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
     fn fixed_direct_transform_write_is_visible_to_same_tick_consumer() {
-        let mut app = fixed_spatial_app(false);
+        let app = fixed_spatial_app(false);
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
-            app.world().resource::<FixedSpatialProbe>().observed,
+            runtime.world().resource::<FixedSpatialProbe>().observed,
             Some(Vec2::new(13.0, 24.0))
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
     fn fixed_deferred_transform_write_is_visible_to_same_tick_consumer() {
-        let mut app = fixed_spatial_app(true);
+        let app = fixed_spatial_app(true);
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
-            app.world().resource::<FixedSpatialProbe>().observed,
+            runtime.world().resource::<FixedSpatialProbe>().observed,
             Some(Vec2::new(13.0, 24.0))
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -881,44 +983,45 @@ mod tests {
             place_ordered_hierarchy(world, &[parent], &[(child, parent)]);
             (parent, child)
         };
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .get::<GlobalTransform2d>(child)
                 .unwrap()
                 .translation(),
             Vec2::new(13.0, 24.0)
         );
 
-        {
-            let world = app.world_mut().unwrap();
-            let child_from = HierarchyPlacement::current(world, child).unwrap();
-            let parent_from = HierarchyPlacement::current(world, parent).unwrap();
-            HierarchyWriter::new(world)
-                .apply_batch(&[
-                    HierarchyOperation::Move {
-                        entity: child,
-                        from: child_from,
-                        to: HierarchyPlacement::last(HierarchyPlacementOwner::Root),
-                    },
-                    HierarchyOperation::Remove {
-                        entity: parent,
-                        from: parent_from,
-                    },
-                ])
-                .unwrap();
-            assert!(world.despawn(parent));
-        }
-        app.run_once(Duration::ZERO).unwrap();
+        runtime
+            .with_driver_scope(|scope| {
+                scope
+                    .__apply_port::<ProjectionEditPort>(ProjectionEdit::RetireParent {
+                        parent,
+                        child,
+                    })
+                    .unwrap()
+            })
+            .unwrap()
+            .unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
-        assert!(app.world().get::<nara_hierarchy::Parent>(child).is_none());
+        assert!(
+            runtime
+                .world()
+                .get::<nara_hierarchy::Parent>(child)
+                .is_none()
+        );
         assert_eq!(
-            app.world()
+            runtime
+                .world()
                 .get::<GlobalTransform2d>(child)
                 .unwrap()
                 .translation(),
             Vec2::new(3.0, 4.0)
         );
+        runtime.finish().unwrap();
     }
 
     #[test]
@@ -942,12 +1045,17 @@ mod tests {
         )
         .unwrap();
 
-        app.run_once(Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(Duration::ZERO).unwrap();
 
         assert_eq!(
-            app.world().resource::<PostUpdateSpatialProbe>().observed,
+            runtime
+                .world()
+                .resource::<PostUpdateSpatialProbe>()
+                .observed,
             Some(Vec2::new(13.0, 24.0))
         );
+        runtime.finish().unwrap();
     }
 
     #[test]

@@ -730,20 +730,23 @@ fn plugin_completes_the_latest_ordered_generation() {
     )
     .unwrap();
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
     assert_eq!(
-        app.world().resource::<HierarchyRoots>().as_slice(),
+        runtime.world().resource::<HierarchyRoots>().as_slice(),
         [second, first]
     );
     assert_eq!(
-        __private::completed_topology_generation(app.world()),
+        __private::completed_topology_generation(runtime.world()),
         Some(
-            app.world()
+            runtime
+                .world()
                 .resource::<HierarchyGenerationState>()
                 .topology_generation
         )
     );
+    runtime.finish().unwrap();
 }
 
 #[test]
@@ -784,9 +787,10 @@ fn completed_order_is_depth_first_and_allocation_independent() {
             .unwrap();
     }
 
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let order = app.world().resource::<HierarchyOrder>();
+    let order = runtime.world().resource::<HierarchyOrder>();
     assert_eq!(order.roots(), [first_root, second_root]);
     assert_eq!(
         order.as_slice(),
@@ -800,15 +804,15 @@ fn completed_order_is_depth_first_and_allocation_independent() {
     );
     assert_eq!(order.index(trailing_child), Some(3));
     assert_eq!(order.index(unrelated), None);
+    runtime.finish().unwrap();
 }
 
 #[test]
 fn advanced_component_or_root_removal_invalidates_completion_immediately() {
-    let mut app = App::new();
-    app.add_plugin(HierarchyPlugin).unwrap();
-    let root = app.world_mut().unwrap().spawn_empty().id();
-    let child = app.world_mut().unwrap().spawn_empty().id();
-    HierarchyWriter::new(app.world_mut().unwrap())
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    let child = world.spawn_empty().id();
+    HierarchyWriter::new(&mut world)
         .apply_batch(&[
             HierarchyOperation::Place {
                 entity: root,
@@ -820,68 +824,53 @@ fn advanced_component_or_root_removal_invalidates_completion_immediately() {
             },
         ])
         .unwrap();
-    app.update().unwrap();
-    assert!(__private::completed_topology_generation(app.world()).is_some());
+    validate_dirty_hierarchy(&mut world).unwrap();
+    assert!(__private::completed_topology_generation(&world).is_some());
 
-    app.world_mut()
-        .unwrap()
-        .entity_mut(child)
-        .remove::<Parent>();
-    assert_eq!(__private::completed_topology_generation(app.world()), None);
+    world.entity_mut(child).remove::<Parent>();
+    assert_eq!(__private::completed_topology_generation(&world), None);
 
-    let mut roots_app = App::new();
-    roots_app.add_plugin(HierarchyPlugin).unwrap();
-    let root = roots_app.world_mut().unwrap().spawn_empty().id();
-    place_root(roots_app.world_mut().unwrap(), root);
-    roots_app.update().unwrap();
-    assert!(__private::completed_topology_generation(roots_app.world()).is_some());
-    roots_app
-        .world_mut()
-        .unwrap()
-        .remove_resource::<HierarchyRoots>();
-    assert_eq!(
-        __private::completed_topology_generation(roots_app.world()),
-        None
-    );
+    let mut roots_world = World::new();
+    let root = roots_world.spawn_empty().id();
+    place_root(&mut roots_world, root);
+    validate_dirty_hierarchy(&mut roots_world).unwrap();
+    assert!(__private::completed_topology_generation(&roots_world).is_some());
+    roots_world.remove_resource::<HierarchyRoots>();
+    assert_eq!(__private::completed_topology_generation(&roots_world), None);
 }
 
 #[test]
 fn despawning_childless_root_invalidates_completion_immediately() {
-    let mut app = App::new();
-    app.add_plugin(HierarchyPlugin).unwrap();
-    let root = app.world_mut().unwrap().spawn_empty().id();
-    place_root(app.world_mut().unwrap(), root);
-    app.update().unwrap();
-    assert!(__private::completed_topology_generation(app.world()).is_some());
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    place_root(&mut world, root);
+    validate_dirty_hierarchy(&mut world).unwrap();
+    assert!(__private::completed_topology_generation(&world).is_some());
 
-    assert!(app.world_mut().unwrap().despawn(root));
+    assert!(world.despawn(root));
 
-    assert_eq!(__private::completed_topology_generation(app.world()), None);
-    app.update().unwrap();
-    assert_eq!(__private::completed_topology_generation(app.world()), None);
+    assert_eq!(__private::completed_topology_generation(&world), None);
+    assert!(validate_dirty_hierarchy(&mut world).is_err());
+    assert_eq!(__private::completed_topology_generation(&world), None);
     assert_eq!(
-        validate_hierarchy(app.world()),
+        validate_hierarchy(&world),
         Err(HierarchyError::RootEntityMissing { entity: root })
     );
 }
 
 #[test]
 fn removing_private_membership_cannot_republish_completion() {
-    let mut app = App::new();
-    app.add_plugin(HierarchyPlugin).unwrap();
-    let root = app.world_mut().unwrap().spawn_empty().id();
-    place_root(app.world_mut().unwrap(), root);
-    app.update().unwrap();
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    place_root(&mut world, root);
+    validate_dirty_hierarchy(&mut world).unwrap();
 
-    app.world_mut()
-        .unwrap()
-        .entity_mut(root)
-        .remove::<relation::HierarchyMember>();
-    assert_eq!(__private::completed_topology_generation(app.world()), None);
-    app.update().unwrap();
-    assert_eq!(__private::completed_topology_generation(app.world()), None);
+    world.entity_mut(root).remove::<relation::HierarchyMember>();
+    assert_eq!(__private::completed_topology_generation(&world), None);
+    assert!(validate_dirty_hierarchy(&mut world).is_err());
+    assert_eq!(__private::completed_topology_generation(&world), None);
     assert_eq!(
-        validate_hierarchy(app.world()),
+        validate_hierarchy(&world),
         Err(HierarchyError::MembershipMissing { entity: root })
     );
 }

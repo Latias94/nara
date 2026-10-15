@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use nara_app::{App, AppScheduleRunError, CoreStage, PluginLifecycleState, StartupStage};
+use nara_app::{App, CoreStage, PluginLifecycleState, RuntimeInstance, StartupStage};
 use nara_ecs::{
     ResMut, Resource,
     schedule::{IntoScheduleConfigs, ScheduleLabel, SystemSet},
@@ -22,7 +22,7 @@ enum DomainSet {
 struct DomainTrace(Vec<&'static str>);
 
 #[test]
-fn custom_typed_schedule_is_inspectable_inert_and_explicitly_driven() {
+fn custom_typed_schedule_is_inspectable_and_inert_during_managed_frames() {
     let mut app = App::new();
     app.init_resource::<DomainTrace>().unwrap();
     app.init_schedule(DomainSchedule).unwrap();
@@ -42,26 +42,13 @@ fn custom_typed_schedule_is_inspectable_inert_and_explicitly_driven() {
 
     assert!(app.get_schedule(DomainSchedule).is_some());
     assert!(matches!(app.get_schedule_mut(DomainSchedule), Ok(Some(_))));
-    app.run_once(Duration::ZERO).unwrap();
-    assert!(app.world().resource::<DomainTrace>().0.is_empty());
-
-    app.run_schedule(DomainSchedule).unwrap();
-    assert_eq!(
-        app.world().resource::<DomainTrace>().0,
-        ["prepare", "simulate"]
-    );
-    assert_eq!(
-        app.run_schedule(MissingSchedule),
-        Err(AppScheduleRunError::MissingSchedule)
-    );
-    assert!(matches!(
-        app.get_schedule_mut(DomainSchedule),
-        Err(nara_app::PluginError::AppSealed)
-    ));
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(runtime.world().resource::<DomainTrace>().0.is_empty());
 }
 
 #[test]
-fn custom_schedule_seals_before_it_executes() {
+fn custom_schedule_configuration_is_frozen_by_seal() {
     let mut app = App::new();
     app.init_resource::<DomainTrace>().unwrap();
     app.init_schedule(DomainSchedule).unwrap();
@@ -72,20 +59,15 @@ fn custom_schedule_seals_before_it_executes() {
         PluginLifecycleState::Configuring
     );
 
-    app.run_schedule(DomainSchedule).unwrap();
-
-    assert_eq!(app.plugin_lifecycle_state(), PluginLifecycleState::Ready);
-    assert_eq!(app.world().resource::<DomainTrace>().0, ["prepare"]);
+    let sealed = app.seal().unwrap();
+    assert!(sealed.world().resource::<DomainTrace>().0.is_empty());
 }
 
 #[test]
-fn missing_custom_schedule_does_not_seal_the_app() {
-    let mut app = App::new();
+fn missing_custom_schedule_is_observed_without_sealing_the_app() {
+    let app = App::new();
 
-    assert_eq!(
-        app.run_schedule(MissingSchedule),
-        Err(AppScheduleRunError::MissingSchedule)
-    );
+    assert!(app.get_schedule(MissingSchedule).is_none());
     assert_eq!(
         app.plugin_lifecycle_state(),
         PluginLifecycleState::Configuring
@@ -93,22 +75,11 @@ fn missing_custom_schedule_does_not_seal_the_app() {
 }
 
 #[test]
-fn generic_schedule_entry_rejects_builtin_stages_without_consuming_startup() {
+fn managed_startup_runs_once_and_the_frame_uses_engine_stage_order() {
     let mut app = App::new();
     app.init_resource::<DomainTrace>().unwrap();
     app.add_systems(StartupStage::Core, record_prepare).unwrap();
     app.add_systems(CoreStage::Update, record_simulate).unwrap();
-
-    for _ in 0..2 {
-        assert_eq!(
-            app.run_schedule(StartupStage::Core),
-            Err(AppScheduleRunError::BuiltInSchedule)
-        );
-        assert_eq!(
-            app.run_schedule(CoreStage::Update),
-            Err(AppScheduleRunError::BuiltInSchedule)
-        );
-    }
 
     assert_eq!(
         app.plugin_lifecycle_state(),
@@ -116,9 +87,10 @@ fn generic_schedule_entry_rejects_builtin_stages_without_consuming_startup() {
     );
     assert!(app.world().resource::<DomainTrace>().0.is_empty());
 
-    app.run_once(Duration::ZERO).unwrap();
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
     assert_eq!(
-        app.world().resource::<DomainTrace>().0,
+        runtime.world().resource::<DomainTrace>().0,
         ["prepare", "simulate"]
     );
 }

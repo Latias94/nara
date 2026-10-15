@@ -10,8 +10,8 @@ mod tests {
 
     use engine::{
         app::{
-            App, AppRunError, CoreStage, FixedTime, FixedUpdateSet, RuntimeFaultKind,
-            RuntimeFaultReporter,
+            App, CoreStage, FixedTime, FixedUpdateSet, RuntimeFaultKind, RuntimeFaultReporter,
+            RuntimeInstance,
         },
         ecs::{
             Commands, Component, Query, Res, ResMut, Resource, ScheduleLabel, SystemSet,
@@ -147,7 +147,8 @@ mod tests {
             .submit(submission(1))
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut app = RuntimeInstance::start(app).unwrap();
+        app.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         let trace = app.world().resource::<AnchorTrace>();
         assert_eq!(trace.simulate_runs, 1);
@@ -166,7 +167,6 @@ mod tests {
         assert_eq!(stats.active_commands, 0);
         assert_eq!(stats.retained_commands, 0);
         assert_eq!(stats.acknowledged_through_tick, 1);
-        assert!(app.get_schedule_mut(CoreStage::FixedUpdate).is_err());
     }
 
     #[derive(Debug, Default, Resource)]
@@ -210,7 +210,8 @@ mod tests {
             .submit(submission(1))
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut app = RuntimeInstance::start(app).unwrap();
+        app.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(app.world().resource::<ConditionalRuns>().0, 0);
         let stats = app.world().resource::<GameplayCommandQueue>().stats();
@@ -240,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn public_anchor_member_errors_follow_the_configured_app_policy() {
+    fn public_anchor_member_errors_reach_the_managed_fault_policy() {
         APP_POLICY_ERRORS.store(0, Ordering::SeqCst);
         let mut app = App::new();
         app.add_plugin(GameplayCommandPlugin::default()).unwrap();
@@ -264,17 +265,11 @@ mod tests {
             )
             .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
-
-        assert_eq!(APP_POLICY_ERRORS.load(Ordering::SeqCst), 4);
-        assert_eq!(
-            app.world()
-                .resource::<GameplayCommandQueue>()
-                .stats()
-                .acknowledged_through_tick,
-            1
-        );
-        assert_eq!(app.world().resource::<RuntimeFaultReporter>().fault(), None);
+        let mut app = RuntimeInstance::start(app).unwrap();
+        let failure = app.drive(FixedTime::DEFAULT_TIMESTEP).unwrap_err();
+        assert_eq!(failure.fault().kind(), RuntimeFaultKind::System);
+        assert_eq!(APP_POLICY_ERRORS.load(Ordering::SeqCst), 0);
+        assert_eq!(app.fault(), Some(failure.fault()));
     }
 
     #[derive(Debug, Default, Resource)]
@@ -319,16 +314,17 @@ mod tests {
             .submit(submission(1))
             .unwrap();
 
+        let mut app = RuntimeInstance::start(app).unwrap();
         let first_error = app
-            .run_once(FixedTime::DEFAULT_TIMESTEP)
-            .expect_err("the acknowledgement fault must cross the direct runtime boundary");
+            .drive(FixedTime::DEFAULT_TIMESTEP)
+            .expect_err("the acknowledgement fault must cross the managed runtime boundary");
         assert_eq!(
-            first_error,
-            AppRunError::DirectRuntime {
-                kind: RuntimeFaultKind::GameplayLifecycle,
-                fault_source: "nara.gameplay.fixed-acknowledge",
-                ..
-            }
+            first_error.fault().kind(),
+            RuntimeFaultKind::GameplayLifecycle
+        );
+        assert_eq!(
+            first_error.fault().source(),
+            "nara.gameplay.fixed-acknowledge"
         );
 
         let trace = app.world().resource::<DomainFaultTrace>();
@@ -349,8 +345,8 @@ mod tests {
         assert_eq!(fault.source(), "nara.gameplay.fixed-acknowledge");
 
         let sticky_error = app
-            .run_once(FixedTime::DEFAULT_TIMESTEP)
-            .expect_err("the direct runtime fault must remain sticky");
+            .drive(FixedTime::DEFAULT_TIMESTEP)
+            .expect_err("the managed runtime fault must remain sticky");
         assert_eq!(sticky_error, first_error);
 
         let trace = app.world().resource::<DomainFaultTrace>();
@@ -393,7 +389,8 @@ mod tests {
         )
         .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut app = RuntimeInstance::start(app).unwrap();
+        app.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert!(!app.world().resource::<VisibilityTrace>().0);
         assert!(
@@ -436,14 +433,9 @@ mod tests {
         )
         .unwrap();
 
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut app = RuntimeInstance::start(app).unwrap();
+        app.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
         assert_eq!(app.world().resource::<ExecutionTrace>().0, ["fixed"]);
-
-        app.run_schedule(ForeignSchedule).unwrap();
-        assert_eq!(
-            app.world().resource::<ExecutionTrace>().0,
-            ["fixed", "foreign"]
-        );
     }
 
     #[derive(Debug, Default, Resource)]
@@ -479,7 +471,8 @@ mod tests {
             )
             .unwrap();
         }
-        app.run_once(FixedTime::DEFAULT_TIMESTEP).unwrap();
+        let mut app = RuntimeInstance::start(app).unwrap();
+        app.drive(FixedTime::DEFAULT_TIMESTEP).unwrap();
         app.world().resource::<CommutativeResult>().0
     }
 

@@ -29,9 +29,8 @@ use nara::{
     },
     core::{ItemLimit, TimeLimit},
     ecs::{
-        Commands, Event, On, Res, ResMut, Resource, World,
-        change_detection::DetectChangesMut,
-        schedule::{IntoScheduleConfigs, ScheduleLabel},
+        Commands, Event, On, Res, ResMut, Resource, World, change_detection::DetectChangesMut,
+        schedule::IntoScheduleConfigs,
     },
     gameplay::{
         GameplayCommandBatch, GameplayCommandDraft, GameplayCommandIngressSource,
@@ -1639,8 +1638,7 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         PluginShutdownObligationId::new("nara.test.admission.plugin-owner");
     const PLUGIN_PARTICIPANT_ID: RuntimeCloseParticipantId =
         RuntimeCloseParticipantId::new("nara.test.admission.plugin-owner");
-    const HOST_PARTICIPANT_ID: RuntimeCloseParticipantId =
-        RuntimeCloseParticipantId::new("nara.test.admission.host-owner");
+    const HOST_PARTICIPANT_ID: RuntimeCloseParticipantId = PLUGIN_PARTICIPANT_ID;
     const DECLARATION: PluginDeclaration =
         PluginDeclaration::new(PLUGIN_ID, PluginCategory::Runtime)
             .shutdown_obligations(&[OBLIGATION_ID]);
@@ -1758,8 +1756,6 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         polls: Arc::clone(&plugin_polls),
     })
     .unwrap();
-    app.set_runner(|_| Ok(nara::app::AppExit::Success)).unwrap();
-
     let failure = admit_candidate_with(
         app.seal().unwrap(),
         obligations,
@@ -1767,7 +1763,12 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
     )
     .unwrap_err();
 
-    assert_eq!(failure.error(), RuntimeAdmissionError::RawRunnerInstalled);
+    assert_eq!(
+        failure.error(),
+        RuntimeAdmissionError::Obligation(nara::app::RuntimeObligationLedgerError::Duplicate {
+            id: PLUGIN_PARTICIPANT_ID,
+        })
+    );
     let retained_route_reservations = reserve_remaining_runtime_routes();
     assert_eq!(retained_route_reservations.len() + 1, route_capacity);
     assert_eq!(plugin_begins.load(Ordering::SeqCst), 0);
@@ -1805,6 +1806,49 @@ fn admission_failure_retires_plugin_then_host_and_retries_only_pending_owner() {
         .expect("truthful admission-failure retirement releases its route");
     drop(released_route);
     drop(retained_route_reservations);
+}
+
+#[test]
+fn ordinary_start_validator_unwind_retains_host_close_obligations() {
+    let retained_before = runtime_quarantine_status().current_thread_retained();
+    let begins = Arc::new(AtomicUsize::new(0));
+    let drops = Arc::new(AtomicUsize::new(0));
+    let mut obligations = RuntimeObligationLedger::new();
+    obligations
+        .register(
+            RuntimeCloseParticipantId::new("nara.test.validator-unwind-host"),
+            RetainedCloseParticipant {
+                released: Arc::new(AtomicBool::new(true)),
+                begins: Arc::clone(&begins),
+                polls: Arc::new(AtomicUsize::new(0)),
+                drops: Arc::clone(&drops),
+            },
+        )
+        .unwrap();
+    let mut app = App::new();
+    app.__install_runtime_authority_validator(
+        PluginId::new("nara.test.validator-unwind"),
+        Arc::new(|_, _| panic!("injected seal validator unwind")),
+    )
+    .unwrap();
+
+    let unwound = catch_unwind(AssertUnwindSafe(|| {
+        let _ =
+            RuntimeInstance::start_with_options(app, obligations, RuntimeClosePolicy::default());
+    }));
+    assert!(unwound.is_err());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while runtime_quarantine_status().current_thread_retained() > retained_before
+        && Instant::now() < deadline
+    {
+        let _ = drive_runtime_quarantine();
+    }
+    assert_eq!(
+        runtime_quarantine_status().current_thread_retained(),
+        retained_before
+    );
+    assert_eq!(begins.load(Ordering::SeqCst), 1);
+    assert_eq!(drops.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -1927,62 +1971,6 @@ fn admission_panic_retains_its_owner_and_route_in_process_quarantine() {
         .expect("reaping the admission panic owner releases its route");
     drop(released_route);
     drop(retained_route_reservations);
-}
-
-#[test]
-fn dropping_an_admission_failure_transfers_its_owner_to_quarantine() {
-    let quarantine_before = runtime_quarantine_status();
-    let released = Arc::new(AtomicBool::new(false));
-    let drops = Arc::new(AtomicUsize::new(0));
-    let mut obligations = RuntimeObligationLedger::new();
-    obligations
-        .register(
-            RuntimeCloseParticipantId::new("nara.test.dropped-admission-owner"),
-            RetainedCloseParticipant {
-                released: released.clone(),
-                begins: Arc::new(AtomicUsize::new(0)),
-                polls: Arc::new(AtomicUsize::new(0)),
-                drops: drops.clone(),
-            },
-        )
-        .unwrap();
-    let mut app = configured_app(FixedTime::default());
-    app.set_runner(|_| Ok(nara::app::AppExit::Success)).unwrap();
-    let failure = admit_candidate_with(
-        app.seal().unwrap(),
-        obligations,
-        RuntimeClosePolicy::new(Duration::ZERO),
-    )
-    .unwrap_err();
-
-    drop(failure);
-    assert_eq!(drops.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        runtime_quarantine_status().process_retained(),
-        quarantine_before.process_retained() + 1
-    );
-
-    released.store(true, Ordering::SeqCst);
-    let reaped = drive_runtime_quarantine();
-    assert_eq!(
-        reaped.process_retained(),
-        quarantine_before.process_retained()
-    );
-    assert_eq!(drops.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn already_started_app_admission_returns_an_owned_retirement_path() {
-    let mut app = configured_app(FixedTime::default());
-    app.run_once(Duration::ZERO).unwrap();
-    let failure = admit_candidate(app.seal().unwrap()).unwrap_err();
-
-    assert_eq!(failure.error(), RuntimeAdmissionError::AppStarted);
-    let mut retirement = failure.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
 }
 
 #[test]
@@ -2376,9 +2364,6 @@ struct TestSystemError;
 #[derive(Event)]
 struct RuntimeScopeFaultEvent;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
-struct RawAdmissionSchedule;
-
 #[derive(Default, Resource)]
 struct RawObserverCount(usize);
 
@@ -2547,30 +2532,9 @@ fn app_observers_begin_at_the_first_execution_boundary() {
     app.world_mut().unwrap().trigger(RuntimeScopeFaultEvent);
     assert_eq!(app.world().resource::<RawObserverCount>().0, 0);
 
-    app.run_once(Duration::ZERO).unwrap();
-
-    assert_eq!(app.world().resource::<RawObserverCount>().0, 1);
-}
-
-#[test]
-fn raw_schedule_execution_prevents_later_managed_admission() {
-    let mut app = App::new();
-    app.insert_resource(RawObserverCount::default())
-        .unwrap()
-        .add_observer(count_raw_observer)
-        .unwrap()
-        .init_schedule(RawAdmissionSchedule)
-        .unwrap();
-
-    app.run_schedule(RawAdmissionSchedule).unwrap();
-    let failure = admit_candidate(app.seal().unwrap()).unwrap_err();
-
-    assert_eq!(failure.error(), RuntimeAdmissionError::AppStarted);
-    let mut retirement = failure.begin_retirement();
-    assert_eq!(
-        retirement.drive_retirement(),
-        RuntimeCandidateRetirementState::Retired
-    );
+    let runtime = RuntimeInstance::start(app).unwrap();
+    assert_eq!(runtime.world().resource::<RawObserverCount>().0, 1);
+    runtime.finish().unwrap();
 }
 
 fn panic_system() {

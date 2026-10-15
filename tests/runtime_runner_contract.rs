@@ -134,11 +134,14 @@ fn renamed_root_runtime_2d_tree_excludes_presentation_crates_and_features() {
         );
     }
     for forbidden in [
-        "nara_render",
         "nara_sprite_render",
         "nara_render_wgpu",
         "nara_ui_render",
         "nara_tooling",
+        "nara_winit",
+        "wgpu",
+        "winit",
+        "egui",
     ] {
         assert!(
             !packages.contains(forbidden),

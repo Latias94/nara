@@ -1474,17 +1474,23 @@ fn diagnostics_plugin_installs_headless_resources_and_frame_retention() {
             0,
         );
 
-    app.update().unwrap();
-    assert_eq!(app.world().resource::<RuntimeDiagnostics>().len(), 1);
-    assert_eq!(app.world().resource::<RuntimePressureSnapshots>().len(), 1);
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    assert_eq!(runtime.world().resource::<RuntimeDiagnostics>().len(), 1);
+    assert_eq!(
+        runtime.world().resource::<RuntimePressureSnapshots>().len(),
+        1
+    );
 
-    app.update().unwrap();
-    assert!(app.world().resource::<RuntimeDiagnostics>().is_empty());
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    assert!(runtime.world().resource::<RuntimeDiagnostics>().is_empty());
     assert!(
-        app.world()
+        runtime
+            .world()
             .resource::<RuntimePressureSnapshots>()
             .is_empty()
     );
+    runtime.finish().unwrap();
 }
 
 #[derive(Default, Resource)]
@@ -1529,19 +1535,21 @@ fn first_stage_retention_runs_before_declared_producers() {
             0,
         );
 
-    app.update().unwrap();
-    app.update().unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
 
-    let probe = app.world().resource::<FirstStagePublishProbe>();
+    let probe = runtime.world().resource::<FirstStagePublishProbe>();
     let outcome = probe.outcome.expect("frame two producer should publish");
     assert!(outcome.is_published());
     assert_eq!(outcome.evicted_entries(), 0);
-    let diagnostics = app.world().resource::<RuntimeDiagnostics>();
+    let diagnostics = runtime.world().resource::<RuntimeDiagnostics>();
     assert_eq!(diagnostics.stats().expired_entries(), 1);
     assert_eq!(
         diagnostics.iter().next().unwrap().code().as_str(),
         "runtime.new"
     );
+    runtime.finish().unwrap();
 }
 
 #[derive(Clone)]

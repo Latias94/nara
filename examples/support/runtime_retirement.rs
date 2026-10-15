@@ -1,16 +1,11 @@
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
-    time::{Duration, Instant},
 };
-
-const RUNTIME_RETIREMENT_POLL_INTERVAL: Duration = Duration::from_millis(1);
-const RUNTIME_RETIREMENT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug)]
 pub(crate) struct RuntimeRetirementFailure {
     prior: Option<nara::app::AppRunError>,
-    evidence: nara::app::RuntimeCloseEvidence,
     retirement: nara::app::RuntimeRetirement,
 }
 
@@ -22,7 +17,7 @@ impl RuntimeRetirementFailure {
 
     #[cfg(test)]
     fn close_evidence(&self) -> &nara::app::RuntimeCloseEvidence {
-        &self.evidence
+        self.retirement.close_evidence()
     }
 }
 
@@ -35,7 +30,7 @@ impl Display for RuntimeRetirementFailure {
             formatter,
             "runtime retirement remained {:?}; close evidence={:?}",
             self.retirement.retirement_state(),
-            self.evidence.causes()
+            self.retirement.close_evidence().causes()
         )
     }
 }
@@ -45,6 +40,7 @@ impl Error for RuntimeRetirementFailure {
         self.prior
             .as_ref()
             .map(|error| error as &(dyn Error + 'static))
+            .or(Some(&self.retirement))
     }
 }
 
@@ -52,62 +48,30 @@ pub(crate) fn finish_runtime_after_winit(
     run_result: Result<nara::app::AppExit, nara::app::AppRunError>,
     runtime: nara::app::RuntimeInstance,
 ) -> Result<(), Box<dyn Error>> {
-    finish_runtime_after_winit_with_timeout(run_result, runtime, RUNTIME_RETIREMENT_TIMEOUT)
-}
-
-fn finish_runtime_after_winit_with_timeout(
-    run_result: Result<nara::app::AppExit, nara::app::AppRunError>,
-    runtime: nara::app::RuntimeInstance,
-    timeout: Duration,
-) -> Result<(), Box<dyn Error>> {
-    if runtime.state() == nara::app::RuntimeState::Stopped {
-        return run_result
-            .map(|_| ())
-            .map_err(|error| Box::new(error) as Box<dyn Error>);
-    }
-
     let prior = run_result.err();
-    let mut retirement = runtime.begin_retirement();
-    let deadline = Instant::now() + timeout;
-    while retirement.retirement_state() != nara::app::RuntimeCandidateRetirementState::Retired
-        && Instant::now() < deadline
-    {
-        retirement.drive_retirement();
-        if retirement.retirement_state() == nara::app::RuntimeCandidateRetirementState::Retired {
-            break;
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        std::thread::park_timeout(RUNTIME_RETIREMENT_POLL_INTERVAL.min(remaining));
-    }
-
-    if retirement.retirement_state() == nara::app::RuntimeCandidateRetirementState::Retired {
-        return match prior {
+    match runtime.finish() {
+        Ok(_) => match prior {
             Some(error) => Err(Box::new(error)),
             None => Ok(()),
-        };
+        },
+        Err(retirement) => Err(Box::new(RuntimeRetirementFailure { prior, retirement })),
     }
-
-    let evidence = retirement.close_evidence().clone();
-    Err(Box::new(RuntimeRetirementFailure {
-        prior,
-        evidence,
-        retirement,
-    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use nara::app::{
-        App, RuntimeAdmissionReservation, RuntimeCloseCause, RuntimeCloseContext,
-        RuntimeCloseParticipant, RuntimeCloseParticipantError, RuntimeCloseParticipantId,
-        RuntimeClosePolicy, RuntimeCloseProgress, RuntimeControl, RuntimeControlRequestResult,
-        RuntimeObligationLedger, RuntimeState,
+        App, RuntimeCloseCause, RuntimeCloseContext, RuntimeCloseParticipant,
+        RuntimeCloseParticipantError, RuntimeCloseParticipantId, RuntimeClosePolicy,
+        RuntimeCloseProgress, RuntimeControl, RuntimeControlRequestResult, RuntimeObligationLedger,
+        RuntimeState,
     };
     use std::sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     };
+    use std::time::Duration;
 
     struct ReleasedCloseParticipant {
         released: Arc<AtomicBool>,
@@ -139,11 +103,8 @@ mod tests {
         obligations: RuntimeObligationLedger,
         close_policy: RuntimeClosePolicy,
     ) -> nara::app::RuntimeInstance {
-        let candidate = RuntimeAdmissionReservation::try_acquire()
+        nara::app::RuntimeInstance::start_with_options(App::new(), obligations, close_policy)
             .unwrap()
-            .admit(App::new().seal().unwrap(), obligations, close_policy)
-            .unwrap();
-        candidate.complete_startup().unwrap().promote()
     }
 
     #[test]
@@ -153,11 +114,7 @@ mod tests {
             RuntimeClosePolicy::default(),
         );
 
-        let result = finish_runtime_after_winit_with_timeout(
-            Ok(nara::app::AppExit::Success),
-            runtime,
-            Duration::from_millis(10),
-        );
+        let result = finish_runtime_after_winit(Ok(nara::app::AppExit::Success), runtime);
 
         assert!(result.is_ok());
     }
@@ -170,12 +127,7 @@ mod tests {
         );
         let prior = nara::app::AppRunError::runner("injected runner failure");
 
-        let error = finish_runtime_after_winit_with_timeout(
-            Err(prior.clone()),
-            runtime,
-            Duration::from_millis(10),
-        )
-        .unwrap_err();
+        let error = finish_runtime_after_winit(Err(prior.clone()), runtime).unwrap_err();
 
         assert_eq!(error.downcast_ref::<nara::app::AppRunError>(), Some(&prior));
     }
@@ -196,15 +148,12 @@ mod tests {
             .unwrap();
         let runtime = start_runtime(obligations, RuntimeClosePolicy::new(Duration::ZERO));
 
-        let mut error = finish_runtime_after_winit_with_timeout(
-            Ok(nara::app::AppExit::Success),
-            runtime,
-            Duration::from_millis(10),
-        )
-        .unwrap_err();
+        let prior = nara::app::AppRunError::runner("runner and close both failed");
+        let mut error = finish_runtime_after_winit(Err(prior.clone()), runtime).unwrap_err();
         let failure = error
             .downcast_mut::<RuntimeRetirementFailure>()
             .expect("incomplete retirement keeps the typed owner error");
+        assert_eq!(failure.prior.as_ref(), Some(&prior));
 
         assert_eq!(
             failure.retirement_state(),
@@ -226,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_retirement_incomplete_is_retried_within_the_remaining_budget() {
+    fn initial_retirement_incomplete_is_retried_once_with_the_runtime_policy() {
         let released = Arc::new(AtomicBool::new(false));
         let polls = Arc::new(AtomicUsize::new(0));
         let mut obligations = RuntimeObligationLedger::new();
@@ -252,11 +201,7 @@ mod tests {
         let polls_before_retry = polls.load(Ordering::SeqCst);
         released.store(true, Ordering::SeqCst);
 
-        let result = finish_runtime_after_winit_with_timeout(
-            Ok(nara::app::AppExit::Success),
-            runtime,
-            Duration::from_millis(10),
-        );
+        let result = finish_runtime_after_winit(Ok(nara::app::AppExit::Success), runtime);
 
         assert!(result.is_ok());
         assert!(polls.load(Ordering::SeqCst) > polls_before_retry);

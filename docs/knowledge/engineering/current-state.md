@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "a3a1362d3dfe2fa4c940c4c79f8aa4ca97767fb0fce856ada4e7fcfd98e046b4"
+source_fingerprint: "286adfae8d25b7b5e6b3468b8ff8c910fb5f52db86ce014d5bc4f2bacac5be59"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "a3a1362d3dfe2fa4c940c4c79f8aa4ca97767fb0fce856ada4e7fcfd98e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `a3a1362d3dfe2fa4c940c4c79f8aa4ca97767fb0fce856ada4e7fcfd98e046b4`
-- Immutable records: 568
+- Source fingerprint: `286adfae8d25b7b5e6b3468b8ff8c910fb5f52db86ce014d5bc4f2bacac5be59`
+- Immutable records: 579
 - Active lane heads: 1
 
 # Active Registrations
@@ -28,7 +28,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
-- [Foundation U4 verified; U5 removes duplicate execution](registry/2026-10/2026-10-15T103700Z-nara-2d-foundation-contracts-codex-root-f8cc88aac8214e40a7f24ae09f14f000.md): `active` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
+- [Foundation U5 same-owner execution and frozen driver operations under verification](registry/2026-10/2026-10-15T112650Z-nara-2d-foundation-contracts-codex-root-e88d1a2cbabc408bbff02a2d7c0d1442.md): `active` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -41,18 +41,18 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Foundation U5 independent consumers and native examples verified](verification/2026-10/2026-10-15T120302Z-foundation-u5-independent-consumers-and-native-examples-verified-dd39a41fb70c462bacd772d8fd26b752.md) - Execution consumers and static checks pass in the integrated worktree; overlapping prior work stays uncommitted.
+- **Session Handoff**: [Foundation U5 libraries and independent runtime consumers pass; examples and precise commit remain](sessions/2026-10/2026-10-15T114700Z-foundation-u5-libraries-and-independent-runtime-consumers-pass-examples-and-precise-commit-remain-d72c30286d6649cf990f5d302b3e33ed.md) - Session Handoff for Foundation U5 libraries and independent runtime consumers pass; examples and precise commit remain.
+- **Subagent Finding**: [Compiled presentation must not impose a target on a headless runtime](subagents/2026-10/2026-10-15T114556Z-compiled-presentation-must-not-impose-a-target-on-a-headless-runtime-476fd15790694f1bb3a9818e055ff720.md) - Subagent Finding for Compiled presentation must not impose a target on a headless runtime.
+- **Verification Evidence**: [Foundation U5 core ownership privacy and incremental close verification](verification/2026-10/2026-10-15T114139Z-foundation-u5-core-ownership-privacy-and-incremental-close-verification-7e531ba1a4644ad9a36ccf7876fd2e61.md) - Core and library migrations pass; independent compiled consumers and examples still gate U5 completion.
+- **Work Progress**: [Foundation U5 unifies ownership and freezes coordinated driver operations](progress/2026-10/2026-10-15T112250Z-foundation-u5-unifies-ownership-and-freezes-coordinated-driver-operations-ae018c52e4384e059610f77afb30115b.md) - Work Progress for Foundation U5 unifies ownership and freezes coordinated driver operations.
+- **Subagent Finding**: [Runtime driver transactions must be configured before execution](subagents/2026-10/2026-10-15T111906Z-runtime-driver-transactions-must-be-configured-before-execution-c8b70859ecb1443bb070b7c1bb4cb01b.md) - Subagent Finding for Runtime driver transactions must be configured before execution.
+- **Subagent Finding**: [Supervised Play close retry and background preparation ownership gaps](subagents/2026-10/2026-10-15T110728Z-supervised-play-close-retry-and-background-preparation-ownership-gaps-df85ee87b18f42d88e257c480b5f83fb.md) - Subagent Finding for Supervised Play close retry and background preparation ownership gaps.
+- **Session Handoff**: [Foundation U5 raw execution removed with unwind regression pending](sessions/2026-10/2026-10-15T105214Z-foundation-u5-raw-execution-removed-with-unwind-regression-pending-a723ad2ee28842d1bbfdaba6bb015333.md) - Continue the active U1-U13 goal from the shared dirty worktree; U4 is verified and U5 consumer validation plus one review fix remain in flight.
+- **Subagent Finding**: [Host close obligations must enter the runtime owner before callbacks](subagents/2026-10/2026-10-15T104337Z-host-close-obligations-must-enter-the-runtime-owner-before-callbacks-51473f488c09410c8db5bb9f5579070a.md) - U5 review found two unwind windows in ordinary startup and staged admission; corrections and red regressions are pending.
+- **Subagent Finding**: [Reuse existing product contribution and project-owned tooling for U6](subagents/2026-10/2026-10-15T104337Z-reuse-existing-product-contribution-and-project-owned-tooling-for-u6-040afbb34ab24947b5f1678d25d3e129.md) - The existing typed contribution and runtime plan already provide composition authority; the remaining obstacle is the empty-recipe CLI bootstrap.
 - **Verification Evidence**: [Foundation U4 Windows and native Linux publication cleanup](verification/2026-10/2026-10-15T102927Z-foundation-u4-windows-and-native-linux-publication-cleanup-4f79a46cf5c4455a8700d9090c13e386.md) - Instance preflight and retained cleanup pass on Windows and native WSL2 Linux; real repair CLI failure exit is verified.
 - **Work Progress**: [Foundation U4 file-effect ownership implemented and U5 execution migration started](progress/2026-10/2026-10-15T101450Z-foundation-u4-file-effect-ownership-implemented-and-u5-execution-migration-started-f66566f6e82242569ad63e218f56ad7c.md) - Windows filesystem and Host cleanup regressions pass; CLI and native Linux verification continue while two isolated U5 source slices are implemented.
-- **Verification Evidence**: [Foundation U3 published image availability and identity revocation](verification/2026-10/2026-10-15T094134Z-foundation-u3-published-image-availability-and-identity-revocation-868d1a8a5a8e4218b4d52b2d02f5dc7b.md) - Retain usable publications through ordinary failures, revoke invalid identity and settings authority, and exercise the real desktop WGPU path.
-- **Subagent Finding**: [Editor task pool must transfer into the single runtime close owner](subagents/2026-10/2026-10-15T093553Z-editor-task-pool-must-transfer-into-the-single-runtime-close-owner-641be150d42f4ec2b9f408d5cd063beb.md) - U5 must migrate the existing RuntimeOwner state and editor preinserted TaskPools, rather than wrap the executable App or retain a second task-close authority.
-- **Verification Evidence**: [Foundation U2 structural baseline and membership invalidation](verification/2026-10/2026-10-15T093011Z-foundation-u2-structural-baseline-and-membership-invalidation-7fee7000828c4c1e9146bca1233008b7.md) - Two regressions observed before production changes; 149 hierarchy/scene/transform library tests and 23 root integration/privacy tests pass after the ownership correction.
-- **Subagent Finding**: [Publication failure must retain file ownership through session close](subagents/2026-10/2026-10-15T092726Z-publication-failure-must-retain-file-ownership-through-session-close-a71b8a878c2a41ebaecc4836ecb9b2ba.md) - U4 source trace shows filesystem failure ownership must propagate through Scene, Prefab, image metadata, repair, retry, and close.
-- **Session Handoff**: [2D foundation execution baseline and ownership](sessions/2026-10/2026-10-15T091614Z-2d-foundation-execution-baseline-and-ownership-0cd8accf28254acda193b1d6e18ac533.md) - Initial execution inventory, commit exclusions, plan authority, and architecture follow-up policy.
-- **Verification Evidence**: [SPL-U2 bounded desktop build and immutable generation verification](verification/2026-08/2026-08-21T101853Z-spl-u2-bounded-desktop-build-and-generation-e0c5ea801f5e432484dfc710ae3ce00b.md) - Verifies exact Cargo metadata and artifact selection, bounded build cancellation, and immutable Editor-owned executable generations.
-- **Verification Evidence**: [SPL-U1 private supervised process substrate verification](verification/2026-08/2026-08-21T090132Z-spl-u1-private-supervised-process-substrate-9b5f75ac859c466ba7f94deb74851778.md) - Verifies the private Windows process-tree owner, bounded cancellable output, spawn authority allowlist, cleanup receipt, and the supported Linux compile boundary.
-- **Verification Evidence**: [SPL-U0 supervised Play contract and launch-context verification](verification/2026-08/2026-08-21T060000Z-spl-u0-supervised-play-contract.md) - Verifies the versioned execution declaration, capability-free source receipt, and explicit project-root contract before build or process effects.
-- **Verification Evidence**: [EIR-U6 standalone image import product closure](verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md) - Verifies the one-window Editor image import trajectory, safe last-good failure, Runtime closure exclusion, and final EIR lane closure.
-- **Verification Evidence**: [EIR-U5 same-generation authoring image publication and referenced hydration](verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md) - Verifies atomic image choices and prepared resources, referenced-only hydration, generic Save/Reopen, retirement, and exact source-proof boundaries.
 
 # Integration Notes
 

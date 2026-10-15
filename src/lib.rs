@@ -167,7 +167,8 @@ pub mod prelude {
     pub use nara_app::{
         AddPluginsError, App, AppExit, AppRunError, CoreStage, FixedCatchUpPolicy, FixedTime,
         FixedUpdateSet, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginGroup,
-        PluginId, RealTime, RuntimeTimeSettings, StartupStage, VirtualTime,
+        PluginId, RealTime, RuntimeInstance, RuntimeStartFailure, RuntimeState,
+        RuntimeTimeSettings, StartupStage, VirtualTime,
     };
     pub use nara_asset::{
         Asset, AssetId, AssetPath, AssetRef, AssetServer, Assets, Handle, StableAssetId,
@@ -249,16 +250,15 @@ pub mod prelude {
 pub mod advanced_prelude {
     pub use crate::prelude::*;
     pub use nara_app::{
-        AppExitRequests, AppFrameOutcome, AppScheduleRunError, EditedPluginGroup, FixedTimeError,
-        PluginCapability, PluginCategory, PluginConfigurationFingerprint, PluginDeclaration,
-        PluginDefinition, PluginDefinitionId, PluginDefinitionKey, PluginFailure,
-        PluginFailureReport, PluginGroupBuilder, PluginGroupId, PluginHook, PluginHookMutation,
-        PluginId, PluginInstantiationError, PluginLifecycleState, PluginPlan, PluginPlanEntry,
-        PluginPlanError, PluginPlanFingerprint, PluginPrepareError, PluginPrepareFailure,
-        PluginProductCapability, PluginSchemaProviderId, PluginServiceId, PluginShutdownContext,
-        PluginShutdownError, PluginShutdownObligationId, PluginSlot, PluginSlotId,
-        PluginSlotPresence, RenderTime, ResolvedPluginGroup, RuntimeFrameStatus, SealedApp,
-        TimeFrameError, TimeFrameResource, TimeSettingsError,
+        AppExitRequests, AppFrameOutcome, EditedPluginGroup, FixedTimeError, PluginCategory,
+        PluginConfigurationFingerprint, PluginDeclaration, PluginDefinition, PluginDefinitionId,
+        PluginDefinitionKey, PluginFailure, PluginFailureReport, PluginGroupBuilder, PluginGroupId,
+        PluginHook, PluginHookMutation, PluginId, PluginInstantiationError, PluginLifecycleState,
+        PluginPlan, PluginPlanEntry, PluginPlanError, PluginPlanFingerprint, PluginPrepareError,
+        PluginPrepareFailure, PluginProductCapability, PluginSchemaProviderId,
+        PluginShutdownContext, PluginShutdownError, PluginShutdownObligationId, PluginSlot,
+        PluginSlotId, PluginSlotPresence, RenderTime, ResolvedPluginGroup, RuntimeFrameStatus,
+        SealedApp, TimeFrameError, TimeFrameResource, TimeSettingsError,
     };
     pub use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetDatabaseError, AssetDependencyGraph, AssetError,
@@ -573,7 +573,8 @@ mod tests {
             ))
             .unwrap();
 
-        app.run_once(std::time::Duration::ZERO).unwrap();
+        let mut app = nara_app::RuntimeInstance::start(app).unwrap();
+        app.drive(std::time::Duration::ZERO).unwrap();
 
         assert!(
             !app.world()
@@ -593,7 +594,7 @@ mod tests {
             1
         );
 
-        app.run_once(nara_app::FixedTime::DEFAULT_TIMESTEP).unwrap();
+        app.drive(nara_app::FixedTime::DEFAULT_TIMESTEP).unwrap();
 
         assert_eq!(
             app.world().resource::<ObservedServerCommands>().0[0].1[0]
@@ -660,7 +661,8 @@ mod tests {
             }
         }
 
-        app.run_once(nara_app::FixedTime::DEFAULT_TIMESTEP * 2)
+        let mut app = nara_app::RuntimeInstance::start(app).unwrap();
+        app.drive(nara_app::FixedTime::DEFAULT_TIMESTEP * 2)
             .unwrap();
         assert!(!app.world().contains_resource::<nara_input::PointerState>());
         assert!(
@@ -786,7 +788,8 @@ mod tests {
             }
         });
 
-        app.run_once(std::time::Duration::ZERO).unwrap();
+        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+        runtime.drive(std::time::Duration::ZERO).unwrap();
 
         watchdog_cancel_sender.send(()).unwrap();
         release_sender.send(()).unwrap();
