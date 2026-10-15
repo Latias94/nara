@@ -8,20 +8,23 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The active [2D foundation contracts](../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
-   plan is the sole active implementation lane, registered by
-   [record `63e79d44bfd84519a1f9a5ce17000c06`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-nara-2d-foundation-contracts-codex-root-63e79d44bfd84519a1f9a5ce17000c06.md).
+3. The completed [2D foundation contracts](../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
+   plan closes its finite U1-U13 implementation through
+   [registration `88b6faf455454957bc7e0f79e76b9850`](../knowledge/engineering/registry/2026-10/2026-10-15T202335Z-nara-2d-foundation-contracts-codex-root-88b6faf455454957bc7e0f79e76b9850.md)
+   and [acceptance evidence `b09676d3fa354aa899a795a5dfe9d2ba`](../knowledge/engineering/verification/2026-10/2026-10-15T202228Z-foundation-u1-u13-acceptance-closes-with-actual-consumers-and-completed-full-review-b09676d3fa354aa899a795a5dfe9d2ba.md).
    [ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) owns its focused contract
-   refinements. Acceptance is separate from implementation evidence.
+   refinements. The result is verified in the integrated worktree, with original overlapping
+   changes preserved. No successor lane is automatically active. Full tracked review and
+   platform/committed-HEAD limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
-   Its last verified boundary remains registered by
+   Its last predecessor boundary remains registered by
    [record `079f447a577b42929a258328ab95b1fe`](../knowledge/engineering/registry/2026-08/2026-08-21T101853Z-standalone-supervised-play-v1-codex-root-079f447a577b42929a258328ab95b1fe.md).
-   SPL-U0 accepts [ADR 0116](adr/0116-standalone-supervised-editor-play.md), narrows OQ-039 to one
-   local external-window desktop placement, and must land the capability-free admission contract
-   before build or process effects begin. SPL-U0 through SPL-U2 are verified through `ab211bc`;
-   child READY, ordinary Editor lifecycle effects, and the final product trajectories are carried
-   into foundation U12 with existing working changes preserved. SPL is not claimed complete.
+   SPL-U0 through SPL-U2 remain verified through `ab211bc` under
+   [ADR 0116](adr/0116-standalone-supervised-editor-play.md). Foundation U12 now verifies child
+   READY, ordinary lifecycle effects, saved-generation recovery and physical cleanup on Windows;
+   complete native Linux/macOS release trajectories remain unverified. This preserves the
+   historical SPL checkpoint instead of retroactively changing its evidence.
    Completed predecessor plans remain immutable evidence.
    The completed [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
    plan closes at `ec64e4c` with
@@ -47,7 +50,7 @@ an index, not another source of architecture decisions.
    [verification `b2dfa722baf349b9a75cc324086024ac`](../knowledge/engineering/verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md).
    EIR-U6 proves the one-window standalone product trajectory, safe last-good failure, and exact
    Runtime closure exclusion at `ec64e4c`. EIR-U0 through EIR-U6 are complete; no unrelated Editor
-   successor is active automatically beyond the explicitly registered SPL lane.
+   successor is automatically active; current foundation closure is recorded above.
    The completed
    [Editor Project Browser and Source Index v1](../plans/2026-08-19-001-feat-editor-project-browser-and-source-index-v1-plan.md)
    plan closes at `1a832df` with
