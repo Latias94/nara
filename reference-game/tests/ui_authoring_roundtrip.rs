@@ -23,7 +23,6 @@ use ui_product_fixture::{
 };
 
 const RETRY_BUTTON: &str = "retry-button";
-const EXPANDED_RETRY_BUTTON: &str = "reference-ui/retry-button";
 const UI_NODE: &str = "nara.ui.UiNode";
 const UI_BUTTON: &str = "nara.ui.UiButton";
 const EDITED_RETRY_WIDTH: f64 = 216.0;
@@ -90,10 +89,22 @@ fn canonical_prefab_edit_reaches_reloaded_runtime_adapter_without_rust_changes()
         retry_width(&source_prefab.document().entities, RETRY_BUTTON),
         EDITED_RETRY_WIDTH
     );
+    let retry_id = reloaded
+        .snapshot
+        .expanded_startup_scene_provenance()
+        .iter()
+        .find_map(|(id, source)| {
+            (source.source_entity_id().as_str() == RETRY_BUTTON
+                && source.projection_path().is_some_and(|path| {
+                    path.root_anchor().as_str() == "reference-ui" && path.source_chain().len() == 1
+                }))
+            .then_some(id)
+        })
+        .expect("the reloaded retry projection must retain its source identity");
     assert_eq!(
         retry_width(
             &reloaded.snapshot.expanded_startup_scene().entities,
-            EXPANDED_RETRY_BUTTON,
+            retry_id.as_str(),
         ),
         EDITED_RETRY_WIDTH
     );

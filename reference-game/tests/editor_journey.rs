@@ -13,9 +13,10 @@ use std::{
 
 use nara::{
     app::{CoreStage, FixedTime, Plugin, PluginCategory, PluginDeclaration, PluginError, PluginId},
+    ecs::With,
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
     gameplay::GameplayCommandQueue,
-    prelude::{App, Query, Res, ResMut, Resource},
+    prelude::{App, Parent, Query, Res, ResMut, Resource},
     project_host::{EditorProjectSession, TrustedCompiledEditorProjectIntent},
     reflect::{ComponentFieldId, ComponentSchemaVersion, ComponentTypeId, ComponentValue},
     scene::{SceneEntitySource, ScenePatchDocument, ScenePatchOperation},
@@ -29,7 +30,8 @@ use nara::{
     transform::Transform2d,
 };
 use nara_reference_game::{
-    REFERENCE_WAVE_PLUGIN_ID, WaveRunGeneration, WaveSnapshot, retry_command, wave_recipe,
+    PlayerRole, REFERENCE_WAVE_PLUGIN_ID, WaveRunGeneration, WaveSnapshot, Weapon, retry_command,
+    wave_recipe,
 };
 
 const EDITED_WEAPON_X: f64 = 2.75;
@@ -215,21 +217,23 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
     ));
     let closed_frame = editor.drive_editor_frame(Duration::ZERO);
     assert!(closed_frame.workspace().scenes.is_empty());
-    assert!(matches!(
-        dispatch_editor_action(
-            &mut editor,
-            &closed_frame,
-            EditorAction::Persistence(EditorPersistenceAction::Reopen {
-                target: closed_frame.reopen_target(),
-            }),
-        ),
-        EditorActionOutcome::Persistence(EditorPersistenceRequestResult::Accepted)
-    ));
-    let reopened_frame = editor.drive_editor_frame(Duration::ZERO);
-    let reopened_document_id = match reopened_frame.persistence().result() {
-        Some(EditorPersistenceResult::Opened { document, .. }) => document,
-        other => panic!("expected the saved reference scene to reopen, got {other:?}"),
-    };
+    assert_eq!(
+        closed_frame.reopen_target(),
+        nara::tooling::EditorReopenTarget::Unavailable
+    );
+    close_editor(&mut editor);
+    drop(editor);
+
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new().with_recipe(wave_recipe().unwrap()),
+    )
+    .expect("a new Editor session should reopen the saved reference scene");
+    let reopened_frame = editor.current_frame();
+    let reopened_document_id = reopened_frame
+        .workspace()
+        .active_document
+        .expect("the saved startup scene should be active after reopening");
     assert!(
         !reopened_frame
             .workspace()
@@ -271,6 +275,24 @@ fn unsaved_editor_source_survives_retry_then_save_close_and_reopen() {
         .and_then(ComponentValue::as_f64)
         .expect("the reopened Inspector should expose the saved weapon translation");
     assert_eq!(field, EDITED_WEAPON_X);
+    close_editor(&mut editor);
+}
+
+fn close_editor(editor: &mut EditorProjectSession) {
+    let deadline = Instant::now() + EDITOR_JOURNEY_DEADLINE;
+    loop {
+        if matches!(
+            editor.advance_close(),
+            nara::project_host::EditorProjectCloseProgress::Complete(_)
+        ) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the Editor journey must physically close"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[derive(Debug, Default)]
@@ -328,8 +350,8 @@ fn observe_editor_journey(
     fixed_time: Res<FixedTime>,
     generation: Res<WaveRunGeneration>,
     snapshot: Res<WaveSnapshot>,
-    sources: Query<&SceneEntitySource>,
-    mut transforms: Query<(&SceneEntitySource, &mut Transform2d)>,
+    sources: Query<(&SceneEntitySource, Option<&PlayerRole>)>,
+    mut transforms: Query<(&SceneEntitySource, &Parent, &mut Transform2d), With<Weapon>>,
     mut commands: ResMut<GameplayCommandQueue>,
     mut probe: ResMut<EditorJourneyProbe>,
 ) {
@@ -337,8 +359,11 @@ fn observe_editor_journey(
     let mut weapon_count = 0;
     let mut observed_weapon = None;
     let mut runtime_weapon_x = None;
-    for (source, mut transform) in transforms.iter_mut() {
-        if source.entity_id.as_str() != "player-weapon" {
+    for (source, parent, mut transform) in transforms.iter_mut() {
+        if !sources
+            .get(parent.parent())
+            .is_ok_and(|(player, role)| role.is_some() && player.instance_id == source.instance_id)
+        {
             continue;
         }
         weapon_count += 1;
@@ -395,7 +420,7 @@ fn observe_editor_journey(
             .map(|initial_instance_id| {
                 sources
                     .iter()
-                    .filter(|source| source.instance_id.get() == initial_instance_id)
+                    .filter(|(source, _)| source.instance_id.get() == initial_instance_id)
                     .count()
             })
             .unwrap_or(0);

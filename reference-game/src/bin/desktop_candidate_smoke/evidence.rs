@@ -105,7 +105,7 @@ impl ArmedCandidate {
             app_frame_index: wgpu.app_frame_index(),
             render_transaction_frame_index: wgpu.render_transaction_frame_index(),
         };
-        let Some(ui) = ReferenceUiObservation::from_presented_observation(&presented) else {
+        let Some(ui) = ReferenceUiObservation::from_presented_observation(world, &presented) else {
             return Ok(None);
         };
 

@@ -17,12 +17,13 @@ use nara::{
     core::Color,
     ecs::Entity,
     hierarchy::Parent,
+    identity::{EntityLookup, RuntimeEntityReference, WorldIdentityDomain},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     material::SamplerDescriptor,
-    prelude::{FixedTime, Sprite, Vec2, World},
+    prelude::{Component, FixedTime, Sprite, Vec2, World},
     project_host::ProjectContentLoader,
     scene::SceneEntitySource,
-    sprite_render::{ExtractedSprites, TextureUvRect},
+    sprite_render::__private::{ExtractedSprites, TextureUvRect},
     transform::{GlobalTransform2d, Transform2d},
     ui::{UiLayer, UiSurfaceId, latest_ui_frame},
 };
@@ -154,8 +155,8 @@ fn desktop_projection_preserves_authored_actor_sprite_fields() {
     let player_tint = Color::rgba(0.12, 0.34, 0.56, 0.78);
     let enemy_tint = Color::rgba(0.81, 0.63, 0.27, 0.91);
     let mut runtime = render_runtime_with_admission_edit(move |world| {
-        let player = scene_entity(world, "player");
-        let enemy = scene_entity(world, "enemy-anchor/enemy");
+        let player = scene_actor::<PlayerRole>(world);
+        let enemy = first_enemy(world);
         let mut player_sprite = world
             .get_mut::<Sprite>(player)
             .expect("the player should retain its authored Sprite");
@@ -177,8 +178,8 @@ fn desktop_projection_preserves_authored_actor_sprite_fields() {
     let timestep = runtime.world().resource::<FixedTime>().timestep();
     runtime.drive(timestep).unwrap();
 
-    let player = scene_entity(runtime.world(), "player");
-    let enemy = scene_entity(runtime.world(), "enemy-anchor/enemy");
+    let player = scene_actor::<PlayerRole>(runtime.world());
+    let enemy = first_enemy(runtime.world());
 
     let player_sprite = runtime
         .world()
@@ -206,13 +207,14 @@ fn desktop_projection_preserves_authored_actor_sprite_fields() {
 #[test]
 fn parented_enemy_gameplay_and_snapshot_use_completed_world_space() {
     let mut runtime = render_runtime_with_admission_edit(|world| {
-        let anchor = scene_entity(world, "enemy-anchor");
+        let enemy = first_enemy(world);
+        let anchor = world.get::<Parent>(enemy).unwrap().parent();
         world
             .get_mut::<Transform2d>(anchor)
             .expect("the enemy anchor should participate in the transform chain")
             .translation = Vec2::new(-10.0, 0.0);
     });
-    let enemy = scene_entity(runtime.world(), "enemy-anchor/enemy");
+    let enemy = first_enemy(runtime.world());
     let enemy_local_before = runtime
         .world()
         .get::<Transform2d>(enemy)
@@ -247,7 +249,15 @@ fn parented_enemy_gameplay_and_snapshot_use_completed_world_space() {
         .resource::<WaveSnapshot>()
         .enemies
         .iter()
-        .find(|enemy| enemy.id == "enemy-anchor/enemy")
+        .find(|snapshot| {
+            runtime
+                .world()
+                .get::<SceneEntitySource>(enemy)
+                .unwrap()
+                .entity_id
+                .as_str()
+                == snapshot.id
+        })
         .expect("the current receipt enemy should be present in the snapshot");
     assert_vec2_close(snapshot_enemy.position, world_after);
 
@@ -268,8 +278,8 @@ fn desktop_weapon_keeps_its_local_offset_and_follows_the_player_in_same_tick_ext
         weapon_extracted_before,
     ) = {
         let world = runtime.world();
-        let player_entity = scene_entity(world, "player");
-        let weapon_entity = scene_entity(world, "player-weapon");
+        let player_entity = scene_actor::<PlayerRole>(world);
+        let weapon_entity = scene_actor::<Weapon>(world);
         assert!(world.get::<PlayerRole>(player_entity).is_some());
         assert!(world.get::<Weapon>(weapon_entity).is_some());
         assert_eq!(
@@ -525,16 +535,41 @@ fn render_runtime_with_admission_edit(
     candidate.complete_startup().unwrap().promote()
 }
 
-fn scene_entity(world: &World, scene_id: &str) -> Entity {
+fn scene_actor<C: Component>(world: &World) -> Entity {
+    let mut actors = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<C>() && registered_scene_entity(world, entity.id()));
+    let actor = actors.next().expect("the scene actor must exist").id();
+    assert!(actors.next().is_none(), "the scene actor must be unique");
+    actor
+}
+
+fn first_enemy(world: &World) -> Entity {
     world
         .iter_entities()
-        .find_map(|entity| {
-            entity
-                .get::<SceneEntitySource>()
-                .is_some_and(|source| source.entity_id.as_str() == scene_id)
-                .then_some(entity.id())
+        .find(|entity| {
+            entity.contains::<EnemyRole>()
+                && registered_scene_entity(world, entity.id())
+                && entity.get::<SceneEntitySource>().is_some_and(|source| {
+                    source.source_entity_id.as_str() == "enemy"
+                        && source.projection_path.as_ref().is_some_and(|path| {
+                            path.root_anchor().as_str() == "enemy-anchor"
+                                && path.source_chain().len() == 1
+                        })
+                })
         })
-        .unwrap_or_else(|| panic!("the render fixture must contain scene entity {scene_id}"))
+        .expect("the first enemy projection must exist")
+        .id()
+}
+
+fn registered_scene_entity(world: &World, entity: Entity) -> bool {
+    let Some(source) = world.get::<SceneEntitySource>(entity) else {
+        return false;
+    };
+    world.resource::<WorldIdentityDomain>().lookup(
+        world,
+        &RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
+    ) == EntityLookup::Resolved(entity)
 }
 
 fn assert_extracted_sprite_matches_global(world: &World, entity: Entity) -> Vec2 {

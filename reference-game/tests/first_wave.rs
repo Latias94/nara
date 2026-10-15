@@ -434,10 +434,7 @@ fn prepare_same_tick_tie(
     >,
     mut weapons: Query<(&mut Weapon, &mut WeaponCooldown)>,
 ) {
-    for (source, mut transform, mut velocity, mut health) in &mut players {
-        if source.entity_id.as_str() != "player" {
-            continue;
-        }
+    for (_, mut transform, mut velocity, mut health) in &mut players {
         transform.translation = Vec2::ZERO;
         velocity.value = Vec2::ZERO;
         health.current = 10;
@@ -450,7 +447,7 @@ fn prepare_same_tick_tie(
     for (source, mut transform, mut velocity, mut health, mut spawn) in &mut enemies {
         spawn.tick = 1;
         velocity.value = Vec2::ZERO;
-        if source.entity_id.as_str() == "enemy-anchor/enemy" {
+        if is_first_enemy_source(source) {
             transform.translation = Vec2::new(1.5, 0.0);
             health.current = 10;
         } else {
@@ -461,9 +458,11 @@ fn prepare_same_tick_tie(
 
 fn remove_wave_spawn(world: &mut World) {
     let target = world.iter_entities().find_map(|entity| {
-        (entity
-            .get::<SceneEntitySource>()
-            .is_some_and(|source| source.entity_id.as_str() == "enemy-anchor/enemy"))
+        (entity.contains::<EnemyRole>()
+            && registered_scene_entity(world, entity.id())
+            && entity
+                .get::<SceneEntitySource>()
+                .is_some_and(is_first_enemy_source))
         .then_some(entity.id())
     });
     if let Some(target) = target {
@@ -474,10 +473,8 @@ fn remove_wave_spawn(world: &mut World) {
 fn assert_invalid_topology_did_not_advance(
     players: Query<(&SceneEntitySource, &Transform2d), With<PlayerRole>>,
 ) {
-    for (source, transform) in &players {
-        if source.entity_id.as_str() == "player" {
-            assert_eq!(transform.translation, Vec2::ZERO);
-        }
+    for (_, transform) in &players {
+        assert_eq!(transform.translation, Vec2::ZERO);
     }
 }
 
@@ -526,10 +523,7 @@ fn corrupt_retry_identity_after_terminal(world: &mut World) {
     let player = world
         .iter_entities()
         .find(|entity| {
-            entity.contains::<PlayerRole>()
-                && entity
-                    .get::<SceneEntitySource>()
-                    .is_some_and(|source| source.entity_id.as_str() == "player")
+            entity.contains::<PlayerRole>() && registered_scene_entity(world, entity.id())
         })
         .map(|entity| entity.id())
         .expect("the terminal wave should retain its player identity");
@@ -553,18 +547,17 @@ fn install_retry_candidate_observer_after_terminal(world: &mut World) {
     {
         return;
     }
+    let (old_player, _) = player_scene_identity(world);
     let observer_entity = world
         .add_observer(
-            |event: On<Add, SceneEntitySource>,
-             snapshot: Res<WaveSnapshot>,
-             mut observer: ResMut<RetryCandidateObserver>,
-             players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
-             mut commands: Commands| {
+            move |event: On<Add, SceneEntitySource>,
+                  snapshot: Res<WaveSnapshot>,
+                  mut observer: ResMut<RetryCandidateObserver>,
+                  players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
+                  mut commands: Commands| {
                 if snapshot.is_terminal() && observer.triggered == 0 {
                     observer.triggered = 1;
-                    if let Some((old_player, _)) = players.iter().find(|(entity, source)| {
-                        *entity != event.entity && source.entity_id.as_str() == "player"
-                    }) {
+                    if old_player != event.entity && players.get(old_player).is_ok() {
                         commands.entity(old_player).despawn();
                     }
                 }
@@ -622,6 +615,9 @@ fn normalized_run_state(world: &World) -> NormalizedRunState {
     let mut actors = world
         .iter_entities()
         .filter_map(|entity| {
+            if !registered_scene_entity(world, entity.id()) {
+                return None;
+            }
             let role = if entity.contains::<PlayerRole>() {
                 ActorRole::Player
             } else if entity.contains::<EnemyRole>() {
@@ -669,9 +665,11 @@ fn normalized_run_state(world: &World) -> NormalizedRunState {
         .iter_entities()
         .find(|entity| {
             entity.contains::<Weapon>()
-                && entity
-                    .get::<SceneEntitySource>()
-                    .is_some_and(|source| source.entity_id.as_str() == "player-weapon")
+                && registered_scene_entity(world, entity.id())
+                && entity.get::<Parent>().is_some_and(|parent| {
+                    world.get::<PlayerRole>(parent.parent()).is_some()
+                        && registered_scene_entity(world, parent.parent())
+                })
         })
         .expect("the initialized run should expose one authored player weapon");
     let source = weapon_entity
@@ -770,14 +768,18 @@ fn spawn_foreign_gameplay_sentinels(world: &mut World) {
         .iter_entities()
         .find_map(|entity| {
             let source = entity.get::<SceneEntitySource>()?;
-            (source.entity_id.as_str() == "player").then(|| source.clone())
+            (entity.contains::<PlayerRole>() && registered_scene_entity(world, entity.id()))
+                .then(|| source.clone())
         })
         .expect("the authored player source must be available");
     let enemy_source = world
         .iter_entities()
         .find_map(|entity| {
             let source = entity.get::<SceneEntitySource>()?;
-            (source.entity_id.as_str() == "enemy-anchor/enemy").then(|| source.clone())
+            (entity.contains::<EnemyRole>()
+                && registered_scene_entity(world, entity.id())
+                && is_first_enemy_source(source))
+            .then(|| source.clone())
         })
         .expect("the authored enemy source must be available");
     let player = world
@@ -817,22 +819,23 @@ fn install_retry_retirement_observer_after_terminal(world: &mut World) {
     let old_player = world
         .iter_entities()
         .find(|entity| {
-            entity.contains::<PlayerRole>()
-                && entity
-                    .get::<SceneEntitySource>()
-                    .is_some_and(|source| source.entity_id.as_str() == "player")
+            entity.contains::<PlayerRole>() && registered_scene_entity(world, entity.id())
         })
         .map(|entity| entity.id())
         .expect("the terminal wave should retain its player entity");
+    let old_instance = world
+        .get::<SceneEntitySource>(old_player)
+        .unwrap()
+        .instance_id;
     world.spawn(
         Observer::new(
-            |event: On<Despawn>,
-             mut observer: ResMut<RetryRetirementObserver>,
-             players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
-             mut commands: Commands| {
+            move |event: On<Despawn>,
+                  mut observer: ResMut<RetryRetirementObserver>,
+                  players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
+                  mut commands: Commands| {
                 observer.triggered += 1;
                 if let Some((candidate, _)) = players.iter().find(|(entity, source)| {
-                    *entity != event.entity && source.entity_id.as_str() == "player"
+                    *entity != event.entity && source.instance_id != old_instance
                 }) {
                     commands.entity(candidate).despawn();
                 }
@@ -1114,26 +1117,26 @@ fn startup_and_retry_publish_the_same_normalized_authored_and_runtime_state() {
     assert_eq!(player.velocity.value, Vec2::ZERO);
     assert_eq!(player.wave_spawn, None);
     assert_eq!(startup.weapon.scene_id, "player-weapon");
-    assert_eq!(startup.weapon.parent_scene_id, "player");
+    assert_eq!(startup.weapon.parent_scene_id, player.scene_id);
     assert_eq!(
         startup.weapon.transform,
         Transform2d::from_translation(Vec2::new(1.2, 0.0))
     );
     assert_eq!(startup.weapon.weapon, Weapon::fixture());
     assert_eq!(startup.weapon.cooldown.remaining_ticks, 3);
-    assert_eq!(
-        startup
-            .actors
-            .iter()
-            .filter(|actor| actor.role == ActorRole::Enemy)
-            .map(|actor| (actor.scene_id.as_str(), actor.transform.translation.x))
-            .collect::<Vec<_>>(),
-        [
-            ("enemy-anchor-2/enemy", 9.0),
-            ("enemy-anchor-3/enemy", 13.0),
-            ("enemy-anchor/enemy", 5.0),
-        ]
-    );
+    let mut enemy_spawns = startup
+        .actors
+        .iter()
+        .filter(|actor| actor.role == ActorRole::Enemy)
+        .map(|actor| {
+            (
+                actor.wave_spawn.unwrap().tick,
+                actor.transform.translation.x,
+            )
+        })
+        .collect::<Vec<_>>();
+    enemy_spawns.sort_by_key(|(tick, _)| *tick);
+    assert_eq!(enemy_spawns, [(1, 5.0), (5, 9.0), (9, 13.0)]);
 
     drive_adapter_to_terminal(&mut runtime);
     let (old_player, old_reference) = player_scene_identity(runtime.world());
@@ -1174,7 +1177,7 @@ fn invalid_authored_weapon_configuration_rejects_startup_before_runtime_publicat
     let weapon = scene
         .entities
         .iter_mut()
-        .find(|entity| entity.id.as_str() == "player-weapon")
+        .find(|entity| entity.components.contains_key(&weapon_id))
         .and_then(|entity| entity.components.get_mut(&weapon_id))
         .expect("the startup fixture should expose its authored weapon");
     let ComponentValue::Map(fields) = &mut weapon.value else {
@@ -1200,7 +1203,11 @@ fn missing_authored_weapon_sprite_rejects_startup_before_runtime_publication() {
     let weapon = scene
         .entities
         .iter_mut()
-        .find(|entity| entity.id.as_str() == "player-weapon")
+        .find(|entity| {
+            entity
+                .components
+                .contains_key(&ComponentTypeId::new("reference_game.Weapon"))
+        })
         .expect("the startup fixture should expose its authored weapon");
     assert!(
         weapon
@@ -1692,14 +1699,33 @@ fn player_scene_identity(world: &World) -> (Entity, RuntimeEntityReference) {
         .iter_entities()
         .find_map(|entity| {
             let source = entity.get::<SceneEntitySource>()?;
-            (entity.contains::<PlayerRole>() && source.entity_id.as_str() == "player").then(|| {
-                (
-                    entity.id(),
-                    RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
-                )
-            })
+            (entity.contains::<PlayerRole>() && registered_scene_entity(world, entity.id())).then(
+                || {
+                    (
+                        entity.id(),
+                        RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
+                    )
+                },
+            )
         })
         .expect("the wave should expose one scene-managed player")
+}
+
+fn registered_scene_entity(world: &World, entity: Entity) -> bool {
+    let Some(source) = world.get::<SceneEntitySource>(entity) else {
+        return false;
+    };
+    world.resource::<WorldIdentityDomain>().lookup(
+        world,
+        &RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
+    ) == EntityLookup::Resolved(entity)
+}
+
+fn is_first_enemy_source(source: &SceneEntitySource) -> bool {
+    source.source_entity_id.as_str() == "enemy"
+        && source.projection_path.as_ref().is_some_and(|path| {
+            path.root_anchor().as_str() == "enemy-anchor" && path.source_chain().len() == 1
+        })
 }
 
 fn entity_component_topology(world: &World) -> Vec<(Entity, Vec<ComponentId>)> {

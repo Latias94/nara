@@ -5,8 +5,12 @@ use nara::{
 };
 
 #[cfg(feature = "desktop")]
+use std::sync::Arc;
+
+#[cfg(feature = "desktop")]
 use nara::{
     ui::advanced::{UiFrame, UiKey},
+    ui::latest_ui_frame,
     ui_render::advanced::PresentedUiObservation,
 };
 
@@ -151,14 +155,22 @@ impl ReferenceUiObservation {
         })
     }
 
-    /// Projects product facts from one exact owner-produced presented frame.
+    /// Joins actual scene identity with the current owner-produced presented frame.
     #[must_use]
     #[cfg(feature = "desktop")]
-    pub fn from_presented_observation(presented: &PresentedUiObservation) -> Option<Self> {
+    pub fn from_presented_observation(
+        world: &World,
+        presented: &PresentedUiObservation,
+    ) -> Option<Self> {
         let frame = presented.frame();
         if frame.environment().surface_id().get() != REFERENCE_UI_SURFACE_ID {
             return None;
         }
+        let current = latest_ui_frame(world, frame.environment().surface_id()).ok()??;
+        if !Arc::ptr_eq(&current, &frame) {
+            return None;
+        }
+        let authored = Self::from_authoring_world(world)?;
         let mut retry_nodes = frame.semantics().iter().filter(|node| {
             node.actions()
                 .iter()
@@ -172,7 +184,7 @@ impl ReferenceUiObservation {
             return None;
         };
         let transform = frame.environment().content_transform();
-        let authored = transform.authored_logical_size();
+        let authored_size = transform.authored_logical_size();
         let retry_rect = retry.rect();
         let retry_origin = retry_rect.origin();
         let retry_size = retry_rect.size();
@@ -190,11 +202,11 @@ impl ReferenceUiObservation {
 
         Some(Self {
             surface_id: frame.environment().surface_id().get(),
-            authored_width: authored.width(),
-            authored_height: authored.height(),
-            retry_entity_id: "reference-ui/retry-button".to_owned(),
-            retry_source_document: "reference-ui.prefab.json".to_owned(),
-            retry_source_entity: "retry-button".to_owned(),
+            authored_width: authored_size.width(),
+            authored_height: authored_size.height(),
+            retry_entity_id: authored.retry_entity_id,
+            retry_source_document: authored.retry_source_document,
+            retry_source_entity: authored.retry_source_entity,
             retry_action: action.as_str().to_owned(),
             retry_name: retry.name().to_owned(),
             retry_enabled: retry.enabled(),

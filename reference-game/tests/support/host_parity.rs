@@ -39,12 +39,12 @@ pub fn run_host(mode: HostMode) -> String {
         .arg(mode.argument())
         .current_dir(&environment.cwd)
         .env("HOME", &environment.home)
-        .env("USERPROFILE", &environment.home)
         .env("XDG_CACHE_HOME", environment.home.join("cache"))
         .env("XDG_CONFIG_HOME", environment.home.join("config"))
         .env("XDG_DATA_HOME", environment.home.join("data"))
         .env("APPDATA", environment.home.join("appdata"))
         .env("LOCALAPPDATA", environment.home.join("local-appdata"));
+    // Keep the real Windows account profile for native drivers; application paths stay isolated.
     let output = run_child_with_timeout(
         command,
         Duration::from_secs(45),

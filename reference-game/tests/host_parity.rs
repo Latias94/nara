@@ -26,7 +26,7 @@ fn real_product_hosts_publish_the_same_bounded_semantics_and_fault() {
         "@late,1,1",
         "|wave=1,2,running,",
         "|player=player,",
-        "|enemies=enemy-anchor-2/enemy,",
+        "|enemies=",
         "|fault=system,nara.ecs.fallible-execution,3",
     ] {
         assert!(

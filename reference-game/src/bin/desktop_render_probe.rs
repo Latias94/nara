@@ -24,7 +24,7 @@ use nara::{
     },
     render::{PreparedRenderResources, RenderFrame},
     render_wgpu::WgpuRenderBackend,
-    sprite_render::SpriteBatches,
+    sprite_render::__private::SpriteBatches,
     window::{
         Window, WindowId,
         backend::{BackendWindowHandles, WindowTargetSnapshot},

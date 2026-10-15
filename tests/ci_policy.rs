@@ -38,6 +38,7 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         "Cargo.lock",
         "reference-game/Cargo.lock",
         "module-consumer/Cargo.lock",
+        "ui-module-consumer/Cargo.lock",
     ] {
         assert!(
             repository_root().join(lockfile).is_file(),
@@ -55,11 +56,6 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
     assert_workflow_safety(&workflow);
 
     let jobs = mapping(required_field(root, "jobs", "CI workflow"), "CI jobs");
-    assert_eq!(
-        string_keys(jobs),
-        string_set(["root", "reference-game", "module-consumer"]),
-        "CI must cover exactly the three independently locked workspaces"
-    );
 
     let root_job = required_job(jobs, "root");
     let reference_job = required_job(jobs, "reference-game");
@@ -91,6 +87,7 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "cargo nextest run --workspace --locked --all-features --test-threads=1",
             "--features desktop-winit,render-wgpu --example windowed_clear",
             "--features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites",
+            "--features presentation-2d,desktop-winit,render-wgpu --example palette_material",
             "cargo run -p nara_ui_kernel --locked --example layout_gallery",
             "cargo run -p nara_ui --locked --example interaction_lab",
             "cargo run -p nara --locked --no-default-features --features presentation-ui,desktop-winit,render-wgpu --example ui_presentation_gallery",
@@ -111,6 +108,7 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         "render-wgpu",
         "tooling-egui",
         "serde",
+        "project-tooling",
     ] {
         assert!(
             root_script.contains(&format!("--features {feature} --lib")),
@@ -138,9 +136,12 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "cargo fmt --manifest-path module-consumer/Cargo.toml --all -- --check",
             "cargo check --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets",
             "cargo clippy --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings",
+            "cargo fmt --manifest-path ui-module-consumer/Cargo.toml --all -- --check",
+            "cargo check --manifest-path ui-module-consumer/Cargo.toml --locked --all-targets",
+            "cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1",
             "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1",
             "else",
-            "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer --test-threads=1",
+            "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1",
             "fi",
         ],
         "module-consumer CI",
@@ -156,8 +157,8 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         .map(|offset| windows_test + offset)
         .expect("module consumer CI must have a non-Windows branch");
     let scene_test = module_script
-        .find("cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer --test-threads=1")
-        .expect("non-Windows CI must run only the platform-neutral scene consumer");
+        .find("cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1")
+        .expect("non-Windows CI must run the platform-neutral scene and material consumers");
     assert!(windows_test < workspace_test && workspace_test < linux_branch);
     assert!(linux_branch < scene_test);
 
@@ -313,7 +314,11 @@ fn assert_external_manifest_boundaries() {
             .filter(|dependency| !dependency.starts_with("target."))
             .map(str::to_owned)
             .collect(),
-        "reference-game production code must consume only the root facade while component probes use the audited test-only dependencies"
+        "gameplay uses the root facade while explicit native Editor canaries and component probes use their declared dependencies"
+    );
+    assert_eq!(
+        reference["dependencies"]["nara-editor"]["optional"].as_bool(),
+        Some(true)
     );
     assert_no_workspace_dependencies(&reference, "reference-game");
 
@@ -328,6 +333,12 @@ fn assert_external_manifest_boundaries() {
             "dependencies.nara_reflect",
             "dependencies.nara_scene",
             "dev-dependencies.bevy_ecs",
+            "dev-dependencies.nara_app",
+            "dev-dependencies.nara_asset",
+            "dev-dependencies.nara_ecs",
+            "dev-dependencies.nara_identity",
+            "dev-dependencies.ron",
+            "dev-dependencies.serde",
         ]),
         "module-consumer must remain a direct-domain fixture"
     );

@@ -68,39 +68,47 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     assert_eq!(prefab_ids, ["enemy"]);
 
     let expanded = loaded.snapshot.expanded_startup_scene();
-    let expanded_ids = expanded
-        .entities
-        .iter()
-        .map(|entity| entity.id.as_str())
-        .collect::<Vec<_>>();
+    let provenance = loaded.snapshot.expanded_startup_scene_provenance();
+    assert_eq!(expanded.entities.len(), 24);
+    assert_eq!(provenance.len(), expanded.entities.len());
     assert_eq!(
-        expanded_ids,
-        [
-            "enemy-anchor",
-            "enemy-anchor-2",
-            "enemy-anchor-2/enemy",
-            "enemy-anchor-3",
-            "enemy-anchor-3/enemy",
-            "enemy-anchor/enemy",
-            "player",
-            "player-weapon",
-            "reference-ui",
-            "reference-ui/autofire-status",
-            "reference-ui/health-fill",
-            "reference-ui/health-label",
-            "reference-ui/health-track",
-            "reference-ui/input-hint",
-            "reference-ui/modal-dim",
-            "reference-ui/movement-status",
-            "reference-ui/outcome-label",
-            "reference-ui/reference-hud",
-            "reference-ui/retry-button",
-            "reference-ui/run-summary",
-            "reference-ui/score-status",
-            "reference-ui/terminal-overlay",
-            "reference-ui/terminal-panel",
-            "reference-ui/wave-status",
-        ],
+        expanded
+            .entities
+            .iter()
+            .map(|entity| &entity.id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        expanded.entities.len()
+    );
+    let enemy_projections = provenance
+        .iter()
+        .filter_map(|(id, source)| {
+            let path = source.projection_path()?;
+            (source.source_entity_id().as_str() == "enemy")
+                .then_some((path.root_anchor().as_str(), id))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        enemy_projections.keys().copied().collect::<Vec<_>>(),
+        ["enemy-anchor", "enemy-anchor-2", "enemy-anchor-3"]
+    );
+    let ui_source_ids = provenance
+        .values()
+        .filter(|source| {
+            source.projection_path().is_some_and(|path| {
+                path.root_anchor().as_str() == "reference-ui" && path.source_chain().len() == 1
+            })
+        })
+        .map(|source| source.source_entity_id().as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        ui_source_ids,
+        ui_prefab
+            .document()
+            .entities
+            .iter()
+            .map(|entity| entity.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
     );
     assert_eq!(
         ui_prefab
@@ -114,7 +122,11 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     let player = expanded
         .entities
         .iter()
-        .find(|entity| entity.id.as_str() == "player")
+        .find(|entity| {
+            entity
+                .components
+                .contains_key(&ComponentTypeId::new("reference_game.PlayerRole"))
+        })
         .unwrap();
     assert!(
         player
@@ -139,16 +151,13 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     let weapon = expanded
         .entities
         .iter()
-        .find(|entity| entity.id.as_str() == "player-weapon")
+        .find(|entity| {
+            entity
+                .components
+                .contains_key(&ComponentTypeId::new("reference_game.Weapon"))
+        })
         .unwrap();
-    assert_eq!(
-        player
-            .children
-            .iter()
-            .map(|entity| entity.as_str())
-            .collect::<Vec<_>>(),
-        ["player-weapon"]
-    );
+    assert_eq!(player.children.as_slice(), std::slice::from_ref(&weapon.id));
     assert!(
         weapon
             .components
@@ -167,7 +176,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     let enemy = expanded
         .entities
         .iter()
-        .find(|entity| entity.id.as_str() == "enemy-anchor/enemy")
+        .find(|entity| &entity.id == enemy_projections["enemy-anchor"])
         .unwrap();
     let enemy_anchor = expanded
         .entities
@@ -175,12 +184,8 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
         .find(|entity| entity.id.as_str() == "enemy-anchor")
         .unwrap();
     assert_eq!(
-        enemy_anchor
-            .children
-            .iter()
-            .map(|entity| entity.as_str())
-            .collect::<Vec<_>>(),
-        ["enemy-anchor/enemy"]
+        enemy_anchor.children.as_slice(),
+        std::slice::from_ref(&enemy.id)
     );
     assert!(
         enemy
@@ -200,7 +205,7 @@ fn committed_prefab_expands_into_the_exact_startup_document() {
     let second_enemy = expanded
         .entities
         .iter()
-        .find(|entity| entity.id.as_str() == "enemy-anchor-2/enemy")
+        .find(|entity| &entity.id == enemy_projections["enemy-anchor-2"])
         .unwrap();
     assert_eq!(
         second_enemy

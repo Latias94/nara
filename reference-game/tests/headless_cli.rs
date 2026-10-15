@@ -77,10 +77,7 @@ fn opt_in_ui_observation_reports_authored_retry_facts_after_the_wave_summary() {
     );
     assert_eq!(observation["authored_size"], serde_json::json!([960, 540]));
     let retry = &observation["retry"];
-    assert_eq!(
-        retry["entity_id"],
-        Value::String("reference-ui/retry-button".to_owned())
-    );
+    assert!(retry["entity_id"].as_str().is_some_and(|id| !id.is_empty()));
     assert_eq!(
         retry["source_document"],
         Value::String("reference-ui.prefab.json".to_owned())

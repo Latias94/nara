@@ -12,8 +12,7 @@ use nara::{
 use crate::{
     EnemyRole, Health, PlayerRole, ProjectileLifetime, ProjectileRole, Velocity2d, WaveSpawn,
     resources::{
-        MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES, PLAYER_SCENE_ID, ProjectileId, WaveRunGeneration,
-        WaveRunOwner,
+        MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES, ProjectileId, WaveRunGeneration, WaveRunOwner,
     },
 };
 
@@ -140,8 +139,7 @@ pub(crate) fn capture_wave_snapshot(
 
     let mut player = None;
     for (entity, source, global, health) in &queries.players {
-        if !owner.owns_scene_entity(entity, source) || source.entity_id.as_str() != PLAYER_SCENE_ID
-        {
+        if !owner.owns_scene_entity(entity, source) {
             continue;
         }
         if player.replace((source, global, health)).is_some() {

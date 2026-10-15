@@ -70,6 +70,10 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "desktop-winit",
         "presentation-2d",
         "presentation-ui",
+        "project-tooling",
+        "project-workflow",
+        "project-workflow-cargo-facts",
+        "project-workflow-cli",
         "render-wgpu",
         "runtime-2d",
         "runtime-core",
@@ -116,6 +120,7 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
             "dep:nara_ui_render",
             "nara_image/render-prepare",
             "nara_render_wgpu?/ui-submitter",
+            "nara_winit?/platform-accessibility",
         ]
     );
     assert_eq!(
@@ -290,7 +295,13 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             vec!["--no-default-features", "--features", "runtime-2d"],
             with_packages(
                 &runtime_core,
-                &["nara_image", "nara_material", "nara_sprite", "nara_tilemap"],
+                &[
+                    "nara_image",
+                    "nara_material",
+                    "nara_render",
+                    "nara_sprite",
+                    "nara_tilemap",
+                ],
             ),
         ),
         (
@@ -355,7 +366,18 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
         (
             "tooling-egui",
             vec!["--no-default-features", "--features", "tooling-egui"],
-            with_packages(&runtime_core, &["nara_tooling", "nara_tooling_egui"]),
+            with_packages(
+                &runtime_core,
+                &[
+                    "nara_render",
+                    "nara_text",
+                    "nara_tooling",
+                    "nara_tooling_egui",
+                    "nara_ui",
+                    "nara_ui_kernel",
+                    "nara_ui_widgets",
+                ],
+            ),
         ),
         (
             "all-features",

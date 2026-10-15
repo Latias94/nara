@@ -380,7 +380,147 @@ fn editor_frame_publishes_ordered_navigation_and_mutation_only_after_drive() {
 }
 
 #[test]
-fn editor_frame_rejects_a_second_document_mutation_without_undoing_the_first() {
+fn document_transaction_and_undo_use_live_revisions_without_another_frame() {
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let entity = SceneEntityId::new("transaction-target").unwrap();
+    let transform = ComponentTypeId::new("nara.transform.Transform2d");
+    let sprite = ComponentTypeId::new("nara.sprite.Sprite");
+    let image = nara::asset::AssetRef::path("textures/player.png").unwrap();
+    project.write_scene_source(&SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(entity.clone())
+            .with_component(transform.clone(), transform_record(1.0, 2.0))
+            .with_component(
+                sprite.clone(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    project_content_fixture::sprite_value(&image),
+                ),
+            ),
+    ]));
+    let patch = ScenePatchDocument::new([
+        ScenePatchOperation::SetField {
+            entity: entity.clone(),
+            component: transform.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("translation.x"),
+            value: ComponentValue::f64(7.0).unwrap(),
+        },
+        ScenePatchOperation::SetField {
+            entity: entity.clone(),
+            component: sprite.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("layer"),
+            value: ComponentValue::I64(4),
+        },
+    ]);
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.root_capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let frame = editor.current_frame();
+    let document = frame.workspace().active_document.unwrap();
+    let initial_revision = frame.workspace().scene(document).unwrap().revision;
+    let commit = editor.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [
+            EditorAction::Navigate(EditorNavigationAction::SelectEntity {
+                document,
+                entity: Some(entity),
+            }),
+            EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                document,
+                base_revision: initial_revision,
+                patch,
+            }),
+        ],
+    ));
+    let committed_revision = commit
+        .as_ref()
+        .ok()
+        .and_then(|report| report.outcomes().last())
+        .and_then(|outcome| match outcome {
+            EditorActionOutcome::Workspace(report) if report.applied => report.revision,
+            _ => None,
+        });
+    let undo = committed_revision.map(|base_revision| {
+        editor.dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(EditorDocumentMutation::Undo {
+                document,
+                base_revision,
+            })],
+        ))
+    });
+    let unchanged_frame = Arc::ptr_eq(&frame, &editor.current_frame());
+    let observed = editor.drive_editor_frame(Duration::ZERO);
+
+    while !matches!(
+        editor.advance_close(),
+        nara::project_host::EditorProjectCloseProgress::Complete(_)
+    ) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    drop(editor);
+
+    let commit = commit.expect("the initial document transaction must be admitted");
+    assert!(matches!(
+        commit.outcomes().last(),
+        Some(EditorActionOutcome::Workspace(report)) if report.applied && report.dirty == Some(true)
+    ));
+    assert_eq!(
+        committed_revision.unwrap().generation(),
+        initial_revision.generation() + 1,
+        "all patch operations must publish one revision"
+    );
+    let undo = undo
+        .expect("the committed transaction must return its new document revision")
+        .expect("Undo against the new revision must not require another published frame");
+    assert!(matches!(
+        undo.outcomes(),
+        [EditorActionOutcome::Workspace(report)] if report.applied && report.dirty == Some(false)
+    ));
+    assert!(
+        unchanged_frame,
+        "neither command should publish an Editor frame"
+    );
+    let scene = observed.workspace().active_scene.as_ref().unwrap();
+    assert!(!scene.dirty);
+    assert_eq!(
+        scene.revision.generation(),
+        initial_revision.generation() + 2
+    );
+    assert_eq!(scene.editor.inspector.history.undo_depth, 0);
+    assert_eq!(scene.editor.inspector.history.redo_depth, 1);
+    let selected = scene
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_ref()
+        .unwrap();
+    let value = |component: &ComponentTypeId, field: &str| {
+        selected
+            .components
+            .iter()
+            .find(|candidate| &candidate.component == component)
+            .and_then(|component| {
+                component
+                    .fields
+                    .iter()
+                    .find(|candidate| candidate.id == ComponentFieldId::new(field))
+            })
+            .and_then(|field| field.value.as_ref())
+    };
+    assert_eq!(
+        value(&transform, "translation.x"),
+        Some(&ComponentValue::f64(1.0).unwrap())
+    );
+    assert_eq!(value(&sprite, "layer"), Some(&ComponentValue::I64(0)));
+}
+
+#[test]
+fn document_transactions_reject_stale_bases_and_accept_fresh_bases_without_redraw() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
     let mut editor = EditorProjectSession::open_trusted_compiled(
@@ -398,59 +538,96 @@ fn editor_frame_rejects_a_second_document_mutation_without_undoing_the_first() {
             placement: ScenePlacement::last(ScenePlacementOwner::Root),
         }])
     };
-    let report = editor
-        .dispatch_editor_actions(EditorActionBatch::new(
+    let report = editor.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [
+            EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                document,
+                base_revision: revision,
+                patch: patch("first-frame-edit"),
+            }),
+            EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+                document,
+                base_revision: revision,
+                patch: patch("second-frame-edit"),
+            }),
+        ],
+    ));
+    let committed_revision = report
+        .as_ref()
+        .ok()
+        .and_then(|report| report.outcomes().first())
+        .and_then(|outcome| match outcome {
+            EditorActionOutcome::Workspace(report) if report.applied => report.revision,
+            _ => None,
+        });
+    let acknowledgement = editor.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Persistence(
+            EditorPersistenceAction::AcknowledgeResult,
+        )],
+    ));
+    let fresh = committed_revision.map(|base_revision| {
+        editor.dispatch_editor_actions(EditorActionBatch::new(
             frame.revision(),
-            [
-                EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyScenePatch {
                     document,
-                    base_revision: revision,
-                    patch: patch("first-frame-edit"),
-                }),
-                EditorAction::Mutate(EditorDocumentMutation::ApplyScenePatch {
-                    document,
-                    base_revision: revision,
-                    patch: patch("second-frame-edit"),
-                }),
-            ],
+                    base_revision,
+                    patch: patch("fresh-base-edit"),
+                },
+            )],
         ))
-        .unwrap();
+    });
+    let unchanged_frame = Arc::ptr_eq(&frame, &editor.current_frame());
+    let next = editor.drive_editor_frame(Duration::ZERO);
+    let stale_pick = editor.dispatch_editor_actions(EditorActionBatch::new(
+        frame.revision(),
+        [EditorAction::Navigate(
+            EditorNavigationAction::SelectEntity {
+                document,
+                entity: Some(SceneEntityId::new("first-frame-edit").unwrap()),
+            },
+        )],
+    ));
+    let diagnosed = editor.drive_editor_frame(Duration::ZERO);
+    while !matches!(
+        editor.advance_close(),
+        nara::project_host::EditorProjectCloseProgress::Complete(_)
+    ) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    drop(editor);
+
+    let report = report.expect("the batch must reach document revision admission");
     assert!(matches!(
         &report.outcomes()[0],
         EditorActionOutcome::Workspace(report) if report.applied
     ));
     assert_eq!(
         &report.outcomes()[1],
-        &EditorActionOutcome::Rejected(EditorActionRejection::MutationAlreadySubmitted {
+        &EditorActionOutcome::Rejected(EditorActionRejection::StaleDocumentFact {
             document,
+            expected: revision,
+            actual: committed_revision,
         })
     );
+    assert!(acknowledgement.is_ok());
+    let fresh = fresh
+        .unwrap()
+        .expect("a fresh base must work without publishing another frame");
+    assert!(matches!(
+        fresh.outcomes(),
+        [EditorActionOutcome::Workspace(report)] if report.applied
+    ));
+    assert!(unchanged_frame);
     assert_eq!(
-        editor
-            .dispatch_editor_actions(EditorActionBatch::new(
-                frame.revision(),
-                std::iter::empty::<EditorAction>(),
-            ))
-            .unwrap_err(),
-        EditorActionRejection::FrameAlreadyDispatched {
-            revision: frame.revision(),
-        }
-    );
-
-    let next = editor.drive_editor_frame(Duration::ZERO);
-    assert_eq!(
-        editor
-            .dispatch_editor_actions(EditorActionBatch::new(
-                frame.revision(),
-                std::iter::empty::<EditorAction>(),
-            ))
-            .unwrap_err(),
+        stale_pick.unwrap_err(),
         EditorActionRejection::StaleFrame {
             expected: next.revision(),
             received: frame.revision(),
         }
     );
-    let diagnosed = editor.drive_editor_frame(Duration::ZERO);
     assert!(
         diagnosed
             .diagnostics()
@@ -466,6 +643,7 @@ fn editor_frame_rejects_a_second_document_mutation_without_undoing_the_first() {
         .inspector
         .entities;
     assert!(rows.iter().any(|row| row.id.as_str() == "first-frame-edit"));
+    assert!(rows.iter().any(|row| row.id.as_str() == "fresh-base-edit"));
     assert!(
         !rows
             .iter()
@@ -1110,47 +1288,150 @@ fn play_without_an_active_document_rejects_without_creating_an_owner() {
 fn runtime_edit_is_generation_and_safe_point_bound() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
+    let entity = SceneEntityId::new("runtime-edit-target").unwrap();
+    let image = nara::asset::AssetRef::path("textures/player.png").unwrap();
+    project.write_scene_source(&SceneDocument::from_ordered_roots([
+        SceneEntityRecord::new(entity.clone())
+            .with_component(
+                ComponentTypeId::new("nara.transform.Transform2d"),
+                transform_record(0.0, 0.0),
+            )
+            .with_component(
+                ComponentTypeId::new("nara.sprite.Sprite"),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    project_content_fixture::sprite_value(&image),
+                ),
+            ),
+    ]));
     let mut editor = EditorProjectSession::open_trusted_compiled(
         project.root_capability(),
         TrustedCompiledEditorProjectIntent::new(),
     )
     .unwrap();
-    assert_eq!(
-        editor_driver::request_play(&mut editor, EditorPlayCommand::Play),
-        EditorPlayRequestResult::Accepted
-    );
-    drive_until(&mut editor, EditorPlayState::Running, 32);
+    let observations = (|| {
+        let frame = editor.current_frame();
+        let document = frame.workspace().active_document?;
+        let revision = frame.workspace().scene(document)?.revision;
+        let start = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::Play(nara::tooling::EditorPlayAction::Play {
+                    document,
+                    base_revision: revision,
+                })],
+            ))
+            .ok()?;
+        for _ in 0..32 {
+            if editor.current_frame().play().state() == EditorPlayState::Running {
+                break;
+            }
+            editor.drive_editor_frame(Duration::ZERO);
+        }
+        let frame = editor.current_frame();
+        let generation = frame.play().generation()?;
+        let wrong = nara::tooling::EditorRuntimeEditRequest {
+            generation: generation.saturating_add(1),
+            document_revision: frame.play().current_revision()?,
+            entity: entity.clone(),
+            component: ComponentTypeId::new("nara.sprite.Sprite"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("layer"),
+            value: ComponentValue::I64(4),
+        };
+        let exact = nara::tooling::EditorRuntimeEditRequest {
+            generation,
+            ..wrong.clone()
+        };
+        let submitted = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [
+                    EditorAction::RuntimeEdit {
+                        document,
+                        request: wrong,
+                    },
+                    EditorAction::RuntimeEdit {
+                        document,
+                        request: exact,
+                    },
+                    EditorAction::AcknowledgeRuntimeEditResult,
+                ],
+            ))
+            .ok()?;
+        let before_drive = editor.current_frame();
+        let applied = editor.drive_editor_frame(Duration::ZERO);
+        let acknowledged = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                applied.revision(),
+                [EditorAction::AcknowledgeRuntimeEditResult],
+            ))
+            .ok()?;
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        let second = nara::tooling::EditorRuntimeEditRequest {
+            generation: frame.play().generation()?,
+            document_revision: frame.play().current_revision()?,
+            entity,
+            component: ComponentTypeId::new("nara.sprite.Sprite"),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("layer"),
+            value: ComponentValue::I64(5),
+        };
+        let stopping = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [
+                    EditorAction::RuntimeEdit {
+                        document,
+                        request: second,
+                    },
+                    EditorAction::Play(nara::tooling::EditorPlayAction::Stop),
+                ],
+            ))
+            .ok()?;
+        editor.drive_editor_frame(Duration::ZERO);
+        Some((
+            start,
+            submitted,
+            before_drive,
+            applied,
+            acknowledged,
+            stopping,
+        ))
+    })();
 
-    let frame = editor.current_frame();
-    let play = frame.play();
-    let document = frame.workspace().active_document.unwrap();
-    let wrong = nara::tooling::EditorRuntimeEditRequest {
-        generation: play.generation().unwrap().saturating_add(1),
-        document_revision: play.current_revision().unwrap(),
-        entity: SceneEntityId::new("enemy-anchor/enemy").unwrap(),
-        component: ComponentTypeId::new("nara.sprite.Sprite"),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("layer"),
-        value: ComponentValue::I64(4),
-    };
-    let exact = nara::tooling::EditorRuntimeEditRequest {
-        generation: play.generation().unwrap(),
-        ..wrong.clone()
-    };
-    let outcomes = editor_driver::dispatch(
-        &mut editor,
-        [
-            EditorAction::RuntimeEdit {
-                document,
-                request: wrong,
-            },
-            EditorAction::RuntimeEdit {
-                document,
-                request: exact,
-            },
-            EditorAction::AcknowledgeRuntimeEditResult,
-        ],
+    while editor.current_frame().play().state() != EditorPlayState::Empty {
+        let frame = editor.current_frame();
+        let action = match frame.play().state() {
+            EditorPlayState::CloseIncomplete => nara::tooling::EditorPlayAction::RetryClose,
+            EditorPlayState::RetirementIncomplete => {
+                nara::tooling::EditorPlayAction::RetryRetirement
+            }
+            _ => nara::tooling::EditorPlayAction::Stop,
+        };
+        let _ = editor.dispatch_editor_actions(EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Play(action)],
+        ));
+        editor.drive_editor_frame(Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let stopped = editor.current_frame();
+    while !matches!(
+        editor.advance_close(),
+        nara::project_host::EditorProjectCloseProgress::Complete(_)
+    ) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    drop(editor);
+
+    let (start, submitted, before_drive, applied, acknowledged, stopping) =
+        observations.expect("the running generation must admit both RuntimeEdit requests");
+    assert_eq!(
+        start.outcomes(),
+        [EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)]
     );
+    let outcomes = submitted.outcomes();
     assert!(matches!(
         outcomes[0],
         EditorActionOutcome::Rejected(EditorActionRejection::RuntimeGenerationChanged { .. })
@@ -1162,43 +1443,35 @@ fn runtime_edit_is_generation_and_safe_point_bound() {
             false
         ))
     );
-    editor.drive_editor_frame(Duration::ZERO);
-    assert!(matches!(
-        editor.current_frame().runtime_edit_result(),
-        Some(nara::tooling::EditorRuntimeEditResult::Applied(_))
-    ));
-    assert!(editor_driver::acknowledge_runtime_edit_result(&mut editor));
-
-    let frame = editor.drive_editor_frame(Duration::ZERO);
-    let second = nara::tooling::EditorRuntimeEditRequest {
-        generation: frame.play().generation().unwrap(),
-        document_revision: frame.play().current_revision().unwrap(),
-        entity: SceneEntityId::new("enemy-anchor/enemy").unwrap(),
-        component: ComponentTypeId::new("nara.sprite.Sprite"),
-        component_version: ComponentSchemaVersion::ONE,
-        field: ComponentFieldId::new("layer"),
-        value: ComponentValue::I64(5),
-    };
-    let outcomes = editor_driver::dispatch(
-        &mut editor,
-        [
-            EditorAction::RuntimeEdit {
-                document,
-                request: second,
-            },
-            EditorAction::Play(nara::tooling::EditorPlayAction::Stop),
-        ],
+    assert!(before_drive.runtime_edit_result().is_none());
+    assert!(
+        matches!(
+            applied.runtime_edit_result(),
+            Some(nara::tooling::EditorRuntimeEditResult::Applied(_))
+        ),
+        "runtime edit result: {:?}",
+        applied.runtime_edit_result()
     );
+    assert_eq!(
+        acknowledged.outcomes(),
+        [EditorActionOutcome::Acknowledged(
+            nara::tooling::EditorActionAcknowledgement::RuntimeEdit(true)
+        )]
+    );
+    let outcomes = stopping.outcomes();
     assert_eq!(outcomes[0], EditorActionOutcome::RuntimeEdit(Ok(())));
     assert_eq!(
         outcomes[1],
         EditorActionOutcome::Play(EditorPlayRequestResult::Accepted)
     );
-    drive_until(&mut editor, EditorPlayState::Empty, 32);
-    assert!(matches!(
-        editor.current_frame().runtime_edit_result(),
-        Some(nara::tooling::EditorRuntimeEditResult::Cancelled(_))
-    ));
+    assert!(
+        matches!(
+            stopped.runtime_edit_result(),
+            Some(nara::tooling::EditorRuntimeEditResult::Cancelled(_))
+        ),
+        "runtime edit result after Stop: {:?}",
+        stopped.runtime_edit_result()
+    );
 }
 
 #[test]
@@ -1708,6 +1981,10 @@ fn terminal_shutdown_failure_prevents_restart_from_reporting_success() {
 fn apply_changes_rejects_prefab_expansion_without_document_mutation() {
     let project = TestProject::with_prefab_startup();
     project.select_local_headless_profile();
+    let projected = project.prefab_projection(
+        &SceneEntityId::new("enemy-anchor").unwrap(),
+        &SceneEntityId::new("enemy").unwrap(),
+    );
     let mut editor = EditorProjectSession::open_trusted_compiled(
         project.root_capability(),
         TrustedCompiledEditorProjectIntent::new(),
@@ -1727,7 +2004,7 @@ fn apply_changes_rejects_prefab_expansion_without_document_mutation() {
         .revision;
 
     let expanded_request = nara::tooling::SceneApplyChangesRequest::new(
-        SceneEntityId::new("enemy-anchor/enemy").unwrap(),
+        projected,
         [ComponentTypeId::new("nara.sprite.Sprite")],
     );
     editor_driver::request_apply_changes(&mut editor, expanded_request.clone()).unwrap();

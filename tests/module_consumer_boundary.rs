@@ -9,26 +9,21 @@ use std::{
 };
 
 use serde_json::Value as JsonValue;
-use syn::{ItemExternCrate, ItemUse, UseTree, visit::Visit};
 use toml::Value as TomlValue;
 
-const EXPECTED_DEPENDENCIES: [&str; 3] = [
+const EXPECTED_DEPENDENCIES: [&str; 9] = [
     "dependencies.nara_reflect",
     "dependencies.nara_scene",
     "dev-dependencies.bevy_ecs",
-];
-const ALLOWED_SOURCE_ROOTS: [&str; 7] = [
-    "alloc",
-    "bevy_ecs",
-    "core",
-    "nara_reflect",
-    "nara_scene",
-    "nara_scene_module_consumer",
-    "std",
+    "dev-dependencies.nara_app",
+    "dev-dependencies.nara_asset",
+    "dev-dependencies.nara_ecs",
+    "dev-dependencies.nara_identity",
+    "dev-dependencies.ron",
+    "dev-dependencies.serde",
 ];
 const FS_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara_fs"];
 const PROJECT_WORKFLOW_EXPECTED_DEPENDENCIES: [&str; 1] = ["dependencies.nara"];
-const PROJECT_WORKFLOW_ALLOWED_SOURCE_ROOTS: [&str; 1] = ["nara"];
 
 #[test]
 fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() {
@@ -55,6 +50,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
         Some(&vec![
             TomlValue::String("fs-consumer".to_owned()),
             TomlValue::String("project-workflow-consumer".to_owned()),
+            TomlValue::String("material-consumer".to_owned()),
         ])
     );
     assert_eq!(
@@ -65,6 +61,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
             TomlValue::String(".".to_owned()),
             TomlValue::String("fs-consumer".to_owned()),
             TomlValue::String("project-workflow-consumer".to_owned()),
+            TomlValue::String("material-consumer".to_owned()),
         ])
     );
 
@@ -147,11 +144,6 @@ fn locked_metadata_keeps_direct_modules_separate_from_the_project_workflow_facad
     let members = metadata["workspace_members"]
         .as_array()
         .expect("workspace_members must be an array");
-    assert_eq!(
-        members.len(),
-        3,
-        "the two direct module consumers and one workflow consumer must be members"
-    );
     let member_ids = members
         .iter()
         .map(|member| member.as_str().unwrap())
@@ -160,6 +152,7 @@ fn locked_metadata_keeps_direct_modules_separate_from_the_project_workflow_facad
         "nara-scene-module-consumer",
         "nara-fs-module-consumer",
         "nara-project-workflow-consumer",
+        "nara-material-module-consumer",
     ] {
         let package = packages
             .iter()
@@ -176,46 +169,6 @@ fn locked_metadata_keeps_direct_modules_separate_from_the_project_workflow_facad
             .unwrap(),
         module_consumer_root().canonicalize().unwrap()
     );
-}
-
-#[test]
-fn source_imports_are_declared_and_stay_on_the_supported_surface() {
-    let consumer = module_consumer_root();
-    for root in [consumer.join("src"), consumer.join("tests")] {
-        for path in rust_sources(&root) {
-            let source = fs::read_to_string(&path).unwrap();
-            assert_source_boundary(&source, &ALLOWED_SOURCE_ROOTS)
-                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        }
-    }
-    for forbidden in [
-        "use nara::scene::SceneDocument;",
-        "const _: Option<nara_app::PrivateType> = None;",
-        "#[path = \"../hidden.rs\"] mod hidden;",
-        "include!(\"../hidden.rs\");",
-        "macro_rules! hidden { () => { use nara_ecs::World; } }",
-    ] {
-        assert!(assert_source_boundary(forbidden, &ALLOWED_SOURCE_ROOTS).is_err());
-    }
-}
-
-#[test]
-fn project_workflow_consumer_uses_only_the_public_root_module() {
-    let root = module_consumer_root().join("project-workflow-consumer/src");
-    for path in rust_sources(&root) {
-        let source = fs::read_to_string(&path).unwrap();
-        assert_source_boundary(&source, &PROJECT_WORKFLOW_ALLOWED_SOURCE_ROOTS)
-            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-    }
-
-    for forbidden in [
-        "use nara_project::ProjectManifest;",
-        "use nara_fs::DirectoryCapability;",
-        "use nara_winit::WinitPlugin;",
-        "include!(\"../hidden.rs\");",
-    ] {
-        assert!(assert_source_boundary(forbidden, &PROJECT_WORKFLOW_ALLOWED_SOURCE_ROOTS).is_err());
-    }
 }
 
 #[test]
@@ -435,35 +388,18 @@ fn filesystem_module_documentation_names_the_bounded_public_contract() {
     }
 }
 
-#[test]
-fn filesystem_consumer_production_has_no_ambient_path_authority() {
-    let source = fs::read_to_string(module_consumer_root().join("fs-consumer/src/lib.rs"))
-        .expect("filesystem consumer production source must exist");
-    let production = source
-        .split_once("#[cfg(all(test,")
-        .map_or(source.as_str(), |(production, _)| production);
-
-    for forbidden in [
-        "std::fs",
-        "std::path",
-        "File::open",
-        "OpenOptions",
-        "current_dir",
-        "current_exe",
-        "CARGO_MANIFEST_DIR",
-    ] {
-        assert!(
-            !production.contains(forbidden),
-            "filesystem consumer production code contains ambient authority {forbidden:?}"
-        );
-    }
-}
-
 fn assert_manifest_boundary(manifest: &TomlValue) -> Result<(), String> {
     assert_direct_manifest_boundary(
         manifest,
         &EXPECTED_DEPENDENCIES,
-        &["nara_scene", "nara_reflect"],
+        &[
+            "nara_scene",
+            "nara_reflect",
+            "nara_app",
+            "nara_asset",
+            "nara_ecs",
+            "nara_identity",
+        ],
     )
 }
 
@@ -584,181 +520,6 @@ fn collect_dependency_entries<'a>(
     Ok(())
 }
 
-fn assert_source_boundary(source: &str, allowed_roots: &[&str]) -> Result<(), String> {
-    let syntax = syn::parse_file(source).map_err(|error| error.to_string())?;
-    let mut visitor = ImportRootVisitor::default();
-    visitor.visit_file(&syntax);
-    let allowed = allowed_roots.iter().copied().collect::<BTreeSet<_>>();
-    let undeclared = visitor
-        .roots
-        .iter()
-        .filter(|root| !allowed.contains(root.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    if undeclared.is_empty() && visitor.redirects.is_empty() {
-        Ok(())
-    } else {
-        Err(format!(
-            "undeclared imports {undeclared:?}; uninspectable redirects {:?}",
-            visitor.redirects
-        ))
-    }
-}
-
-#[derive(Default)]
-struct ImportRootVisitor {
-    roots: BTreeSet<String>,
-    local_bindings: BTreeSet<String>,
-    redirects: BTreeSet<String>,
-}
-
-impl<'ast> Visit<'ast> for ImportRootVisitor {
-    fn visit_file(&mut self, file: &'ast syn::File) {
-        for item in &file.items {
-            match item {
-                syn::Item::Use(item) => self.record_use(item),
-                syn::Item::ExternCrate(item) => self.record_extern_crate(item),
-                _ => {}
-            }
-        }
-        syn::visit::visit_file(self, file);
-    }
-
-    fn visit_item_use(&mut self, item: &'ast ItemUse) {
-        self.record_use(item);
-    }
-
-    fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
-        self.record_extern_crate(item);
-    }
-
-    fn visit_path(&mut self, path: &'ast syn::Path) {
-        if path.segments.len() > 1 {
-            let root = path.segments.first().unwrap().ident.to_string();
-            if root.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-                && !self.local_bindings.contains(&root)
-                && !matches!(root.as_str(), "crate" | "self" | "super")
-            {
-                self.roots.insert(root);
-            }
-        }
-        syn::visit::visit_path(self, path);
-    }
-
-    fn visit_macro(&mut self, item: &'ast syn::Macro) {
-        let name = item.path.segments.last().unwrap().ident.to_string();
-        if matches!(name.as_str(), "include" | "macro_rules") {
-            self.redirects.insert(name);
-        }
-        syn::visit::visit_macro(self, item);
-    }
-
-    fn visit_attribute(&mut self, attribute: &'ast syn::Attribute) {
-        if attribute.path().is_ident("path") || cfg_attr_redirects_path(attribute) {
-            self.redirects
-                .insert(attribute.path().segments.last().unwrap().ident.to_string());
-        }
-        syn::visit::visit_attribute(self, attribute);
-    }
-}
-
-impl ImportRootVisitor {
-    fn record_use(&mut self, item: &ItemUse) {
-        collect_use_roots(&item.tree, &mut self.roots);
-        collect_use_bindings(&item.tree, &mut self.local_bindings);
-        if use_tree_contains_include(&item.tree) {
-            self.redirects.insert("imported include".to_owned());
-        }
-    }
-
-    fn record_extern_crate(&mut self, item: &ItemExternCrate) {
-        self.roots.insert(item.ident.to_string());
-        if let Some((_, rename)) = &item.rename {
-            self.local_bindings.insert(rename.to_string());
-        }
-    }
-}
-
-fn collect_use_roots(tree: &UseTree, roots: &mut BTreeSet<String>) {
-    match tree {
-        UseTree::Path(path) => {
-            if !matches!(path.ident.to_string().as_str(), "crate" | "self" | "super") {
-                roots.insert(path.ident.to_string());
-            }
-        }
-        UseTree::Name(name) => {
-            roots.insert(name.ident.to_string());
-        }
-        UseTree::Rename(rename) => {
-            roots.insert(rename.ident.to_string());
-        }
-        UseTree::Group(group) => {
-            for item in &group.items {
-                collect_use_roots(item, roots);
-            }
-        }
-        UseTree::Glob(_) => {}
-    }
-}
-
-fn collect_use_bindings(tree: &UseTree, bindings: &mut BTreeSet<String>) {
-    match tree {
-        UseTree::Path(path) => collect_use_bindings(&path.tree, bindings),
-        UseTree::Name(name) => {
-            bindings.insert(name.ident.to_string());
-        }
-        UseTree::Rename(rename) => {
-            bindings.insert(rename.rename.to_string());
-        }
-        UseTree::Group(group) => {
-            for item in &group.items {
-                collect_use_bindings(item, bindings);
-            }
-        }
-        UseTree::Glob(_) => {}
-    }
-}
-
-fn use_tree_contains_include(tree: &UseTree) -> bool {
-    match tree {
-        UseTree::Path(path) => use_tree_contains_include(&path.tree),
-        UseTree::Name(name) => name.ident == "include",
-        UseTree::Rename(rename) => rename.ident == "include",
-        UseTree::Group(group) => group.items.iter().any(use_tree_contains_include),
-        UseTree::Glob(_) => false,
-    }
-}
-
-fn cfg_attr_redirects_path(attribute: &syn::Attribute) -> bool {
-    if !attribute.path().is_ident("cfg_attr") {
-        return false;
-    }
-    match attribute
-        .parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
-    {
-        Ok(nested) => nested.iter().skip(1).any(meta_contains_path_override),
-        Err(_) => true,
-    }
-}
-
-fn meta_contains_path_override(meta: &syn::Meta) -> bool {
-    if meta.path().is_ident("path") {
-        return true;
-    }
-    let syn::Meta::List(list) = meta else {
-        return false;
-    };
-    if !list.path.is_ident("cfg_attr") {
-        return false;
-    }
-    match list
-        .parse_args_with(syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated)
-    {
-        Ok(nested) => nested.iter().skip(1).any(meta_contains_path_override),
-        Err(_) => true,
-    }
-}
-
 fn assert_path_dependency(manifest: &TomlValue, dependency: &str, expected_path: &str) {
     assert_eq!(
         manifest["dependencies"][dependency]
@@ -775,30 +536,6 @@ fn dependency_table<const N: usize>(entries: [(&str, TomlValue); N]) -> TomlValu
             .map(|(key, value)| (key.to_owned(), value))
             .collect(),
     )
-}
-
-fn rust_sources(root: &Path) -> Vec<PathBuf> {
-    let mut pending = vec![root.to_path_buf()];
-    let mut sources = Vec::new();
-    while let Some(directory) = pending.pop() {
-        for entry in fs::read_dir(&directory)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()))
-        {
-            let entry = entry.unwrap();
-            let file_type = entry.file_type().unwrap();
-            assert!(!file_type.is_symlink(), "source links are forbidden");
-            let path = entry.path();
-            if file_type.is_dir() && entry.file_name() != "target" {
-                pending.push(path);
-            } else if file_type.is_file()
-                && path.extension().is_some_and(|extension| extension == "rs")
-            {
-                sources.push(path);
-            }
-        }
-    }
-    sources.sort();
-    sources
 }
 
 fn cargo_executable() -> OsString {

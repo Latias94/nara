@@ -22,6 +22,7 @@ use nara::{
         Entity, Mut, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
+    identity::{EntityLookup, RuntimeEntityReference, WorldIdentityDomain},
     prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
     ui::latest_ui_frame,
@@ -477,19 +478,29 @@ fn install_retry_candidate_observer_after_terminal(world: &mut World) {
     {
         return;
     }
+    let old_player = world
+        .iter_entities()
+        .find_map(|entity| {
+            let source = entity.get::<SceneEntitySource>()?;
+            (entity.contains::<PlayerRole>()
+                && world.resource::<WorldIdentityDomain>().lookup(
+                    world,
+                    &RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
+                ) == EntityLookup::Resolved(entity.id()))
+            .then_some(entity.id())
+        })
+        .expect("the terminal run must retain its exact registered player");
     let observer_entity = world
         .add_observer(
-            |event: On<Add, SceneEntitySource>,
-             snapshot: Res<WaveSnapshot>,
-             mut observer: ResMut<RetryCandidateObserver>,
-             players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
-             mut commands: Commands| {
+            move |event: On<Add, SceneEntitySource>,
+                  snapshot: Res<WaveSnapshot>,
+                  mut observer: ResMut<RetryCandidateObserver>,
+                  players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
+                  mut commands: Commands| {
                 if !snapshot.is_terminal() || observer.triggered {
                     return;
                 }
-                if let Some((old_player, _)) = players.iter().find(|(entity, source)| {
-                    *entity != event.entity && source.entity_id.as_str() == "player"
-                }) {
+                if old_player != event.entity && players.get(old_player).is_ok() {
                     observer.triggered = true;
                     commands.entity(old_player).despawn();
                 }

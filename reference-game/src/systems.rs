@@ -30,10 +30,9 @@ use crate::{
     resources::{
         ENEMY_CONTACT_DAMAGE, KILL_SCORE, MAX_WAVE_ENEMIES, MAX_WAVE_PROJECTILES,
         MAX_WAVE_SCENE_ENTITIES, MOVE_COMMAND_TYPE, MOVE_PRESSED_FIELD, MOVE_X_FIELD, MOVE_Y_FIELD,
-        MovementDirection, MovementIntent, PLAYER_SCENE_ID, PLAYER_WEAPON_SCENE_ID,
-        PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE, RETRY_UI_ACTION_SEQUENCE_FIELD,
-        WaveRetryRejection, WaveRetryStatus, WaveRunBaseline, WaveRunGeneration, WaveRunOwner,
-        WaveState,
+        MovementDirection, MovementIntent, PROJECTILE_TTL_TICKS, ProjectileId, RETRY_COMMAND_TYPE,
+        RETRY_UI_ACTION_SEQUENCE_FIELD, WaveRetryRejection, WaveRetryStatus, WaveRunBaseline,
+        WaveRunGeneration, WaveRunOwner, WaveState,
     },
     snapshot::{WaveOutcome, WaveSnapshot},
 };
@@ -191,11 +190,7 @@ fn prepare_reference_run(
     let weapon_schema = Weapon::persistent_component_schema();
     let transform_type = ComponentTypeId::new("nara.transform.Transform2d");
     let sprite_type = ComponentTypeId::new("nara.sprite.Sprite");
-    let player_children = source
-        .entities
-        .iter()
-        .find(|entity| entity.id.as_str() == PLAYER_SCENE_ID)
-        .map(|entity| &entity.children);
+    let mut player_children = None;
     for entity in &source.entities {
         let player = decode_current_component::<PlayerRole>(entity, &player_role_schema)?;
         let enemy = decode_current_component::<EnemyRole>(entity, &enemy_role_schema)?;
@@ -226,8 +221,9 @@ fn prepare_reference_run(
                 player_count = player_count
                     .checked_add(1)
                     .ok_or(ReferenceSimulationError::TooManySceneEntities)?;
-                if entity.id.as_str() != PLAYER_SCENE_ID || wave_spawn.is_some() {
-                    return Err(ReferenceSimulationError::UnexpectedPlayerIdentity);
+                player_children = Some(&entity.children);
+                if wave_spawn.is_some() {
+                    return Err(ReferenceSimulationError::InvalidAuthoredConfiguration);
                 }
             } else {
                 enemy_count = enemy_count
@@ -251,12 +247,7 @@ fn prepare_reference_run(
         }
 
         if let Some(config) = weapon_config {
-            if weapon.is_some()
-                || entity.id.as_str() != PLAYER_WEAPON_SCENE_ID
-                || player_children.is_none_or(|children| !children.contains(&entity.id))
-                || !has_transform
-                || !has_sprite
-            {
+            if weapon.is_some() || !has_transform || !has_sprite {
                 return Err(ReferenceSimulationError::MissingPlayerWeapon);
             }
             if config.cooldown_ticks == 0 || config.damage <= 0 {
@@ -281,6 +272,9 @@ fn prepare_reference_run(
         return Err(ReferenceSimulationError::MissingEnemy);
     }
     let weapon = weapon.ok_or(ReferenceSimulationError::MissingPlayerWeapon)?;
+    if player_children.is_none_or(|children| !children.contains(&weapon.id)) {
+        return Err(ReferenceSimulationError::MissingPlayerWeapon);
+    }
     actors.sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut retry = WaveRetryStatus::default();
@@ -564,9 +558,7 @@ pub(crate) fn consume_movement_commands(
 
         let mut player = None;
         for (entity, source, candidate) in &mut players {
-            if !owner.owns_scene_entity(entity, source)
-                || source.entity_id.as_str() != PLAYER_SCENE_ID
-            {
+            if !owner.owns_scene_entity(entity, source) {
                 continue;
             }
             if player.replace(candidate).is_some() {
@@ -729,11 +721,6 @@ pub(crate) fn validate_wave_topology(
                 if !owner.owns_scene_entity(entity, source) {
                     continue;
                 }
-                if source.entity_id.as_str() != PLAYER_SCENE_ID {
-                    return Err(BevyError::error(
-                        ReferenceSimulationError::UnexpectedPlayerIdentity,
-                    ));
-                }
                 if health.is_none() || velocity.is_none() || transform.is_none() || global.is_none()
                 {
                     return Err(BevyError::error(
@@ -754,11 +741,7 @@ pub(crate) fn validate_wave_topology(
             if !owner.owns_scene_entity(entity, source) {
                 continue;
             }
-            if source.entity_id.as_str() != PLAYER_WEAPON_SCENE_ID
-                || parent.parent() != player_entity
-                || cooldown.is_none()
-                || transform.is_none()
-            {
+            if parent.parent() != player_entity || cooldown.is_none() || transform.is_none() {
                 return Err(BevyError::error(
                     ReferenceSimulationError::MissingPlayerWeapon,
                 ));
@@ -954,9 +937,7 @@ fn fire_automatic_weapons_inner(world: &mut World) -> Result<(), BevyError> {
         >();
             let mut player = None;
             for (entity, source, global) in players.iter(world) {
-                if !owner.owns_scene_entity(entity, source)
-                    || source.entity_id.as_str() != PLAYER_SCENE_ID
-                {
+                if !owner.owns_scene_entity(entity, source) {
                     continue;
                 }
                 if player.replace((entity, global.translation())).is_some() {
@@ -1267,9 +1248,7 @@ pub(crate) fn resolve_enemy_contacts(
     let result = (|| {
         let mut player = None;
         for (entity, source, global, health) in &mut players {
-            if !owner.owns_scene_entity(entity, source)
-                || source.entity_id.as_str() != PLAYER_SCENE_ID
-            {
+            if !owner.owns_scene_entity(entity, source) {
                 continue;
             }
             if player.replace((global.translation(), health)).is_some() {
@@ -1396,9 +1375,7 @@ pub(crate) fn evaluate_wave_outcome(
     let result = (|| {
         let mut player_hit_points = None;
         for (entity, source, health) in &players {
-            if !owner.owns_scene_entity(entity, source)
-                || source.entity_id.as_str() != PLAYER_SCENE_ID
-            {
+            if !owner.owns_scene_entity(entity, source) {
                 continue;
             }
             if player_hit_points.replace(health.current).is_some() {
@@ -1450,7 +1427,6 @@ enum ReferenceSimulationError {
     InvalidRunTick,
     MissingPlayer,
     DuplicatePlayer,
-    UnexpectedPlayerIdentity,
     MissingPlayerWeapon,
     MissingEnemy,
     MissingWaveSpawn,
@@ -1486,7 +1462,6 @@ impl fmt::Display for ReferenceSimulationError {
             Self::InvalidRunTick => "reference wave run tick is invalid",
             Self::MissingPlayer => "reference wave player is missing",
             Self::DuplicatePlayer => "reference wave player identity is duplicated",
-            Self::UnexpectedPlayerIdentity => "reference wave player identity is unsupported",
             Self::MissingPlayerWeapon => "reference wave player weapon is missing",
             Self::MissingEnemy => "reference wave has no enemy roster",
             Self::MissingWaveSpawn => "reference wave enemy has no spawn schedule",
@@ -1550,11 +1525,21 @@ pub(crate) struct ProjectSnapshotQueries<'w, 's> {
             &'static SceneEntitySource,
             &'static GlobalTransform2d,
             &'static Health,
+            &'static WaveSpawn,
         ),
         With<EnemyRole>,
     >,
-    weapons:
-        Query<'w, 's, (Entity, &'static SceneEntitySource, &'static WeaponCooldown), With<Weapon>>,
+    weapons: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static SceneEntitySource,
+            &'static Parent,
+            &'static WeaponCooldown,
+        ),
+        With<Weapon>,
+    >,
     runtime_only: Query<'w, 's, (), With<RuntimeOnlyTag>>,
     unbound_players: Query<'w, 's, (), (With<PlayerRole>, Without<SceneEntitySource>)>,
     unbound_enemies: Query<'w, 's, (), (With<EnemyRole>, Without<SceneEntitySource>)>,
@@ -1569,23 +1554,27 @@ pub(crate) fn capture_project_snapshot(
 ) -> Result<(), BevyError> {
     let mut player = None;
     for (entity, source, global, health) in &queries.players {
-        if !owner.owns_scene_entity(entity, source) || source.entity_id.as_str() != PLAYER_SCENE_ID
-        {
+        if !owner.owns_scene_entity(entity, source) {
             continue;
         }
-        if player.replace((global, health)).is_some() {
+        if player.replace((entity, global, health)).is_some() {
             return Err(BevyError::error(ProjectSnapshotError::DuplicatePlayer));
         }
     }
-    let Some((player_global, player_health)) = player else {
+    let Some((player_entity, player_global, player_health)) = player else {
         return Err(BevyError::error(ProjectSnapshotError::MissingPlayer));
     };
 
+    let earliest_spawn = queries
+        .enemies
+        .iter()
+        .filter(|(entity, source, _, _, _)| owner.owns_scene_entity(*entity, source))
+        .map(|(_, _, _, _, spawn)| spawn.tick)
+        .min()
+        .ok_or_else(|| BevyError::error(ProjectSnapshotError::MissingEnemy))?;
     let mut enemy = None;
-    for (entity, source, global, health) in &queries.enemies {
-        if !owner.owns_scene_entity(entity, source)
-            || source.entity_id.as_str() != "enemy-anchor/enemy"
-        {
+    for (entity, source, global, health, spawn) in &queries.enemies {
+        if !owner.owns_scene_entity(entity, source) || spawn.tick != earliest_spawn {
             continue;
         }
         if enemy.replace((global, health)).is_some() {
@@ -1597,10 +1586,8 @@ pub(crate) fn capture_project_snapshot(
     };
 
     let mut weapon = None;
-    for (entity, source, cooldown) in &queries.weapons {
-        if !owner.owns_scene_entity(entity, source)
-            || source.entity_id.as_str() != PLAYER_WEAPON_SCENE_ID
-        {
+    for (entity, source, parent, cooldown) in &queries.weapons {
+        if !owner.owns_scene_entity(entity, source) || parent.parent() != player_entity {
             continue;
         }
         if weapon.replace(cooldown).is_some() {

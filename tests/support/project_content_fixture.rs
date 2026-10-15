@@ -158,6 +158,36 @@ requested = ["runtime-2d"]
         .unwrap();
     }
 
+    pub fn prefab_projection(
+        &self,
+        anchor: &nara::scene::SceneEntityId,
+        source: &nara::scene::SceneEntityId,
+    ) -> nara::scene::SceneEntityId {
+        let (candidate, plan, root) = self.candidate_plan_and_root();
+        let snapshot = nara::project_host::ProjectContentLoader::new(root)
+            .unwrap()
+            .load(&candidate, &plan)
+            .unwrap();
+        let mut matches =
+            snapshot
+                .expanded_startup_scene_provenance()
+                .iter()
+                .filter(|(_, provenance)| {
+                    provenance.source_entity_id() == source
+                        && provenance
+                            .projection_path()
+                            .is_some_and(|path| path.root_anchor() == anchor)
+                });
+        let (projected, _) = matches
+            .next()
+            .expect("the authored instance must contain this source");
+        assert!(
+            matches.next().is_none(),
+            "the fixture selects one concrete prefab projection"
+        );
+        projected.clone()
+    }
+
     pub fn select_local_headless_profile(&self) {
         fs::write(
             self.root.join("nara.toml"),

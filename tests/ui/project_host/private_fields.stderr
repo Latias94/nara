@@ -1,0 +1,11 @@
+error[E0616]: field `definition` of struct `RuntimeProbe` is private
+ --> tests/ui/project_host/private_fields.rs:4:19
+  |
+4 |     let _ = probe.definition;
+  |                   ^^^^^^^^^^ private field
+
+error[E0616]: field `recipe` of struct `HeadlessRunIntent` is private
+ --> tests/ui/project_host/private_fields.rs:5:20
+  |
+5 |     let _ = intent.recipe;
+  |                    ^^^^^^ private field

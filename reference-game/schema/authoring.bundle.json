@@ -668,7 +668,7 @@
                 {
                   "id": "sort_key",
                   "aliases": [
-                    "Sort key"
+                    "Sort group"
                   ],
                   "path": [
                     {
@@ -697,6 +697,28 @@
                     {
                       "kind": "field",
                       "value": "texture_region"
+                    }
+                  ],
+                  "value_kind": "map",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                },
+                {
+                  "id": "y_sort_anchor",
+                  "aliases": [
+                    "Y sort anchor"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "y_sort_anchor"
                     }
                   ],
                   "value_kind": "map",
@@ -783,7 +805,7 @@
                 {
                   "id": "sort_key",
                   "aliases": [
-                    "Sort key"
+                    "Sort group"
                   ],
                   "path": [
                     {
@@ -867,6 +889,28 @@
                     "inspect",
                     "edit",
                     "asset_ref"
+                  ],
+                  "default_value": {
+                    "type": "null"
+                  }
+                },
+                {
+                  "id": "y_sort_anchor",
+                  "aliases": [
+                    "Y sort anchor"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "y_sort_anchor"
+                    }
+                  ],
+                  "value_kind": "map",
+                  "required": false,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
                   ],
                   "default_value": {
                     "type": "null"
