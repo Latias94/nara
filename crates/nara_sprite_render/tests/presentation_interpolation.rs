@@ -321,6 +321,31 @@ fn apply_authoring_edit(world: &mut World) {
 }
 
 #[test]
+fn resuming_after_a_paused_step_does_not_rewind_the_displayed_transform() {
+    let (app, sprite) = motion_scene(true);
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+    runtime
+        .drive(FixedTime::DEFAULT_TIMESTEP + FixedTime::DEFAULT_TIMESTEP / 2)
+        .unwrap();
+    runtime.request_control(RuntimeControl::Pause);
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime.request_control(RuntimeControl::StepFixedTick);
+    runtime.drive(Duration::ZERO).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    let stepped = rendered_center(&runtime, sprite);
+    runtime.request_control(RuntimeControl::Resume);
+    runtime.drive(Duration::ZERO).unwrap();
+    let resumed = rendered_center(&runtime, sprite);
+    runtime.finish().unwrap();
+
+    assert_eq!(stepped, Vec2::new(16.0, 0.0));
+    assert_eq!(
+        resumed, stepped,
+        "resuming must not show an older fixed sample"
+    );
+}
+
+#[test]
 fn paused_step_and_authoring_changes_display_current_and_reset_new_entities() {
     let (mut app, sprite) = motion_scene(true);
     app.init_resource::<AuthoringEdit>().unwrap();

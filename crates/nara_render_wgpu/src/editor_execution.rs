@@ -1276,12 +1276,11 @@ mod tests {
             source: test_image_frame().source_generation(),
             target,
         };
-        let (runtime, target_reservation) = publication
+        let (_runtime, target_reservation) = publication
             .commit(mismatched_runtime, target_reservation)
             .expect_err("mismatched reservations must remain unpublished");
         assert!(publication.runtime.is_none());
         assert!(publication.target.is_none());
-        drop(runtime);
 
         publication
             .commit(RuntimeReservation { source, target }, target_reservation)

@@ -135,7 +135,8 @@ fn derive_render_projection(world: &mut World) -> Result<(), BevyError> {
         projection.matrices.clear();
         return Ok(());
     }
-    let alpha = if world.resource::<RuntimeTimeSettings>().paused() {
+    let paused = world.resource::<RuntimeTimeSettings>().paused();
+    let alpha = if paused {
         1.0
     } else {
         world.resource::<RenderTime>().interpolation_alpha
@@ -151,7 +152,7 @@ fn derive_render_projection(world: &mut World) -> Result<(), BevyError> {
                 current: *local,
                 parent,
             });
-            if pair.current != *local || pair.parent != parent {
+            if paused || pair.current != *local || pair.parent != parent {
                 *pair = LocalSamples {
                     previous: *local,
                     current: *local,

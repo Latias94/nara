@@ -8,9 +8,9 @@ use std::{
 
 use nara::{
     project_host::{
-        EditorAcceptedPreview, EditorPresentationImage, EditorPresentedToken,
-        EditorPreviewCandidate, EditorPreviewPresentation, EditorProjectSession,
-        TrustedCompiledEditorProjectIntent,
+        EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage,
+        EditorPresentedToken, EditorPreviewCandidate, EditorPreviewPresentation,
+        EditorProjectSession, TrustedCompiledEditorProjectIntent,
     },
     render::{
         DisplayMapping2d, DisplayRect, DisplayScale, Extent2d, RenderFrameSourceGeneration,
@@ -267,6 +267,27 @@ fn fake_toolkit_picks_only_finished_host_preview_and_preserves_last_display() {
             toolkit
                 .presentation
                 .pick(token, [260.0, 170.0])
+                .unwrap()
+                .is_some()
+        );
+
+        let late = toolkit.submit(candidate(&mut editor), mapping);
+        let successor = toolkit.submit(candidate(&mut editor), mapping);
+        let successor_token = toolkit.finish(successor);
+        let displayed = toolkit.displayed_pixels.clone();
+        assert_eq!(
+            toolkit
+                .presentation
+                .finish(late.accepted, late.image, late.mapping),
+            Err(EditorPresentationError::ImageMismatch),
+            "a late display completion cannot replace its completed successor"
+        );
+        assert_eq!(toolkit.current_token(), Some(successor_token));
+        assert_eq!(toolkit.displayed_pixels, displayed);
+        assert!(
+            toolkit
+                .presentation
+                .pick(successor_token, [260.0, 170.0])
                 .unwrap()
                 .is_some()
         );
