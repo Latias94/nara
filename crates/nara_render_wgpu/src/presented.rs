@@ -203,13 +203,12 @@ impl WgpuEditorWindowPresentedReceipt {
     }
 }
 
-/// Unforgeable join proving the fixed viewport-image/egui/Editor-window transaction.
+/// Unforgeable join proving the exact viewport image was sampled in a presented Editor window.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuEditorCompositeReceipt {
     image: WgpuSubmittedImageReceipt,
     window: WgpuEditorWindowPresentedReceipt,
-    texture_registration_generation: u64,
     presentation_generation: u64,
 }
 
@@ -217,13 +216,11 @@ impl WgpuEditorCompositeReceipt {
     pub(crate) const fn new(
         image: WgpuSubmittedImageReceipt,
         window: WgpuEditorWindowPresentedReceipt,
-        texture_registration_generation: u64,
         presentation_generation: u64,
     ) -> Self {
         Self {
             image,
             window,
-            texture_registration_generation,
             presentation_generation,
         }
     }
@@ -236,11 +233,6 @@ impl WgpuEditorCompositeReceipt {
     #[must_use]
     pub const fn window(self) -> WgpuEditorWindowPresentedReceipt {
         self.window
-    }
-
-    #[must_use]
-    pub const fn texture_registration_generation(self) -> u64 {
-        self.texture_registration_generation
     }
 
     #[must_use]

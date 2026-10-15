@@ -10,10 +10,12 @@ use std::{
 
 use nara_app::RuntimeGeneration;
 use nara_ecs::Resource;
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
 use nara_material::AlphaMode2d;
+#[cfg(test)]
+use nara_render::Color;
 use nara_render::{
-    Color, Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
+    Extent2d, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
     RenderFrameSkipReason, RenderFrameSourceGeneration, RenderFrameTarget, RenderTarget,
     RenderWindowPacket, ViewportRect,
 };
@@ -31,12 +33,12 @@ use crate::presented::WgpuPresentedFrameReceipt;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::quad::{
     WgpuQuadPipeline, WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, admit_quad_instance_buffers,
-    create_quad_batch_buffers, create_quad_pipeline, create_quad_texture_bind_group_layout,
-    quad_batch_draw_stats,
+    create_material_bind_group_layout, create_quad_batch_buffers, create_quad_pipeline,
+    create_quad_texture_bind_group_layout, quad_batch_draw_stats,
 };
 use crate::surface::{
-    SurfaceDropReason, SurfaceResizeAction, WgpuConfiguredPresentMode, WgpuSurfaceState,
-    configure_surface, create_surface, surface_extent, surface_resize_action,
+    SurfaceDropReason, WgpuConfiguredPresentMode, WgpuSurfaceState, configure_surface,
+    create_surface, surface_extent,
 };
 use crate::telemetry::{
     WgpuAdapterSummary, WgpuBackendTelemetry, WgpuBackendTelemetryConfig,
@@ -44,7 +46,10 @@ use crate::telemetry::{
 };
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use crate::texture::WgpuSpriteTextureCache;
-use crate::{PreparedSubmitterDraw, WGPU_RENDER_BACKEND, WgpuRenderError, render_acquired_texture};
+use crate::{
+    PreparedSubmitterDraw, PreparedTargetDraw, WGPU_RENDER_BACKEND, WgpuRenderError,
+    render_acquired_texture,
+};
 
 static NEXT_WGPU_BACKEND_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
 const WGPU_FORCE_FALLBACK_ADAPTER_ENV: &str = "NARA_WGPU_FORCE_FALLBACK";
@@ -392,6 +397,8 @@ pub struct WgpuRenderBackend {
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_texture_bind_group_layout: Option<wgpu::BindGroupLayout>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    quad_material_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_pipelines: Vec<WgpuQuadPipeline>,
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     quad_textures: WgpuSpriteTextureCache,
@@ -445,6 +452,15 @@ impl WgpuRenderBackend {
             .get(&window_id)
             .filter(|surface| surface.config.is_some())
             .map(|surface| surface.size)
+    }
+
+    /// Last requested mode accepted by surface configuration, independently of its selected fallback.
+    #[must_use]
+    pub fn requested_surface_present_mode(
+        &self,
+        window_id: WindowId,
+    ) -> Option<nara_window::PresentMode> {
+        self.surfaces.get(&window_id)?.requested_present_mode
     }
 
     #[must_use]
@@ -613,6 +629,7 @@ impl WgpuRenderBackend {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
             self.quad_texture_bind_group_layout = None;
+            self.quad_material_bind_group_layout = None;
             self.quad_pipelines.clear();
             self.quad_textures.clear();
         }
@@ -880,16 +897,10 @@ impl WgpuRenderBackend {
         let view_format = self.surface_view_format(window.id)?;
         #[cfg(feature = "ui-submitter")]
         {
-            let ui = payload.ui_facts(packet.view().target);
+            let ui = payload.ui_facts(packet.views()[0].target);
             self.frame_transaction_stats.record_ui_payload(ui);
         }
-        let draw = match self.prepare_submitter_draw(
-            view_format,
-            packet.view().target,
-            packet.view().viewport,
-            &payload,
-            frame.index,
-        ) {
+        let draw = match self.prepare_target_draw(view_format, &packet, &payload, frame.index) {
             Ok(draw) => draw,
             Err(error) => {
                 self.telemetry
@@ -923,8 +934,6 @@ impl WgpuRenderBackend {
             .observe_gpu_resources(submitted_texture_bytes, submitted_instance_buffer_bytes);
         let presented = self.render_window(
             window.id,
-            packet.view().viewport,
-            packet.view().clear_color,
             &draw,
             runtime_generation,
             app_frame_index,
@@ -1195,9 +1204,7 @@ impl WgpuRenderBackend {
     fn render_window(
         &mut self,
         window_id: WindowId,
-        viewport: nara_render::ViewportRect,
-        clear_color: Color,
-        draw: &PreparedSubmitterDraw,
+        draw: &PreparedTargetDraw,
         runtime_generation: RuntimeGeneration,
         app_frame_index: u64,
         render_transaction_frame_index: u64,
@@ -1238,16 +1245,7 @@ impl WgpuRenderBackend {
         match surface_state.surface(window_id)?.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture) => {
                 self.frame_transaction_stats.surface_acquires += 1;
-                render_acquired_texture(
-                    &device,
-                    &queue,
-                    window_id,
-                    surface_state,
-                    texture,
-                    viewport,
-                    clear_color,
-                    draw,
-                )?;
+                render_acquired_texture(&device, &queue, window_id, surface_state, texture, draw)?;
                 if let Some(completion) = self.telemetry.begin_frame_submission(
                     app_frame_index,
                     render_transaction_frame_index,
@@ -1262,16 +1260,7 @@ impl WgpuRenderBackend {
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
                 self.frame_transaction_stats.surface_acquires += 1;
-                render_acquired_texture(
-                    &device,
-                    &queue,
-                    window_id,
-                    surface_state,
-                    texture,
-                    viewport,
-                    clear_color,
-                    draw,
-                )?;
+                render_acquired_texture(&device, &queue, window_id, surface_state, texture, draw)?;
                 if let Some(completion) = self.telemetry.begin_frame_submission(
                     app_frame_index,
                     render_transaction_frame_index,
@@ -1351,9 +1340,7 @@ impl WgpuRenderBackend {
             .ok_or(WgpuRenderError::SurfaceMissing {
                 window_id: window.id,
             })?;
-        if surface_resize_action(surface.size, size) == SurfaceResizeAction::Reconfigure(size)
-            || surface.dirty
-        {
+        if surface.needs_configuration(size, window.present_mode) {
             configure_surface(
                 surface,
                 adapter,
@@ -1381,17 +1368,63 @@ impl WgpuRenderBackend {
         Ok(config.format.add_srgb_suffix())
     }
 
+    pub(super) fn prepare_target_draw(
+        &mut self,
+        format: wgpu::TextureFormat,
+        packet: &nara_render::RenderFramePacket,
+        payload: &WgpuFramePayload,
+        frame_index: u64,
+    ) -> Result<PreparedTargetDraw, WgpuRenderError> {
+        let mut prepared = PreparedTargetDraw::default();
+        for (index, view) in packet.views().iter().enumerate() {
+            let draw = self.prepare_submitter_draw(
+                format,
+                view.target,
+                view.viewport,
+                Some(index),
+                payload,
+                frame_index,
+            )?;
+            prepared.push(view.viewport, view.load, draw);
+        }
+        #[cfg(feature = "ui-submitter")]
+        {
+            let viewport = ViewportRect::from_extent(packet.target().extent())
+                .expect("admitted target extent");
+            let draw = self.prepare_submitter_draw(
+                format,
+                packet.views()[0].target,
+                viewport,
+                None,
+                payload,
+                frame_index,
+            )?;
+            prepared.push(viewport, nara_render::ViewLoadOp::Load, draw);
+        }
+        Ok(prepared)
+    }
+
+    #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+    pub(crate) fn with_probe_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        Self {
+            device: Some(device),
+            queue: Some(queue),
+            ..Self::default()
+        }
+    }
+
     pub(super) fn prepare_submitter_draw(
         &mut self,
         view_format: wgpu::TextureFormat,
         target: RenderTarget,
         viewport: ViewportRect,
+        view_index: Option<usize>,
         payload: &WgpuFramePayload,
         frame_index: u64,
     ) -> Result<PreparedSubmitterDraw, WgpuRenderError> {
         #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
         {
-            let lowered = payload.lower_draw(target, viewport)?;
+            let lowered = payload.lower_draw(target, viewport, view_index)?;
             let batches = lowered.batches;
             #[cfg(feature = "ui-submitter")]
             let ui_packets = lowered.ui_packets;
@@ -1408,15 +1441,13 @@ impl WgpuRenderBackend {
                     message: error.to_string(),
                 }
             })?;
-            let alpha_modes = crate::required_alpha_modes(&batches);
+            let pipeline_keys = crate::required_quad_pipeline_keys(&batches, view_format);
             let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
-            for alpha_mode in &alpha_modes {
-                self.ensure_quad_pipeline(WgpuQuadPipelineKey {
-                    format: view_format,
-                    alpha_mode: *alpha_mode,
-                })?;
+            let material_layout = self.ensure_quad_material_bind_group_layout()?;
+            for key in &pipeline_keys {
+                self.ensure_quad_pipeline(*key)?;
             }
-            let pipelines = self.quad_pipeline_draw_refs(view_format, &alpha_modes)?;
+            let pipelines = self.quad_pipeline_draw_refs(&pipeline_keys)?;
             let device = self
                 .device
                 .as_ref()
@@ -1432,6 +1463,7 @@ impl WgpuRenderBackend {
                 &queue,
                 &batches,
                 &texture_layout,
+                &material_layout,
                 &mut self.quad_textures,
                 frame_index,
             )
@@ -1460,7 +1492,14 @@ impl WgpuRenderBackend {
 
         #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
         {
-            let _ = (view_format, target, viewport, payload, frame_index);
+            let _ = (
+                view_format,
+                target,
+                viewport,
+                view_index,
+                payload,
+                frame_index,
+            );
             Ok(PreparedSubmitterDraw::default())
         }
     }
@@ -1493,6 +1532,22 @@ impl WgpuRenderBackend {
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+    fn ensure_quad_material_bind_group_layout(
+        &mut self,
+    ) -> Result<wgpu::BindGroupLayout, WgpuRenderError> {
+        if let Some(layout) = &self.quad_material_bind_group_layout {
+            return Ok(layout.clone());
+        }
+        let device = self
+            .device
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        let layout = create_material_bind_group_layout(device);
+        self.quad_material_bind_group_layout = Some(layout.clone());
+        Ok(layout)
+    }
+
+    #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn ensure_quad_pipeline(&mut self, key: WgpuQuadPipelineKey) -> Result<(), WgpuRenderError> {
         if self
             .quad_pipelines
@@ -1502,38 +1557,38 @@ impl WgpuRenderBackend {
             return Ok(());
         }
         let texture_layout = self.ensure_quad_texture_bind_group_layout()?;
+        let material_layout = self.ensure_quad_material_bind_group_layout()?;
         let device = self
             .device
             .as_ref()
             .ok_or(WgpuRenderError::BackendNotReady)?;
-        self.quad_pipelines
-            .push(create_quad_pipeline(device, key, &texture_layout));
+        self.quad_pipelines.push(create_quad_pipeline(
+            device,
+            key,
+            &texture_layout,
+            &material_layout,
+        )?);
         Ok(())
     }
 
     #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
     fn quad_pipeline_draw_refs(
         &self,
-        format: wgpu::TextureFormat,
-        alpha_modes: &[AlphaMode2d],
+        keys: &[WgpuQuadPipelineKey],
     ) -> Result<Vec<WgpuQuadPipelineDrawRef>, WgpuRenderError> {
-        alpha_modes
-            .iter()
-            .map(|alpha_mode| {
-                let key = WgpuQuadPipelineKey {
-                    format,
-                    alpha_mode: *alpha_mode,
-                };
+        keys.iter()
+            .map(|key| {
                 let pipeline = self
                     .quad_pipelines
                     .iter()
-                    .find(|pipeline| pipeline.key == key)
+                    .find(|pipeline| pipeline.key == *key)
                     .ok_or_else(|| WgpuRenderError::QuadPipelineMissing {
-                        format: format!("{format:?}"),
-                        alpha_mode: format!("{alpha_mode:?}"),
+                        format: format!("{:?}", key.format),
+                        alpha_mode: format!("{:?}", key.alpha_mode),
                     })?;
                 Ok(WgpuQuadPipelineDrawRef {
-                    alpha_mode: *alpha_mode,
+                    alpha_mode: key.alpha_mode,
+                    material: key.material,
                     pipeline: pipeline.pipeline.clone(),
                 })
             })
@@ -1925,10 +1980,14 @@ mod tests {
             camera_entity: Entity::from_raw_u32(1).unwrap(),
             target: RenderTarget::PrimaryWindow,
             viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            world_position: nara_core::Vec2::ZERO,
-            viewport_height: 720.0,
+            mapping: nara_render::ViewMapping2d::orthographic(
+                nara_core::Mat3::IDENTITY,
+                720.0,
+                ViewportRect::new(0, 0, 1280, 720).unwrap(),
+            )
+            .unwrap(),
             order: 0,
-            clear_color: Color::BLACK,
+            load: nara_render::ViewLoadOp::Clear(Color::BLACK),
         });
         let topology = build_render_frame_packet(
             generation,

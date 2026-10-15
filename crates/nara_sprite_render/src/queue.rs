@@ -6,8 +6,9 @@ use nara_image::{PreparedImageResource, PreparedImageSnapshot, image_resource_ke
 use nara_render::{ExtractedView, ExtractedViews, PreparedRenderResources, RenderPrepareStatus};
 
 use crate::{
-    ExtractedSprite, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind,
-    SpriteBatches, SpriteInstance, SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
+    ExtractedSprite, PreparedMaterial2d, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch,
+    SpriteBatchKind, SpriteBatches, SpriteInstance, SpriteMaterialKey, SpriteRenderStats,
+    TextureUvRect,
 };
 
 pub fn queue_sprites(
@@ -43,8 +44,10 @@ pub fn queue_sprites(
                 kind: SpriteBatchKind::from_extracted(queueable.sprite.kind),
                 layer: queueable.sprite.layer,
                 sort_key: queueable.sprite.sort_key,
+                world_sort_y: queueable.sprite.world_sort_y,
                 material: queueable.material,
                 image: queueable.image.clone(),
+                material_extension: queueable.material_extension.clone(),
                 source_order: queueable.sprite.source_order,
                 instance,
             });
@@ -66,14 +69,6 @@ pub fn sort_and_batch_sprites(
 }
 
 #[must_use]
-pub fn project_sprite_to_view(
-    view: &ExtractedView,
-    sprite: &ExtractedSprite,
-) -> Option<SpriteInstance> {
-    project_sprite_to_view_with_uv(view, sprite, sprite.texture_region)
-}
-
-#[must_use]
 pub fn project_sprite_to_view_with_uv(
     view: &ExtractedView,
     sprite: &ExtractedSprite,
@@ -90,6 +85,7 @@ pub fn project_sprite_to_view_with_uv(
 }
 
 #[must_use]
+#[cfg(test)]
 pub fn world_to_clip_instance(
     view: &ExtractedView,
     world_center: Vec2,
@@ -116,34 +112,13 @@ pub fn world_to_clip_instance_with_uv(
     color: Color,
     uv: TextureUvRect,
 ) -> Option<SpriteInstance> {
-    let world_extent = view_world_extent(view)?;
-    let clip_scale = Vec2::new(2.0 / world_extent.x, 2.0 / world_extent.y);
-
     Some(SpriteInstance {
-        center: (world_center - view.world_position) * clip_scale,
-        x_axis: world_x_axis * clip_scale,
-        y_axis: world_y_axis * clip_scale,
+        center: view.mapping.world_to_clip(world_center),
+        x_axis: view.mapping.world_vector_to_clip(world_x_axis),
+        y_axis: view.mapping.world_vector_to_clip(world_y_axis),
         color,
         uv,
     })
-}
-
-#[must_use]
-pub fn view_world_extent(view: &ExtractedView) -> Option<Vec2> {
-    if view.viewport.physical_height == 0
-        || view.viewport_height <= 0.0
-        || !view.viewport_height.is_finite()
-    {
-        return None;
-    }
-
-    let aspect = view.viewport.physical_width as f32 / view.viewport.physical_height as f32;
-    let width = view.viewport_height * aspect;
-    if width <= 0.0 || !width.is_finite() {
-        return None;
-    }
-
-    Some(Vec2::new(width, view.viewport_height))
 }
 
 #[must_use]
@@ -160,6 +135,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             && batch.sort_key == item.sort_key
             && batch.material == item.material
             && batch.image == item.image
+            && batch.material_extension == item.material_extension
         {
             batch.instances.push(item.instance);
             continue;
@@ -174,6 +150,7 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
             sort_key: item.sort_key,
             material: item.material,
             image: item.image.clone(),
+            material_extension: item.material_extension.clone(),
             instances: vec![item.instance],
         });
     }
@@ -182,24 +159,27 @@ pub fn build_sprite_batches(items: &[QueuedSpriteItem]) -> Vec<SpriteBatch> {
 }
 
 pub fn compare_queued_sprite_items(left: &QueuedSpriteItem, right: &QueuedSpriteItem) -> Ordering {
-    (
-        left.view_order,
-        left.view_index,
-        left.kind.order(),
-        left.layer,
-        left.sort_key,
-        left.source_order,
-        left.material,
-    )
+    (left.view_order, left.view_index, left.layer, left.sort_key)
         .cmp(&(
             right.view_order,
             right.view_index,
-            right.kind.order(),
             right.layer,
             right.sort_key,
-            right.source_order,
-            right.material,
         ))
+        .then_with(|| {
+            let left_y = if left.world_sort_y == 0.0 {
+                0.0
+            } else {
+                left.world_sort_y
+            };
+            let right_y = if right.world_sort_y == 0.0 {
+                0.0
+            } else {
+                right.world_sort_y
+            };
+            right_y.total_cmp(&left_y)
+        })
+        .then_with(|| left.source_order.cmp(&right.source_order))
 }
 
 fn saturating_u32(value: usize) -> u32 {
@@ -210,6 +190,7 @@ struct QueueableSprite<'a> {
     sprite: &'a ExtractedSprite,
     material: SpriteMaterialKey,
     image: Option<PreparedImageSnapshot>,
+    material_extension: Option<PreparedMaterial2d>,
     uv: TextureUvRect,
 }
 
@@ -220,14 +201,15 @@ fn resolve_queueable_sprites<'a>(
 ) -> Vec<QueueableSprite<'a>> {
     sprites
         .filter_map(|sprite| {
-            resolve_sprite_material(sprite, prepared_images, stats).map(|(material, image, uv)| {
-                QueueableSprite {
+            resolve_sprite_material(sprite, prepared_images, stats).map(
+                |(material, image, material_extension, uv)| QueueableSprite {
                     sprite,
                     material,
                     image,
+                    material_extension,
                     uv,
-                }
-            })
+                },
+            )
         })
         .collect()
 }
@@ -239,6 +221,7 @@ fn resolve_sprite_material(
 ) -> Option<(
     SpriteMaterialKey,
     Option<PreparedImageSnapshot>,
+    Option<PreparedMaterial2d>,
     TextureUvRect,
 )> {
     if !sprite.texture_region.is_valid() {
@@ -246,13 +229,29 @@ fn resolve_sprite_material(
         return None;
     }
 
-    let Some(texture) = sprite.material.image else {
-        return Some((
-            SpriteMaterialKey::from_material(sprite.material),
-            None,
-            sprite.texture_region,
-        ));
+    let image = match sprite.material.image {
+        Some(texture) => Some(resolve_image(texture, prepared_images, stats)?),
+        None => None,
     };
+    let material_extension = match sprite.material_extension {
+        Some(instance) => Some(PreparedMaterial2d {
+            texture: resolve_image(instance.texture(), prepared_images, stats)?,
+            instance,
+        }),
+        None => None,
+    };
+    let mut material = SpriteMaterialKey::from_material(sprite.material);
+    if let Some(extension) = &material_extension {
+        material.alpha_mode = extension.instance.definition().alpha_mode;
+    }
+    Some((material, image, material_extension, sprite.texture_region))
+}
+
+fn resolve_image(
+    texture: nara_asset::Handle<nara_image::ImageAsset>,
+    prepared_images: Option<&PreparedRenderResources<PreparedImageResource>>,
+    stats: &mut SpriteRenderStats,
+) -> Option<PreparedImageSnapshot> {
     let key = image_resource_key(texture);
     let Some(prepared_images) = prepared_images else {
         stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
@@ -270,11 +269,8 @@ fn resolve_sprite_material(
         stats.unprepared_textures = stats.unprepared_textures.saturating_add(1);
         return None;
     };
-    let snapshot = PreparedImageSnapshot::new(record.snapshot().clone(), resource.clone());
-
-    Some((
-        SpriteMaterialKey::from_material(sprite.material),
-        Some(snapshot),
-        sprite.texture_region,
+    Some(PreparedImageSnapshot::new(
+        record.snapshot().clone(),
+        resource.clone(),
     ))
 }

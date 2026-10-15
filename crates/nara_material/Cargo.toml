@@ -6,14 +6,12 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-blake3.workspace = true
 nara_asset.workspace = true
-nara_core.workspace = true
+nara_ecs.workspace = true
+nara_image.workspace = true
+thiserror.workspace = true
 serde = { workspace = true, optional = true }
-
-[dev-dependencies]
-serde_json.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde", "nara_asset/serde", "nara_core/serde"]
+serde = ["dep:serde"]

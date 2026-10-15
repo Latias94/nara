@@ -4,7 +4,7 @@ use nara_asset::Handle;
 use nara_core::{Color, Vec2};
 use nara_ecs::{Entity, Resource};
 use nara_image::{ImageAsset, PreparedImageSnapshot};
-use nara_material::{AlphaMode2d, SamplerDescriptor};
+use nara_material::{AlphaMode2d, Material2dInstance, SamplerDescriptor};
 use nara_render::RenderTarget;
 use nara_sprite::TextureRegion;
 use nara_tilemap::{TileCoord, TileIndex};
@@ -22,13 +22,6 @@ pub enum SpriteBatchKind {
 }
 
 impl SpriteBatchKind {
-    pub(crate) const fn order(self) -> u8 {
-        match self {
-            Self::Tilemap => 0,
-            Self::Sprite => 1,
-        }
-    }
-
     #[must_use]
     pub const fn from_extracted(kind: ExtractedSpriteKind) -> Self {
         match kind {
@@ -44,6 +37,7 @@ pub struct ExtractedSprite {
     pub source_order: u64,
     pub kind: ExtractedSpriteKind,
     pub material: ExtractedSpriteMaterial,
+    pub material_extension: Option<Material2dInstance>,
     pub texture_region: TextureUvRect,
     pub world_center: Vec2,
     pub world_x_axis: Vec2,
@@ -51,6 +45,7 @@ pub struct ExtractedSprite {
     pub color: Color,
     pub layer: i32,
     pub sort_key: i32,
+    pub world_sort_y: f32,
 }
 
 impl ExtractedSprite {
@@ -126,11 +121,8 @@ pub struct ExtractedSprites {
 }
 
 impl ExtractedSprites {
-    pub fn clear(&mut self) {
-        self.sprites.clear();
-    }
-
-    pub fn push(&mut self, sprite: ExtractedSprite) {
+    #[cfg(test)]
+    pub(crate) fn push(&mut self, sprite: ExtractedSprite) {
         self.sprites.push(sprite);
     }
 
@@ -191,10 +183,18 @@ pub struct QueuedSpriteItem {
     pub kind: SpriteBatchKind,
     pub layer: i32,
     pub sort_key: i32,
+    pub world_sort_y: f32,
     pub material: SpriteMaterialKey,
     pub image: Option<PreparedImageSnapshot>,
+    pub material_extension: Option<PreparedMaterial2d>,
     pub source_order: u64,
     pub instance: SpriteInstance,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedMaterial2d {
+    pub instance: Material2dInstance,
+    pub texture: PreparedImageSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -241,26 +241,22 @@ pub struct QueuedSpriteItems {
 }
 
 impl QueuedSpriteItems {
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.items.clear();
     }
 
-    pub fn push(&mut self, item: QueuedSpriteItem) {
+    pub(crate) fn push(&mut self, item: QueuedSpriteItem) {
         self.items.push(item);
     }
 
-    pub fn sort(&mut self) {
-        self.items.sort_by(crate::compare_queued_sprite_items);
+    pub(crate) fn sort(&mut self) {
+        self.items
+            .sort_by(crate::queue::compare_queued_sprite_items);
     }
 
     #[must_use]
     pub fn as_slice(&self) -> &[QueuedSpriteItem] {
         &self.items
-    }
-
-    #[must_use]
-    pub fn as_mut_slice(&mut self) -> &mut [QueuedSpriteItem] {
-        &mut self.items
     }
 
     #[must_use]
@@ -284,6 +280,7 @@ pub struct SpriteBatch {
     pub sort_key: i32,
     pub material: SpriteMaterialKey,
     pub image: Option<PreparedImageSnapshot>,
+    pub material_extension: Option<PreparedMaterial2d>,
     pub instances: Vec<SpriteInstance>,
 }
 

@@ -33,10 +33,14 @@ fn test_view() -> ExtractedView {
         camera_entity: Entity::PLACEHOLDER,
         target: RenderTarget::PrimaryWindow,
         viewport: ViewportRect::new(0, 0, 200, 100).unwrap(),
-        world_position: Vec2::ZERO,
-        viewport_height: 100.0,
+        mapping: nara_render::ViewMapping2d::orthographic(
+            nara_core::Mat3::IDENTITY,
+            100.0,
+            ViewportRect::new(0, 0, 200, 100).unwrap(),
+        )
+        .unwrap(),
         order: 0,
-        clear_color: Color::BLACK,
+        load: nara_render::ViewLoadOp::Clear(Color::BLACK),
     }
 }
 
@@ -120,6 +124,7 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
             source_order: 99,
             kind: ExtractedSpriteKind::Sprite,
             material: ExtractedSpriteMaterial::from_color(Color::WHITE),
+            material_extension: None,
             texture_region: TextureUvRect::FULL,
             world_center: Vec2::new(9.0, 9.0),
             world_x_axis: Vec2::X,
@@ -127,6 +132,7 @@ fn extraction_clears_stale_sprites_and_uses_explicit_identity_transform() {
             color: Color::WHITE,
             layer: 0,
             sort_key: 0,
+            world_sort_y: 0.0,
         });
     let sprite = app
         .world_mut()
@@ -254,6 +260,79 @@ fn extraction_uses_authored_structure_when_entity_allocation_is_reversed() {
         extracted_colors(true),
         vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 0.0, 1.0),]
     );
+}
+
+#[test]
+fn equal_depth_sprite_and_tile_follow_authored_hierarchy_order() {
+    let mut app = sprite_app();
+    let actor = app
+        .world_mut()
+        .unwrap()
+        .spawn((
+            Sprite::from_color(Vec2::ONE, Color::WHITE),
+            Transform2d::default(),
+        ))
+        .id();
+    let mut tilemap = Tilemap::new(Vec2::ONE);
+    tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
+    let foreground = app
+        .world_mut()
+        .unwrap()
+        .spawn((tilemap, Transform2d::default()))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[foreground, actor]);
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let order = runtime
+        .world()
+        .resource::<ExtractedSprites>()
+        .as_slice()
+        .iter()
+        .map(|sprite| (sprite.entity, sprite.source_order))
+        .collect::<Vec<_>>();
+    runtime.finish().unwrap();
+    assert_eq!(order, vec![(foreground, 0), (actor, 1)]);
+}
+
+#[test]
+fn y_sort_anchors_use_world_affines_for_sprites_and_tile_cells() {
+    let mut app = sprite_app();
+    let actor = app
+        .world_mut()
+        .unwrap()
+        .spawn((
+            Sprite::from_color(Vec2::ONE, Color::WHITE).with_y_sort_anchor(Vec2::new(2.0, 0.0)),
+            Transform2d {
+                translation: Vec2::new(0.0, 10.0),
+                rotation: std::f32::consts::FRAC_PI_2,
+                ..Transform2d::default()
+            },
+        ))
+        .id();
+    let mut tilemap = Tilemap::new(Vec2::new(4.0, 4.0)).with_y_sort_anchor(Vec2::new(0.0, -2.0));
+    tilemap.set_cell(TileCoord::new(0, 1), TileCell::new(TileIndex::new(0)));
+    let tilemap = app
+        .world_mut()
+        .unwrap()
+        .spawn((tilemap, Transform2d::from_translation(Vec2::new(0.0, 3.0))))
+        .id();
+    place_roots(app.world_mut().unwrap(), &[actor, tilemap]);
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let anchors = runtime
+        .world()
+        .resource::<ExtractedSprites>()
+        .as_slice()
+        .iter()
+        .map(|sprite| sprite.world_sort_y)
+        .collect::<Vec<_>>();
+    runtime.finish().unwrap();
+    assert!((anchors[0] - 12.0).abs() < 0.000_001);
+    assert!((anchors[1] - 7.0).abs() < 0.000_001);
 }
 
 #[test]
@@ -578,6 +657,215 @@ fn queueing_uses_prepared_image_resource_keys_and_uvs() {
 }
 
 #[test]
+fn custom_material_captures_second_texture_and_preserves_stock_order() {
+    use nara_material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
+    static DEFINITIONS: [Material2dDefinition; 1] = [Material2dDefinition {
+        id: "test.palette",
+        fragment_shader: include_str!("../../../examples/support/palette_material.wgsl"),
+        input: Material2dInput::SPRITE_FRAGMENT_V1,
+        alpha_mode: AlphaMode2d::Opaque,
+    }];
+    let texture = Handle::new(AssetId::from_raw(33));
+    let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
+    let material = definitions
+        .instantiate("test.palette", [1.0, 0.5, 0.0, 0.0], texture)
+        .unwrap();
+    let mut app = sprite_app();
+    insert_loaded_image(&mut app, texture);
+    let world = app.world_mut().unwrap();
+    let camera = world
+        .spawn((
+            Camera2d {
+                target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9))),
+                viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+                viewport_height: 100.0,
+                ..Default::default()
+            },
+            Transform2d::default(),
+        ))
+        .id();
+    let stock = world
+        .spawn((
+            Sprite::from_color(Vec2::ONE, Color::WHITE),
+            Transform2d::default(),
+        ))
+        .id();
+    let custom = world
+        .spawn((
+            Sprite::from_color(Vec2::ONE, Color::WHITE),
+            material,
+            Transform2d::default(),
+        ))
+        .id();
+    let mut tilemap = Tilemap::new(Vec2::ONE);
+    tilemap.set_cell(TileCoord::new(0, 0), TileCell::new(TileIndex::new(0)));
+    let tile = world
+        .spawn((tilemap, material, Transform2d::default()))
+        .id();
+    place_roots(world, &[camera, stock, custom, tile]);
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let queued = runtime
+        .world()
+        .resource::<QueuedSpriteItems>()
+        .as_slice()
+        .to_vec();
+    let batches = runtime.world().resource::<SpriteBatches>().clone();
+    runtime.finish().unwrap();
+    assert_eq!(
+        queued.iter().map(|item| item.entity).collect::<Vec<_>>(),
+        vec![stock, custom, tile]
+    );
+    assert!(queued[0].material_extension.is_none());
+    for item in &queued[1..] {
+        let extension = item.material_extension.as_ref().unwrap();
+        assert_eq!(extension.instance, material);
+        assert_eq!(
+            extension.texture.identity().key(),
+            image_resource_key(texture)
+        );
+        assert_eq!(extension.texture.resource().pixels(), &[255; 16]);
+        assert_eq!(item.material.alpha_mode, AlphaMode2d::Opaque);
+    }
+    assert_eq!(batches.total_instances(), 3);
+}
+
+#[test]
+fn missing_custom_material_texture_skips_only_that_item() {
+    use nara_material::{Material2dDefinition, Material2dDefinitions, Material2dInput};
+    static DEFINITIONS: [Material2dDefinition; 1] = [Material2dDefinition {
+        id: "test.palette",
+        fragment_shader: "fn material_fragment() {}",
+        input: Material2dInput::SPRITE_FRAGMENT_V1,
+        alpha_mode: AlphaMode2d::Blend,
+    }];
+    let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
+    let material = definitions
+        .instantiate("test.palette", [0.0; 4], Handle::new(AssetId::from_raw(33)))
+        .unwrap();
+    let mut app = sprite_app();
+    let world = app.world_mut().unwrap();
+    let camera = world
+        .spawn((
+            Camera2d {
+                target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(9))),
+                viewport: Some(ViewportRect::new(0, 0, 100, 100).unwrap()),
+                viewport_height: 100.0,
+                ..Default::default()
+            },
+            Transform2d::default(),
+        ))
+        .id();
+    let stock = world
+        .spawn((
+            Sprite::from_color(Vec2::ONE, Color::WHITE),
+            Transform2d::default(),
+        ))
+        .id();
+    let custom = world
+        .spawn((
+            Sprite::from_color(Vec2::ONE, Color::WHITE),
+            material,
+            Transform2d::default(),
+        ))
+        .id();
+    place_roots(world, &[camera, stock, custom]);
+    let mut runtime = RuntimeInstance::start(app).unwrap();
+
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let queued = runtime
+        .world()
+        .resource::<QueuedSpriteItems>()
+        .as_slice()
+        .to_vec();
+    let unprepared = runtime
+        .world()
+        .resource::<SpriteRenderStats>()
+        .unprepared_textures;
+    runtime.finish().unwrap();
+    assert_eq!(
+        queued.iter().map(|item| item.entity).collect::<Vec<_>>(),
+        vec![stock]
+    );
+    assert_eq!(unprepared, 1);
+}
+
+#[test]
+fn foreground_tile_follows_actor_by_layer() {
+    let actor = queued_item(0);
+    let foreground_tile = QueuedSpriteItem {
+        kind: SpriteBatchKind::Tilemap,
+        layer: 1,
+        ..queued_item(1)
+    };
+    let mut items = vec![foreground_tile.clone(), actor.clone()];
+
+    items.sort_by(compare_queued_sprite_items);
+
+    assert_eq!(
+        items.iter().map(|item| item.entity).collect::<Vec<_>>(),
+        vec![actor.entity, foreground_tile.entity],
+    );
+}
+
+#[test]
+fn y_sort_is_total_and_stays_within_layer_and_sort_group() {
+    let mut items = vec![
+        QueuedSpriteItem {
+            world_sort_y: -10.0,
+            kind: SpriteBatchKind::Tilemap,
+            ..queued_item(0)
+        },
+        QueuedSpriteItem {
+            world_sort_y: 0.0,
+            ..queued_item(1)
+        },
+        QueuedSpriteItem {
+            world_sort_y: 10.0,
+            ..queued_item(2)
+        },
+        QueuedSpriteItem {
+            world_sort_y: -0.0,
+            kind: SpriteBatchKind::Tilemap,
+            ..queued_item(3)
+        },
+        QueuedSpriteItem {
+            sort_key: 1,
+            world_sort_y: 100.0,
+            ..queued_item(4)
+        },
+        QueuedSpriteItem {
+            layer: 1,
+            sort_key: -1,
+            world_sort_y: 1_000.0,
+            ..queued_item(5)
+        },
+    ];
+
+    items.sort_by(compare_queued_sprite_items);
+
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.source_order)
+            .collect::<Vec<_>>(),
+        vec![2, 1, 3, 0, 4, 5],
+    );
+    items.reverse();
+    items.sort_by(compare_queued_sprite_items);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.source_order)
+            .collect::<Vec<_>>(),
+        vec![2, 1, 3, 0, 4, 5],
+    );
+}
+
+#[test]
 fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
     let mut items = vec![
         QueuedSpriteItem {
@@ -588,10 +876,12 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             kind: SpriteBatchKind::Sprite,
             layer: 0,
             sort_key: 0,
+            world_sort_y: 0.0,
             material: material_key(),
             source_order: 0,
             instance: instance(),
             image: None,
+            material_extension: None,
         },
         QueuedSpriteItem {
             entity: Entity::from_raw_u32(2).unwrap(),
@@ -601,10 +891,12 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             kind: SpriteBatchKind::Sprite,
             layer: 0,
             sort_key: 0,
+            world_sort_y: 0.0,
             material: material_key(),
             source_order: 1,
             instance: instance(),
             image: None,
+            material_extension: None,
         },
         QueuedSpriteItem {
             entity: Entity::from_raw_u32(3).unwrap(),
@@ -614,10 +906,12 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             kind: SpriteBatchKind::Sprite,
             layer: 1,
             sort_key: 0,
+            world_sort_y: 0.0,
             material: material_key(),
             source_order: 2,
             instance: instance(),
             image: None,
+            material_extension: None,
         },
         QueuedSpriteItem {
             entity: Entity::from_raw_u32(4).unwrap(),
@@ -627,10 +921,12 @@ fn sorting_preserves_source_order_for_equal_keys_and_batches_adjacent_items() {
             kind: SpriteBatchKind::Sprite,
             layer: 1,
             sort_key: 1,
+            world_sort_y: 0.0,
             material: material_key(),
             source_order: 3,
             instance: instance(),
             image: None,
+            material_extension: None,
         },
     ];
 
@@ -677,6 +973,7 @@ fn transparent_material_changes_preserve_painter_order_and_split_adjacent_batche
         QueuedSpriteItem {
             material: material_key(),
             image: Some(texture_b.clone()),
+            kind: SpriteBatchKind::Tilemap,
             ..queued_item(1)
         },
         QueuedSpriteItem {
@@ -801,8 +1098,8 @@ fn target_or_domain_kind_changes_split_batches() {
     let batches = build_sprite_batches(&items);
 
     assert_eq!(batches.len(), 3);
-    assert_eq!(batches[0].kind, SpriteBatchKind::Tilemap);
-    assert_eq!(batches[1].kind, SpriteBatchKind::Sprite);
+    assert_eq!(batches[0].kind, SpriteBatchKind::Sprite);
+    assert_eq!(batches[1].kind, SpriteBatchKind::Tilemap);
     assert!(
         batches
             .iter()
@@ -823,7 +1120,12 @@ fn target_or_domain_kind_changes_split_batches() {
 #[test]
 fn generated_instances_fit_camera_viewport_aspect_and_position() {
     let view = ExtractedView {
-        world_position: Vec2::new(10.0, 5.0),
+        mapping: nara_render::ViewMapping2d::orthographic(
+            nara_core::Mat3::from_translation(Vec2::new(10.0, 5.0)),
+            100.0,
+            test_view().viewport,
+        )
+        .unwrap(),
         ..test_view()
     };
     let instance = world_to_clip_instance(
@@ -835,7 +1137,6 @@ fn generated_instances_fit_camera_viewport_aspect_and_position() {
     )
     .unwrap();
 
-    assert_eq!(view_world_extent(&view), Some(Vec2::new(200.0, 100.0)));
     assert!(instance.center.abs_diff_eq(Vec2::new(0.5, 0.5), 0.000_001));
     assert!(
         instance
@@ -989,6 +1290,7 @@ fn placeholder_extracted_sprite() -> ExtractedSprite {
         source_order: 99,
         kind: ExtractedSpriteKind::Sprite,
         material: ExtractedSpriteMaterial::from_color(Color::WHITE),
+        material_extension: None,
         texture_region: TextureUvRect::FULL,
         world_center: Vec2::new(9.0, 9.0),
         world_x_axis: Vec2::X,
@@ -996,6 +1298,7 @@ fn placeholder_extracted_sprite() -> ExtractedSprite {
         color: Color::WHITE,
         layer: 0,
         sort_key: 0,
+        world_sort_y: 0.0,
     }
 }
 
@@ -1008,10 +1311,12 @@ fn queued_item(entity_index: u32) -> QueuedSpriteItem {
         kind: SpriteBatchKind::Sprite,
         layer: 0,
         sort_key: 0,
+        world_sort_y: 0.0,
         material: material_key(),
         source_order: entity_index as u64,
         instance: instance(),
         image: None,
+        material_extension: None,
     }
 }
 

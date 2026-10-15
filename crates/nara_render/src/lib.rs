@@ -1,14 +1,46 @@
 //! Renderer-facing data and backend seam.
 
+mod frame;
 mod prepare;
+mod presentation;
+mod target;
+mod view;
 
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext, RuntimeGeneration};
+use frame::build_render_frame_packet_for_source;
+pub use frame::{
+    MAX_VIEWS_PER_TARGET, RenderFramePacket, RenderFramePacketError, RenderFrameSourceGeneration,
+    build_render_frame_packet,
+};
+pub use presentation::{DisplayMapping2d, DisplayRect, DisplaySampling, DisplayScale};
+pub use target::{
+    Extent2d, RenderFrameTarget, RenderImage2d, RenderImagePacket, RenderTarget,
+    RenderWindowPacket, ViewportRect,
+};
+pub use view::{
+    Camera2d, ExtractedView, ExtractedViews, ViewLoadOp, ViewMapping2d, viewport_clip_to_physical,
+    viewport_physical_to_clip,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Resource)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ClearColor(pub Color);
+
+impl Default for ClearColor {
+    fn default() -> Self {
+        Self(Color::BLACK)
+    }
+}
+
+#[cfg(test)]
+use nara_app::RuntimeGeneration;
+use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
+#[cfg(test)]
 use nara_asset::Handle;
 pub use nara_core::Color;
+#[cfg(test)]
 use nara_core::Vec2;
 use nara_ecs::{
-    Component, Entity, Query, Res, ResMut, Resource, error::BevyError,
-    schedule::IntoScheduleConfigs,
+    Entity, Query, Res, ResMut, Resource, error::BevyError, schedule::IntoScheduleConfigs,
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
@@ -16,7 +48,7 @@ use nara_reflect::{
     ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
 };
 use nara_transform::{GlobalTransform2d, Transform2d};
-use nara_window::{PresentMode, PrimaryWindowId, Window, WindowId, WindowResolution};
+use nara_window::{PrimaryWindowId, Window, WindowId};
 
 pub use prepare::{
     PreparedRenderResource, PreparedRenderResourceRecord, PreparedRenderResources,
@@ -59,6 +91,7 @@ pub mod __private {
         generation: EditorRenderGeneration,
         frame_index: u64,
         views: &ExtractedViews,
+        target: RenderImagePacket,
     ) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
         let packet = build_render_frame_packet_for_source(
             RenderFrameSourceGeneration::editor(generation.0),
@@ -66,6 +99,7 @@ pub mod __private {
             None,
             std::iter::empty(),
             views,
+            Some(target),
         )?;
         if packet
             .as_ref()
@@ -128,184 +162,6 @@ pub mod __private {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Extent2d {
-    pub width: u32,
-    pub height: u32,
-}
-
-impl Extent2d {
-    #[must_use]
-    pub const fn new(width: u32, height: u32) -> Option<Self> {
-        if width == 0 || height == 0 {
-            None
-        } else {
-            Some(Self { width, height })
-        }
-    }
-
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.width == 0 || self.height == 0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Resource)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ClearColor(pub Color);
-
-impl Default for ClearColor {
-    fn default() -> Self {
-        Self(Color::BLACK)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct RenderImage2d {
-    pub width: u32,
-    pub height: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RenderTarget {
-    PrimaryWindow,
-    Window(WindowId),
-    Image(Handle<RenderImage2d>),
-}
-
-impl Default for RenderTarget {
-    fn default() -> Self {
-        Self::PrimaryWindow
-    }
-}
-
-impl RenderTarget {
-    #[must_use]
-    pub fn window_id(self, primary_window_id: Option<WindowId>) -> Option<WindowId> {
-        match self {
-            Self::PrimaryWindow => Some(primary_window_id.unwrap_or(WindowId::PRIMARY)),
-            Self::Window(window_id) => Some(window_id),
-            Self::Image(_) => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ViewportRect {
-    pub physical_x: u32,
-    pub physical_y: u32,
-    pub physical_width: u32,
-    pub physical_height: u32,
-}
-
-impl ViewportRect {
-    #[must_use]
-    pub const fn new(
-        physical_x: u32,
-        physical_y: u32,
-        physical_width: u32,
-        physical_height: u32,
-    ) -> Option<Self> {
-        if physical_width == 0 || physical_height == 0 {
-            None
-        } else {
-            Some(Self {
-                physical_x,
-                physical_y,
-                physical_width,
-                physical_height,
-            })
-        }
-    }
-
-    #[must_use]
-    pub const fn from_extent(extent: Extent2d) -> Option<Self> {
-        Self::new(0, 0, extent.width, extent.height)
-    }
-
-    #[must_use]
-    pub const fn from_window_resolution(resolution: WindowResolution) -> Option<Self> {
-        Self::new(0, 0, resolution.physical_width, resolution.physical_height)
-    }
-
-    #[must_use]
-    pub const fn extent(&self) -> Extent2d {
-        Extent2d {
-            width: self.physical_width,
-            height: self.physical_height,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Component)]
-pub struct Camera2d {
-    pub target: RenderTarget,
-    pub viewport: Option<ViewportRect>,
-    pub clear_color: Option<Color>,
-    pub viewport_height: f32,
-    pub order: i32,
-}
-
-impl Default for Camera2d {
-    fn default() -> Self {
-        Self {
-            target: RenderTarget::PrimaryWindow,
-            viewport: None,
-            clear_color: None,
-            viewport_height: 720.0,
-            order: 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ExtractedView {
-    pub camera_entity: Entity,
-    pub target: RenderTarget,
-    pub viewport: ViewportRect,
-    pub world_position: Vec2,
-    pub viewport_height: f32,
-    pub order: i32,
-    pub clear_color: Color,
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Resource)]
-pub struct ExtractedViews {
-    views: Vec<ExtractedView>,
-}
-
-impl ExtractedViews {
-    pub fn clear(&mut self) {
-        self.views.clear();
-    }
-
-    pub fn push(&mut self, view: ExtractedView) {
-        self.views.push(view);
-    }
-
-    fn replace(&mut self, candidate: &mut Vec<ExtractedView>) {
-        std::mem::swap(&mut self.views, candidate);
-    }
-
-    #[must_use]
-    pub fn as_slice(&self) -> &[ExtractedView] {
-        &self.views
-    }
-
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.views.is_empty()
-    }
-
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.views.len()
-    }
-}
-
 #[derive(Debug, Default, Resource)]
 struct ExtractedViewScratch(Vec<ExtractedView>);
 
@@ -322,226 +178,8 @@ pub(crate) enum RenderViewExtractionError {
     NonFiniteTransform { entity: Entity },
     #[error("camera entity {entity:?} has a singular completed linear transform")]
     SingularTransform { entity: Entity },
-    #[error("camera entity {entity:?} has a non-identity completed linear transform")]
-    UnsupportedLinearTransform { entity: Entity },
-}
-
-/// Immutable window state admitted for one render-frame submission.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct RenderWindowPacket {
-    pub id: WindowId,
-    pub resolution: WindowResolution,
-    pub present_mode: PresentMode,
-}
-
-/// Immutable image target admitted for one render-frame submission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RenderImagePacket {
-    image: Handle<RenderImage2d>,
-    extent: Extent2d,
-}
-
-impl RenderImagePacket {
-    #[must_use]
-    pub const fn image(self) -> Handle<RenderImage2d> {
-        self.image
-    }
-
-    #[must_use]
-    pub const fn extent(self) -> Extent2d {
-        self.extent
-    }
-}
-
-/// The one backend-neutral target owned by a [`RenderFramePacket`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum RenderFrameTarget {
-    Window(RenderWindowPacket),
-    Image(RenderImagePacket),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum RenderFrameSourceKind {
-    Runtime(RuntimeGeneration),
-    EditorPreview(u64),
-}
-
-/// Exact producer generation for one immutable render-frame packet stream.
-///
-/// Constructors are deliberately closed. Managed runtimes enter through
-/// [`build_render_frame_packet`], while the private first-party Editor owns the only independent
-/// preview producer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RenderFrameSourceGeneration(RenderFrameSourceKind);
-
-impl RenderFrameSourceGeneration {
-    const fn runtime(generation: RuntimeGeneration) -> Self {
-        Self(RenderFrameSourceKind::Runtime(generation))
-    }
-
-    const fn editor(generation: u64) -> Self {
-        Self(RenderFrameSourceKind::EditorPreview(generation))
-    }
-
-    #[must_use]
-    pub const fn runtime_generation(self) -> Option<RuntimeGeneration> {
-        match self.0 {
-            RenderFrameSourceKind::Runtime(generation) => Some(generation),
-            RenderFrameSourceKind::EditorPreview(_) => None,
-        }
-    }
-}
-
-impl From<RuntimeGeneration> for RenderFrameSourceGeneration {
-    fn from(generation: RuntimeGeneration) -> Self {
-        Self::runtime(generation)
-    }
-}
-
-/// Owned backend-neutral render input captured before any surface acquisition.
-#[derive(Debug, PartialEq)]
-pub struct RenderFramePacket {
-    source_generation: RenderFrameSourceGeneration,
-    frame_index: u64,
-    target: RenderFrameTarget,
-    view: ExtractedView,
-}
-
-impl RenderFramePacket {
-    #[must_use]
-    pub const fn source_generation(&self) -> RenderFrameSourceGeneration {
-        self.source_generation
-    }
-
-    #[must_use]
-    pub const fn frame_index(&self) -> u64 {
-        self.frame_index
-    }
-
-    #[must_use]
-    pub const fn target(&self) -> RenderFrameTarget {
-        self.target
-    }
-
-    #[must_use]
-    pub const fn view(&self) -> &ExtractedView {
-        &self.view
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum RenderFramePacketError {
-    #[error("the desktop renderer supports exactly one view, but captured {actual}")]
-    UnsupportedViewCount { actual: usize },
-    #[error("the desktop renderer supports exactly one window, but captured {actual}")]
-    UnsupportedWindowCount { actual: usize },
-    #[error("an image render target viewport must start at the target origin")]
-    ImageViewportMustStartAtOrigin,
-    #[error("an image render target must have a non-zero physical extent")]
-    ImageTargetHasZeroExtent,
-    #[error("an Editor preview render packet must target an image")]
-    EditorPreviewRequiresImageTarget,
-    #[error("an Editor Game View render packet must originate from a logical window target")]
-    EditorGameViewRequiresWindowTarget,
-    #[error(
-        "the Editor Game View image extent {image:?} does not match logical window extent {logical:?}"
-    )]
-    EditorGameViewTargetExtentMismatch { logical: Extent2d, image: Extent2d },
-    #[error("render target window {window_id:?} is not the admitted window")]
-    TargetWindowMismatch { window_id: WindowId },
-    #[error("the render viewport lies outside window {window_id:?}")]
-    ViewportOutsideTarget { window_id: WindowId },
-}
-
-/// Captures the supported desktop topology without retaining a `World` borrow.
-///
-/// No surface operation may occur until this function has returned an admitted packet.
-pub fn build_render_frame_packet<'a>(
-    generation: RuntimeGeneration,
-    frame_index: u64,
-    primary_window_id: Option<WindowId>,
-    windows: impl IntoIterator<Item = &'a Window>,
-    views: &ExtractedViews,
-) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
-    build_render_frame_packet_for_source(
-        RenderFrameSourceGeneration::runtime(generation),
-        frame_index,
-        primary_window_id,
-        windows,
-        views,
-    )
-}
-
-fn build_render_frame_packet_for_source<'a>(
-    source_generation: RenderFrameSourceGeneration,
-    frame_index: u64,
-    primary_window_id: Option<WindowId>,
-    windows: impl IntoIterator<Item = &'a Window>,
-    views: &ExtractedViews,
-) -> Result<Option<RenderFramePacket>, RenderFramePacketError> {
-    if views.is_empty() {
-        return Ok(None);
-    }
-    if views.len() != 1 {
-        return Err(RenderFramePacketError::UnsupportedViewCount {
-            actual: views.len(),
-        });
-    }
-
-    let view = views.as_slice()[0];
-    let target = match view.target {
-        RenderTarget::Image(image) => {
-            if view.viewport.physical_x != 0 || view.viewport.physical_y != 0 {
-                return Err(RenderFramePacketError::ImageViewportMustStartAtOrigin);
-            }
-            let extent = view.viewport.extent();
-            if extent.is_empty() {
-                return Err(RenderFramePacketError::ImageTargetHasZeroExtent);
-            }
-            RenderFrameTarget::Image(RenderImagePacket { image, extent })
-        }
-        RenderTarget::PrimaryWindow | RenderTarget::Window(_) => {
-            let mut windows = windows.into_iter();
-            let Some(window) = windows.next() else {
-                return Err(RenderFramePacketError::UnsupportedWindowCount { actual: 0 });
-            };
-            let additional = windows.count();
-            if additional != 0 {
-                return Err(RenderFramePacketError::UnsupportedWindowCount {
-                    actual: additional.saturating_add(1),
-                });
-            }
-            let window_id = view
-                .target
-                .window_id(primary_window_id)
-                .expect("window render targets always resolve to a window identity");
-            if window.id != window_id {
-                return Err(RenderFramePacketError::TargetWindowMismatch { window_id });
-            }
-
-            let viewport_right = u64::from(view.viewport.physical_x)
-                .saturating_add(u64::from(view.viewport.physical_width));
-            let viewport_bottom = u64::from(view.viewport.physical_y)
-                .saturating_add(u64::from(view.viewport.physical_height));
-            if viewport_right > u64::from(window.resolution.physical_width)
-                || viewport_bottom > u64::from(window.resolution.physical_height)
-            {
-                return Err(RenderFramePacketError::ViewportOutsideTarget { window_id });
-            }
-            RenderFrameTarget::Window(RenderWindowPacket {
-                id: window.id,
-                resolution: window.resolution,
-                present_mode: window.present_mode,
-            })
-        }
-    };
-
-    Ok(Some(RenderFramePacket {
-        source_generation,
-        frame_index,
-        target,
-        view,
-    }))
+    #[error("camera entity {entity:?} has an invalid orthographic projection")]
+    InvalidProjection { entity: Entity },
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -815,6 +453,7 @@ impl Plugin for RenderPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        nara_transform::__private::install_render_projection(app)?;
         app.init_resource::<ClearColor>()?;
         app.init_resource::<ExtractedViews>()?;
         app.init_resource::<ExtractedViewScratch>()?;
@@ -824,7 +463,7 @@ impl Plugin for RenderPlugin {
         app.add_systems(
             CoreStage::Extract,
             extract_views
-                .after(nara_transform::__private::TransformSet::Propagate)
+                .after(nara_transform::__private::TransformSet::Present)
                 .in_set(__private::RenderExtractSet::Views),
         )?;
         app.add_systems(CoreStage::Render, begin_render_frame)?;
@@ -1066,6 +705,7 @@ fn extract_views(
     clear_color: Res<ClearColor>,
     completed_projection: Option<Res<nara_transform::__private::CompletedTransformProjection>>,
     completed_hierarchy: Option<Res<nara_hierarchy::__private::CompletedHierarchyProjection>>,
+    presentation: Res<nara_transform::__private::RenderTransformProjection>,
     primary_window_id: Option<Res<PrimaryWindowId>>,
     windows: Query<&Window>,
     cameras: Query<(
@@ -1108,51 +748,58 @@ fn extract_views(
             continue;
         };
 
-        let world_position =
-            camera_world_position(camera_entity, global).map_err(BevyError::error)?;
+        let matrix = presentation
+            .matrix(camera_entity, global.matrix())
+            .ok_or(RenderViewExtractionError::ProjectionIncomplete)
+            .map_err(BevyError::error)?;
+        let mapping = camera_mapping(camera_entity, matrix, camera.viewport_height, viewport)
+            .map_err(BevyError::error)?;
         scratch.0.push(ExtractedView {
             camera_entity,
             target: camera.target,
             viewport,
-            world_position,
-            viewport_height: camera.viewport_height,
+            mapping,
             order: camera.order,
-            clear_color: camera.clear_color.unwrap_or(clear_color.0),
+            load: camera
+                .clear_color
+                .map_or(ViewLoadOp::Load, ViewLoadOp::Clear),
         });
     }
 
     scratch
         .0
         .sort_unstable_by_key(|view| (view.order, view.camera_entity.to_bits()));
+    for index in 0..scratch.0.len() {
+        let (previous, remaining) = scratch.0.split_at_mut(index);
+        let view = &mut remaining[0];
+        if view.load == ViewLoadOp::Load
+            && !previous.iter().any(|previous| {
+                frame::targets_match(previous.target, view.target, primary_window_id)
+            })
+        {
+            view.load = ViewLoadOp::Clear(clear_color.0);
+        }
+    }
     extracted_views.replace(&mut scratch.0);
     frame.begin_extract();
     Ok(())
 }
 
-const CAMERA_LINEAR_TOLERANCE: f32 = 1.0e-5;
-
-fn camera_world_position(
+fn camera_mapping(
     entity: Entity,
-    global: &GlobalTransform2d,
-) -> Result<Vec2, RenderViewExtractionError> {
-    let matrix = global.matrix();
+    matrix: nara_core::Mat3,
+    viewport_height: f32,
+    viewport: ViewportRect,
+) -> Result<ViewMapping2d, RenderViewExtractionError> {
     if !matrix.is_finite() {
         return Err(RenderViewExtractionError::NonFiniteTransform { entity });
     }
 
-    let x_axis = matrix.x_axis.truncate();
-    let y_axis = matrix.y_axis.truncate();
-    let determinant = x_axis.perp_dot(y_axis);
-    if determinant.abs() <= CAMERA_LINEAR_TOLERANCE {
+    if matrix.determinant() == 0.0 {
         return Err(RenderViewExtractionError::SingularTransform { entity });
     }
-    if !x_axis.abs_diff_eq(Vec2::X, CAMERA_LINEAR_TOLERANCE)
-        || !y_axis.abs_diff_eq(Vec2::Y, CAMERA_LINEAR_TOLERANCE)
-    {
-        return Err(RenderViewExtractionError::UnsupportedLinearTransform { entity });
-    }
-
-    Ok(matrix.transform_point2(Vec2::ZERO))
+    ViewMapping2d::orthographic(matrix, viewport_height, viewport)
+        .ok_or(RenderViewExtractionError::InvalidProjection { entity })
 }
 
 pub fn begin_render_frame(mut frame: ResMut<RenderFrame>) {
@@ -1286,7 +933,59 @@ mod tests {
             packet.target(),
             RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
         ));
-        assert_eq!(packet.view(), &test_extracted_view());
+        assert_eq!(packet.views().first().unwrap(), &test_extracted_view());
+    }
+
+    #[test]
+    fn frame_packet_admits_two_ordered_split_views_on_one_window_target() {
+        let mut app = render_app(true);
+        let world = app.world_mut().unwrap();
+        let right = world
+            .spawn((
+                Camera2d {
+                    viewport: Some(ViewportRect::new(640, 0, 640, 720).unwrap()),
+                    order: 10,
+                    ..Camera2d::default()
+                },
+                Transform2d::default(),
+            ))
+            .id();
+        let left = world
+            .spawn((
+                Camera2d {
+                    viewport: Some(ViewportRect::new(0, 0, 640, 720).unwrap()),
+                    order: 0,
+                    ..Camera2d::default()
+                },
+                Transform2d::default(),
+            ))
+            .id();
+        let mut runtime = start_runtime(app);
+        runtime.drive(Duration::ZERO).unwrap();
+        let views = runtime.world().resource::<ExtractedViews>();
+        let ordered_cameras = views
+            .as_slice()
+            .iter()
+            .map(|view| view.camera_entity)
+            .collect::<Vec<_>>();
+        let window = Window::default();
+        let captured = build_render_frame_packet(
+            runtime.generation(),
+            runtime.world().resource::<RenderFrame>().index,
+            Some(WindowId::PRIMARY),
+            [&window],
+            views,
+        );
+        retire_runtime(runtime);
+
+        assert_eq!(ordered_cameras, [left, right]);
+        let packet = captured
+            .expect("two ordered split views on one target must be admitted")
+            .expect("two extracted views must produce a render frame packet");
+        assert!(matches!(
+            packet.target(),
+            RenderFrameTarget::Window(window) if window.id == WindowId::PRIMARY
+        ));
     }
 
     #[test]
@@ -1310,8 +1009,14 @@ mod tests {
         let mapped = __private::map_editor_game_view_packet(packet, target).unwrap();
 
         assert_eq!(mapped.target(), RenderFrameTarget::Image(target));
-        assert_eq!(mapped.view().target, RenderTarget::PrimaryWindow);
-        assert_eq!(mapped.view().viewport, test_extracted_view().viewport);
+        assert_eq!(
+            mapped.views().first().unwrap().target,
+            RenderTarget::PrimaryWindow
+        );
+        assert_eq!(
+            mapped.views().first().unwrap().viewport,
+            test_extracted_view().viewport
+        );
 
         let packet =
             build_render_frame_packet(generation, 10, Some(WindowId::PRIMARY), [&window], &views)
@@ -1330,94 +1035,6 @@ mod tests {
             ),
             Err(RenderFramePacketError::EditorGameViewTargetExtentMismatch { .. })
         ));
-    }
-
-    #[test]
-    fn frame_packet_rejects_extra_topology_and_admits_one_image_target() {
-        let generation = test_runtime_generation();
-        let window = Window::default();
-        let mut views = ExtractedViews::default();
-        views.push(test_extracted_view());
-        views.push(ExtractedView {
-            camera_entity: Entity::from_raw_u32(2).unwrap(),
-            ..test_extracted_view()
-        });
-        assert!(matches!(
-            build_render_frame_packet(generation, 1, None, [&window], &views),
-            Err(RenderFramePacketError::UnsupportedViewCount { actual: 2 })
-        ));
-
-        let mut views = ExtractedViews::default();
-        views.push(test_extracted_view());
-        let second_window = Window::default().with_id(WindowId::new(2));
-        assert!(matches!(
-            build_render_frame_packet(generation, 1, None, [&window, &second_window], &views),
-            Err(RenderFramePacketError::UnsupportedWindowCount { actual: 2 })
-        ));
-
-        let image = Handle::new(AssetId::from_raw(17));
-        let mut image_views = ExtractedViews::default();
-        image_views.push(ExtractedView {
-            target: RenderTarget::Image(image),
-            viewport: ViewportRect::new(0, 0, 320, 180).unwrap(),
-            ..test_extracted_view()
-        });
-        let packet = build_render_frame_packet(
-            generation,
-            1,
-            None,
-            std::iter::empty::<&Window>(),
-            &image_views,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(
-            packet.target(),
-            RenderFrameTarget::Image(RenderImagePacket {
-                image,
-                extent: Extent2d {
-                    width: 320,
-                    height: 180,
-                },
-            })
-        );
-    }
-
-    #[test]
-    fn frame_packet_rejects_an_offset_image_viewport() {
-        let generation = test_runtime_generation();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            target: RenderTarget::Image(Handle::new(AssetId::from_raw(17))),
-            viewport: ViewportRect::new(1, 0, 320, 180).unwrap(),
-            ..test_extracted_view()
-        });
-
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, std::iter::empty::<&Window>(), &views,),
-            Err(RenderFramePacketError::ImageViewportMustStartAtOrigin)
-        );
-    }
-
-    #[test]
-    fn frame_packet_rejects_a_zero_extent_image_viewport() {
-        let generation = test_runtime_generation();
-        let mut views = ExtractedViews::default();
-        views.push(ExtractedView {
-            target: RenderTarget::Image(Handle::new(AssetId::from_raw(17))),
-            viewport: ViewportRect {
-                physical_x: 0,
-                physical_y: 0,
-                physical_width: 0,
-                physical_height: 180,
-            },
-            ..test_extracted_view()
-        });
-
-        assert_eq!(
-            build_render_frame_packet(generation, 1, None, std::iter::empty::<&Window>(), &views,),
-            Err(RenderFramePacketError::ImageTargetHasZeroExtent)
-        );
     }
 
     #[test]
@@ -1444,35 +1061,205 @@ mod tests {
         });
         assert_eq!(
             build_render_frame_packet(generation, 1, None, [&window], &outside),
-            Err(RenderFramePacketError::ViewportOutsideTarget {
-                window_id: WindowId::PRIMARY,
-            })
+            Err(RenderFramePacketError::ViewportOutsideTarget)
         );
     }
 
     #[test]
-    fn captured_packet_ignores_later_topology_mutation_and_next_capture_rejects() {
+    fn captured_packet_retains_order_and_clear_once_load_next() {
+        let mut app = render_app(true);
+        for x in [0, 640] {
+            app.world_mut().unwrap().spawn((
+                Camera2d {
+                    viewport: Some(ViewportRect::new(x, 0, 640, 720).unwrap()),
+                    ..Default::default()
+                },
+                Transform2d::default(),
+            ));
+        }
+        let mut runtime = start_runtime(app);
+        runtime.drive(Duration::ZERO).unwrap();
+        let window = Window::default();
+        let mut first_views = runtime.world().resource::<ExtractedViews>().clone();
+        let captured = build_render_frame_packet(
+            runtime.generation(),
+            runtime.world().resource::<RenderFrame>().index,
+            None,
+            [&window],
+            &first_views,
+        );
+        runtime.drive(Duration::ZERO).unwrap();
+        let next_views = runtime.world().resource::<ExtractedViews>().clone();
+        let next = build_render_frame_packet(
+            runtime.generation(),
+            runtime.world().resource::<RenderFrame>().index,
+            None,
+            [&window],
+            &next_views,
+        );
+        first_views.clear();
+        retire_runtime(runtime);
+
+        let packet = captured.unwrap().unwrap();
+        let next = next.unwrap().unwrap();
+        assert!(first_views.is_empty());
+        assert_eq!(packet.views().len(), 2);
+        assert_eq!(packet.views(), next_views.as_slice());
+        assert_eq!(next.views(), packet.views());
+        assert_eq!(packet.views()[0].load, ViewLoadOp::Clear(Color::BLACK));
+        assert_eq!(packet.views()[1].load, ViewLoadOp::Load);
+    }
+
+    #[test]
+    fn split_image_uses_explicit_physical_extent_and_rejects_mixed_targets() {
+        let generation = test_runtime_generation();
+        let image = Handle::new(AssetId::from_raw(17));
+        let target =
+            __private::editor_viewport_image_target(image, Extent2d::new(320, 180).unwrap())
+                .unwrap();
+        let mut views = ExtractedViews::default();
+        views.push(ExtractedView {
+            target: RenderTarget::Image(image),
+            viewport: ViewportRect::new(0, 0, 160, 180).unwrap(),
+            ..test_extracted_view()
+        });
+        views.push(ExtractedView {
+            camera_entity: Entity::from_raw_u32(2).unwrap(),
+            target: RenderTarget::Image(image),
+            viewport: ViewportRect::new(160, 0, 160, 180).unwrap(),
+            order: 1,
+            load: ViewLoadOp::Load,
+            ..test_extracted_view()
+        });
+        let packet = __private::build_editor_render_frame_packet(
+            __private::EditorRenderGeneration::try_acquire().unwrap(),
+            1,
+            &views,
+            target,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(packet.target(), RenderFrameTarget::Image(target));
+        assert_eq!(packet.views(), views.as_slice());
+        views.push(ExtractedView {
+            camera_entity: Entity::from_raw_u32(3).unwrap(),
+            ..test_extracted_view()
+        });
+        assert_eq!(
+            build_render_frame_packet(generation, 2, None, [&Window::default()], &views),
+            Err(RenderFramePacketError::MixedRenderTargets)
+        );
+    }
+
+    #[test]
+    fn packet_view_limit_order_and_initialization_are_explicit() {
         let generation = test_runtime_generation();
         let window = Window::default();
         let mut views = ExtractedViews::default();
-        views.push(test_extracted_view());
-        let packet = build_render_frame_packet(generation, 1, None, [&window], &views)
-            .unwrap()
-            .unwrap();
-
+        views.push(ExtractedView {
+            load: ViewLoadOp::Load,
+            ..test_extracted_view()
+        });
+        assert_eq!(
+            build_render_frame_packet(generation, 1, None, [&window], &views),
+            Err(RenderFramePacketError::UninitializedTarget)
+        );
+        views.clear();
+        for index in 0..=MAX_VIEWS_PER_TARGET {
+            views.push(ExtractedView {
+                camera_entity: Entity::from_raw_u32(index as u32 + 1).unwrap(),
+                ..test_extracted_view()
+            });
+        }
+        assert_eq!(
+            build_render_frame_packet(generation, 1, None, [&window], &views),
+            Err(RenderFramePacketError::TooManyViews {
+                actual: MAX_VIEWS_PER_TARGET + 1,
+                maximum: MAX_VIEWS_PER_TARGET
+            })
+        );
+        views.clear();
+        views.push(ExtractedView {
+            order: 1,
+            ..test_extracted_view()
+        });
         views.push(ExtractedView {
             camera_entity: Entity::from_raw_u32(2).unwrap(),
             ..test_extracted_view()
         });
-
         assert_eq!(
-            packet.view().camera_entity,
-            Entity::from_raw_u32(1).unwrap()
+            build_render_frame_packet(generation, 1, None, [&window], &views),
+            Err(RenderFramePacketError::UnorderedViews)
         );
-        assert!(matches!(
-            build_render_frame_packet(generation, 2, None, [&window], &views),
-            Err(RenderFramePacketError::UnsupportedViewCount { actual: 2 })
+    }
+
+    #[test]
+    fn parented_affine_camera_shares_drawing_and_picking_mapping() {
+        let mut app = render_app(false);
+        let world = app.world_mut().unwrap();
+        let parent = world
+            .spawn(Transform2d {
+                translation: Vec2::new(4.0, -3.0),
+                scale: Vec2::new(2.0, 1.0),
+                ..Default::default()
+            })
+            .id();
+        let camera = world
+            .spawn((
+                Camera2d {
+                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                    viewport: Some(ViewportRect::new(40, 20, 320, 180).unwrap()),
+                    viewport_height: 180.0,
+                    ..Default::default()
+                },
+                Transform2d {
+                    rotation: std::f32::consts::FRAC_PI_4,
+                    ..Default::default()
+                },
+            ))
+            .id();
+        place_parented(world, camera, parent);
+        let mut runtime = start_runtime(app);
+        runtime.drive(Duration::ZERO).unwrap();
+        let view = runtime.world().resource::<ExtractedViews>().as_slice()[0];
+        let camera_matrix = runtime
+            .world()
+            .get::<GlobalTransform2d>(camera)
+            .unwrap()
+            .matrix();
+        let world_point = camera_matrix.transform_point2(Vec2::new(80.0, 45.0));
+        let physical = view.world_to_viewport(world_point);
+        let restored = view.viewport_to_world(physical).unwrap();
+        retire_runtime(runtime);
+        assert!(physical.abs_diff_eq(Vec2::new(280.0, 65.0), 1.0e-4));
+        assert!(restored.abs_diff_eq(world_point, 1.0e-4));
+    }
+
+    #[test]
+    fn singular_camera_faults_without_partial_publication() {
+        let mut app = render_app(false);
+        let prior = test_extracted_view();
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<ExtractedViews>()
+            .push(prior);
+        app.world_mut().unwrap().spawn((
+            Camera2d {
+                target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
+                viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
+                ..Default::default()
+            },
+            Transform2d {
+                scale: Vec2::ZERO,
+                ..Default::default()
+            },
         ));
+        let mut runtime = start_runtime(app);
+        let result = runtime.drive(Duration::ZERO);
+        let retained = runtime.world().resource::<ExtractedViews>().clone();
+        retire_runtime(runtime);
+        assert!(result.is_err());
+        assert_eq!(retained.as_slice(), &[prior]);
     }
 
     #[test]
@@ -1488,13 +1275,21 @@ mod tests {
         let views = runtime.world().resource::<ExtractedViews>();
         assert_eq!(views.len(), 1);
         assert_eq!(views.as_slice()[0].target, RenderTarget::PrimaryWindow);
-        assert_eq!(views.as_slice()[0].world_position, Vec2::ZERO);
-        assert_eq!(views.as_slice()[0].viewport_height, 720.0);
+        assert_eq!(
+            views.as_slice()[0].mapping.clip_to_world(Vec2::ZERO),
+            Vec2::ZERO
+        );
+        assert!(
+            views.as_slice()[0]
+                .mapping
+                .world_to_clip(Vec2::new(0.0, 360.0))
+                .abs_diff_eq(Vec2::Y, 1.0e-5)
+        );
         assert_eq!(
             views.as_slice()[0].viewport,
             ViewportRect::new(0, 0, 1280, 720).unwrap()
         );
-        assert_eq!(views.as_slice()[0].clear_color, Color::BLACK);
+        assert_eq!(views.as_slice()[0].load, ViewLoadOp::Clear(Color::BLACK));
         runtime.finish().unwrap();
     }
 
@@ -1503,10 +1298,14 @@ mod tests {
             camera_entity: Entity::from_raw_u32(1).unwrap(),
             target: RenderTarget::PrimaryWindow,
             viewport: ViewportRect::new(0, 0, 1280, 720).unwrap(),
-            world_position: Vec2::ZERO,
-            viewport_height: 720.0,
+            mapping: ViewMapping2d::orthographic(
+                nara_core::Mat3::IDENTITY,
+                720.0,
+                ViewportRect::new(0, 0, 1280, 720).unwrap(),
+            )
+            .unwrap(),
             order: 0,
-            clear_color: Color::BLACK,
+            load: ViewLoadOp::Clear(Color::BLACK),
         }
     }
 
@@ -1553,7 +1352,7 @@ mod tests {
             views.as_slice()[0].viewport,
             ViewportRect::new(0, 0, 320, 180).unwrap()
         );
-        assert_eq!(views.as_slice()[0].clear_color, Color::WHITE);
+        assert_eq!(views.as_slice()[0].load, ViewLoadOp::Clear(Color::WHITE));
         runtime.finish().unwrap();
     }
 
@@ -1567,10 +1366,14 @@ mod tests {
                 camera_entity: Entity::PLACEHOLDER,
                 target: RenderTarget::PrimaryWindow,
                 viewport: ViewportRect::new(0, 0, 1, 1).unwrap(),
-                world_position: Vec2::ZERO,
-                viewport_height: 1.0,
+                mapping: ViewMapping2d::orthographic(
+                    nara_core::Mat3::IDENTITY,
+                    1.0,
+                    ViewportRect::new(0, 0, 1, 1).unwrap(),
+                )
+                .unwrap(),
                 order: 0,
-                clear_color: Color::WHITE,
+                load: ViewLoadOp::Clear(Color::WHITE),
             });
 
         let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
@@ -1604,7 +1407,10 @@ mod tests {
 
         let views = runtime.world().resource::<ExtractedViews>();
         assert_eq!(views.len(), 1);
-        assert_eq!(views.as_slice()[0].world_position, Vec2::new(110.0, 35.0));
+        assert_eq!(
+            views.as_slice()[0].mapping.clip_to_world(Vec2::ZERO),
+            Vec2::new(110.0, 35.0)
+        );
         runtime.finish().unwrap();
     }
 
@@ -1626,80 +1432,6 @@ mod tests {
         runtime
             .drive(Duration::ZERO)
             .expect_err("world-space cameras require explicit local and completed transforms");
-
-        assert_eq!(
-            runtime.world().resource::<ExtractedViews>().as_slice(),
-            &[prior]
-        );
-        retire_runtime(runtime);
-    }
-
-    #[test]
-    fn unsupported_camera_linear_transform_faults_without_partial_publication() {
-        let mut app = render_app(false);
-        let prior = test_extracted_view();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ExtractedViews>()
-            .push(prior);
-        app.world_mut().unwrap().spawn((
-            Camera2d {
-                target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
-                viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                ..Camera2d::default()
-            },
-            Transform2d {
-                rotation: 0.25,
-                ..Transform2d::default()
-            },
-        ));
-
-        let mut runtime = start_runtime(app);
-        runtime
-            .drive(Duration::ZERO)
-            .expect_err("camera rotation must reject frame extraction");
-
-        assert_eq!(
-            runtime.world().resource::<ExtractedViews>().as_slice(),
-            &[prior]
-        );
-        retire_runtime(runtime);
-    }
-
-    #[test]
-    fn parented_camera_shear_faults_without_partial_publication() {
-        let mut app = render_app(false);
-        let prior = test_extracted_view();
-        app.world_mut()
-            .unwrap()
-            .resource_mut::<ExtractedViews>()
-            .push(prior);
-        let world = app.world_mut().unwrap();
-        let parent = world
-            .spawn(Transform2d {
-                scale: Vec2::new(2.0, 1.0),
-                ..Transform2d::default()
-            })
-            .id();
-        let camera = world
-            .spawn((
-                Camera2d {
-                    target: RenderTarget::Image(Handle::new(AssetId::from_raw(7))),
-                    viewport: Some(ViewportRect::new(0, 0, 320, 180).unwrap()),
-                    ..Camera2d::default()
-                },
-                Transform2d {
-                    rotation: std::f32::consts::FRAC_PI_4,
-                    ..Transform2d::default()
-                },
-            ))
-            .id();
-        place_parented(world, camera, parent);
-
-        let mut runtime = start_runtime(app);
-        runtime
-            .drive(Duration::ZERO)
-            .expect_err("camera shear must reject frame extraction");
 
         assert_eq!(
             runtime.world().resource::<ExtractedViews>().as_slice(),
@@ -1747,96 +1479,6 @@ mod tests {
             &[prior]
         );
         retire_runtime(runtime);
-    }
-
-    #[test]
-    fn camera_linear_validation_distinguishes_singular_and_non_identity() {
-        let mut app = App::new();
-        app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
-            .unwrap();
-        let (singular, rotated) = {
-            let world = app.world_mut().unwrap();
-            let singular = world
-                .spawn(Transform2d {
-                    scale: Vec2::ZERO,
-                    ..Transform2d::default()
-                })
-                .id();
-            let rotated = world
-                .spawn(Transform2d {
-                    rotation: 0.25,
-                    ..Transform2d::default()
-                })
-                .id();
-            (singular, rotated)
-        };
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
-
-        assert_eq!(
-            camera_world_position(
-                singular,
-                runtime.world().get::<GlobalTransform2d>(singular).unwrap()
-            ),
-            Err(RenderViewExtractionError::SingularTransform { entity: singular })
-        );
-        assert_eq!(
-            camera_world_position(
-                rotated,
-                runtime.world().get::<GlobalTransform2d>(rotated).unwrap()
-            ),
-            Err(RenderViewExtractionError::UnsupportedLinearTransform { entity: rotated })
-        );
-        runtime.finish().unwrap();
-    }
-
-    #[test]
-    fn camera_linear_validation_uses_one_fixed_engine_tolerance() {
-        let mut app = App::new();
-        app.add_plugins((ComponentRegistryPlugin, HierarchyPlugin, TransformPlugin))
-            .unwrap();
-        let (within_tolerance, outside_tolerance) = {
-            let world = app.world_mut().unwrap();
-            let within_tolerance = world
-                .spawn(Transform2d {
-                    scale: Vec2::new(1.0 + CAMERA_LINEAR_TOLERANCE * 0.5, 1.0),
-                    ..Transform2d::default()
-                })
-                .id();
-            let outside_tolerance = world
-                .spawn(Transform2d {
-                    scale: Vec2::new(1.0 + CAMERA_LINEAR_TOLERANCE * 2.0, 1.0),
-                    ..Transform2d::default()
-                })
-                .id();
-            (within_tolerance, outside_tolerance)
-        };
-        let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
-        runtime.drive(Duration::ZERO).unwrap();
-
-        assert_eq!(
-            camera_world_position(
-                within_tolerance,
-                runtime
-                    .world()
-                    .get::<GlobalTransform2d>(within_tolerance)
-                    .unwrap()
-            ),
-            Ok(Vec2::ZERO)
-        );
-        assert_eq!(
-            camera_world_position(
-                outside_tolerance,
-                runtime
-                    .world()
-                    .get::<GlobalTransform2d>(outside_tolerance)
-                    .unwrap()
-            ),
-            Err(RenderViewExtractionError::UnsupportedLinearTransform {
-                entity: outside_tolerance,
-            })
-        );
-        runtime.finish().unwrap();
     }
 
     #[derive(Resource)]

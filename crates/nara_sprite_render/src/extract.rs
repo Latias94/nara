@@ -1,7 +1,8 @@
 use nara_asset::Assets;
-use nara_core::{Color, Vec2};
+use nara_core::{Color, Mat3, Vec2};
 use nara_ecs::{Entity, Query, Res, ResMut, Resource, error::BevyError};
 use nara_hierarchy::HierarchyOrder;
+use nara_material::Material2dInstance;
 use nara_sprite::Sprite;
 use nara_tilemap::{TileCoord, TileIndex, TileSet, Tilemap};
 use nara_transform::{GlobalTransform2d, Transform2d};
@@ -40,18 +41,21 @@ pub(crate) fn extract_sprites(
     mut scratch: ResMut<ExtractedSpriteScratch>,
     completed_projection: Option<Res<nara_transform::__private::CompletedTransformProjection>>,
     completed_hierarchy: Option<Res<nara_hierarchy::__private::CompletedHierarchyProjection>>,
+    presentation: Res<nara_transform::__private::RenderTransformProjection>,
     hierarchy_order: Option<Res<HierarchyOrder>>,
     sprites: Query<(
         Entity,
         &Sprite,
         Option<&Transform2d>,
         Option<&GlobalTransform2d>,
+        Option<&Material2dInstance>,
     )>,
     tilemaps: Query<(
         Entity,
         &Tilemap,
         Option<&Transform2d>,
         Option<&GlobalTransform2d>,
+        Option<&Material2dInstance>,
     )>,
     tilesets: Option<Res<Assets<TileSet>>>,
 ) -> Result<(), BevyError> {
@@ -92,24 +96,25 @@ pub(crate) fn extract_sprites(
     scratch.stats = SpriteRenderStats::default();
 
     for entity in hierarchy_order.as_slice().iter().copied() {
-        let Ok((entity, sprite, local, global)) = sprites.get(entity) else {
-            continue;
-        };
-        local
-            .ok_or(SpriteExtractionError::MissingSpriteLocalTransform { entity })
-            .map_err(BevyError::error)?;
-        let global = global
-            .ok_or(SpriteExtractionError::MissingSpriteGlobalTransform { entity })
-            .map_err(BevyError::error)?;
-        let source_order = scratch.sprites.len() as u64;
-        scratch
-            .sprites
-            .push(extract_sprite(entity, sprite, global, source_order));
-        scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
-    }
+        if let Ok((entity, sprite, local, global, material)) = sprites.get(entity) {
+            local
+                .ok_or(SpriteExtractionError::MissingSpriteLocalTransform { entity })
+                .map_err(BevyError::error)?;
+            let global = global
+                .ok_or(SpriteExtractionError::MissingSpriteGlobalTransform { entity })
+                .map_err(BevyError::error)?;
+            let source_order = scratch.sprites.len() as u64;
+            let matrix = presentation
+                .matrix(entity, global.matrix())
+                .ok_or(SpriteExtractionError::ProjectionIncomplete)
+                .map_err(BevyError::error)?;
+            let mut extracted = extract_sprite(entity, sprite, matrix, source_order);
+            extracted.material_extension = material.copied();
+            scratch.sprites.push(extracted);
+            scratch.stats.extracted_sprites = scratch.stats.extracted_sprites.saturating_add(1);
+        }
 
-    for entity in hierarchy_order.as_slice().iter().copied() {
-        let Ok((entity, tilemap, local, global)) = tilemaps.get(entity) else {
+        let Ok((entity, tilemap, local, global, material)) = tilemaps.get(entity) else {
             continue;
         };
         local
@@ -117,6 +122,10 @@ pub(crate) fn extract_sprites(
             .map_err(BevyError::error)?;
         let global = global
             .ok_or(SpriteExtractionError::MissingTilemapGlobalTransform { entity })
+            .map_err(BevyError::error)?;
+        let matrix = presentation
+            .matrix(entity, global.matrix())
+            .ok_or(SpriteExtractionError::ProjectionIncomplete)
             .map_err(BevyError::error)?;
         let tileset = tilemap.tileset.and_then(|handle| {
             tilesets
@@ -126,11 +135,11 @@ pub(crate) fn extract_sprites(
         let missing_tileset = tilemap.tileset.is_some() && tileset.is_none();
         for (coord, cell) in tilemap.cells() {
             let source_order = scratch.sprites.len() as u64;
-            let Some(extracted_cell) = extract_tile_cell(
+            let Some(mut extracted_cell) = extract_tile_cell(
                 entity,
                 tilemap,
                 tileset,
-                global,
+                matrix,
                 coord,
                 cell.tile,
                 cell.color,
@@ -140,6 +149,7 @@ pub(crate) fn extract_sprites(
                     scratch.stats.invalid_tile_regions.saturating_add(1);
                 continue;
             };
+            extracted_cell.material_extension = material.copied();
             if missing_tileset {
                 scratch.stats.missing_tilesets = scratch.stats.missing_tilesets.saturating_add(1);
             }
@@ -158,10 +168,9 @@ pub(crate) fn extract_sprites(
 pub fn extract_sprite(
     entity: Entity,
     sprite: &Sprite,
-    global: &GlobalTransform2d,
+    matrix: Mat3,
     source_order: u64,
 ) -> ExtractedSprite {
-    let matrix = global.matrix();
     let local_center = -sprite.anchor.normalized * sprite.size;
     let local_x_axis = Vec2::new(sprite.size.x * 0.5, 0.0);
     let local_y_axis = Vec2::new(0.0, sprite.size.y * 0.5);
@@ -176,6 +185,7 @@ pub fn extract_sprite(
             alpha_mode: sprite.material.alpha_mode,
             tint: sprite.material.tint,
         },
+        material_extension: None,
         texture_region: sprite
             .texture_region
             .map(TextureUvRect::from_texture_region)
@@ -186,6 +196,9 @@ pub fn extract_sprite(
         color: sprite.material.tint,
         layer: sprite.layer,
         sort_key: sprite.sort_key,
+        world_sort_y: sprite
+            .y_sort_anchor
+            .map_or(0.0, |anchor| matrix.transform_point2(anchor).y),
     }
 }
 
@@ -194,13 +207,12 @@ pub fn extract_tile_cell(
     entity: Entity,
     tilemap: &Tilemap,
     tileset: Option<&TileSet>,
-    global: &GlobalTransform2d,
+    matrix: Mat3,
     coord: TileCoord,
     tile: TileIndex,
     color: Color,
     source_order: u64,
 ) -> Option<ExtractedSprite> {
-    let matrix = global.matrix();
     let tile_size = tilemap.tile_size;
     let local_center = Vec2::new(
         (coord.x as f32 + 0.5) * tile_size.x,
@@ -233,6 +245,7 @@ pub fn extract_tile_cell(
         source_order,
         kind: ExtractedSpriteKind::TilemapCell { coord, tile },
         material,
+        material_extension: None,
         texture_region: tile_texture
             .map(|(_, texture_region)| texture_region)
             .unwrap_or(TextureUvRect::FULL),
@@ -242,6 +255,9 @@ pub fn extract_tile_cell(
         color: multiply_color(material.tint, color),
         layer: tilemap.layer.index,
         sort_key: tilemap.sort_key,
+        world_sort_y: tilemap.y_sort_anchor.map_or(0.0, |anchor| {
+            matrix.transform_point2(local_center + anchor).y
+        }),
     })
 }
 

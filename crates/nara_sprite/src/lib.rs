@@ -96,7 +96,11 @@ pub struct Sprite {
     pub size: Vec2,
     pub anchor: SpriteAnchor,
     pub layer: i32,
+    /// Explicit sort group within a layer. Y sorting never crosses this key.
     pub sort_key: i32,
+    /// Local point used for descending world-Y order within the sort group.
+    /// `None` participates at world Y = 0 and keeps authored order with equal anchors.
+    pub y_sort_anchor: Option<Vec2>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -163,6 +167,7 @@ impl Sprite {
             anchor: SpriteAnchor::CENTER,
             layer: 0,
             sort_key: 0,
+            y_sort_anchor: None,
         }
     }
 
@@ -175,6 +180,7 @@ impl Sprite {
             anchor: SpriteAnchor::CENTER,
             layer: 0,
             sort_key: 0,
+            y_sort_anchor: None,
         }
     }
 
@@ -211,6 +217,12 @@ impl Sprite {
     #[must_use]
     pub fn with_sort_key(mut self, sort_key: i32) -> Self {
         self.sort_key = sort_key;
+        self
+    }
+
+    #[must_use]
+    pub fn with_y_sort_anchor(mut self, anchor: Vec2) -> Self {
+        self.y_sort_anchor = Some(anchor);
         self
     }
 }
@@ -282,6 +294,10 @@ pub fn register_sprite_components(
                 read_optional_texture_region(value.get("texture_region"), "texture_region")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
+            let y_sort_anchor = match value.get("y_sort_anchor") {
+                None | Some(ComponentValue::Null) => None,
+                Some(value) => Some(read_vec2(value, "y_sort_anchor")?),
+            };
 
             if material.requires_asset_server() {
                 Ok(PreparedComponentCandidate::with_asset_server(
@@ -294,6 +310,7 @@ pub fn register_sprite_components(
                             anchor,
                             layer,
                             sort_key,
+                            y_sort_anchor,
                         })
                     },
                 ))
@@ -310,6 +327,7 @@ pub fn register_sprite_components(
                     anchor,
                     layer,
                     sort_key,
+                    y_sort_anchor,
                 }))
             }
         },
@@ -345,6 +363,14 @@ pub fn register_sprite_components(
                 ("material", material),
                 ("layer", ComponentValue::I64(i64::from(sprite.layer))),
                 ("sort_key", ComponentValue::I64(i64::from(sprite.sort_key))),
+                (
+                    "y_sort_anchor",
+                    sprite
+                        .y_sort_anchor
+                        .map(vec2_value)
+                        .transpose()?
+                        .unwrap_or(ComponentValue::Null),
+                ),
             ];
             fields.push((
                 "texture_region",
@@ -382,7 +408,7 @@ fn validate_sprite_components(registry: &ComponentRegistry) -> Result<(), Compon
     registry.validate_component_registration::<Sprite>(&ComponentTypeId::new("nara.sprite.Sprite"))
 }
 
-fn sprite_fields() -> [ComponentFieldSchema; 18] {
+fn sprite_fields() -> [ComponentFieldSchema; 19] {
     [
         sprite_required(
             "size.x",
@@ -491,10 +517,17 @@ fn sprite_fields() -> [ComponentFieldSchema; 18] {
         ),
         sprite_optional(
             "sort_key",
-            "Sort key",
+            "Sort group",
             ComponentFieldPath::from_fields(["sort_key"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
+        ),
+        sprite_optional(
+            "y_sort_anchor",
+            "Y sort anchor",
+            ComponentFieldPath::from_fields(["y_sort_anchor"]),
+            ComponentValueKind::Map,
+            ComponentValue::Null,
         ),
         sprite_optional(
             "texture_region",
@@ -1071,6 +1104,31 @@ mod tests {
     }
 
     #[test]
+    fn sprite_codec_preserves_y_sort_anchor_and_explicit_group() {
+        let registry = frozen_sprite_registry();
+        let mut world = World::new();
+        let original = Sprite::from_color(Vec2::ONE, Color::WHITE)
+            .with_layer(3)
+            .with_sort_key(-7)
+            .with_y_sort_anchor(Vec2::new(2.0, -4.0));
+        let entity = world.spawn(original.clone()).id();
+        let value = registry
+            .encode_component(&sprite_type_id(), &world, entity)
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let prepared = registry
+            .preflight_component(&sprite_type_id(), &value)
+            .unwrap()
+            .unwrap();
+        let restored = world.spawn_empty().id();
+
+        prepared.apply(&mut world, restored).unwrap();
+
+        assert_eq!(world.get::<Sprite>(restored), Some(&original));
+    }
+
+    #[test]
     fn sprite_codec_resolves_stable_texture_refs_during_preflight() {
         let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
         let database = test_database(stable_id, "textures/player.png");
@@ -1248,6 +1306,7 @@ mod tests {
                 ("size.y".to_string(), ComponentValueKind::F64, true),
                 ("sort_key".to_string(), ComponentValueKind::I64, false),
                 ("texture_region".to_string(), ComponentValueKind::Map, false),
+                ("y_sort_anchor".to_string(), ComponentValueKind::Map, false),
             ]
         );
     }

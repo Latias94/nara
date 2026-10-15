@@ -1,7 +1,10 @@
-//! Backend-neutral material descriptors shared by sprite, tilemap, UI, and future render domains.
+//! Shared sampling and alpha semantics, plus one bounded 2D fragment-material extension.
 
-use nara_asset::AssetRef;
-use nara_core::Color;
+extern crate nara_ecs as bevy_ecs;
+
+use nara_asset::Handle;
+use nara_ecs::{Component, Resource};
+use nara_image::ImageAsset;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -68,167 +71,153 @@ impl Default for AlphaMode2d {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Material2dDescriptor {
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub image: Option<AssetRef>,
-    pub sampler: SamplerDescriptor,
-    pub alpha_mode: AlphaMode2d,
-    pub tint: Color,
+/// The only custom fragment input currently supported by the stock 2D renderer.
+///
+/// The engine supplies the sampled primary image, linear tint and UV to
+/// `fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32>`.
+/// Custom WGSL may read `material_parameters: vec4<f32>` and
+/// `material_texture: texture_2d<f32>`. It must return linear RGB and straight alpha.
+/// Shader source is trusted Rust executable content and changes require a restart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Material2dInput {
+    pub parameter_vectors: u32,
+    pub additional_textures: u32,
 }
 
-impl Material2dDescriptor {
-    #[must_use]
-    pub fn from_color(tint: Color) -> Self {
-        Self {
-            image: None,
-            sampler: SamplerDescriptor::default(),
-            alpha_mode: AlphaMode2d::Blend,
-            tint,
-        }
-    }
-
-    #[must_use]
-    pub fn from_image(image: AssetRef) -> Self {
-        Self {
-            image: Some(image),
-            sampler: SamplerDescriptor::default(),
-            alpha_mode: AlphaMode2d::Blend,
-            tint: Color::WHITE,
-        }
-    }
-
-    #[must_use]
-    pub const fn with_sampler(mut self, sampler: SamplerDescriptor) -> Self {
-        self.sampler = sampler;
-        self
-    }
-
-    #[must_use]
-    pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode2d) -> Self {
-        self.alpha_mode = alpha_mode;
-        self
-    }
-
-    #[must_use]
-    pub const fn with_tint(mut self, tint: Color) -> Self {
-        self.tint = tint;
-        self
-    }
-
-    #[must_use]
-    pub fn key(&self) -> Material2dKey {
-        material2d_descriptor_key(self)
-    }
-}
-
-impl Default for Material2dDescriptor {
-    fn default() -> Self {
-        Self::from_color(Color::WHITE)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-pub struct Material2dKey([u8; 32]);
-
-impl Material2dKey {
-    #[must_use]
-    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    #[must_use]
-    pub const fn as_bytes(self) -> [u8; 32] {
-        self.0
-    }
-}
-
-#[must_use]
-pub fn material2d_descriptor_key(descriptor: &Material2dDescriptor) -> Material2dKey {
-    let mut hasher = blake3::Hasher::new();
-    write_image_ref(&mut hasher, descriptor.image.as_ref());
-    write_sampler(&mut hasher, descriptor.sampler);
-    hasher.update(&[alpha_mode_tag(descriptor.alpha_mode)]);
-    write_color(&mut hasher, descriptor.tint);
-    Material2dKey::from_bytes(*hasher.finalize().as_bytes())
-}
-
-fn write_image_ref(hasher: &mut blake3::Hasher, image: Option<&AssetRef>) {
-    match image {
-        None => {
-            hasher.update(&[0]);
-        }
-        Some(AssetRef::Path(path)) => {
-            hasher.update(&[1]);
-            write_str(hasher, path.as_str());
-        }
-        Some(AssetRef::StableId(id)) => {
-            hasher.update(&[2]);
-            write_str(hasher, &id.to_string());
-        }
+impl Material2dInput {
+    pub const SPRITE_FRAGMENT_V1: Self = Self {
+        parameter_vectors: 1,
+        additional_textures: 1,
     };
 }
 
-fn write_sampler(hasher: &mut blake3::Hasher, sampler: SamplerDescriptor) {
-    hasher.update(&[
-        filter_mode_tag(sampler.min_filter),
-        filter_mode_tag(sampler.mag_filter),
-        filter_mode_tag(sampler.mipmap_filter),
-        address_mode_tag(sampler.address_mode_u),
-        address_mode_tag(sampler.address_mode_v),
-    ]);
+/// A trusted startup declaration for the bounded sprite/tile fragment extension.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Material2dDefinition {
+    pub id: &'static str,
+    pub fragment_shader: &'static str,
+    pub input: Material2dInput,
+    pub alpha_mode: AlphaMode2d,
 }
 
-fn write_color(hasher: &mut blake3::Hasher, color: Color) {
-    hasher.update(&color.r.to_le_bytes());
-    hasher.update(&color.g.to_le_bytes());
-    hasher.update(&color.b.to_le_bytes());
-    hasher.update(&color.a.to_le_bytes());
+/// Immutable startup declarations. Instances retain the admitted definition by value.
+#[derive(Debug, Clone, Resource)]
+pub struct Material2dDefinitions {
+    definitions: &'static [Material2dDefinition],
 }
 
-fn write_str(hasher: &mut blake3::Hasher, value: &str) {
-    hasher.update(&(value.len() as u64).to_le_bytes());
-    hasher.update(value.as_bytes());
-}
+impl Material2dDefinitions {
+    pub fn new(definitions: &'static [Material2dDefinition]) -> Result<Self, Material2dError> {
+        for (index, definition) in definitions.iter().enumerate() {
+            if definition.id.is_empty() || definition.fragment_shader.trim().is_empty() {
+                return Err(Material2dError::EmptyDefinition);
+            }
+            if definition.input != Material2dInput::SPRITE_FRAGMENT_V1 {
+                return Err(Material2dError::UnsupportedInput {
+                    id: definition.id,
+                    requested: definition.input,
+                });
+            }
+            if definitions[..index]
+                .iter()
+                .any(|other| other.id == definition.id)
+            {
+                return Err(Material2dError::DuplicateDefinition(definition.id));
+            }
+        }
+        Ok(Self { definitions })
+    }
 
-fn filter_mode_tag(filter_mode: FilterMode) -> u8 {
-    match filter_mode {
-        FilterMode::Nearest => 1,
-        FilterMode::Linear => 2,
+    /// Selects an admitted shader and validates its one parameter vector.
+    /// The second image is a normal process-local asset reference; preparation captures its revision.
+    pub fn instantiate(
+        &self,
+        id: &str,
+        parameters: [f32; 4],
+        texture: Handle<ImageAsset>,
+    ) -> Result<Material2dInstance, Material2dError> {
+        let definition = self
+            .definitions
+            .iter()
+            .find(|definition| definition.id == id)
+            .ok_or_else(|| Material2dError::UnknownDefinition(id.to_owned()))?;
+        if !parameters.iter().all(|value| value.is_finite()) {
+            return Err(Material2dError::NonFiniteParameters);
+        }
+        Ok(Material2dInstance {
+            definition: *definition,
+            parameters,
+            texture,
+        })
     }
 }
 
-fn address_mode_tag(address_mode: AddressMode) -> u8 {
-    match address_mode {
-        AddressMode::ClampToEdge => 1,
-        AddressMode::Repeat => 2,
-        AddressMode::MirrorRepeat => 3,
+/// Transient shading attached to a Sprite or Tilemap entity.
+///
+/// The definition owns the draw's alpha mode; the Sprite/TileSet still owns its primary
+/// image, sampler and tint. This component is deliberately outside durable Scene codecs.
+#[derive(Debug, Clone, Copy, PartialEq, Component)]
+pub struct Material2dInstance {
+    definition: Material2dDefinition,
+    parameters: [f32; 4],
+    texture: Handle<ImageAsset>,
+}
+
+impl Material2dInstance {
+    #[must_use]
+    pub const fn definition(self) -> Material2dDefinition {
+        self.definition
+    }
+
+    #[must_use]
+    pub const fn parameters(self) -> [f32; 4] {
+        self.parameters
+    }
+
+    #[must_use]
+    pub const fn texture(self) -> Handle<ImageAsset> {
+        self.texture
     }
 }
 
-fn alpha_mode_tag(alpha_mode: AlphaMode2d) -> u8 {
-    match alpha_mode {
-        AlphaMode2d::Opaque => 1,
-        AlphaMode2d::Blend => 2,
-    }
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Material2dError {
+    #[error("material definitions require a nonempty id and shader")]
+    EmptyDefinition,
+    #[error("material definition {0} is registered more than once")]
+    DuplicateDefinition(&'static str),
+    #[error(
+        "material {id} requests unsupported fragment inputs {requested:?}; supported inputs are one vec4 and one additional 2D texture"
+    )]
+    UnsupportedInput {
+        id: &'static str,
+        requested: Material2dInput,
+    },
+    #[error("material {0} is not registered at startup")]
+    UnknownDefinition(String),
+    #[error("material parameters must be finite")]
+    NonFiniteParameters,
 }
 
 pub mod prelude {
     pub use crate::{
-        AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, Material2dKey,
-        SamplerDescriptor, material2d_descriptor_key,
+        AddressMode, AlphaMode2d, FilterMode, Material2dDefinition, Material2dDefinitions,
+        Material2dError, Material2dInput, Material2dInstance, SamplerDescriptor,
     };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nara_asset::AssetId;
+
+    const DEFINITION: Material2dDefinition = Material2dDefinition {
+        id: "test.palette",
+        fragment_shader: "fn material_fragment() {}",
+        input: Material2dInput::SPRITE_FRAGMENT_V1,
+        alpha_mode: AlphaMode2d::Blend,
+    };
+    static DEFINITIONS: [Material2dDefinition; 1] = [DEFINITION];
 
     #[test]
     fn sampler_default_is_linear_clamp() {
@@ -239,44 +228,42 @@ mod tests {
     }
 
     #[test]
-    fn material_key_changes_when_material_intent_changes() {
-        let base = Material2dDescriptor::from_image(
-            AssetRef::path("textures/player.png").expect("test path is valid"),
-        );
-
-        assert_ne!(
-            base.key(),
-            base.clone()
-                .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
-                .key()
-        );
-        assert_ne!(
-            base.key(),
-            base.clone().with_alpha_mode(AlphaMode2d::Opaque).key()
-        );
-        assert_ne!(base.key(), base.clone().with_tint(Color::BLACK).key());
-        assert_ne!(
-            base.key(),
-            Material2dDescriptor::from_image(
-                AssetRef::path("textures/enemy.png").expect("test path is valid"),
-            )
-            .key()
+    fn instances_select_registered_shader_parameters_texture_and_alpha() {
+        let definitions = Material2dDefinitions::new(&DEFINITIONS).unwrap();
+        let texture = Handle::new(AssetId::from_raw(7));
+        let instance = definitions
+            .instantiate("test.palette", [0.5, 1.0, 2.0, 3.0], texture)
+            .unwrap();
+        assert_eq!(instance.definition(), DEFINITION);
+        assert_eq!(instance.parameters(), [0.5, 1.0, 2.0, 3.0]);
+        assert_eq!(instance.texture(), texture);
+        assert!(matches!(
+            definitions.instantiate("absent", [0.0; 4], texture),
+            Err(Material2dError::UnknownDefinition(_))
+        ));
+        assert_eq!(
+            definitions.instantiate("test.palette", [f32::NAN; 4], texture),
+            Err(Material2dError::NonFiniteParameters)
         );
     }
 
-    #[cfg(feature = "serde")]
     #[test]
-    fn material_descriptor_roundtrips_through_json() {
-        let descriptor = Material2dDescriptor::from_image(
-            AssetRef::path("textures/player.png").expect("test path is valid"),
-        )
-        .with_sampler(SamplerDescriptor::NEAREST_CLAMP)
-        .with_alpha_mode(AlphaMode2d::Opaque)
-        .with_tint(Color::rgba(0.25, 0.5, 0.75, 1.0));
-
-        let json = serde_json::to_string(&descriptor).unwrap();
-        let decoded: Material2dDescriptor = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, descriptor);
+    fn startup_rejects_unsupported_inputs_and_duplicate_ids() {
+        static UNSUPPORTED: [Material2dDefinition; 1] = [Material2dDefinition {
+            input: Material2dInput {
+                additional_textures: 2,
+                ..Material2dInput::SPRITE_FRAGMENT_V1
+            },
+            ..DEFINITION
+        }];
+        static DUPLICATES: [Material2dDefinition; 2] = [DEFINITION, DEFINITION];
+        assert!(matches!(
+            Material2dDefinitions::new(&UNSUPPORTED),
+            Err(Material2dError::UnsupportedInput { .. })
+        ));
+        assert!(matches!(
+            Material2dDefinitions::new(&DUPLICATES),
+            Err(Material2dError::DuplicateDefinition("test.palette"))
+        ));
     }
 }

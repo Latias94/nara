@@ -11,14 +11,20 @@ mod plugin;
 mod presented;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod quad;
+#[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
+mod readback_tests;
 #[cfg(feature = "sprite-submitter")]
 mod sprite;
+#[cfg(all(test, feature = "sprite-submitter"))]
+mod sprite_probe;
 mod surface;
 mod telemetry;
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 mod texture;
 #[cfg(feature = "ui-submitter")]
 mod ui;
+#[cfg(all(test, feature = "sprite-submitter"))]
+mod view_probe;
 
 use crate::backend::render_backend_state;
 #[cfg(all(feature = "ui-submitter", test))]
@@ -37,14 +43,14 @@ use nara_app::{
 #[cfg(test)]
 use nara_ecs::Resource;
 use nara_ecs::{Query, Res, ResMut, schedule::IntoScheduleConfigs, system::NonSendMarker};
-#[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-use nara_material::AlphaMode2d;
+#[cfg(test)]
+use nara_render::Color;
 #[cfg(test)]
 use nara_render::Extent2d;
 #[cfg(all(feature = "ui-submitter", test))]
 use nara_render::RenderFrameState;
 use nara_render::{
-    Color, ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
+    ExtractedViews, FrameStats, RenderBackendState, RenderBackendStatus, RenderFrame,
     RenderFrameSkipReason, build_render_frame_packet,
 };
 #[cfg(all(test, any(feature = "sprite-submitter", feature = "ui-submitter")))]
@@ -281,7 +287,7 @@ fn reset_wgpu_frame_packet(mut slot: ResMut<WgpuFramePacketSlot>) {
 
 #[cfg(feature = "sprite-submitter")]
 fn collect_wgpu_sprite_payload(
-    sprite_batches: Res<nara_sprite_render::SpriteBatches>,
+    sprite_batches: Res<nara_sprite_render::__private::SpriteBatches>,
     mut slot: ResMut<WgpuFramePacketSlot>,
 ) {
     slot.collect_sprite(sprite_batches.clone());
@@ -354,6 +360,98 @@ struct PreparedSubmitterDraw {
     sprites: u32,
     #[cfg(feature = "ui-submitter")]
     image_sprites: u32,
+}
+
+#[derive(Debug)]
+struct PreparedViewDraw {
+    viewport: nara_render::ViewportRect,
+    load: nara_render::ViewLoadOp,
+    draw: PreparedSubmitterDraw,
+}
+
+#[derive(Debug, Default)]
+struct PreparedTargetDraw {
+    views: Vec<PreparedViewDraw>,
+    draw_calls: u32,
+    sprites: u32,
+    #[cfg(feature = "ui-submitter")]
+    image_sprites: u32,
+    #[cfg(feature = "ui-submitter")]
+    ui_packets: Vec<ui::WgpuLoweredUiPacketFacts>,
+}
+
+impl PreparedTargetDraw {
+    fn push(
+        &mut self,
+        viewport: nara_render::ViewportRect,
+        load: nara_render::ViewLoadOp,
+        mut draw: PreparedSubmitterDraw,
+    ) {
+        self.draw_calls = self.draw_calls.saturating_add(draw.draw_calls);
+        self.sprites = self.sprites.saturating_add(draw.sprites);
+        #[cfg(feature = "ui-submitter")]
+        {
+            self.image_sprites = self.image_sprites.saturating_add(draw.image_sprites);
+            self.ui_packets.append(&mut draw.ui_packets);
+        }
+        self.views.push(PreparedViewDraw {
+            viewport,
+            load,
+            draw,
+        });
+    }
+
+    fn instance_buffer_bytes(&self) -> u64 {
+        self.views.iter().fold(0, |total, view| {
+            total.saturating_add(view.draw.instance_buffer_bytes())
+        })
+    }
+}
+
+/// Encodes the complete ordered transaction. Runtime, Editor, and native readback share this path.
+fn encode_target_draw(
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    prepared: &PreparedTargetDraw,
+) {
+    for view in &prepared.views {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("nara_ordered_view_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: match view.load {
+                        nara_render::ViewLoadOp::Clear(color) => {
+                            wgpu::LoadOp::Clear(clear_color_to_wgpu(color))
+                        }
+                        nara_render::ViewLoadOp::Load => wgpu::LoadOp::Load,
+                    },
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_viewport(
+            view.viewport.physical_x as f32,
+            view.viewport.physical_y as f32,
+            view.viewport.physical_width as f32,
+            view.viewport.physical_height as f32,
+            0.0,
+            1.0,
+        );
+        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
+        draw_quad_batch_buffers(
+            &mut pass,
+            &view.draw.pipelines,
+            &view.draw.buffers,
+            view.viewport,
+        );
+    }
 }
 
 fn render_wgpu_surfaces(
@@ -528,18 +626,28 @@ fn handle_wgpu_render_error(
 }
 
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-fn required_alpha_modes(batches: &[WgpuQuadBatch]) -> Vec<AlphaMode2d> {
-    let mut modes = Vec::new();
-    for mode in batches
+fn required_quad_pipeline_keys(
+    batches: &[WgpuQuadBatch],
+    format: wgpu::TextureFormat,
+) -> Vec<crate::quad::WgpuQuadPipelineKey> {
+    let mut keys = Vec::new();
+    for key in batches
         .iter()
         .filter(|batch| !batch.instances.is_empty())
-        .map(|batch| batch.material.alpha_mode)
+        .map(|batch| crate::quad::WgpuQuadPipelineKey {
+            format,
+            alpha_mode: batch.material.alpha_mode,
+            material: batch
+                .material_extension
+                .as_ref()
+                .map(|material| material.definition),
+        })
     {
-        if !modes.contains(&mode) {
-            modes.push(mode);
+        if !keys.contains(&key) {
+            keys.push(key);
         }
     }
-    modes
+    keys
 }
 
 fn render_acquired_texture(
@@ -548,12 +656,8 @@ fn render_acquired_texture(
     window_id: WindowId,
     surface_state: &WgpuSurfaceState,
     surface_texture: wgpu::SurfaceTexture,
-    viewport: nara_render::ViewportRect,
-    clear_color: Color,
-    draw: &PreparedSubmitterDraw,
+    draw: &PreparedTargetDraw,
 ) -> Result<(), WgpuRenderError> {
-    #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-    let _ = viewport;
     let config = surface_state
         .config
         .as_ref()
@@ -567,37 +671,7 @@ fn render_acquired_texture(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("nara_wgpu_surface_encoder"),
     });
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("nara_wgpu_surface_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color_to_wgpu(clear_color)),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        pass.set_viewport(
-            viewport.physical_x as f32,
-            viewport.physical_y as f32,
-            viewport.physical_width as f32,
-            viewport.physical_height as f32,
-            0.0,
-            1.0,
-        );
-        #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-        draw_quad_batch_buffers(&mut pass, &draw.pipelines, &draw.buffers, viewport);
-        #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-        let _ = (&mut pass, draw);
-    }
+    encode_target_draw(&mut encoder, &view, draw);
     queue.submit([encoder.finish()]);
     queue.present(surface_texture);
     Ok(())
@@ -660,41 +734,26 @@ mod tests {
     }
 
     #[cfg(feature = "sprite-submitter")]
-    fn inject_sprite_domain_work(
-        mut views: ResMut<ExtractedViews>,
-        mut sprites: ResMut<nara_sprite_render::ExtractedSprites>,
-    ) {
+    fn inject_sprite_domain_work(mut views: ResMut<ExtractedViews>) {
         views.clear();
         views.push(nara_render::ExtractedView {
             camera_entity: Entity::PLACEHOLDER,
             target: nara_render::RenderTarget::PrimaryWindow,
             viewport: nara_render::ViewportRect::new(0, 0, 16, 16).unwrap(),
-            world_position: nara_core::Vec2::ZERO,
-            viewport_height: 16.0,
+            mapping: nara_render::ViewMapping2d::orthographic(
+                nara_core::Mat3::IDENTITY,
+                16.0,
+                ViewportRect::new(0, 0, 16, 16).unwrap(),
+            )
+            .unwrap(),
             order: 0,
-            clear_color: nara_core::Color::BLACK,
-        });
-        sprites.clear();
-        sprites.push(nara_sprite_render::ExtractedSprite {
-            entity: Entity::PLACEHOLDER,
-            source_order: 0,
-            kind: nara_sprite_render::ExtractedSpriteKind::Sprite,
-            material: nara_sprite_render::ExtractedSpriteMaterial::from_color(
-                nara_core::Color::WHITE,
-            ),
-            texture_region: nara_sprite_render::TextureUvRect::FULL,
-            world_center: nara_core::Vec2::ZERO,
-            world_x_axis: nara_core::Vec2::X,
-            world_y_axis: nara_core::Vec2::Y,
-            color: nara_core::Color::WHITE,
-            layer: 0,
-            sort_key: 0,
+            load: nara_render::ViewLoadOp::Clear(nara_core::Color::BLACK),
         });
     }
 
     #[cfg(feature = "sprite-submitter")]
     fn observe_uninstalled_sprite_contribution(
-        batches: Res<nara_sprite_render::SpriteBatches>,
+        batches: Res<nara_sprite_render::__private::SpriteBatches>,
         slot: Res<WgpuFramePacketSlot>,
         mut observation: ResMut<UninstalledSpriteContributionObservation>,
         mut views: ResMut<ExtractedViews>,
@@ -760,7 +819,11 @@ mod tests {
         }
         injection.0 = true;
         commands.spawn((
-            nara_render::Camera2d::default(),
+            nara_render::Camera2d {
+                target: nara_render::RenderTarget::Window(WindowId::new(999)),
+                viewport: Some(nara_render::ViewportRect::new(0, 0, 16, 16).unwrap()),
+                ..Default::default()
+            },
             nara_transform::Transform2d::default(),
         ));
     }
@@ -809,6 +872,21 @@ mod tests {
                 .before(frame::WgpuFrameSet::Seal),
         )
         .unwrap();
+        let world = app.world_mut().unwrap();
+        let entity = world
+            .spawn((
+                nara_sprite::Sprite::from_color(nara_core::Vec2::ONE, Color::WHITE),
+                nara_transform::Transform2d::default(),
+            ))
+            .id();
+        nara_hierarchy::HierarchyWriter::new(world)
+            .apply_batch(&[nara_hierarchy::HierarchyOperation::Place {
+                entity,
+                placement: nara_hierarchy::HierarchyPlacement::last(
+                    nara_hierarchy::HierarchyPlacementOwner::Root,
+                ),
+            }])
+            .unwrap();
         let candidate = admit_runtime(app);
         let mut runtime = candidate.complete_startup().unwrap().promote();
 
@@ -817,11 +895,16 @@ mod tests {
         let observation = runtime
             .world()
             .resource::<UninstalledSpriteContributionObservation>();
-        assert_eq!(observation.source_instances, 1);
-        assert_eq!(observation.collected_instances, None);
+        let source_instances = observation.source_instances;
+        let collected_instances = observation.collected_instances;
         let stats = runtime.world().resource::<FrameStats>();
-        assert_eq!(stats.draw_calls, 0);
-        assert_eq!(stats.sprites, 0);
+        let draw_calls = stats.draw_calls;
+        let sprites = stats.sprites;
+        runtime.finish().unwrap();
+        assert_eq!(source_instances, 1);
+        assert_eq!(collected_instances, None);
+        assert_eq!(draw_calls, 0);
+        assert_eq!(sprites, 0);
     }
 
     #[cfg(feature = "ui-submitter")]
@@ -1233,6 +1316,7 @@ mod tests {
                 .lower_draw(
                     RenderTarget::PrimaryWindow,
                     ViewportRect::new(0, 0, 1, 1).unwrap(),
+                    None,
                 )
                 .unwrap()
                 .batches
@@ -1253,6 +1337,7 @@ mod tests {
             scissor: None,
             instances: Vec::new(),
             counts_as_sprites: true,
+            material_extension: None,
         };
         let ui = WgpuQuadBatch {
             counts_as_sprites: false,
@@ -1831,7 +1916,7 @@ mod tests {
         let viewport = ViewportRect::new(0, 0, 16, 16).unwrap();
 
         let facts = payload.ui_facts(image_target);
-        let lowered = payload.lower_draw(image_target, viewport).unwrap();
+        let lowered = payload.lower_draw(image_target, viewport, None).unwrap();
 
         assert_eq!(facts.packet_count, 1);
         assert_eq!(facts.packet_identity, Some(packet_identity));

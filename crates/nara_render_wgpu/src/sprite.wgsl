@@ -74,7 +74,7 @@ fn coverage(distance: f32) -> f32 {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let sampled = textureSample(sprite_texture, sprite_sampler, input.uv);
-    var output_color = input.color * sampled;
+    var output_color = material_fragment(sampled, input.color, input.uv);
     if input.texture_mode == 1u {
         output_color = vec4<f32>(input.color.rgb, input.color.a * sampled.r);
     }

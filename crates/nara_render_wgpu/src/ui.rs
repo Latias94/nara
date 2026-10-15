@@ -228,6 +228,7 @@ fn append_quad(
         scissor,
         instances: vec![instance],
         counts_as_sprites: false,
+        material_extension: None,
     });
 }
 
@@ -279,21 +280,29 @@ fn ui_quad_instance(
     if viewport.physical_width == 0 || viewport.physical_height == 0 {
         return None;
     }
-    let viewport_width = viewport.physical_width as f32;
-    let viewport_height = viewport.physical_height as f32;
     let center_x = (rect.min_x() as f32 + rect.max_x() as f32) * 0.5;
     let center_y = (rect.min_y() as f32 + rect.max_y() as f32) * 0.5;
     let half_width = rect.width() as f32 * 0.5;
     let half_height = rect.height() as f32 * 0.5;
+    let center_physical = [
+        center_x + viewport.physical_x as f32,
+        center_y + viewport.physical_y as f32,
+    ];
+    let center = nara_render::viewport_physical_to_clip(viewport, center_physical.into())?;
+    let x_axis = nara_render::viewport_physical_to_clip(
+        viewport,
+        [center_physical[0] + half_width, center_physical[1]].into(),
+    )? - center;
+    let y_axis = nara_render::viewport_physical_to_clip(
+        viewport,
+        [center_physical[0], center_physical[1] + half_height].into(),
+    )? - center;
     let top_left = uv.top_left();
     let extent = uv.extent();
     Some(WgpuQuadInstance {
-        center: [
-            center_x / viewport_width * 2.0 - 1.0,
-            1.0 - center_y / viewport_height * 2.0,
-        ],
-        x_axis: [half_width / viewport_width * 2.0, 0.0],
-        y_axis: [0.0, -(half_height / viewport_height * 2.0)],
+        center: center.to_array(),
+        x_axis: x_axis.to_array(),
+        y_axis: y_axis.to_array(),
         color,
         // Packet UVs use a top-left origin while the shared quad shader maps top vertices to v=1.
         uv_min: [top_left[0], top_left[1] + extent[1]],
@@ -343,7 +352,6 @@ pub(crate) enum WgpuUiPacketError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{sync::mpsc, time::Duration};
 
     use nara_asset::{
         ArtifactFormatVersion, ArtifactLabel, AssetId, AssetPath, AssetVersion, Assets, Handle,
@@ -364,12 +372,9 @@ mod tests {
     };
     use nara_window::WindowId;
 
-    use crate::{
-        quad::{
-            WgpuQuadPipelineDrawRef, WgpuQuadPipelineKey, create_quad_batch_buffers,
-            create_quad_pipeline, create_quad_texture_bind_group_layout, draw_quad_batch_buffers,
-        },
-        texture::WgpuSpriteTextureCache,
+    use crate::readback_tests::{
+        READBACK_BYTES_PER_PIXEL, READBACK_EXTENT, readback_pixel, readback_viewport,
+        render_batches_to_rgba,
     };
 
     #[test]
@@ -454,7 +459,7 @@ mod tests {
             "the UI packet should contain glyph work"
         );
 
-        let pixels = render_batches_to_rgba(&batches);
+        let pixels = render_batches_to_rgba(&batches).unwrap();
         let nonblank_pixels = pixels
             .chunks_exact(READBACK_BYTES_PER_PIXEL as usize)
             .filter(|pixel| pixel[3] != 0)
@@ -507,7 +512,7 @@ mod tests {
             "the UI packet should contain image work"
         );
 
-        let pixels = render_batches_to_rgba(&batches);
+        let pixels = render_batches_to_rgba(&batches).unwrap();
         assert!(
             pixels
                 .chunks_exact(READBACK_BYTES_PER_PIXEL as usize)
@@ -523,7 +528,7 @@ mod tests {
         let batches =
             collect_ui_quad_batches(&[packet], target, Some(WindowId::PRIMARY), viewport).unwrap();
 
-        let pixels = render_batches_to_rgba(&batches);
+        let pixels = render_batches_to_rgba(&batches).unwrap();
         let solid_corner = readback_pixel(&pixels, 4, 4);
         let border = readback_pixel(&pixels, 18, 5);
         let solid_interior = readback_pixel(&pixels, 18, 18);
@@ -552,163 +557,6 @@ mod tests {
                 && image_interior[2] > 80,
             "the image interior must retain the captured snapshot color"
         );
-    }
-
-    const READBACK_EXTENT: u32 = 64;
-    const READBACK_BYTES_PER_PIXEL: u32 = 4;
-
-    fn readback_viewport() -> ViewportRect {
-        ViewportRect::new(0, 0, READBACK_EXTENT, READBACK_EXTENT).unwrap()
-    }
-
-    fn readback_pixel(pixels: &[u8], x: u32, y: u32) -> &[u8] {
-        let offset = usize::try_from((y * READBACK_EXTENT + x) * READBACK_BYTES_PER_PIXEL).unwrap();
-        &pixels[offset..offset + READBACK_BYTES_PER_PIXEL as usize]
-    }
-
-    fn render_batches_to_rgba(batches: &[WgpuQuadBatch]) -> Vec<u8> {
-        let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-            ..Default::default()
-        }))
-        .or_else(|_| {
-            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: true,
-                ..Default::default()
-            }))
-        })
-        .expect("UI readback requires a wgpu adapter");
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .expect("UI readback requires a wgpu device");
-
-        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-        let output = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("nara_wgpu_ui_readback_target"),
-            size: wgpu::Extent3d {
-                width: READBACK_EXTENT,
-                height: READBACK_EXTENT,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
-        let texture_layout = create_quad_texture_bind_group_layout(&device);
-        let pipeline = create_quad_pipeline(
-            &device,
-            WgpuQuadPipelineKey {
-                format,
-                alpha_mode: AlphaMode2d::Blend,
-            },
-            &texture_layout,
-        );
-        let pipelines = [WgpuQuadPipelineDrawRef {
-            alpha_mode: AlphaMode2d::Blend,
-            pipeline: pipeline.pipeline.clone(),
-        }];
-        let mut texture_cache = WgpuSpriteTextureCache::default();
-        texture_cache.begin_frame(1);
-        let buffers = create_quad_batch_buffers(
-            &device,
-            &queue,
-            batches,
-            &texture_layout,
-            &mut texture_cache,
-            1,
-        )
-        .unwrap();
-
-        let bytes_per_row = READBACK_EXTENT * READBACK_BYTES_PER_PIXEL;
-        assert_eq!(bytes_per_row % wgpu::COPY_BYTES_PER_ROW_ALIGNMENT, 0);
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("nara_wgpu_ui_readback_buffer"),
-            size: u64::from(bytes_per_row) * u64::from(READBACK_EXTENT),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("nara_wgpu_ui_readback_encoder"),
-        });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("nara_wgpu_ui_readback_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &output_view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            pass.set_viewport(
-                0.0,
-                0.0,
-                READBACK_EXTENT as f32,
-                READBACK_EXTENT as f32,
-                0.0,
-                1.0,
-            );
-            draw_quad_batch_buffers(&mut pass, &pipelines, &buffers, readback_viewport());
-        }
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &output,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(bytes_per_row),
-                    rows_per_image: Some(READBACK_EXTENT),
-                },
-            },
-            wgpu::Extent3d {
-                width: READBACK_EXTENT,
-                height: READBACK_EXTENT,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit([encoder.finish()]);
-
-        let (sender, receiver) = mpsc::channel();
-        readback.map_async(wgpu::MapMode::Read, .., move |result| {
-            sender.send(result).unwrap();
-        });
-        device
-            .poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: Some(Duration::from_secs(10)),
-            })
-            .unwrap();
-        receiver
-            .recv_timeout(Duration::from_secs(10))
-            .unwrap()
-            .unwrap();
-
-        let mapped = readback.get_mapped_range(..).unwrap();
-        let pixels = mapped.to_vec();
-        drop(mapped);
-        readback.unmap();
-        pixels
     }
 
     fn text_packet() -> Arc<UiPaintPacket> {

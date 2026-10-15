@@ -6,7 +6,7 @@ use nara_render::{
     RenderWindowPacket,
 };
 #[cfg(feature = "sprite-submitter")]
-use nara_sprite_render::SpriteBatches;
+use nara_sprite_render::__private::SpriteBatches;
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::__private::{UiBackendPresentationFrame, UiCompletedBackendOutcome};
 #[cfg(feature = "ui-submitter")]
@@ -29,7 +29,6 @@ use crate::{
     presented::{
         WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt, WgpuSubmittedImageReceipt,
     },
-    surface::clear_color_to_wgpu,
 };
 
 const EDITOR_IMAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -66,8 +65,6 @@ pub enum WgpuEditorExecutionError {
     },
     #[error("the Editor viewport reservation no longer matches the live source or GPU namespace")]
     StaleViewportReservation,
-    #[error("the egui texture registration generation must be non-zero")]
-    InvalidTextureRegistrationGeneration,
     #[error("the Editor toolkit paint callback failed: {message}")]
     ToolkitPaint { message: String },
 }
@@ -292,7 +289,6 @@ impl WgpuEditorUiSubmission {
             | WgpuEditorExecutionError::TargetGenerationExhausted
             | WgpuEditorExecutionError::SourceHandoffGenerationExhausted
             | WgpuEditorExecutionError::PresentationGenerationExhausted
-            | WgpuEditorExecutionError::InvalidTextureRegistrationGeneration
             | WgpuEditorExecutionError::ToolkitPaint { .. } => {
                 UiPresentationBackendFaultDomain::Attempt
             }
@@ -450,7 +446,6 @@ impl<'frame> WgpuEditorReservedViewportTexture<'frame> {
 #[derive(Clone, Copy)]
 struct WgpuEditorViewportSample {
     image: WgpuSubmittedImageReceipt,
-    texture_registration_generation: u64,
 }
 
 fn join_composite_receipt(
@@ -474,7 +469,6 @@ fn join_composite_receipt(
     Ok(Some(WgpuEditorCompositeReceipt::new(
         sample.image,
         window,
-        sample.texture_registration_generation,
         generation,
     )))
 }
@@ -563,19 +557,12 @@ impl<'frame> WgpuEditorWindowFrame<'frame> {
         self.leading_command_buffers.extend(command_buffers);
     }
 
-    pub fn record_viewport_sample(
-        &mut self,
-        texture_registration_generation: u64,
-    ) -> Result<(), WgpuEditorExecutionError> {
-        if texture_registration_generation == 0 {
-            return Err(WgpuEditorExecutionError::InvalidTextureRegistrationGeneration);
-        }
+    pub fn record_viewport_sample(&mut self) -> Result<(), WgpuEditorExecutionError> {
         let Some(viewport) = self.viewport else {
             return Err(WgpuEditorExecutionError::StaleImageSubmission);
         };
         *self.sampled_viewport = Some(WgpuEditorViewportSample {
             image: viewport.receipt,
-            texture_registration_generation,
         });
         Ok(())
     }
@@ -897,10 +884,9 @@ impl WgpuEditorExecution {
         if let (Some(ui), Some(backend_generation)) = (ui.as_deref_mut(), ui_backend_generation) {
             ui.bind_backend(backend_generation)?;
         }
-        let draw = self.backend.prepare_submitter_draw(
+        let draw = self.backend.prepare_target_draw(
             EDITOR_IMAGE_FORMAT,
-            packet.view().target,
-            packet.view().viewport,
+            &packet,
             &payload,
             packet.frame_index(),
         )?;
@@ -914,42 +900,7 @@ impl WgpuEditorExecution {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("nara_editor_viewport_encoder"),
                 });
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("nara_editor_viewport_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &viewport_target.view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color_to_wgpu(packet.view().clear_color)),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            pass.set_viewport(
-                packet.view().viewport.physical_x as f32,
-                packet.view().viewport.physical_y as f32,
-                packet.view().viewport.physical_width as f32,
-                packet.view().viewport.physical_height as f32,
-                0.0,
-                1.0,
-            );
-            #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
-            crate::draw_quad_batch_buffers(
-                &mut pass,
-                &draw.pipelines,
-                &draw.buffers,
-                packet.view().viewport,
-            );
-            #[cfg(not(any(feature = "sprite-submitter", feature = "ui-submitter")))]
-            let _ = (&mut pass, draw);
-        }
+        crate::encode_target_draw(&mut encoder, &viewport_target.view, &draw);
         namespace.queue.submit([encoder.finish()]);
         self.backend.record_editor_image_submission();
         Ok(WgpuSubmittedImageReceipt::new(
@@ -1208,10 +1159,7 @@ mod tests {
             submitted.device_epoch(),
             9,
         );
-        let sample = WgpuEditorViewportSample {
-            image: submitted,
-            texture_registration_generation: 5,
-        };
+        let sample = WgpuEditorViewportSample { image: submitted };
         assert_eq!(
             join_composite_receipt(
                 &mut presentation_generation,
@@ -1233,7 +1181,6 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(composite.presentation_generation(), 1);
-        assert_eq!(composite.texture_registration_generation(), 5);
         assert_eq!(
             composite.image().source_generation(),
             frame.source_generation()
@@ -1452,13 +1399,12 @@ mod tests {
         let foreign = WgpuEditorCompositeReceipt::new(
             WgpuSubmittedImageReceipt::new(image, 9, frame.source_generation(), 3, 21, 4, 12),
             window,
-            6,
             1,
         );
         let submission = submission
             .presented(foreign)
             .expect_err("a foreign image receipt must not commit Runtime UI presentation");
-        let exact = WgpuEditorCompositeReceipt::new(submitted, window, 6, 1);
+        let exact = WgpuEditorCompositeReceipt::new(submitted, window, 1);
 
         assert!(matches!(
             publish_editor_ui_outcomes(outcomes, submission.presented(exact).unwrap()).remove(0),
@@ -1473,14 +1419,27 @@ mod tests {
             camera_entity: Entity::PLACEHOLDER,
             target: RenderTarget::Image(Handle::<RenderImage2d>::new(AssetId::from_raw(17))),
             viewport: ViewportRect::new(0, 0, 64, 64).unwrap(),
-            world_position: nara_core::Vec2::ZERO,
-            viewport_height: 64.0,
+            mapping: nara_render::ViewMapping2d::orthographic(
+                nara_core::Mat3::IDENTITY,
+                64.0,
+                ViewportRect::new(0, 0, 64, 64).unwrap(),
+            )
+            .unwrap(),
             order: 0,
-            clear_color: Color::BLACK,
+            load: nara_render::ViewLoadOp::Clear(Color::BLACK),
         });
-        build_editor_render_frame_packet(generation, 1, &views)
-            .unwrap()
-            .unwrap()
+        build_editor_render_frame_packet(
+            generation,
+            1,
+            &views,
+            nara_render::__private::editor_viewport_image_target(
+                Handle::<RenderImage2d>::new(AssetId::from_raw(17)),
+                nara_render::Extent2d::new(64, 64).unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .unwrap()
     }
 
     fn image_target(packet: &RenderFramePacket) -> RenderImagePacket {

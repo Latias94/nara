@@ -1,6 +1,9 @@
 //! Authored 2D transforms and completed runtime-global projection.
 
+mod presentation;
 mod propagation;
+
+pub use presentation::FixedTransformInterpolation;
 
 use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
 use nara_core::{Mat3, Vec2};
@@ -83,6 +86,13 @@ pub fn add_fixed_transform_projection_systems<'a, M>(
 pub mod __private {
     use nara_ecs::{Resource, SystemSet};
 
+    pub use crate::presentation::RenderTransformProjection;
+
+    /// Installs the transform owner's optional fixed-history presentation projection.
+    pub fn install_render_projection(app: &mut nara_app::App) -> Result<(), nara_app::PluginError> {
+        crate::presentation::install(app)
+    }
+
     /// Capability token proving that the current runtime 2D projection completed successfully.
     ///
     /// First-party consumers require this token before publishing world-space output. The
@@ -119,6 +129,7 @@ pub mod __private {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, SystemSet)]
     pub enum TransformSet {
         Propagate,
+        Present,
     }
 }
 

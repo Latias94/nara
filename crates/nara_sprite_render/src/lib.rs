@@ -11,17 +11,27 @@ use nara_app::{App, CoreStage, Plugin, PluginError};
 use nara_ecs::schedule::IntoScheduleConfigs;
 
 use crate::extract::extract_sprites;
-pub use crate::extract::{extract_sprite, extract_tile_cell};
-pub use crate::queue::{
-    build_sprite_batches, compare_queued_sprite_items, project_sprite_to_view,
-    project_sprite_to_view_with_uv, queue_sprites, sort_and_batch_sprites, view_world_extent,
-    world_to_clip_instance, world_to_clip_instance_with_uv,
+#[cfg(test)]
+use crate::queue::{build_sprite_batches, compare_queued_sprite_items, world_to_clip_instance};
+use crate::queue::{queue_sprites, sort_and_batch_sprites};
+#[cfg(test)]
+use crate::types::ColorKey;
+pub use crate::types::SpriteRenderStats;
+pub(crate) use crate::types::{
+    ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+    PreparedMaterial2d, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind,
+    SpriteBatches, SpriteInstance, SpriteMaterialKey, TextureUvRect,
 };
-pub use crate::types::{
-    ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-    QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind, SpriteBatches,
-    SpriteInstance, SpriteMaterialKey, SpriteRenderStats, TextureUvRect,
-};
+
+/// Read-only packet and geometry integration used by the first-party backend and Editor.
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::types::{
+        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
+        PreparedMaterial2d, QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind,
+        SpriteBatches, SpriteInstance, SpriteMaterialKey, TextureUvRect,
+    };
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SpriteRenderPlugin;
@@ -63,12 +73,5 @@ impl Plugin for SpriteRenderPlugin {
 }
 
 pub mod prelude {
-    pub use crate::{
-        ColorKey, ExtractedSprite, ExtractedSpriteKind, ExtractedSpriteMaterial, ExtractedSprites,
-        QueuedSpriteItem, QueuedSpriteItems, SpriteBatch, SpriteBatchKind, SpriteBatches,
-        SpriteInstance, SpriteMaterialKey, SpriteRenderPlugin, SpriteRenderStats, TextureUvRect,
-        build_sprite_batches, compare_queued_sprite_items, project_sprite_to_view,
-        project_sprite_to_view_with_uv, queue_sprites, sort_and_batch_sprites, view_world_extent,
-        world_to_clip_instance, world_to_clip_instance_with_uv,
-    };
+    pub use crate::{SpriteRenderPlugin, SpriteRenderStats};
 }

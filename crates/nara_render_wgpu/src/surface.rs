@@ -41,11 +41,19 @@ struct LiveSurface {
 pub(crate) struct WgpuSurfaceState {
     live: Option<LiveSurface>,
     pub(crate) config: Option<wgpu::SurfaceConfiguration>,
+    pub(crate) requested_present_mode: Option<PresentMode>,
     pub(crate) size: Extent2d,
     pub(crate) dirty: bool,
 }
 
 impl WgpuSurfaceState {
+    pub(crate) fn needs_configuration(&self, size: Extent2d, requested: PresentMode) -> bool {
+        self.config.is_none()
+            || self.dirty
+            || self.size != size
+            || self.requested_present_mode != Some(requested)
+    }
+
     pub(crate) fn new(
         surface: wgpu::Surface<'static>,
         target: WindowSurfaceLease,
@@ -57,6 +65,7 @@ impl WgpuSurfaceState {
                 lease: target,
             }),
             config: None,
+            requested_present_mode: None,
             size,
             dirty: true,
         }
@@ -73,6 +82,7 @@ impl WgpuSurfaceState {
                 lease: target,
             }),
             config: None,
+            requested_present_mode: None,
             size,
             dirty: true,
         }
@@ -317,6 +327,44 @@ pub(crate) fn configure_surface(
     surface.configure(device, &config);
     surface_state.size = size;
     surface_state.config = Some(config);
+    surface_state.requested_present_mode = Some(present_mode);
     surface_state.dirty = false;
     Ok(())
+}
+
+#[cfg(test)]
+mod configuration_tests {
+    use super::*;
+
+    #[test]
+    fn same_size_mode_change_configures_once_and_retains_selected_fallback() {
+        let size = Extent2d::new(320, 180).unwrap();
+        let mut state = WgpuSurfaceState {
+            live: None,
+            config: Some(wgpu::SurfaceConfiguration {
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                color_space: wgpu::SurfaceColorSpace::Auto,
+                width: size.width,
+                height: size.height,
+                present_mode: wgpu::PresentMode::Fifo,
+                desired_maximum_frame_latency: 2,
+                alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+                view_formats: vec![],
+            }),
+            requested_present_mode: Some(PresentMode::Fifo),
+            size,
+            dirty: false,
+        };
+        assert!(!state.needs_configuration(size, PresentMode::Fifo));
+        assert!(state.needs_configuration(size, PresentMode::Immediate));
+        let selected = choose_present_mode(PresentMode::Immediate, &[wgpu::PresentMode::Fifo]);
+        state.config.as_mut().unwrap().present_mode = selected;
+        state.requested_present_mode = Some(PresentMode::Immediate);
+        assert_eq!(selected, wgpu::PresentMode::Fifo);
+        assert!(!state.needs_configuration(size, PresentMode::Immediate));
+        assert!(state.needs_configuration(size, PresentMode::Mailbox));
+        state.dirty = true;
+        assert!(state.needs_configuration(size, PresentMode::Immediate));
+    }
 }

@@ -11,10 +11,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = RuntimeInstance::start(app)?;
     runtime.drive(std::time::Duration::ZERO)?;
 
-    let batches = runtime
+    let stats = runtime
         .world()
-        .resource::<nara::sprite_render::SpriteBatches>();
-    assert_eq!(batches.total_instances(), 3);
+        .resource::<nara::sprite_render::SpriteRenderStats>();
+    assert_eq!(stats.queued_items, 3);
     runtime.finish()?;
     Ok(())
 }

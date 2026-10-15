@@ -217,7 +217,8 @@ pub mod prelude {
     };
     #[cfg(feature = "runtime-2d")]
     pub use nara_material::{
-        AddressMode, AlphaMode2d, FilterMode, Material2dDescriptor, SamplerDescriptor,
+        AddressMode, AlphaMode2d, FilterMode, Material2dDefinition, Material2dDefinitions,
+        Material2dError, Material2dInput, Material2dInstance, SamplerDescriptor,
     };
     #[cfg(any(
         feature = "runtime-2d",
@@ -885,7 +886,7 @@ mod tests {
         );
         assert!(
             app.world()
-                .contains_resource::<nara_sprite_render::SpriteBatches>()
+                .contains_resource::<nara_sprite_render::__private::SpriteBatches>()
         );
     }
 }

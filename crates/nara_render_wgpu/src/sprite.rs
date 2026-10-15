@@ -1,7 +1,8 @@
 use crate::quad::{
-    WGPU_QUAD_SHAPE_PLAIN, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey, WgpuQuadTexture,
+    WGPU_QUAD_SHAPE_PLAIN, WgpuMaterial2d, WgpuQuadBatch, WgpuQuadInstance, WgpuQuadMaterialKey,
+    WgpuQuadTexture,
 };
-use nara_sprite_render::{SpriteBatch, SpriteBatches, SpriteInstance};
+use nara_sprite_render::__private::{SpriteBatch, SpriteBatches, SpriteInstance};
 
 pub(crate) fn collect_sprite_quad_batches(
     batches: &SpriteBatches,
@@ -28,6 +29,14 @@ fn sprite_quad_batch(batch: &SpriteBatch) -> WgpuQuadBatch {
         scissor: None,
         instances: batch.instances.iter().map(sprite_quad_instance).collect(),
         counts_as_sprites: true,
+        material_extension: batch
+            .material_extension
+            .as_ref()
+            .map(|material| WgpuMaterial2d {
+                definition: material.instance.definition(),
+                parameters: material.instance.parameters(),
+                texture: material.texture.clone(),
+            }),
     }
 }
 
@@ -58,7 +67,9 @@ mod tests {
     use nara_core::{Color, Vec2};
     use nara_material::{AlphaMode2d, SamplerDescriptor};
     use nara_render::RenderTarget;
-    use nara_sprite_render::{ColorKey, SpriteBatchKind, SpriteMaterialKey, TextureUvRect};
+    use nara_sprite_render::__private::{
+        ColorKey, SpriteBatchKind, SpriteMaterialKey, TextureUvRect,
+    };
 
     #[test]
     fn sprite_adapter_preserves_material_and_instance_geometry() {
@@ -75,6 +86,7 @@ mod tests {
                 tint: ColorKey::from_color(Color::WHITE),
             },
             image: None,
+            material_extension: None,
             instances: vec![SpriteInstance {
                 center: Vec2::new(0.25, -0.5),
                 x_axis: Vec2::new(0.1, 0.2),

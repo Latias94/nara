@@ -155,6 +155,19 @@ impl WgpuSpriteTextureCache {
         Ok(binding.bind_group.clone())
     }
 
+    pub(crate) fn prepared_image_view(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        snapshot: &PreparedImageSnapshot,
+        frame_index: u64,
+    ) -> Result<wgpu::TextureView, WgpuTextureError> {
+        self.ensure_image(device, queue, snapshot, frame_index)?;
+        Ok(self
+            .texture_view(WgpuQuadTextureKey::Image(snapshot.identity().key()))?
+            .clone())
+    }
+
     fn ensure_fallback(
         &mut self,
         device: &wgpu::Device,

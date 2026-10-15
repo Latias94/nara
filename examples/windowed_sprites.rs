@@ -1,10 +1,13 @@
 use std::error::Error;
 
-use image::ImageEncoder;
+use nara::ecs::{With, schedule::IntoScheduleConfigs};
 use nara::hierarchy::{
     HierarchyCommandsExt, HierarchyOperation, HierarchyPlacement, HierarchyPlacementOwner,
 };
 use nara::{advanced_prelude::*, backend_prelude::*};
+
+#[path = "support/procedural_image.rs"]
+mod procedural_image;
 
 #[path = "support/runtime_retirement.rs"]
 mod runtime_retirement;
@@ -26,11 +29,28 @@ fn main() -> Result<(), Box<dyn Error>> {
         WgpuBackendPlugins,
         WgpuSpriteSubmitterPlugin,
     ))?;
+    app.insert_resource(nara::transform::FixedTransformInterpolation)?;
     app.add_systems(StartupStage::Scene, setup_scene)?;
+    app.add_systems(
+        CoreStage::FixedUpdate,
+        rotate_demo_sprite.in_set(nara::app::FixedUpdateSet::Simulate),
+    )?;
     app.world_mut()?.insert_resource(AssetServer::new());
     let mut runtime = nara::app::RuntimeInstance::start(app)?;
     let run_result = WinitRunner::default().run(&mut runtime);
     finish_runtime_after_winit(run_result, runtime)
+}
+
+#[derive(Component)]
+struct DemoMotion;
+
+fn rotate_demo_sprite(
+    time: Res<nara::app::FixedTime>,
+    mut sprites: Query<&mut Transform2d, With<DemoMotion>>,
+) {
+    for mut transform in &mut sprites {
+        transform.rotation += time.delta().as_secs_f32() * 0.5;
+    }
 }
 
 fn setup_scene(
@@ -62,6 +82,7 @@ fn setup_scene(
         .id();
     let color_sprite = commands
         .spawn((
+            DemoMotion,
             Name::new("rose square"),
             Transform2d {
                 translation: Vec2::new(40.0, -20.0),
@@ -108,47 +129,15 @@ fn import_demo_texture(
         AssetPath::new("textures/windowed-demo.png").unwrap(),
         AssetSourceKind::Image,
     );
-    let mut database = ProjectAssetDatabase::default();
-    database.insert(record.clone()).unwrap();
-    let png_bytes = rgba_png(
-        2,
-        2,
+    procedural_image::import_rgba(
+        asset_server,
+        images,
+        states,
+        record,
+        ImageExtent::new(2, 2),
         &[
-            255, 255, 255, 255, //
-            40, 180, 255, 255, //
-            255, 80, 120, 255, //
-            30, 40, 60, 255,
+            255, 255, 255, 255, 40, 180, 255, 255, 255, 80, 120, 255, 30, 40, 60, 255,
         ],
+        ImageImportSettings::default(),
     )
-    .unwrap();
-    let texture = AssetRef::stable_id(WINDOW_TEXTURE_STABLE_ID)
-        .unwrap()
-        .resolve_with_database::<ImageAsset>(asset_server, &database)
-        .unwrap();
-    let imported = ImageImporter::default()
-        .import_image(
-            ImageBytesImportRequest::new(
-                record.clone(),
-                png_bytes.into_boxed_slice(),
-                ImageImportSettings::default(),
-            ),
-            texture,
-            states.version(texture.id()).unwrap_or(AssetVersion::ZERO),
-            asset_server,
-            images,
-            states,
-        )
-        .unwrap();
-    let mut events = AssetEvents::default();
-    imported
-        .commit(asset_server, images, states, &mut events)
-        .unwrap();
-    texture
-}
-
-fn rgba_png(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, image::ImageError> {
-    let mut bytes = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
-    encoder.write_image(pixels, width, height, image::ExtendedColorType::Rgba8)?;
-    Ok(bytes)
 }

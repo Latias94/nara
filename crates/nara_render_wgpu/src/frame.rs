@@ -10,7 +10,7 @@ use nara_render::{ExtractedViews, RenderFramePacket, RenderFramePacketError};
 #[cfg(any(feature = "sprite-submitter", feature = "ui-submitter"))]
 use nara_render::{RenderTarget, ViewportRect};
 #[cfg(feature = "sprite-submitter")]
-use nara_sprite_render::SpriteBatches;
+use nara_sprite_render::__private::SpriteBatches;
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::__private::{
     UiBackendSubmission, UiCompletedBackendOutcome, UiPresentationOutcomes,
@@ -534,13 +534,16 @@ impl WgpuFramePayload {
         &self,
         target: RenderTarget,
         viewport: ViewportRect,
+        view_index: Option<usize>,
     ) -> Result<WgpuLoweredFrameDraw, WgpuRenderError> {
         #[cfg(feature = "sprite-submitter")]
         let content = self
             .sprite_batches
             .as_ref()
             .map_or_else(Vec::new, |batches| {
-                crate::sprite::collect_sprite_quad_batches(batches, 0)
+                view_index.map_or_else(Vec::new, |index| {
+                    crate::sprite::collect_sprite_quad_batches(batches, index)
+                })
             });
         #[cfg(not(feature = "sprite-submitter"))]
         let content = Vec::new();
@@ -548,7 +551,11 @@ impl WgpuFramePayload {
         let ui_packet_target = self.ui_packet_target(target);
         #[cfg(feature = "ui-submitter")]
         let ui = crate::ui::lower_ui_packets(
-            &self.ui_packets,
+            if view_index.is_none() {
+                &self.ui_packets
+            } else {
+                &[]
+            },
             ui_packet_target,
             self.primary_window_id,
             viewport,
@@ -558,7 +565,7 @@ impl WgpuFramePayload {
         })?;
         #[cfg(not(feature = "ui-submitter"))]
         let ui_batches = {
-            let _ = (target, viewport);
+            let _ = (target, viewport, view_index);
             Vec::new()
         };
         #[cfg(feature = "ui-submitter")]
@@ -592,10 +599,12 @@ fn payload_batches_match_topology(
     let _ = (payload, view);
     #[cfg(feature = "sprite-submitter")]
     if payload.sprite_batches.as_ref().is_some_and(|batches| {
-        batches
-            .as_slice()
-            .iter()
-            .any(|batch| batch.view_index != 0 || batch.target != view.target)
+        batches.as_slice().iter().any(|batch| {
+            views
+                .as_slice()
+                .get(batch.view_index)
+                .is_none_or(|view| batch.target != view.target || batch.view_order != view.order)
+        })
     }) {
         return false;
     }

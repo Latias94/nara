@@ -1,7 +1,7 @@
 use crate::texture::{WgpuSpriteTextureCache, WgpuTextureError};
 use bytemuck::{Pod, Zeroable};
 use nara_image::PreparedImageSnapshot;
-use nara_material::{AlphaMode2d, SamplerDescriptor};
+use nara_material::{AlphaMode2d, Material2dDefinition, SamplerDescriptor};
 use nara_render::{RenderResourceKey, ViewportRect};
 #[cfg(feature = "ui-submitter")]
 use nara_ui_render::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot};
@@ -87,6 +87,14 @@ pub(crate) struct WgpuQuadBatch {
     pub(crate) scissor: Option<WgpuScissorRect>,
     pub(crate) instances: Vec<WgpuQuadInstance>,
     pub(crate) counts_as_sprites: bool,
+    pub(crate) material_extension: Option<WgpuMaterial2d>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct WgpuMaterial2d {
+    pub(crate) definition: Material2dDefinition,
+    pub(crate) parameters: [f32; 4],
+    pub(crate) texture: PreparedImageSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,11 +115,13 @@ pub(crate) struct WgpuQuadPipeline {
 pub(crate) struct WgpuQuadPipelineKey {
     pub(crate) format: wgpu::TextureFormat,
     pub(crate) alpha_mode: AlphaMode2d,
+    pub(crate) material: Option<Material2dDefinition>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct WgpuQuadPipelineDrawRef {
     pub(crate) alpha_mode: AlphaMode2d,
+    pub(crate) material: Option<Material2dDefinition>,
     pub(crate) pipeline: wgpu::RenderPipeline,
 }
 
@@ -119,10 +129,40 @@ pub(crate) struct WgpuQuadPipelineDrawRef {
 pub(crate) struct WgpuQuadBatchBuffer {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+    material_bind_group: Option<wgpu::BindGroup>,
+    material: Option<Material2dDefinition>,
     alpha_mode: AlphaMode2d,
     scissor: Option<WgpuScissorRect>,
     instance_count: u32,
     logical_bytes: u64,
+}
+
+pub(crate) fn create_material_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("nara_material_2d_bind_group_layout"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(16),
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+        ],
+    })
 }
 
 impl WgpuQuadBatchBuffer {
@@ -175,11 +215,30 @@ pub(crate) fn create_quad_pipeline(
     device: &wgpu::Device,
     key: WgpuQuadPipelineKey,
     texture_bind_group_layout: &wgpu::BindGroupLayout,
-) -> WgpuQuadPipeline {
-    let shader = device.create_shader_module(wgpu::include_wgsl!("sprite.wgsl"));
+    material_bind_group_layout: &wgpu::BindGroupLayout,
+) -> Result<WgpuQuadPipeline, crate::WgpuRenderError> {
+    let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let fragment = key.material.map_or(
+        "fn material_fragment(sampled: vec4<f32>, tint: vec4<f32>, uv: vec2<f32>) -> vec4<f32> { return sampled * tint; }",
+        |material| material.fragment_shader,
+    );
+    let bindings = if key.material.is_some() {
+        "@group(1) @binding(0) var<uniform> material_parameters: vec4<f32>;\n@group(1) @binding(1) var material_texture: texture_2d<f32>;"
+    } else {
+        ""
+    };
+    let source = format!("{}\n{bindings}\n{fragment}", include_str!("sprite.wgsl"));
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("nara_wgpu_quad_shader"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let mut layouts = vec![Some(texture_bind_group_layout)];
+    if key.material.is_some() {
+        layouts.push(Some(material_bind_group_layout));
+    }
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("nara_wgpu_quad_pipeline_layout"),
-        bind_group_layouts: &[Some(texture_bind_group_layout)],
+        bind_group_layouts: &layouts,
         immediate_size: 0,
     });
     let vertex_buffer_layout = quad_instance_buffer_layout();
@@ -208,7 +267,15 @@ pub(crate) fn create_quad_pipeline(
         cache: None,
     });
 
-    WgpuQuadPipeline { key, pipeline }
+    if let Some(error) = pollster::block_on(error_scope.pop()) {
+        return Err(crate::WgpuRenderError::ContentRejected {
+            message: format!(
+                "2D material {:?}: {error}",
+                key.material.map(|material| material.id)
+            ),
+        });
+    }
+    Ok(WgpuQuadPipeline { key, pipeline })
 }
 
 pub(crate) fn create_quad_batch_buffers(
@@ -216,6 +283,7 @@ pub(crate) fn create_quad_batch_buffers(
     queue: &wgpu::Queue,
     batches: &[WgpuQuadBatch],
     texture_layout: &wgpu::BindGroupLayout,
+    material_layout: &wgpu::BindGroupLayout,
     texture_cache: &mut WgpuSpriteTextureCache,
     frame_index: u64,
 ) -> Result<Vec<WgpuQuadBatchBuffer>, WgpuTextureError> {
@@ -231,6 +299,35 @@ pub(crate) fn create_quad_batch_buffers(
                 &batch.texture,
                 frame_index,
             )?;
+            let material_bind_group = if let Some(material) = &batch.material_extension {
+                let view = texture_cache.prepared_image_view(
+                    device,
+                    queue,
+                    &material.texture,
+                    frame_index,
+                )?;
+                let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("nara_material_2d_parameters"),
+                    contents: bytemuck::cast_slice(&material.parameters),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+                Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("nara_material_2d_bind_group"),
+                    layout: material_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: parameters.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&view),
+                        },
+                    ],
+                }))
+            } else {
+                None
+            };
             let instance_count = saturating_u32(batch.instances.len());
             let logical_bytes = quad_instance_byte_len(batch.instances.len());
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -242,6 +339,11 @@ pub(crate) fn create_quad_batch_buffers(
             Ok(WgpuQuadBatchBuffer {
                 buffer,
                 bind_group,
+                material_bind_group,
+                material: batch
+                    .material_extension
+                    .as_ref()
+                    .map(|material| material.definition),
                 alpha_mode: batch.material.alpha_mode,
                 scissor: batch.scissor,
                 instance_count,
@@ -257,18 +359,20 @@ pub(crate) fn draw_quad_batch_buffers<'pass>(
     buffers: &'pass [WgpuQuadBatchBuffer],
     viewport: ViewportRect,
 ) {
-    let mut bound_alpha_mode = None::<AlphaMode2d>;
+    let mut bound_pipeline = None;
     for buffer in buffers {
         let Some(pipeline) = pipelines
             .iter()
-            .find(|pipeline| pipeline.alpha_mode == buffer.alpha_mode)
+            .find(|pipeline| {
+                pipeline.alpha_mode == buffer.alpha_mode && pipeline.material == buffer.material
+            })
             .map(|pipeline| &pipeline.pipeline)
         else {
             continue;
         };
-        if bound_alpha_mode != Some(buffer.alpha_mode) {
+        if bound_pipeline != Some((buffer.alpha_mode, buffer.material)) {
             render_pass.set_pipeline(pipeline);
-            bound_alpha_mode = Some(buffer.alpha_mode);
+            bound_pipeline = Some((buffer.alpha_mode, buffer.material));
         }
         let scissor = buffer.scissor.unwrap_or(WgpuScissorRect {
             x: viewport.physical_x,
@@ -278,6 +382,9 @@ pub(crate) fn draw_quad_batch_buffers<'pass>(
         });
         render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
         render_pass.set_bind_group(0, &buffer.bind_group, &[]);
+        if let Some(material) = &buffer.material_bind_group {
+            render_pass.set_bind_group(1, material, &[]);
+        }
         render_pass.set_vertex_buffer(0, buffer.buffer.slice(..));
         render_pass.draw(0..VERTICES_PER_QUAD, 0..buffer.instance_count);
     }
@@ -414,6 +521,7 @@ mod tests {
             scissor: None,
             instances: vec![WgpuQuadInstance::zeroed(); 2],
             counts_as_sprites: true,
+            material_extension: None,
         };
         let image = WgpuQuadBatch {
             material: WgpuQuadMaterialKey {

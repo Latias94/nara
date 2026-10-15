@@ -17,6 +17,8 @@ use crate::{
 /// Failure to publish one complete runtime 2D transform projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum TransformCompletionError {
+    #[error("the simulation transform projection is unavailable for presentation")]
+    SimulationProjectionIncomplete,
     #[error("the runtime hierarchy has not completed validation")]
     HierarchyIncomplete,
     #[error("entity {entity:?} has a non-finite local 2D transform")]
@@ -223,7 +225,9 @@ pub(crate) fn complete_transform_projection(
             };
             world.remove_resource::<CompletedTransformProjection>();
 
-            build_candidate_projection(world, &mut scratch, participant_count)?;
+            build_candidate_projection(world, &mut scratch, participant_count, |_, local| {
+                local.matrix()
+            })?;
             publish_candidate_projection(world, &mut scratch);
 
             #[cfg(test)]
@@ -268,6 +272,7 @@ fn build_candidate_projection(
     world: &World,
     scratch: &mut RetainedTransformPropagationScratch,
     participant_count: usize,
+    mut local_matrix: impl FnMut(Entity, &Transform2d) -> Mat3,
 ) -> Result<(), TransformCompletionError> {
     scratch.local_matrices.clear();
     scratch.first_transform_child.clear();
@@ -288,7 +293,7 @@ fn build_candidate_projection(
     scratch.candidate_globals.reserve(participant_count);
 
     for (entity, transform) in scratch.local_transforms.iter(world) {
-        let matrix = transform.matrix();
+        let matrix = local_matrix(entity, &transform);
         if !matrix.is_finite() {
             return Err(TransformCompletionError::NonFiniteLocal { entity });
         }
@@ -350,6 +355,28 @@ fn build_candidate_projection(
         .stale_entities
         .extend(scratch.stale_globals.iter(world));
     Ok(())
+}
+
+/// Reuses the validated transform forest without publishing simulation components.
+pub(super) fn project_render_matrices(
+    world: &mut World,
+    output: &mut EntityHashMap<Mat3>,
+    local_matrix: impl FnMut(Entity, &Transform2d) -> Mat3,
+) -> Result<(), TransformCompletionError> {
+    if !world.contains_resource::<CompletedTransformProjection>() {
+        return Err(TransformCompletionError::SimulationProjectionIncomplete);
+    }
+    let participants = world
+        .resource::<TransformCompletionState>()
+        .observed_participants;
+    world.resource_scope(
+        |world, mut scratch: Mut<RetainedTransformPropagationScratch>| {
+            build_candidate_projection(world, &mut scratch, participants, local_matrix)?;
+            output.clear();
+            output.extend(scratch.candidate_globals.iter().copied());
+            Ok(())
+        },
+    )
 }
 
 fn publish_candidate_projection(

@@ -363,7 +363,11 @@ pub struct Tilemap {
     pub tileset: Option<Handle<TileSet>>,
     pub tile_size: Vec2,
     pub layer: TileLayer,
+    /// Explicit sort group within a layer. Y sorting never crosses this key.
     pub sort_key: i32,
+    /// Local offset from each cell center used for descending world-Y order.
+    /// `None` participates at world Y = 0 and keeps authored order with equal anchors.
+    pub y_sort_anchor: Option<Vec2>,
     cells: BTreeMap<TileCoord, TileCell>,
     dirty_chunks: BTreeMap<TileChunkCoord, u64>,
     next_dirty_revision: u64,
@@ -377,6 +381,7 @@ impl Tilemap {
             tile_size,
             layer: TileLayer::default(),
             sort_key: 0,
+            y_sort_anchor: None,
             cells: BTreeMap::new(),
             dirty_chunks: BTreeMap::new(),
             next_dirty_revision: 1,
@@ -398,6 +403,12 @@ impl Tilemap {
     #[must_use]
     pub fn with_sort_key(mut self, sort_key: i32) -> Self {
         self.sort_key = sort_key;
+        self
+    }
+
+    #[must_use]
+    pub fn with_y_sort_anchor(mut self, anchor: Vec2) -> Self {
+        self.y_sort_anchor = Some(anchor);
         self
     }
 
@@ -526,6 +537,10 @@ pub fn register_tilemap_components(
             let tile_size = read_vec2(value.field("tile_size")?, "tile_size")?;
             let layer = optional_i32(value, "layer")?.unwrap_or(0);
             let sort_key = optional_i32(value, "sort_key")?.unwrap_or(0);
+            let y_sort_anchor = match value.get("y_sort_anchor") {
+                None | Some(ComponentValue::Null) => None,
+                Some(value) => Some(read_vec2(value, "y_sort_anchor")?),
+            };
             let tileset_ref = read_optional_asset_ref(value.get("tileset"), "tileset")?;
             let tileset = prepare_optional_tileset(context, tileset_ref)?;
             let cells = read_cells(value.get("cells"))?;
@@ -535,14 +550,24 @@ pub fn register_tilemap_components(
                     move |context| {
                         let tileset = resolve_prepared_tileset(context, tileset)?;
                         Ok(build_prepared_tilemap(
-                            tile_size, layer, sort_key, tileset, cells,
+                            tile_size,
+                            layer,
+                            sort_key,
+                            y_sort_anchor,
+                            tileset,
+                            cells,
                         ))
                     },
                 ))
             } else {
                 let tileset = resolve_prepared_tileset_without_asset_server(tileset)?;
                 Ok(PreparedComponentCandidate::insert(build_prepared_tilemap(
-                    tile_size, layer, sort_key, tileset, cells,
+                    tile_size,
+                    layer,
+                    sort_key,
+                    y_sort_anchor,
+                    tileset,
+                    cells,
                 )))
             }
         },
@@ -570,6 +595,14 @@ pub fn register_tilemap_components(
                 ("tile_size", vec2_value(tilemap.tile_size)?),
                 ("layer", ComponentValue::I64(i64::from(tilemap.layer.index))),
                 ("sort_key", ComponentValue::I64(i64::from(tilemap.sort_key))),
+                (
+                    "y_sort_anchor",
+                    tilemap
+                        .y_sort_anchor
+                        .map(vec2_value)
+                        .transpose()?
+                        .unwrap_or(ComponentValue::Null),
+                ),
                 ("tileset", tileset.unwrap_or(ComponentValue::Null)),
                 ("cells", cells_value(tilemap)?),
             ])))
@@ -601,7 +634,7 @@ fn validate_tilemap_components(registry: &ComponentRegistry) -> Result<(), Compo
         .validate_component_registration::<Tilemap>(&ComponentTypeId::new("nara.tilemap.Tilemap"))
 }
 
-fn tilemap_fields() -> [ComponentFieldSchema; 6] {
+fn tilemap_fields() -> [ComponentFieldSchema; 7] {
     [
         ComponentFieldSchema::required(
             ComponentFieldId::new("tile_size.x"),
@@ -627,10 +660,18 @@ fn tilemap_fields() -> [ComponentFieldSchema; 6] {
         .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
             ComponentFieldId::new("sort_key"),
-            "Sort key",
+            "Sort group",
             ComponentFieldPath::from_fields(["sort_key"]),
             ComponentValueKind::I64,
             ComponentValue::I64(0),
+        )
+        .with_capabilities(ComponentCapability::SCENE_AUTHORING),
+        ComponentFieldSchema::optional_with_default(
+            ComponentFieldId::new("y_sort_anchor"),
+            "Y sort anchor",
+            ComponentFieldPath::from_fields(["y_sort_anchor"]),
+            ComponentValueKind::Map,
+            ComponentValue::Null,
         )
         .with_capabilities(ComponentCapability::SCENE_AUTHORING),
         ComponentFieldSchema::optional_with_default(
@@ -678,12 +719,14 @@ fn build_prepared_tilemap(
     tile_size: Vec2,
     layer: i32,
     sort_key: i32,
+    y_sort_anchor: Option<Vec2>,
     tileset: Option<Handle<TileSet>>,
     cells: Vec<(TileCoord, TileCell)>,
 ) -> Tilemap {
     let mut tilemap = Tilemap::new(tile_size)
         .with_layer(layer)
         .with_sort_key(sort_key);
+    tilemap.y_sort_anchor = y_sort_anchor;
     if let Some(tileset) = tileset {
         tilemap = tilemap.with_tileset(tileset);
     }
@@ -1070,6 +1113,31 @@ mod tests {
     }
 
     #[test]
+    fn tilemap_codec_preserves_y_sort_anchor_and_explicit_group() {
+        let registry = frozen_tilemap_registry();
+        let mut world = World::new();
+        let original = Tilemap::new(Vec2::ONE)
+            .with_layer(3)
+            .with_sort_key(-7)
+            .with_y_sort_anchor(Vec2::new(2.0, -4.0));
+        let entity = world.spawn(original.clone()).id();
+        let value = registry
+            .encode_component(&tilemap_type_id(), &world, entity)
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let prepared = registry
+            .preflight_component(&tilemap_type_id(), &value)
+            .unwrap()
+            .unwrap();
+        let restored = world.spawn_empty().id();
+
+        prepared.apply(&mut world, restored).unwrap();
+
+        assert_eq!(world.get::<Tilemap>(restored), Some(&original));
+    }
+
+    #[test]
     fn tileset_records_image_handle_and_atlas_regions() {
         let image = Handle::new(AssetId::from_raw(31));
         let atlas = TileAtlasLayout::grid(Vec2::new(16.0, 8.0), 4, 2);
@@ -1231,6 +1299,7 @@ mod tests {
                 ("tile_size.x".to_string(), ComponentValueKind::F64, true),
                 ("tile_size.y".to_string(), ComponentValueKind::F64, true),
                 ("tileset".to_string(), ComponentValueKind::AssetRef, false),
+                ("y_sort_anchor".to_string(), ComponentValueKind::Map, false),
             ]
         );
     }
