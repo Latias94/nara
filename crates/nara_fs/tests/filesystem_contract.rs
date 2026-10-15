@@ -367,7 +367,8 @@ fn exclusive_temp_collision_is_reported_without_truncation() {
     let error = capability
         .create_temp(&component("candidate.tmp"))
         .unwrap_err();
-    assert!(matches!(error, FsError::AlreadyExists { .. }));
+    assert!(matches!(error.error(), FsError::AlreadyExists { .. }));
+    assert!(error.cleanup().is_none());
     assert_eq!(
         fs::read(root.path().join("candidate.tmp")).unwrap(),
         b"keep"
@@ -551,7 +552,8 @@ fn missing_target_publication_uses_atomic_no_replace() {
         )
         .unwrap_err();
 
-    assert!(matches!(error, FsError::TargetStateMismatch));
+    assert!(matches!(error.error(), FsError::TargetStateMismatch));
+    assert!(error.cleanup().is_some());
     assert_eq!(
         fs::read(root.path().join("document.scene")).unwrap(),
         b"first"
@@ -594,7 +596,7 @@ fn replacement_receipt_detects_candidate_bytes_changed_outside_its_capability() 
 
 #[cfg(windows)]
 #[test]
-fn replacement_sharing_failure_preserves_target_and_discards_candidate() {
+fn replacement_sharing_failure_preserves_target_and_candidate_for_explicit_cleanup() {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ;
 
@@ -610,6 +612,7 @@ fn replacement_sharing_failure_preserves_target_and_discards_candidate() {
         .unwrap();
     let mut temporary = capability.create_temp(&component("document.tmp")).unwrap();
     temporary.write_all(b"new").unwrap();
+    let candidate_identity = temporary.identity();
 
     let error = capability
         .replace_temp(
@@ -619,13 +622,20 @@ fn replacement_sharing_failure_preserves_target_and_discards_candidate() {
         )
         .unwrap_err();
 
-    assert!(matches!(error, FsError::Io { .. }));
+    assert!(matches!(error.error(), FsError::Io { .. }));
+    assert_eq!(
+        error.cleanup().unwrap().identity(),
+        Some(candidate_identity)
+    );
     assert_eq!(fs::read(target).unwrap(), b"old");
+    assert!(root.path().join("document.tmp").exists());
+    drop(_sharing_blocker);
+    error.into_parts().1.unwrap().discard().unwrap();
     assert!(!root.path().join("document.tmp").exists());
 }
 
 #[test]
-fn failed_expected_identity_preserves_target_and_reports_cleanup_tier() {
+fn failed_expected_identity_preserves_target_and_candidate_for_explicit_cleanup() {
     let root = TestRoot::new();
     fs::write(root.path().join("document.scene"), b"old").unwrap();
     let capability = trusted_read_write(&root);
@@ -634,6 +644,7 @@ fn failed_expected_identity_preserves_target_and_reports_cleanup_tier() {
     let other = capability.open_file(&relative("other.scene")).unwrap();
     let mut temporary = capability.create_temp(&component("document.tmp")).unwrap();
     temporary.write_all(b"new").unwrap();
+    let candidate_identity = temporary.identity();
 
     let error = capability
         .replace_temp(
@@ -643,15 +654,20 @@ fn failed_expected_identity_preserves_target_and_reports_cleanup_tier() {
         )
         .unwrap_err();
 
-    assert!(matches!(error, FsError::TargetStateMismatch));
+    assert!(matches!(error.error(), FsError::TargetStateMismatch));
+    assert_eq!(
+        error.cleanup().unwrap().identity(),
+        Some(candidate_identity)
+    );
     assert_eq!(
         fs::read(root.path().join("document.scene")).unwrap(),
         b"old"
     );
-    if cfg!(windows) {
+    assert!(root.path().join("document.tmp").exists());
+    #[cfg(windows)]
+    {
+        error.into_parts().1.unwrap().discard().unwrap();
         assert!(!root.path().join("document.tmp").exists());
-    } else {
-        assert!(root.path().join("document.tmp").exists());
     }
     drop(unrelated);
 }
@@ -676,6 +692,66 @@ fn explicit_and_drop_cleanup_remove_the_temporary_name() {
     assert!(!root.path().join("drop.tmp").exists());
 }
 
+#[cfg(windows)]
+#[test]
+fn explicit_cleanup_failure_retains_the_candidate_until_read_only_is_cleared() {
+    let root = TestRoot::new();
+    let capability = trusted_read_write(&root);
+    let temporary = capability.create_temp(&component("candidate.tmp")).unwrap();
+    let identity = temporary.identity();
+    let path = root.path().join("candidate.tmp");
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let mut permissions = original_permissions.clone();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+
+    let error = temporary.discard().unwrap_err();
+    assert!(matches!(error.error(), FsError::Io { .. }));
+    assert_eq!(error.cleanup().unwrap().identity(), Some(identity));
+    assert!(path.exists());
+    fs::set_permissions(&path, original_permissions).unwrap();
+    error.into_parts().1.unwrap().discard().unwrap();
+    assert!(!path.exists());
+}
+
+#[cfg(any(windows, unix))]
+#[test]
+fn cleanup_of_a_renamed_candidate_does_not_remove_its_name_replacement() {
+    let root = TestRoot::new();
+    let capability = trusted_read_write(&root);
+    let mut temporary = capability.create_temp(&component("candidate.tmp")).unwrap();
+    temporary.write_all(b"candidate").unwrap();
+    let identity = temporary.identity();
+    fs::rename(
+        root.path().join("candidate.tmp"),
+        root.path().join("moved.tmp"),
+    )
+    .unwrap();
+    fs::write(root.path().join("candidate.tmp"), b"replacement").unwrap();
+
+    let result = temporary.discard();
+    assert_eq!(
+        fs::read(root.path().join("candidate.tmp")).unwrap(),
+        b"replacement"
+    );
+    #[cfg(windows)]
+    {
+        result.unwrap();
+        assert!(!root.path().join("moved.tmp").exists());
+        let _ = identity;
+    }
+    #[cfg(unix)]
+    {
+        let error = result.unwrap_err();
+        assert!(matches!(error.error(), FsError::Unsupported { .. }));
+        assert_eq!(error.cleanup().unwrap().identity(), Some(identity));
+        assert_eq!(
+            fs::read(root.path().join("moved.tmp")).unwrap(),
+            b"candidate"
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn unix_cleanup_fails_closed_and_preserves_recoverable_orphans() {
@@ -687,7 +763,11 @@ fn unix_cleanup_fails_closed_and_preserves_recoverable_orphans() {
         .unwrap()
         .discard()
         .unwrap_err();
-    assert!(matches!(error, FsError::Unsupported { .. }));
+    assert!(matches!(error.error(), FsError::Unsupported { .. }));
+    let identity = error.cleanup().unwrap().identity();
+    let error = error.into_parts().1.unwrap().discard().unwrap_err();
+    assert!(matches!(error.error(), FsError::Unsupported { .. }));
+    assert_eq!(error.cleanup().unwrap().identity(), identity);
     assert!(root.path().join("explicit.tmp").exists());
 
     {
@@ -714,8 +794,13 @@ fn read_only_capability_refuses_write_primitives() {
             operation: nara_fs::FsOperation::CreateFile
         })
     ));
+    let error = capability
+        .create_temp(&component("candidate.tmp"))
+        .unwrap_err();
+    assert!(matches!(error.error(), FsError::ReadOnlyCapability { .. }));
+    assert!(error.cleanup().is_none());
     assert!(matches!(
-        capability.create_temp(&component("candidate.tmp")),
+        capability.preflight_replace(ExpectedTarget::Any),
         Err(FsError::ReadOnlyCapability { .. })
     ));
 }
@@ -859,6 +944,23 @@ fn sync_and_platform_proof_tiers_are_explicit() {
         }
         tier => assert_eq!(capability.sync().unwrap().tier(), tier),
     }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+#[test]
+fn unavailable_no_replace_publication_is_rejected_before_candidate_creation() {
+    let root = TestRoot::new();
+    let capability = trusted_read_write(&root);
+
+    capability.preflight_replace(ExpectedTarget::Any).unwrap();
+    assert!(matches!(
+        capability.preflight_replace(ExpectedTarget::Missing),
+        Err(FsError::Unsupported {
+            operation: nara_fs::FsOperation::Replace,
+            ..
+        })
+    ));
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
@@ -1046,6 +1148,11 @@ fn strict_unix_replacement_rejects_name_bound_candidate_publication() {
     let root = TestRoot::new();
     fs::write(root.path().join("document.scene"), b"old").unwrap();
     let capability = strict_read_write(&root);
+    assert!(matches!(
+        capability.preflight_replace(ExpectedTarget::Any),
+        Err(FsError::Unproven { .. })
+    ));
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
     let old = capability.open_file(&relative("document.scene")).unwrap();
     let mut temporary = capability.create_temp(&component("document.tmp")).unwrap();
     temporary.write_all(b"new").unwrap();
@@ -1058,7 +1165,8 @@ fn strict_unix_replacement_rejects_name_bound_candidate_publication() {
         )
         .unwrap_err();
 
-    assert!(matches!(error, FsError::Unproven { .. }));
+    assert!(matches!(error.error(), FsError::Unproven { .. }));
+    assert!(error.cleanup().is_some());
     assert_eq!(
         fs::read(root.path().join("document.scene")).unwrap(),
         b"old"

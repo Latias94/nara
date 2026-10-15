@@ -1,13 +1,16 @@
 use std::{
     fmt::{self, Debug, Formatter},
+    fs::File,
     io::Write,
     sync::Arc,
 };
 
 use crate::{
-    ConflictProtection, ContentDigest, DurabilityProgress, FileCapability, FileIdentity, FsError,
+    ConflictProtection, ContentDigest, DurabilityProgress, FileIdentity, FileSyncTier, FsError,
     ParentAuthorizationTier, PublicationAtomicity, PublicationIdentityEvidence,
-    PublicationSourceBinding, RelativeComponent, capability::DirectoryInner, platform,
+    PublicationSourceBinding, RelativeComponent, StageStatus,
+    capability::{DirectoryInner, validate_file_facts},
+    platform,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,66 +20,219 @@ pub enum ExpectedTarget {
     Identity(FileIdentity),
 }
 
-pub struct TemporaryFile {
+/// A failed temporary-file operation and any cleanup authority it still owns.
+#[derive(Debug, thiserror::Error)]
+#[error("{error}")]
+pub struct TemporaryFileFailure {
+    #[source]
+    error: FsError,
+    cleanup: Option<Box<TemporaryFileCleanup>>,
+}
+
+impl TemporaryFileFailure {
+    /// Associates an operation failure with cleanup authority the caller already owns.
+    ///
+    /// Use `From<FsError>` for failures before candidate creation; use this constructor when an
+    /// existing candidate remains, including write or synchronization failures.
+    #[must_use]
+    pub fn with_cleanup(error: FsError, cleanup: TemporaryFileCleanup) -> Self {
+        Self {
+            error,
+            cleanup: Some(Box::new(cleanup)),
+        }
+    }
+
+    #[must_use]
+    pub const fn error(&self) -> &FsError {
+        &self.error
+    }
+
+    #[must_use]
+    pub fn cleanup(&self) -> Option<&TemporaryFileCleanup> {
+        self.cleanup.as_deref()
+    }
+
+    /// Attempts retained cleanup once, preserving the original failure and any remaining owner.
+    #[must_use]
+    pub fn retry_cleanup(&mut self) -> bool {
+        let Some(cleanup) = self.cleanup.take() else {
+            return true;
+        };
+        match (*cleanup).discard() {
+            Ok(()) => true,
+            Err(failure) => {
+                self.cleanup = failure.cleanup;
+                false
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn into_parts(self) -> (FsError, Option<TemporaryFileCleanup>) {
+        (self.error, self.cleanup.map(|cleanup| *cleanup))
+    }
+}
+
+impl From<FsError> for TemporaryFileFailure {
+    fn from(error: FsError) -> Self {
+        Self {
+            error,
+            cleanup: None,
+        }
+    }
+}
+
+/// Owns the opened candidate solely for an explicit, identity-bound cleanup retry.
+///
+/// A failed operation retains this owner without retrying cleanup during `Drop`. It never grants
+/// read, write, or publication authority, including when creation validation did not succeed.
+pub struct TemporaryFileCleanup {
     parent: Arc<DirectoryInner>,
     name: RelativeComponent,
-    file: FileCapability,
+    file: File,
+    identity: Option<FileIdentity>,
+    cleanup_on_drop: bool,
+}
+
+impl TemporaryFileCleanup {
+    pub(crate) fn new(
+        parent: Arc<DirectoryInner>,
+        name: RelativeComponent,
+        file: File,
+        identity: Option<FileIdentity>,
+    ) -> Self {
+        Self {
+            parent,
+            name,
+            file,
+            identity,
+            cleanup_on_drop: false,
+        }
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> Option<FileIdentity> {
+        self.identity
+    }
+
+    /// Returns the original relative candidate name for recovery diagnostics, not authorization.
+    #[must_use]
+    pub const fn name(&self) -> &RelativeComponent {
+        &self.name
+    }
+
+    /// Retries cleanup of this exact opened object and returns ownership again on failure.
+    pub fn discard(mut self) -> Result<(), TemporaryFileFailure> {
+        self.cleanup_on_drop = false;
+        let result = self.discard_inner();
+        result.map_err(|error| TemporaryFileFailure::with_cleanup(error, self))
+    }
+
+    fn discard_inner(&mut self) -> Result<(), FsError> {
+        let identity = match self.identity {
+            Some(identity) => identity,
+            None => {
+                let facts = platform::facts(&self.file)?;
+                validate_file_facts(&self.parent, facts)?;
+                if !facts.identity_proven {
+                    return Err(FsError::IdentityUnavailable);
+                }
+                let identity = FileIdentity::new(
+                    self.parent.identity.session(),
+                    self.parent.options.generation(),
+                    facts.identity,
+                );
+                self.identity = Some(identity);
+                identity
+            }
+        };
+        platform::discard_temporary(&self.parent.file, &self.file, &self.name, identity.native())
+    }
+}
+
+impl Debug for TemporaryFileCleanup {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TemporaryFileCleanup")
+            .field("identity", &self.identity)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Drop for TemporaryFileCleanup {
+    fn drop(&mut self) {
+        if self.cleanup_on_drop {
+            let _ = self.discard_inner();
+        }
+    }
+}
+
+pub struct TemporaryFile {
+    cleanup: TemporaryFileCleanup,
+    identity: FileIdentity,
     durability: DurabilityProgress,
     content_hasher: blake3::Hasher,
     content_length: u64,
-    cleanup_on_drop: bool,
 }
 
 impl TemporaryFile {
     pub(crate) fn new(
         parent: Arc<DirectoryInner>,
         name: RelativeComponent,
-        file: FileCapability,
+        file: File,
+        identity: FileIdentity,
     ) -> Self {
+        let mut cleanup = TemporaryFileCleanup::new(parent, name, file, Some(identity));
+        cleanup.cleanup_on_drop = true;
         Self {
-            parent,
-            name,
-            file,
+            cleanup,
+            identity,
             durability: DurabilityProgress::NONE,
             content_hasher: blake3::Hasher::new(),
             content_length: 0,
-            cleanup_on_drop: true,
         }
     }
 
     #[must_use]
     pub const fn identity(&self) -> FileIdentity {
-        self.file.identity()
+        self.identity
     }
 
     pub fn sync(&mut self) -> Result<crate::FileSyncReceipt, FsError> {
-        let receipt = self.file.sync()?;
+        let tier = platform::sync_file(&self.cleanup.file)?;
+        let synced = match tier {
+            FileSyncTier::DataAndMetadata => StageStatus::Achieved,
+            FileSyncTier::Unsupported => StageStatus::Unsupported,
+        };
+        let receipt = crate::FileSyncReceipt::new(
+            tier,
+            DurabilityProgress::new(synced, synced, StageStatus::Unknown, StageStatus::Unknown),
+        );
         self.durability = receipt.progress();
         Ok(receipt)
     }
 
-    pub fn discard(mut self) -> Result<(), FsError> {
-        // An explicit terminal request must not trigger a hidden second
-        // name-based cleanup attempt from `Drop` after it reports failure.
-        self.cleanup_on_drop = false;
-        platform::discard_temporary(
-            &self.parent.file,
-            &self.file.file,
-            &self.name,
-            self.file.identity().native(),
-        )
+    pub fn discard(self) -> Result<(), TemporaryFileFailure> {
+        self.into_cleanup().discard()
+    }
+
+    /// Relinquishes write and publication authority while retaining explicit cleanup ownership.
+    #[must_use]
+    pub fn into_cleanup(mut self) -> TemporaryFileCleanup {
+        self.cleanup.cleanup_on_drop = false;
+        self.cleanup
     }
 
     pub(crate) fn parent(&self) -> &Arc<DirectoryInner> {
-        &self.parent
+        &self.cleanup.parent
     }
 
     pub(crate) fn name(&self) -> &RelativeComponent {
-        &self.name
+        &self.cleanup.name
     }
 
     pub(crate) fn file_handle(&self) -> &std::fs::File {
-        &self.file.file
+        &self.cleanup.file
     }
 
     pub(crate) const fn durability(&self) -> DurabilityProgress {
@@ -91,14 +247,14 @@ impl TemporaryFile {
     }
 
     pub(crate) fn mark_published(&mut self) {
-        self.cleanup_on_drop = false;
+        self.cleanup.cleanup_on_drop = false;
     }
 }
 
 impl Write for TemporaryFile {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
         self.durability = DurabilityProgress::NONE;
-        let written = self.file.file.write(buffer)?;
+        let written = self.cleanup.file.write(buffer)?;
         self.content_hasher.update(&buffer[..written]);
         self.content_length = self
             .content_length
@@ -108,7 +264,7 @@ impl Write for TemporaryFile {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.file.file.flush()
+        self.cleanup.file.flush()
     }
 }
 
@@ -116,23 +272,10 @@ impl Debug for TemporaryFile {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("TemporaryFile")
-            .field("identity", &self.file.identity())
-            .field("cleanup_on_drop", &self.cleanup_on_drop)
+            .field("identity", &self.identity)
+            .field("cleanup_on_drop", &self.cleanup.cleanup_on_drop)
             .field("durability", &self.durability)
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for TemporaryFile {
-    fn drop(&mut self) {
-        if self.cleanup_on_drop {
-            let _ = platform::discard_temporary(
-                &self.parent.file,
-                &self.file.file,
-                &self.name,
-                self.file.identity().native(),
-            );
-        }
     }
 }
 

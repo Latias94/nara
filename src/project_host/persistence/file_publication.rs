@@ -5,7 +5,8 @@ use std::{
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, ExpectedTarget, FileCapability, FileIdentity, FsError,
-    LockMode, RelativeComponent, RelativePath, ReplaceReceipt, StageStatus,
+    LockMode, RelativeComponent, RelativePath, ReplaceReceipt, StageStatus, TemporaryFileCleanup,
+    TemporaryFileFailure,
 };
 
 static NEXT_TEMPORARY_NAME: AtomicU64 = AtomicU64::new(1);
@@ -53,6 +54,7 @@ pub(in crate::project_host) enum FilePublicationRejection {
     LockUnavailable,
     UnsupportedGuarantee,
     RequiresReconcile,
+    CleanupPending,
 }
 
 #[must_use = "file publication outcomes must be accepted or reconciled explicitly"]
@@ -109,6 +111,11 @@ pub(in crate::project_host) struct FilePublicationHost {
     binding: FilePublicationBinding,
     byte_limit: u64,
     uncertain: bool,
+    cleanup: Option<TemporaryFileCleanup>,
+    #[cfg(test)]
+    fail_after_write: bool,
+    #[cfg(test)]
+    block_cleanup: bool,
 }
 
 impl FilePublicationHost {
@@ -125,6 +132,11 @@ impl FilePublicationHost {
             binding: FilePublicationBinding::Existing { identity, digest },
             byte_limit,
             uncertain: false,
+            cleanup: None,
+            #[cfg(test)]
+            fail_after_write: false,
+            #[cfg(test)]
+            block_cleanup: false,
         }
     }
 
@@ -148,6 +160,11 @@ impl FilePublicationHost {
             },
             byte_limit,
             uncertain: false,
+            cleanup: None,
+            #[cfg(test)]
+            fail_after_write: false,
+            #[cfg(test)]
+            block_cleanup: false,
         })
     }
 
@@ -167,6 +184,11 @@ impl FilePublicationHost {
             binding: FilePublicationBinding::Missing,
             byte_limit,
             uncertain: false,
+            cleanup: None,
+            #[cfg(test)]
+            fail_after_write: false,
+            #[cfg(test)]
+            block_cleanup: false,
         })
     }
 
@@ -176,6 +198,65 @@ impl FilePublicationHost {
 
     pub(in crate::project_host) const fn uncertain(&self) -> bool {
         self.uncertain
+    }
+
+    pub(in crate::project_host) fn has_cleanup(&self) -> bool {
+        self.cleanup.is_some()
+    }
+
+    pub(in crate::project_host) fn retry_cleanup(&mut self) -> bool {
+        #[cfg(test)]
+        if self.block_cleanup && self.cleanup.is_some() {
+            return false;
+        }
+        let Some(cleanup) = self.cleanup.take() else {
+            return true;
+        };
+        match cleanup.discard() {
+            Ok(()) => true,
+            Err(failure) => {
+                self.cleanup = failure.into_parts().1;
+                false
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::project_host) fn test_fail_after_write(&mut self) {
+        self.fail_after_write = true;
+        self.block_cleanup = true;
+    }
+
+    #[cfg(test)]
+    pub(in crate::project_host) fn test_allow_cleanup(&mut self) {
+        self.block_cleanup = false;
+    }
+
+    pub(in crate::project_host) fn preflight(&mut self) -> Result<(), FilePublicationRejection> {
+        if !self.retry_cleanup() {
+            return Err(FilePublicationRejection::CleanupPending);
+        }
+        if self.uncertain {
+            return Err(FilePublicationRejection::RequiresReconcile);
+        }
+        self.parent
+            .preflight_replace(self.binding.expected_target())
+            .map_err(|_| FilePublicationRejection::UnsupportedGuarantee)
+    }
+
+    fn retain_failed_cleanup(&mut self, failure: TemporaryFileFailure) -> FsError {
+        let (error, cleanup) = failure.into_parts();
+        debug_assert!(self.cleanup.is_none());
+        self.cleanup = cleanup;
+        self.retry_cleanup();
+        error
+    }
+
+    fn discard_candidate(&mut self, candidate: nara_fs::TemporaryFile) {
+        if let Err(failure) = candidate.discard() {
+            debug_assert!(self.cleanup.is_none());
+            self.cleanup = failure.into_parts().1;
+        }
     }
 
     pub(in crate::project_host) fn open_target(&self) -> Result<FileCapability, FsError> {
@@ -202,21 +283,12 @@ impl FilePublicationHost {
     }
 
     pub(in crate::project_host) fn publish(&mut self, bytes: &[u8]) -> FilePublicationOutcome {
-        if self.uncertain {
-            return FilePublicationOutcome::Rejected(FilePublicationRejection::RequiresReconcile);
+        if let Err(reason) = self.preflight() {
+            return FilePublicationOutcome::Rejected(reason);
         }
         if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > self.byte_limit {
             return FilePublicationOutcome::Failed(FilePublicationFailureStage::PayloadTooLarge);
         }
-        let matrix = nara_fs::platform_capability_matrix();
-        if matrix.publication_atomicity() != nara_fs::PublicationAtomicity::AtomicNameSwitch
-            || matrix.replace_source_binding() == nara_fs::PublicationSourceBinding::Unsupported
-        {
-            return FilePublicationOutcome::Rejected(
-                FilePublicationRejection::UnsupportedGuarantee,
-            );
-        }
-
         let target = match self.binding {
             FilePublicationBinding::Missing => None,
             FilePublicationBinding::Existing { .. } => {
@@ -258,24 +330,33 @@ impl FilePublicationHost {
 
         let mut temporary = match create_temporary(&self.parent) {
             Ok(temporary) => temporary,
-            Err(_) => {
+            Err(failure) => {
+                self.retain_failed_cleanup(failure);
                 return FilePublicationOutcome::Failed(
                     FilePublicationFailureStage::CreateTemporary,
                 );
             }
         };
         if temporary.write_all(bytes).is_err() || temporary.flush().is_err() {
+            self.discard_candidate(temporary);
+            return FilePublicationOutcome::Failed(FilePublicationFailureStage::WriteTemporary);
+        }
+        #[cfg(test)]
+        if std::mem::take(&mut self.fail_after_write) {
+            self.cleanup = Some(temporary.into_cleanup());
             return FilePublicationOutcome::Failed(FilePublicationFailureStage::WriteTemporary);
         }
         let sync = match temporary.sync() {
             Ok(sync) => sync,
             Err(_) => {
+                self.discard_candidate(temporary);
                 return FilePublicationOutcome::Failed(FilePublicationFailureStage::SyncTemporary);
             }
         };
         if sync.progress().data_synced() != StageStatus::Achieved
             || sync.progress().file_metadata_synced() != StageStatus::Achieved
         {
+            self.discard_candidate(temporary);
             return FilePublicationOutcome::Rejected(
                 FilePublicationRejection::UnsupportedGuarantee,
             );
@@ -287,21 +368,23 @@ impl FilePublicationHost {
                 .replace_temp(temporary, &self.target, self.binding.expected_target())
             {
                 Ok(receipt) => receipt,
-                Err(FsError::TargetStateMismatch) => {
-                    return FilePublicationOutcome::Rejected(
-                        FilePublicationRejection::TargetChanged,
-                    );
-                }
-                Err(FsError::Unsupported { .. } | FsError::Unproven { .. }) => {
-                    return FilePublicationOutcome::Rejected(
-                        FilePublicationRejection::UnsupportedGuarantee,
-                    );
-                }
-                Err(_) => {
-                    return FilePublicationOutcome::Failed(
-                        FilePublicationFailureStage::ReplaceTarget,
-                    );
-                }
+                Err(failure) => match self.retain_failed_cleanup(failure) {
+                    FsError::TargetStateMismatch => {
+                        return FilePublicationOutcome::Rejected(
+                            FilePublicationRejection::TargetChanged,
+                        );
+                    }
+                    FsError::Unsupported { .. } | FsError::Unproven { .. } => {
+                        return FilePublicationOutcome::Rejected(
+                            FilePublicationRejection::UnsupportedGuarantee,
+                        );
+                    }
+                    _ => {
+                        return FilePublicationOutcome::Failed(
+                            FilePublicationFailureStage::ReplaceTarget,
+                        );
+                    }
+                },
             };
         drop(lock);
 
@@ -342,7 +425,9 @@ fn publication_is_accepted(binding: FilePublicationBinding, receipt: &ReplaceRec
         && receipt.verified_content_digest() == Some(receipt.written_content_digest())
 }
 
-fn create_temporary(parent: &DirectoryCapability) -> Result<nara_fs::TemporaryFile, FsError> {
+fn create_temporary(
+    parent: &DirectoryCapability,
+) -> Result<nara_fs::TemporaryFile, TemporaryFileFailure> {
     for _ in 0..TEMPORARY_NAME_ATTEMPTS {
         let sequence = NEXT_TEMPORARY_NAME.fetch_add(1, Ordering::Relaxed);
         let name = RelativeComponent::new(format!(
@@ -352,13 +437,14 @@ fn create_temporary(parent: &DirectoryCapability) -> Result<nara_fs::TemporaryFi
         .expect("the engine-owned temporary filename is valid");
         match parent.create_temp(&name) {
             Ok(temporary) => return Ok(temporary),
-            Err(FsError::AlreadyExists { .. }) => continue,
+            Err(error) if matches!(error.error(), FsError::AlreadyExists { .. }) => continue,
             Err(error) => return Err(error),
         }
     }
     Err(FsError::AlreadyExists {
         operation: nara_fs::FsOperation::CreateTemporary,
-    })
+    }
+    .into())
 }
 
 fn open_target_failure(error: FsError) -> FilePublicationOutcome {

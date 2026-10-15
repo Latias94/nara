@@ -7,8 +7,7 @@ pub(super) use file_publication::{
 
 use nara_fs::{
     ContentDigest, DirectoryCapability, DurabilityProgress, FileIdentity, FsError,
-    PublicationAtomicity, PublicationIdentityEvidence, PublicationSourceBinding, RelativePath,
-    StageStatus,
+    PublicationAtomicity, PublicationIdentityEvidence, RelativePath, StageStatus,
 };
 use nara_reflect::ComponentRegistry;
 use nara_scene::{
@@ -288,15 +287,9 @@ impl PersistenceFileState {
         if let Some(stage) = self.fail_next_save.take() {
             return Err(PersistenceSaveOutcome::Failed(stage));
         }
-        let matrix = nara_fs::platform_capability_matrix();
-        if matrix.publication_atomicity() != PublicationAtomicity::AtomicNameSwitch
-            || matrix.replace_source_binding() == PublicationSourceBinding::Unsupported
-        {
-            return Err(PersistenceSaveOutcome::Rejected(
-                EditorPersistenceRejection::UnsupportedGuarantee,
-            ));
-        }
-        Ok(())
+        self.publication.preflight().map_err(|reason| {
+            PersistenceSaveOutcome::Rejected(editor_publication_rejection(reason))
+        })
     }
 
     fn save_preflighted(
@@ -412,6 +405,20 @@ impl PersistenceFileState {
 }
 
 impl ScenePersistenceHost {
+    #[cfg(test)]
+    pub(super) fn test_fail_after_write(&mut self) {
+        self.file.publication.test_fail_after_write();
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_allow_cleanup(&mut self) {
+        self.file.publication.test_allow_cleanup();
+    }
+
+    pub(super) fn retry_cleanup(&mut self) -> bool {
+        self.file.publication.retry_cleanup()
+    }
+
     pub(super) fn open(
         scenes: &DirectoryCapability,
         scene_path: &str,
@@ -612,6 +619,10 @@ impl ScenePersistenceHost {
 }
 
 impl PrefabPersistenceHost {
+    pub(super) fn retry_cleanup(&mut self) -> bool {
+        self.file.publication.retry_cleanup()
+    }
+
     pub(super) fn open(
         prefabs: &DirectoryCapability,
         source_binding: nara_tooling::EditorDocumentSourceBinding,
@@ -1022,6 +1033,7 @@ const fn editor_publication_rejection(
         FilePublicationRejection::RequiresReconcile => {
             EditorPersistenceRejection::RequiresReconcile
         }
+        FilePublicationRejection::CleanupPending => EditorPersistenceRejection::CleanupPending,
     }
 }
 
@@ -1088,6 +1100,49 @@ mod tests {
     use nara_tooling::{EditorDocumentSourceBinding, EditorWorkspace, EditorWorkspaceCommand};
 
     static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_write_retains_one_candidate_until_cleanup_retry() {
+        let root = TestRoot::new();
+        let capability = root.capability();
+        let mut publication =
+            FilePublicationHost::bind_missing(&capability, "import.png.meta", 1024).unwrap();
+        let initial_entries = fs::read_dir(&root.path).unwrap().count();
+        publication.test_fail_after_write();
+
+        assert!(matches!(
+            publication.publish(b"metadata"),
+            FilePublicationOutcome::Failed(FilePublicationFailureStage::WriteTemporary)
+        ));
+        assert!(publication.has_cleanup());
+        assert!(!root.path.join("import.png.meta").exists());
+        assert_eq!(
+            fs::read_dir(&root.path).unwrap().count(),
+            initial_entries + 1
+        );
+        assert!(matches!(
+            publication.publish(b"retry"),
+            FilePublicationOutcome::Rejected(FilePublicationRejection::CleanupPending)
+        ));
+        assert_eq!(
+            fs::read_dir(&root.path).unwrap().count(),
+            initial_entries + 1
+        );
+
+        publication.test_allow_cleanup();
+        assert!(publication.retry_cleanup());
+        assert!(!publication.has_cleanup());
+        assert_eq!(fs::read_dir(&root.path).unwrap().count(), initial_entries);
+        assert!(matches!(
+            publication.publish(b"retry"),
+            FilePublicationOutcome::Published(_)
+        ));
+        assert_eq!(
+            fs::read(root.path.join("import.png.meta")).unwrap(),
+            b"retry"
+        );
+    }
 
     #[test]
     fn file_publication_preserves_missing_and_existing_target_expectations() {
