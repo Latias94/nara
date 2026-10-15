@@ -1351,6 +1351,32 @@ fn frame_with_play_state(scene: EditorSceneModel, state: EditorPlayState) -> Edi
     frame_with_play_state_and_result(scene, state, None)
 }
 
+#[test]
+fn closing_authoring_lock_keeps_physical_close_retry_reachable() {
+    let scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        false,
+    );
+    let frame = frame_with_play_state_and_result(
+        scene,
+        EditorPlayState::CloseIncomplete,
+        Some(EditorPlayOperationResult::Failed {
+            operation: EditorPlayOperation::RetryClose,
+            failure: nara_tooling::EditorPlayFailure::Close,
+        }),
+    );
+    let output = click_locked_control(&mut EguiEditorPanel::new(), &frame, "Retry close");
+    assert_eq!(
+        output.into_parts().0,
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Play(EditorPlayAction::RetryClose)],
+        ),
+    );
+}
+
 fn frame_with_play_state_and_result(
     scene: EditorSceneModel,
     state: EditorPlayState,

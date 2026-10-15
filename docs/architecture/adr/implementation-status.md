@@ -1,7 +1,7 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified Implementation**: 2026-10-15 @ foundation U5 records `7e531ba1a4644ad9a36ccf7876fd2e61` / `dd39a41fb70c462bacd772d8fd26b752`; earlier SPL-U2 evidence remains `ab211bc` / `e0c5ea801f5e432484dfc710ae3ce00b`
+**Last Verified Implementation**: 2026-10-15 @ U6 `e8ac2ba`, U12 native/static record `4a4c7b0afbcb4897b6aef21ad01ed38c`; U7/U9 initial library slices are verified independently of unfinished consumer closure.
 
 This ledger tracks implementation evidence independently from ADR decision acceptance. The active
 [2D foundation refactor](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
@@ -31,8 +31,16 @@ WGPU/Winit/egui normal dependency. Overlapping pre-existing Cargo, Host, and SPL
 preserved outside owned-path commits.
 U12's owned slow-work preparation, changed-observation/quiet-frame handling, and Closing retry
 pass focused Editor/Host/UI and generated-starter Play tests (`281475e6f27a491c97010730686c0f7c`,
-`95bcfe8e121b489490fe8b9a2e02c1fd`, `20e375e5915c4d0b9eb7681308249f22`). Native supervised-Play
-canary and final static checks remain pending; U12 and the remaining U7-U11/U13 are not complete.
+`95bcfe8e121b489490fe8b9a2e02c1fd`, `20e375e5915c4d0b9eb7681308249f22`). The real Windows canary
+now verifies saved-generation runs, build failure without false Running, Run Last Good, successor
+generation, and physical cleanup (`320ccd19841f4449b30b7d20e2ee69b0`). Workspace all-feature/
+all-target check and affected Clippy pass at that integrated checkpoint
+(`4a4c7b0afbcb4897b6aef21ad01ed38c`). Native Linux/macOS process coverage and the final integrated
+review remain outstanding; Windows evidence does not claim those releases.
+U7's opaque prefab mapping passes all 116 scene library tests; Reference selectors and stable
+asset Runtime/preview consumers are still being migrated. U9's shared layer/group/Y/hierarchy
+ordering passes 47 sprite/tile library tests; concrete material/native GPU evidence remains in
+progress. U7-U11/U13 are not complete.
 These focused results do not mark the remaining foundation or supervised-Play units complete.
 The preceding
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
@@ -46,8 +54,9 @@ bounded cancellable output, exact spawn authority allowlist, and terminal cleanu
 evidence remains a later release gate. SPL-U2 adds the pure bounded Cargo facts/JSON selector, the
 single desktop build-attempt owner, and the Editor-owned immutable executable-generation store at
 `ab211bc`, verified by record `e0c5ea801f5e432484dfc710ae3ce00b`. Child READY, capability-free
-launch context, Host admission, and ordinary Editor lifecycle effects remain unclaimed for SPL-U3
-and SPL-U4.
+launch context, Host admission, and ordinary Editor lifecycle effects were carried into foundation
+U12; their current Windows integrated evidence is recorded above rather than retroactively changing
+the predecessor SPL-U2 checkpoint.
 The completed
 [Editor Image Import and Reimport v1](../../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
 plan closes at `ec64e4c` with verification record `ae97ce2c7330420d8b6851967fd7c8b4`
