@@ -4,7 +4,7 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, Plugin, PluginError};
-use nara_asset::{AssetStates, Assets, Handle, ImportArtifactDigest, LoadState, SourceHash};
+use nara_asset::{AssetStates, Assets, Handle, ImportArtifactDigest, SourceHash};
 use nara_ecs::{Res, ResMut, Resource};
 use nara_render::{
     PreparedRenderResources, RenderResourceKey, RenderResourceKind, RenderResourceSnapshot,
@@ -137,7 +137,7 @@ pub struct ImagePrepareStats {
     pub prepared: u32,
     pub removed: u32,
     pub skipped_missing_state: u32,
-    pub skipped_not_loaded: u32,
+    pub skipped_unavailable: u32,
 }
 
 #[derive(Debug, Default)]
@@ -183,7 +183,7 @@ pub fn prepare_images(
             images.get(handle).is_none()
                 || states
                     .state(key.asset_id())
-                    .is_none_or(|state| state.load_state() == &LoadState::Removed)
+                    .is_none_or(|state| state.usable_version().is_none())
         })
         .collect::<Vec<_>>();
     for key in removed_keys {
@@ -197,15 +197,15 @@ pub fn prepare_images(
             stats.skipped_missing_state += 1;
             continue;
         };
-        if state.load_state() != &LoadState::Loaded {
-            stats.skipped_not_loaded += 1;
+        let Some(version) = state.usable_version() else {
+            stats.skipped_unavailable += 1;
             continue;
-        }
+        };
 
         let key = image_resource_key(handle);
         let snapshot = RenderResourceSnapshot::new(
             key,
-            state.version(),
+            version,
             images.slot_revision(handle),
             image_descriptor_hash(image),
         );

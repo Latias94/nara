@@ -81,6 +81,7 @@ pub struct AssetState {
     load_state: LoadState,
     source_hash: Option<SourceHash>,
     import_hash: Option<ImportArtifactDigest>,
+    published_available: bool,
 }
 
 impl AssetState {
@@ -91,17 +92,29 @@ impl AssetState {
         source_hash: Option<SourceHash>,
         import_hash: Option<ImportArtifactDigest>,
     ) -> Self {
+        let published_available = matches!(load_state, LoadState::Loaded);
         Self {
             version,
             load_state,
             source_hash,
             import_hash,
+            published_available,
         }
     }
 
     #[must_use]
     pub const fn version(&self) -> AssetVersion {
         self.version
+    }
+
+    /// Returns the usable published version independently of the latest load attempt.
+    #[must_use]
+    pub const fn usable_version(&self) -> Option<AssetVersion> {
+        if self.published_available {
+            Some(self.version)
+        } else {
+            None
+        }
     }
 
     #[must_use]
@@ -227,17 +240,10 @@ impl AssetStates {
     }
 
     pub fn set_loading(&mut self, id: AssetId) -> AssetVersion {
-        let current = self.state(id).cloned().unwrap_or_default();
+        let mut current = self.state(id).cloned().unwrap_or_default();
         let version = current.version();
-        self.insert_state(
-            id,
-            AssetState::new(
-                version,
-                LoadState::Loading,
-                current.source_hash(),
-                current.import_hash(),
-            ),
-        );
+        current.load_state = LoadState::Loading;
+        self.insert_state(id, current);
         version
     }
 
@@ -246,20 +252,14 @@ impl AssetStates {
         id: AssetId,
         message: String,
     ) -> Result<AssetVersion, AssetStateError> {
-        let current = self
+        let mut current = self
             .state(id)
             .cloned()
             .ok_or(AssetStateError::UnknownAsset { id })?;
-        self.insert_state(
-            id,
-            AssetState::new(
-                current.version(),
-                LoadState::Failed { message },
-                current.source_hash(),
-                current.import_hash(),
-            ),
-        );
-        Ok(current.version())
+        let version = current.version();
+        current.load_state = LoadState::Failed { message };
+        self.insert_state(id, current);
+        Ok(version)
     }
 
     pub(crate) fn reject_reload_request(
@@ -267,32 +267,35 @@ impl AssetStates {
         id: AssetId,
         message: &'static str,
     ) -> AssetVersion {
-        let (version, source_hash, import_hash) = self
-            .state(id)
-            .map(|current| {
-                (
-                    current.version(),
-                    current.source_hash(),
-                    current.import_hash(),
-                )
-            })
-            .unwrap_or((AssetVersion::ZERO, None, None));
-        self.insert_state(
-            id,
-            AssetState::new(
-                version,
-                LoadState::Failed {
-                    message: message.to_owned(),
-                },
-                source_hash,
-                import_hash,
-            ),
-        );
+        let current = self.states.entry(id).or_default();
+        let version = current.version();
+        current.load_state = LoadState::Failed {
+            message: message.to_owned(),
+        };
+        self.advance_state_revision(id);
         version
+    }
+
+    /// Revokes a publication whose identity or authority is no longer valid.
+    ///
+    /// Retained CPU data and the latest diagnostic remain available for inspection, but cannot
+    /// authorize derived resources. A subsequent successful publication restores availability.
+    pub fn invalidate_publication(&mut self, id: AssetId) {
+        let Some(current) = self.states.get_mut(&id) else {
+            return;
+        };
+        if current.published_available {
+            current.published_available = false;
+            self.advance_state_revision(id);
+        }
     }
 
     fn insert_state(&mut self, id: AssetId, state: AssetState) {
         self.states.insert(id, state);
+        self.advance_state_revision(id);
+    }
+
+    fn advance_state_revision(&mut self, id: AssetId) {
         self.state_revisions
             .entry(id)
             .and_modify(RevisionCounter::advance)
@@ -739,6 +742,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(failed_version, version);
+        assert_eq!(
+            states.state(handle.id()).unwrap().usable_version(),
+            Some(version)
+        );
         assert_eq!(assets.get(handle).map(String::as_str), Some("first"));
         assert_eq!(
             states.state(handle.id()).unwrap().load_state(),
@@ -779,6 +786,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(removed.as_deref(), Some("first"));
+        assert_eq!(states.state(handle.id()).unwrap().usable_version(), None);
         assert_eq!(assets.get(handle), None);
         assert_eq!(
             states.state(handle.id()).unwrap().load_state(),
@@ -795,6 +803,37 @@ mod tests {
                 AssetVersion::from_raw(version.raw() + 1),
                 AssetEventKind::Removed
             )]
+        );
+    }
+
+    #[test]
+    fn publication_invalidation_changes_revision_and_stays_revoked_until_success() {
+        let handle = handle();
+        let mut states = AssetStates::default();
+        states.set_loading(handle.id());
+        assert_eq!(states.state(handle.id()).unwrap().usable_version(), None);
+        states
+            .set_failed(handle.id(), "initial failure".to_owned())
+            .unwrap();
+        assert_eq!(states.state(handle.id()).unwrap().usable_version(), None);
+
+        let version = AssetVersion::from_raw(1);
+        states.set_loaded_at(handle.id(), version, None, None);
+        states.set_loading(handle.id());
+        let before = states.state_revision(handle.id());
+        states.invalidate_publication(handle.id());
+        assert_ne!(states.state_revision(handle.id()), before);
+        assert_eq!(states.state(handle.id()).unwrap().version(), version);
+        assert_eq!(states.state(handle.id()).unwrap().usable_version(), None);
+        states.reject_reload_request(handle.id(), "identity changed");
+        states.set_loading(handle.id());
+        assert_eq!(states.state(handle.id()).unwrap().usable_version(), None);
+
+        let next = states.next_version(handle.id()).unwrap();
+        states.set_loaded_at(handle.id(), next, None, None);
+        assert_eq!(
+            states.state(handle.id()).unwrap().usable_version(),
+            Some(next)
         );
     }
 

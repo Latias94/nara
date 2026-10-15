@@ -1499,6 +1499,144 @@ fn prepare_system_writes_backend_neutral_image_resource() {
 }
 
 #[test]
+fn retained_publication_prepares_during_loading_and_after_reload_failure() {
+    for fail_attempt in [false, true] {
+        let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+        let world = app.world_mut().unwrap();
+        let mut images = world.remove_resource::<Assets<ImageAsset>>().unwrap();
+        let mut states = world.remove_resource::<AssetStates>().unwrap();
+        let version = states.set_loading(handle.id());
+        if fail_attempt {
+            images
+                .record_reload_failure(
+                    handle,
+                    &mut states,
+                    &mut AssetEvents::default(),
+                    "decode failed",
+                )
+                .unwrap();
+        }
+        world.insert_resource(images);
+        world.insert_resource(states);
+
+        app.update().unwrap();
+
+        let prepared = app
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>();
+        let resource = prepared.get_ready(image_resource_key(handle)).unwrap();
+        assert_eq!(resource.pixels(), &[0, 0, 255, 255]);
+        assert_eq!(
+            prepared
+                .get(image_resource_key(handle))
+                .unwrap()
+                .snapshot()
+                .asset_version(),
+            version
+        );
+        assert_eq!(app.world().resource::<ImagePrepareStats>().prepared, 1);
+    }
+}
+
+#[test]
+fn revoked_publication_removes_prepared_resources_and_cannot_prepare_retained_pixels() {
+    for prepare_before_invalidation in [false, true] {
+        let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+        if prepare_before_invalidation {
+            app.update().unwrap();
+        }
+        app.world_mut()
+            .unwrap()
+            .resource_mut::<AssetStates>()
+            .invalidate_publication(handle.id());
+
+        app.update().unwrap();
+
+        assert!(
+            app.world()
+                .resource::<Assets<ImageAsset>>()
+                .get(handle)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .resource::<PreparedRenderResources<PreparedImageResource>>()
+                .get_ready(image_resource_key(handle))
+                .is_none()
+        );
+        assert_eq!(
+            app.world()
+                .resource::<ImagePrepareStats>()
+                .skipped_unavailable,
+            1
+        );
+        assert_eq!(
+            app.world().resource::<ImagePrepareStats>().removed,
+            u32::from(prepare_before_invalidation)
+        );
+    }
+}
+
+#[test]
+fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
+    let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
+    app.update().unwrap();
+    let world = app.world_mut().unwrap();
+    let mut images = world.remove_resource::<Assets<ImageAsset>>().unwrap();
+    let mut states = world.remove_resource::<AssetStates>().unwrap();
+    let source = images.get(handle).unwrap().source().clone();
+    let replacement = ImageAsset::new(
+        source,
+        ImageExtent::new(1, 1),
+        ImageFormat::Rgba8,
+        vec![255, 0, 0, 255],
+    )
+    .unwrap();
+    let version = images
+        .commit_reload(
+            handle,
+            states.version(handle.id()).unwrap(),
+            replacement,
+            &mut states,
+            &mut AssetEvents::default(),
+            None,
+            None,
+        )
+        .unwrap();
+    images
+        .record_reload_failure(
+            handle,
+            &mut states,
+            &mut AssetEvents::default(),
+            "decode failed",
+        )
+        .unwrap();
+    world.insert_resource(images);
+    world.insert_resource(states);
+
+    app.update().unwrap();
+
+    let prepared = app
+        .world()
+        .resource::<PreparedRenderResources<PreparedImageResource>>();
+    assert_eq!(
+        prepared
+            .get_ready(image_resource_key(handle))
+            .unwrap()
+            .pixels(),
+        &[255, 0, 0, 255]
+    );
+    assert_eq!(
+        prepared
+            .get(image_resource_key(handle))
+            .unwrap()
+            .snapshot()
+            .asset_version(),
+        version
+    );
+}
+
+#[test]
 fn unchanged_image_snapshot_reuses_the_prepared_resource() {
     let (mut app, handle) = app_with_loaded_image(ImageImporter::default());
     app.update().unwrap();
@@ -1770,7 +1908,7 @@ fn image_plugin_reloads_a_linear_image_with_its_accepted_recipe() {
 
 #[cfg(feature = "serde")]
 #[test]
-fn image_plugin_meta_reload_admits_changed_recipe_and_preserves_last_good_on_invalid_meta() {
+fn image_plugin_meta_reload_preserves_last_good_but_revokes_changed_identity() {
     let temp_root = unique_temp_root();
     let texture_path = temp_root.join("textures").join("player.png");
     let metadata_path = temp_root.join("textures").join("player.png.meta");
@@ -1828,6 +1966,20 @@ fn image_plugin_meta_reload_admits_changed_recipe_and_preserves_last_good_on_inv
         Some(last_good_version)
     );
     assert_eq!(app.world().resource::<ImageReloadStats>().failed, 1);
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        Some(last_good_version)
+    );
+    assert!(
+        app.world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .is_some()
+    );
     assert!(matches!(
         app.world()
             .resource::<AssetStates>()
@@ -1875,6 +2027,84 @@ fn image_plugin_meta_reload_admits_changed_recipe_and_preserves_last_good_on_inv
     );
     assert_eq!(app.world().resource::<ImageReloadStats>().applied, 1);
     assert_app_image_budget_released(&app);
+
+    let changed_identity = AssetMeta::new(
+        AssetMetaIdentity::new(
+            record.stable_id(),
+            AssetPath::new("textures/other.png").unwrap(),
+            record.source_kind().clone(),
+        ),
+        linear,
+    );
+    fs::write(&metadata_path, changed_identity.to_json_string().unwrap()).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .meta_modified(record.path().clone())
+        .unwrap();
+    drive_image_jobs(&mut app);
+
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        None
+    );
+    assert!(
+        app.world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .is_none()
+    );
+    assert!(
+        app.world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .is_some()
+    );
+
+    fs::write(&texture_path, rgba_png(1, 1, &[0, 255, 0, 255])).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .modified(record.path().clone())
+        .unwrap();
+    drive_image_jobs(&mut app);
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        None,
+        "a source edit cannot reauthorize settings after metadata identity was revoked"
+    );
+
+    fs::write(&metadata_path, metadata.to_json_string().unwrap()).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .meta_modified(record.path().clone())
+        .unwrap();
+    drive_image_jobs(&mut app);
+    assert!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version()
+            .is_some()
+    );
+    assert_eq!(
+        app.world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .unwrap()
+            .pixels(),
+        &[0, 255, 0, 255]
+    );
 
     remove_temp_root(&temp_root);
 }

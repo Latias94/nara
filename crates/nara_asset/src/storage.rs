@@ -187,6 +187,7 @@ impl<T: Asset> Assets<T> {
     ) -> Result<AssetVersion, AssetStateError> {
         let id = handle.id();
         let version = states.set_failed(id, message.into())?;
+        states.invalidate_publication(id);
         self.remove(handle);
         let _ = events.push(id, version, AssetEventKind::LoadFailed);
         Ok(version)

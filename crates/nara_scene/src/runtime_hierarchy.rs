@@ -72,13 +72,11 @@ pub(crate) fn prepare_scene_hierarchy_retirement(
     for entity in structural_retirements {
         affected_entities.push(entity);
         if let Some(parent) = world.get::<Parent>(entity).map(Parent::parent) {
-            affected_entities.push(entity);
             affected_entities.push(parent);
         }
         if let Some(children) = world.get::<Children>(entity) {
             for child in children.iter() {
                 affected_entities.push(child);
-                affected_entities.push(entity);
             }
         }
     }

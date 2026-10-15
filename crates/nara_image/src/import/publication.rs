@@ -148,7 +148,11 @@ impl ImagePublicationSnapshot {
         states: &AssetStates,
     ) -> (Self, Option<ImageImportSettings>) {
         let previous = images.get(handle);
-        let settings = previous.map(|image| image.source().settings());
+        let settings = states
+            .state(handle.id())
+            .and_then(|state| state.usable_version())
+            .and(previous)
+            .map(|image| image.source().settings());
         let snapshot =
             Self::capture_observed(source, handle, expected_version, previous, images, states);
         (snapshot, settings)

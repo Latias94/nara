@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "67e2be099d453af68b4501e972cd06360e0a9bc7bc0a99aa505c35e818364e6e"
+source_fingerprint: "9cc2001faff8cc157f56cca4f276f5e790231eafcb9337ecfc84af458e8972ec"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "67e2be099d453af68b4501e972cd06360e0a9bc7bc0a99aa505c35e8183
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `67e2be099d453af68b4501e972cd06360e0a9bc7bc0a99aa505c35e818364e6e`
-- Immutable records: 560
+- Source fingerprint: `9cc2001faff8cc157f56cca4f276f5e790231eafcb9337ecfc84af458e8972ec`
+- Immutable records: 565
 - Active lane heads: 1
 
 # Active Registrations
@@ -28,7 +28,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
-- [2D foundation contract refactor active](registry/2026-10/2026-10-15T091614Z-nara-2d-foundation-contracts-codex-root-63e79d44bfd84519a1f9a5ce17000c06.md): `active` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
+- [2D foundation U1 and U2 verified; U3 closing](registry/2026-10/2026-10-15T094639Z-nara-2d-foundation-contracts-codex-root-e0e8984012e64296b685bdf9c6cf80fc.md): `active` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -41,6 +41,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Foundation U3 published image availability and identity revocation](verification/2026-10/2026-10-15T094134Z-foundation-u3-published-image-availability-and-identity-revocation-868d1a8a5a8e4218b4d52b2d02f5dc7b.md) - Retain usable publications through ordinary failures, revoke invalid identity and settings authority, and exercise the real desktop WGPU path.
+- **Subagent Finding**: [Editor task pool must transfer into the single runtime close owner](subagents/2026-10/2026-10-15T093553Z-editor-task-pool-must-transfer-into-the-single-runtime-close-owner-641be150d42f4ec2b9f408d5cd063beb.md) - U5 must migrate the existing RuntimeOwner state and editor preinserted TaskPools, rather than wrap the executable App or retain a second task-close authority.
+- **Verification Evidence**: [Foundation U2 structural baseline and membership invalidation](verification/2026-10/2026-10-15T093011Z-foundation-u2-structural-baseline-and-membership-invalidation-7fee7000828c4c1e9146bca1233008b7.md) - Two regressions observed before production changes; 149 hierarchy/scene/transform library tests and 23 root integration/privacy tests pass after the ownership correction.
+- **Subagent Finding**: [Publication failure must retain file ownership through session close](subagents/2026-10/2026-10-15T092726Z-publication-failure-must-retain-file-ownership-through-session-close-a71b8a878c2a41ebaecc4836ecb9b2ba.md) - U4 source trace shows filesystem failure ownership must propagate through Scene, Prefab, image metadata, repair, retry, and close.
 - **Session Handoff**: [2D foundation execution baseline and ownership](sessions/2026-10/2026-10-15T091614Z-2d-foundation-execution-baseline-and-ownership-0cd8accf28254acda193b1d6e18ac533.md) - Initial execution inventory, commit exclusions, plan authority, and architecture follow-up policy.
 - **Verification Evidence**: [SPL-U2 bounded desktop build and immutable generation verification](verification/2026-08/2026-08-21T101853Z-spl-u2-bounded-desktop-build-and-generation-e0c5ea801f5e432484dfc710ae3ce00b.md) - Verifies exact Cargo metadata and artifact selection, bounded build cancellation, and immutable Editor-owned executable generations.
 - **Verification Evidence**: [SPL-U1 private supervised process substrate verification](verification/2026-08/2026-08-21T090132Z-spl-u1-private-supervised-process-substrate-9b5f75ac859c466ba7f94deb74851778.md) - Verifies the private Windows process-tree owner, bounded cancellable output, spawn authority allowlist, cleanup receipt, and the supported Linux compile boundary.
@@ -49,10 +53,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EIR-U5 same-generation authoring image publication and referenced hydration](verification/2026-08/2026-08-21T005752Z-eir-u5-same-generation-authoring-image-publication-and-referenced-hydration-b2dfa722baf349b9a75cc324086024ac.md) - Verifies atomic image choices and prepared resources, referenced-only hydration, generic Save/Reopen, retirement, and exact source-proof boundaries.
 - **Verification Evidence**: [EIR-U4 image import Inspector and native wake](verification/2026-08/2026-08-20T121501Z-eir-u4-image-import-inspector-and-native-wake-d109ae1760a2463a862ffd4c0148caaf.md) - Verifies the UI-neutral image import projection, private egui Inspector, exact frame-bound action, last-good diagnostics, and bounded native polling wake.
 - **Verification Evidence**: [EIR-U3 bounded Editor image import and reimport transaction](verification/2026-08/2026-08-20T094524Z-eir-u3-bounded-editor-image-import-and-reimport-transaction-e6cb2cf25cdf4321a15368421154678d.md) - Verifies the bounded Host catalog, atomic metadata publication, task-owned image import, exact retained-pixel leases, retryable close, and failure-atomic reimport workflow.
-- **Verification Evidence**: [EIR-U1/U2 canonical image recipe and strict consumer migration](verification/2026-08/2026-08-20T053914Z-eir-u1-u2-canonical-image-recipe-and-strict-consumer-migration-48b2b28ab1404017b7fe14ab2c335071.md) - Verifies the atomic typed metadata reset across image owners, Generic Authoring, strict ProjectContent, reload, fixtures, and consumers.
-- **Verification Evidence**: [EPB-U5 standalone Project Browser product closure](verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md) - Verifies one generic Editor browse, filter, Scene/Prefab Open, equivalent Refresh, and last-good failure trajectory on Windows.
-- **Verification Evidence**: [EPB-U4 bounded Editor Project Browser](verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md) - Verifies UI-neutral source-index projection, bounded query and rendering work, exact frame-bound Refresh/Open ingress, and no filesystem authority in adapters.
-- **Verification Evidence**: [EPB-U3 indexed Authoring document admission](verification/2026-08/2026-08-19T192016Z-epb-u3-indexed-authoring-document-admission-684770f357d14a0184e3cdbec4751355.md) - Verifies exact indexed Scene and Prefab admission, independent persistence lanes, and dirty replacement arbitration.
 
 # Integration Notes
 

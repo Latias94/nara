@@ -72,7 +72,7 @@ fn missing_record_invalidates_an_existing_runtime_identity() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetStates>()
-        .set_loading(asset_id);
+        .set_loaded_at(asset_id, AssetVersion::from_raw(1), None, None);
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetLoadGenerations>()
@@ -85,6 +85,14 @@ fn missing_record_invalidates_an_existing_runtime_identity() {
 
     app.update().unwrap();
 
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(asset_id)
+            .unwrap()
+            .usable_version(),
+        None
+    );
     assert_eq!(
         app.world()
             .resource::<AssetLoadGenerations>()
@@ -136,7 +144,7 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetStates>()
-        .set_loading(dependent_asset_id);
+        .set_loaded_at(dependent_asset_id, AssetVersion::from_raw(1), None, None);
     app.world_mut()
         .unwrap()
         .resource_mut::<AssetLoadGenerations>()
@@ -153,6 +161,14 @@ fn missing_dependent_record_invalidates_its_existing_runtime_identity() {
 
     app.update().unwrap();
 
+    assert_eq!(
+        app.world()
+            .resource::<AssetStates>()
+            .state(dependent_asset_id)
+            .unwrap()
+            .usable_version(),
+        None
+    );
     assert_eq!(
         app.world()
             .resource::<AssetLoadGenerations>()

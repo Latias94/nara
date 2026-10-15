@@ -283,19 +283,16 @@ impl AssetReloadResolutionContext<'_> {
         asset_id: Option<AssetId>,
         error: AssetReloadResolutionError,
     ) {
-        let error = match asset_id {
-            Some(asset_id) => {
-                self.generations.begin_request(asset_id);
-                self.reject_request(asset_id, error)
-            }
-            None => error,
-        };
+        if let Some(asset_id) = asset_id {
+            self.invalidate_and_reject(asset_id, error.diagnostic_code());
+        }
         self.diagnostics
             .push(source_change_resolution_failure_diagnostic(&error));
     }
 
     fn invalidate_and_reject(&mut self, asset_id: AssetId, diagnostic_code: &'static str) {
         self.generations.begin_request(asset_id);
+        self.states.invalidate_publication(asset_id);
         self.reject_asset(asset_id, diagnostic_code);
     }
 

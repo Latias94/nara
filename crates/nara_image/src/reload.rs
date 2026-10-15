@@ -807,6 +807,9 @@ pub(super) fn record_image_reload_failure(
     } else {
         images.record_load_failure(handle, states, events, error.stable_code())
     };
+    if result.is_ok() && matches!(error, ImageReloadError::MetadataIdentityMismatch) {
+        states.invalidate_publication(handle.id());
+    }
 
     match result {
         Ok(_) => stats.failed = stats.failed.saturating_add(1),

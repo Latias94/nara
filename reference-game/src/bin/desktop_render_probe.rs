@@ -11,11 +11,12 @@ use nara::ecs as bevy_ecs;
 use nara::{
     app::{
         AppExit, AppExitRequests, PluginCategory, PluginDeclaration, PluginDefinition,
-        PluginDefinitionId, PluginError, PluginId, RuntimeGeneration,
+        PluginDefinitionId, PluginError, PluginId, RuntimeGeneration, StartupStage,
     },
+    asset::{AssetEvents, AssetStates, Assets},
     ecs::{Entity, Query, With, schedule::IntoScheduleConfigs, system::SystemParam},
     gameplay::{GameplayCommandQueue, GameplayCommandSet},
-    image::PreparedImageResource,
+    image::{ImageAsset, PreparedImageResource},
     prelude::{App, CoreStage, FixedTime, Plugin, Res, ResMut, Resource},
     project_host::{
         DesktopRunOutcome,
@@ -171,8 +172,31 @@ impl Plugin for ProductRenderProbePlugin {
             CoreStage::FixedUpdate,
             observe_product_render.in_set(GameplayCommandSet::Capture),
         )?
-        .add_systems(CoreStage::Cleanup, observe_startup_present)?;
+        .add_systems(CoreStage::Cleanup, observe_startup_present)?
+        .add_systems(StartupStage::Tooling, fail_retry_before_first_image_prepare)?;
         Ok(())
+    }
+}
+
+fn fail_retry_before_first_image_prepare(
+    mut images: ResMut<Assets<ImageAsset>>,
+    mut states: ResMut<AssetStates>,
+    mut events: ResMut<AssetEvents>,
+) {
+    let handles = images.iter().map(|(handle, _)| handle).collect::<Vec<_>>();
+    assert!(
+        !handles.is_empty(),
+        "the product must publish an image before startup"
+    );
+    for handle in handles {
+        let version = states.set_loading(handle.id());
+        images
+            .record_reload_failure(handle, &mut states, &mut events, "probe retry failed")
+            .unwrap();
+        assert_eq!(
+            states.state(handle.id()).unwrap().usable_version(),
+            Some(version)
+        );
     }
 }
 
