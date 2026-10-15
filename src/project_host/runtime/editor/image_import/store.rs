@@ -8,7 +8,7 @@ use crate::project_host::authoring::{
     AuthoringProjectAttemptGeneration, ProjectSourceIndexGeneration,
 };
 
-pub(super) const MAX_LAST_GOOD_IMAGES: usize = 4_096;
+pub(super) use crate::project_host::authoring::MAX_AUTHORING_IMAGE_IDENTITIES as MAX_LAST_GOOD_IMAGES;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EditorImageSourceProof {

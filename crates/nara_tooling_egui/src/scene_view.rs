@@ -1,6 +1,7 @@
 use egui::{
     Align2, Color32, FontId, PointerButton, Pos2, Rect, RichText, Sense, TextureId, Ui, Vec2,
 };
+use nara_render::{DisplayMapping2d, DisplayRect, DisplayScale, Extent2d};
 
 const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 8.0;
@@ -80,6 +81,8 @@ impl Default for EguiSceneViewInput {
 pub struct EguiSceneViewOutput {
     desired_size_points: Vec2,
     pick_uv: Option<[f32; 2]>,
+    pick_point: Option<[f32; 2]>,
+    mapping: Option<DisplayMapping2d>,
     camera_changed: bool,
 }
 
@@ -92,6 +95,16 @@ impl EguiSceneViewOutput {
     #[must_use]
     pub const fn pick_uv(self) -> Option<[f32; 2]> {
         self.pick_uv
+    }
+
+    #[must_use]
+    pub const fn pick_point(self) -> Option<[f32; 2]> {
+        self.pick_point
+    }
+
+    #[must_use]
+    pub const fn display_mapping(self) -> Option<DisplayMapping2d> {
+        self.mapping
     }
 
     #[must_use]
@@ -144,10 +157,17 @@ impl EguiSceneViewPanel {
         ui.painter()
             .rect_filled(outer_rect, 2.0, Color32::from_rgb(18, 20, 25));
 
-        let image_rect = texture_facts(input.content).map_or(outer_rect, |(_, extent)| {
-            fitted_image_rect(outer_rect, extent)
-        });
         let input_view_uv = self.view_uv;
+        let mapping = texture_facts(input.content).and_then(|(_, extent)| {
+            display_mapping(
+                outer_rect,
+                extent,
+                ui.ctx().pixels_per_point(),
+                DisplayScale::Fit,
+            )?
+            .with_uv(display_rect(input_view_uv))
+        });
+        let image_rect = mapping.map_or(outer_rect, |mapping| egui_rect(mapping.content_rect()));
         if let Some((texture_id, _)) = texture_facts(input.content) {
             ui.painter()
                 .image(texture_id, image_rect, self.view_uv, Color32::WHITE);
@@ -169,13 +189,14 @@ impl EguiSceneViewPanel {
             }
         }
 
-        let pick_uv = if matches!(input.content, EguiSceneViewContent::Presented { .. })
+        let pick_point = if matches!(input.content, EguiSceneViewContent::Presented { .. })
             && response.clicked_by(PointerButton::Primary)
         {
-            pointer_in_content.map(|pointer| texture_uv(input_view_uv, pointer, image_rect))
+            pointer_in_content.map(|pointer| [pointer.x, pointer.y])
         } else {
             None
         };
+        let pick_uv = pick_point.and_then(|point| mapping?.panel_to_uv(point));
 
         if !matches!(input.content, EguiSceneViewContent::Presented { .. })
             || input.notice.is_some()
@@ -193,6 +214,8 @@ impl EguiSceneViewPanel {
         EguiSceneViewOutput {
             desired_size_points: outer_rect.size(),
             pick_uv,
+            pick_point,
+            mapping,
             camera_changed: self.view_uv != initial_view_uv,
         }
     }
@@ -226,12 +249,6 @@ impl EguiSceneViewPanel {
         let next_min = texture_anchor - anchor * next_size;
         self.view_uv = clamp_view_uv(Rect::from_min_size(next_min, next_size));
     }
-}
-
-fn texture_uv(view: Rect, pointer: Pos2, display: Rect) -> [f32; 2] {
-    let normalized = normalized_pointer(pointer, display);
-    let texture = view.min + normalized * view.size();
-    [texture.x, texture.y]
 }
 
 fn state_label(content: EguiSceneViewContent) -> &'static str {
@@ -274,11 +291,30 @@ fn clamp_view_uv(mut view: Rect) -> Rect {
     view
 }
 
-pub(crate) fn fitted_image_rect(outer: Rect, extent: [u32; 2]) -> Rect {
-    let source = Vec2::new(extent[0] as f32, extent[1] as f32);
-    if source.x <= 0.0 || source.y <= 0.0 {
-        return outer;
+pub(crate) fn display_mapping(
+    outer: Rect,
+    extent: [u32; 2],
+    pixels_per_point: f32,
+    scale: DisplayScale,
+) -> Option<DisplayMapping2d> {
+    DisplayMapping2d::fit(
+        Extent2d::new(extent[0], extent[1])?,
+        display_rect(outer),
+        pixels_per_point,
+        scale,
+    )
+}
+
+fn display_rect(rect: Rect) -> DisplayRect {
+    DisplayRect {
+        min: [rect.min.x, rect.min.y],
+        max: [rect.max.x, rect.max.y],
     }
-    let scale = (outer.width() / source.x).min(outer.height() / source.y);
-    Rect::from_center_size(outer.center(), source * scale)
+}
+
+pub(crate) fn egui_rect(rect: DisplayRect) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(rect.min[0], rect.min[1]),
+        Pos2::new(rect.max[0], rect.max[1]),
+    )
 }

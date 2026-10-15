@@ -805,9 +805,9 @@ impl EditorImageImportHost {
                 .and_then(|()| {
                     let source_digest = imported.source_digest();
                     let settings_hash = imported.artifact().key().settings_hash();
-                    let version = runtime.commit_image_import(imported).map_err(|_| {
-                        EditorImageImportFailure::Runtime(EditorImageRuntimeFailure::Publication)
-                    })?;
+                    let version = runtime
+                        .commit_image_import(imported)
+                        .map_err(EditorImageImportFailure::Runtime)?;
                     let source_index_generation = project
                         .source_index_snapshot()
                         .map(|snapshot| snapshot.generation())

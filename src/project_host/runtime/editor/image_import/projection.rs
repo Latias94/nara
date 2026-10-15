@@ -423,7 +423,8 @@ fn project_failure_reason(failure: EditorImageImportFailure) -> EditorImageImpor
         EditorImageImportFailure::StableIdUnavailable => {
             EditorImageImportFailureReason::IdentityUnavailable
         }
-        EditorImageImportFailure::LastGoodLimitExceeded => {
+        EditorImageImportFailure::LastGoodLimitExceeded
+        | EditorImageImportFailure::Runtime(EditorImageRuntimeFailure::IdentityCapacity) => {
             EditorImageImportFailureReason::CapacityExceeded
         }
         EditorImageImportFailure::SourceUnavailable
@@ -471,7 +472,8 @@ fn project_rejection(failure: EditorImageImportFailure) -> EditorImageImportActi
         | EditorImageImportFailure::StableIdUnavailable => {
             EditorImageImportActionRejection::MetadataBlocked
         }
-        EditorImageImportFailure::LastGoodLimitExceeded => {
+        EditorImageImportFailure::LastGoodLimitExceeded
+        | EditorImageImportFailure::Runtime(EditorImageRuntimeFailure::IdentityCapacity) => {
             EditorImageImportActionRejection::CapacityExceeded
         }
         EditorImageImportFailure::CatalogUnavailable

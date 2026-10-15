@@ -5,14 +5,15 @@ use nara::{
     image::ImageColorSpace,
     prelude::Vec2 as NaraVec2,
     project_host::{
-        EditorGameStartActivation, EditorGameStartRequest, EditorGameViewCandidate,
-        EditorGameViewCandidateIdentity, EditorGameViewCompletion, EditorPreviewCandidate,
-        EditorPreviewHit, EditorUiPreviewCandidate,
+        EditorAcceptedPreview, EditorGameStartActivation, EditorGameStartRequest,
+        EditorGameViewCandidate, EditorGameViewCandidateIdentity, EditorGameViewCompletion,
+        EditorPresentationImage, EditorPresentedToken, EditorPreviewCandidate,
+        EditorPreviewPresentation, EditorUiPreviewCandidate,
     },
     render::{
         __private::{editor_viewport_image_target, map_editor_game_view_packet},
-        Extent2d, RenderFrameSourceGeneration, RenderFrameTarget, RenderImagePacket,
-        RenderWindowPacket,
+        DisplayMapping2d, DisplaySampling, DisplayScale, Extent2d, RenderFrameSourceGeneration,
+        RenderFrameTarget, RenderImagePacket, RenderWindowPacket,
     },
     render_wgpu::__private::{
         WgpuEditorCompositeReceipt, WgpuEditorExecution, WgpuEditorExecutionError,
@@ -20,7 +21,7 @@ use nara::{
         WgpuEditorViewportTargetActivation, WgpuSubmittedImageReceipt,
     },
     scene::{SceneAuthoringRevision, SceneEntityId},
-    sprite_render::SpriteBatches,
+    sprite_render::__private::SpriteBatches,
     tooling::{
         EditorAction, EditorActionBatch, EditorDocumentId, EditorFrameModel, EditorGestureStamp,
     },
@@ -48,6 +49,7 @@ struct EditorViewportTextureBinding {
     registration_generation: u64,
     target: RenderImagePacket,
     source: EditorViewportSource,
+    display_scale: DisplayScale,
 }
 
 impl EditorViewportTextureBinding {
@@ -57,7 +59,6 @@ impl EditorViewportTextureBinding {
 
     fn matches_presented(self, receipt: WgpuEditorCompositeReceipt) -> bool {
         self.matches(receipt.image())
-            && self.registration_generation == receipt.texture_registration_generation()
     }
 }
 
@@ -69,6 +70,7 @@ struct PreparedEditorViewportTarget {
 pub(super) struct EditorViewportSlot {
     texture_registration_generation: u64,
     binding: Option<EditorViewportTextureBinding>,
+    game_display_scale: DisplayScale,
 }
 
 impl EditorViewportSlot {
@@ -76,11 +78,42 @@ impl EditorViewportSlot {
         Self {
             texture_registration_generation: 0,
             binding: None,
+            game_display_scale: DisplayScale::Fit,
         }
     }
 
     pub(super) fn has_binding(&self) -> bool {
         self.binding.is_some()
+    }
+
+    pub(super) const fn game_display_scale(&self) -> DisplayScale {
+        self.game_display_scale
+    }
+
+    pub(super) fn game_display_scale_pending(&self) -> bool {
+        self.game_binding()
+            .is_some_and(|binding| binding.display_scale != self.game_display_scale)
+    }
+
+    pub(super) fn request_game_display_scale(&mut self, scale: DisplayScale) -> bool {
+        let changed = self.game_display_scale != scale;
+        self.game_display_scale = scale;
+        changed
+    }
+
+    fn display_scale(&self, source: EditorViewportSource) -> DisplayScale {
+        if matches!(source, EditorViewportSource::Game(_)) {
+            self.game_display_scale
+        } else {
+            DisplayScale::Fit
+        }
+    }
+
+    pub(super) fn matches_prepared(&self, prepared: &PreparedEditorViewportFrame) -> bool {
+        self.binding.is_some_and(|binding| {
+            binding.matches(prepared.image())
+                && binding.registration_generation == prepared.texture_registration_generation()
+        })
     }
 
     pub(super) fn is_game(&self) -> bool {
@@ -146,6 +179,11 @@ impl EditorViewportSlot {
                     "viewport texture registration generation exhausted".to_owned(),
                 )
             })?;
+        let display_scale = self.display_scale(source);
+        let filter = match display_scale.sampling() {
+            DisplaySampling::Linear => wgpu::FilterMode::Linear,
+            DisplaySampling::Nearest => wgpu::FilterMode::Nearest,
+        };
         let (reservation, texture_id) = gpu
             .reserve_viewport_target_with_texture(
                 editor_window,
@@ -155,7 +193,7 @@ impl EditorViewportSlot {
                     renderer.renderer.register_native_texture(
                         scope.device(),
                         texture.view(),
-                        wgpu::FilterMode::Linear,
+                        filter,
                     )
                 },
             )
@@ -176,6 +214,7 @@ impl EditorViewportSlot {
                 registration_generation,
                 target,
                 source,
+                display_scale,
             },
         })
     }
@@ -216,7 +255,21 @@ impl EditorViewportSlot {
                 ));
             }
             if gpu.viewport_target_matches(source_generation, target) {
-                return Ok(binding);
+                if binding.display_scale == self.display_scale(source) {
+                    return Ok(binding);
+                }
+                let prepared = self.prepare_target(
+                    gpu,
+                    renderer,
+                    editor_window,
+                    source_generation,
+                    target,
+                    source,
+                )?;
+                self.commit_target(gpu, renderer, prepared);
+                return Ok(self
+                    .binding
+                    .expect("a policy change replaces the native texture binding"));
             }
             return Err(EditorRunError::Platform(
                 "the active viewport binding no longer matches its GPU target".to_owned(),
@@ -675,9 +728,7 @@ impl EditorUiCanvasPresenter {
         prepared: PreparedEditorUiCanvas,
         receipt: WgpuEditorCompositeReceipt,
     ) -> Result<(), EditorRunError> {
-        if receipt.image() != prepared.submission
-            || receipt.texture_registration_generation() != prepared.texture_registration_generation
-        {
+        if receipt.image() != prepared.submission {
             return Err(EditorRunError::Platform(
                 "the Editor UI Canvas receipt does not match the prepared candidate".to_owned(),
             ));
@@ -1099,7 +1150,7 @@ impl EditorGamePresenter {
         };
         if !binding.matches_presented(receipt)
             || receipt.image() != submission.image()
-            || receipt.texture_registration_generation() != texture_registration_generation
+            || binding.registration_generation != texture_registration_generation
         {
             let error = WgpuEditorExecutionError::StaleImageSubmission;
             let completion = submission.failed(identity, &error);
@@ -1266,10 +1317,7 @@ fn game_view_target(
 }
 
 pub(super) struct PreparedEditorScene {
-    document: EditorDocumentId,
-    revision: SceneAuthoringRevision,
-    geometry_revision: u64,
-    hits: Vec<EditorPreviewHit>,
+    accepted: EditorAcceptedPreview,
     submission: WgpuSubmittedImageReceipt,
     texture_id: TextureId,
     texture_registration_generation: u64,
@@ -1277,30 +1325,30 @@ pub(super) struct PreparedEditorScene {
 
 struct PresentedEditorScene {
     stamp: EditorScenePickStamp,
-    hits: Vec<EditorPreviewHit>,
+    receipt: WgpuEditorCompositeReceipt,
+    mapping: DisplayMapping2d,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct EditorScenePickStamp {
-    pub(super) document: EditorDocumentId,
-    revision: SceneAuthoringRevision,
-    geometry_revision: u64,
-    receipt: WgpuEditorCompositeReceipt,
-}
+pub(super) type EditorScenePickStamp = EditorPresentedToken;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct EditorScenePickRequest {
     pub(super) stamp: EditorScenePickStamp,
-    pub(super) uv: [f32; 2],
+    pub(super) point: [f32; 2],
+    pub(super) mapping: DisplayMapping2d,
 }
 
 pub(super) struct EditorScenePresenter {
+    authority: EditorPreviewPresentation,
     presented: Option<PresentedEditorScene>,
 }
 
 impl EditorScenePresenter {
     pub(super) fn new() -> Self {
-        Self { presented: None }
+        Self {
+            authority: EditorPreviewPresentation::new(),
+            presented: None,
+        }
     }
 
     pub(super) fn prepare(
@@ -1316,8 +1364,10 @@ impl EditorScenePresenter {
                 "the Scene renderer does not belong to the live GPU namespace".to_owned(),
             ));
         }
-        let (document, revision, geometry_revision, packet, sprite_batches, hits) =
-            candidate.into_parts();
+        let (accepted, packet, sprite_batches) = self
+            .authority
+            .accept(candidate)
+            .map_err(|error| EditorRunError::Platform(error.to_string()))?;
         let RenderFrameTarget::Image(target) = packet.target() else {
             return Err(EditorRunError::Platform(
                 "the Scene preview candidate did not retain its image target".to_owned(),
@@ -1343,10 +1393,7 @@ impl EditorScenePresenter {
         }
 
         Ok(PreparedEditorScene {
-            document,
-            revision,
-            geometry_revision,
-            hits,
+            accepted,
             submission,
             texture_id: binding.texture_id,
             texture_registration_generation: binding.registration_generation,
@@ -1354,7 +1401,7 @@ impl EditorScenePresenter {
     }
 
     pub(super) fn pick_stamp(
-        &self,
+        &mut self,
         slot: &EditorViewportSlot,
         frame: &EditorFrameModel,
         requested_extent: Option<Extent2d>,
@@ -1363,14 +1410,17 @@ impl EditorScenePresenter {
         let binding = slot
             .binding
             .filter(|binding| binding.source == EditorViewportSource::Scene)?;
-        let extent = presented.stamp.receipt.image().target().extent();
-        if requested_extent != Some(extent)
-            || !binding.matches_presented(presented.stamp.receipt)
-            || !scene_matches_frame(frame, presented.stamp.document, presented.stamp.revision)
-        {
+        let extent = presented.receipt.image().target().extent();
+        if requested_extent != Some(extent) || !binding.matches_presented(presented.receipt) {
             return None;
         }
-        Some(presented.stamp)
+        let scene = frame.workspace().active_scene.as_ref()?;
+        self.authority.token(
+            scene.document,
+            scene.revision,
+            presentation_image(presented.receipt.image()),
+            presented.mapping,
+        )
     }
 
     pub(super) fn scene_view_input(
@@ -1388,7 +1438,11 @@ impl EditorScenePresenter {
         if let Some(prepared) = prepared {
             let extent = prepared.submission.target().extent();
             if requested_extent == Some(extent)
-                && scene_matches_frame(frame, prepared.document, prepared.revision)
+                && scene_matches_frame(
+                    frame,
+                    prepared.accepted.document(),
+                    prepared.accepted.revision(),
+                )
             {
                 let extent = [extent.width, extent.height];
                 return if pick_stamp.is_some() {
@@ -1409,7 +1463,7 @@ impl EditorScenePresenter {
                 .as_ref()
                 .and_then(|_| slot.scene_binding())
                 .expect("pickable Scene View state owns one texture binding");
-            let extent = stamp.receipt.image().target().extent();
+            let extent = presented.receipt.image().target().extent();
             return EguiSceneViewInput::presented(
                 binding.texture_id,
                 [extent.width, extent.height],
@@ -1425,50 +1479,66 @@ impl EditorScenePresenter {
     pub(super) fn resolve_pick(
         &self,
         request: EditorScenePickRequest,
-    ) -> Result<Option<nara::scene::SceneEntityId>, ()> {
+    ) -> Result<(EditorDocumentId, Option<nara::scene::SceneEntityId>), ()> {
         let presented = self.presented.as_ref().ok_or(())?;
-        if presented.stamp != request.stamp || !is_normalized_viewport_uv(request.uv) {
+        if presented.stamp != request.stamp || presented.mapping != request.mapping {
             return Err(());
         }
-        let clip = [request.uv[0] * 2.0 - 1.0, 1.0 - request.uv[1] * 2.0];
-        Ok(presented
-            .hits
-            .iter()
-            .rev()
-            .find(|hit| hit.contains_clip_point(clip))
-            .map(|hit| hit.entity().clone()))
+        let document = self.authority.document(request.stamp).ok_or(())?;
+        let entity = self
+            .authority
+            .pick(request.stamp, request.point)
+            .map_err(|_| ())?;
+        Ok((document, entity))
     }
 
     pub(super) fn promote(
         &mut self,
         prepared: PreparedEditorScene,
         receipt: WgpuEditorCompositeReceipt,
+        mapping: DisplayMapping2d,
     ) -> Result<(), EditorRunError> {
-        if receipt.image() != prepared.submission
-            || receipt.texture_registration_generation() != prepared.texture_registration_generation
-        {
+        if receipt.image() != prepared.submission {
             return Err(EditorRunError::Platform(
                 "the Editor Scene receipt does not match the prepared candidate".to_owned(),
             ));
         }
+        let stamp = self
+            .authority
+            .finish(
+                prepared.accepted,
+                presentation_image(receipt.image()),
+                mapping,
+            )
+            .map_err(|error| EditorRunError::Platform(error.to_string()))?;
         self.presented = Some(PresentedEditorScene {
-            stamp: EditorScenePickStamp {
-                document: prepared.document,
-                revision: prepared.revision,
-                geometry_revision: prepared.geometry_revision,
-                receipt,
-            },
-            hits: prepared.hits,
+            stamp,
+            receipt,
+            mapping,
         });
         Ok(())
     }
 
     pub(super) fn retire_presentation(&mut self) {
+        self.authority.retire();
         self.presented = None;
     }
 
     pub(super) fn retire_gpu_binding(&mut self) {
+        self.authority.retire();
         self.presented = None;
+    }
+}
+
+fn presentation_image(image: WgpuSubmittedImageReceipt) -> EditorPresentationImage {
+    EditorPresentationImage {
+        target: image.target(),
+        target_generation: image.target_generation(),
+        source_generation: image.source_generation(),
+        source_handoff_generation: image.source_handoff_generation(),
+        backend_instance_id: image.backend_instance_id(),
+        device_epoch: image.device_epoch(),
+        frame_index: image.render_transaction_frame_index(),
     }
 }
 

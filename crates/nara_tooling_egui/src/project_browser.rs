@@ -292,9 +292,7 @@ impl EguiProjectBrowserPanel {
     pub(crate) fn observe_action_rejection(&mut self, rejection: EditorActionRejection) {
         if matches!(
             rejection,
-            EditorActionRejection::NoPublishedFrame
-                | EditorActionRejection::StaleFrame { .. }
-                | EditorActionRejection::FrameAlreadyDispatched { .. }
+            EditorActionRejection::NoPublishedFrame | EditorActionRejection::StaleFrame { .. }
         ) {
             self.notice = Some("Project Browser action came from a stale Editor frame");
         }

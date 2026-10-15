@@ -1,4 +1,5 @@
 use egui::{Align2, Color32, FontId, PointerButton, Rect, RichText, Sense, TextureId, Ui, Vec2};
+use nara_render::DisplayScale;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EguiGameViewContent {
@@ -24,6 +25,7 @@ pub struct EguiGameViewInput {
     capture_active: bool,
     modal_active: bool,
     restore_focus: bool,
+    scale: DisplayScale,
 }
 
 impl EguiGameViewInput {
@@ -35,6 +37,7 @@ impl EguiGameViewInput {
             capture_active: false,
             modal_active: false,
             restore_focus: false,
+            scale: DisplayScale::Fit,
         }
     }
 
@@ -46,6 +49,7 @@ impl EguiGameViewInput {
             capture_active: false,
             modal_active: false,
             restore_focus: false,
+            scale: DisplayScale::Fit,
         }
     }
 
@@ -57,6 +61,7 @@ impl EguiGameViewInput {
             capture_active: false,
             modal_active: false,
             restore_focus: false,
+            scale: DisplayScale::Fit,
         }
     }
 
@@ -68,12 +73,23 @@ impl EguiGameViewInput {
             capture_active: false,
             modal_active: false,
             restore_focus: false,
+            scale: DisplayScale::Fit,
         }
     }
 
     #[must_use]
     pub const fn with_notice(mut self, notice: &'static str) -> Self {
         self.notice = Some(notice);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_integer_scaling(mut self, enabled: bool) -> Self {
+        self.scale = if enabled {
+            DisplayScale::IntegerFit
+        } else {
+            DisplayScale::Fit
+        };
         self
     }
 
@@ -108,6 +124,7 @@ pub struct EguiGameViewOutput {
     desired_size_points: Vec2,
     content_rect_points: Option<Rect>,
     capture_requested: bool,
+    requested_scale: DisplayScale,
 }
 
 impl EguiGameViewOutput {
@@ -125,6 +142,11 @@ impl EguiGameViewOutput {
     pub const fn capture_requested(self) -> bool {
         self.capture_requested
     }
+
+    #[must_use]
+    pub const fn requested_scale(self) -> DisplayScale {
+        self.requested_scale
+    }
 }
 
 #[derive(Debug, Default)]
@@ -138,11 +160,19 @@ impl EguiGameViewPanel {
         panel_size: Vec2,
     ) -> EguiGameViewOutput {
         let panel_top = ui.cursor().top();
+        let mut integer_scaling = input.scale == DisplayScale::IntegerFit;
         ui.horizontal(|ui| {
             let _heading = ui.heading("Game View");
             #[cfg(test)]
             crate::editor::record_test_control("Game View heading", _heading.rect);
             ui.label(RichText::new(state_label(input.content)).weak());
+            let _scaling = ui
+                .checkbox(&mut integer_scaling, "Integer scaling")
+                .on_hover_text(
+                    "Keep the game canvas size and use nearest sampling with whole-pixel scaling",
+                );
+            #[cfg(test)]
+            crate::editor::record_test_control("Game View integer scaling", _scaling.rect);
         });
 
         let header_height = (ui.cursor().top() - panel_top).max(0.0);
@@ -156,7 +186,15 @@ impl EguiGameViewPanel {
             .rect_filled(outer_rect, 2.0, Color32::from_rgb(18, 20, 25));
 
         let content_rect_points = if let Some((texture_id, extent)) = texture_facts(input.content) {
-            let image_rect = crate::scene_view::fitted_image_rect(outer_rect, extent);
+            let image_rect = crate::scene_view::display_mapping(
+                outer_rect,
+                extent,
+                ui.ctx().pixels_per_point(),
+                input.scale,
+            )
+            .map_or(outer_rect, |mapping| {
+                crate::scene_view::egui_rect(mapping.content_rect())
+            });
             ui.painter().image(
                 texture_id,
                 image_rect,
@@ -200,6 +238,11 @@ impl EguiGameViewPanel {
             desired_size_points: outer_rect.size(),
             content_rect_points,
             capture_requested,
+            requested_scale: if integer_scaling {
+                DisplayScale::IntegerFit
+            } else {
+                DisplayScale::Fit
+            },
         }
     }
 }
@@ -218,5 +261,89 @@ fn texture_facts(content: EguiGameViewContent) -> Option<(TextureId, [u32; 2])> 
         EguiGameViewContent::Presented { texture_id, extent }
         | EguiGameViewContent::Updating { texture_id, extent } => Some((texture_id, extent)),
         EguiGameViewContent::Waiting | EguiGameViewContent::Unavailable => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paint(
+        context: &egui::Context,
+        panel: &mut EguiGameViewPanel,
+        input: EguiGameViewInput,
+        events: Vec<egui::Event>,
+    ) -> EguiGameViewOutput {
+        let mut result = None;
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 700.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                result = Some(panel.show(ui, input, Vec2::new(600.0, 400.0)));
+            },
+        );
+        output.drop_without_applying_deltas();
+        result.unwrap()
+    }
+
+    #[test]
+    fn integer_canvas_is_an_ordinary_panel_choice_and_uses_physical_pixel_fit() {
+        let context = egui::Context::default();
+        context.set_pixels_per_point(2.0);
+        let mut panel = EguiGameViewPanel;
+        let input = EguiGameViewInput::presented(TextureId::User(1), [160, 90]);
+        let before = paint(&context, &mut panel, input, vec![]);
+        assert_eq!(before.requested_scale(), DisplayScale::Fit);
+        let position = crate::editor::test_control_rect("Game View integer scaling")
+            .unwrap()
+            .center();
+        let _ = paint(
+            &context,
+            &mut panel,
+            input,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+            ],
+        );
+        let requested = paint(
+            &context,
+            &mut panel,
+            input,
+            vec![egui::Event::PointerButton {
+                pos: position,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Default::default(),
+            }],
+        );
+        assert_eq!(requested.requested_scale(), DisplayScale::IntegerFit);
+        assert_eq!(
+            requested.content_rect_points(),
+            before.content_rect_points(),
+            "the policy request applies after the current native paint transaction"
+        );
+        let applied = paint(
+            &context,
+            &mut panel,
+            input.with_integer_scaling(true),
+            vec![],
+        );
+        let content = applied.content_rect_points().unwrap();
+        let scale = content.width() * context.pixels_per_point() / 160.0;
+        assert_eq!(scale.fract(), 0.0);
+        assert_eq!(scale, content.height() * context.pixels_per_point() / 90.0);
+        assert_eq!((content.min.x * context.pixels_per_point()).fract(), 0.0);
     }
 }

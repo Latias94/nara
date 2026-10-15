@@ -10,6 +10,7 @@ egui.workspace = true
 nara_diagnostic.workspace = true
 nara_identity.workspace = true
 nara_reflect.workspace = true
+nara_render.workspace = true
 nara_scene.workspace = true
 nara_tooling.workspace = true
 nara_ui.workspace = true

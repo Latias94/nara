@@ -10,7 +10,7 @@ use nara_ui::__private::{
     UiAuthoringCanvasProjection, UiAuthoringDirectEdit, UiDirectManipulationCapability,
 };
 
-use crate::scene_view::fitted_image_rect;
+use crate::scene_view::{display_mapping, egui_rect};
 
 use super::{
     EguiUiAuthoringInput, EguiUiAuthoringScope, EguiUiCanvasContent, EguiUiCanvasInput,
@@ -82,9 +82,15 @@ impl EguiUiCanvasPanel {
         let (outer_rect, response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
         ui.painter()
             .rect_filled(outer_rect, 2.0, Color32::from_rgb(18, 20, 25));
-        let image_rect = canvas_texture_facts(input.content).map_or(outer_rect, |(_, extent)| {
-            fitted_image_rect(outer_rect, extent)
+        let mapping = canvas_texture_facts(input.content).and_then(|(_, extent)| {
+            display_mapping(
+                outer_rect,
+                extent,
+                ui.ctx().pixels_per_point(),
+                nara_render::DisplayScale::Fit,
+            )
         });
+        let image_rect = mapping.map_or(outer_rect, |mapping| egui_rect(mapping.content_rect()));
         if let Some((texture_id, _)) = canvas_texture_facts(input.content) {
             ui.painter().image(
                 texture_id,
@@ -105,7 +111,7 @@ impl EguiUiCanvasPanel {
             .then(|| response.interact_pointer_pos())
             .flatten()
             .filter(|point| image_rect.contains(*point))
-            .map(|point| normalized_pointer(point, image_rect));
+            .and_then(|point| mapping?.panel_to_uv([point.x, point.y]));
 
         if !input.is_presented() || input.notice.is_some() {
             ui.painter().text(
@@ -400,11 +406,4 @@ fn canvas_texture_facts(content: EguiUiCanvasContent) -> Option<(TextureId, [u32
         | EguiUiCanvasContent::Previewing { texture_id, extent } => Some((texture_id, extent)),
         EguiUiCanvasContent::Resizing | EguiUiCanvasContent::Unavailable => None,
     }
-}
-
-fn normalized_pointer(pointer: Pos2, rect: Rect) -> [f32; 2] {
-    [
-        ((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0),
-        ((pointer.y - rect.top()) / rect.height()).clamp(0.0, 1.0),
-    ]
 }

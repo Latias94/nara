@@ -4,13 +4,15 @@ use std::{
 };
 
 use nara_app::{App, CoreStage, RuntimeInstance};
-use nara_asset::{AssetId, Handle};
+use nara_asset::{AssetId, AssetRecord, Handle, ProjectAssetDatabase};
 use nara_core::Vec2;
 use nara_diagnostic::DiagnosticReport;
 use nara_ecs::{Entity, Resource, With, World};
 use nara_reflect::{ComponentRegistry, ComponentRegistrySnapshot};
 use nara_render::{
-    __private::{EditorRenderGeneration, build_editor_render_frame_packet},
+    __private::{
+        EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
+    },
     Camera2d, Color, Extent2d, ExtractedViews, RenderFrame, RenderFramePacket, RenderImage2d,
     RenderTarget, ViewportRect,
 };
@@ -18,7 +20,7 @@ use nara_scene::{
     __private::AuthoringPreviewOmission, SceneAuthoringRevision, SceneAuthoringSession,
     SceneDocument, SceneEntityId, SceneEntitySource,
 };
-use nara_sprite_render::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
+use nara_sprite_render::__private::{QueuedSpriteItems, SpriteBatches, SpriteInstance};
 use nara_tooling::{EditorDocumentId, WorldIdentitySnapshot};
 use nara_transform::Transform2d;
 
@@ -26,6 +28,8 @@ use crate::project_host::ProjectContentSnapshot;
 
 use super::super::single_error;
 use super::authoring_preview::EditorAuthoringPreviewOmissions;
+use super::authoring_runtime::EditorImageRuntimeFailure;
+use super::image_import::{MAX_LAST_GOOD_IMAGES, MAX_RETAINED_PATH_BYTES};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorPreviewHit {
@@ -159,8 +163,57 @@ struct EditorPreviewRegistry(ComponentRegistry);
 
 #[derive(Resource)]
 enum EditorPreviewProject {
-    Authoring,
+    Authoring(AuthoringPreviewAssets),
     TrustedCompiled(ProjectContentSnapshot),
+}
+
+struct AuthoringPreviewAssets {
+    database: Arc<ProjectAssetDatabase>,
+    admitted_count: usize,
+    additional_path_bytes: usize,
+}
+
+pub(super) fn validate_authoring_image_identity(
+    world: &World,
+    record: &AssetRecord,
+) -> Result<(), EditorImageRuntimeFailure> {
+    let Some(EditorPreviewProject::Authoring(assets)) =
+        world.get_resource::<EditorPreviewProject>()
+    else {
+        return Ok(());
+    };
+    if assets.database.record_for_path(record.path()) == Some(record) {
+        return Ok(());
+    }
+    if assets.database.len().saturating_sub(assets.admitted_count) >= MAX_LAST_GOOD_IMAGES
+        || assets
+            .additional_path_bytes
+            .checked_add(record.path().as_str().len())
+            .is_none_or(|bytes| bytes > MAX_RETAINED_PATH_BYTES)
+    {
+        return Err(EditorImageRuntimeFailure::IdentityCapacity);
+    }
+    assets
+        .database
+        .validate_insert(record)
+        .map_err(|_| EditorImageRuntimeFailure::AssetIdentity)
+}
+
+pub(super) fn publish_authoring_image_identity(world: &mut World, record: AssetRecord) {
+    let Some(mut project) = world.get_resource_mut::<EditorPreviewProject>() else {
+        return;
+    };
+    let EditorPreviewProject::Authoring(assets) = &mut *project else {
+        return;
+    };
+    if assets.database.record_for_path(record.path()) == Some(&record) {
+        return;
+    }
+    let path_bytes = record.path().as_str().len();
+    Arc::make_mut(&mut assets.database)
+        .insert(record)
+        .expect("the same exclusive image publication preflighted this identity");
+    assets.additional_path_bytes += path_bytes;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -223,8 +276,18 @@ impl EditorPreviewSession {
     pub(super) fn install_authoring(
         app: &mut App,
         registry: &ComponentRegistrySnapshot,
+        database: Arc<ProjectAssetDatabase>,
     ) -> Result<Self, DiagnosticReport> {
-        Self::install(app, EditorPreviewProject::Authoring, registry)
+        let admitted_count = database.len();
+        Self::install(
+            app,
+            EditorPreviewProject::Authoring(AuthoringPreviewAssets {
+                database,
+                admitted_count,
+                additional_path_bytes: 0,
+            }),
+            registry,
+        )
     }
 
     fn install(
@@ -340,14 +403,20 @@ impl EditorPreviewSession {
             return Err(runtime_state.diagnostics.clone());
         }
         let views = runtime.world().resource::<ExtractedViews>();
+        let target_descriptor = editor_viewport_image_target(self.target, extent)
+            .map_err(|_| preview_error("project.editor.preview-target-rejected"))?;
         let packet = build_editor_render_frame_packet(
             self.generation,
             runtime.world().resource::<RenderFrame>().index,
             views,
+            target_descriptor,
         )
         .map_err(|_| preview_error("project.editor.preview-packet-rejected"))?
         .ok_or_else(|| preview_error("project.editor.preview-view-missing"))?;
-        let target = packet.view().target;
+        let [view] = packet.views() else {
+            return Err(preview_error("project.editor.preview-view-count-mismatch"));
+        };
+        let target = view.target;
         let queued = runtime.world().resource::<QueuedSpriteItems>();
         let mut hits = Vec::with_capacity(queued.len());
         for (ordinal, item) in queued.as_slice().iter().enumerate() {
@@ -444,8 +513,8 @@ fn apply_editor_preview_request(world: &mut World) {
             .as_mut()
             .expect("a requested preview owns one materializer");
         let report = match &project {
-            EditorPreviewProject::Authoring => materializer
-                .sync_world(world, &registry.0)
+            EditorPreviewProject::Authoring(assets) => materializer
+                .sync_world_with_asset_database(world, &registry.0, &assets.database)
                 .expect("authoring preview projections always create native materializers"),
             EditorPreviewProject::TrustedCompiled(project) => {
                 project.sync_editor_preview_scene(materializer, world, &registry.0)
@@ -502,4 +571,85 @@ fn ensure_preview_camera(
 
 fn preview_error(code: &'static str) -> DiagnosticReport {
     single_error(code, "Editor Scene preview could not publish a candidate")
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use nara_asset::{AssetPath, AssetSourceKind, StableAssetId};
+
+    use super::*;
+
+    #[test]
+    fn accepted_image_identities_copy_once_and_remain_bounded_with_idempotent_reimport() {
+        let admitted = Arc::new(ProjectAssetDatabase::default());
+        let mut world = World::new();
+        world.insert_resource(EditorPreviewProject::Authoring(AuthoringPreviewAssets {
+            database: Arc::clone(&admitted),
+            admitted_count: 0,
+            additional_path_bytes: 0,
+        }));
+        for index in 0..MAX_LAST_GOOD_IMAGES {
+            let record = image_record(index, format!("images/{index}.png"));
+            assert_eq!(validate_authoring_image_identity(&world, &record), Ok(()));
+            publish_authoring_image_identity(&mut world, record);
+        }
+        assert!(
+            admitted.is_empty(),
+            "runtime import must not mutate the admitted snapshot"
+        );
+        assert_eq!(
+            validate_authoring_image_identity(
+                &world,
+                &image_record(MAX_LAST_GOOD_IMAGES, "images/new.png".to_owned())
+            ),
+            Err(EditorImageRuntimeFailure::IdentityCapacity)
+        );
+        let reimport = image_record(0, "images/0.png".to_owned());
+        assert_eq!(validate_authoring_image_identity(&world, &reimport), Ok(()));
+        publish_authoring_image_identity(&mut world, reimport);
+        let EditorPreviewProject::Authoring(assets) = world.resource::<EditorPreviewProject>()
+        else {
+            unreachable!()
+        };
+        assert_eq!(assets.database.len(), MAX_LAST_GOOD_IMAGES);
+    }
+
+    #[test]
+    fn accepted_image_identity_paths_have_an_aggregate_byte_ceiling() {
+        let mut world = World::new();
+        world.insert_resource(EditorPreviewProject::Authoring(AuthoringPreviewAssets {
+            database: Arc::new(ProjectAssetDatabase::default()),
+            admitted_count: 0,
+            additional_path_bytes: 0,
+        }));
+        let part = format!("{}/", "p".repeat(200));
+        let long_path = format!("{}image.png", part.repeat(32));
+        let mut capacity_rejected = false;
+        for index in 0..MAX_LAST_GOOD_IMAGES {
+            let record = image_record(index, format!("{index}/{long_path}"));
+            match validate_authoring_image_identity(&world, &record) {
+                Ok(()) => publish_authoring_image_identity(&mut world, record),
+                Err(EditorImageRuntimeFailure::IdentityCapacity) => {
+                    capacity_rejected = true;
+                    break;
+                }
+                other => panic!("unexpected identity admission: {other:?}"),
+            }
+        }
+        assert!(capacity_rejected);
+        let EditorPreviewProject::Authoring(assets) = world.resource::<EditorPreviewProject>()
+        else {
+            unreachable!()
+        };
+        assert!(assets.database.len() < MAX_LAST_GOOD_IMAGES);
+        assert!(assets.additional_path_bytes <= MAX_RETAINED_PATH_BYTES);
+    }
+
+    fn image_record(index: usize, path: String) -> AssetRecord {
+        AssetRecord::new(
+            StableAssetId::parse_str(format!("00000000-0000-0000-0000-{index:012x}")).unwrap(),
+            AssetPath::new(path).unwrap(),
+            AssetSourceKind::Image,
+        )
+    }
 }

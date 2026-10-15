@@ -385,7 +385,6 @@ impl EditorProjectSession {
             | ProjectContentErrorKind::ScenePublication
             | ProjectContentErrorKind::PrefabExpansion
             | ProjectContentErrorKind::AssetReference
-            | ProjectContentErrorKind::UnsupportedStableAssetReference
             | ProjectContentErrorKind::AssetMeta
             | ProjectContentErrorKind::AssetMetaMismatch
             | ProjectContentErrorKind::UnsupportedAssetKind

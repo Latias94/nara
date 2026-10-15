@@ -1957,7 +1957,7 @@ fn prepare_field_edits(
 ) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
     let mut inverse = Vec::with_capacity(edits.len());
     for edit in edits {
-        let (next, _, undo) = prepare_field_edit(candidate, state, edit)?;
+        let (next, undo) = prepare_field_edit(candidate, state, edit)?;
         candidate = next;
         inverse.extend(undo.operations);
     }
@@ -1969,7 +1969,7 @@ fn prepare_field_edit(
     mut candidate: SceneDocument,
     state: &AuthoringDocumentState,
     edit: &AuthoringFieldEdit,
-) -> Result<(SceneDocument, ScenePatchDocument, ScenePatchDocument), ScenePatchReport> {
+) -> Result<(SceneDocument, ScenePatchDocument), ScenePatchReport> {
     let available = state.record_facts.iter().any(|fact| {
         fact.readiness == AuthoringRecordReadiness::Available
             && fact.component == edit.component
@@ -2019,7 +2019,6 @@ fn prepare_field_edit(
         ));
     }
 
-    let mut patch = Vec::with_capacity(edit.writes.len());
     let mut inverse = Vec::with_capacity(edit.writes.len());
     for write in &edit.writes {
         let Some(field) = schema_entry
@@ -2051,13 +2050,6 @@ fn prepare_field_edit(
                     "Authoring field edit path is absent from the component value",
                 )
             })?;
-        patch.push(ScenePatchOperation::SetField {
-            entity: edit.entity.clone(),
-            component: edit.component.clone(),
-            component_version: record.version,
-            field: write.field.clone(),
-            value: write.value.clone(),
-        });
         inverse.push(ScenePatchOperation::SetField {
             entity: edit.entity.clone(),
             component: edit.component.clone(),
@@ -2067,11 +2059,7 @@ fn prepare_field_edit(
         });
     }
     inverse.reverse();
-    Ok((
-        candidate,
-        ScenePatchDocument::new(patch),
-        ScenePatchDocument::new(inverse),
-    ))
+    Ok((candidate, ScenePatchDocument::new(inverse)))
 }
 
 fn authoring_field_write_is_preservation_safe(

@@ -3,6 +3,10 @@
 #[path = "support/editor_action_driver.rs"]
 mod editor_action_driver;
 
+#[cfg(feature = "presentation-2d")]
+#[path = "support/fake_preview_toolkit.rs"]
+mod fake_preview_toolkit;
+
 use std::{
     fs::{self, File},
     io::Write,

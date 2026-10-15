@@ -1175,18 +1175,13 @@ fn structural_read_only_label(reason: UiAuthoringStructuralReadOnlyReason) -> &'
 
 fn structure_action_rejection_label(rejection: EditorActionRejection) -> &'static str {
     match rejection {
-        EditorActionRejection::NoPublishedFrame
-        | EditorActionRejection::StaleFrame { .. }
-        | EditorActionRejection::FrameAlreadyDispatched { .. } => {
+        EditorActionRejection::NoPublishedFrame | EditorActionRejection::StaleFrame { .. } => {
             "The Editor frame changed before the structure change was applied"
         }
         EditorActionRejection::DocumentNotInFrame { .. }
         | EditorActionRejection::StaleDocumentFact { .. }
         | EditorActionRejection::ActiveDocumentChanged { .. } => {
             "The active Prefab source changed; review the current hierarchy and try again"
-        }
-        EditorActionRejection::MutationAlreadySubmitted { .. } => {
-            "Another document mutation already used this Editor frame"
         }
         EditorActionRejection::StructureContractMismatch { .. } => {
             "The structure request no longer matches the current UI source facts"

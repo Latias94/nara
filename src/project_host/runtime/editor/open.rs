@@ -294,6 +294,13 @@ fn source_failure(error: AuthoringProjectSourceAdmissionError) -> EditorProjectO
                 "Asset metadata does not describe its requested project source",
             ),
         ),
+        AuthoringProjectSourceAdmissionError::AssetMetadataChanged { path } => (
+            Some(path.as_str().to_owned()),
+            single_error(
+                "project.editor.authoring-asset-metadata-source-changed",
+                "Asset metadata changed during stable reference lookup; retry project admission",
+            ),
+        ),
         AuthoringProjectSourceAdmissionError::MissingStartupScene => (
             Some("nara.toml".to_owned()),
             single_error(

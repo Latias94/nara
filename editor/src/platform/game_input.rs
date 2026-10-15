@@ -5,6 +5,7 @@ use nara::{
     input::{ButtonDriverInput, KeyCode, MouseButton, PointerDriverInput},
     prelude::Vec2,
     project_host::{EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent},
+    render::{DisplayMapping2d, DisplayRect, DisplayScale, Extent2d},
     winit::{convert_mouse_button, convert_physical_key},
 };
 use winit::{
@@ -45,12 +46,8 @@ impl EditorGameInputLease {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct EditorGameContentTransform {
-    min_x: f64,
-    min_y: f64,
-    max_x: f64,
-    max_y: f64,
-    logical_width: f32,
-    logical_height: f32,
+    mapping: DisplayMapping2d,
+    logical_scale_factor: f32,
 }
 
 impl EditorGameContentTransform {
@@ -67,44 +64,35 @@ impl EditorGameContentTransform {
         if !scale_factor.is_finite() || scale_factor <= 0.0 {
             return None;
         }
-        let logical_width = window.resolution.physical_width as f32 / scale_factor;
-        let logical_height = window.resolution.physical_height as f32 / scale_factor;
-        let min_x = f64::from(rect.min.x * pixels_per_point);
-        let min_y = f64::from(rect.min.y * pixels_per_point);
-        let max_x = f64::from(rect.max.x * pixels_per_point);
-        let max_y = f64::from(rect.max.y * pixels_per_point);
-        if !logical_width.is_finite()
-            || !logical_height.is_finite()
-            || logical_width <= 0.0
-            || logical_height <= 0.0
-            || max_x <= min_x
-            || max_y <= min_y
-        {
-            return None;
-        }
+        let target = Extent2d::new(
+            window.resolution.physical_width,
+            window.resolution.physical_height,
+        )?;
+        let mapping = DisplayMapping2d::fit(
+            target,
+            DisplayRect {
+                min: [rect.min.x, rect.min.y],
+                max: [rect.max.x, rect.max.y],
+            },
+            pixels_per_point,
+            DisplayScale::Fit,
+        )?;
         Some(Self {
-            min_x,
-            min_y,
-            max_x,
-            max_y,
-            logical_width,
-            logical_height,
+            mapping,
+            logical_scale_factor: scale_factor,
         })
     }
 
     fn map(self, position: PhysicalPosition<f64>) -> Option<Vec2> {
-        if !position.x.is_finite()
-            || !position.y.is_finite()
-            || position.x < self.min_x
-            || position.y < self.min_y
-            || position.x > self.max_x
-            || position.y > self.max_y
-        {
-            return None;
-        }
-        let x = ((position.x - self.min_x) / (self.max_x - self.min_x)) as f32;
-        let y = ((position.y - self.min_y) / (self.max_y - self.min_y)) as f32;
-        Some(Vec2::new(x * self.logical_width, y * self.logical_height))
+        let physical = self.mapping.pixels_per_point();
+        let target = self.mapping.panel_to_target([
+            (position.x / f64::from(physical)) as f32,
+            (position.y / f64::from(physical)) as f32,
+        ])?;
+        Some(Vec2::new(
+            target[0] / self.logical_scale_factor,
+            target[1] / self.logical_scale_factor,
+        ))
     }
 }
 
@@ -255,9 +243,15 @@ impl EditorGameInputRouter {
         let Some(presented) = self.presented else {
             return false;
         };
+        let center = presented
+            .transform
+            .mapping
+            .uv_to_panel([0.5, 0.5])
+            .expect("the full Game image contains its center");
+        let physical = presented.transform.mapping.pixels_per_point();
         self.cursor_position = Some(PhysicalPosition::new(
-            (presented.transform.min_x + presented.transform.max_x) * 0.5,
-            (presented.transform.min_y + presented.transform.max_y) * 0.5,
+            f64::from(center[0] * physical),
+            f64::from(center[1] * physical),
         ));
         if !self.capture_requested() || !self.input_enabled {
             return false;
@@ -533,12 +527,17 @@ mod tests {
     #[test]
     fn content_transform_rejects_bars_and_maps_the_exact_logical_extent() {
         let transform = EditorGameContentTransform {
-            min_x: 100.0,
-            min_y: 50.0,
-            max_x: 900.0,
-            max_y: 500.0,
-            logical_width: 960.0,
-            logical_height: 540.0,
+            mapping: nara::render::DisplayMapping2d::fit(
+                nara::render::Extent2d::new(960, 540).unwrap(),
+                nara::render::DisplayRect {
+                    min: [100.0, 50.0],
+                    max: [900.0, 500.0],
+                },
+                1.0,
+                nara::render::DisplayScale::Fit,
+            )
+            .unwrap(),
+            logical_scale_factor: 1.0,
         };
 
         assert!(transform.map(PhysicalPosition::new(50.0, 200.0)).is_none());

@@ -17,7 +17,7 @@ use crate::project_host::authoring::{
 };
 
 const MAX_CATALOG_MEMBERS: usize = 4_096;
-const MAX_RETAINED_PATH_BYTES: usize = 2 * 1024 * 1024;
+use crate::project_host::authoring::MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES as MAX_RETAINED_PATH_BYTES;
 const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
 const MAX_WORK_PER_ADVANCE: usize = 8;
 

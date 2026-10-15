@@ -17,7 +17,7 @@ use nara_render::{
 };
 use nara_scene::SceneAuthoringRevision;
 #[cfg(feature = "presentation-2d")]
-use nara_sprite_render::SpriteBatches;
+use nara_sprite_render::__private::SpriteBatches;
 #[cfg(feature = "presentation-ui")]
 use nara_ui_render::__private::{
     UiBackendPresentationFrame, UiCompletedBackendOutcome, commit_ui_backend_outcomes,

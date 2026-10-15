@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use nara_asset::{AssetId, Handle};
-use nara_core::Vec2;
+use nara_core::Mat3;
 use nara_ecs::Entity;
 use nara_render::{
-    __private::{EditorRenderGeneration, build_editor_render_frame_packet},
+    __private::{
+        EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
+    },
     Color, Extent2d, ExtractedView, ExtractedViews, RenderFramePacket, RenderImage2d, RenderTarget,
-    ViewportRect,
+    ViewLoadOp, ViewMapping2d, ViewportRect,
 };
 use nara_scene::SceneAuthoringRevision;
 use nara_tooling::{EditorDocumentId, EditorGestureStamp};
@@ -231,18 +233,22 @@ impl EditorUiPreviewSession {
             camera_entity: Entity::PLACEHOLDER,
             target,
             viewport,
-            world_position: Vec2::ZERO,
-            viewport_height: logical_size.height(),
+            mapping: ViewMapping2d::orthographic(Mat3::IDENTITY, logical_size.height(), viewport)
+                .ok_or(UiPreviewError::InvalidProfile)?,
             order: 0,
-            clear_color: Color::rgba(0.075, 0.085, 0.11, 1.0),
+            load: ViewLoadOp::Clear(Color::rgba(0.075, 0.085, 0.11, 1.0)),
         });
         let frame_index = self
             .next_frame_index
             .checked_add(1)
             .ok_or(UiPreviewError::FrameIndexExhausted)?;
-        let render_packet =
-            build_editor_render_frame_packet(self.render_generation, frame_index, &views)?
-                .ok_or(UiPreviewError::RenderViewMissing)?;
+        let render_packet = build_editor_render_frame_packet(
+            self.render_generation,
+            frame_index,
+            &views,
+            editor_viewport_image_target(self.target, extent)?,
+        )?
+        .ok_or(UiPreviewError::RenderViewMissing)?;
         self.next_frame_index = frame_index;
         Ok(EditorUiPreviewCandidate {
             document,

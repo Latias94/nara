@@ -13,7 +13,7 @@ use nara_ecs::{Mut, Resource, World};
 use nara_fs::{ContentDigest, DirectoryCapability, FileCapability, FileIdentity, RelativePath};
 use nara_image::{
     ImageAsset, ImageFileImportRequest, ImageImportError, ImageImportSettings, ImageImportedAsset,
-    ImageImporter, ImagePublicationFailureKind,
+    ImageImporter,
 };
 use nara_reflect::{ComponentRegistryPlugin, ComponentRegistrySnapshot};
 #[cfg(feature = "presentation-2d")]
@@ -44,6 +44,7 @@ const EDITOR_IMAGE_IMPORT_TASK_DOMAIN: TaskDomainKey = TaskDomainKey::new(0x6e61
 pub(crate) enum EditorImageRuntimeFailure {
     RuntimeUnavailable,
     AssetIdentity,
+    IdentityCapacity,
     ImportAdmission,
     TaskAdmission,
     SourceChanged,
@@ -213,7 +214,8 @@ impl EditorAuthoringRuntime {
         let _ = registry;
         let mut app = build_authoring_app()?;
         #[cfg(feature = "presentation-2d")]
-        let preview = EditorPreviewSession::install_authoring(&mut app, registry)?;
+        let preview =
+            EditorPreviewSession::install_authoring(&mut app, registry, project.asset_database())?;
         publish_authoring_image_records(
             app.world_mut()
                 .map_err(|_| runtime_error("project.editor.preview-world-unavailable"))?,
@@ -331,11 +333,11 @@ impl EditorAuthoringRuntime {
     pub(super) fn commit_image_import(
         &mut self,
         imported: ImageImportedAsset,
-    ) -> Result<AssetVersion, ImageImportError> {
+    ) -> Result<AssetVersion, EditorImageRuntimeFailure> {
         self.runtime
             .with_driver_scope(|scope| scope.__apply_port::<EditorImagePublicationPort>(imported))
-            .map_err(|_| ImageImportError::Publication(ImagePublicationFailureKind::Stale))?
-            .map_err(|_| ImageImportError::Publication(ImagePublicationFailureKind::Stale))?
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
     }
 
     #[must_use]
@@ -642,12 +644,10 @@ struct EditorImagePublicationPort;
 
 impl __RuntimeDriverPort for EditorImagePublicationPort {
     type Input = ImageImportedAsset;
-    type Output = Result<AssetVersion, ImageImportError>;
+    type Output = Result<AssetVersion, EditorImageRuntimeFailure>;
 
     fn apply_driver_input(&mut self, _input: Self::Input) -> Self::Output {
-        Err(ImageImportError::Publication(
-            ImagePublicationFailureKind::Stale,
-        ))
+        Err(EditorImageRuntimeFailure::RuntimeUnavailable)
     }
 }
 
@@ -655,17 +655,37 @@ impl EditorImagePublicationPort {
     fn apply_driver_input_in_world(
         world: &mut World,
         imported: ImageImportedAsset,
-    ) -> Result<Result<AssetVersion, ImageImportError>, (RuntimeWorldAccessError, ImageImportedAsset)>
-    {
+    ) -> Result<
+        Result<AssetVersion, EditorImageRuntimeFailure>,
+        (RuntimeWorldAccessError, ImageImportedAsset),
+    > {
+        #[cfg(feature = "presentation-2d")]
+        let record = {
+            let source = imported.image().source();
+            let record = AssetRecord::new(
+                source.stable_id(),
+                source.path().clone(),
+                AssetSourceKind::Image,
+            );
+            if let Err(reason) = super::preview::validate_authoring_image_identity(world, &record) {
+                return Ok(Err(reason));
+            }
+            record
+        };
         let server = world.resource::<AssetServer>().clone();
-        Ok(world.resource_scope(
+        let result = world.resource_scope(
             |world, mut images: Mut<'_, Assets<ImageAsset>>| -> Result<_, _> {
                 world.resource_scope(|world, mut states: Mut<'_, AssetStates>| -> Result<_, _> {
                     let mut events = world.resource_mut::<AssetEvents>();
                     imported.commit_retained(&server, &mut images, &mut states, &mut events)
                 })
             },
-        ))
+        );
+        #[cfg(feature = "presentation-2d")]
+        if result.is_ok() {
+            super::preview::publish_authoring_image_identity(world, record);
+        }
+        Ok(result.map_err(|_| EditorImageRuntimeFailure::Publication))
     }
 }
 
