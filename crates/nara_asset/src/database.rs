@@ -258,6 +258,21 @@ impl ProjectAssetDatabase {
     }
 
     pub fn insert(&mut self, record: AssetRecord) -> Result<(), AssetDatabaseError> {
+        self.validate_insert(&record)?;
+
+        self.by_stable_id
+            .insert(record.stable_id(), record.path().clone());
+        self.case_folded_paths
+            .insert(record.path().case_fold_key(), record.path().clone());
+        self.by_path.insert(record.path().clone(), record);
+        Ok(())
+    }
+
+    /// Checks whether a record can be inserted without modifying the database.
+    ///
+    /// The caller must retain exclusive mutation authority until a later insertion. A successful
+    /// check does not reserve the identity against another writer.
+    pub fn validate_insert(&self, record: &AssetRecord) -> Result<(), AssetDatabaseError> {
         if self.by_path.contains_key(record.path()) {
             return Err(AssetDatabaseError::DuplicatePath {
                 path: record.path().clone(),
@@ -282,11 +297,6 @@ impl ProjectAssetDatabase {
             });
         }
 
-        self.by_stable_id
-            .insert(record.stable_id(), record.path().clone());
-        self.case_folded_paths
-            .insert(case_key, record.path().clone());
-        self.by_path.insert(record.path().clone(), record);
         Ok(())
     }
 
@@ -357,5 +367,55 @@ impl ProjectAssetDatabase {
 
         AssetPath::new(segments.join("/"))
             .map_err(|error| AssetDatabaseError::Filesystem(error.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod insertion_tests {
+    use super::*;
+
+    #[test]
+    fn insertion_preflight_checks_collisions_without_mutation_or_reservation() {
+        let first_id = StableAssetId::parse_str("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f").unwrap();
+        let second_id = StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap();
+        let first = AssetRecord::new(
+            first_id,
+            AssetPath::new("textures/Icon.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        let mut database = ProjectAssetDatabase::default();
+        database.insert(first.clone()).unwrap();
+        let original = database.clone();
+        assert!(matches!(
+            database.validate_insert(&first),
+            Err(AssetDatabaseError::DuplicatePath { .. })
+        ));
+        assert!(matches!(
+            database.validate_insert(&AssetRecord::new(
+                first_id,
+                AssetPath::new("textures/other.png").unwrap(),
+                AssetSourceKind::Image
+            )),
+            Err(AssetDatabaseError::DuplicateStableId { .. })
+        ));
+        assert!(matches!(
+            database.validate_insert(&AssetRecord::new(
+                second_id,
+                AssetPath::new("textures/icon.png").unwrap(),
+                AssetSourceKind::Image
+            )),
+            Err(AssetDatabaseError::CaseInsensitivePathCollision { .. })
+        ));
+        assert_eq!(database, original);
+        let accepted = AssetRecord::new(
+            second_id,
+            AssetPath::new("textures/new.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        assert_eq!(database.validate_insert(&accepted), Ok(()));
+        assert_eq!(database, original);
+        database.insert(accepted.clone()).unwrap();
+        assert_eq!(database.record_for_stable_id(second_id), Some(&accepted));
+        assert_eq!(database.len(), 2);
     }
 }

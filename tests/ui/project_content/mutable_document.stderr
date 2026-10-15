@@ -1,0 +1,5 @@
+error[E0596]: cannot borrow data in a `&` reference as mutable
+ --> tests/ui/project_content/mutable_document.rs:4:5
+  |
+4 |     snapshot.startup_scene().entities.clear();
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ cannot borrow as mutable

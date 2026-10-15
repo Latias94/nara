@@ -33,7 +33,7 @@ use nara_reflect::{ComponentRegistry, component_registry, validate_component_reg
 use nara_scene::{SceneDocument, SceneEntityProvenanceMap, spawn_scene_with_provenance};
 
 #[cfg(all(feature = "runtime-2d", feature = "serde"))]
-use crate::project_content::ProjectContentLease;
+use crate::project_content::{ProjectContentAssets, ProjectContentLease};
 use crate::scene_retention::direct_startup_scene_retained_bytes;
 
 /// Stable plugin identity for the provisional advanced startup-scene activation seam.
@@ -69,6 +69,7 @@ enum StartupSceneRetention {
     #[cfg(all(feature = "runtime-2d", feature = "serde"))]
     Project {
         _lease: ProjectContentLease,
+        assets: Arc<ProjectContentAssets>,
         retained_bytes: usize,
     },
     Direct {
@@ -161,6 +162,7 @@ impl StartupSceneSource {
     pub(crate) fn from_project_content(
         document: Arc<SceneDocument>,
         provenance: Arc<SceneEntityProvenanceMap>,
+        assets: Arc<ProjectContentAssets>,
         lease: ProjectContentLease,
         retained_bytes: usize,
     ) -> Self {
@@ -169,6 +171,7 @@ impl StartupSceneSource {
             provenance,
             retention: StartupSceneRetention::Project {
                 _lease: lease,
+                assets,
                 retained_bytes,
             },
         }
@@ -177,6 +180,14 @@ impl StartupSceneSource {
     #[must_use]
     pub(crate) fn document(&self) -> &SceneDocument {
         &self.document
+    }
+
+    fn asset_database(&self) -> Option<&nara_asset::ProjectAssetDatabase> {
+        match &self.retention {
+            #[cfg(all(feature = "runtime-2d", feature = "serde"))]
+            StartupSceneRetention::Project { assets, .. } => Some(assets.database()),
+            StartupSceneRetention::Direct { .. } => None,
+        }
     }
 
     #[must_use]
@@ -498,8 +509,13 @@ pub fn materialize_startup_scene(
             )
         })?;
 
-    let mut report =
-        spawn_scene_with_provenance(world, &registry, source.document(), &source.provenance);
+    let mut report = spawn_scene_with_provenance(
+        world,
+        &registry,
+        source.document(),
+        &source.provenance,
+        source.asset_database(),
+    );
     if report.diagnostics.has_errors() {
         return Err(StartupSceneMaterializeError::new(report.diagnostics));
     }

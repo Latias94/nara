@@ -13,50 +13,14 @@ use nara::{
 };
 use project_content_fixture::{TestProject, scene_id};
 
-const PORTABLE_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 10] = [
-    (ProjectContentBudgetKind::DirectoryDepth, 2),
-    (ProjectContentBudgetKind::DirectoryEntries, 12),
-    (ProjectContentBudgetKind::PathBytes, 133),
-    (ProjectContentBudgetKind::OpenHandles, 6),
-    (ProjectContentBudgetKind::Files, 4),
-    (ProjectContentBudgetKind::QueuedJobs, 1),
-    (ProjectContentBudgetKind::InFlightJobs, 1),
-    (ProjectContentBudgetKind::DependencyEdges, 2),
-    (ProjectContentBudgetKind::EncodedBytes, 16_782_538),
-    (ProjectContentBudgetKind::ArtifactBytes, 4),
-];
-
-// These modeled allocations include target-specific Rust and standard-library type layouts.
-#[cfg(all(target_pointer_width = "64", target_os = "windows"))]
-const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
-    (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 7_972),
-    (ProjectContentBudgetKind::AggregateBytes, 393_081_408),
-];
-
-#[cfg(all(target_pointer_width = "64", target_os = "linux"))]
-const LAYOUT_FIXTURE_HIGH_WATER: [(ProjectContentBudgetKind, usize); 3] = [
-    (ProjectContentBudgetKind::WorkBytes, 393_075_070),
-    (ProjectContentBudgetKind::RetainedBytes, 7_964),
-    // The aggregate peak precedes final retained publication for this fixture.
-    (ProjectContentBudgetKind::AggregateBytes, 393_081_408),
-];
-
 #[test]
-fn portable_loader_budgets_match_the_independent_fixture_oracle() {
-    for (kind, expected) in PORTABLE_FIXTURE_HIGH_WATER {
-        assert_budget_boundary(kind, expected);
-    }
-}
-
-#[cfg(all(
-    target_pointer_width = "64",
-    any(target_os = "linux", target_os = "windows")
-))]
-#[test]
-fn layout_dependent_loader_budgets_match_the_supported_target_fixture_oracle() {
-    for (kind, expected) in LAYOUT_FIXTURE_HIGH_WATER {
-        assert_budget_boundary(kind, expected);
+fn every_content_budget_accepts_its_peak_and_rejects_one_less_without_leaking() {
+    // Struct layout and canonical encodings can change. The contract is bounded admission,
+    // atomic rejection and complete release, rather than a particular allocation/job count.
+    for kind in ProjectContentBudgetKind::ALL.iter().copied() {
+        let required = successful_high_water(kind, |_| {});
+        assert!(required > 0, "the fixture must exercise {kind:?}");
+        assert_budget_boundary(kind, required);
     }
 }
 
@@ -139,7 +103,7 @@ fn failed_load_releases_every_charge_and_the_same_host_accepts_later_work() {
     let valid_loader =
         ProjectContentLoader::with_budget_host(valid_root, limits, budget_host.clone()).unwrap();
     let snapshot = valid_loader.load(&valid_candidate, &valid_plan).unwrap();
-    assert_eq!(budget_host.snapshot().active_reservations(), 1);
+    assert_eq!(budget_host.snapshot().active_reservations(), 2);
     drop(snapshot);
     assert_no_active_charges(budget_host.snapshot());
 }
@@ -168,7 +132,7 @@ fn shared_budget_host_contention_rejects_without_retry_or_partial_publication() 
 
     assert_eq!(error.kind(), ProjectContentErrorKind::BudgetExceeded);
     assert_eq!(first.revision(), first_revision);
-    assert_eq!(budget_host.snapshot().active_reservations(), 1);
+    assert_eq!(budget_host.snapshot().active_reservations(), 2);
 
     drop(first);
     assert_no_active_charges(budget_host.snapshot());

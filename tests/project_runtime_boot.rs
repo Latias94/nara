@@ -32,7 +32,9 @@ use nara::{
     },
     scene::SceneEntitySource,
 };
-use project_content_fixture::{TestProject, image_meta, valid_png_bytes};
+use project_content_fixture::{
+    TestProject, image_meta, player_image_meta, scene_id, sprite_value, valid_png_bytes,
+};
 
 const BOOT_OUTCOME_PLUGIN_ID: PluginId = PluginId::new("nara.test.project-boot-outcome");
 const BOOT_OUTCOME_REQUIREMENTS: &[PluginId] = &[GAMEPLAY_COMMAND_PLUGIN_ID];
@@ -159,7 +161,7 @@ fn capture_boot_outcome(
     outcome.tick = fixed_time.tick();
     outcome.scene_entities = scene_entities
         .iter()
-        .map(|source| source.entity_id.as_str().to_owned())
+        .map(|source| source.source_entity_id.as_str().to_owned())
         .collect();
     outcome.scene_entities.sort();
 }
@@ -231,8 +233,67 @@ fn ordinary_recipe_headless_facade_owns_project_start_and_close() {
         report.outcome(),
         &HeadlessRunOutcome::Completed(BootOutcome {
             tick: 1,
-            scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
+            scene_entities: vec!["enemy".to_owned(), "enemy-anchor".to_owned()],
         })
+    );
+}
+
+#[test]
+fn headless_run_materializes_a_stable_image_reference_after_source_rename() {
+    use nara::{
+        asset::AssetRef,
+        reflect::{ComponentSchemaVersion, ComponentTypeId},
+        scene::{PrefabDocument, SceneComponentRecord, SceneEntityRecord},
+    };
+
+    let project = TestProject::with_prefab_startup();
+    project.select_local_headless_profile();
+    let identity = player_image_meta().identity().stable_id();
+    project.write_prefab_source(&PrefabDocument::from_ordered_roots([
+        SceneEntityRecord::new(scene_id("enemy")).with_component(
+            ComponentTypeId::new("nara.sprite.Sprite"),
+            SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                sprite_value(&AssetRef::StableId(identity)),
+            ),
+        ),
+    ]));
+    let mut before_run = project_run(&project);
+    let before = execute_to_terminal(&mut before_run);
+    assert!(
+        matches!(before.outcome(), HeadlessRunOutcome::Completed(_)),
+        "{before:#?}"
+    );
+    drop(before_run);
+
+    std::fs::rename(
+        project.path().join("assets/textures/player.png"),
+        project.path().join("assets/textures/renamed.png"),
+    )
+    .unwrap();
+    std::fs::rename(
+        project.path().join("assets/textures/player.png.meta"),
+        project.path().join("assets/textures/renamed.png.meta"),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("assets/textures/renamed.png.meta"),
+        image_meta(&identity.to_string(), "textures/renamed.png")
+            .to_json_string()
+            .unwrap(),
+    )
+    .unwrap();
+    let mut after_run = project_run(&project);
+    let after = execute_to_terminal(&mut after_run);
+
+    assert_eq!(after.outcome(), before.outcome(), "{after:#?}");
+    assert!(!after.diagnostics().has_errors());
+    let closure = after.startup_content_closure().unwrap();
+    assert!(
+        closure
+            .members()
+            .iter()
+            .any(|member| member.path().as_str() == "assets/textures/renamed.png")
     );
 }
 
@@ -247,7 +308,7 @@ fn product_action_boots_authorized_content_runs_one_tick_and_closes() {
         first.outcome(),
         &HeadlessRunOutcome::Completed(BootOutcome {
             tick: 1,
-            scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
+            scene_entities: vec!["enemy".to_owned(), "enemy-anchor".to_owned()],
         }),
         "{first:?}"
     );
@@ -365,7 +426,7 @@ fn incomplete_cleanup_retries_the_same_owner_without_restarting_the_project() {
         completed.outcome(),
         &HeadlessRunOutcome::Completed(BootOutcome {
             tick: 1,
-            scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
+            scene_entities: vec!["enemy".to_owned(), "enemy-anchor".to_owned()],
         })
     );
     assert_eq!(
@@ -414,7 +475,7 @@ fn product_action_propagates_an_app_exit_from_the_completed_fixed_tick() {
         report.outcome(),
         &HeadlessRunOutcome::Completed(BootOutcome {
             tick: 1,
-            scene_entities: vec!["enemy-anchor".to_owned(), "enemy-anchor/enemy".to_owned()],
+            scene_entities: vec!["enemy".to_owned(), "enemy-anchor".to_owned()],
         }),
         "{report:?}"
     );

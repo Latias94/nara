@@ -1,0 +1,5 @@
+error[E0616]: field `inner` of struct `ProjectContentSnapshot` is private
+ --> tests/ui/project_content/private_owner.rs:4:22
+  |
+4 |     let _ = snapshot.inner;
+  |                      ^^^^^ private field

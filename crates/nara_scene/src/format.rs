@@ -410,7 +410,29 @@ impl CanonicalSceneDocumentCandidate {
         self,
         registry: &ComponentRegistry,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
-        let diagnostics = self.document.validate_authoring(registry);
+        self.publish_with_optional_asset_database(registry, None)
+    }
+
+    /// Publishes with the asset identities admitted by the content source owner.
+    pub fn publish_with_asset_database(
+        self,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
+        self.publish_with_optional_asset_database(registry, Some(database))
+    }
+
+    fn publish_with_optional_asset_database(
+        self,
+        registry: &ComponentRegistry,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
+        let diagnostics = match database {
+            Some(database) => self
+                .document
+                .validate_authoring_with_asset_database(registry, database),
+            None => self.document.validate_authoring(registry),
+        };
         if diagnostics.has_errors() {
             return Err(SceneFilePublicationError::new(diagnostics));
         }
@@ -439,7 +461,28 @@ impl CanonicalPrefabDocumentCandidate {
         self,
         registry: &ComponentRegistry,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
-        let diagnostics = self.document.instantiate().validate_authoring(registry);
+        self.publish_with_optional_asset_database(registry, None)
+    }
+
+    /// Publishes with the asset identities admitted by the content source owner.
+    pub fn publish_with_asset_database(
+        self,
+        registry: &ComponentRegistry,
+        database: &ProjectAssetDatabase,
+    ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
+        self.publish_with_optional_asset_database(registry, Some(database))
+    }
+
+    fn publish_with_optional_asset_database(
+        self,
+        registry: &ComponentRegistry,
+        database: Option<&ProjectAssetDatabase>,
+    ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
+        let document = self.document.instantiate();
+        let diagnostics = match database {
+            Some(database) => document.validate_authoring_with_asset_database(registry, database),
+            None => document.validate_authoring(registry),
+        };
         if diagnostics.has_errors() {
             return Err(SceneFilePublicationError::new(diagnostics));
         }

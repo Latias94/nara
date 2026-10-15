@@ -1558,8 +1558,12 @@ pub fn spawn_scene_with_provenance(
     registry: &ComponentRegistry,
     document: &SceneDocument,
     provenance: &SceneEntityProvenanceMap,
+    database: Option<&ProjectAssetDatabase>,
 ) -> SceneSpawnReport {
-    let mut report = spawn_scene(world, registry, document);
+    let mut report = match database {
+        Some(database) => spawn_scene_with_asset_database(world, registry, document, database),
+        None => spawn_scene(world, registry, document),
+    };
     apply_scene_provenance(world, &mut report, provenance);
     report
 }

@@ -103,10 +103,12 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     assert_eq!(snapshot.images()[0].image().pixels(), &[24, 120, 220, 255]);
     assert!(
         snapshot
-            .expanded_startup_scene()
-            .entities
-            .iter()
-            .any(|entity| entity.id == scene_id("enemy-anchor/enemy"))
+            .expanded_startup_scene_provenance()
+            .values()
+            .any(|source| source.source_entity_id() == &scene_id("enemy")
+                && source
+                    .projection_path()
+                    .is_some_and(|path| path.root_anchor() == &scene_id("enemy-anchor")))
     );
     assert!(std::ptr::eq(
         snapshot.images()[0].image().pixels(),
@@ -123,7 +125,15 @@ fn authorized_startup_closure_publishes_an_immutable_snapshot() {
     drop(snapshot);
     assert_eq!(loader.budget_snapshot(), leased);
     drop(cloned);
-    assert_eq!(loader.budget_snapshot(), leased);
+    let image_only = loader.budget_snapshot();
+    assert_eq!(
+        image_only.active_reservations(),
+        leased.active_reservations()
+    );
+    for kind in ProjectContentBudgetKind::ALL {
+        assert_eq!(image_only.active(*kind), leased.active(*kind));
+    }
+    assert_eq!(image_only.active_generations(), 0);
     drop(escaped);
     let closure_only = loader.budget_snapshot();
     assert_eq!(

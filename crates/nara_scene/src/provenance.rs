@@ -36,8 +36,8 @@ impl PrefabProjectionStep {
 
 /// Structured location of one prefab projection inside a containing scene.
 ///
-/// The root anchor and source chain remain separate from the expanded runtime locator. Consumers
-/// must not parse the transitional `anchor/source_entity` encoding to reconstruct this value.
+/// The root anchor and source chain remain separate from the private expanded runtime locator.
+/// Consumers use this structured path rather than derive source identity from a generated ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrefabProjectionPath {
     root_anchor: SceneEntityId,

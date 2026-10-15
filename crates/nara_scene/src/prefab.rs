@@ -533,13 +533,16 @@ struct PrefabExpansionContext<'a, R: PrefabSourceResolver + ?Sized> {
     budget_failed: bool,
     diagnostics: DiagnosticReport,
     provenance: BTreeMap<SceneEntityId, SceneEntityProvenance>,
+    reserved_entity_ids: BTreeSet<SceneEntityId>,
+    next_projected_entity: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PrefabReferenceNamespaceError {
+enum PrefabReferenceRemapError {
     SingleGeneratedIdentifier { observed: usize, maximum: usize },
     GeneratedIdentifier { observed: usize, maximum: usize },
     MaterializedValue { observed: usize, maximum: usize },
+    MissingSourceEntity,
 }
 
 impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
@@ -559,6 +562,8 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             budget_failed: false,
             diagnostics: DiagnosticReport::default(),
             provenance: BTreeMap::new(),
+            reserved_entity_ids: BTreeSet::new(),
+            next_projected_entity: 0,
         }
     }
 
@@ -567,7 +572,21 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             roots: document.roots.clone(),
             entities: Vec::new(),
         };
-        self.expand_entities(&document.entities, &mut expanded.entities);
+        if self
+            .observe_item_budget(
+                PrefabExpansionBudgetKind::MaterializedEntities,
+                0,
+                document.entities.len(),
+                self.options.limits.materialized_entities(),
+                None,
+                None,
+            )
+            .is_some()
+        {
+            self.reserved_entity_ids
+                .extend(document.entities.iter().map(|entity| entity.id.clone()));
+            self.expand_entities(&document.entities, &mut expanded.entities);
+        }
         expanded.canonicalize();
 
         if !self.diagnostics.has_errors() {
@@ -740,44 +759,72 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             return Vec::new();
         }
 
+        let Some(entity_ids) = self.allocate_projected_entity_ids(&source_document, anchor_id)
+        else {
+            self.stack.pop();
+            return Vec::new();
+        };
         let roots = source_document.roots;
-        self.expand_prefab_entities(
-            anchor_id,
-            &source,
-            parent_projection,
-            &roots,
-            source_document.entities,
-            output,
-        );
-
-        self.stack.pop();
-        roots
-            .iter()
-            .map(|root| namespace_scene_entity_id(anchor_id, root))
-            .collect()
-    }
-
-    fn expand_prefab_entities(
-        &mut self,
-        anchor_id: &SceneEntityId,
-        source: &AssetRef,
-        parent_projection: Option<&PrefabProjectionPath>,
-        roots: &[SceneEntityId],
-        entities: Vec<SceneEntityRecord>,
-        output: &mut Vec<SceneEntityRecord>,
-    ) {
-        let roots = roots.iter().cloned().collect::<BTreeSet<_>>();
-        for entity in entities {
+        let root_ids = roots.iter().collect::<BTreeSet<_>>();
+        for entity in source_document.entities {
             if self.budget_failed {
                 break;
             }
-            let is_root = roots.contains(&entity.id);
+            let is_root = root_ids.contains(&entity.id);
             let projection = parent_projection
                 .cloned()
                 .unwrap_or_else(|| PrefabProjectionPath::new(anchor_id.clone()))
                 .with_step(source.clone(), entity.id.clone());
-            self.expand_prefab_entity(anchor_id, entity, is_root, projection, output);
+            self.expand_prefab_entity(anchor_id, entity, is_root, projection, &entity_ids, output);
         }
+
+        self.stack.pop();
+        if self.budget_failed {
+            return Vec::new();
+        }
+        roots.iter().map(|root| entity_ids[root].clone()).collect()
+    }
+
+    fn allocate_projected_entity_ids(
+        &mut self,
+        document: &SceneDocument,
+        anchor_id: &SceneEntityId,
+    ) -> Option<BTreeMap<SceneEntityId, SceneEntityId>> {
+        let mut entity_ids = BTreeMap::new();
+        for entity in &document.entities {
+            loop {
+                let ordinal = self.next_projected_entity;
+                let identifier_len = "prefab_".len()
+                    + ordinal
+                        .checked_ilog10()
+                        .map_or(1, |digits| digits as usize + 1);
+                let mut generated_bytes = 0;
+                if let Err(error) = accumulate_generated_identifier_bytes(
+                    self.usage.generated_identifier_bytes,
+                    &mut generated_bytes,
+                    identifier_len,
+                    self.options
+                        .limits
+                        .single_generated_identifier_bytes()
+                        .get(),
+                    self.options.limits.generated_identifier_bytes().get(),
+                ) {
+                    self.fail_prefab_remap_budget(error, anchor_id);
+                    return None;
+                }
+                self.next_projected_entity = ordinal
+                    .checked_add(1)
+                    .expect("in-memory entity allocation cannot exhaust usize ordinals");
+                let candidate = SceneEntityId::new(format!("prefab_{ordinal}"))
+                    .expect("a generated prefab locator is a valid scene entity ID");
+                if self.reserved_entity_ids.insert(candidate.clone()) {
+                    self.usage.generated_identifier_bytes += generated_bytes;
+                    entity_ids.insert(entity.id.clone(), candidate);
+                    break;
+                }
+            }
+        }
+        Some(entity_ids)
     }
 
     fn expand_prefab_entity(
@@ -786,6 +833,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         mut entity: SceneEntityRecord,
         is_root: bool,
         projection: PrefabProjectionPath,
+        entity_ids: &BTreeMap<SceneEntityId, SceneEntityId>,
         output: &mut Vec<SceneEntityRecord>,
     ) {
         let Some(original_value_cost) = self.reserve_materialized_entity(&entity) else {
@@ -796,23 +844,21 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         let current_generated_bytes = self.usage.generated_identifier_bytes;
         let single_limit = self.options.limits.single_generated_identifier_bytes();
         let aggregate_limit = self.options.limits.generated_identifier_bytes();
-        let namespace_prefix_bytes = anchor_id.as_str().len().saturating_add(1);
         let materialized_value_byte_limit = self.options.limits.materialized_value_bytes().get();
         let traversal_limits = self.prefab_reference_traversal_limits();
         let mut generated_bytes = 0_usize;
-        let mut namespaced_value_growth = 0_usize;
+        let mut original_reference_bytes = 0_usize;
+        let mut mapped_reference_bytes = 0_usize;
         let mut replacement_value_cost = ComponentValueCost::ZERO;
         let mut reference_plans =
             Vec::<DeclaredEntityReferencePlan>::with_capacity(entity.components.len());
 
-        let identifier_lengths = std::iter::once(namespaced_identifier_len(anchor_id, &entity.id))
-            .chain(
-                entity
-                    .children
-                    .iter()
-                    .map(|child| namespaced_identifier_len(anchor_id, child)),
-            )
-            .chain(is_root.then(|| namespaced_identifier_len(anchor_id, &entity.id)));
+        // Entity IDs were charged when the complete source map was allocated.
+        let identifier_lengths = entity
+            .children
+            .iter()
+            .map(|child| entity_ids[child].as_str().len())
+            .chain(is_root.then(|| entity_ids[&entity.id].as_str().len()));
         for identifier_len in identifier_lengths {
             if let Err(error) = accumulate_generated_identifier_bytes(
                 current_generated_bytes,
@@ -821,7 +867,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 single_limit.get(),
                 aggregate_limit.get(),
             ) {
-                self.fail_prefab_namespace_budget(error, anchor_id);
+                self.fail_prefab_remap_budget(error, anchor_id);
                 return;
             }
         }
@@ -887,7 +933,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 ));
                 return;
             };
-            let plan = match plan_declared_entity_references::<PrefabReferenceNamespaceError>(
+            let plan = match plan_declared_entity_references::<PrefabReferenceRemapError>(
                 schema,
                 &component.value,
                 traversal_limits,
@@ -904,7 +950,10 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             };
             if let Err(error) = plan.visit(&component.value, |_, reference| {
                 if let EntityReference::SceneLocal { entity } = reference {
-                    let identifier_len = namespaced_identifier_len(anchor_id, entity);
+                    let mapped = entity_ids
+                        .get(entity)
+                        .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?;
+                    let identifier_len = mapped.as_str().len();
                     accumulate_generated_identifier_bytes(
                         current_generated_bytes,
                         &mut generated_bytes,
@@ -912,24 +961,27 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                         single_limit.get(),
                         aggregate_limit.get(),
                     )?;
-                    namespaced_value_growth = namespaced_value_growth
-                        .checked_add(namespace_prefix_bytes)
-                        .ok_or(PrefabReferenceNamespaceError::MaterializedValue {
+                    original_reference_bytes = original_reference_bytes
+                        .checked_add(entity.as_str().len())
+                        .ok_or(PrefabReferenceRemapError::MaterializedValue {
+                            observed: usize::MAX,
+                            maximum: materialized_value_byte_limit,
+                        })?;
+                    mapped_reference_bytes = mapped_reference_bytes
+                        .checked_add(identifier_len)
+                        .ok_or(PrefabReferenceRemapError::MaterializedValue {
                             observed: usize::MAX,
                             maximum: materialized_value_byte_limit,
                         })?;
                 }
                 Ok(())
             }) {
-                if let ComponentEntityReferenceRewriteError::Rewrite { error, .. } = &error {
-                    self.fail_prefab_namespace_budget(*error, anchor_id);
-                } else {
-                    self.push_prefab_reference_rewrite_error(
-                        &entity.id,
-                        component_id.as_str(),
-                        &error,
-                    );
+                if let ComponentEntityReferenceRewriteError::Rewrite { error, .. } = &error
+                    && self.fail_prefab_remap_budget(*error, anchor_id)
+                {
+                    return;
                 }
+                self.push_prefab_reference_rewrite_error(&entity.id, component_id.as_str(), &error);
                 return;
             }
             reference_plans.push(plan);
@@ -937,7 +989,8 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
         let Some(replacement_value_bytes) = replacement_value_cost
             .logical_bytes()
-            .checked_add(namespaced_value_growth)
+            .checked_sub(original_reference_bytes)
+            .and_then(|bytes| bytes.checked_add(mapped_reference_bytes))
         else {
             self.fail_budget(
                 PrefabExpansionBudgetKind::MaterializedValueBytes,
@@ -973,9 +1026,12 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
         for ((component_id, component), plan) in entity.components.iter_mut().zip(reference_plans) {
             if let Err(error) = plan.rewrite_in_place(&mut component.value, |_, reference| {
-                Ok::<_, PrefabReferenceNamespaceError>(match reference {
+                Ok::<_, PrefabReferenceRemapError>(match reference {
                     EntityReference::SceneLocal { entity } => EntityReference::SceneLocal {
-                        entity: namespace_scene_entity_id(anchor_id, entity),
+                        entity: entity_ids
+                            .get(entity)
+                            .ok_or(PrefabReferenceRemapError::MissingSourceEntity)?
+                            .clone(),
                     },
                     EntityReference::Persistent { .. } => reference.clone(),
                 })
@@ -988,9 +1044,9 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         entity.children = entity
             .children
             .iter()
-            .map(|child| namespace_scene_entity_id(anchor_id, child))
+            .map(|child| entity_ids[child].clone())
             .collect();
-        entity.id = namespace_scene_entity_id(anchor_id, &entity.id);
+        entity.id = entity_ids[&entity.id].clone();
 
         self.usage.generated_identifier_bytes = generated_identifier_bytes;
         self.usage.materialized_value_nodes = materialized_value_nodes;
@@ -1198,36 +1254,38 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         )
     }
 
-    fn fail_prefab_namespace_budget(
+    fn fail_prefab_remap_budget(
         &mut self,
-        error: PrefabReferenceNamespaceError,
+        error: PrefabReferenceRemapError,
         anchor_id: &SceneEntityId,
-    ) {
+    ) -> bool {
         let (kind, observed, maximum) = match error {
-            PrefabReferenceNamespaceError::SingleGeneratedIdentifier { observed, maximum } => (
+            PrefabReferenceRemapError::SingleGeneratedIdentifier { observed, maximum } => (
                 PrefabExpansionBudgetKind::SingleGeneratedIdentifierBytes,
                 observed,
                 maximum,
             ),
-            PrefabReferenceNamespaceError::GeneratedIdentifier { observed, maximum } => (
+            PrefabReferenceRemapError::GeneratedIdentifier { observed, maximum } => (
                 PrefabExpansionBudgetKind::GeneratedIdentifierBytes,
                 observed,
                 maximum,
             ),
-            PrefabReferenceNamespaceError::MaterializedValue { observed, maximum } => (
+            PrefabReferenceRemapError::MaterializedValue { observed, maximum } => (
                 PrefabExpansionBudgetKind::MaterializedValueBytes,
                 observed,
                 maximum,
             ),
+            PrefabReferenceRemapError::MissingSourceEntity => return false,
         };
         self.fail_budget(kind, observed, maximum, Some(anchor_id), None);
+        true
     }
 
     fn push_prefab_reference_rewrite_error(
         &mut self,
         entity_id: &SceneEntityId,
         component_id: &str,
-        error: &ComponentEntityReferenceRewriteError<PrefabReferenceNamespaceError>,
+        error: &ComponentEntityReferenceRewriteError<PrefabReferenceRemapError>,
     ) {
         self.diagnostics.push(with_entity_reference_rewrite_error(
             with_public_locator(
@@ -1243,7 +1301,7 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
                 component_id,
             ),
             error,
-            prefab_reference_namespace_error_name,
+            prefab_reference_remap_error_name,
         ));
     }
 
@@ -1390,41 +1448,33 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
     }
 }
 
-fn namespaced_identifier_len(anchor_id: &SceneEntityId, local_id: &SceneEntityId) -> usize {
-    anchor_id
-        .as_str()
-        .len()
-        .saturating_add(1)
-        .saturating_add(local_id.as_str().len())
-}
-
 fn accumulate_generated_identifier_bytes(
     current: usize,
     pending: &mut usize,
     identifier_len: usize,
     single_limit: usize,
     aggregate_limit: usize,
-) -> Result<(), PrefabReferenceNamespaceError> {
+) -> Result<(), PrefabReferenceRemapError> {
     if identifier_len > single_limit {
-        return Err(PrefabReferenceNamespaceError::SingleGeneratedIdentifier {
+        return Err(PrefabReferenceRemapError::SingleGeneratedIdentifier {
             observed: identifier_len,
             maximum: single_limit,
         });
     }
     let Some(candidate_pending) = pending.checked_add(identifier_len) else {
-        return Err(PrefabReferenceNamespaceError::GeneratedIdentifier {
+        return Err(PrefabReferenceRemapError::GeneratedIdentifier {
             observed: usize::MAX,
             maximum: aggregate_limit,
         });
     };
     let Some(observed) = current.checked_add(candidate_pending) else {
-        return Err(PrefabReferenceNamespaceError::GeneratedIdentifier {
+        return Err(PrefabReferenceRemapError::GeneratedIdentifier {
             observed: usize::MAX,
             maximum: aggregate_limit,
         });
     };
     if observed > aggregate_limit {
-        return Err(PrefabReferenceNamespaceError::GeneratedIdentifier {
+        return Err(PrefabReferenceRemapError::GeneratedIdentifier {
             observed,
             maximum: aggregate_limit,
         });
@@ -1433,19 +1483,13 @@ fn accumulate_generated_identifier_bytes(
     Ok(())
 }
 
-const fn prefab_reference_namespace_error_name(
-    error: &PrefabReferenceNamespaceError,
-) -> &'static str {
+const fn prefab_reference_remap_error_name(error: &PrefabReferenceRemapError) -> &'static str {
     match error {
-        PrefabReferenceNamespaceError::SingleGeneratedIdentifier { .. } => {
+        PrefabReferenceRemapError::SingleGeneratedIdentifier { .. } => {
             "single-generated-identifier-bytes"
         }
-        PrefabReferenceNamespaceError::GeneratedIdentifier { .. } => "generated-identifier-bytes",
-        PrefabReferenceNamespaceError::MaterializedValue { .. } => "materialized-value-bytes",
+        PrefabReferenceRemapError::GeneratedIdentifier { .. } => "generated-identifier-bytes",
+        PrefabReferenceRemapError::MaterializedValue { .. } => "materialized-value-bytes",
+        PrefabReferenceRemapError::MissingSourceEntity => "missing-source-entity",
     }
-}
-
-fn namespace_scene_entity_id(anchor_id: &SceneEntityId, local_id: &SceneEntityId) -> SceneEntityId {
-    SceneEntityId::new(format!("{}/{}", anchor_id.as_str(), local_id.as_str()))
-        .expect("namespacing two valid scene entity ids should produce a valid scene entity id")
 }

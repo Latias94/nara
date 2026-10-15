@@ -525,31 +525,23 @@ fn scene_prefab_resolver_expands_one_level_instance_before_spawn() {
     let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
-    assert_eq!(
-        expanded
-            .entities
-            .iter()
-            .map(|entity| entity.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["enemy", "enemy/visual"]
-    );
-    assert_eq!(
-        expanded.entities[0]
-            .children
-            .iter()
-            .map(SceneEntityId::as_str)
-            .collect::<Vec<_>>(),
-        vec!["enemy/visual"]
-    );
+    let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
+    let expanded = expansion.document.as_ref().unwrap();
+    assert_eq!(expanded.entities.len(), 2);
+    let anchor = expanded
+        .entities
+        .iter()
+        .find(|entity| entity.id == scene_id("enemy"))
+        .unwrap();
+    assert_eq!(anchor.children.as_slice(), std::slice::from_ref(visual_id));
     assert!(!report.diagnostics.has_errors());
     assert_eq!(spawned_instance(&report).len(), 2);
-    let visual = spawned_entity(&world, &report, &scene_id("enemy/visual"));
+    let visual = spawned_entity(&world, &report, visual_id);
     assert_eq!(world.get::<TestPosition>(visual).unwrap().x, 3);
 }
 
 #[test]
-fn prefab_instance_override_patch_applies_before_namespacing() {
+fn prefab_instance_override_patch_applies_before_projection() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/enemy.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
@@ -571,11 +563,12 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let visual_id = prefab_projection_id(&expansion, "enemy", &["visual"]);
+    let expanded = expansion.document.as_ref().unwrap();
     let visual = expanded
         .entities
         .iter()
-        .find(|entity| entity.id.as_str() == "enemy/visual")
+        .find(|entity| &entity.id == visual_id)
         .unwrap();
     assert_eq!(
         visual
@@ -590,7 +583,7 @@ fn prefab_instance_override_patch_applies_before_namespacing() {
 }
 
 #[test]
-fn prefab_instance_override_preserves_ordered_placement_before_namespacing() {
+fn prefab_instance_override_preserves_ordered_placement_before_projection() {
     let registry = test_registry();
     let source = AssetRef::path("prefabs/ordered-overrides.ron").unwrap();
     let root_a = scene_id("root-a");
@@ -641,37 +634,32 @@ fn prefab_instance_override_preserves_ordered_placement_before_namespacing() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let expanded = expansion.document.as_ref().unwrap();
     let anchor = expanded
         .entities
         .iter()
         .find(|entity| entity.id == scene_id("instance"))
         .unwrap();
     assert_eq!(
-        anchor
-            .children
-            .iter()
-            .map(SceneEntityId::as_str)
-            .collect::<Vec<_>>(),
+        anchor.children.iter().collect::<Vec<_>>(),
         [
-            "instance/root-b",
-            "instance/added",
-            "instance/root-a",
-            "instance/root-c",
+            prefab_projection_id(&expansion, "instance", &["root-b"]),
+            prefab_projection_id(&expansion, "instance", &["added"]),
+            prefab_projection_id(&expansion, "instance", &["root-a"]),
+            prefab_projection_id(&expansion, "instance", &["root-c"]),
         ]
     );
     let root_a = expanded
         .entities
         .iter()
-        .find(|entity| entity.id == scene_id("instance/root-a"))
+        .find(|entity| &entity.id == prefab_projection_id(&expansion, "instance", &["root-a"]))
         .unwrap();
     assert_eq!(
-        root_a
-            .children
-            .iter()
-            .map(SceneEntityId::as_str)
-            .collect::<Vec<_>>(),
-        ["instance/child-b", "instance/child-a"]
+        root_a.children.iter().collect::<Vec<_>>(),
+        [
+            prefab_projection_id(&expansion, "instance", &["child-b"]),
+            prefab_projection_id(&expansion, "instance", &["child-a"]),
+        ]
     );
 }
 
@@ -701,9 +689,10 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
+    let flash_id = prefab_projection_id(&expansion, "enemy", &["weapon", "muzzle", "flash"]);
     let provenance = expansion
         .provenance
-        .get(&scene_id("enemy/weapon/muzzle/flash"))
+        .get(flash_id)
         .expect("nested projection must retain source provenance");
     assert_eq!(provenance.source_entity_id(), &scene_id("flash"));
     let projection = provenance
@@ -735,28 +724,17 @@ fn scene_prefab_resolver_expands_nested_instances_with_deterministic_ids() {
         projection.source_chain()[2].source_entity(),
         &scene_id("flash")
     );
-    let expanded = expansion.document.unwrap();
-    assert_eq!(
-        expanded
-            .entities
-            .iter()
-            .map(|entity| entity.id.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            "enemy",
-            "enemy/weapon",
-            "enemy/weapon/muzzle",
-            "enemy/weapon/muzzle/flash"
-        ]
-    );
+    let expanded = expansion.document.as_ref().unwrap();
+    assert_eq!(expanded.entities.len(), 4);
+    assert_eq!(expansion, document.expand_prefabs(&registry, &resolver));
 
     let mut world = World::new();
     let report = spawn_scene_with_prefab_resolver(&mut world, &registry, &document, &resolver);
-    let projected = spawned_entity(&world, &report, &scene_id("enemy/weapon/muzzle/flash"));
+    let projected = spawned_entity(&world, &report, flash_id);
     let source = world
         .get::<SceneEntitySource>(projected)
         .expect("spawned prefab projection must carry source provenance");
-    assert_eq!(source.entity_id, scene_id("enemy/weapon/muzzle/flash"));
+    assert_eq!(&source.entity_id, flash_id);
     assert_eq!(source.source_entity_id, scene_id("flash"));
     assert_eq!(
         source
@@ -777,22 +755,94 @@ fn repeated_prefab_instances_expand_without_id_collisions() {
         source.clone(),
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("visual"))]),
     );
-    let document = SceneDocument::from_ordered_roots([
+    let mut document = SceneDocument::from_ordered_roots([
         prefab_anchor("left", source.clone()),
         prefab_anchor("right", source),
+    ]);
+
+    let initial = document.expand_prefabs(&registry, &resolver);
+    assert!(!initial.diagnostics.has_errors());
+    let authored_id = prefab_projection_id(&initial, "left", &["visual"]).clone();
+    document.roots.push(authored_id.clone());
+    document
+        .entities
+        .push(SceneEntityRecord::new(authored_id.clone()));
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(!expansion.diagnostics.has_errors());
+    let expanded = expansion.document.as_ref().unwrap();
+    assert_eq!(expanded.entities.len(), 5);
+    let left = prefab_projection_id(&expansion, "left", &["visual"]);
+    let right = prefab_projection_id(&expansion, "right", &["visual"]);
+    assert_ne!(left, right);
+    assert_ne!(left, &authored_id);
+    assert_ne!(right, &authored_id);
+    assert!(
+        expansion.provenance[&authored_id]
+            .projection_path()
+            .is_none()
+    );
+}
+
+#[test]
+fn prefab_opaque_ids_do_not_alias_distinct_nested_instances() {
+    let registry = test_registry();
+    let inner_source = AssetRef::path("prefabs/opaque-inner.ron").unwrap();
+    let outer_source = AssetRef::path("prefabs/opaque-outer.ron").unwrap();
+    let leaf_id = scene_id("leaf");
+    let resolver = InMemoryPrefabSourceResolver::new()
+        .with_prefab(
+            inner_source.clone(),
+            PrefabDocument::from_ordered_roots([SceneEntityRecord::new(leaf_id.clone())]),
+        )
+        .with_prefab(
+            outer_source.clone(),
+            PrefabDocument::from_ordered_roots([prefab_anchor("branch", inner_source.clone())]),
+        );
+    let document = SceneDocument::from_ordered_roots([
+        prefab_anchor("left", outer_source),
+        prefab_anchor("left/branch", inner_source),
     ]);
 
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let expanded = expansion.document.as_ref().unwrap();
+    assert_eq!(expanded.roots, [scene_id("left"), scene_id("left/branch")]);
+    assert_eq!(expanded.entities.len(), 5);
     assert_eq!(
         expanded
             .entities
             .iter()
-            .map(|entity| entity.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["left", "left/visual", "right", "right/visual"]
+            .map(|entity| &entity.id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        5
+    );
+    assert_eq!(expansion.provenance.len(), 5);
+    for root in &expanded.roots {
+        let provenance = expansion.provenance.get(root).unwrap();
+        assert_eq!(provenance.source_entity_id(), root);
+        assert!(provenance.projection_path().is_none());
+    }
+
+    let leaves = expansion
+        .provenance
+        .iter()
+        .filter(|(_, provenance)| provenance.source_entity_id() == &leaf_id)
+        .collect::<Vec<_>>();
+    assert_eq!(leaves.len(), 2);
+    assert_ne!(leaves[0].0, leaves[1].0);
+    let leaf_projection_depths = leaves
+        .iter()
+        .map(|(_, provenance)| {
+            let path = provenance.projection_path().unwrap();
+            (path.root_anchor().clone(), path.source_chain().len())
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        leaf_projection_depths,
+        BTreeMap::from([(scene_id("left"), 2), (scene_id("left/branch"), 1)])
     );
 }
 
@@ -830,7 +880,7 @@ fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_chil
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let expanded = expansion.document.as_ref().unwrap();
     assert_eq!(expanded.roots.as_slice(), std::slice::from_ref(&anchor));
     let anchor = expanded
         .entities
@@ -838,41 +888,42 @@ fn prefab_expansion_preserves_source_order_and_prefixes_roots_before_anchor_chil
         .find(|entity| entity.id == anchor)
         .unwrap();
     assert_eq!(
-        anchor
-            .children
-            .iter()
-            .map(|child| child.as_str())
-            .collect::<Vec<_>>(),
-        ["anchor/root-b", "anchor/root-a", "local-b", "local-a"]
+        anchor.children.iter().collect::<Vec<_>>(),
+        [
+            prefab_projection_id(&expansion, "anchor", &["root-b"]),
+            prefab_projection_id(&expansion, "anchor", &["root-a"]),
+            &scene_id("local-b"),
+            &scene_id("local-a"),
+        ]
     );
     let root_a = expanded
         .entities
         .iter()
-        .find(|entity| entity.id == scene_id("anchor/root-a"))
+        .find(|entity| &entity.id == prefab_projection_id(&expansion, "anchor", &["root-a"]))
         .unwrap();
     assert_eq!(
-        root_a
-            .children
-            .iter()
-            .map(|child| child.as_str())
-            .collect::<Vec<_>>(),
-        ["anchor/child-b", "anchor/child-a"]
+        root_a.children.iter().collect::<Vec<_>>(),
+        [
+            prefab_projection_id(&expansion, "anchor", &["child-b"]),
+            prefab_projection_id(&expansion, "anchor", &["child-a"]),
+        ]
     );
 }
 
 #[test]
-fn repeated_prefab_instances_namespace_declared_scene_local_references() {
+fn repeated_prefab_instances_remap_declared_scene_local_references() {
     let registry = entity_link_registry();
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let persistent = persistent_reference("66666666-6666-4666-8666-666666666666");
+    let local_target = "target/with/a/long/opaque/local-id";
     let prefab = PrefabDocument::from_ordered_roots([
         SceneEntityRecord::new(scene_id("source")).with_component(
             entity_link_type_id(),
             entity_link_record(EntityReference::SceneLocal {
-                entity: scene_id("target"),
+                entity: scene_id(local_target),
             }),
         ),
-        SceneEntityRecord::new(scene_id("target")),
+        SceneEntityRecord::new(scene_id(local_target)),
         SceneEntityRecord::new(scene_id("external")).with_component(
             entity_link_type_id(),
             entity_link_record(EntityReference::Persistent {
@@ -889,24 +940,27 @@ fn repeated_prefab_instances_namespace_declared_scene_local_references() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let expanded = expansion.document.as_ref().unwrap();
     for anchor in ["left", "right"] {
+        let source_id = prefab_projection_id(&expansion, anchor, &["source"]);
+        let target_id = prefab_projection_id(&expansion, anchor, &[local_target]);
+        assert!(target_id.as_str().len() < local_target.len());
         let source = expanded
             .entities
             .iter()
-            .find(|entity| entity.id == scene_id(&format!("{anchor}/source")))
+            .find(|entity| &entity.id == source_id)
             .unwrap();
         assert_eq!(
             exported_entity_link(source),
             &EntityReference::SceneLocal {
-                entity: scene_id(&format!("{anchor}/target")),
+                entity: target_id.clone(),
             }
         );
 
         let external = expanded
             .entities
             .iter()
-            .find(|entity| entity.id == scene_id(&format!("{anchor}/external")))
+            .find(|entity| &entity.id == prefab_projection_id(&expansion, anchor, &["external"]))
             .unwrap();
         assert_eq!(
             exported_entity_link(external),
@@ -923,13 +977,13 @@ fn repeated_prefab_instances_namespace_declared_scene_local_references() {
     assert_eq!(
         exported_entity_link(source_record),
         &EntityReference::SceneLocal {
-            entity: scene_id("target"),
+            entity: scene_id(local_target),
         }
     );
 }
 
 #[test]
-fn nested_prefabs_namespace_declared_scene_local_references_through_each_anchor() {
+fn nested_prefabs_remap_declared_scene_local_references_through_each_anchor() {
     let registry = entity_link_registry();
     let inner_source = AssetRef::path("prefabs/linked-inner.ron").unwrap();
     let outer_source = AssetRef::path("prefabs/linked-outer.ron").unwrap();
@@ -955,16 +1009,18 @@ fn nested_prefabs_namespace_declared_scene_local_references_through_each_anchor(
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let source_id = prefab_projection_id(&expansion, "root", &["nested", "source"]);
+    let target_id = prefab_projection_id(&expansion, "root", &["nested", "target"]);
+    let expanded = expansion.document.as_ref().unwrap();
     let source = expanded
         .entities
         .iter()
-        .find(|entity| entity.id == scene_id("root/nested/source"))
+        .find(|entity| &entity.id == source_id)
         .unwrap();
     assert_eq!(
         exported_entity_link(source),
         &EntityReference::SceneLocal {
-            entity: scene_id("root/nested/target"),
+            entity: target_id.clone(),
         }
     );
 }
@@ -992,8 +1048,15 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
             PrefabDocument::from_ordered_roots([prefab_anchor("nested", inner_source)]),
         );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", outer_source)]);
+    let baseline = document.expand_prefabs(&registry, &resolver);
+    assert!(!baseline.diagnostics.has_errors());
+    let nested = prefab_projection_id(&baseline, "root", &["nested"]);
+    let source = prefab_projection_id(&baseline, "root", &["nested", "source"]);
+    let target = prefab_projection_id(&baseline, "root", &["nested", "target"]);
+    let expected_bytes =
+        nested.as_str().len() * 2 + source.as_str().len() * 2 + target.as_str().len() * 3;
     let exact_limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(112).unwrap());
+        .with_generated_identifier_bytes(ByteLimit::new(expected_bytes).unwrap());
 
     let exact = document.expand_prefabs_with_options(
         &registry,
@@ -1005,7 +1068,7 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     assert!(exact.document.is_some());
 
     let failing_limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(111).unwrap());
+        .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
     let failing = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -1015,8 +1078,8 @@ fn nested_prefab_generated_identifier_budget_charges_only_final_projection() {
     assert!(failing.document.is_none());
     assert!(failing.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 112)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 111)
+            && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
+            && diagnostic_has_u64_field(diagnostic, "maximum", (expected_bytes - 1) as u64)
     }));
 }
 
@@ -1044,18 +1107,20 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
     let expansion = document.expand_prefabs(&registry, &resolver);
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let source_id = prefab_projection_id(&expansion, "root", &["source"]);
+    let target_id = prefab_projection_id(&expansion, "root", &["target"]);
+    let expanded = expansion.document.as_ref().unwrap();
     let source = expanded
         .entities
         .iter()
-        .find(|entity| entity.id == scene_id("root/source"))
+        .find(|entity| &entity.id == source_id)
         .unwrap();
     let component = source.components.get(&entity_link_type_id()).unwrap();
     assert_eq!(component.version, ComponentSchemaVersion(2));
     assert_eq!(
         component.value.field_entity_reference("target").unwrap(),
         &EntityReference::SceneLocal {
-            entity: scene_id("root/target"),
+            entity: target_id.clone(),
         }
     );
     let source_component = prefab.entities[0]
@@ -1067,7 +1132,7 @@ fn prefab_reference_rewrite_uses_the_migrated_component_schema() {
 }
 
 #[test]
-fn prefab_expansion_budgets_namespaced_component_references_before_publication() {
+fn prefab_expansion_budgets_mapped_component_references_before_publication() {
     let registry = entity_link_registry();
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
@@ -1083,8 +1148,13 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
         ]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
+    let baseline = document.expand_prefabs(&registry, &resolver);
+    assert!(!baseline.diagnostics.has_errors());
+    let source_id = prefab_projection_id(&baseline, "root", &["source"]);
+    let target_id = prefab_projection_id(&baseline, "root", &["target"]);
+    let expected_bytes = source_id.as_str().len() * 2 + target_id.as_str().len() * 3;
     let exact_limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(55).unwrap());
+        .with_generated_identifier_bytes(ByteLimit::new(expected_bytes).unwrap());
     let exact = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -1094,7 +1164,7 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
     assert!(exact.document.is_some());
 
     let limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(54).unwrap());
+        .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
     let expansion = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -1104,13 +1174,13 @@ fn prefab_expansion_budgets_namespaced_component_references_before_publication()
     assert!(expansion.document.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 55)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 54)
+            && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
+            && diagnostic_has_u64_field(diagnostic, "maximum", (expected_bytes - 1) as u64)
     }));
 }
 
 #[test]
-fn prefab_namespace_preflight_uses_the_public_materialized_node_budget() {
+fn prefab_reference_remap_preflight_uses_the_public_materialized_node_budget() {
     let registry = large_data_registry();
     let source = AssetRef::path("prefabs/large-data.ron").unwrap();
     let large_value = ComponentValue::map([(
@@ -1138,11 +1208,12 @@ fn prefab_namespace_preflight_uses_the_public_materialized_node_budget() {
         "{:?}",
         expansion.diagnostics
     );
-    let expanded = expansion.document.unwrap();
+    let source_id = prefab_projection_id(&expansion, "root", &["source"]);
+    let expanded = expansion.document.as_ref().unwrap();
     let source = expanded
         .entities
         .iter()
-        .find(|entity| entity.id == scene_id("root/source"))
+        .find(|entity| &entity.id == source_id)
         .unwrap();
     let component = source.components.get(&large_data_type_id()).unwrap();
     let ComponentValue::List(values) = component.value.field("values").unwrap() else {
@@ -1152,7 +1223,7 @@ fn prefab_namespace_preflight_uses_the_public_materialized_node_budget() {
 }
 
 #[test]
-fn prefab_namespace_rejects_undeclared_references_without_mutating_the_source() {
+fn prefab_reference_remap_rejects_undeclared_references_without_mutating_the_source() {
     let registry = large_data_registry();
     let source = AssetRef::path("prefabs/hidden-reference.ron").unwrap();
     let prefab = PrefabDocument::from_ordered_roots([
@@ -1189,7 +1260,33 @@ fn prefab_namespace_rejects_undeclared_references_without_mutating_the_source() 
 }
 
 #[test]
-fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication() {
+fn prefab_reference_remap_rejects_a_target_outside_its_source_document() {
+    let registry = entity_link_registry();
+    let source = AssetRef::path("prefabs/dangling-link.ron").unwrap();
+    let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
+        .with_component(
+            entity_link_type_id(),
+            entity_link_record(EntityReference::SceneLocal {
+                entity: scene_id("missing"),
+            }),
+        )]);
+    let resolver = InMemoryPrefabSourceResolver::new().with_prefab(source.clone(), prefab.clone());
+    let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source.clone())]);
+
+    let expansion = document.expand_prefabs(&registry, &resolver);
+
+    assert!(expansion.document.is_none());
+    assert!(expansion.provenance.is_empty());
+    assert!(expansion.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.prefab-entity-reference-rewrite-failed"
+            && diagnostic_has_text_field(diagnostic, "rewrite-error-kind", "missing-source-entity")
+            && diagnostic_has_text_field(diagnostic, "entity-id", "source")
+    }));
+    assert_eq!(resolver.resolve_prefab(&source), Some(&prefab));
+}
+
+#[test]
+fn prefab_expansion_budgets_mapped_reference_value_growth_before_publication() {
     let registry = entity_link_registry();
     let source = AssetRef::path("prefabs/linked-unit.ron").unwrap();
     let resolver = InMemoryPrefabSourceResolver::new().with_prefab(
@@ -1205,8 +1302,12 @@ fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication
         ]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
+    let baseline = document.expand_prefabs(&registry, &resolver);
+    assert!(!baseline.diagnostics.has_errors());
+    let target_id = prefab_projection_id(&baseline, "root", &["target"]);
+    let expected_bytes = "target".len() + target_id.as_str().len();
     let exact_limits = PrefabExpansionLimits::default()
-        .with_materialized_value_bytes(nara_core::ByteLimit::new(17).unwrap());
+        .with_materialized_value_bytes(ByteLimit::new(expected_bytes).unwrap());
 
     let exact = document.expand_prefabs_with_options(
         &registry,
@@ -1218,7 +1319,7 @@ fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication
     assert!(exact.document.is_some());
 
     let failing_limits = PrefabExpansionLimits::default()
-        .with_materialized_value_bytes(nara_core::ByteLimit::new(16).unwrap());
+        .with_materialized_value_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
     let failing = document.expand_prefabs_with_options(
         &registry,
         &resolver,
@@ -1228,13 +1329,13 @@ fn prefab_expansion_budgets_namespaced_reference_value_growth_before_publication
     assert!(failing.document.is_none());
     assert!(failing.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "materialized-value-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 17)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 16)
+            && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
+            && diagnostic_has_u64_field(diagnostic, "maximum", (expected_bytes - 1) as u64)
     }));
 }
 
 #[test]
-fn prefab_namespace_traversal_accepts_persistent_reference_at_logical_byte_limit() {
+fn prefab_reference_remap_traversal_accepts_persistent_reference_at_logical_byte_limit() {
     let registry = entity_link_registry();
     let source = AssetRef::path("prefabs/persistent-link.ron").unwrap();
     let persistent = persistent_reference("77777777-7777-4777-8777-777777777777");
@@ -1260,11 +1361,12 @@ fn prefab_namespace_traversal_accepts_persistent_reference_at_logical_byte_limit
     );
 
     assert!(!expansion.diagnostics.has_errors());
-    let expanded = expansion.document.unwrap();
+    let source_id = prefab_projection_id(&expansion, "root", &["source"]);
+    let expanded = expansion.document.as_ref().unwrap();
     let source = expanded
         .entities
         .iter()
-        .find(|entity| entity.id == scene_id("root/source"))
+        .find(|entity| &entity.id == source_id)
         .unwrap();
     assert_eq!(
         exported_entity_link(source),
@@ -1391,7 +1493,8 @@ fn prefab_expansion_depth_limit_reports_before_spawn_mutation() {
     assert!(expansion.document.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic.code().as_str() == "scene.prefab-depth-exceeded"
-            && diagnostic_has_text_field(diagnostic, "entity-id", "enemy/weapon")
+            && diagnostic_has_field_class(diagnostic, "entity-id", DiagnosticFieldClass::Public)
+            && diagnostic_has_text_field(diagnostic, "asset-ref", "prefabs/weapon.ron")
             && diagnostic_has_u64_field(diagnostic, "maximum-depth", 1)
     }));
 }
@@ -1581,8 +1684,14 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
         PrefabDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("child"))]),
     );
     let document = SceneDocument::from_ordered_roots([prefab_anchor("root", source)]);
+    let baseline = document.expand_prefabs(&registry, &resolver);
+    assert!(!baseline.diagnostics.has_errors());
+    let identifier_bytes = prefab_projection_id(&baseline, "root", &["child"])
+        .as_str()
+        .len();
+    let expected_bytes = identifier_bytes * 2;
     let limits = PrefabExpansionLimits::default()
-        .with_generated_identifier_bytes(nara_core::ByteLimit::new(19).unwrap());
+        .with_generated_identifier_bytes(ByteLimit::new(expected_bytes - 1).unwrap());
 
     let expansion = document.expand_prefabs_with_options(
         &registry,
@@ -1593,8 +1702,25 @@ fn prefab_expansion_bounds_generated_identifier_bytes_before_publication() {
     assert!(expansion.document.is_none());
     assert!(expansion.diagnostics.iter().any(|diagnostic| {
         diagnostic_has_text_field(diagnostic, "budget-kind", "generated-identifier-bytes")
-            && diagnostic_has_u64_field(diagnostic, "observed", 20)
-            && diagnostic_has_u64_field(diagnostic, "maximum", 19)
+            && diagnostic_has_u64_field(diagnostic, "observed", expected_bytes as u64)
+            && diagnostic_has_u64_field(diagnostic, "maximum", (expected_bytes - 1) as u64)
+    }));
+
+    let single_limit = PrefabExpansionLimits::default()
+        .with_single_generated_identifier_bytes(ByteLimit::new(identifier_bytes - 1).unwrap());
+    let single = document.expand_prefabs_with_options(
+        &registry,
+        &resolver,
+        PrefabExpansionOptions::default().with_limits(single_limit),
+    );
+    assert!(single.document.is_none());
+    assert!(single.diagnostics.iter().any(|diagnostic| {
+        diagnostic_has_text_field(
+            diagnostic,
+            "budget-kind",
+            "single-generated-identifier-bytes",
+        ) && diagnostic_has_u64_field(diagnostic, "observed", identifier_bytes as u64)
+            && diagnostic_has_u64_field(diagnostic, "maximum", (identifier_bytes - 1) as u64)
     }));
 }
 
@@ -4890,6 +5016,27 @@ fn stable_id(id: &str) -> StableAssetId {
 
 fn scene_id(id: &str) -> SceneEntityId {
     SceneEntityId::new(id).unwrap()
+}
+
+fn prefab_projection_id<'a>(
+    report: &'a PrefabExpansionReport,
+    root_anchor: &str,
+    source_entities: &[&str],
+) -> &'a SceneEntityId {
+    let mut matches = report.provenance.iter().filter(|(_, provenance)| {
+        provenance.projection_path().is_some_and(|path| {
+            path.root_anchor().as_str() == root_anchor
+                && path.source_chain().len() == source_entities.len()
+                && path
+                    .source_chain()
+                    .iter()
+                    .zip(source_entities)
+                    .all(|(step, entity)| step.source_entity().as_str() == *entity)
+        })
+    });
+    let (id, _) = matches.next().expect("prefab projection must exist");
+    assert!(matches.next().is_none(), "prefab projection must be unique");
+    id
 }
 
 fn prefab_anchor(id: &str, source: AssetRef) -> SceneEntityRecord {
