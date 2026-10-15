@@ -9,7 +9,8 @@ use nara_ecs::{
 };
 
 use crate::{
-    Children, HierarchyError, HierarchyRoots, Parent, mark_topology_dirty, validate_hierarchy,
+    Children, HierarchyError, HierarchyRoots, Parent, mark_topology_dirty,
+    relation::HierarchyMember, validate_hierarchy,
 };
 
 /// The ordered collection that owns one runtime hierarchy entity.
@@ -112,6 +113,14 @@ pub struct PreparedHierarchyBatch {
     resolved: Vec<ResolvedOperation>,
 }
 
+pub(crate) fn prepare_mutation_baseline(world: &mut World) {
+    world.register_component::<Parent>();
+    world.register_component::<Children>();
+    world.register_component::<HierarchyMember>();
+    world.register_component::<HierarchyRoots>();
+    world.flush();
+}
+
 pub(crate) fn prepare_hierarchy_batch(
     world: &mut World,
     operations: &[HierarchyOperation],
@@ -204,7 +213,7 @@ pub(crate) fn hierarchy_retirement_operations(
 }
 
 pub(crate) fn validate_hierarchy_retirement_despawn(
-    world: &mut World,
+    world: &World,
     entities: &[Entity],
     affected_entities: &[Entity],
 ) -> Result<(), LifecycleFreeDespawnError> {
@@ -212,18 +221,22 @@ pub(crate) fn validate_hierarchy_retirement_despawn(
         PersistentLifecycleEvent::Insert,
         PersistentLifecycleEvent::Discard,
     ];
-    world.register_component::<Parent>();
-    world.register_component::<Children>();
-    world.flush();
     let parent_id = validate_registered_component_metadata::<Parent>(world, &allowed_hooks)
         .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
     let children_id = validate_registered_component_metadata::<Children>(world, &allowed_hooks)
         .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
+    let member_id = validate_registered_component_metadata::<HierarchyMember>(
+        world,
+        &[PersistentLifecycleEvent::Discard],
+    )
+    .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
 
     for entity in affected_entities.iter().copied() {
         validate_registered_component_observers::<Parent>(world, Some(entity))
             .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
         validate_registered_component_observers::<Children>(world, Some(entity))
+            .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
+        validate_registered_component_observers::<HierarchyMember>(world, Some(entity))
             .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
     }
 
@@ -239,7 +252,7 @@ pub(crate) fn validate_hierarchy_retirement_despawn(
             world,
             entity,
             entity_ref.archetype().components(),
-            &[parent_id, children_id],
+            &[parent_id, children_id, member_id],
         )
         .map_err(|_| LifecycleFreeDespawnError::LifecycleWork)?;
     }
@@ -254,7 +267,6 @@ impl PreparedHierarchyBatch {
         }
 
         commit_resolved(world, self.resolved);
-        world.flush();
         mark_topology_dirty(world);
     }
 }
@@ -301,6 +313,7 @@ impl<'world> HierarchyWriter<'world> {
 
     /// Preflights a sequential candidate and commits the complete batch atomically.
     pub fn apply_batch(&mut self, operations: &[HierarchyOperation]) -> Result<(), HierarchyError> {
+        prepare_mutation_baseline(self.world);
         prepare_hierarchy_batch(self.world, operations)?.commit(self.world);
         Ok(())
     }
@@ -625,7 +638,7 @@ enum ResolvedOperation {
 }
 
 fn validate_hierarchy_mutation_lifecycle(
-    world: &mut World,
+    world: &World,
     operations: &[ResolvedOperation],
 ) -> Result<(), HierarchyError> {
     if operations.is_empty() {
@@ -633,11 +646,6 @@ fn validate_hierarchy_mutation_lifecycle(
     }
 
     let roots_present = world.contains_resource::<HierarchyRoots>();
-    world.register_component::<Parent>();
-    world.register_component::<Children>();
-    world.register_component::<HierarchyRoots>();
-    world.flush();
-
     let allowed_hooks = [
         PersistentLifecycleEvent::Insert,
         PersistentLifecycleEvent::Discard,
@@ -646,6 +654,11 @@ fn validate_hierarchy_mutation_lifecycle(
         .map_err(|_| HierarchyError::LifecycleWork)?;
     validate_registered_component_metadata::<Children>(world, &allowed_hooks)
         .map_err(|_| HierarchyError::LifecycleWork)?;
+    validate_registered_component_metadata::<HierarchyMember>(
+        world,
+        &[PersistentLifecycleEvent::Discard],
+    )
+    .map_err(|_| HierarchyError::LifecycleWork)?;
     if roots_present {
         validate_resource_scope::<HierarchyRoots>(world)
             .map_err(|_| HierarchyError::LifecycleWork)?;
@@ -659,6 +672,8 @@ fn validate_hierarchy_mutation_lifecycle(
     for operation in operations {
         match *operation {
             ResolvedOperation::Place { entity, insertion } => {
+                validate_registered_component_observers::<HierarchyMember>(world, Some(entity))
+                    .map_err(|_| HierarchyError::LifecycleWork)?;
                 record_component_targets(
                     entity,
                     insertion.owner,
@@ -680,6 +695,8 @@ fn validate_hierarchy_mutation_lifecycle(
                 );
             }
             ResolvedOperation::Remove { entity, from } => {
+                validate_registered_component_observers::<HierarchyMember>(world, Some(entity))
+                    .map_err(|_| HierarchyError::LifecycleWork)?;
                 record_component_targets(entity, from, &mut parent_targets, &mut children_targets);
             }
         }
@@ -727,6 +744,7 @@ fn commit_resolved(world: &mut World, operations: Vec<ResolvedOperation>) {
     for operation in operations {
         match operation {
             ResolvedOperation::Place { entity, insertion } => {
+                world.entity_mut(entity).insert(HierarchyMember);
                 commit_insert(world, &mut roots, entity, insertion);
             }
             ResolvedOperation::Move {
@@ -739,6 +757,7 @@ fn commit_resolved(world: &mut World, operations: Vec<ResolvedOperation>) {
             }
             ResolvedOperation::Remove { entity, from } => {
                 commit_detach(world, &mut roots, entity, from);
+                world.entity_mut(entity).remove::<HierarchyMember>();
             }
         }
     }

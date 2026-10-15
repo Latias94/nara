@@ -6,7 +6,10 @@ use nara_ecs::{
     __private::validate_registered_persistent_component_apply, Component, Entity,
     LifecycleFreeInsertionPlan, Mut, World, prepare_lifecycle_free_despawn,
 };
-use nara_hierarchy::{__private::prepare_construction_batch, Children, Parent, validate_hierarchy};
+use nara_hierarchy::{
+    __private::{prepare_construction_batch, prepare_mutation_baseline},
+    Children, HierarchyRoots, Parent, validate_hierarchy,
+};
 use nara_identity::{
     __private::{
         AdditionalRetirementIdentityError, IdentitySupportTopologyError,
@@ -349,11 +352,8 @@ impl SceneSpawner {
             }
             None => None,
         };
-        if pending_product.is_some() {
-            // Product configuration is the last caller-controlled operation. Materialize the
-            // deferred pre-transaction baseline once before any semantic World proof.
-            world.flush();
-        }
+        // Product configuration and decoding precede the shared semantic World baseline.
+        prepare_mutation_baseline(world);
         if validate_hierarchy(world).is_err() {
             diagnostics.push(diagnostic_error(
                 "scene.hierarchy-invalid",
@@ -1311,6 +1311,7 @@ pub(crate) fn retire_scene_instance_exact(
     current: &SpawnedSceneInstance,
     cause: TombstoneCause,
 ) -> Result<Vec<Entity>, SceneInstanceRetirementTransactionError> {
+    prepare_mutation_baseline(world);
     let prepared = prepare_exact_scene_instance_retirement(world, current, cause)
         .map_err(SceneInstanceRetirementTransactionError::Identity)?;
     let retirements = prepared.retiring_entities().to_vec();
@@ -1363,7 +1364,11 @@ fn rollback_spawn_transaction(world: &mut World, spawned_entities: &[Entity]) {
     }
 
     let has_relationship = live_entities.iter().copied().any(|entity| {
-        world.get::<Parent>(entity).is_some() || world.get::<Children>(entity).is_some()
+        world.get::<Parent>(entity).is_some()
+            || world.get::<Children>(entity).is_some()
+            || world
+                .get_resource::<HierarchyRoots>()
+                .is_some_and(|roots| roots.contains(entity))
     });
     if has_relationship {
         let hierarchy = prepare_scene_hierarchy_retirement(world, &live_entities)
@@ -1502,6 +1507,7 @@ pub fn retire_and_despawn_scene_entity(
     world: &mut World,
     entity: Entity,
 ) -> Result<(), SceneEntityRetirementError> {
+    prepare_mutation_baseline(world);
     let Some(source) = world.get::<SceneEntitySource>(entity).cloned() else {
         return Err(SceneEntityRetirementError::NotSceneEntity);
     };

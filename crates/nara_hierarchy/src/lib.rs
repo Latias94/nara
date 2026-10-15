@@ -42,6 +42,11 @@ pub mod __private {
 
     pub use super::writer::PreparedHierarchyBatch;
 
+    /// Materializes deferred work before an enclosing owner takes any semantic World proofs.
+    pub fn prepare_mutation_baseline(world: &mut World) {
+        super::writer::prepare_mutation_baseline(world);
+    }
+
     /// Capability token proving that the current runtime hierarchy generation completed.
     #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Resource)]
     pub struct CompletedHierarchyProjection {
@@ -84,7 +89,9 @@ pub mod __private {
         .map(|()| completed.generation())
     }
 
-    /// Prepares candidate construction edges without publishing a hierarchy generation.
+    /// Prepares construction edges against the enclosing owner's already materialized baseline.
+    ///
+    /// This does not execute deferred work; preparation and commit require exclusive World access.
     pub fn prepare_construction_batch(
         world: &mut World,
         operations: &[HierarchyOperation],
@@ -102,7 +109,7 @@ pub mod __private {
 
     /// Validates exact entity retirement while allowing only hierarchy-owned component hooks.
     pub fn validate_retirement_despawn(
-        world: &mut World,
+        world: &World,
         entities: &[nara_ecs::Entity],
         affected_entities: &[nara_ecs::Entity],
     ) -> Result<(), nara_ecs::LifecycleFreeDespawnError> {

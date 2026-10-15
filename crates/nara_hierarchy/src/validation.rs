@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use nara_ecs::{Entity, QueryState, World, entity::EntityHashMap};
+use nara_ecs::{Entity, QueryState, With, World, entity::EntityHashMap};
 
-use crate::{Children, HierarchyError, HierarchyRoots, Parent};
+use crate::{Children, HierarchyError, HierarchyRoots, Parent, relation::HierarchyMember};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VisitState {
@@ -14,6 +14,7 @@ enum VisitState {
 pub(crate) struct HierarchyValidationScratch {
     parent_query: Option<QueryState<(Entity, &'static Parent)>>,
     children_query: Option<QueryState<(Entity, &'static Children)>>,
+    member_query: Option<QueryState<Entity, With<HierarchyMember>>>,
     parent_edges: Vec<(Entity, Entity)>,
     parent_by_child: EntityHashMap<Entity>,
     reverse_edges: HashSet<(Entity, Entity)>,
@@ -216,7 +217,37 @@ pub(crate) fn validate_hierarchy_with_additions(
 
     validate_acyclic(scratch, &mut stats)?;
     validate_root_closure(world, scratch)?;
+    validate_membership(world, scratch)?;
     Ok(stats)
+}
+
+fn validate_membership(
+    world: &World,
+    scratch: &mut HierarchyValidationScratch,
+) -> Result<(), HierarchyError> {
+    for entity in scratch
+        .root_entities
+        .iter()
+        .chain(scratch.parent_by_child.keys())
+        .copied()
+    {
+        if world.get::<HierarchyMember>(entity).is_none() {
+            return Err(HierarchyError::MembershipMissing { entity });
+        }
+    }
+    if scratch.member_query.is_none() {
+        scratch.member_query = QueryState::try_new(world);
+    }
+    if let Some(query) = &mut scratch.member_query {
+        for entity in query.iter(world) {
+            if !scratch.root_entities.contains(&entity)
+                && !scratch.parent_by_child.contains_key(&entity)
+            {
+                return Err(HierarchyError::PlacementMissing { entity });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_root_closure(

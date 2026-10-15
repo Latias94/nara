@@ -40,6 +40,8 @@ pub enum HierarchyError {
     RootParented { entity: Entity, parent: Entity },
     #[error("hierarchy participant {entity:?} has no registered root-or-parent placement")]
     PlacementMissing { entity: Entity },
+    #[error("hierarchy participant {entity:?} lost its private membership component")]
+    MembershipMissing { entity: Entity },
     #[error("parent {parent:?} is missing child {child:?} from its reverse projection")]
     ReverseMissing { parent: Entity, child: Entity },
     #[error("parent {parent:?} contains duplicate child {child:?} in its reverse projection")]

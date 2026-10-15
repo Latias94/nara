@@ -70,6 +70,7 @@ pub(crate) fn prepare_scene_hierarchy_retirement(
         .map_err(|_| SceneHierarchyRetirementError)?;
     let mut affected_entities = Vec::new();
     for entity in structural_retirements {
+        affected_entities.push(entity);
         if let Some(parent) = world.get::<Parent>(entity).map(Parent::parent) {
             affected_entities.push(entity);
             affected_entities.push(parent);

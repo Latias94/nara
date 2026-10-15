@@ -1,5 +1,10 @@
 use nara_ecs::{Component, Entity, Resource, entity::EntityHashMap};
 
+/// Tracks lifetime invalidation for every placed entity, including childless roots.
+#[derive(Debug, Component)]
+#[component(immutable, on_discard = crate::hierarchy_component_changed)]
+pub(crate) struct HierarchyMember;
+
 /// The ordered runtime roots registered with Nara's structural hierarchy.
 ///
 /// The collection is maintained only by [`HierarchyWriter`](crate::HierarchyWriter). It is not a
