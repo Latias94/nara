@@ -8,15 +8,21 @@ an index, not another source of architecture decisions.
 1. [Accepted ADRs](adr/README.md) own durable decisions.
 2. [ADR implementation status](adr/implementation-status.md) owns repository evidence and remaining
    gaps.
-3. The active
-   [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
-   plan is the sole active implementation lane. It is registered by
+3. The active [2D foundation contracts](../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
+   plan is the sole active implementation lane, registered by
+   [record `63e79d44bfd84519a1f9a5ce17000c06`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-nara-2d-foundation-contracts-codex-root-63e79d44bfd84519a1f9a5ce17000c06.md).
+   [ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) owns its focused contract
+   refinements. Acceptance is separate from implementation evidence.
+   The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
+   lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
+   Its last verified boundary remains registered by
    [record `079f447a577b42929a258328ab95b1fe`](../knowledge/engineering/registry/2026-08/2026-08-21T101853Z-standalone-supervised-play-v1-codex-root-079f447a577b42929a258328ab95b1fe.md).
    SPL-U0 accepts [ADR 0116](adr/0116-standalone-supervised-editor-play.md), narrows OQ-039 to one
    local external-window desktop placement, and must land the capability-free admission contract
    before build or process effects begin. SPL-U0 through SPL-U2 are verified through `ab211bc`;
-   child READY, ordinary Editor lifecycle effects, and the final product trajectories remain later
-   gates. Completed predecessor plans remain immutable evidence.
+   child READY, ordinary Editor lifecycle effects, and the final product trajectories are carried
+   into foundation U12 with existing working changes preserved. SPL is not claimed complete.
+   Completed predecessor plans remain immutable evidence.
    The completed [Editor Image Import and Reimport v1](../plans/2026-08-20-001-feat-editor-image-import-and-reimport-v1-plan.md)
    plan closes at `ec64e4c` with
    [verification `ae97ce2c7330420d8b6851967fd7c8b4`](../knowledge/engineering/verification/2026-08/2026-08-21T025159Z-eir-u6-standalone-image-import-product-closure-ae97ce2c7330420d8b6851967fd7c8b4.md)

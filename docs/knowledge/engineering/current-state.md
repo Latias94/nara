@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "2ba8637f5dd4f905ff486d49aa9e4bb186305e9b488ae99e7908489ea1e0ddb0"
+source_fingerprint: "67e2be099d453af68b4501e972cd06360e0a9bc7bc0a99aa505c35e818364e6e"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "2ba8637f5dd4f905ff486d49aa9e4bb186305e9b488ae99e7908489ea1e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `2ba8637f5dd4f905ff486d49aa9e4bb186305e9b488ae99e7908489ea1e0ddb0`
-- Immutable records: 557
+- Source fingerprint: `67e2be099d453af68b4501e972cd06360e0a9bc7bc0a99aa505c35e818364e6e`
+- Immutable records: 560
 - Active lane heads: 1
 
 # Active Registrations
@@ -28,6 +28,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
+- [2D foundation contract refactor active](registry/2026-10/2026-10-15T091614Z-nara-2d-foundation-contracts-codex-root-63e79d44bfd84519a1f9a5ce17000c06.md): `active` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
@@ -36,10 +37,11 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Reference-game-driven foundation refactor: RGF-U23](registry/2026-07/2026-07-21T131138Z-reference-game-foundation-rgf-u23-codex-root-ab7e4acc3ce143dc8b868eb820eb1181.md): `completed` (reference-game-foundation-rgf-u23-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U8](registry/2026-07/2026-07-19T233045Z-reference-game-foundation-rgf-u8-codex-root-4007e43148c84b20a0c28c73e379d302.md): `completed` (reference-game-foundation-rgf-u8-codex-root; producer `codex-root`)
 - [Standalone Generic Editor: SGE complete; no successor active](registry/2026-08/2026-08-19T111039Z-standalone-generic-editor-open-recovery-codex-root-931591fb6d2b4bcbad3151922814d8e6.md): `completed` (standalone-generic-editor-open-recovery-codex-root; producer `codex-root`)
-- [Standalone Supervised Play v1 active after SPL-U2](registry/2026-08/2026-08-21T101853Z-standalone-supervised-play-v1-codex-root-079f447a577b42929a258328ab95b1fe.md): `active` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
+- [Standalone Supervised Play transferred to 2D foundation refactor](registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md): `closed` (standalone-supervised-play-v1-codex-root; producer `codex-root`)
 
 # Recent Evidence
 
+- **Session Handoff**: [2D foundation execution baseline and ownership](sessions/2026-10/2026-10-15T091614Z-2d-foundation-execution-baseline-and-ownership-0cd8accf28254acda193b1d6e18ac533.md) - Initial execution inventory, commit exclusions, plan authority, and architecture follow-up policy.
 - **Verification Evidence**: [SPL-U2 bounded desktop build and immutable generation verification](verification/2026-08/2026-08-21T101853Z-spl-u2-bounded-desktop-build-and-generation-e0c5ea801f5e432484dfc710ae3ce00b.md) - Verifies exact Cargo metadata and artifact selection, bounded build cancellation, and immutable Editor-owned executable generations.
 - **Verification Evidence**: [SPL-U1 private supervised process substrate verification](verification/2026-08/2026-08-21T090132Z-spl-u1-private-supervised-process-substrate-9b5f75ac859c466ba7f94deb74851778.md) - Verifies the private Windows process-tree owner, bounded cancellable output, spawn authority allowlist, cleanup receipt, and the supported Linux compile boundary.
 - **Verification Evidence**: [SPL-U0 supervised Play contract and launch-context verification](verification/2026-08/2026-08-21T060000Z-spl-u0-supervised-play-contract.md) - Verifies the versioned execution declaration, capability-free source receipt, and explicit project-root contract before build or process effects.
@@ -51,7 +53,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [EPB-U5 standalone Project Browser product closure](verification/2026-08/2026-08-19T213500Z-epb-u5-standalone-project-browser-product-closure-2acde0398a8b467b93fe714241a5e216.md) - Verifies one generic Editor browse, filter, Scene/Prefab Open, equivalent Refresh, and last-good failure trajectory on Windows.
 - **Verification Evidence**: [EPB-U4 bounded Editor Project Browser](verification/2026-08/2026-08-19T204830Z-epb-u4-bounded-editor-project-browser-495c3c9cb92b4f94aa0895dfbce04ebf.md) - Verifies UI-neutral source-index projection, bounded query and rendering work, exact frame-bound Refresh/Open ingress, and no filesystem authority in adapters.
 - **Verification Evidence**: [EPB-U3 indexed Authoring document admission](verification/2026-08/2026-08-19T192016Z-epb-u3-indexed-authoring-document-admission-684770f357d14a0184e3cdbec4751355.md) - Verifies exact indexed Scene and Prefab admission, independent persistence lanes, and dirty replacement arbitration.
-- **Verification Evidence**: [EPB-U2 bounded Host project source index](verification/2026-08/2026-08-19T182322Z-epb-u2-bounded-host-project-source-index-9ac12073205d4064a4bc76729225caf8.md) - Verifies deterministic capability-bound source indexing, atomic last-good refresh, bounded lineage revalidation, and Runtime-closure isolation.
 
 # Integration Notes
 

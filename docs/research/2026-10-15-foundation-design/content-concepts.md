@@ -1,0 +1,72 @@
+# Persistent content and runtime concepts: a refactoring decision study
+
+Research date: 2026-10-15. Read-only source study; no builds, tests, or probes executed. Nara began at `b91223a`; concurrent work advanced HEAD to `757fb6a` while reading. Existing dirty work was preserved. Comparisons use local Bevy `4e6bd141e` (0.20 development) and Godot `d824ca9fe2` (4.8 development), not stable releases. Nara actually depends on Bevy 0.19 (`Cargo.toml:94-97`); upstream examples establish design alternatives, not drop-in compatibility. Source locations below are relative to the Nara repository root.
+
+The recommendation is to retain the content model and typed runtime while narrowing their connection: **atomic persistent-data publication, followed by domain-owned runtime reconciliation with explicit readiness and failure semantics**. Do not grow a universal transaction engine to make arbitrary native side effects reversible. A deep Module hides ordering, validation, identity resolution, and failure handling behind an understandable Interface; reducing implementation lines alone is not depth.
+
+## 1. Asset identity identifies content; artifact identity identifies a derivation
+
+**Evidence.** Nara already separates UUID `StableAssetId` from runtime `AssetId` (`crates/nara_asset/src/identity.rs:10,31`) and records source/settings/dependency hashes in `ImportArtifactKey` (`crates/nara_asset/src/artifact.rs:400`). However its database is one path/UUID map (`database.rs:238`), and startup loading decodes source PNGs directly (`src/project_content.rs:1445`). Godot maps resource UIDs to current paths (`repo-ref/godot/core/io/resource_uid.h:74-90`) and loads an imported physical path while retaining the original logical path (`core/io/resource_importer.cpp:171-196`). Bevy separately carries source, path, and optional label (`repo-ref/bevy/crates/bevy_asset/src/path.rs:57`); its runtime IDs can be indexed or UUID-based (`id.rs:23`).
+
+**Recommend.** Keep one stable logical asset identity, a locator resolved by the content source, an artifact derivation key, and process-local handles. Initially admit one principal runtime product per source asset; derive importer-private auxiliary products without promising their durable addressability. Introduce a stable local product key only when a real importer must expose independently referenced products. A cooked catalog is a later resolver implementation, not a second identity system.
+
+**Alternative/counterexample.** Path-only references are convenient but rename-sensitive; artifact hashes change after every reimport and cannot identify saved gameplay content. A universal compound-product graph now would freeze unused reconciliation policy.
+
+**Migration/deletion.** Preserve UUID metadata; resolve existing paths through metadata on load and report unresolved references. Retire redundant competing source-path authorities when introducing mounts; never silently rewrite immutable package IDs. Refine Accepted ADRs 0007/0037 and 0103; admit only a bounded successor to Proposed 0083/0087/0088. Verify rename, copy-as-new, duplicate mounted UUID rejection, and reimport with an unchanged logical asset ID.
+
+## 2. Authored entity, projected prefab entity, and saved entity need different scopes
+
+**Evidence.** Nara's document-local ID and persistent-runtime UUID reference are separate (`crates/nara_identity/src/types.rs:16,331-368`). Prefab lowering still concatenates `anchor/local` (`crates/nara_scene/src/prefab.rs:1448`); export flattens prefab information and may generate `entity_N` (`export.rs:367,402-434`). Godot's packed nodes explicitly encode parent, owner, instance, and index (`repo-ref/godot/scene/resources/packed_scene.h:60-80`), and packing filters through scene ownership (`packed_scene.cpp:873-889`). That is useful evidence for explicit scope, not a reason to adopt NodePath as permanent identity.
+
+**Recommend.** Keep opaque document-local IDs plus structured prefab provenance. A live lookup additionally needs an instance selection. A saved dynamic entity uses its existing persistent UUID; save-game links to authored objects need a declared persistent instance binding. Source identity alone cannot select one of two live prefab instances. Preserve an authored document as authority; runtime export is an explicit bake/convert operation, not a lossless authoring round trip or save format.
+
+**Alternative/counterexample.** Treating `anchor/local` as the durable key makes hierarchy edits identity changes. Giving every projection another global UUID invents lifecycle and remapping work without defining ownership.
+
+**Migration/deletion.** Migrate consumers from concatenated IDs to existing structured provenance; delete parsing/string-comparison selectors and select gameplay roles through components. Support one entity-bearing document per source initially instead of implementing every proposed product axis. Refine Accepted 0038/0058/0101; update 0006's transitional implementation description. Reuse the prior durable-identity audit as evidence, not authority. Verify two nested instances, source rename, instance duplication, and a save link resolving to exactly one restored instance.
+
+## 3. Freeze executable schema composition, not every future extension concept
+
+**Evidence.** Nara freezes a validated registry snapshot (`crates/nara_reflect/src/registry.rs:805`), migrates registered values (`:1428`), and separates owner lineage from provider/binding identities (`provider.rs:17-35`). Bevy's reflected registry instead indexes native TypeId/type paths and permits registration/overwrite (`repo-ref/bevy/crates/bevy_reflect/src/type_registry.rs:32,202,273`). The latter is useful runtime metadata but does not supply Nara's durable field IDs or migrations.
+
+**Recommend.** Preserve stable schema/field IDs, explicit ownership, owner-local versions, tombstones, migration functions, and immutable native bindings for a running executable generation. Present authors with one typed schema registration through their Rust plugin; keep receipts, fingerprints, provider validation, and cross-owner collision work private to composition. A missing owner is not a deletion. Do not promote provider IDs into installation/package IDs.
+
+**Alternative/counterexample.** Replacing durable schema identity with Rust type paths breaks refactoring compatibility. Conversely, requiring every small plugin author to supply an ecosystem lineage protocol makes the Interface nearly as complicated as its implementation.
+
+**Migration/deletion.** Collapse duplicate author-facing registration authorities through `SchemaContribution` (`src/product.rs:138-197`), retaining existing private proofs where they earn their keep. Do not remove owner-local omission semantics. Refine Accepted 0011/0081/0098 only where the author Interface changes; arbitrary historical catalog support remains unpromised. Verify native type rename with unchanged durable IDs, omitted/re-enabled owner, missing migration, and cross-owner ID collision through ordinary plugin composition.
+
+## 4. Choose the persistence/runtime connection explicitly
+
+**Evidence.** Nara rejects persistent required components, lifecycle hooks, and observers (`crates/nara_reflect/src/persistent_apply.rs:69-106`), checks before scene mutation (`crates/nara_scene/src/spawn.rs:402`), and guards despawn too (`crates/nara_ecs/src/transaction.rs:45`). This is a consequence of its rollback contract. Upstream Bevy's audio player requires settings (`repo-ref/bevy/crates/bevy_audio/src/audio.rs:247-253`) and a later system creates sinks (`audio_output.rs:84-117`). Godot physics attaches/detaches bodies on tree entry/exit (`repo-ref/godot/scene/2d/physics/collision_object_2d.cpp:37-106`); audio starts autoplay on entry (`scene/audio/audio_stream_player_internal.cpp:99-121`).
+
+| Design | Interface and errors | Physics/audio cost |
+| --- | --- | --- |
+| A: persistent configuration plus reconciliation | Validate/migrate pure data, publish a revision, then reconcile runtime objects at documented phases; report committed-data revision separately from runtime readiness | Persistent collider/emitter settings produce transient bodies/sinks. Runtime plugins retain native lifecycle behavior; reconciliation owns creation, update, and cleanup |
+| B: arbitrary ECS apply with full rollback | Every native insertion/removal must be reversible or forbidden; failure promises the previous World and external effects remain intact | Hook-based plugins need adapters or extensive restrictions; played sound cannot be unplayed, external physics/service mutations require owner-specific compensations |
+
+**Recommend A.** Plain persistent components may also be directly useful runtime data; do not duplicate all values. Separate configurations only where native ownership or side effects require it. Authoring publication failure preserves the prior document. Reconciliation failure reports degraded/unavailable runtime state and offers retry/reconstruction; it must not claim old gameplay is intact after effects occurred. Strict old-or-new native activation is admitted only for a concrete domain with a real preparation/activation protocol.
+
+**Alternative/counterexample.** B is legitimate for the existing narrow lifecycle-free data path, but cannot be expanded to arbitrary third-party effects by adding more metadata checks. Bevy's developmental scene spawn only despawns the intermediate entity on failure (`bevy_scene/src/resolved_scene.rs:47-59`); it is not evidence of universal rollback either.
+
+**Migration.** Revise Accepted 0006/0081 persistent-binding rules, 0027, and relevant 0100/0101 retirement contracts before implementation. Keep old strict guards until consumers migrate; replace them at the owning scene/reconciliation seam, not by bypassing checks. Collider edits and audio autoplay are future adapter counterexamples, not a requirement to build those subsystems during this refactor.
+
+**Bounded first validation.** The existing Image → prepared asset → WGPU consumer plus a small hook-owning runtime fixture is sufficient to establish this seam. The fixture must use an ordinary system to read committed configuration and insert runtime state with RequiredComponents/on_add behavior; Image derivation alone does not establish entity lifecycle. Cover replacement/removal and cleanup as well as insertion, including the retirement guards in `crates/nara_ecs/src/transaction.rs`. Inject creation failure and expose revision-bound readiness, then verify retry/reconstruction. The image trajectory must publish B, fail the next attempt before Prepare, and still derive B through `crates/nara_image/src/{prepare,reload}.rs` and `crates/nara_render_wgpu/src/texture.rs`. No full audio/physics SDK, universal Hydrator, or generic rollback protocol is needed for this first decision.
+
+## 5. Published value and latest attempt are different facts
+
+**Evidence.** Nara retains CPU image data after reload failure (`crates/nara_asset/src/storage.rs:169`), but preparation requires `LoadState::Loaded` (`crates/nara_image/src/prepare.rs:195-202`). Existing audit F03 executed a probe where retained CPU pixels never acquired a prepared resource. This study did not rerun that probe. Bevy keeps load-state metadata (`repo-ref/bevy/crates/bevy_asset/src/server/info.rs:29`) separate from typed values (`assets.rs:288`); audio consumption reads actual asset availability (`repo-ref/bevy/crates/bevy_audio/src/audio_output.rs:111`).
+
+**Recommend.** A resource Module exposes usable published value/revision independently from latest attempt, desired recipe, and diagnostic. Preparation consumes the published revision; only removal, identity invalidation, or successful replacement changes that derivation. Candidate preparation/publish ordering belongs inside the owning Module, not in every renderer/UI caller.
+
+**Alternative/counterexample.** One `Loaded/Failed` enum cannot express “B remains usable while attempt C failed.” More generation receipts do not repair this missing state dimension.
+
+**Migration/deletion.** Separate these facts in existing storage/state owners; delete downstream attempt-state gates and competing freshness interpretations. Refine Accepted 0033/0037/0115. Verify publish B, fail C before Prepare, derive B, then remove; also verify metadata identity drift invalidates rather than displays unsafe stale content.
+
+## 6. Three extension concepts are sufficient; distribution can remain separate
+
+**Evidence.** Nara Rust plugins are trusted native composition (`crates/nara_app/src/plugin.rs:345`), while command ingress already bounds payload/tick/queue behavior (`crates/nara_gameplay/src/queue.rs:395`). Bevy distinguishes named asset sources (`repo-ref/bevy/crates/bevy_asset/src/io/source.rs:18-29`) from native reflection/registration. Neither mechanism implies one universal executable package contract.
+
+**Recommend.** Use **Rust plugin** for compiled systems/domain integration; **content pack** for validated definitions/assets and explicit overrides; **optional Lua adapter** for restricted player script modules. Lua owns VM scheduling, permissions, error policy, and explicit state; reuse domain commands after adapter authorization, not a universal language-neutral behavior bridge. Keep game saves as game-owned versioned projections initially, without adding a speculative universal SaveCapability.
+
+**Alternative/counterexample.** A marketplace-ready Package/Contribution/isolated-host architecture before these consumers exist adds installation cohorts, privileges, transport, and UI protocols to every extension. Cargo remains sufficient for native source distribution; a local resolved content-pack list is sufficient for the first player-mod workflow.
+
+**Migration/deletion.** Preserve Accepted 0093 and 0046 distinctions; narrow adapters and content resolution under 0020/0095 when admitted. The old `docs/plans/2026-07-20-001-feat-package-extension-product-contract-plan.md:1-29` is requirements-only and explicitly not implementation authority. Its recorded product aspirations, including isolated Editor hosts, must not be silently deleted or treated as current permission: reconcile their future scope in planning, keep them inactive, and introduce no Package kernel now. Verify one content override conflict, missing required pack, one Lua interaction, and the same Rust plugin in headless/desktop composition. Native plugin unload remains restart-based.

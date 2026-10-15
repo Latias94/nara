@@ -162,3 +162,4 @@ See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.m
 - [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md): Standalone Generic Editor Authoring and Execution Boundary
 - [ADR 0115](0115-editor-image-import-metadata-and-authoring-publication.md): Editor Image Import Metadata and Authoring Publication
 - [ADR 0116](0116-standalone-supervised-editor-play.md): Standalone Supervised Editor Play
+- [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md): 2D Foundation Ownership and Authoring Contracts

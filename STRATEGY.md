@@ -1,6 +1,6 @@
 ---
 name: Nara
-last_updated: 2026-07-12
+last_updated: 2026-10-15
 ---
 
 # Nara Strategy
@@ -49,9 +49,11 @@ workflows; Nara is not limited to teams in which every contributor is a programm
 
 ### Reference-game proof
 
-Build and release one open-source Brotato-like game as Nara's cross-cutting
-production fixture and source of measured evidence. Steam publication is not part
-of this proof.
+Use a small general-purpose 2D consumer as Nara's cross-cutting production fixture
+and source of measured evidence. Existing genre examples are lightweight consumers,
+not requirements for the core. Desktop design targets Windows, Linux, and macOS;
+each release claim needs its native platform evidence. Steam publication is outside
+this proof.
 
 _Why it serves the approach:_ It prevents architecture completeness from becoming
 a substitute for a finished game.

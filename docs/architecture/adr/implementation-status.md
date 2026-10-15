@@ -1,11 +1,17 @@
 # ADR Implementation Status
 
 **Status**: Active
-**Last Verified**: 2026-08-21 @ SPL-U2 bounded build and generation verification `ab211bc` / record `e0c5ea801f5e432484dfc710ae3ce00b`
+**Last Verified Implementation**: 2026-08-21 @ SPL-U2 bounded build and generation verification `ab211bc` / record `e0c5ea801f5e432484dfc710ae3ce00b`
 
-This ledger tracks implementation evidence independently from ADR decision acceptance. The completed
+This ledger tracks implementation evidence independently from ADR decision acceptance. The active
+[2D foundation refactor](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
+is the sole implementation lane under registration `63e79d44bfd84519a1f9a5ce17000c06`. U1 accepts
+[ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) and transfers unfinished SPL work
+into foundation U12; no new runtime implementation evidence is claimed by that handoff.
+The preceding
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
-successor is the sole active lane under registration `079f447a577b42929a258328ab95b1fe`.
+lane closes by transfer under record `d7cca2f42c6d4e07b762475aced7eb44`, preserving its last verified
+registration `079f447a577b42929a258328ab95b1fe` and existing uncommitted work.
 SPL-U0 accepts ADR 0116 and narrows OQ-039 to one local external-window desktop placement. Its
 manifest, source-receipt, launch-context, and value-only admission contract gates pass at `90d7545`.
 SPL-U1 adds the private Windows process-tree owner, supported Linux x86_64 process-group adapter,

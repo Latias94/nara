@@ -2,7 +2,12 @@
 
 **Status**: Accepted; implementation varies by ADR
 **Created**: 2026-07-08
-**Scope**: Phase 1 runtime foundation with seams for Phase 2 tooling and Phase 3 editor.
+**Scope**: General-purpose 2D runtime, content, tooling, and editor boundaries.
+
+[ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) refines the affected
+execution, persistence, identity, 2D ordering, view, and authoring contracts. The first implementation
+profile is desktop-first and toolkit-neutral; the contract refactor does not imply all deferred domains
+or platform release evidence are complete.
 
 ## Problem
 
