@@ -11,6 +11,11 @@ into foundation U12; no new runtime implementation evidence is claimed by that h
 U2 now fixes structural baseline/lifetime invalidation at `722ff27` (149 library and 23 root
 integration/privacy tests). U3 separates usable resource publication from attempts, including
 identity revocation/recovery (128 resource/image tests and a native Windows WGPU product trajectory).
+U4's capability-instance preflight and retained temporary cleanup are implemented in the worktree
+and verified by record `4f79a46cf5c4455a8700d9090c13e386` (59 Windows and 57 native Linux filesystem
+tests, focused Host ownership tests, and both real CLI failure exits). Overlapping pre-existing SPL
+filesystem/tooling edits remain uncommitted. U5 has moved execution into the same RuntimeOwner and
+is migrating consumers/removing raw App execution; its whole-consumer validation is still in progress.
 These focused results do not mark the remaining foundation or supervised-Play units complete.
 The preceding
 [Standalone Supervised Play v1](../../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
