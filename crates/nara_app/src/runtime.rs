@@ -3669,7 +3669,7 @@ mod tests {
             .unwrap();
         let mut app = App::new();
         app.world_mut().unwrap().add_observer(
-            |_: On<nara_ecs::lifecycle::Add, nara_ecs::observer::Observer>| {
+            |_: On<nara_ecs::lifecycle::Add<nara_ecs::observer::Observer>>| {
                 panic!("injected pending observer initialization panic");
             },
         );

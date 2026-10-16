@@ -693,7 +693,7 @@ mod tests {
         );
 
         let mut observed = World::new();
-        observed.add_observer(|_: On<Add, Plain>| {});
+        observed.add_observer(|_: On<Add<Plain>>| {});
         observed.flush();
         let component_id = observed.component_id::<Plain>().unwrap();
         assert_eq!(
@@ -717,7 +717,7 @@ mod tests {
     fn apply_probe_covers_every_lifecycle_event_and_observer_scope() {
         let mut event_global = World::new();
         event_global.register_component::<Plain>();
-        event_global.add_observer(|_: On<Add>| {});
+        event_global.add_observer(|_: On<Add<()>>| {});
         event_global.flush();
         assert_eq!(
             validate_persistent_component_apply(
@@ -732,7 +732,7 @@ mod tests {
         );
 
         let mut component_global = World::new();
-        component_global.add_observer(|_: On<Insert, Plain>| {});
+        component_global.add_observer(|_: On<Insert<Plain>>| {});
         component_global.flush();
         assert_eq!(
             validate_persistent_component_apply(
@@ -748,7 +748,7 @@ mod tests {
 
         let mut entity = World::new();
         let target = entity.spawn_empty().id();
-        entity.entity_mut(target).observe(|_: On<Discard>| {});
+        entity.entity_mut(target).observe(|_: On<Discard<()>>| {});
         entity.flush();
         let component_id = entity.register_component::<Plain>();
         assert_eq!(
@@ -763,7 +763,7 @@ mod tests {
         let target = entity_component.spawn_empty().id();
         entity_component
             .entity_mut(target)
-            .observe(|_: On<Remove, Plain>| {});
+            .observe(|_: On<Remove<Plain>>| {});
         entity_component.flush();
         assert_eq!(
             validate_persistent_component_apply(
@@ -778,7 +778,7 @@ mod tests {
         );
 
         let mut despawn = World::new();
-        despawn.add_observer(|_: On<Despawn, Plain>| {});
+        despawn.add_observer(|_: On<Despawn<Plain>>| {});
         despawn.flush();
         assert_eq!(
             validate_persistent_component_apply(
@@ -807,7 +807,7 @@ mod tests {
         );
 
         let mut observed_resource = World::new();
-        observed_resource.add_observer(|_: On<Add, PlainResource>| {});
+        observed_resource.add_observer(|_: On<Add<PlainResource>>| {});
         observed_resource.flush();
         assert_eq!(
             validate_resource_insertion::<PlainResource>(&observed_resource),
@@ -819,7 +819,7 @@ mod tests {
 
         let mut observed_marker = World::new();
         observed_marker.register_component::<PlainResource>();
-        observed_marker.add_observer(|_: On<Add, IsResource>| {});
+        observed_marker.add_observer(|_: On<Add<IsResource>>| {});
         observed_marker.flush();
         assert_eq!(
             validate_resource_insertion::<PlainResource>(&observed_marker),
@@ -835,7 +835,7 @@ mod tests {
         let resource_entity = scoped.resource_entities().get(resource_id).unwrap();
         scoped
             .entity_mut(resource_entity)
-            .observe(|_: On<Remove, PlainResource>| {});
+            .observe(|_: On<Remove<PlainResource>>| {});
         scoped.flush();
         assert_eq!(
             validate_resource_scope::<PlainResource>(&scoped),
@@ -859,7 +859,7 @@ mod tests {
         let mut observed = World::new();
         let parent = observed.spawn_empty().id();
         let child = observed.spawn_empty().id();
-        observed.add_observer(|_: On<Add, TestParent>| {});
+        observed.add_observer(|_: On<Add<TestParent>>| {});
         observed.flush();
         assert_eq!(
             validate_non_linked_relationship_insertion::<TestParent>(

@@ -58,3 +58,21 @@ Winit 0.31 beta changes input/window/event-loop APIs. It is not compatible with 
 ## Implementation boundary
 
 Add one dependency-baseline unit before new editor acceptance: apply WGPU fixes; migrate the selected Bevy cohort and resolve the math-feature decision; patch the still-live egui adapter; preserve Winit 0.30.13; then build the Dear ImGui probe on those resolved versions. Verify macro fixtures, lifecycle/transaction behavior, document undo/save/reopen, native first-present and shutdown, plus the declared MSRV. Record the exact lockfile and platform results. An upgrade is complete when those workflows pass, not when version numbers change.
+
+## U9 selected implementation cohort
+
+The sections above preserve the pre-migration research baseline. U9 selects the following resolved graph; verification belongs in the implementation ledger and engineering evidence.
+
+| Boundary | Selected resolution | Reason |
+| --- | --- | --- |
+| Nara compiler minimum | Rust 1.95 | The standalone Bevy ECS/reflection graph supports this minimum; no top-level Bevy dependency is added |
+| Bevy ECS, reflection and macro family | 0.20.0 | Migrate the lifecycle and derive substrate together before changing editor contracts |
+| Public Nara math and Bevy reflection math | glam 0.33.12 | Public Vec2/Vec3/Mat3 must participate in the enabled reflection contract; a real reflected-struct round-trip covers the boundary |
+| Retained egui family | 0.36.2 | Take the maintenance fix while the replacement gate remains pending; avoid a second breaking widget migration |
+| WGPU / WGPU HAL | 30.0.1 / 30.0.1 | Apply both the public patch and the implementation package containing the native platform repairs |
+| Winit | 0.30.13 | Retain the stable route shared by the current editor and researched Dear ImGui backend |
+
+All six WGPU-bearing project locks include HAL 30.0.1. Other WGPU subpackages follow ordinary compatible resolution rather than a synthetic equal-patch rule.
+The two presentation fixture locks required updating the coupled wasm-bindgen/js-sys/web-sys/futures packages together; this is dependency resolution, not a Web support claim.
+The startup Scene source uses a handwritten SystemParam, whose access registration now delegates through SystemAccess; it does not implement a handwritten System.
+No ComponentInfo::id migration or macro-logic wrapper was needed in Nara's callers.

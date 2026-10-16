@@ -30,7 +30,10 @@ an index, not another source of architecture decisions.
    The new [Editor Foundation and Frontends](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md)
    plan carries the editor/module successor under [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md).
    Its planning delivery is not implementation evidence or unconditional Dear ImGui adoption.
-   No implementation successor is active automatically. Remaining native platform limitations are recorded in the implementation ledger.
+   The user explicitly activated implementation under registration `81c99dbe5a5c4741b7021d932ab0c350`, beginning at U9 dependency migration.
+   [U9 verification](../knowledge/engineering/verification/2026-10/2026-10-16T055947Z-editor-u9-dependency-cohort-passes-minimum-compiler-and-native-editor-verification-447cd6ed651b44cc965962198ec34bce.md)
+   establishes the migrated dependency cohort, Rust 1.95 graph and current Windows Editor baseline; U1-U8 remain pending.
+   Remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
    Its last predecessor boundary remains registered by

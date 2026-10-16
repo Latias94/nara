@@ -77,7 +77,9 @@ impl Display for ExternalRunnerError {
             Self::Authority(error) => write!(formatter, "project authority failed: {error}"),
             Self::Recipe(error) => write!(formatter, "product recipe failed: {error}"),
             Self::Run(error) => write!(formatter, "headless product run failed: {error}"),
-            Self::UnexpectedOutcome => formatter.write_str("headless product returned an unexpected outcome"),
+            Self::UnexpectedOutcome => {
+                formatter.write_str("headless product returned an unexpected outcome")
+            }
         }
     }
 }
@@ -173,19 +175,20 @@ pub fn run() -> Result<ExternalRunOutcome, ExternalRunnerError> {
 
     for _ in 0..8 {
         let report = product.execute_bounded();
-        match report.into_outcome() {
+        match report.outcome() {
             HeadlessRunOutcome::Completed(outcome) => {
-                if outcome.ticks == 1
-                    && outcome.configuration == 42
-                    && outcome.runtime_plugin_seen
+                if outcome.ticks == 1 && outcome.configuration == 42 && outcome.runtime_plugin_seen
                 {
-                    return Ok(outcome);
+                    return Ok(outcome.clone());
                 }
                 return Err(ExternalRunnerError::UnexpectedOutcome);
             }
             HeadlessRunOutcome::CleanupIncomplete => std::thread::yield_now(),
             HeadlessRunOutcome::Failed => {
-                return Err(ExternalRunnerError::Run("product action failed".to_owned()));
+                return Err(ExternalRunnerError::Run(format!(
+                    "product action failed: {:?}",
+                    report.diagnostics()
+                )));
             }
         }
     }

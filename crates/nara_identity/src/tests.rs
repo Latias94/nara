@@ -1024,7 +1024,7 @@ fn atomic_scene_replacement_rejects_old_entity_observer_before_publication() {
     let old_reference = current.runtime_reference(&entity_id).unwrap();
     let before = world.resource::<WorldIdentityDomain>().stats();
     world.spawn(
-        Observer::new(|_: On<Despawn>, mut runs: ResMut<RetirementObserverRuns>| runs.0 += 1)
+        Observer::new(|_: On<Despawn<()>>, mut runs: ResMut<RetirementObserverRuns>| runs.0 += 1)
             .with_entity(old_token.entity()),
     );
 

@@ -21,10 +21,10 @@ use nara_ecs::{
     change_detection::Tick,
     component::ComponentId,
     error::BevyError,
-    query::FilteredAccessSet,
     schedule::IntoScheduleConfigs,
     system::{
-        ReadOnlySystemParam, ScheduleSystem, SystemMeta, SystemParam, SystemParamValidationError,
+        ReadOnlySystemParam, ScheduleSystem, SystemAccess, SystemMeta, SystemParam,
+        SystemParamValidationError,
     },
     world::unsafe_world_cell::UnsafeWorldCell,
 };
@@ -343,13 +343,13 @@ unsafe impl SystemParam for StartupSceneActivation<'_> {
     fn init_access(
         state: &Self::State,
         system_meta: &mut SystemMeta,
-        component_access_set: &mut FilteredAccessSet,
+        system_access: &mut SystemAccess,
         world: &mut World,
     ) {
         <Res<'_, StartupSceneActivationOwner> as SystemParam>::init_access(
             state,
             system_meta,
-            component_access_set,
+            system_access,
             world,
         );
     }

@@ -947,7 +947,7 @@ mod persistent_apply_contract_tests {
         let target = world.spawn_empty().id();
         let receipt_component = world.register_component::<PersistentApplyReceipts>();
         world.spawn(
-            Observer::new(|_: On<Add>, mut canary: ResMut<SupportCanary>| canary.0 += 1)
+            Observer::new(|_: On<Add<()>>, mut canary: ResMut<SupportCanary>| canary.0 += 1)
                 .with_entity(target)
                 .with_component(receipt_component),
         );
@@ -975,7 +975,7 @@ mod persistent_apply_contract_tests {
         let target = world.spawn_empty().id();
         let binding_component = world.register_component::<PersistentWorldBindings>();
         world.spawn(
-            Observer::new(|_: On<Add>| {
+            Observer::new(|_: On<Add<()>>| {
                 SUPPORT_OBSERVER_RUNS.fetch_add(1, Ordering::Relaxed);
             })
             .with_component(binding_component),
@@ -1161,7 +1161,7 @@ mod persistent_apply_contract_tests {
             .apply(&mut world, target)
             .unwrap();
         world.add_observer(
-            |_: On<Discard, ReplaceProbe>, mut canary: ResMut<SupportCanary>| canary.0 += 1,
+            |_: On<Discard<ReplaceProbe>>, mut canary: ResMut<SupportCanary>| canary.0 += 1,
         );
         world.flush();
 
@@ -1192,7 +1192,7 @@ mod persistent_apply_contract_tests {
         let receipt_component = world.component_id::<PersistentApplyReceipts>().unwrap();
         world.spawn(
             Observer::new(
-                |_: On<nara_ecs::lifecycle::Despawn>, mut canary: ResMut<SupportCanary>| {
+                |_: On<nara_ecs::lifecycle::Despawn<()>>, mut canary: ResMut<SupportCanary>| {
                     canary.0 += 1;
                 },
             )
@@ -1221,7 +1221,7 @@ mod persistent_apply_contract_tests {
         let mut world = World::new();
         world.init_resource::<SupportCanary>();
         world.add_observer(
-            |_: On<Add, AssetServer>, mut canary: ResMut<SupportCanary>| canary.0 += 1,
+            |_: On<Add<AssetServer>>, mut canary: ResMut<SupportCanary>| canary.0 += 1,
         );
         world.flush();
         let target = world.spawn_empty().id();

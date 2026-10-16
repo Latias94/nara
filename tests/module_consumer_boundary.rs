@@ -90,7 +90,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
     );
     assert_eq!(
         manifest["dev-dependencies"]["bevy_ecs"].as_str(),
-        Some("0.19")
+        Some("0.20")
     );
 
     let filesystem_source = fs::read_to_string(consumer.join("fs-consumer/Cargo.toml"))

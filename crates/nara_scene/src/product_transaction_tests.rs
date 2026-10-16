@@ -490,7 +490,7 @@ fn overlay_lifecycle_rejection_rolls_back_scratch_and_resource_replacement() {
     fixture.world.init_resource::<LifecycleCanary>();
     fixture.world.register_component::<RuntimeValue>();
     fixture.world.add_observer(
-        |_: On<Add, RuntimeValue>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
+        |_: On<Add<RuntimeValue>>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
     );
     fixture.world.flush();
     let before_entities = fixture.entity_ids();
@@ -600,7 +600,7 @@ impl OverlayLifecycleRejectionPort {
         world.init_resource::<LifecycleCanary>();
         world.register_component::<RuntimeValue>();
         world.add_observer(
-            |_: On<Add, RuntimeValue>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
+            |_: On<Add<RuntimeValue>>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1,
         );
         world.flush();
         Ok(replace_scene_with_product(
@@ -790,7 +790,7 @@ fn additional_retirement_rejects_missing_persistent_and_lifecycle_ownership() {
     fixture.world.init_resource::<LifecycleCanary>();
     let lifecycle = spawn_retirement_token(&mut fixture.world);
     fixture.world.spawn(
-        Observer::new(|_: On<Despawn>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1)
+        Observer::new(|_: On<Despawn<()>>, mut canary: ResMut<LifecycleCanary>| canary.0 += 1)
             .with_entity(lifecycle.entity()),
     );
     fixture.world.flush();

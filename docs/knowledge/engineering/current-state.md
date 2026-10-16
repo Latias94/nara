@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "d81bb69ed6160f491cb2836875660b19ab5b216fd1a0dfeb161e2e9943d33138"
+source_fingerprint: "abad9339246cd8c7639ccbae0254a0498be3bd873c03ff8f3e2bcc47ba0ff8ff"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "d81bb69ed6160f491cb2836875660b19ab5b216fd1a0dfeb161e2e9943d
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `d81bb69ed6160f491cb2836875660b19ab5b216fd1a0dfeb161e2e9943d33138`
-- Immutable records: 630
-- Active lane heads: 0
+- Source fingerprint: `abad9339246cd8c7639ccbae0254a0498be3bd873c03ff8f3e2bcc47ba0ff8ff`
+- Immutable records: 633
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -31,6 +31,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
+- [Editor foundation implementation starts at dependency cohort](registry/2026-10/2026-10-16T045001Z-nara-editor-foundation-implementation-codex-root-81c99dbe5a5c4741b7021d932ab0c350.md): `active` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -44,6 +45,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Editor U9 dependency cohort passes minimum compiler and native editor verification](verification/2026-10/2026-10-16T055947Z-editor-u9-dependency-cohort-passes-minimum-compiler-and-native-editor-verification-447cd6ed651b44cc965962198ec34bce.md) - Bevy 0.20, glam 0.33 and WGPU/HAL 30.0.1 validated with focused transactions, external consumers, Rust 1.95 and Windows native Editor.
+- **Work Progress**: [Editor U9 dependency migration reaches compiled and semantic checkpoints](progress/2026-10/2026-10-16T051204Z-editor-u9-dependency-migration-reaches-compiled-and-semantic-checkpoints-aed57c4312214365a9e9651468ee5724.md) - Goal active; U9 code and lock migrations are uncommitted, 134 substrate and 336 domain tests plus full workspace check pass; root runtime tests still compiling.
 - **Verification Evidence**: [Custom scalar authoring closes with clean committed-source Editor and strict gameplay](verification/2026-10/2026-10-16T040828Z-custom-scalar-authoring-closes-with-clean-committed-source-editor-and-strict-gameplay-27663c95797a48c58c16188165a86f97.md) - R1-R5 and U1-U4 accepted through finite scalar contracts, exact data authoring, completed review and an external consumer of committed source.
 - **Subagent Finding**: [Custom component authoring plan review completes with six lenses](subagents/2026-10/2026-10-16T033000Z-custom-component-authoring-plan-review-completes-with-six-lenses-f408016c706f46d9b0855ea906e87c85.md) - Six completed Codex document review lenses report zero findings; finite data authoring clarification preserves R1-R5.
 - **Work Progress**: [First author workflow implementation and committed acceptance complete](progress/2026-10/2026-10-16T025216Z-first-author-workflow-implementation-and-committed-acceptance-complete-938d0131afec43d8b04a1210700ba21a.md) - Work Progress for First author workflow implementation and committed acceptance complete.
@@ -54,8 +57,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation implementation is fully committed after final workspace check](verification/2026-10/2026-10-16T011247Z-foundation-implementation-is-fully-committed-after-final-workspace-check-a95bf9b605bb4510b9865799c2346991.md) - Verification Evidence for Foundation implementation is fully committed after final workspace check.
 - **Work Progress**: [Foundation U1-U13 implementation and full review are complete in the integrated worktree](progress/2026-10/2026-10-15T202259Z-foundation-u1-u13-implementation-and-full-review-are-complete-in-the-integrated-worktree-d237cddc6a5444559bb013eac57c4fe5.md) - Work Progress for Foundation U1-U13 implementation and full review are complete in the integrated worktree.
 - **Verification Evidence**: [Foundation U1-U13 acceptance closes with actual consumers and completed full review](verification/2026-10/2026-10-15T202228Z-foundation-u1-u13-acceptance-closes-with-actual-consumers-and-completed-full-review-b09676d3fa354aa899a795a5dfe9d2ba.md) - Verification Evidence for Foundation U1-U13 acceptance closes with actual consumers and completed full review.
-- **Subagent Finding**: [Full foundation review completes with resolved display coverage and explicit platform limits](subagents/2026-10/2026-10-15T202150Z-full-foundation-review-completes-with-resolved-display-coverage-and-explicit-platform-limits-2f0fee3044664b538a2590f95e61131a.md) - Subagent Finding for Full foundation review completes with resolved display coverage and explicit platform limits.
-- **Work Progress**: [Foundation workflows and final static gates pass with full review in progress](progress/2026-10/2026-10-15T200426Z-foundation-workflows-and-final-static-gates-pass-with-full-review-in-progress-28848ee3f899494dbd153def40469040.md) - Work Progress for Foundation workflows and final static gates pass with full review in progress.
 
 # Integration Notes
 

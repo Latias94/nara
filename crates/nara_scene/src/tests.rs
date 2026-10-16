@@ -1754,7 +1754,7 @@ fn component_observer_rejects_fresh_scene_before_target_allocation() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
-        |_: On<Add, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Add<TestPosition>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -1841,9 +1841,9 @@ fn hierarchy_observer_rejects_publication_before_candidate_mutation() {
     );
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    world.add_observer(|_: On<Add, Parent>, mut commands: Commands| {
+    world.add_observer(|_: On<Add<Parent>>, mut commands: Commands| {
         commands.add_observer(
-            |_: On<Add, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+            |_: On<Add<TestPosition>>, mut canary: ResMut<PersistentApplyCanary>| {
                 canary.0 += 1;
             },
         );
@@ -1988,7 +1988,7 @@ fn asset_server_observer_rejects_scene_before_target_allocation() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
-        |_: On<Add, AssetServer>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
+        |_: On<Add<AssetServer>>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
     );
     world.flush();
     let baseline = world
@@ -2027,7 +2027,7 @@ fn deferred_asset_prepare_declares_resource_access_before_target_allocation() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
-        |_: On<Add, AssetServer>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
+        |_: On<Add<AssetServer>>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
     );
     world.flush();
     let baseline = world
@@ -2069,7 +2069,7 @@ fn identity_resource_scope_observer_rejects_scene_before_target_allocation() {
     let first = spawn_scene(&mut world, &registry, &first_document);
     assert!(!first.diagnostics.has_errors());
     world.add_observer(
-        |_: On<Remove, WorldIdentityDomain>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<WorldIdentityDomain>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -2335,7 +2335,7 @@ fn empty_persistent_set_rejects_event_global_observer_before_target_allocation()
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("empty"))]);
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
-    world.add_observer(|_: On<Add>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1);
+    world.add_observer(|_: On<Add<()>>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1);
     world.flush();
     world.resource_mut::<PersistentApplyCanary>().0 = 0;
     let baseline = world
@@ -2619,9 +2619,11 @@ fn runtime_component_despawn_observer_rejects_scene_replacement_atomically() {
         .component_id::<RuntimeRetirementProbe>()
         .expect("the runtime retirement component should be registered");
     world.spawn(
-        Observer::new(|_: On<Despawn>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1)
-            .with_entity(old_entity)
-            .with_component(runtime_component),
+        Observer::new(
+            |_: On<Despawn<()>>, mut canary: ResMut<PersistentApplyCanary>| canary.0 += 1,
+        )
+        .with_entity(old_entity)
+        .with_component(runtime_component),
     );
     world.flush();
     let baseline_entities = world
@@ -2682,7 +2684,7 @@ fn hierarchy_remove_observer_rejects_scene_replacement_before_detach() {
     let current = spawned_instance(&first).clone();
     let old_child = spawned_entity(&world, &first, &child_id);
     world.entity_mut(old_child).observe(
-        |_: On<Remove, Parent>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<Parent>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -2730,7 +2732,7 @@ fn children_add_observer_rejects_fresh_scene_publication() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
-        |_: On<Add, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Add<Children>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -2759,7 +2761,7 @@ fn children_add_observer_does_not_reject_a_flat_scene() {
     let mut world = World::new();
     world.init_resource::<PersistentApplyCanary>();
     world.add_observer(
-        |_: On<Add, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Add<Children>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -2950,7 +2952,7 @@ fn children_remove_observer_rejects_scene_replacement_before_detach() {
     let old_root = spawned_entity(&world, &first, &root_id);
     let old_child = spawned_entity(&world, &first, &child_id);
     world.entity_mut(old_root).observe(
-        |_: On<Remove, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<Children>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -3016,7 +3018,7 @@ fn children_remove_observer_rejects_authoring_unload_before_detach() {
         lookup => panic!("authoring child did not resolve: {lookup:?}"),
     };
     world.entity_mut(root).observe(
-        |_: On<Remove, Children>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<Children>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -3088,7 +3090,7 @@ fn replacement_relationship_rejection_precedes_asset_and_binding_publication() {
     let old_root = spawned_entity(&world, &first, &root_id);
     let old_child = spawned_entity(&world, &first, &child_id);
     world.entity_mut(old_child).observe(
-        |_: On<Remove, Parent>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<Parent>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -3162,7 +3164,7 @@ fn entity_component_observer_rejects_authoring_replacement_before_retirement() {
         lookup => panic!("first authoring instance did not resolve: {lookup:?}"),
     };
     world.entity_mut(first_entity).observe(
-        |_: On<Remove, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<TestPosition>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );
@@ -3237,7 +3239,7 @@ fn entity_component_observer_rejects_authoring_clear_before_retirement() {
         lookup => panic!("authoring instance did not resolve: {lookup:?}"),
     };
     world.entity_mut(entity).observe(
-        |_: On<Remove, TestPosition>, mut canary: ResMut<PersistentApplyCanary>| {
+        |_: On<Remove<TestPosition>>, mut canary: ResMut<PersistentApplyCanary>| {
             canary.0 += 1;
         },
     );

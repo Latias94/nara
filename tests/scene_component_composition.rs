@@ -371,7 +371,7 @@ fn post_publication_runtime_observer_runs_but_blocks_the_next_persistent_apply()
     let entity = resolved_entity(&world, &report, &id);
 
     world.entity_mut(entity).observe(
-        |_: On<Remove, CompositionProbe>, mut canary: ResMut<HookCanary>| {
+        |_: On<Remove<CompositionProbe>>, mut canary: ResMut<HookCanary>| {
             canary.0 += 1;
         },
     );
@@ -413,7 +413,7 @@ fn component_global_observer_rejects_a_fresh_scene_without_running() {
     let mut world = World::new();
     world.init_resource::<HookCanary>();
     world.add_observer(
-        |_: On<Add, CompositionProbe>, mut canary: ResMut<HookCanary>| {
+        |_: On<Add<CompositionProbe>>, mut canary: ResMut<HookCanary>| {
             canary.0 += 1;
         },
     );
@@ -449,7 +449,7 @@ fn identity_resource_observer_rejects_before_scene_allocation() {
     let mut world = World::new();
     world.init_resource::<HookCanary>();
     world.add_observer(
-        |_: On<Add, WorldIdentityDomain>, mut canary: ResMut<HookCanary>| {
+        |_: On<Add<WorldIdentityDomain>>, mut canary: ResMut<HookCanary>| {
             canary.0 += 1;
         },
     );

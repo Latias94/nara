@@ -805,7 +805,7 @@ fn entity_component_observer_rejects_existing_target_before_component_mutation()
     world.init_resource::<ObserverCanary>();
     let entity = world.spawn_empty().id();
     world.entity_mut(entity).observe(
-        |_: On<Add, ApplyProbe>, mut canary: nara_ecs::system::ResMut<ObserverCanary>| {
+        |_: On<Add<ApplyProbe>>, mut canary: nara_ecs::system::ResMut<ObserverCanary>| {
             canary.0 += 1;
         },
     );

@@ -550,7 +550,7 @@ fn install_retry_candidate_observer_after_terminal(world: &mut World) {
     let (old_player, _) = player_scene_identity(world);
     let observer_entity = world
         .add_observer(
-            move |event: On<Add, SceneEntitySource>,
+            move |event: On<Add<SceneEntitySource>>,
                   snapshot: Res<WaveSnapshot>,
                   mut observer: ResMut<RetryCandidateObserver>,
                   players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
@@ -829,7 +829,7 @@ fn install_retry_retirement_observer_after_terminal(world: &mut World) {
         .instance_id;
     world.spawn(
         Observer::new(
-            move |event: On<Despawn>,
+            move |event: On<Despawn<()>>,
                   mut observer: ResMut<RetryRetirementObserver>,
                   players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
                   mut commands: Commands| {

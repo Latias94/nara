@@ -12,7 +12,7 @@ nara_reflect = { path = "../crates/nara_reflect" }
 nara_scene = { path = "../crates/nara_scene", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
-bevy_ecs = "0.19"
+bevy_ecs = "0.20"
 ```
 
 - `nara_scene` owns the canonical scene file candidate, scene component registration, stable scene

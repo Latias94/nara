@@ -1,5 +1,3 @@
-use nara::startup_scene::StartupSceneActivation;
+use nara::startup_scene;
 
-fn main() {
-    let _: Option<StartupSceneActivation> = None;
-}
+fn main() {}

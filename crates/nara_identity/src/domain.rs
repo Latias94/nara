@@ -243,7 +243,7 @@ mod identity_support_topology_tests {
         let target = world.spawn(IdentityEntityMarker { domain: domain_id }).id();
         let marker = world.component_id::<IdentityEntityMarker>().unwrap();
         world.spawn(
-            Observer::new(|_: On<Despawn>, mut canary: ResMut<SupportCanary>| canary.0 += 1)
+            Observer::new(|_: On<Despawn<()>>, mut canary: ResMut<SupportCanary>| canary.0 += 1)
                 .with_entity(target)
                 .with_component(marker),
         );
@@ -263,7 +263,7 @@ mod identity_support_topology_tests {
         let domain =
             WorldIdentityDomain::new(&world, WorldIdentityDomainSettings::default()).unwrap();
         world.insert_resource(domain);
-        world.add_observer(|_: On<Add>, mut canary: ResMut<SupportCanary>| canary.0 += 1);
+        world.add_observer(|_: On<Add<()>>, mut canary: ResMut<SupportCanary>| canary.0 += 1);
         world.flush();
         let baseline_entities = world.iter_entities().count();
 

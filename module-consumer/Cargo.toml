@@ -16,7 +16,7 @@ nara_reflect = { path = "../crates/nara_reflect" }
 nara_scene = { path = "../crates/nara_scene", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
-bevy_ecs = "0.19"
+bevy_ecs = "0.20"
 nara_app = { path = "../crates/nara_app" }
 nara_asset = { path = "../crates/nara_asset", default-features = false, features = ["serde"] }
 nara_ecs = { path = "../crates/nara_ecs" }

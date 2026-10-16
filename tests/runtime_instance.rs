@@ -1937,7 +1937,7 @@ fn admission_panic_retains_its_owner_and_route_in_process_quarantine() {
 
     let mut app = configured_app(FixedTime::default());
     app.world_mut().unwrap().add_observer(
-        |_: On<nara::ecs::lifecycle::Add, nara::ecs::observer::Observer>| {
+        |_: On<nara::ecs::lifecycle::Add<nara::ecs::observer::Observer>>| {
             panic!("injected observer materialization panic");
         },
     );
@@ -2498,7 +2498,7 @@ fn fail_system() -> Result<(), BevyError> {
 }
 
 fn fail_system_with_panic_severity() -> Result<(), BevyError> {
-    Err(BevyError::panic(TestSystemError))
+    Err(BevyError::panic(TestSystemError, Box::new(TestSystemError)))
 }
 
 fn fail_runtime_scope_observer(_: On<RuntimeScopeFaultEvent>) -> Result<(), BevyError> {

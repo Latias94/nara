@@ -91,17 +91,17 @@ nara_ui_render = { path = "crates/nara_ui_render" }
 nara_window = { path = "crates/nara_window" }
 nara_winit = { path = "crates/nara_winit" }
 
-bevy_ecs = "0.19"
-bevy_ecs_macro_logic = "0.19"
-bevy_macro_utils = "0.19"
-bevy_reflect = { version = "0.19", features = ["glam"] }
+bevy_ecs = "0.20"
+bevy_ecs_macro_logic = "0.20"
+bevy_macro_utils = "0.20"
+bevy_reflect = { version = "0.20", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
-egui = "0.36.1"
-egui_kittest = "0.36.1"
-egui-wgpu = "0.36.1"
-egui-winit = "0.36.1"
-glam = { version = "0.30", features = ["serde"] }
+egui = "0.36.2"
+egui_kittest = "0.36.2"
+egui-wgpu = "0.36.2"
+egui-winit = "0.36.2"
+glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
@@ -128,7 +128,7 @@ quote = "1"
 syn = { version = "2", features = ["full", "visit"] }
 trybuild = "1.0.118"
 yaml-rust2 = { version = "0.11.0", default-features = false }
-wgpu = "=30.0.0"
+wgpu = "=30.0.1"
 rustix = "1.1.4"
 windows-sys = "0.61.2"
 

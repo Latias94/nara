@@ -153,7 +153,7 @@ fn asset_free_sprite_does_not_claim_or_insert_an_asset_server() {
     let mut world = World::new();
     world.init_resource::<AssetServerObserverCanary>();
     world.add_observer(
-        |_: On<Add, AssetServer>, mut canary: ResMut<AssetServerObserverCanary>| canary.0 += 1,
+        |_: On<Add<AssetServer>>, mut canary: ResMut<AssetServerObserverCanary>| canary.0 += 1,
     );
     world.flush();
 

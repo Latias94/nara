@@ -375,7 +375,7 @@ mod tests {
         component_world.init_resource::<ObserverRuns>();
         let component_target = component_world.spawn(Probe).id();
         component_world.add_observer(
-            |_: On<Remove, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| runs.0 += 1,
+            |_: On<Remove<Probe>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| runs.0 += 1,
         );
 
         assert_eq!(
@@ -393,7 +393,9 @@ mod tests {
         let observer = entity_world
             .spawn(
                 bevy_ecs::observer::Observer::new(
-                    |_: On<Despawn>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| runs.0 += 1,
+                    |_: On<Despawn<()>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                        runs.0 += 1
+                    },
                 )
                 .with_entity(entity_target),
             )
@@ -434,7 +436,7 @@ mod tests {
         observer_world.commands().queue(move |world: &mut World| {
             world.spawn(
                 bevy_ecs::observer::Observer::new(
-                    |_: On<Despawn>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                    |_: On<Despawn<()>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
                         runs.0 += 1;
                     },
                 )
@@ -491,7 +493,7 @@ mod tests {
         let child = world.spawn(<TestParent as Relationship>::from(parent)).id();
         world.flush();
         world.add_observer(
-            |_: On<Remove, TestParent>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+            |_: On<Remove<TestParent>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
                 runs.0 += 1;
             },
         );
@@ -662,33 +664,33 @@ mod tests {
     fn insertion_plan_rejects_every_lifecycle_observer() {
         assert_insertion_observer_rejected(|world| {
             world.add_observer(
-                |_: On<Add, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| runs.0 += 1,
+                |_: On<Add<Probe>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| runs.0 += 1,
             );
         });
         assert_insertion_observer_rejected(|world| {
             world.add_observer(
-                |_: On<Insert, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                |_: On<Insert<Probe>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
                     runs.0 += 1;
                 },
             );
         });
         assert_insertion_observer_rejected(|world| {
             world.add_observer(
-                |_: On<Discard, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                |_: On<Discard<Probe>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
                     runs.0 += 1;
                 },
             );
         });
         assert_insertion_observer_rejected(|world| {
             world.add_observer(
-                |_: On<Remove, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                |_: On<Remove<Probe>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
                     runs.0 += 1;
                 },
             );
         });
         assert_insertion_observer_rejected(|world| {
             world.add_observer(
-                |_: On<Despawn, Probe>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
+                |_: On<Despawn<Probe>>, mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| {
                     runs.0 += 1;
                 },
             );
@@ -705,7 +707,7 @@ mod tests {
         let second = world.spawn_empty().id();
         world.commands().queue(|world: &mut World| {
             world.add_observer(
-                |_: On<bevy_ecs::lifecycle::Add, Value>,
+                |_: On<bevy_ecs::lifecycle::Add<Value>>,
                  mut runs: bevy_ecs::prelude::ResMut<ObserverRuns>| { runs.0 += 1 },
             );
         });

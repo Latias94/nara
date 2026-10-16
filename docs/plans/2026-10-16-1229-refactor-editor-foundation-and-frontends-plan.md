@@ -350,7 +350,7 @@ Make the selected frontend the default only when each current capability is eith
 
 **Goal:** Prove the result from committed source and leave one understandable production architecture.
 **Requirements:** R1-R10; AE1-AE6. **Dependencies:** U3-U7.
-**Files:** obsolete `crates/nara_tooling_egui/` and references; root facade/features and dependency fixtures; `samples/collection-game/`; `editor/tests/`; clean external consumer acceptance fixture; architecture ledger, migration/user guides and engineering verification evidence.
+**Files:** obsolete `crates/nara_tooling_egui/` and references; root facade/features and dependency fixtures; `samples/collect-game/`; `editor/tests/`; clean external consumer acceptance fixture; architecture ledger, migration/user guides and engineering verification evidence.
 **Approach:** Run the completed authoring workflow against a clean external project, remove the old frontend and temporary dual-path glue, and update only the admitted contract/dependency surface.
 Document future custom frontend work as a new adapter and widget implementation, without claiming this run proved an unbuilt toolkit.
 **Test scenarios:**

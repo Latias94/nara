@@ -114,7 +114,7 @@ impl Plugin for LateEventObserverPlugin {
         app.world_mut()?
             .commands()
             .queue(|world: &mut nara::prelude::World| {
-                world.add_observer(|_: On<Add>| {});
+                world.add_observer(|_: On<Add<()>>| {});
             });
         Ok(())
     }
@@ -132,7 +132,7 @@ impl Plugin for LateComponentObserverPlugin {
         app.world_mut()?
             .commands()
             .queue(|world: &mut nara::prelude::World| {
-                world.add_observer(|_: On<Add, Sprite>| {});
+                world.add_observer(|_: On<Add<Sprite>>| {});
             });
         Ok(())
     }

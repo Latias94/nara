@@ -492,7 +492,7 @@ fn install_retry_candidate_observer_after_terminal(world: &mut World) {
         .expect("the terminal run must retain its exact registered player");
     let observer_entity = world
         .add_observer(
-            move |event: On<Add, SceneEntitySource>,
+            move |event: On<Add<SceneEntitySource>>,
                   snapshot: Res<WaveSnapshot>,
                   mut observer: ResMut<RetryCandidateObserver>,
                   players: Query<(Entity, &SceneEntitySource), With<PlayerRole>>,
