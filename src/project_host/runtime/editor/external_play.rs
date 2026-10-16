@@ -7,9 +7,8 @@ use nara_tooling::{EditorRuntimeAvailability, EditorRuntimeUnavailableReason};
 use crate::project_content::{StartupContentMemberKind, startup_content_digest_from_members};
 use crate::project_host::authoring::{
     AuthoringProjectAdmissionHost, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
-    AuthoringSourceKind, PreparedAuthoringProject, first_party_authoring_adapters,
+    AuthoringSourceKind, PreparedAuthoringProject, project_authoring_adapters,
 };
-use crate::project_host::composition::built_in_schema_providers;
 use crate::project_host::product_launch::{
     EditorExternalPlaySourceFact, EditorExternalPlaySourceKind, EditorExternalPlaySourceReceipt,
     EditorExternalPlayTarget, SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION,
@@ -213,7 +212,7 @@ fn readmit_current_authoring_project(
         .and_then(|prepared| prepared.admit_bundle())
         .map_err(|_| EditorExternalPlayReceiptError::StartupClosureRejected)?
         .publish();
-    let adapters = first_party_authoring_adapters(built_in_schema_providers())
+    let adapters = project_authoring_adapters(schema.bundle())
         .map_err(|_| EditorExternalPlayReceiptError::StartupClosureRejected)?;
     let receipt = PreparedAuthoringProject::new(schema, adapters)
         .admit_startup_closure()

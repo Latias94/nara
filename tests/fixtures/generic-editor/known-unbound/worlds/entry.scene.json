@@ -30,8 +30,13 @@
               "type": "map",
               "value": {
                 "amplitude": {
-                  "type": "f64",
-                  "value": 0.75
+                  "type": "map",
+                  "value": {
+                    "peak": {
+                      "type": "f64",
+                      "value": 0.75
+                    }
+                  }
                 }
               }
             }

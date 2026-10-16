@@ -37,7 +37,7 @@ use nara::{
         EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayState,
         EditorRuntimeUnavailableReason, EditorSelectionSet, EditorWorkspaceIntent,
         EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
-        SceneInspectorCommand,
+        SceneInspectorCommand, SceneInspectorReadOnlyReason,
     },
     tooling_egui::{EguiEditorProjectAction, EguiProjectOpenDraft},
     ui::__private::{UiAuthoringCanvasProjection, UiAuthoringFieldValue},
@@ -271,13 +271,58 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
     assert!(rejected_frame.diagnostics().stats().observed_errors() >= 2);
 
     let stale_source = current_frame(&application);
-    application.submit_and_drive(
-        EditorActionBatch::new(stale_source.revision(), []),
-        Duration::ZERO,
-    );
+    let stale_scene = stale_source.workspace().active_scene.as_ref().unwrap();
+    let original_value = field.value.as_ref().unwrap().as_f64().unwrap();
+    let accepted_value = ComponentValue::f64(original_value * 0.5 + 0.25).unwrap();
+    assert_ne!(Some(&accepted_value), field.value.as_ref());
     application.submit_and_drive(
         EditorActionBatch::new(
             stale_source.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyInspectorCommand {
+                    document: stale_scene.document,
+                    base_revision: stale_scene.revision,
+                    command: SceneInspectorCommand::SetField {
+                        entity: target.entity().clone(),
+                        component: component.component.clone(),
+                        component_version: component.schema_version,
+                        field: field.id.clone(),
+                        value: accepted_value.clone(),
+                    },
+                },
+            )],
+        ),
+        Duration::ZERO,
+    );
+    let accepted_frame = current_frame(&application);
+    let accepted_scene = accepted_frame.workspace().active_scene.as_ref().unwrap();
+    assert_ne!(accepted_frame.revision(), stale_source.revision());
+    assert_ne!(accepted_scene.revision, stale_scene.revision);
+    assert!(accepted_scene.dirty);
+    let accepted_field = accepted_scene
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_ref()
+        .unwrap()
+        .components
+        .iter()
+        .find(|candidate| candidate.component == component.component)
+        .unwrap()
+        .fields
+        .iter()
+        .find(|candidate| candidate.id == field.id)
+        .unwrap();
+    assert_eq!(accepted_field.value.as_ref(), Some(&accepted_value));
+    assert!(accepted_frame.field_feedback().is_none());
+    let accepted_history = accepted_frame
+        .workspace()
+        .document(accepted_scene.document)
+        .unwrap()
+        .history;
+    application.submit_and_drive(
+        EditorActionBatch::new(
+            accepted_frame.revision(),
             [EditorAction::ReportFieldValidation(failure)],
         ),
         Duration::ZERO,
@@ -286,7 +331,24 @@ fn field_failures_publish_inline_feedback_and_durable_diagnostics() {
     let feedback = stale_frame.field_feedback().unwrap();
     assert!(feedback.target().same_field(&target));
     assert_eq!(feedback.reason(), EditorFieldFeedbackReason::StaleAction);
-    assert!(has_diagnostic(&stale_frame, "editor.action.stale-frame"));
+    assert!(has_diagnostic(&stale_frame, "editor.action.stale-document"));
+    assert_eq!(
+        stale_frame
+            .workspace()
+            .active_scene
+            .as_ref()
+            .unwrap()
+            .revision,
+        accepted_scene.revision
+    );
+    assert_eq!(
+        stale_frame
+            .workspace()
+            .document(accepted_scene.document)
+            .unwrap()
+            .history,
+        accepted_history
+    );
 }
 
 #[test]
@@ -365,7 +427,7 @@ fn clean_room_custom_owner_opens_through_the_ordinary_editor() {
     application.submit_and_drive(select, Duration::ZERO);
 
     let selected_frame = current_frame(&application);
-    let name_component = selected_frame
+    let selected_entity = selected_frame
         .workspace()
         .active_scene
         .as_ref()
@@ -374,12 +436,23 @@ fn clean_room_custom_owner_opens_through_the_ordinary_editor() {
         .inspector
         .selected_entity_view
         .as_ref()
-        .unwrap()
+        .unwrap();
+    let name_component = selected_entity
         .components
         .iter()
         .find(|component| component.component == ComponentTypeId::new("nara.scene.Name"))
         .unwrap();
     assert!(name_component.access.is_editable());
+    let pulse = selected_entity
+        .components
+        .iter()
+        .find(|component| component.component == ComponentTypeId::new("studio.signal.Pulse"))
+        .unwrap();
+    assert_eq!(
+        pulse.access.read_only_reason(),
+        Some(SceneInspectorReadOnlyReason::KnownUnbound)
+    );
+    assert!(pulse.fields.is_empty());
     assert!(has_diagnostic(
         &selected_frame,
         "scene.authoring-known-unbound"

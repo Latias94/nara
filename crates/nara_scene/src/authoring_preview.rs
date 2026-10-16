@@ -40,6 +40,7 @@ pub enum AuthoringPreviewOmissionReason {
     RecordFactAmbiguous,
     RecordFactMismatch,
     NestedPrefabUnsupported,
+    NativeBindingUnavailable,
 }
 
 /// Typed fact describing one fail-closed authoring preview omission.
@@ -260,6 +261,13 @@ fn project_authoring_preview(
                     Some(AuthoringPreviewOmissionReason::RecordUnavailable(
                         fact.readiness(),
                     ))
+                }
+                Some(IndexedDirectRecordFact::Unique(fact))
+                    if fact
+                        .adapter()
+                        .is_none_or(|adapter| !adapter.supports_native_preview()) =>
+                {
+                    Some(AuthoringPreviewOmissionReason::NativeBindingUnavailable)
                 }
                 Some(IndexedDirectRecordFact::Unique(_)) => None,
             };

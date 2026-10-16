@@ -11,10 +11,10 @@ use std::{
 use nara_asset::AssetRef;
 use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
-    AuthoringSchemaBundle, ComponentCapability, ComponentFieldId, ComponentSchema,
-    ComponentSchemaContributionReceipt, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, DeclaredAssetReference, EntityReference, PersistentComponentSchemaOwnerId,
-    collect_declared_asset_references_from_schema,
+    AuthoringSchemaBundle, AuthoringSchemaBundleOwner, CatalogFingerprint, ComponentCapability,
+    ComponentFieldId, ComponentSchema, ComponentSchemaContributionReceipt, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, DeclaredAssetReference, EntityReference,
+    PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
 };
 
 use crate::{
@@ -136,7 +136,46 @@ impl AuthoringAdapterIdentity {
 pub struct AuthoringAdapterEvidence {
     identity: AuthoringAdapterIdentity,
     adapter_generation: NonZeroU64,
-    contribution: ComponentSchemaContributionReceipt,
+    catalog: AuthoringAdapterCatalog,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum AuthoringAdapterCatalog {
+    Native(ComponentSchemaContributionReceipt),
+    Data {
+        owner: PersistentComponentSchemaOwnerId,
+        generation: u64,
+        fingerprint: CatalogFingerprint,
+        predecessor: Option<CatalogFingerprint>,
+    },
+}
+
+impl AuthoringAdapterCatalog {
+    fn matches(&self, owner: &AuthoringSchemaBundleOwner) -> bool {
+        match self {
+            Self::Native(contribution) => {
+                let receipt = contribution.owner();
+                owner
+                    .owner_id()
+                    .matches_executable(receipt.owner())
+                    .unwrap_or(false)
+                    && owner.current().generation() == receipt.generation()
+                    && owner.current().fingerprint() == receipt.catalog()
+                    && owner.current().predecessor().copied() == receipt.predecessor()
+            }
+            Self::Data {
+                owner: id,
+                generation,
+                fingerprint,
+                predecessor,
+            } => {
+                owner.owner_id() == id
+                    && owner.current().generation() == *generation
+                    && owner.current().fingerprint() == *fingerprint
+                    && owner.current().predecessor() == predecessor.as_ref()
+            }
+        }
+    }
 }
 
 impl AuthoringAdapterEvidence {
@@ -151,8 +190,16 @@ impl AuthoringAdapterEvidence {
     }
 
     #[must_use]
-    pub const fn contribution(&self) -> ComponentSchemaContributionReceipt {
-        self.contribution
+    pub const fn contribution(&self) -> Option<ComponentSchemaContributionReceipt> {
+        match self.catalog {
+            AuthoringAdapterCatalog::Native(contribution) => Some(contribution),
+            AuthoringAdapterCatalog::Data { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn supports_native_preview(&self) -> bool {
+        matches!(self.catalog, AuthoringAdapterCatalog::Native(_))
     }
 }
 
@@ -573,11 +620,11 @@ impl UnavailableRecordManifest {
     }
 }
 
-/// Compatibility proof created only from a trusted resolved provider contribution.
+/// Compatibility evidence for a trusted native or finite engine-owned data Adapter.
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoringAdapterReceipt {
-    contribution: ComponentSchemaContributionReceipt,
+    catalog: AuthoringAdapterCatalog,
     identity: AuthoringAdapterIdentity,
     adapter_generation: NonZeroU64,
     components: BTreeSet<ComponentTypeId>,
@@ -644,7 +691,7 @@ impl AuthoringAdapterReceipt {
             return Err(AuthoringAdapterReceiptError::EmptyCoverage);
         }
         Ok(Self {
-            contribution,
+            catalog: AuthoringAdapterCatalog::Native(contribution),
             identity: AuthoringAdapterIdentity {
                 id: adapter_id,
                 version: adapter_version,
@@ -655,8 +702,45 @@ impl AuthoringAdapterReceipt {
     }
 
     #[must_use]
-    pub const fn contribution(&self) -> ComponentSchemaContributionReceipt {
-        self.contribution
+    pub const fn contribution(&self) -> Option<ComponentSchemaContributionReceipt> {
+        match self.catalog {
+            AuthoringAdapterCatalog::Native(contribution) => Some(contribution),
+            AuthoringAdapterCatalog::Data { .. } => None,
+        }
+    }
+
+    /// Installs the engine's finite data Adapter, without granting executable trust.
+    #[doc(hidden)]
+    pub fn from_schema_owner(
+        owner: &AuthoringSchemaBundleOwner,
+        native_coverage: &BTreeSet<ComponentTypeId>,
+    ) -> Option<Self> {
+        let components: BTreeSet<_> = owner
+            .current()
+            .components()
+            .iter()
+            .filter(|schema| {
+                !native_coverage.contains(schema.id()) && supports_data_authoring(schema)
+            })
+            .map(|schema| schema.id().clone())
+            .collect();
+        if components.is_empty() {
+            return None;
+        }
+        Some(Self {
+            catalog: AuthoringAdapterCatalog::Data {
+                owner: owner.owner_id().clone(),
+                generation: owner.current().generation(),
+                fingerprint: owner.current().fingerprint(),
+                predecessor: owner.current().predecessor().copied(),
+            },
+            identity: AuthoringAdapterIdentity {
+                id: "nara.schema-data-authoring",
+                version: 1,
+            },
+            adapter_generation: NonZeroU64::MIN,
+            components,
+        })
     }
 
     #[must_use]
@@ -673,6 +757,27 @@ impl AuthoringAdapterReceipt {
     pub fn components(&self) -> impl ExactSizeIterator<Item = &ComponentTypeId> {
         self.components.iter()
     }
+}
+
+fn supports_data_authoring(schema: &ComponentSchema) -> bool {
+    schema.has_capability(ComponentCapability::Scene)
+        && schema.has_capability(ComponentCapability::Inspect)
+        && !schema.fields.is_empty()
+        && schema.fields.iter().all(|field| {
+            if field.has_capability(ComponentCapability::EntityRef) {
+                return false;
+            }
+            match field.value_kind() {
+                ComponentValueKind::Bool
+                | ComponentValueKind::I64
+                | ComponentValueKind::U64
+                | ComponentValueKind::F64
+                | ComponentValueKind::String => {
+                    !field.has_capability(ComponentCapability::AssetRef)
+                }
+                _ => false,
+            }
+        })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1077,17 +1182,10 @@ impl AuthoringClassificationBasis {
         }
 
         for adapter in adapters {
-            let contribution = adapter.contribution();
-            let owner_receipt = contribution.owner();
-            let matching_owner = bundle.owners().iter().find(|owner| {
-                owner
-                    .owner_id()
-                    .matches_executable(owner_receipt.owner())
-                    .unwrap_or(false)
-                    && owner.current().generation() == owner_receipt.generation()
-                    && owner.current().fingerprint() == owner_receipt.catalog()
-                    && owner.current().predecessor().copied() == owner_receipt.predecessor()
-            });
+            let matching_owner = bundle
+                .owners()
+                .iter()
+                .find(|owner| adapter.catalog.matches(owner));
             let Some(matching_owner) = matching_owner else {
                 continue;
             };
@@ -1125,7 +1223,7 @@ impl AuthoringClassificationBasis {
                 entry.adapter = Some(AuthoringAdapterEvidence {
                     identity: adapter.identity,
                     adapter_generation: adapter.adapter_generation,
-                    contribution,
+                    catalog: adapter.catalog.clone(),
                 });
             }
         }
@@ -1469,6 +1567,27 @@ fn classify_complete_record(
     context: &mut ClassificationContext<'_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
     let classified = context.basis.classify_record(component, record)?;
+    if classified.readiness.is_available()
+        && classified
+            .adapter
+            .as_ref()
+            .is_some_and(|adapter| !adapter.supports_native_preview())
+    {
+        let schema = classified
+            .schema
+            .as_ref()
+            .expect("available data Adapter retains its schema");
+        nara_reflect::validate_component_value(schema, &record.value).map_err(|_| {
+            rejection(with_public_locator(
+                diagnostic_error(
+                    "scene.authoring-component-value-invalid",
+                    "Persistent authoring record does not satisfy its declared schema",
+                ),
+                "component-id",
+                component.as_str(),
+            ))
+        })?;
+    }
     let schema_declared_asset_references = if classified
         .schema
         .as_ref()
@@ -2113,8 +2232,7 @@ fn authoring_field_write_is_preservation_safe(
         | ComponentValueKind::U64
         | ComponentValueKind::F64
         | ComponentValueKind::String => {
-            !field.has_capability(ComponentCapability::AssetRef)
-                && value.kind() == field.value_kind()
+            !field.has_capability(ComponentCapability::AssetRef) && field.accepts_value(value)
         }
         ComponentValueKind::AssetRef => {
             field.has_capability(ComponentCapability::AssetRef)

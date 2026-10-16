@@ -103,7 +103,7 @@
                       "value": "amplitude"
                     }
                   ],
-                  "value_kind": "f64",
+                  "value_kind": "map",
                   "required": true,
                   "capabilities": [
                     "scene",

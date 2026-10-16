@@ -1,13 +1,32 @@
 use nara_reflect::{
     __private::{register_or_validate_resolved_schema_provider, resolve_schema_provider},
-    ComponentCapability, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
-    ComponentSchemaProviderDefinition,
+    AuthoringSchemaBundle, ComponentCapability, ComponentRegistry, ComponentRegistryError,
+    ComponentRegistrySnapshot, ComponentSchemaProviderDefinition,
 };
 use nara_scene::__private::{AuthoringAdapterReceipt, AuthoringAdapterReceiptError};
 
 const FIRST_PARTY_SCHEMA_ADAPTER_ID: &str = "nara.first-party-authoring";
 const FIRST_PARTY_SCHEMA_ADAPTER_VERSION: u32 = 1;
 const FIRST_PARTY_SCHEMA_ADAPTER_GENERATION: u64 = 1;
+
+pub(crate) fn project_authoring_adapters(
+    bundle: &AuthoringSchemaBundle,
+) -> Result<Box<[AuthoringAdapterReceipt]>, FirstPartyAuthoringAdapterError> {
+    let mut adapters = first_party_authoring_adapters(
+        crate::project_host::composition::built_in_schema_providers(),
+    )?
+    .into_vec();
+    let native_coverage = adapters
+        .iter()
+        .flat_map(|adapter| adapter.components().cloned())
+        .collect();
+    adapters.extend(
+        bundle.owners().iter().filter_map(|owner| {
+            AuthoringAdapterReceipt::from_schema_owner(owner, &native_coverage)
+        }),
+    );
+    Ok(adapters.into_boxed_slice())
+}
 
 pub(crate) fn first_party_authoring_adapters(
     providers: impl IntoIterator<Item = ComponentSchemaProviderDefinition>,

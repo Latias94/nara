@@ -229,6 +229,14 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
     let original_bundle = fs::read(project.bundle()).unwrap();
     let original_scene = fs::read(project.scene()).unwrap();
     let original_pulse = component_record(&project.scene(), SIGNAL_ENTITY, PULSE_COMPONENT);
+    assert_eq!(
+        original_pulse["value"]["value"]["amplitude"],
+        serde_json::json!({
+            "type": "map",
+            "value": { "peak": { "type": "f64", "value": 0.75 } }
+        }),
+        "the degraded fixture must require unsupported structured-field semantics"
+    );
     assert!(
         fs::read_to_string(project.unbuildable_source())
             .unwrap()
@@ -290,8 +298,45 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
         pulse.access.read_only_reason(),
         Some(SceneInspectorReadOnlyReason::KnownUnbound)
     );
+    assert!(pulse.fields.is_empty());
 
     let scene = selected.workspace().active_scene.as_ref().unwrap();
+    let history = selected
+        .workspace()
+        .document(scene.document)
+        .unwrap()
+        .history;
+    let rejected = dispatch(
+        &mut application,
+        EditorAction::Mutate(EditorDocumentMutation::ApplyAuthoringFieldEdit {
+            document: scene.document,
+            base_revision: scene.revision,
+            edit: AuthoringFieldEdit::single(
+                SceneEntityId::new(SIGNAL_ENTITY).unwrap(),
+                ComponentTypeId::new(PULSE_COMPONENT),
+                ComponentSchemaVersion::ONE,
+                ComponentFieldId::new("amplitude"),
+                ComponentValue::map([("peak", ComponentValue::f64(1.0).unwrap())]),
+            )
+            .unwrap(),
+        }),
+    );
+    let rejected_scene = rejected.workspace().active_scene.as_ref().unwrap();
+    assert_eq!(rejected_scene.revision, scene.revision);
+    assert_eq!(rejected_scene.dirty, scene.dirty);
+    assert_eq!(
+        rejected
+            .workspace()
+            .document(scene.document)
+            .unwrap()
+            .history,
+        history
+    );
+    assert_eq!(fs::read(project.scene()).unwrap(), original_scene);
+    assert_eq!(
+        application.active_authoring_unavailable_record_manifest(),
+        Some(original_manifest.clone())
+    );
     let edited = dispatch(
         &mut application,
         EditorAction::Mutate(EditorDocumentMutation::ApplyAuthoringFieldEdit {

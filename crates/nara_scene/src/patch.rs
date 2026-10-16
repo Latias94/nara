@@ -2778,24 +2778,7 @@ fn require_field_capability(
 }
 
 pub(crate) fn field_value_matches(field: &ComponentFieldSchema, value: &ComponentValue) -> bool {
-    if !field.required && matches!(value, ComponentValue::Null) {
-        return true;
-    }
-    match field.value_kind {
-        ComponentValueKind::AssetRef => is_asset_ref_value(value),
-        expected => value.kind() == expected,
-    }
-}
-
-fn is_asset_ref_value(value: &ComponentValue) -> bool {
-    let ComponentValue::Map(fields) = value else {
-        return false;
-    };
-    matches!(
-        (fields.get("kind"), fields.get("value")),
-        (Some(ComponentValue::String(kind)), Some(ComponentValue::String(_)))
-            if kind == "path" || kind == "stable_id"
-    )
+    field.accepts_value(value)
 }
 
 pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {

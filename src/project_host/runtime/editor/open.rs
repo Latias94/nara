@@ -6,9 +6,8 @@ use nara_fs::DirectoryCapability;
 use crate::project_host::authoring::{
     AuthoringProjectAdmissionError, AuthoringProjectAdmissionHost, AuthoringProjectReceipt,
     AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
-    PreparedAuthoringSchemaBasis, first_party_authoring_adapters,
+    PreparedAuthoringSchemaBasis, project_authoring_adapters,
 };
-use crate::project_host::composition::built_in_schema_providers;
 
 use super::{EditorProjectOpenError, EditorProjectSession, single_error};
 
@@ -124,7 +123,7 @@ impl EditorProjectOpenHost {
                         ));
                     }
                 };
-                let adapters = match first_party_authoring_adapters(built_in_schema_providers()) {
+                let adapters = match project_authoring_adapters(schema.bundle()) {
                     Ok(adapters) => adapters,
                     Err(_) => {
                         return EditorProjectOpenProgress::Rejected(failure(
