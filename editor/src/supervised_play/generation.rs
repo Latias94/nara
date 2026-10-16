@@ -9,6 +9,6 @@ pub(super) use format::{
 };
 #[allow(unused_imports)]
 pub(super) use store::{
-    ExecutableGenerationStore, GenerationScavengeReceipt, GenerationStoreCloseReceipt,
-    GenerationStoreError, ImmutableExecutableGeneration,
+    ExecutableGenerationLaunchReceipt, ExecutableGenerationStore, GenerationScavengeReceipt,
+    GenerationStoreCloseReceipt, GenerationStoreError, ImmutableExecutableGeneration,
 };

@@ -9,6 +9,7 @@ mod directory_enumeration;
 mod directory_publication;
 mod error;
 mod file;
+mod host_handle;
 mod identity;
 mod lock;
 mod path;
@@ -30,6 +31,8 @@ pub use directory_publication::{
 };
 pub use error::{FsError, FsOperation, PathValidationError};
 pub use file::{CapabilityReader, CapabilityWriter, FileCapability};
+#[doc(hidden)]
+pub use host_handle::RestrictiveCapabilityHandleLease;
 pub use identity::{CapabilityGeneration, CapabilitySessionId, FileIdentity, FileKind};
 pub use lock::{FileLock, LockGuarantee, LockMode, LockScope};
 pub use path::{RelativeComponent, RelativePath, RelativePathPreflight};
@@ -39,7 +42,9 @@ pub use proof::{
     PublicationIdentityEvidence, PublicationSourceBinding, PublicationTopologyEvidence,
     ResolutionTier, StageStatus,
 };
-pub use replace::{ExpectedTarget, ReplaceReceipt, TemporaryFile};
+pub use replace::{
+    ExpectedTarget, ReplaceReceipt, TemporaryFile, TemporaryFileCleanup, TemporaryFileFailure,
+};
 pub use sync::{DirectorySyncReceipt, FileSyncReceipt};
 
 pub(crate) use identity::{FileFacts, NativeFileIdentity};

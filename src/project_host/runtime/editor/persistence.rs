@@ -286,8 +286,23 @@ impl EditorProjectSession {
             .prefab
             .as_ref()
             .ok_or("project.editor.prefab-source-not-an-anchor")?;
-        let AssetRef::Path(source) = &instance.source else {
-            return Err("project.editor.prefab-source-stable-id-unsupported");
+        let resolved_source;
+        let source = match &instance.source {
+            AssetRef::Path(source) => source,
+            reference @ AssetRef::StableId(_) => {
+                resolved_source = match &self.execution {
+                    EditorExecutionLane::Authoring(snapshot) => snapshot
+                        .asset_database()
+                        .resolve_ref(reference)
+                        .ok()
+                        .map(|record| record.path().clone()),
+                    EditorExecutionLane::TrustedCompiled(lane) => {
+                        lane.snapshot.resolved_asset_path(reference).cloned()
+                    }
+                }
+                .ok_or("project.editor.prefab-source-stable-id-unresolved")?;
+                &resolved_source
+            }
         };
         let source_is_admitted = match &self.execution {
             EditorExecutionLane::Authoring(snapshot) => snapshot.prefab(source).is_some(),
@@ -319,6 +334,24 @@ impl EditorProjectSession {
             .expect("the persistence test requires an open Scene lane")
             .host
             .test_fail_next_save(stage);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_fail_next_save_after_write(&mut self) {
+        self.scene_lane
+            .as_mut()
+            .expect("the test requires an open Scene lane")
+            .host
+            .test_fail_after_write();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_allow_save_cleanup(&mut self) {
+        self.scene_lane
+            .as_mut()
+            .expect("the test requires an open Scene lane")
+            .host
+            .test_allow_cleanup();
     }
 
     #[cfg(test)]
@@ -657,6 +690,7 @@ impl EditorProjectSession {
                 } else if matches!(lane, PersistenceLane::Prefab) {
                     self.commit_authoring_prefab_source_observation(document, evidence);
                 }
+                self.refresh_current_saved_source_digest();
                 EditorPersistenceResult::Saved {
                     document: evidence.document(),
                     revision: evidence.revision(),

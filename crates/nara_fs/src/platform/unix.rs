@@ -15,6 +15,21 @@ use crate::{
 
 pub(crate) struct DirectoryEnumerationCursor;
 
+pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
+    file.try_clone()
+        .map_err(|source| FsError::io(FsOperation::CloneHandle, source))
+}
+
+pub(crate) fn restrictive_clone_file(file: &File) -> Result<File, FsError> {
+    file.try_clone()
+        .map_err(|source| FsError::io(FsOperation::CloneHandle, source))
+}
+
+pub(crate) fn restrictive_clone_executable(file: &File) -> Result<File, FsError> {
+    file.try_clone()
+        .map_err(|source| FsError::io(FsOperation::CloneHandle, source))
+}
+
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {
     #[cfg(target_os = "linux")]
     let directory_sync = DirectorySyncTier::Naming;

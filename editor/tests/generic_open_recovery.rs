@@ -248,7 +248,7 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
     assert_eq!(
         opened.runtime_availability(),
         EditorRuntimeAvailability::Unavailable(
-            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            EditorRuntimeUnavailableReason::SupervisedPlayContractMissing,
         )
     );
     assert_eq!(
@@ -402,7 +402,7 @@ fn ordinary_generic_open_preserves_degraded_source_through_reopen_and_recovery()
         Some(EditorPlayOperationResult::Rejected {
             operation: EditorPlayOperation::Play,
             reason: EditorPlayRejection::RuntimeUnavailable(
-                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                EditorRuntimeUnavailableReason::SupervisedPlayContractMissing,
             ),
         })
     );

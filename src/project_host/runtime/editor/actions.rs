@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::sync::Arc;
 
 use nara_diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticField, DiagnosticFieldKey, SafeSummary,
@@ -19,34 +19,24 @@ use crate::project_host::authoring::ProjectSourceIndexSnapshot;
 
 use super::{EditorProjectSession, EditorRuntimeOwnerState};
 
-#[derive(Clone, Copy)]
-enum EditorFieldCommitMode {
-    Discrete,
-    Continuous,
-}
-
 impl EditorProjectSession {
-    /// Applies one ordered action list produced from the current immutable Editor frame.
+    /// Applies ordered actions against their owning document or displayed-frame authority.
     ///
-    /// A frame accepts at most one batch. Every revision-bound action is checked against both
-    /// its originating frame and the current document/runtime authority before any operation is
-    /// requested. A second document mutation from the same frame is rejected rather than rebased.
+    /// Ordinary document commands use their explicit live base revision. Frame-sensitive actions
+    /// retain exact frame admission; neither navigation nor acknowledgements consume a batch slot.
     pub fn dispatch_editor_actions(
         &mut self,
         batch: EditorActionBatch,
     ) -> Result<EditorActionBatchReport, EditorActionRejection> {
         let batch_field_target = batch.first_field_target();
         let received = batch.frame_revision();
-        let frame = match self.published_frame.as_mut() {
+        let frame = match self.published_frame.as_ref() {
             None => Err(EditorActionRejection::NoPublishedFrame),
             Some(published) => {
                 let expected = published.model.revision();
-                if received != expected {
+                if received != expected && batch.requires_current_frame() {
                     Err(EditorActionRejection::StaleFrame { expected, received })
-                } else if published.dispatched {
-                    Err(EditorActionRejection::FrameAlreadyDispatched { revision: expected })
                 } else {
-                    published.dispatched = true;
                     Ok((
                         Arc::clone(&published.model),
                         published.source_index.as_ref().map(Arc::clone),
@@ -68,32 +58,21 @@ impl EditorProjectSession {
                 return Err(rejection);
             }
         };
-        let expected = frame.revision();
-
-        let mut mutation_documents = BTreeSet::new();
         let outcomes = batch.into_actions().into_iter().map(|action| {
             let field_target = action.field_target();
-            let outcome = if let Some(document) = action.revision_advancing_document()
-                && !mutation_documents.insert(document)
-            {
-                EditorActionOutcome::Rejected(EditorActionRejection::MutationAlreadySubmitted {
-                    document,
-                })
-            } else {
-                self.dispatch_editor_action(
-                    &frame,
-                    source_index.as_ref(),
-                    image_import.as_ref(),
-                    action,
-                )
-            };
+            let outcome = self.dispatch_editor_action(
+                &frame,
+                source_index.as_ref(),
+                image_import.as_ref(),
+                action,
+            );
             if let EditorActionOutcome::Rejected(rejection) = &outcome {
                 self.record_editor_action_rejection(*rejection);
             }
             self.update_editor_field_feedback(field_target, &outcome);
             outcome
         });
-        Ok(EditorActionBatchReport::new(expected, outcomes))
+        Ok(EditorActionBatchReport::new(received, outcomes))
     }
 
     fn record_editor_action_rejection(&mut self, rejection: EditorActionRejection) {
@@ -110,8 +89,8 @@ impl EditorProjectSession {
     ) -> EditorActionOutcome {
         match action {
             EditorAction::Navigate(action) => self.dispatch_navigation(frame, action),
-            EditorAction::Mutate(action) => self.dispatch_document_mutation(frame, action),
-            EditorAction::Persistence(action) => self.dispatch_persistence(frame, action),
+            EditorAction::Mutate(action) => self.dispatch_document_mutation(action),
+            EditorAction::Persistence(action) => self.dispatch_persistence(action),
             EditorAction::ProjectBrowser(action) => EditorActionOutcome::ProjectBrowser(
                 self.dispatch_project_browser_action(frame, source_index, action),
             ),
@@ -123,9 +102,7 @@ impl EditorProjectSession {
             }
             EditorAction::WorkspaceIntent(action) => self.dispatch_workspace_intent(frame, action),
             EditorAction::Play(action) => self.dispatch_play(frame, action),
-            EditorAction::ReportFieldValidation(failure) => {
-                self.dispatch_field_validation(frame, failure)
-            }
+            EditorAction::ReportFieldValidation(failure) => self.dispatch_field_validation(failure),
             EditorAction::Gesture(action) => self.dispatch_gesture(frame, action),
             EditorAction::RuntimeEdit { document, request } => {
                 if let Err(rejection) =
@@ -293,11 +270,9 @@ impl EditorProjectSession {
 
     fn dispatch_field_validation(
         &mut self,
-        frame: &EditorFrameModel,
         failure: EditorFieldValidationFailure,
     ) -> EditorActionOutcome {
-        if let Err(rejection) = self.verify_document_fact(
-            frame,
+        if let Err(rejection) = self.verify_document_revision(
             failure.target().document(),
             failure.target().base_revision(),
         ) {
@@ -358,23 +333,22 @@ impl EditorProjectSession {
 
     fn dispatch_document_mutation(
         &mut self,
-        frame: &EditorFrameModel,
         action: EditorDocumentMutation,
     ) -> EditorActionOutcome {
         let document = action.document();
         let base_revision = action.base_revision();
-        if let Err(rejection) = self.verify_document_fact(frame, document, base_revision) {
+        if let Err(rejection) = self.verify_document_revision(document, base_revision) {
             return EditorActionOutcome::Rejected(rejection);
         }
         if let EditorDocumentMutation::ApplyPrefabFieldEdit { edit } = &action
-            && !self.ui_authoring_field_edit_matches(frame, edit, EditorFieldCommitMode::Discrete)
+            && !self.ui_authoring_document_field_edit_matches(edit)
         {
             return EditorActionOutcome::Rejected(EditorActionRejection::FieldContractMismatch {
                 document,
             });
         }
         if let EditorDocumentMutation::ComposePrefab { command, .. } = &action
-            && !self.ui_authoring_structure_matches(frame, document, base_revision, command)
+            && !self.ui_authoring_structure_matches(document, command)
         {
             return EditorActionOutcome::Rejected(
                 EditorActionRejection::StructureContractMismatch { document },
@@ -510,11 +484,7 @@ impl EditorProjectSession {
                         lane.plan.schema_validation().registry(),
                         &baseline,
                     )
-                    || !self.ui_authoring_field_edit_matches(
-                        frame,
-                        &baseline,
-                        EditorFieldCommitMode::Continuous,
-                    )
+                    || !self.ui_authoring_field_edit_matches(frame, &baseline)
                 {
                     return EditorActionOutcome::Gesture(EditorGestureOutcome::Rejected(
                         EditorGestureRejection::BaselineMismatch,
@@ -541,11 +511,7 @@ impl EditorProjectSession {
                 if let Err(rejection) = self.gestures.validate_edit(gesture, &edit) {
                     return EditorActionOutcome::Gesture(EditorGestureOutcome::Rejected(rejection));
                 }
-                if !self.ui_authoring_field_edit_matches(
-                    frame,
-                    &edit,
-                    EditorFieldCommitMode::Continuous,
-                ) {
+                if !self.ui_authoring_field_edit_matches(frame, &edit) {
                     let reason = nara_tooling::EditorGestureCancelReason::InvalidPreview;
                     let outcome = self
                         .gestures
@@ -571,11 +537,7 @@ impl EditorProjectSession {
                 if let Err(rejection) = self.gestures.validate_edit(gesture, &edit) {
                     return EditorActionOutcome::Gesture(EditorGestureOutcome::Rejected(rejection));
                 }
-                if !self.ui_authoring_field_edit_matches(
-                    frame,
-                    &edit,
-                    EditorFieldCommitMode::Continuous,
-                ) {
+                if !self.ui_authoring_field_edit_matches(frame, &edit) {
                     let reason = nara_tooling::EditorGestureCancelReason::InvalidPreview;
                     let outcome = self
                         .gestures
@@ -613,17 +575,13 @@ impl EditorProjectSession {
         }
     }
 
-    fn dispatch_persistence(
-        &mut self,
-        frame: &EditorFrameModel,
-        action: EditorPersistenceAction,
-    ) -> EditorActionOutcome {
+    fn dispatch_persistence(&mut self, action: EditorPersistenceAction) -> EditorActionOutcome {
         match action {
             EditorPersistenceAction::Save {
                 document,
                 base_revision,
             } => {
-                if let Err(rejection) = self.verify_document_fact(frame, document, base_revision) {
+                if let Err(rejection) = self.verify_document_revision(document, base_revision) {
                     return EditorActionOutcome::Rejected(rejection);
                 }
                 EditorActionOutcome::Persistence(self.request_persistence(
@@ -633,18 +591,13 @@ impl EditorProjectSession {
                 ))
             }
             EditorPersistenceAction::Reopen { target } => {
-                if target != frame.reopen_target() {
-                    return EditorActionOutcome::Rejected(
-                        EditorActionRejection::InvalidReopenTarget,
-                    );
-                }
                 let document = match target {
                     EditorReopenTarget::OpenDocument {
                         document,
                         base_revision,
                     } => {
                         if let Err(rejection) =
-                            self.verify_document_fact(frame, document, base_revision)
+                            self.verify_document_revision(document, base_revision)
                         {
                             return EditorActionOutcome::Rejected(rejection);
                         }
@@ -724,6 +677,7 @@ impl EditorProjectSession {
             EditorPlayAction::StepFixedTick => self.request_play(EditorPlayCommand::StepFixedTick),
             EditorPlayAction::Stop => self.request_play(EditorPlayCommand::Stop),
             EditorPlayAction::Restart => self.request_play(EditorPlayCommand::Restart),
+            EditorPlayAction::RunLastGood => self.request_play(EditorPlayCommand::RunLastGood),
             EditorPlayAction::RetryRetirement => {
                 self.request_play(EditorPlayCommand::RetryRetirement)
             }
@@ -751,6 +705,14 @@ impl EditorProjectSession {
                 actual: Some(frame_document.revision),
             });
         }
+        self.verify_document_revision(document, expected)
+    }
+
+    fn verify_document_revision(
+        &self,
+        document: EditorDocumentId,
+        expected: SceneAuthoringRevision,
+    ) -> Result<(), EditorActionRejection> {
         let actual = self.workspace.document_revision(document);
         if actual != Some(expected) {
             return Err(EditorActionRejection::StaleDocumentFact {
@@ -766,51 +728,74 @@ impl EditorProjectSession {
         &self,
         frame: &EditorFrameModel,
         edit: &EditorAtomicFieldEdit,
-        mode: EditorFieldCommitMode,
     ) -> bool {
         #[cfg(feature = "runtime-ui")]
         {
-            let policy = match mode {
-                EditorFieldCommitMode::Discrete => {
-                    nara_ui::__private::UiAuthoringCommitPolicy::Discrete
-                }
-                EditorFieldCommitMode::Continuous => {
-                    nara_ui::__private::UiAuthoringCommitPolicy::Continuous
-                }
-            };
             self.ui_authoring_frame.as_deref().is_some_and(|authoring| {
                 self.workspace.active_document() == Some(edit.target().document())
                     && authoring.editor_frame() == frame.revision()
-                    && authoring.admits_field_edit(edit, policy)
+                    && authoring.admits_field_edit(
+                        edit,
+                        nara_ui::__private::UiAuthoringCommitPolicy::Continuous,
+                    )
             })
         }
         #[cfg(not(feature = "runtime-ui"))]
         {
-            let _ = (frame, edit, mode);
+            let _ = (frame, edit);
             false
         }
     }
 
     fn ui_authoring_structure_matches(
         &self,
-        frame: &EditorFrameModel,
         document: EditorDocumentId,
-        base_revision: SceneAuthoringRevision,
         command: &nara_tooling::PrefabCompositionCommand,
     ) -> bool {
         #[cfg(feature = "runtime-ui")]
         {
-            self.ui_authoring_frame.as_deref().is_some_and(|authoring| {
-                self.workspace.active_document() == Some(document)
-                    && authoring.editor_frame() == frame.revision()
-                    && authoring.document() == document
-                    && authoring.revision() == base_revision
-                    && authoring.admits_structure_command(command)
-            })
+            let Some(slot) = self.workspace.prefab(document) else {
+                return false;
+            };
+            let Ok(projection) =
+                nara_ui::__private::project_prefab_authoring(slot.session().document())
+            else {
+                return false;
+            };
+            let choices = self.authoring_images.receipt();
+            super::ui_authoring::projection_admits_structure_command(
+                &projection,
+                command,
+                Some(choices.share_choices().as_ref()),
+            )
         }
         #[cfg(not(feature = "runtime-ui"))]
         {
-            let _ = (frame, document, base_revision, command);
+            let _ = (document, command);
+            false
+        }
+    }
+
+    fn ui_authoring_document_field_edit_matches(&self, edit: &EditorAtomicFieldEdit) -> bool {
+        #[cfg(feature = "runtime-ui")]
+        {
+            let Some(slot) = self.workspace.prefab(edit.target().document()) else {
+                return false;
+            };
+            let Ok(projection) =
+                nara_ui::__private::project_prefab_authoring(slot.session().document())
+            else {
+                return false;
+            };
+            super::ui_authoring::projection_admits_field_edit(
+                &projection,
+                edit,
+                nara_ui::__private::UiAuthoringCommitPolicy::Discrete,
+            )
+        }
+        #[cfg(not(feature = "runtime-ui"))]
+        {
+            let _ = edit;
             false
         }
     }
@@ -875,10 +860,6 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
             "editor.action.stale-frame",
             "Editor action targets an obsolete frame",
         ),
-        EditorActionRejection::FrameAlreadyDispatched { .. } => (
-            "editor.action.frame-already-dispatched",
-            "Editor frame already accepted an action batch",
-        ),
         EditorActionRejection::DocumentNotInFrame { .. } => (
             "editor.action.document-not-in-frame",
             "Editor action targets a document absent from its frame",
@@ -890,10 +871,6 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
         EditorActionRejection::ActiveDocumentChanged { .. } => (
             "editor.action.active-document-changed",
             "Editor action targets a document that is no longer active",
-        ),
-        EditorActionRejection::MutationAlreadySubmitted { .. } => (
-            "editor.action.duplicate-mutation",
-            "Editor frame already submitted a mutation for this document",
         ),
         EditorActionRejection::FieldContractMismatch { .. } => (
             "editor.action.field-contract-mismatch",
@@ -922,7 +899,6 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
     );
     match rejection {
         EditorActionRejection::DocumentNotInFrame { document }
-        | EditorActionRejection::MutationAlreadySubmitted { document }
         | EditorActionRejection::FieldContractMismatch { document }
         | EditorActionRejection::StructureContractMismatch { document } => {
             diagnostic = with_public_u64(diagnostic, "document", document.raw());
@@ -966,7 +942,6 @@ fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagn
         }
         EditorActionRejection::NoPublishedFrame
         | EditorActionRejection::StaleFrame { .. }
-        | EditorActionRejection::FrameAlreadyDispatched { .. }
         | EditorActionRejection::InvalidReopenTarget => {}
     }
     diagnostic

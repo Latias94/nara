@@ -38,6 +38,30 @@ fn tool_admission_rejects_relative_process_authority() {
     ));
 }
 
+#[cfg(windows)]
+#[test]
+fn tool_admission_preserves_behavioral_symlink_proxy_name() {
+    let path = env::var_os("PATH").expect("the Rust test environment provides PATH");
+    let proxy = env::split_paths(&path)
+        .map(|directory| directory.join("rustc.exe"))
+        .find(|candidate| {
+            fs::symlink_metadata(candidate).is_ok_and(|metadata| metadata.file_type().is_symlink())
+        });
+    let Some(proxy) = proxy else {
+        return;
+    };
+    let expected = fs::canonicalize(proxy.parent().expect("the rustc proxy has a parent"))
+        .unwrap()
+        .join(proxy.file_name().expect("the rustc proxy has a file name"));
+
+    let admitted = DesktopBuildTools::new(proxy.clone(), proxy)
+        .unwrap()
+        .rustc()
+        .to_path_buf();
+
+    assert_eq!(admitted, expected);
+}
+
 #[test]
 fn revision_mismatch_names_the_first_changed_authority_member() {
     let admitted = DesktopBuildInputRevision::new(

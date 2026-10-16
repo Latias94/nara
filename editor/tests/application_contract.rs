@@ -4,14 +4,17 @@
 ))]
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
+
+#[cfg(windows)]
+use std::fs::OpenOptions;
 
 use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, TrustMode},
@@ -161,6 +164,18 @@ fn dirty_exit_cancel_preserves_the_session_and_discard_closes_it() {
         current_frame(&application).workspace_intent().phase(),
         Some(EditorWorkspaceIntentPhase::Prepared)
     );
+    assert!(drive_process_exit_to_terminal(&mut application));
+    assert!(application.current_frame().is_none());
+}
+
+#[test]
+fn clean_ordinary_exit_reaches_the_process_terminal() {
+    let project = StarterProject::new("clean-ordinary-close");
+    let mut application = open_ordinary(project.root());
+
+    let requested = application.request_exit();
+
+    assert!(!requested.exit_ready());
     assert!(drive_process_exit_to_terminal(&mut application));
     assert!(application.current_frame().is_none());
 }
@@ -811,7 +826,7 @@ fn replacement_same_root_alias_save_publishes_a_fresh_candidate() {
 }
 
 #[test]
-fn ordinary_play_reports_external_execution_host_unavailable() {
+fn ordinary_play_reports_typed_supervised_play_contract_missing() {
     let project = StarterProject::new("runtime-unavailable");
     let mut application = open_ordinary(project.root());
     let frame = current_frame(&application);
@@ -833,7 +848,7 @@ fn ordinary_play_reports_external_execution_host_unavailable() {
         Some(EditorPlayOperationResult::Rejected {
             operation: EditorPlayOperation::Play,
             reason: EditorPlayRejection::RuntimeUnavailable(
-                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+                EditorRuntimeUnavailableReason::SupervisedPlayContractMissing,
             ),
         })
     );
@@ -916,7 +931,8 @@ fn drive_replacement_to_close_decision(application: &mut EditorApplication) {
 }
 
 fn drive_replacement_to_terminal(application: &mut EditorApplication) {
-    for _ in 0..24 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         match application.state() {
             EditorApplicationState::AuthoringReady | EditorApplicationState::AuthoringDegraded => {
                 return;
@@ -935,24 +951,28 @@ fn drive_replacement_to_terminal(application: &mut EditorApplication) {
                 panic!("the replacement should retain a published workspace")
             }
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     panic!("the replacement did not reach a published terminal state")
 }
 
 fn drive_session_retirement_to_manager(application: &mut EditorApplication) {
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         if application.state() == EditorApplicationState::ProjectManager {
             return;
         }
         let frame = current_frame(application);
         let _ = application
             .submit_and_drive(EditorActionBatch::new(frame.revision(), []), Duration::ZERO);
+        std::thread::sleep(Duration::from_millis(1));
     }
     panic!("the session retirement did not return to Project Manager")
 }
 
 fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
-    for _ in 0..8 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
         if application.current_frame().is_none() {
             return false;
         }
@@ -962,6 +982,7 @@ fn drive_process_exit_to_terminal(application: &mut EditorApplication) -> bool {
         if update.exit_ready() {
             return true;
         }
+        std::thread::sleep(Duration::from_millis(1));
     }
     false
 }

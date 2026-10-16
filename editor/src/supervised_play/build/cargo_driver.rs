@@ -9,8 +9,8 @@ use nara::{fs::ContentDigest, project_workflow::__private::CargoDesktopBuildInvo
 use thiserror::Error;
 
 use super::{
-    DesktopBuildFailure, DesktopBuildRequest, MAX_EXECUTABLE_BYTES, MAX_TOOL_IDENTITY_BYTES,
-    MAX_TOOL_PATH_BYTES,
+    DesktopBuildFailure, DesktopBuildRequest, MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES,
+    MAX_TOOL_IDENTITY_BYTES, MAX_TOOL_PATH_BYTES,
 };
 use crate::supervised_play::process::SupervisedProcessCommand;
 
@@ -59,6 +59,7 @@ impl DesktopBuildTools {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn new(
         cargo: impl Into<PathBuf>,
         rustc: impl Into<PathBuf>,
@@ -69,10 +70,7 @@ impl DesktopBuildTools {
         })
     }
 
-    pub(crate) fn cargo(&self) -> &Path {
-        &self.cargo
-    }
-
+    #[cfg(all(test, windows))]
     pub(crate) fn rustc(&self) -> &Path {
         &self.rustc
     }
@@ -268,7 +266,7 @@ pub(crate) fn verify_artifact(path: &Path) -> Result<(), DesktopBuildFailure> {
     if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() == 0 {
         return Err(DesktopBuildFailure::ArtifactNotExecutable);
     }
-    if metadata.len() > MAX_EXECUTABLE_BYTES {
+    if metadata.len() > MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES {
         return Err(DesktopBuildFailure::ArtifactTooLarge);
     }
     if !platform_file_is_executable(&metadata) {
@@ -326,17 +324,30 @@ fn admit_tool_path(
     if !path.is_absolute() {
         return Err(DesktopBuildToolError::OverrideNotAbsolute { tool });
     }
-    if path.as_os_str().as_encoded_bytes().len() > MAX_TOOL_PATH_BYTES {
+    let file_name = path
+        .file_name()
+        .ok_or(DesktopBuildToolError::NotExecutable { tool })?;
+    let parent = path
+        .parent()
+        .ok_or(DesktopBuildToolError::NotExecutable { tool })?;
+    let canonical_parent = fs::canonicalize(parent)
+        .map_err(|source| DesktopBuildToolError::Canonicalize { tool, source })?;
+    // Rustup and other behavior-preserving proxies dispatch from argv[0]. Resolve directory
+    // aliases, but retain the admitted leaf name while separately validating its final target.
+    let invocation = canonical_parent.join(file_name);
+    let resolved = fs::canonicalize(&invocation)
+        .map_err(|source| DesktopBuildToolError::Canonicalize { tool, source })?;
+    if invocation.as_os_str().as_encoded_bytes().len() > MAX_TOOL_PATH_BYTES
+        || resolved.as_os_str().as_encoded_bytes().len() > MAX_TOOL_PATH_BYTES
+    {
         return Err(DesktopBuildToolError::PathLimitExceeded { tool });
     }
-    let canonical = fs::canonicalize(path)
-        .map_err(|source| DesktopBuildToolError::Canonicalize { tool, source })?;
-    let metadata = fs::metadata(&canonical)
+    let metadata = fs::metadata(&resolved)
         .map_err(|source| DesktopBuildToolError::Canonicalize { tool, source })?;
     if !metadata.is_file() || !platform_file_is_executable(&metadata) {
         return Err(DesktopBuildToolError::NotExecutable { tool });
     }
-    Ok(canonical)
+    Ok(invocation)
 }
 
 #[cfg(windows)]

@@ -11,8 +11,9 @@ use crate::{
     CapabilityGeneration, CapabilitySessionId, DirectoryEnumerationLimits,
     DirectoryEnumerationSession, DirectorySyncReceipt, DirectorySyncTier, DurabilityProgress,
     ExpectedTarget, FileCapability, FileFacts, FileIdentity, FileKind, FsError, FsOperation,
-    NativeFileIdentity, RelativeComponent, RelativePath, ResolutionTier, StageStatus,
-    TemporaryFile, platform,
+    NativeFileIdentity, RelativeComponent, RelativePath, ResolutionTier,
+    RestrictiveCapabilityHandleLease, StageStatus, TemporaryFile, TemporaryFileCleanup,
+    TemporaryFileFailure, platform,
 };
 
 static NEXT_CAPABILITY_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -146,6 +147,25 @@ impl DirectoryCapability {
         Self {
             inner: Arc::clone(&self.inner),
         }
+    }
+
+    /// Reopens this exact directory through the platform's restrictive launch lease contract.
+    ///
+    /// Unlike a plain duplicate, the returned lease is produced by the capability owner and is
+    /// revalidated against the live directory object before it can cross into a process launcher.
+    #[doc(hidden)]
+    pub fn duplicate_restrictive_host_handle(
+        &self,
+    ) -> Result<RestrictiveCapabilityHandleLease, FsError> {
+        let file = platform::restrictive_clone_directory(&self.inner.file)?;
+        let facts = platform::facts(&file)?;
+        validate_directory_facts(&self.inner, facts)?;
+        if !facts.identity_proven || facts.identity != self.inner.identity.native() {
+            return Err(FsError::CapabilityIdentityDrift {
+                operation: FsOperation::CloneHandle,
+            });
+        }
+        Ok(RestrictiveCapabilityHandleLease::new(file))
     }
 
     #[must_use]
@@ -385,7 +405,10 @@ impl DirectoryCapability {
         ))
     }
 
-    pub fn create_temp(&self, name: &RelativeComponent) -> Result<TemporaryFile, FsError> {
+    pub fn create_temp(
+        &self,
+        name: &RelativeComponent,
+    ) -> Result<TemporaryFile, TemporaryFileFailure> {
         self.ensure_write(FsOperation::CreateTemporary)?;
         let file = platform::create_file_exclusive(
             &self.inner.file,
@@ -393,26 +416,80 @@ impl DirectoryCapability {
             FsOperation::CreateTemporary,
             platform::FileCreateMode::Regular,
         )?;
-        let facts = platform::facts(&file)?;
-        validate_file_facts(&self.inner, facts)?;
-        let file = FileCapability::from_opened(
-            file,
-            FileIdentity::new(
-                self.inner.identity.session(),
-                self.inner.options.generation,
-                facts.identity,
-            ),
-            Some(self.inner.identity),
-            facts.link_count,
-            CapabilityRights::ReadWrite,
-            self.inner.options.trust,
-            self.inner.resolution,
+        let facts = match platform::facts(&file) {
+            Ok(facts) => facts,
+            Err(error) => {
+                return Err(TemporaryFileFailure::with_cleanup(
+                    error,
+                    TemporaryFileCleanup::new(Arc::clone(&self.inner), name.clone(), file, None),
+                ));
+            }
+        };
+        let identity = FileIdentity::new(
+            self.inner.identity.session(),
+            self.inner.options.generation,
+            facts.identity,
         );
+        if let Err(error) = validate_file_facts(&self.inner, facts) {
+            return Err(TemporaryFileFailure::with_cleanup(
+                error,
+                TemporaryFileCleanup::new(
+                    Arc::clone(&self.inner),
+                    name.clone(),
+                    file,
+                    facts.identity_proven.then_some(identity),
+                ),
+            ));
+        }
         Ok(TemporaryFile::new(
             Arc::clone(&self.inner),
             name.clone(),
             file,
+            identity,
         ))
+    }
+
+    /// Rejects unsupported replacement for this capability before a candidate is created.
+    ///
+    /// This checks authority and platform guarantees. The target's current state is checked again
+    /// by `replace_temp`; this preflight does not reserve a name or promise conflict-free success.
+    pub fn preflight_replace(&self, expected: ExpectedTarget) -> Result<(), FsError> {
+        self.ensure_write(FsOperation::Replace)?;
+        let matrix = platform::capability_matrix();
+        match matrix.publication_atomicity() {
+            crate::PublicationAtomicity::AtomicNameSwitch => {}
+            crate::PublicationAtomicity::Unsupported => {
+                return Err(FsError::Unsupported {
+                    operation: FsOperation::Replace,
+                    capability: "atomic temporary-file publication",
+                });
+            }
+            crate::PublicationAtomicity::NonAtomic | crate::PublicationAtomicity::Unproven => {
+                return Err(FsError::Unproven {
+                    operation: FsOperation::Replace,
+                    proof: "atomic temporary-file publication is unavailable",
+                });
+            }
+        }
+        if matrix.replace_source_binding() == crate::PublicationSourceBinding::Unsupported
+            || matrix.replace_parent_authorization() == crate::ParentAuthorizationTier::Unsupported
+        {
+            return Err(FsError::Unsupported {
+                operation: FsOperation::Replace,
+                capability: "authorized temporary-file publication",
+            });
+        }
+        if self.inner.options.trust.is_strict()
+            && (matrix.replace_source_binding() != crate::PublicationSourceBinding::HandleBound
+                || matrix.replace_parent_authorization()
+                    != crate::ParentAuthorizationTier::HandleBound)
+        {
+            return Err(FsError::Unproven {
+                operation: FsOperation::Replace,
+                proof: "strict replacement requires handle-bound candidate and parent authority",
+            });
+        }
+        platform::preflight_temporary_publication(expected)
     }
 
     pub fn replace_temp(
@@ -420,21 +497,22 @@ impl DirectoryCapability {
         mut temporary: TemporaryFile,
         target: &RelativeComponent,
         expected: ExpectedTarget,
+    ) -> Result<crate::ReplaceReceipt, TemporaryFileFailure> {
+        self.replace_temp_inner(&mut temporary, target, expected)
+            .map_err(|error| TemporaryFileFailure::with_cleanup(error, temporary.into_cleanup()))
+    }
+
+    fn replace_temp_inner(
+        &self,
+        temporary: &mut TemporaryFile,
+        target: &RelativeComponent,
+        expected: ExpectedTarget,
     ) -> Result<crate::ReplaceReceipt, FsError> {
-        self.ensure_write(FsOperation::Replace)?;
+        self.preflight_replace(expected)?;
         if !Arc::ptr_eq(&self.inner, temporary.parent()) {
             return Err(FsError::TemporaryParentMismatch);
         }
         let matrix = platform::capability_matrix();
-        if self.inner.options.trust.is_strict()
-            && matrix.replace_source_binding() != crate::PublicationSourceBinding::HandleBound
-        {
-            return Err(FsError::Unproven {
-                operation: FsOperation::Replace,
-                proof: "strict replacement cannot bind the candidate handle to the source name",
-            });
-        }
-
         let previous = self.inspect_optional_file(target)?;
         match expected {
             ExpectedTarget::Any => {}
@@ -678,7 +756,7 @@ pub(crate) fn validate_directory_facts(
     validate_common_facts(root, facts)
 }
 
-fn validate_file_facts(root: &DirectoryInner, facts: FileFacts) -> Result<(), FsError> {
+pub(crate) fn validate_file_facts(root: &DirectoryInner, facts: FileFacts) -> Result<(), FsError> {
     if facts.kind != FileKind::Regular {
         return Err(FsError::NotRegularFile);
     }
@@ -728,6 +806,72 @@ mod tests {
             Err(FsError::CapabilitySessionExhausted)
         ));
         assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn failed_temporary_validation_retains_a_raw_cleanup_owner() {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "nara_fs_temporary_validation_{}_{}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let capability = DirectoryCapability::from_host_handle(
+            test_host_directory(&root),
+            HostCapabilityOptions::new(CapabilityRights::ReadWrite, test_trust_mode()),
+        )
+        .unwrap();
+        let facts = FileFacts {
+            identity: capability.inner.root_native,
+            kind: FileKind::Other,
+            link_count: 1,
+            reparse_tag: None,
+            identity_proven: false,
+        };
+        let name = RelativeComponent::new("candidate.tmp").unwrap();
+        let failure = platform::with_test_facts_override(facts, || capability.create_temp(&name))
+            .unwrap_err();
+        assert!(matches!(failure.error(), FsError::NotRegularFile));
+        assert!(root.join("candidate.tmp").exists());
+        assert_eq!(failure.cleanup().unwrap().identity(), None);
+
+        let cleanup = failure.into_parts().1.unwrap();
+        let failure = platform::with_test_facts_override(facts, || cleanup.discard()).unwrap_err();
+        assert!(matches!(failure.error(), FsError::NotRegularFile));
+        assert_eq!(failure.cleanup().unwrap().identity(), None);
+        assert!(root.join("candidate.tmp").exists());
+
+        let cleanup = failure.into_parts().1.unwrap();
+        #[cfg(any(windows, target_os = "linux"))]
+        let cleanup = {
+            let unproved = FileFacts {
+                kind: FileKind::Regular,
+                ..facts
+            };
+            let failure =
+                platform::with_test_facts_override(unproved, || cleanup.discard()).unwrap_err();
+            assert!(matches!(failure.error(), FsError::Unproven { .. }));
+            assert_eq!(failure.cleanup().unwrap().identity(), None);
+            failure.into_parts().1.unwrap()
+        };
+        let result = cleanup.discard();
+        #[cfg(windows)]
+        {
+            result.unwrap();
+            assert!(!root.join("candidate.tmp").exists());
+        }
+        #[cfg(unix)]
+        {
+            let failure = result.unwrap_err();
+            assert!(matches!(failure.error(), FsError::Unsupported { .. }));
+            assert!(failure.cleanup().unwrap().identity().is_some());
+            assert!(root.join("candidate.tmp").exists());
+            drop(failure);
+        }
+        drop(capability);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

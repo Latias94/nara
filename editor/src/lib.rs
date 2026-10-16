@@ -10,7 +10,7 @@ pub use app::{
 };
 pub use platform::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
-    EditorRunError, EditorUiAuthoringCanaryEvidence, EditorUiAuthoringCanaryFrame,
-    EditorUiAuthoringCanaryRequest, run, run_trusted_compiled,
+    EditorRunError, EditorSupervisedPlayCanaryEvidence, EditorUiAuthoringCanaryEvidence,
+    EditorUiAuthoringCanaryFrame, EditorUiAuthoringCanaryRequest, run, run_trusted_compiled,
     run_trusted_compiled_game_view_canary,
 };

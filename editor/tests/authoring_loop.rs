@@ -4,12 +4,15 @@
 ))]
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
+
+#[cfg(windows)]
+use std::fs::OpenOptions;
 
 use egui::{Key, Modifiers, accesskit::Role};
 use egui_kittest::{Harness, kittest::Queryable as _};
@@ -181,7 +184,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
     let resized_candidate = take_game_candidate(&mut application);
     assert_eq!(resized_candidate.identity().start(), resized_start);
     assert_eq!(
-        resized_candidate.packet().view().viewport.extent(),
+        resized_candidate.packet().views()[0].viewport.extent(),
         resized_extent
     );
     complete_plain_candidate(&mut application, resized_candidate);

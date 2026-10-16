@@ -6,8 +6,9 @@ use std::{
 
 use crate::{
     CapabilityRights, ContentDigest, DurabilityProgress, FileIdentity, FileKind, FileLock,
-    FileSyncReceipt, FileSyncTier, FsError, FsOperation, LockMode, ResolutionTier, StageStatus,
-    TrustMode, capability::new_host_session, platform,
+    FileSyncReceipt, FileSyncTier, FsError, FsOperation, LockMode, ResolutionTier,
+    RestrictiveCapabilityHandleLease, StageStatus, TrustMode, capability::new_host_session,
+    platform,
 };
 
 pub struct FileCapability {
@@ -110,6 +111,23 @@ impl FileCapability {
     #[must_use]
     pub const fn resolution_tier(&self) -> ResolutionTier {
         self.resolution
+    }
+
+    /// Reopens this exact regular file through the platform's restrictive launch lease contract.
+    #[doc(hidden)]
+    pub fn duplicate_restrictive_host_handle(
+        &self,
+    ) -> Result<RestrictiveCapabilityHandleLease, FsError> {
+        platform::restrictive_clone_file(&self.file).map(RestrictiveCapabilityHandleLease::new)
+    }
+
+    /// Reopens this exact regular file with the execute access required by image attestation.
+    #[doc(hidden)]
+    pub fn duplicate_restrictive_executable_host_handle(
+        &self,
+    ) -> Result<RestrictiveCapabilityHandleLease, FsError> {
+        platform::restrictive_clone_executable(&self.file)
+            .map(RestrictiveCapabilityHandleLease::new)
     }
 
     pub fn reader(&self) -> Result<CapabilityReader, FsError> {

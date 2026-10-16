@@ -4,12 +4,30 @@ use std::{
     time::{Duration, UNIX_EPOCH},
 };
 
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "windows", target_arch = "x86_64")
+))]
+use std::{thread, time::Instant};
+
 use nara::fs::ContentDigest;
 
 use super::{
     EXECUTABLE_NAME, ExecutableGenerationStore, GenerationBuildObservation,
     GenerationManifestInput, GenerationPackageFacts, GenerationSourceFacts, GenerationStoreError,
-    GenerationTargetFacts, SCAVENGE_MIN_AGE, STORE_NAMESPACE, measure_valid_store_tree,
+    GenerationTargetFacts, MAX_SCAVENGE_WORK_DEPTH, SCAVENGE_MIN_AGE, STORE_NAMESPACE,
+    measure_valid_store_tree,
+};
+
+const EXACT_CWD_PROBE: &str = "exact-generation-cwd-probe";
+
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "windows", target_arch = "x86_64")
+))]
+use crate::supervised_play::process::{
+    SupervisedProcessOwner, SupervisedProcessState, SupervisedProductEnvironmentPolicy,
+    SupervisedProductProcessCommand, default_log_limits,
 };
 
 #[test]
@@ -28,10 +46,158 @@ fn published_generation_is_immutable_when_the_cargo_artifact_changes() {
         .publish_candidate(&artifact, manifest_input(b"receipt-b", vec!["desktop"]))
         .unwrap();
 
+    assert_eq!(first.source_receipt(), b"receipt-a");
+    assert_eq!(second.source_receipt(), b"receipt-b");
     assert_eq!(fs::read(first.executable()).unwrap(), b"first executable");
     assert_eq!(fs::read(second.executable()).unwrap(), b"second executable");
     assert_ne!(first.executable_digest(), second.executable_digest());
     assert!(first.executable().exists());
+}
+
+#[test]
+fn unchanged_generation_revalidates_into_an_opaque_launch_authority() {
+    let fixture = Fixture::new("launch-revalidation");
+    let artifact = fixture.artifact(b"launchable executable");
+    let mut store = ExecutableGenerationStore::create(&fixture.root).unwrap();
+    let generation = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+
+    let authority = generation.revalidate_for_launch().unwrap().into_authority();
+
+    assert_eq!(
+        generation.product_identity().as_str(),
+        "cargo-product/v1/package@0.1.0/desktop"
+    );
+    assert_eq!(generation.source_receipt(), b"receipt");
+    drop(authority);
+}
+
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "windows", target_arch = "x86_64")
+))]
+#[test]
+fn exact_launch_authority_survives_generation_path_replacement() {
+    let fixture = Fixture::new("exact-authority-path-replacement");
+    let artifact = fixture.artifact_from_path(&std::env::current_exe().unwrap());
+    let mut store = ExecutableGenerationStore::create(&fixture.root).unwrap();
+    let generation = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+    let authority = generation.revalidate_for_launch().unwrap().into_authority();
+
+    let original_directory = generation.directory.clone();
+    let moved_directory = original_directory.with_file_name(format!(
+        "{}.moved",
+        original_directory.file_name().unwrap().to_string_lossy()
+    ));
+    #[cfg(target_os = "linux")]
+    {
+        fs::rename(&original_directory, &moved_directory).unwrap();
+        fs::create_dir(&original_directory).unwrap();
+        let replacement = original_directory.join(EXECUTABLE_NAME);
+        fs::write(&replacement, b"path replacement must never execute").unwrap();
+        make_executable(&replacement);
+        fs::write(
+            original_directory.join(super::LAUNCH_MANIFEST_NAME),
+            b"replacement manifest",
+        )
+        .unwrap();
+    }
+    #[cfg(target_os = "windows")]
+    assert!(
+        fs::rename(&original_directory, &moved_directory).is_err(),
+        "the restrictive generation-directory lease must deny replacement while authority lives"
+    );
+
+    let command = SupervisedProductProcessCommand::new(
+        SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession,
+        fixture.root.clone(),
+    )
+    .arguments([
+        "--exact",
+        "supervised_play::generation::store::tests::exact_generation_fd_helper",
+        "--nocapture",
+    ]);
+    let mut owner =
+        SupervisedProcessOwner::spawn_exact_generation(authority, &command, default_log_limits())
+            .unwrap();
+    drop(owner.take_bootstrap());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while owner.state() != SupervisedProcessState::Complete {
+        owner.advance(Instant::now()).unwrap();
+        assert!(
+            Instant::now() < deadline,
+            "exact generation child timed out"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let output = owner
+        .logs()
+        .iter()
+        .map(|entry| entry.text().into_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(output.contains("exact-generation-fd-helper"));
+    assert!(output.contains(fixture.root.to_string_lossy().as_ref()));
+    assert!(fixture.root.join(EXACT_CWD_PROBE).is_file());
+    assert!(!original_directory.join(EXACT_CWD_PROBE).exists());
+    assert!(!moved_directory.join(EXACT_CWD_PROBE).exists());
+    #[cfg(target_os = "linux")]
+    {
+        assert!(output.contains("path-present=false"));
+    }
+    assert!(owner.cleanup_receipt().unwrap().exit().success());
+}
+
+#[cfg(any(
+    all(target_os = "linux", target_arch = "x86_64"),
+    all(target_os = "windows", target_arch = "x86_64")
+))]
+#[test]
+fn exact_generation_fd_helper() {
+    if !std::env::args_os().any(|argument| argument == "--exact") {
+        return;
+    }
+    fs::write(EXACT_CWD_PROBE, b"explicit product working directory").unwrap();
+    println!(
+        "exact-generation-fd-helper cwd={} path-present={}",
+        std::env::current_dir().unwrap().display(),
+        std::env::var_os("PATH").is_some()
+    );
+}
+
+#[test]
+fn changed_executable_fails_launch_revalidation() {
+    let fixture = Fixture::new("changed-launch-executable");
+    let artifact = fixture.artifact(b"published executable");
+    let mut store = ExecutableGenerationStore::create(&fixture.root).unwrap();
+    let generation = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+    fs::write(generation.executable(), b"changed executable").unwrap();
+
+    assert!(generation.revalidate_for_launch().is_err());
+}
+
+#[test]
+fn replaced_manifest_fails_launch_revalidation_even_with_identical_bytes() {
+    let fixture = Fixture::new("replaced-launch-manifest");
+    let artifact = fixture.artifact(b"published executable");
+    let mut store = ExecutableGenerationStore::create(&fixture.root).unwrap();
+    let generation = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+    let manifest = fs::read(generation.launch_manifest()).unwrap();
+    fs::remove_file(generation.launch_manifest()).unwrap();
+    fs::write(generation.launch_manifest(), manifest).unwrap();
+
+    assert!(matches!(
+        generation.revalidate_for_launch(),
+        Err(GenerationStoreError::GenerationBindingChanged)
+    ));
 }
 
 #[test]
@@ -88,6 +254,25 @@ fn build_publication_does_not_advance_last_good() {
         store.activate_last_good(),
         Err(GenerationStoreError::LastGoodUnavailable)
     ));
+}
+
+#[test]
+fn last_good_reactivation_preserves_the_immutable_generation_sequence() {
+    let fixture = Fixture::new("last-good-sequence");
+    let artifact = fixture.artifact(b"last good executable");
+    let mut store = ExecutableGenerationStore::create(&fixture.root).unwrap();
+    let published = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+    let published_sequence = published.sequence();
+
+    store.activate_candidate(published.id()).unwrap();
+    store.admit_ready(published.id()).unwrap();
+    store.finish_active(published.id()).unwrap();
+    let reactivated = store.activate_last_good().unwrap();
+
+    assert_eq!(reactivated.id(), published.id());
+    assert_eq!(reactivated.sequence(), published_sequence);
 }
 
 #[test]
@@ -165,6 +350,14 @@ fn close_requires_active_retirement_and_removes_the_owned_store() {
         .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
         .unwrap();
     store.activate_candidate(generation.id()).unwrap();
+    let work_directory = store.begin_work_directory().unwrap();
+    let runtime_log_directory = work_directory.join("NVIDIA Corporation").join("umdlogs");
+    fs::create_dir_all(&runtime_log_directory).unwrap();
+    fs::write(
+        runtime_log_directory.join("runtime.log"),
+        b"runtime side effect",
+    )
+    .unwrap();
     assert!(matches!(
         store.try_close(),
         Err(GenerationStoreError::ActiveGenerationExists)
@@ -172,6 +365,12 @@ fn close_requires_active_retirement_and_removes_the_owned_store() {
 
     store.admit_ready(generation.id()).unwrap();
     store.finish_active(generation.id()).unwrap();
+    assert!(matches!(
+        store.try_close(),
+        Err(GenerationStoreError::ActiveWorkDirectoryExists)
+    ));
+    store.finish_work_directory().unwrap();
+    assert!(!work_directory.exists());
     let owner_marker = store.owner_marker.as_ref().unwrap();
     assert!(
         owner_marker.named_binding_is_current(),
@@ -182,7 +381,7 @@ fn close_requires_active_retirement_and_removes_the_owned_store() {
         "the retained store must still match the bounded store grammar"
     );
     let receipt = store.try_close().unwrap();
-    assert!(receipt.store_removed());
+    assert_eq!(receipt, super::GenerationStoreCloseReceipt);
     assert!(!store_path.exists());
 }
 
@@ -190,8 +389,21 @@ fn close_requires_active_retirement_and_removes_the_owned_store() {
 fn scavenger_skips_live_store_and_removes_old_inactive_store() {
     let fixture = Fixture::new("scavenge");
     let created = UNIX_EPOCH + Duration::from_secs(10);
-    let store = ExecutableGenerationStore::create_at(&fixture.root, created).unwrap();
+    let artifact = fixture.artifact(b"inactive executable");
+    let mut store = ExecutableGenerationStore::create_at(&fixture.root, created).unwrap();
     let store_path = store.store_path.clone();
+    let generation = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+    store.activate_candidate(generation.id()).unwrap();
+    let work_directory = store.begin_work_directory().unwrap();
+    let runtime_log_directory = work_directory.join("NVIDIA Corporation").join("umdlogs");
+    fs::create_dir_all(&runtime_log_directory).unwrap();
+    fs::write(
+        runtime_log_directory.join("runtime.log"),
+        b"runtime side effect",
+    )
+    .unwrap();
     let now = created + SCAVENGE_MIN_AGE + Duration::from_secs(1);
 
     let live = ExecutableGenerationStore::scavenge_inactive_at(&fixture.root, now).unwrap();
@@ -202,6 +414,32 @@ fn scavenger_skips_live_store_and_removes_old_inactive_store() {
     let inactive = ExecutableGenerationStore::scavenge_inactive_at(&fixture.root, now).unwrap();
     assert_eq!(inactive.removed(), 1);
     assert!(!store_path.exists());
+}
+
+#[test]
+fn scavenger_refuses_an_inactive_work_tree_beyond_the_depth_bound() {
+    let fixture = Fixture::new("scavenge-work-depth");
+    let created = UNIX_EPOCH + Duration::from_secs(10);
+    let artifact = fixture.artifact(b"inactive executable");
+    let mut store = ExecutableGenerationStore::create_at(&fixture.root, created).unwrap();
+    let store_path = store.store_path.clone();
+    let generation = store
+        .publish_candidate(&artifact, manifest_input(b"receipt", vec!["desktop"]))
+        .unwrap();
+    store.activate_candidate(generation.id()).unwrap();
+    let mut nested = store.begin_work_directory().unwrap();
+    for _ in 0..=MAX_SCAVENGE_WORK_DEPTH {
+        nested = nested.join("nested");
+        fs::create_dir(&nested).unwrap();
+    }
+    drop(store);
+
+    let now = created + SCAVENGE_MIN_AGE + Duration::from_secs(1);
+    let receipt = ExecutableGenerationStore::scavenge_inactive_at(&fixture.root, now).unwrap();
+
+    assert_eq!(receipt.removed(), 0);
+    assert_eq!(receipt.skipped_unverified(), 1);
+    assert!(store_path.exists());
 }
 
 fn manifest_input(receipt: &[u8], features: Vec<&str>) -> GenerationManifestInput {
@@ -250,6 +488,17 @@ impl Fixture {
     fn artifact(&self, bytes: &[u8]) -> PathBuf {
         let path = self.root.join(EXECUTABLE_NAME);
         fs::write(&path, bytes).unwrap();
+        make_executable(&path);
+        path.canonicalize().unwrap()
+    }
+
+    #[cfg(any(
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "windows", target_arch = "x86_64")
+    ))]
+    fn artifact_from_path(&self, source: &std::path::Path) -> PathBuf {
+        let path = self.root.join(EXECUTABLE_NAME);
+        fs::copy(source, &path).unwrap();
         make_executable(&path);
         path.canonicalize().unwrap()
     }

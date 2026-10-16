@@ -13,6 +13,7 @@ use nara::{
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorNavigationAction, EditorPlayAction, EditorPlayState,
+        EditorRuntimeAvailability,
     },
     tooling_egui::{
         EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorViewport,
@@ -34,6 +35,7 @@ use winit::{
 };
 
 use crate::app::{EditorApplicationDispatch, EditorApplicationSurface};
+use crate::supervised_play::SupervisedPlayWake;
 use crate::{
     EditorApplication, EditorApplicationOpenError, EditorApplicationUpdate, EditorLaunchOptions,
 };
@@ -42,12 +44,14 @@ mod canary;
 mod game_input;
 mod generic_open_canary;
 mod image_import_canary;
+mod supervised_play_canary;
 mod ui_canary;
 mod viewport;
 
 pub use canary::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
 };
+pub use supervised_play_canary::EditorSupervisedPlayCanaryEvidence;
 pub use ui_canary::{
     EditorUiAuthoringCanaryEvidence, EditorUiAuthoringCanaryFrame, EditorUiAuthoringCanaryRequest,
 };
@@ -109,13 +113,24 @@ impl EditorRunError {
 }
 
 pub fn run(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
-    if image_import_canary::requested() && generic_open_canary::requested() {
+    let canary_count = [
+        image_import_canary::requested(),
+        generic_open_canary::requested(),
+        supervised_play_canary::requested(),
+    ]
+    .into_iter()
+    .filter(|requested| *requested)
+    .count();
+    if canary_count > 1 {
         return Err(EditorRunError::usage(
             "only one native Editor canary may be requested per launch",
         ));
     }
     if image_import_canary::requested() {
         return run_image_import_canary(options);
+    }
+    if supervised_play_canary::requested() {
+        return run_supervised_play_canary(options);
     }
     if generic_open_canary::requested() {
         return run_generic_open_canary(options);
@@ -146,7 +161,12 @@ fn run_generic_open_canary(options: EditorLaunchOptions) -> Result<(), EditorRun
     )?;
     let canary = match host.canary.take() {
         Some(NativeEditorCanary::GenericOpen(canary)) => canary,
-        Some(NativeEditorCanary::GameView(_) | NativeEditorCanary::ImageImport(_)) | None => {
+        Some(
+            NativeEditorCanary::GameView(_)
+            | NativeEditorCanary::ImageImport(_)
+            | NativeEditorCanary::SupervisedPlay(_),
+        )
+        | None => {
             unreachable!("the guarded launch installs one generic Open/Recovery canary")
         }
     };
@@ -162,12 +182,54 @@ fn run_image_import_canary(options: EditorLaunchOptions) -> Result<(), EditorRun
     )?;
     let canary = match host.canary.take() {
         Some(NativeEditorCanary::ImageImport(canary)) => canary,
-        Some(NativeEditorCanary::GameView(_) | NativeEditorCanary::GenericOpen(_)) | None => {
+        Some(
+            NativeEditorCanary::GameView(_)
+            | NativeEditorCanary::GenericOpen(_)
+            | NativeEditorCanary::SupervisedPlay(_),
+        )
+        | None => {
             unreachable!("the guarded launch installs one image import canary")
         }
     };
     drop(host);
     canary.finish()
+}
+
+fn run_supervised_play_canary(options: EditorLaunchOptions) -> Result<(), EditorRunError> {
+    let (application, canary) = supervised_play_canary::SupervisedPlayCanaryHost::new(options)?;
+    let mut host = drive_native_editor(
+        application,
+        Some(NativeEditorCanary::SupervisedPlay(Box::new(canary))),
+    )?;
+    match host.canary.take() {
+        Some(NativeEditorCanary::SupervisedPlay(canary)) => {
+            let evidence = canary.finish()?;
+            if evidence.first_generation() == evidence.successor_generation() {
+                return Err(EditorRunError::Platform(
+                    "the supervised Play canary reused its immutable generation".to_owned(),
+                ));
+            }
+            println!(
+                "{{\"kind\":\"nara_editor_supervised_play_canary\",\"version\":1,\"guarded_project\":true,\"first\":{{\"saved_revision\":{},\"generation\":{},\"output_sequence\":{},\"output_truncated\":{}}},\"failure\":{{\"false_running\":false,\"last_good_generation\":{}}},\"successor\":{{\"saved_revision\":{},\"generation\":{},\"output_sequence\":{},\"output_truncated\":{}}},\"cleanup\":\"complete\",\"result\":\"ok\"}}",
+                evidence.first_saved_revision(),
+                evidence.first_generation(),
+                evidence.first_output_sequence(),
+                evidence.first_output_truncated(),
+                evidence.last_good_generation(),
+                evidence.successor_saved_revision(),
+                evidence.successor_generation(),
+                evidence.successor_output_sequence(),
+                evidence.successor_output_truncated(),
+            );
+            Ok(())
+        }
+        Some(
+            NativeEditorCanary::GameView(_)
+            | NativeEditorCanary::GenericOpen(_)
+            | NativeEditorCanary::ImageImport(_),
+        )
+        | None => unreachable!("the supervised Play canary installs one matching host"),
+    }
 }
 
 /// Runs one bounded native Game View canary over an already compiled first-party product intent.
@@ -186,19 +248,33 @@ pub fn run_trusted_compiled_game_view_canary(
     )?;
     match host.canary.take() {
         Some(NativeEditorCanary::GameView(canary)) => canary.finish(),
-        Some(NativeEditorCanary::GenericOpen(_) | NativeEditorCanary::ImageImport(_)) | None => {
+        Some(
+            NativeEditorCanary::GenericOpen(_)
+            | NativeEditorCanary::ImageImport(_)
+            | NativeEditorCanary::SupervisedPlay(_),
+        )
+        | None => {
             unreachable!("the canary launch installs one Game View canary host")
         }
     }
 }
 
 fn drive_native_editor(
-    application: EditorApplication,
+    mut application: EditorApplication,
     canary: Option<NativeEditorCanary>,
 ) -> Result<NativeEditorHost, EditorRunError> {
-    let event_loop = EventLoop::new().map_err(event_loop_error)?;
+    let event_loop = EventLoop::<EditorUserEvent>::with_user_event()
+        .build()
+        .map_err(event_loop_error)?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut host = NativeEditorHost::new(application, canary)?;
+    let proxy = event_loop.create_proxy();
+    let supervised_play_wake = SupervisedPlayWake::new(move || {
+        proxy
+            .send_event(EditorUserEvent::SupervisedPlayWake)
+            .is_ok()
+    });
+    application.install_supervised_play_wake(supervised_play_wake.clone());
+    let mut host = NativeEditorHost::new(application, canary, supervised_play_wake)?;
     if let Err(error) = event_loop.run_app(&mut host) {
         host.terminal_error
             .get_or_insert_with(|| event_loop_error(error));
@@ -209,12 +285,18 @@ fn drive_native_editor(
     Ok(host)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorUserEvent {
+    SupervisedPlayWake,
+}
+
 fn event_loop_error(error: EventLoopError) -> EditorRunError {
     EditorRunError::EventLoop(error.to_string())
 }
 
 struct NativeEditorHost {
     application: EditorApplication,
+    supervised_play_wake: SupervisedPlayWake,
     context: egui::Context,
     window: Option<Arc<Window>>,
     egui_state: Option<egui_winit::State>,
@@ -242,11 +324,13 @@ enum NativeEditorCanary {
     GameView(Box<EditorGameViewCanaryHost>),
     GenericOpen(Box<EditorGenericOpenCanaryHost>),
     ImageImport(Box<EditorImageImportCanaryHost>),
+    SupervisedPlay(Box<supervised_play_canary::SupervisedPlayCanaryHost>),
 }
 
 struct NativeEditorCanaryAdvance {
     action: Option<EditorAction>,
     redraw: bool,
+    request_exit: bool,
     exit: bool,
 }
 
@@ -255,6 +339,7 @@ impl NativeEditorCanaryAdvance {
         Self {
             action: None,
             redraw: false,
+            request_exit: false,
             exit: false,
         }
     }
@@ -263,6 +348,7 @@ impl NativeEditorCanaryAdvance {
         Self {
             action: None,
             redraw: true,
+            request_exit: false,
             exit: false,
         }
     }
@@ -271,6 +357,16 @@ impl NativeEditorCanaryAdvance {
         Self {
             action: Some(action),
             redraw: true,
+            request_exit: false,
+            exit: false,
+        }
+    }
+
+    const fn request_exit() -> Self {
+        Self {
+            action: None,
+            redraw: true,
+            request_exit: true,
             exit: false,
         }
     }
@@ -279,6 +375,7 @@ impl NativeEditorCanaryAdvance {
         Self {
             action: None,
             redraw: false,
+            request_exit: false,
             exit: true,
         }
     }
@@ -290,20 +387,21 @@ impl NativeEditorCanary {
             Self::GameView(canary) => canary.deadline(),
             Self::GenericOpen(canary) => canary.deadline(),
             Self::ImageImport(canary) => canary.deadline(),
+            Self::SupervisedPlay(canary) => canary.deadline(),
         }
     }
 
     fn tracked_sprite_sort_key(&self) -> Option<i32> {
         match self {
             Self::GameView(canary) => Some(canary.tracked_sprite_sort_key()),
-            Self::GenericOpen(_) | Self::ImageImport(_) => None,
+            Self::GenericOpen(_) | Self::ImageImport(_) | Self::SupervisedPlay(_) => None,
         }
     }
 
     const fn viewport_extent_override(&self) -> Option<Extent2d> {
         match self {
             Self::GameView(canary) => canary.viewport_extent_override(),
-            Self::GenericOpen(_) | Self::ImageImport(_) => None,
+            Self::GenericOpen(_) | Self::ImageImport(_) | Self::SupervisedPlay(_) => None,
         }
     }
 }
@@ -323,7 +421,18 @@ impl EditorViewportSelection {
         }
     }
 
-    fn reconcile(&mut self, play_state: EditorPlayState) -> Option<EditorAction> {
+    fn reconcile(
+        &mut self,
+        play_state: EditorPlayState,
+        runtime_availability: EditorRuntimeAvailability,
+    ) -> Option<EditorAction> {
+        if matches!(
+            runtime_availability,
+            EditorRuntimeAvailability::ExternalSupervised
+        ) {
+            *self = Self::Authoring;
+            return None;
+        }
         match play_state {
             EditorPlayState::Empty => *self = Self::Authoring,
             EditorPlayState::PreparingPlay | EditorPlayState::Starting => {
@@ -364,7 +473,17 @@ impl EditorViewportSelection {
         &mut self,
         intent: EguiEditorViewportIntent,
         play_state: EditorPlayState,
+        runtime_availability: EditorRuntimeAvailability,
     ) -> Option<EditorAction> {
+        if matches!(
+            runtime_availability,
+            EditorRuntimeAvailability::ExternalSupervised
+        ) {
+            if intent == EguiEditorViewportIntent::SelectAuthoring {
+                *self = Self::Authoring;
+            }
+            return None;
+        }
         match intent {
             EguiEditorViewportIntent::SelectGame if play_state != EditorPlayState::Empty => {
                 *self = Self::Game;
@@ -403,11 +522,13 @@ impl NativeEditorHost {
     fn new(
         application: EditorApplication,
         canary: Option<NativeEditorCanary>,
+        supervised_play_wake: SupervisedPlayWake,
     ) -> Result<Self, EditorRunError> {
         let capture_ui_image_facts =
             matches!(canary.as_ref(), Some(NativeEditorCanary::ImageImport(_)));
         Ok(Self {
             application,
+            supervised_play_wake,
             context: egui::Context::default(),
             window: None,
             egui_state: None,
@@ -432,6 +553,37 @@ impl NativeEditorHost {
         })
     }
 
+    fn handle_supervised_play_wake(&mut self, event_loop: &ActiveEventLoop) {
+        self.supervised_play_wake.acknowledge();
+        let update = self
+            .application
+            .drive_supervised_play_effects(Instant::now());
+        if update.exit_ready() {
+            event_loop.exit();
+            return;
+        }
+        if update.actions_observed()
+            && let Some(window) = self.window.as_ref()
+        {
+            window.request_redraw();
+            self.repaint_deadline = None;
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
+        self.schedule_next_wake(event_loop);
+    }
+
+    fn schedule_next_wake(&self, event_loop: &ActiveEventLoop) {
+        if let Some(deadline) = earliest_deadline(
+            self.repaint_deadline,
+            self.application.next_supervised_play_deadline(),
+        ) {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
     fn initialize(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
         if self.window.is_some() {
             return Ok(());
@@ -454,7 +606,7 @@ impl NativeEditorHost {
         self.renderer = Some(renderer);
         if !matches!(
             self.canary.as_ref(),
-            Some(NativeEditorCanary::GenericOpen(_))
+            Some(NativeEditorCanary::GenericOpen(_) | NativeEditorCanary::SupervisedPlay(_),)
         ) {
             let _ = self.application.native_shell_ready();
         }
@@ -670,7 +822,7 @@ impl NativeEditorHost {
         }
         let deadline = Instant::now() + GAME_VIEW_PENDING_REPAINT_DELAY;
         self.repaint_deadline = Some(deadline);
-        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        self.schedule_next_wake(event_loop);
         Ok(())
     }
 
@@ -953,6 +1105,23 @@ impl NativeEditorHost {
                 )?;
                 Ok(true)
             }
+            EguiEditorViewport::Game if self.viewport_slot.game_display_scale_pending() => {
+                let Some(request) = self.application.active_game_start_request() else {
+                    return Ok(false);
+                };
+                self.game_presenter.ensure_target(
+                    &mut self.viewport_slot,
+                    self.gpu
+                        .as_mut()
+                        .expect("an installed native window has one Editor GPU owner"),
+                    self.renderer
+                        .as_mut()
+                        .expect("an installed native window has one egui renderer"),
+                    window,
+                    request,
+                )?;
+                Ok(true)
+            }
             EguiEditorViewport::Game => Ok(false),
         }
     }
@@ -1130,10 +1299,18 @@ impl NativeEditorHost {
         } else {
             false
         };
+        let supervised_play_canary_advanced = if presentation_deferred {
+            false
+        } else if let Some(NativeEditorCanary::SupervisedPlay(canary)) = self.canary.as_mut() {
+            canary.advance_project_shell(rendered_state, &mut self.application, window.id())?
+        } else {
+            false
+        };
 
         if open_update.actions_observed()
             || shell_update.actions_observed()
             || generic_canary_advanced
+            || supervised_play_canary_advanced
             || repaint_delay.is_zero()
         {
             window.request_redraw();
@@ -1148,10 +1325,10 @@ impl NativeEditorHost {
             self.canary.as_ref().map(NativeEditorCanary::deadline),
         ) {
             self.repaint_deadline = Some(deadline);
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            self.schedule_next_wake(event_loop);
         } else {
             self.repaint_deadline = None;
-            event_loop.set_control_flow(ControlFlow::Wait);
+            self.schedule_next_wake(event_loop);
         }
         Ok(())
     }
@@ -1184,9 +1361,10 @@ impl NativeEditorHost {
                 )
             })
         });
-        let mut shell_action = self
-            .viewport_selection
-            .reconcile(editor_frame.play().state());
+        let mut shell_action = self.viewport_selection.reconcile(
+            editor_frame.play().state(),
+            editor_frame.runtime_availability(),
+        );
         let selected_viewport = self.viewport_selection.selected();
         let gpu = self
             .gpu
@@ -1397,6 +1575,10 @@ impl NativeEditorHost {
                 .view_input(&self.viewport_slot, &editor_frame, prepared_game)
                 .with_capture_active(self.game_input.is_captured())
                 .with_restore_focus(restore_game_focus)
+                .with_integer_scaling(
+                    self.viewport_slot.game_display_scale()
+                        == nara::render::DisplayScale::IntegerFit,
+                )
         } else {
             EguiGameViewInput::unavailable()
         };
@@ -1431,9 +1613,11 @@ impl NativeEditorHost {
             {
                 self.application.cancel_game_step_presentation();
             }
-            shell_action = self
-                .viewport_selection
-                .apply_intent(intent, editor_frame.play().state());
+            shell_action = self.viewport_selection.apply_intent(
+                intent,
+                editor_frame.play().state(),
+                editor_frame.runtime_availability(),
+            );
         }
         if project_action.is_none()
             && let Some(action) = shell_action
@@ -1449,13 +1633,19 @@ impl NativeEditorHost {
             camera_changed,
         ) = match viewport_output {
             EguiCentralViewportOutput::Scene(scene_view_output) => {
-                if let Some(uv) = scene_view_output.pick_uv() {
+                if let Some((point, mapping)) = scene_view_output
+                    .pick_point()
+                    .zip(scene_view_output.display_mapping())
+                {
                     let selection = pick_stamp
                         .ok_or("Scene View input is unavailable")
                         .and_then(|stamp| {
                             self.scene_presenter
-                                .resolve_pick(EditorScenePickRequest { stamp, uv })
-                                .map(|entity| (stamp.document, entity))
+                                .resolve_pick(EditorScenePickRequest {
+                                    stamp,
+                                    point,
+                                    mapping,
+                                })
                                 .map_err(|()| "Scene View input became stale")
                         });
                     match selection {
@@ -1551,6 +1741,7 @@ impl NativeEditorHost {
         self.pending_textures.append(output.textures_delta);
         let editor_frame_index = self.next_editor_frame_index()?;
         let game_resize_extent = (project_action.is_none()
+            && self.viewport_slot.game_display_scale() == nara::render::DisplayScale::Fit
             && displayed_viewport == EguiEditorViewport::Game
             && selected_after_ui == EguiEditorViewport::Game)
             .then_some(desired_game_extent)
@@ -1581,6 +1772,9 @@ impl NativeEditorHost {
         let sampled_viewport = prepared_viewport
             .as_ref()
             .is_some_and(|prepared| primitives_sample_texture(&primitives, prepared.texture_id()));
+        let registered_viewport_matches = prepared_viewport
+            .as_ref()
+            .is_some_and(|prepared| self.viewport_slot.matches_prepared(prepared));
         let pending_textures = &mut self.pending_textures;
         let mut freed_textures = Vec::new();
         let presentation = gpu.present_window(
@@ -1642,13 +1836,13 @@ impl NativeEditorHost {
                     command_buffers
                 });
                 frame.prepend_command_buffers(command_buffers);
-                if let Some(prepared) = prepared_viewport.as_ref() {
-                    if !sampled_viewport {
+                if prepared_viewport.is_some() {
+                    if !sampled_viewport || !registered_viewport_matches {
                         return Err(WgpuEditorExecutionError::toolkit_paint(
                             "egui did not sample the exact Editor viewport texture",
                         ));
                     }
-                    frame.record_viewport_sample(prepared.texture_registration_generation())?;
+                    frame.record_viewport_sample()?;
                 }
                 freed_textures.extend(pending_textures.free.drain());
                 Ok(())
@@ -1677,7 +1871,15 @@ impl NativeEditorHost {
         let mut game_presentation_advanced = false;
         match (prepared_viewport, presentation.composite()) {
             (Some(PreparedEditorViewportFrame::Scene(prepared)), Some(receipt)) => {
-                self.scene_presenter.promote(prepared, receipt)?;
+                let EguiCentralViewportOutput::Scene(scene_output) = viewport_output else {
+                    return Err(EditorRunError::Platform(
+                        "the Scene candidate was not displayed by the active viewport".to_owned(),
+                    ));
+                };
+                let mapping = scene_output.display_mapping().ok_or_else(|| {
+                    EditorRunError::Platform("the Scene image has no displayed mapping".to_owned())
+                })?;
+                self.scene_presenter.promote(prepared, receipt, mapping)?;
             }
             (Some(PreparedEditorViewportFrame::UiCanvas(prepared)), Some(receipt)) => {
                 self.ui_canvas_presenter.promote(prepared, receipt)?;
@@ -1797,6 +1999,28 @@ impl NativeEditorHost {
                         return Ok(());
                     }
                 }
+                Some(NativeEditorCanary::SupervisedPlay(canary)) => {
+                    let advance = canary.advance_workspace(&mut self.application, window.id())?;
+                    native_canary_advanced = advance.redraw;
+                    if let Some(action) = advance.action {
+                        batch = append_editor_action(batch, action);
+                    }
+                    if advance.request_exit {
+                        let update = self.application.request_exit();
+                        if update.exit_ready() {
+                            event_loop.exit();
+                        } else {
+                            window.request_redraw();
+                            self.repaint_deadline = None;
+                            event_loop.set_control_flow(ControlFlow::Wait);
+                        }
+                        return Ok(());
+                    }
+                    if advance.exit {
+                        event_loop.exit();
+                        return Ok(());
+                    }
+                }
                 Some(NativeEditorCanary::GameView(_)) | None => {}
             }
         }
@@ -1892,6 +2116,22 @@ impl NativeEditorHost {
             );
         }
         let mut game_resized = false;
+        let game_scale_changed = if !read_only
+            && project_action.is_none()
+            && let EguiCentralViewportOutput::Game(output) = viewport_output
+        {
+            self.viewport_slot
+                .request_game_display_scale(output.requested_scale())
+        } else {
+            false
+        };
+        if game_scale_changed {
+            self.game_input.invalidate(false);
+            self.game_presenter.retire_presentation();
+            viewport_retry_pending = true;
+            awaiting_game_frame = true;
+            window.request_redraw();
+        }
         if !read_only && let Some(extent) = game_resize_extent {
             game_resized = self.application.resize_game_view(extent).map_err(|error| {
                 EditorRunError::Platform(format!(
@@ -1938,6 +2178,7 @@ impl NativeEditorHost {
         }
         self.flush_game_input()?;
         let drive_runtime = dispatch.requires_runtime_drive()
+            || game_scale_changed
             || game_resized
             || source_changed
             || self.application.game_step_requires_runtime_drive()
@@ -2038,7 +2279,10 @@ impl NativeEditorHost {
                 (false, None) => unreachable!("the deadline branch requires one wake source"),
             };
             self.repaint_deadline = Some(deadline);
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            self.schedule_next_wake(event_loop);
+        } else {
+            self.repaint_deadline = None;
+            self.schedule_next_wake(event_loop);
         }
         Ok(())
     }
@@ -2068,7 +2312,10 @@ impl NativeEditorHost {
                 frame,
                 read_only: true,
                 ..
-            } if !session_close_pending && !frame.image_import_work_pending() => {
+            } if !session_close_pending
+                && !frame.image_import_work_pending()
+                && !play_lifecycle_requires_runtime_drive(frame.play().state()) =>
+            {
                 self.game_input.invalidate_after_control(true);
                 self.flush_game_input()?;
                 self.play_cadence.retire();
@@ -2145,10 +2392,10 @@ impl NativeEditorHost {
             event_loop.set_control_flow(ControlFlow::Wait);
         } else if let Some(deadline) = deadline {
             self.repaint_deadline = Some(deadline);
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            self.schedule_next_wake(event_loop);
         } else {
             self.repaint_deadline = None;
-            event_loop.set_control_flow(ControlFlow::Wait);
+            self.schedule_next_wake(event_loop);
         }
         Ok(())
     }
@@ -2170,6 +2417,7 @@ impl NativeEditorHost {
             NativeEditorCanary::ImageImport(canary) => {
                 canary.timeout_error(self.application.state())
             }
+            NativeEditorCanary::SupervisedPlay(canary) => canary.timeout_error(&self.application),
         })
     }
 
@@ -2217,19 +2465,49 @@ fn image_import_terminal_successor_required(was_pending: bool, is_pending: bool)
     was_pending && !is_pending
 }
 
-impl ApplicationHandler for NativeEditorHost {
+impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
     fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        if let Some(error) = self.expired_canary_error(Instant::now()) {
+        let now = Instant::now();
+        if let Some(error) = self.expired_canary_error(now) {
             self.fail(event_loop, error);
             return;
         }
-        if matches!(cause, StartCause::ResumeTimeReached { .. })
-            && self.repaint_deadline.take().is_some()
-        {
-            if let Some(window) = self.window.as_ref() {
-                window.request_redraw();
+        if matches!(cause, StartCause::ResumeTimeReached { .. }) {
+            let paint_due = self
+                .repaint_deadline
+                .is_some_and(|deadline| now >= deadline);
+            if paint_due {
+                self.repaint_deadline = None;
             }
-            event_loop.set_control_flow(ControlFlow::Wait);
+            let mut observed = false;
+            if self
+                .application
+                .next_supervised_play_deadline()
+                .is_some_and(|deadline| now >= deadline)
+            {
+                let update = self.application.drive_supervised_play_effects(now);
+                if update.exit_ready() {
+                    event_loop.exit();
+                    return;
+                }
+                observed = update.actions_observed();
+            }
+            if (paint_due || observed)
+                && let Some(window) = self.window.as_ref()
+            {
+                window.request_redraw();
+                event_loop.set_control_flow(ControlFlow::Wait);
+            } else {
+                self.schedule_next_wake(event_loop);
+            }
+        }
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: EditorUserEvent) {
+        match event {
+            EditorUserEvent::SupervisedPlayWake => {
+                self.handle_supervised_play_wake(event_loop);
+            }
         }
     }
 
@@ -2487,7 +2765,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use nara::{
-        tooling::{EditorAction, EditorPlayAction, EditorPlayState},
+        tooling::{EditorAction, EditorPlayAction, EditorPlayState, EditorRuntimeAvailability},
         tooling_egui::{EguiEditorViewport, EguiEditorViewportIntent},
     };
 
@@ -2604,18 +2882,31 @@ mod tests {
     fn scene_tab_handoff_keeps_game_selected_until_pause_is_visible() {
         let mut selection = EditorViewportSelection::Authoring;
 
-        assert_eq!(selection.reconcile(EditorPlayState::Starting), None);
+        assert_eq!(
+            selection.reconcile(
+                EditorPlayState::Starting,
+                EditorRuntimeAvailability::TrustedInProcess,
+            ),
+            None
+        );
         assert_eq!(selection.selected(), EguiEditorViewport::Game);
         assert_eq!(
             selection.apply_intent(
                 EguiEditorViewportIntent::SelectAuthoring,
                 EditorPlayState::Running,
+                EditorRuntimeAvailability::TrustedInProcess,
             ),
             Some(EditorAction::Play(EditorPlayAction::Pause))
         );
         assert_eq!(selection.selected(), EguiEditorViewport::Game);
 
-        assert_eq!(selection.reconcile(EditorPlayState::Paused), None);
+        assert_eq!(
+            selection.reconcile(
+                EditorPlayState::Paused,
+                EditorRuntimeAvailability::TrustedInProcess,
+            ),
+            None
+        );
         assert_eq!(selection.selected(), EguiEditorViewport::Authoring);
     }
 
@@ -2626,18 +2917,44 @@ mod tests {
             selection.apply_intent(
                 EguiEditorViewportIntent::SelectAuthoring,
                 EditorPlayState::Running,
+                EditorRuntimeAvailability::TrustedInProcess,
             ),
             Some(EditorAction::Play(EditorPlayAction::Pause))
         );
-        let mut pending = selection.reconcile(EditorPlayState::Running);
+        let mut pending = selection.reconcile(
+            EditorPlayState::Running,
+            EditorRuntimeAvailability::TrustedInProcess,
+        );
         assert_eq!(pending, Some(EditorAction::Play(EditorPlayAction::Pause)));
         pending = selection.apply_intent(
             EguiEditorViewportIntent::SelectGame,
             EditorPlayState::Running,
+            EditorRuntimeAvailability::TrustedInProcess,
         );
 
         assert_eq!(pending, None);
         assert_eq!(selection.selected(), EguiEditorViewport::Game);
+    }
+
+    #[test]
+    fn external_supervised_play_keeps_authoring_selected_and_rejects_game_handoff() {
+        let mut selection = EditorViewportSelection::Game;
+        let availability = EditorRuntimeAvailability::ExternalSupervised;
+
+        assert_eq!(
+            selection.reconcile(EditorPlayState::Running, availability),
+            None
+        );
+        assert_eq!(selection.selected(), EguiEditorViewport::Authoring);
+        assert_eq!(
+            selection.apply_intent(
+                EguiEditorViewportIntent::SelectGame,
+                EditorPlayState::Running,
+                availability,
+            ),
+            None
+        );
+        assert_eq!(selection.selected(), EguiEditorViewport::Authoring);
     }
 
     #[test]

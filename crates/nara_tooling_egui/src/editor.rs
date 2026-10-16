@@ -10,8 +10,8 @@ use nara_tooling::{
     EditorPersistenceRequestKind, EditorPersistenceResult, EditorPlayAction, EditorPlayOperation,
     EditorPlayOperationResult, EditorPlayState, EditorProjectBrowserLocalAction,
     EditorProjectContentAction, EditorProjectContentRefreshFailure, EditorProjectContentView,
-    EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
-    EditorWorkspaceIntentResult,
+    EditorRuntimeAvailability, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+    EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
 };
 
 use crate::{
@@ -24,6 +24,13 @@ use crate::{
         EguiUiAuthoringInput, EguiUiAuthoringPanel, EguiUiCanvasInput, EguiUiCanvasOutput,
         EguiUiCanvasPanel,
     },
+};
+
+mod external_play;
+
+use external_play::{
+    render_external_play_controls, render_external_play_output, render_external_play_status,
+    render_runtime_unavailable,
 };
 
 const MIN_EDITOR_WIDTH: f32 = 720.0;
@@ -262,6 +269,22 @@ impl EguiEditorPanel {
         let mut open_project_requested = false;
 
         ui.set_min_size(Vec2::new(MIN_EDITOR_WIDTH, MIN_EDITOR_HEIGHT));
+        if read_only {
+            let retry = match frame.play().state() {
+                EditorPlayState::CloseIncomplete => {
+                    Some(("Retry close", EditorPlayAction::RetryClose))
+                }
+                EditorPlayState::RetirementIncomplete => {
+                    Some(("Retry retirement", EditorPlayAction::RetryRetirement))
+                }
+                _ => None,
+            };
+            if let Some((label, action)) = retry
+                && toolbar_button(ui, true, label)
+            {
+                actions.push(EditorAction::Play(action));
+            }
+        }
         let (viewport, mut viewport_intent) = ui
             .add_enabled_ui(!read_only, |ui| {
                 render_toolbar(
@@ -271,6 +294,7 @@ impl EguiEditorPanel {
                     &mut actions,
                     &mut project_action,
                     &mut open_project_requested,
+                    read_only,
                 );
                 ui.separator();
                 let viewport = self.render_authoring_content(
@@ -350,6 +374,7 @@ fn render_toolbar(
     actions: &mut Vec<EditorAction>,
     project_action: &mut Option<EguiEditorProjectAction>,
     open_project_requested: &mut bool,
+    authoring_locked: bool,
 ) {
     let scene = frame.workspace().active_scene.as_ref();
     let active_document = frame
@@ -360,6 +385,10 @@ fn render_toolbar(
     let no_workspace_intent = frame.workspace_intent().intent().is_none();
     let play_state = frame.play().state();
     let play_idle = play_state == EditorPlayState::Empty;
+    let external_supervised = matches!(
+        frame.runtime_availability(),
+        EditorRuntimeAvailability::ExternalSupervised
+    );
     let persistence_idle = persistence.operation() == EditorPersistenceOperation::Idle;
     let save_retryable = active_document.is_some_and(|document| {
         persistence_result_allows_request(
@@ -379,19 +408,21 @@ fn render_toolbar(
         nara_tooling::EditorReopenTarget::Unavailable => false,
     };
     let mutation_available = active_document.is_some()
-        && matches!(
-            (play_state, selected_viewport),
-            (
-                EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-                EguiEditorViewport::Authoring
-            )
-        )
+        && ((external_supervised && selected_viewport == EguiEditorViewport::Authoring)
+            || matches!(
+                (play_state, selected_viewport),
+                (
+                    EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
+                    EguiEditorViewport::Authoring
+                )
+            ))
         && no_workspace_intent
         && persistence_idle;
     let prefab_active =
         active_document.is_some_and(|document| document.kind == EditorDocumentKind::Prefab);
-    let persistence_available =
-        (play_idle || prefab_active) && no_workspace_intent && persistence_idle;
+    let persistence_available = (external_supervised || play_idle || prefab_active)
+        && no_workspace_intent
+        && persistence_idle;
     let play_pending = matches!(
         frame.play().result(),
         Some(EditorPlayOperationResult::Pending { .. })
@@ -456,7 +487,16 @@ fn render_toolbar(
                     *project_action = Some(EguiEditorProjectAction::CloseProject);
                 }
                 ui.separator();
-                render_play_controls(ui, frame, scene, no_workspace_intent, play_pending, actions);
+                if !authoring_locked {
+                    render_play_controls(
+                        ui,
+                        frame,
+                        scene,
+                        no_workspace_intent,
+                        play_pending,
+                        actions,
+                    );
+                }
                 let history = active_document.map(|document| document.history);
                 if toolbar_button(
                     ui,
@@ -598,55 +638,78 @@ fn render_play_controls(
         }
     };
 
-    match state {
-        EditorPlayState::Empty => {
-            if let Some(scene) = scene {
-                push(
-                    content_ready,
-                    false,
-                    "Play",
-                    EditorPlayAction::Play {
-                        document: scene.document,
-                        base_revision: scene.revision,
-                    },
-                );
-            } else {
-                let _ = toolbar_button(ui, false, "Play");
+    if matches!(
+        frame.runtime_availability(),
+        EditorRuntimeAvailability::ExternalSupervised
+    ) {
+        render_external_play_controls(
+            ui,
+            scene,
+            frame,
+            content_ready,
+            can_request,
+            play_pending,
+            actions,
+        );
+    } else {
+        match state {
+            EditorPlayState::Empty => {
+                if let Some(scene) = scene {
+                    push(
+                        content_ready
+                            && !matches!(
+                                frame.runtime_availability(),
+                                EditorRuntimeAvailability::Unavailable(_)
+                            ),
+                        false,
+                        "Play",
+                        EditorPlayAction::Play {
+                            document: scene.document,
+                            base_revision: scene.revision,
+                        },
+                    );
+                } else {
+                    let _ = toolbar_button(ui, false, "Play");
+                }
             }
+            EditorPlayState::PreparingPlay | EditorPlayState::Starting => {
+                push(true, true, "Stop", EditorPlayAction::Cancel);
+            }
+            EditorPlayState::Running => {
+                push(true, false, "Pause", EditorPlayAction::Pause);
+                push(true, false, "Stop", EditorPlayAction::Stop);
+                push(content_ready, false, "Restart", EditorPlayAction::Restart);
+            }
+            EditorPlayState::Paused => {
+                push(true, false, "Resume", EditorPlayAction::Resume);
+                push(true, false, "Step", EditorPlayAction::StepFixedTick);
+                push(true, false, "Stop", EditorPlayAction::Stop);
+                push(content_ready, false, "Restart", EditorPlayAction::Restart);
+            }
+            EditorPlayState::Stepping => {
+                push(true, true, "Stop", EditorPlayAction::Stop);
+            }
+            EditorPlayState::Faulted => {
+                push(true, false, "Stop", EditorPlayAction::Stop);
+                push(content_ready, false, "Restart", EditorPlayAction::Restart);
+            }
+            EditorPlayState::RetirementIncomplete => {
+                push(
+                    true,
+                    false,
+                    "Retry retirement",
+                    EditorPlayAction::RetryRetirement,
+                );
+            }
+            EditorPlayState::CloseIncomplete => {
+                push(true, false, "Retry close", EditorPlayAction::RetryClose);
+            }
+            EditorPlayState::RetiringPlay | EditorPlayState::Stopping => {}
         }
-        EditorPlayState::PreparingPlay | EditorPlayState::Starting => {
-            push(true, true, "Stop", EditorPlayAction::Cancel);
-        }
-        EditorPlayState::Running => {
-            push(true, false, "Pause", EditorPlayAction::Pause);
-            push(true, false, "Stop", EditorPlayAction::Stop);
-            push(content_ready, false, "Restart", EditorPlayAction::Restart);
-        }
-        EditorPlayState::Paused => {
-            push(true, false, "Resume", EditorPlayAction::Resume);
-            push(true, false, "Step", EditorPlayAction::StepFixedTick);
-            push(true, false, "Stop", EditorPlayAction::Stop);
-            push(content_ready, false, "Restart", EditorPlayAction::Restart);
-        }
-        EditorPlayState::Stepping => {
-            push(true, true, "Stop", EditorPlayAction::Stop);
-        }
-        EditorPlayState::Faulted => {
-            push(true, false, "Stop", EditorPlayAction::Stop);
-            push(content_ready, false, "Restart", EditorPlayAction::Restart);
-        }
-        EditorPlayState::RetirementIncomplete => {
-            push(
-                true,
-                false,
-                "Retry retirement",
-                EditorPlayAction::RetryRetirement,
-            );
-        }
-        EditorPlayState::CloseIncomplete => {
-            push(true, false, "Retry close", EditorPlayAction::RetryClose);
-        }
-        EditorPlayState::RetiringPlay | EditorPlayState::Stopping => {}
+    }
+
+    if let EditorRuntimeAvailability::Unavailable(reason) = frame.runtime_availability() {
+        render_runtime_unavailable(ui, reason);
     }
 
     if let Some(result) = frame.play().result()
@@ -660,6 +723,7 @@ fn render_play_controls(
                 EditorPlayOperation::StepFixedTick => "Step complete",
                 EditorPlayOperation::Stop => "Stopped",
                 EditorPlayOperation::Restart => "Restarted",
+                EditorPlayOperation::RunLastGood => "Last good started",
                 EditorPlayOperation::Cancel
                 | EditorPlayOperation::RetryRetirement
                 | EditorPlayOperation::RetryClose => "Play updated",
@@ -701,13 +765,20 @@ impl EguiEditorPanel {
     ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
         let reserved = DIAGNOSTICS_HEIGHT + ui.spacing().item_spacing.y * 2.0;
         let content_height = (ui.available_height() - reserved).max(MIN_CONTENT_HEIGHT);
-        let editing_enabled = matches!(
-            (frame.play().state(), selected_viewport),
-            (
-                EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-                EguiEditorViewport::Authoring
-            )
-        ) && frame.workspace_intent().intent().is_none()
+        let external_supervised = matches!(
+            frame.runtime_availability(),
+            EditorRuntimeAvailability::ExternalSupervised
+        );
+        let editing_enabled = (external_supervised
+            && selected_viewport == EguiEditorViewport::Authoring
+            || matches!(
+                (frame.play().state(), selected_viewport),
+                (
+                    EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
+                    EguiEditorViewport::Authoring
+                )
+            ))
+            && frame.workspace_intent().intent().is_none()
             && frame.persistence().operation() == EditorPersistenceOperation::Idle;
 
         let visible_width = (ui.ctx().viewport_rect().right() - ui.cursor().left()).max(1.0);
@@ -760,8 +831,12 @@ impl EguiEditorPanel {
         }
 
         let mut scene_ui = fixed_column(ui, "nara_editor_scene_view_column", scene_rect);
-        let viewport_intent =
-            render_viewport_tabs(&mut scene_ui, frame.play().state(), selected_viewport);
+        let viewport_intent = render_viewport_tabs(
+            &mut scene_ui,
+            frame.play().state(),
+            frame.runtime_availability(),
+            selected_viewport,
+        );
         let viewport_size = scene_ui.available_size().max(Vec2::splat(1.0));
         let viewport = match selected_viewport {
             EguiEditorViewport::Authoring => match ui_authoring.as_deref_mut() {
@@ -855,6 +930,7 @@ fn render_sidebar_tabs(ui: &mut Ui, selected: &mut EguiEditorSidebar) {
 fn render_viewport_tabs(
     ui: &mut Ui,
     play_state: EditorPlayState,
+    runtime_availability: EditorRuntimeAvailability,
     selected: EguiEditorViewport,
 ) -> Option<EguiEditorViewportIntent> {
     let mut intent = None;
@@ -867,7 +943,11 @@ fn render_viewport_tabs(
             intent = Some(EguiEditorViewportIntent::SelectAuthoring);
         }
 
-        let game_enabled = play_state != EditorPlayState::Empty;
+        let external_supervised = matches!(
+            runtime_availability,
+            EditorRuntimeAvailability::ExternalSupervised
+        );
+        let game_enabled = play_state != EditorPlayState::Empty && !external_supervised;
         let game = ui.add_enabled(
             game_enabled,
             Button::new("Game").selected(selected == EguiEditorViewport::Game),
@@ -876,6 +956,9 @@ fn render_viewport_tabs(
         record_test_control("Game tab", game.rect);
         if game.clicked() {
             intent = Some(EguiEditorViewportIntent::SelectGame);
+        }
+        if external_supervised {
+            game.on_hover_text("Game View is rendered in the supervised external window");
         }
     });
     ui.separator();
@@ -909,6 +992,7 @@ fn render_diagnostics(ui: &mut Ui, frame: &EditorFrameModel, actions: &mut Vec<E
                 .show(ui, |ui| {
                     let status_rendered = render_editor_status(ui, frame, actions);
                     let mut rendered = 0_usize;
+                    render_external_play_output(ui, frame, &mut rendered);
                     render_diagnostic_report(ui, "Host", frame.diagnostics(), &mut rendered);
                     if let Some(scene) = frame.workspace().active_scene.as_ref() {
                         render_diagnostic_report(
@@ -994,24 +1078,34 @@ fn render_editor_status(
             }
         });
     }
-    match frame.play().state() {
-        EditorPlayState::Empty => {}
-        EditorPlayState::Paused => {
+    match frame.runtime_availability() {
+        EditorRuntimeAvailability::ExternalSupervised => {
             rendered = true;
-            let message = if frame.play().is_out_of_date() {
-                "Game View is out of date; save and refresh content before Restart"
-            } else {
-                "Play is paused; Scene authoring remains isolated from this Runtime"
-            };
-            ui.label(RichText::new(message).weak());
+            render_external_play_status(ui, frame);
         }
-        _ => {
+        EditorRuntimeAvailability::Unavailable(reason) => {
             rendered = true;
-            ui.label(
-                RichText::new("Authoring controls are disabled while a Play owner is active")
-                    .weak(),
-            );
+            render_runtime_unavailable(ui, reason);
         }
+        EditorRuntimeAvailability::TrustedInProcess => match frame.play().state() {
+            EditorPlayState::Empty => {}
+            EditorPlayState::Paused => {
+                rendered = true;
+                let message = if frame.play().is_out_of_date() {
+                    "Game View is out of date; save and refresh content before Restart"
+                } else {
+                    "Play is paused; Scene authoring remains isolated from this Runtime"
+                };
+                ui.label(RichText::new(message).weak());
+            }
+            _ => {
+                rendered = true;
+                ui.label(
+                    RichText::new("Authoring controls are disabled while a Play owner is active")
+                        .weak(),
+                );
+            }
+        },
     }
     rendered
 }

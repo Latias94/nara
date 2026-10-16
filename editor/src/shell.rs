@@ -9,6 +9,8 @@ use nara::{
     tooling_egui::{EguiEditorPanel, EguiProjectOpenDraft},
 };
 
+use crate::supervised_play::{SupervisedDesktopPlayOwner, SupervisedPlayWake};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorApplicationState {
     ProjectManager,
@@ -67,14 +69,20 @@ pub(super) struct PublishedEditorProject {
     pub(super) request: EditorProjectRequest,
     pub(super) session: Box<EditorProjectSession>,
     pub(super) panel: EguiEditorPanel,
+    pub(super) supervised_play: Box<SupervisedDesktopPlayOwner>,
 }
 
 impl PublishedEditorProject {
-    pub(super) fn new(request: EditorProjectRequest, session: EditorProjectSession) -> Self {
+    pub(super) fn new(
+        request: EditorProjectRequest,
+        session: EditorProjectSession,
+        supervised_play_wake: SupervisedPlayWake,
+    ) -> Self {
         Self {
             request,
             session: Box::new(session),
             panel: EguiEditorPanel::new(),
+            supervised_play: Box::new(SupervisedDesktopPlayOwner::with_wake(supervised_play_wake)),
         }
     }
 }

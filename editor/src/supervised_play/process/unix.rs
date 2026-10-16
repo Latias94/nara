@@ -1,18 +1,33 @@
 use std::io;
 
-use super::{PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream};
+use nara::fs::RestrictiveCapabilityHandleLease;
+
+use super::{
+    PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream,
+    SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
+};
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+use super::output::PlatformOutputQueue;
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 use std::{
-    collections::VecDeque,
-    ffi::{c_long, c_uint},
+    ffi::{CString, OsStr, OsString, c_char, c_int, c_long, c_uint},
+    fs,
     io::{Read, Write},
     os::{
-        fd::OwnedFd,
-        unix::{net::UnixStream, process::CommandExt},
+        fd::{AsRawFd as _, OwnedFd},
+        unix::{
+            ffi::OsStrExt as _,
+            net::UnixStream,
+            process::{CommandExt, ExitStatusExt},
+        },
     },
     process::{Child, ChildStderr, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -21,7 +36,9 @@ use std::{
 use rustix::{
     event::{PollFd, PollFlags, poll},
     fs::{OFlags, fcntl_getfl, fcntl_setfl},
-    process::{Pid, Signal, kill_process_group, test_kill_process_group},
+    process::{
+        Pid, Signal, WaitId, WaitIdOptions, WaitIdStatus, getpgid, kill_process_group, waitid,
+    },
 };
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -42,10 +59,50 @@ const SPAWN_ROLLBACK_POLL: Duration = Duration::from_millis(10);
 const SYS_CLOSE_RANGE_X86_64: c_long = 436;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const CLOSE_RANGE_CLOEXEC: c_uint = 1 << 2;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const SYS_EXECVEAT_X86_64: c_long = 322;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const AT_EMPTY_PATH: c_int = 0x1000;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const MAX_PRODUCT_ENVIRONMENT_BYTES: usize = 64 * 1024;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+const EMPTY_PATH: [c_char; 1] = [0];
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 unsafe extern "C" {
     fn syscall(number: c_long, ...) -> c_long;
+}
+
+pub(super) struct ExactGenerationLaunchAuthority {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    executable: RestrictiveCapabilityHandleLease,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    _generation_directory: RestrictiveCapabilityHandleLease,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    _launch_manifest: RestrictiveCapabilityHandleLease,
+}
+
+impl ExactGenerationLaunchAuthority {
+    pub(super) fn new(
+        executable: RestrictiveCapabilityHandleLease,
+        generation_directory: RestrictiveCapabilityHandleLease,
+        launch_manifest: RestrictiveCapabilityHandleLease,
+    ) -> io::Result<Self> {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            return Ok(Self {
+                executable,
+                _generation_directory: generation_directory,
+                _launch_manifest: launch_manifest,
+            });
+        }
+
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            let _ = (executable, generation_directory, launch_manifest);
+            Err(unsupported_platform())
+        }
+    }
 }
 
 pub(super) struct SpawnedProcess {
@@ -56,9 +113,63 @@ pub(super) struct SpawnedProcess {
 pub(super) struct BootstrapChannel {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     stream: UnixStream,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    cancelled: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+pub(super) struct BootstrapCancellation {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    cancelled: Arc<AtomicBool>,
+}
+
+impl BootstrapCancellation {
+    pub(super) fn cancel(&self) -> io::Result<()> {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            self.cancelled.store(true, Ordering::Release);
+            return Ok(());
+        }
+
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            Err(unsupported_platform())
+        }
+    }
 }
 
 impl BootstrapChannel {
+    pub(super) fn cancellation(&self) -> BootstrapCancellation {
+        BootstrapCancellation {
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+            cancelled: Arc::clone(&self.cancelled),
+        }
+    }
+
+    pub(super) fn write_some(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            if self.cancelled.load(Ordering::Acquire) {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "the supervised bootstrap write was cancelled",
+                ));
+            }
+            return match self.stream.write(bytes) {
+                Ok(written) => Ok(written),
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(0),
+                Err(error) => Err(error),
+            };
+        }
+
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            let _ = bytes;
+            Err(unsupported_platform())
+        }
+    }
+
+    #[cfg(test)]
     pub(super) fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
@@ -100,9 +211,13 @@ pub(super) struct PlatformProcess {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     process_group: Pid,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    direct_child_exit: Option<std::process::ExitStatus>,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     direct_child_reaped: bool,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    output: Arc<Mutex<OutputQueue>>,
+    output: Arc<PlatformOutputQueue>,
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    output_reader_stopped: Arc<AtomicBool>,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     output_poll_budget: usize,
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -114,13 +229,53 @@ pub(super) struct PlatformProcess {
 }
 
 impl PlatformProcess {
+    #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+    pub(super) fn test_enqueue_loss(&self) {
+        self.output
+            .push_loss(
+                SupervisedProcessStream::Stderr,
+                b"[nara-editor: test output loss]\n".to_vec(),
+            )
+            .expect("the test loss marker is accepted");
+    }
+
     pub(super) fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let child = self.child.as_mut().ok_or_else(process_owner_retired)?;
-            let status = child.try_wait()?;
-            if status.is_some() {
-                self.direct_child_reaped = true;
+            if let Some(status) = self.direct_child_exit {
+                return Ok(Some(status));
+            }
+            if self.direct_child_reaped {
+                return Err(process_owner_retired());
+            }
+            if self.child.is_none() {
+                return Err(process_owner_retired());
+            }
+            // WNOWAIT observes the terminal status without releasing the leader PID. Keeping that
+            // zombie waitable also keeps its numeric PGID unavailable for unrelated reuse while
+            // descendant containment is still being signalled and inspected.
+            let status = loop {
+                match waitid(
+                    WaitId::Pid(self.process_group),
+                    WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT,
+                ) {
+                    Ok(status) => break status.map(waitid_exit_status).transpose()?,
+                    Err(rustix::io::Errno::INTR) => continue,
+                    Err(rustix::io::Errno::CHILD) => {
+                        // Another wait authority in this process violated the single-owner
+                        // contract. Retire the numeric group immediately so no later cleanup path
+                        // can signal a potentially reused PGID.
+                        self.direct_child_reaped = true;
+                        self.child.take();
+                        return Err(io::Error::other(
+                            "the supervised direct child was reaped outside its process owner",
+                        ));
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            };
+            if let Some(status) = status {
+                self.direct_child_exit = Some(status);
             }
             return Ok(status);
         }
@@ -134,6 +289,9 @@ impl PlatformProcess {
     pub(super) fn request_terminate(&mut self) -> io::Result<()> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
+            if self.direct_child_reaped {
+                return Ok(());
+            }
             return signal_process_group(self.process_group, Signal::TERM);
         }
 
@@ -146,6 +304,9 @@ impl PlatformProcess {
     pub(super) fn force_kill(&mut self) -> io::Result<()> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
+            if self.direct_child_reaped {
+                return Ok(());
+            }
             return signal_process_group(self.process_group, Signal::KILL);
         }
 
@@ -162,8 +323,7 @@ impl PlatformProcess {
                 self.output_poll_budget = OUTPUT_POLL_RECORD_BUDGET;
                 return Ok(None);
             }
-            let mut output = self.output.lock().map_err(output_lock_poisoned)?;
-            return match output.pop()? {
+            return match self.output.pop()? {
                 Some(output) => {
                     self.output_poll_budget -= 1;
                     Ok(Some(output))
@@ -218,19 +378,8 @@ impl PlatformProcess {
     pub(super) fn readers_stopped(&mut self) -> bool {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let (stopped, pending_output) = self
-                .output
-                .lock()
-                .map(|output| {
-                    (
-                        output.stopped,
-                        !output.records.is_empty()
-                            || output.dropped_stdout_bytes != 0
-                            || output.dropped_stderr_bytes != 0
-                            || output.failure.is_some(),
-                    )
-                })
-                .unwrap_or((false, true));
+            let stopped = self.output_reader_stopped.load(Ordering::Acquire);
+            let pending_output = self.output.has_pending();
             if !stopped || pending_output {
                 return false;
             }
@@ -240,11 +389,9 @@ impl PlatformProcess {
             if reader.join().is_ok() {
                 return true;
             }
-            if let Ok(mut output) = self.output.lock() {
-                output.record_failure(io::Error::other(
-                    "the supervised process output reader panicked",
-                ));
-            }
+            self.output.record_failure(io::Error::other(
+                "the supervised process output reader panicked",
+            ));
             false
         }
 
@@ -254,17 +401,21 @@ impl PlatformProcess {
         }
     }
 
-    pub(super) fn containment_empty(&self) -> io::Result<bool> {
+    pub(super) fn containment_empty(&mut self) -> io::Result<bool> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            if !self.direct_child_reaped {
+            if self.direct_child_reaped {
+                return Ok(true);
+            }
+            if self.direct_child_exit.is_none() {
                 return Ok(false);
             }
-            return match test_kill_process_group(self.process_group) {
-                Ok(()) => Ok(false),
-                Err(rustix::io::Errno::SRCH) => Ok(true),
-                Err(error) => Err(error.into()),
-            };
+            // The process-group leader deliberately remains waitable until no other member can
+            // execute. Only then is the direct child reaped and the PGID allowed to retire.
+            if process_group_has_other_members(self.process_group)? {
+                return Ok(false);
+            }
+            return self.reap_direct_child();
         }
 
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
@@ -276,8 +427,10 @@ impl PlatformProcess {
     pub(super) fn fail_safe_terminate(&mut self) {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
-            let _ = signal_process_group(self.process_group, Signal::KILL);
             let _ = self.cancel_output();
+            if !self.direct_child_reaped {
+                let _ = signal_process_group(self.process_group, Signal::KILL);
+            }
             let Some(mut child) = self.child.take() else {
                 return;
             };
@@ -285,45 +438,86 @@ impl PlatformProcess {
                 self.direct_child_reaped = true;
                 return;
             }
-            let _ = thread::Builder::new()
-                .name("nara-supervised-process-reaper".to_owned())
-                .spawn(move || {
-                    let _ = child.wait();
-                });
+            if let Err(error) = transfer_child_to_reaper(child, "nara-supervised-process-reaper") {
+                self.output.record_failure(error);
+            }
         }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    fn reap_direct_child(&mut self) -> io::Result<bool> {
+        let reaped = match self
+            .child
+            .as_mut()
+            .ok_or_else(process_owner_retired)?
+            .try_wait()
+        {
+            Ok(Some(reaped)) => reaped,
+            Ok(None) => return Ok(false),
+            Err(error)
+                if rustix::io::Errno::from_io_error(&error) == Some(rustix::io::Errno::CHILD) =>
+            {
+                self.direct_child_reaped = true;
+                self.child.take();
+                return Err(io::Error::other(
+                    "the supervised direct child was reaped outside its process owner",
+                ));
+            }
+            Err(error) => return Err(error),
+        };
+        let status_mismatch = self
+            .direct_child_exit
+            .is_some_and(|observed| observed.into_raw() != reaped.into_raw());
+        self.direct_child_exit = Some(reaped);
+        self.direct_child_reaped = true;
+        self.child.take();
+        if status_mismatch {
+            return Err(io::Error::other(
+                "the reaped direct-child status differs from the non-reaping observation",
+            ));
+        }
+        Ok(true)
     }
 }
 
-pub(super) fn spawn(command: &SupervisedProcessCommand) -> io::Result<SpawnedProcess> {
+pub(super) fn spawn(
+    command: &SupervisedProcessCommand,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
-        return spawn_supported(command);
+        return spawn_supported(command, wake);
     }
 
     #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
     {
-        let _ = command;
+        let _ = (command, wake);
+        Err(unsupported_platform())
+    }
+}
+
+pub(super) fn spawn_exact_generation(
+    authority: ExactGenerationLaunchAuthority,
+    command: &SupervisedProductProcessCommand,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    {
+        return spawn_exact_generation_supported(authority, command, wake);
+    }
+
+    #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+    {
+        let _ = (authority, command, wake);
         Err(unsupported_platform())
     }
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn spawn_supported(command: &SupervisedProcessCommand) -> io::Result<SpawnedProcess> {
-    let (bootstrap, child_bootstrap) = if command.bootstrap_requested() {
-        let (parent, child) = UnixStream::pair()?;
-        parent.set_nonblocking(true)?;
-        let child: OwnedFd = child.into();
-        (
-            Some(BootstrapChannel { stream: parent }),
-            Stdio::from(child),
-        )
-    } else {
-        (None, Stdio::null())
-    };
-    let (output_cancel, output_cancel_reader) = UnixStream::pair()?;
-    output_cancel.set_nonblocking(true)?;
-    output_cancel_reader.set_nonblocking(true)?;
-
+fn spawn_supported(
+    command: &SupervisedProcessCommand,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
     let mut native = Command::new(command.executable());
     native
         .args(command.arguments_ref())
@@ -333,16 +527,82 @@ fn spawn_supported(command: &SupervisedProcessCommand) -> io::Result<SpawnedProc
                 .environment_ref()
                 .iter()
                 .map(|(name, value)| (name, value)),
+        );
+    spawn_native(
+        native,
+        command.bootstrap_requested(),
+        wake,
+        close_non_stdio_on_exec,
+    )
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn spawn_exact_generation_supported(
+    authority: ExactGenerationLaunchAuthority,
+    command: &SupervisedProductProcessCommand,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
+    let executable_fd = authority.executable.as_raw_fd();
+    let payload = ExactExecPayload::new(command)?;
+    let mut native = Command::new("/proc/self/exe");
+    native.current_dir(command.working_directory()).env_clear();
+
+    let spawned = spawn_native(native, true, wake, move || {
+        close_non_stdio_on_exec()?;
+        // SAFETY: the executable descriptor and every C string/pointer array remain live through
+        // this call. `AT_EMPTY_PATH` instructs Linux to execute the already-opened object rather
+        // than resolving a mutable name. Success replaces the child image and never returns.
+        let _ = unsafe {
+            syscall(
+                SYS_EXECVEAT_X86_64,
+                executable_fd,
+                EMPTY_PATH.as_ptr(),
+                payload.argv_ptr(),
+                payload.environment_ptr(),
+                AT_EMPTY_PATH,
+            )
+        };
+        Err(io::Error::last_os_error())
+    });
+    drop(authority);
+    spawned
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn spawn_native(
+    mut native: Command,
+    bootstrap_requested: bool,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+    child_setup: impl FnMut() -> io::Result<()> + Send + Sync + 'static,
+) -> io::Result<SpawnedProcess> {
+    let (bootstrap, child_bootstrap) = if bootstrap_requested {
+        let (parent, child) = UnixStream::pair()?;
+        parent.set_nonblocking(true)?;
+        let child: OwnedFd = child.into();
+        (
+            Some(BootstrapChannel {
+                stream: parent,
+                cancelled: Arc::new(AtomicBool::new(false)),
+            }),
+            Stdio::from(child),
         )
+    } else {
+        (None, Stdio::null())
+    };
+    let (output_cancel, output_cancel_reader) = UnixStream::pair()?;
+    output_cancel.set_nonblocking(true)?;
+    output_cancel_reader.set_nonblocking(true)?;
+
+    native
         .stdin(child_bootstrap)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     native.process_group(0);
-    // SAFETY: The child-side hook performs one async-signal-safe syscall and returns. Marking every
-    // descriptor above stderr close-on-exec preserves Command's private error pipe until exec while
-    // proving that only stdin/bootstrap, stdout, and stderr enter project code.
+    // SAFETY: `child_setup` is restricted to the platform module and performs only documented
+    // async-signal-safe descriptor/process syscalls before either returning an error through
+    // Command's private error pipe or replacing the child image.
     unsafe {
-        native.pre_exec(close_non_stdio_on_exec);
+        native.pre_exec(child_setup);
     }
 
     let mut child = native.spawn()?;
@@ -357,19 +617,32 @@ fn spawn_supported(command: &SupervisedProcessCommand) -> io::Result<SpawnedProc
     };
 
     if let Err(error) = make_nonblocking(&stdout).and_then(|()| make_nonblocking(&stderr)) {
-        terminate_spawn_failure(child, process_group);
-        return Err(error);
+        let cleanup = terminate_spawn_failure(child, process_group);
+        return Err(merge_spawn_rollback_error(error, cleanup.err()));
     }
-    let output = Arc::new(Mutex::new(OutputQueue::default()));
+    let output = Arc::new(PlatformOutputQueue::with_wake(
+        MAX_PENDING_OUTPUT_RECORDS,
+        MAX_PENDING_OUTPUT_BYTES,
+        wake,
+    ));
+    let output_reader_stopped = Arc::new(AtomicBool::new(false));
     let reader_output = Arc::clone(&output);
+    let reader_stopped = Arc::clone(&output_reader_stopped);
     let output_reader = match thread::Builder::new()
         .name("nara-supervised-output".to_owned())
-        .spawn(move || run_output_reader(stdout, stderr, output_cancel_reader, reader_output))
-    {
+        .spawn(move || {
+            run_output_reader(
+                stdout,
+                stderr,
+                output_cancel_reader,
+                reader_output,
+                reader_stopped,
+            );
+        }) {
         Ok(reader) => reader,
         Err(error) => {
-            terminate_spawn_failure(child, process_group);
-            return Err(error);
+            let cleanup = terminate_spawn_failure(child, process_group);
+            return Err(merge_spawn_rollback_error(error, cleanup.err()));
         }
     };
 
@@ -377,8 +650,10 @@ fn spawn_supported(command: &SupervisedProcessCommand) -> io::Result<SpawnedProc
         process: PlatformProcess {
             child: Some(child),
             process_group,
+            direct_child_exit: None,
             direct_child_reaped: false,
             output,
+            output_reader_stopped,
             output_poll_budget: OUTPUT_POLL_RECORD_BUDGET,
             output_cancel,
             output_cancel_requested: false,
@@ -389,32 +664,318 @@ fn spawn_supported(command: &SupervisedProcessCommand) -> io::Result<SpawnedProc
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct ExactExecPayload {
+    _arguments: Vec<CString>,
+    argument_pointers: Box<[usize]>,
+    _environment: Vec<CString>,
+    environment_pointers: Box<[usize]>,
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl ExactExecPayload {
+    fn new(command: &SupervisedProductProcessCommand) -> io::Result<Self> {
+        let mut arguments = Vec::with_capacity(command.arguments_ref().len().saturating_add(1));
+        arguments.push(CString::new("nara-supervised-product").expect("fixed argv[0] has no NUL"));
+        for argument in command.arguments_ref() {
+            arguments.push(c_string(argument.as_os_str(), "product argument")?);
+        }
+        let environment = product_environment(command.environment_policy())?;
+        let argument_pointers = pointer_array(&arguments);
+        let environment_pointers = pointer_array(&environment);
+        Ok(Self {
+            _arguments: arguments,
+            argument_pointers,
+            _environment: environment,
+            environment_pointers,
+        })
+    }
+
+    fn argv_ptr(&self) -> *const *const c_char {
+        self.argument_pointers.as_ptr().cast()
+    }
+
+    fn environment_ptr(&self) -> *const *const c_char {
+        self.environment_pointers.as_ptr().cast()
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn pointer_array(strings: &[CString]) -> Box<[usize]> {
+    strings
+        .iter()
+        .map(|value| value.as_ptr() as usize)
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn product_environment(policy: SupervisedProductEnvironmentPolicy) -> io::Result<Vec<CString>> {
+    project_product_environment(policy, |name| std::env::var_os(name))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn project_product_environment(
+    policy: SupervisedProductEnvironmentPolicy,
+    mut value_for: impl FnMut(&str) -> Option<OsString>,
+) -> io::Result<Vec<CString>> {
+    let mut environment = Vec::with_capacity(policy.allowlisted_names().len());
+    let mut encoded_bytes = 0_usize;
+    for name in policy.allowlisted_names() {
+        let Some(value) = value_for(name) else {
+            continue;
+        };
+        let name_bytes = OsStr::new(name).as_bytes();
+        let value_bytes = value.as_os_str().as_bytes();
+        encoded_bytes = encoded_bytes
+            .checked_add(name_bytes.len())
+            .and_then(|total| total.checked_add(1))
+            .and_then(|total| total.checked_add(value_bytes.len()))
+            .and_then(|total| total.checked_add(1))
+            .ok_or_else(product_environment_too_large)?;
+        if encoded_bytes > MAX_PRODUCT_ENVIRONMENT_BYTES {
+            return Err(product_environment_too_large());
+        }
+        let mut entry = Vec::with_capacity(name_bytes.len() + 1 + value_bytes.len());
+        entry.extend_from_slice(name_bytes);
+        entry.push(b'=');
+        entry.extend_from_slice(value_bytes);
+        environment.push(CString::new(entry).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "an allowlisted product environment value contains NUL",
+            )
+        })?);
+    }
+    Ok(environment)
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn c_string(value: &OsStr, label: &'static str) -> io::Result<CString> {
+    CString::new(value.as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("the supervised {label} contains NUL"),
+        )
+    })
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn product_environment_too_large() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "the allowlisted product environment exceeds its bounded limit",
+    )
+}
+
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+mod exact_launch_tests {
+    use std::ffi::OsString;
+
+    use super::{SupervisedProductEnvironmentPolicy, project_product_environment};
+
+    #[test]
+    fn desktop_product_environment_projects_only_reviewed_session_values() {
+        let mut requested = Vec::new();
+        let projected = project_product_environment(
+            SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession,
+            |name| {
+                requested.push(name.to_owned());
+                match name {
+                    "DISPLAY" => Some(OsString::from(":19")),
+                    "LANG" => Some(OsString::from("C.UTF-8")),
+                    _ => None,
+                }
+            },
+        )
+        .expect("the reviewed environment projection is encodable");
+        let entries = projected
+            .iter()
+            .map(|entry| entry.to_str().expect("the fixture environment is UTF-8"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries, ["DISPLAY=:19", "LANG=C.UTF-8"]);
+        assert!(!requested.iter().any(|name| matches!(
+            name.as_str(),
+            "PATH" | "HTTP_PROXY" | "LD_PRELOAD" | "LD_LIBRARY_PATH"
+        )));
+
+        let mut sealed_lookups = 0;
+        let sealed =
+            project_product_environment(SupervisedProductEnvironmentPolicy::Sealed, |_| {
+                sealed_lookups += 1;
+                Some(OsString::from("must-not-be-observed"))
+            })
+            .expect("the sealed environment is encodable");
+        assert!(sealed.is_empty());
+        assert_eq!(sealed_lookups, 0);
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn spawn_setup_failed(
     child: Child,
     process_group: Pid,
     message: &'static str,
 ) -> io::Result<SpawnedProcess> {
-    terminate_spawn_failure(child, process_group);
-    Err(io::Error::other(message))
+    let cleanup = terminate_spawn_failure(child, process_group);
+    Err(merge_spawn_rollback_error(
+        io::Error::other(message),
+        cleanup.err(),
+    ))
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn terminate_spawn_failure(mut child: Child, process_group: Pid) {
-    let _ = signal_process_group(process_group, Signal::KILL);
-    let _ = child.kill();
+fn terminate_spawn_failure(mut child: Child, process_group: Pid) -> io::Result<()> {
+    let signal_error = signal_process_group(process_group, Signal::KILL).err();
+    if signal_error.is_some() {
+        let _ = child.kill();
+    }
     let deadline = Instant::now() + SPAWN_ROLLBACK_WAIT;
     loop {
         match child.try_wait() {
-            Ok(Some(_)) => return,
+            Ok(Some(_)) => return signal_error.map_or(Ok(()), Err),
             Ok(None) if Instant::now() < deadline => thread::sleep(SPAWN_ROLLBACK_POLL),
-            Ok(None) | Err(_) => break,
+            Ok(None) => break,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                let ownership =
+                    transfer_child_to_reaper(child, "nara-supervised-spawn-rollback-reaper");
+                return Err(merge_cleanup_errors(
+                    signal_error,
+                    Some(error),
+                    ownership.err(),
+                ));
+            }
         }
     }
-    let _ = thread::Builder::new()
-        .name("nara-supervised-spawn-rollback-reaper".to_owned())
+    let ownership = transfer_child_to_reaper(child, "nara-supervised-spawn-rollback-reaper");
+    Err(merge_cleanup_errors(
+        signal_error,
+        Some(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the supervised spawn rollback exceeded its synchronous reap deadline; child ownership was transferred to the rollback reaper",
+        )),
+        ownership.err(),
+    ))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn waitid_exit_status(status: WaitIdStatus) -> io::Result<std::process::ExitStatus> {
+    if let Some(code) = status.exit_status() {
+        let raw = code.checked_shl(8).ok_or_else(|| {
+            io::Error::other("the observed direct-child exit status exceeds wait status encoding")
+        })?;
+        return Ok(std::process::ExitStatus::from_raw(raw));
+    }
+    if let Some(signal) = status.terminating_signal() {
+        let core_dumped = if status.dumped() { 0x80 } else { 0 };
+        return Ok(std::process::ExitStatus::from_raw(signal | core_dumped));
+    }
+    Err(io::Error::other(
+        "waitid returned a non-terminal direct-child status despite WEXITED",
+    ))
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn process_group_has_other_members(process_group: Pid) -> io::Result<bool> {
+    let leader = process_group.as_raw_pid();
+    // Linux process groups are not ownership handles. Enumerating live PIDs while the zombie
+    // leader reserves the group number is the bounded bridge needed before final reap; any
+    // inspection error is treated conservatively as a cleanup failure.
+    for entry in fs::read_dir("/proc")? {
+        let entry = entry?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Ok(raw_pid) = name.parse::<i32>() else {
+            continue;
+        };
+        if raw_pid == leader {
+            continue;
+        }
+        let Some(pid) = Pid::from_raw(raw_pid) else {
+            continue;
+        };
+        match getpgid(Some(pid)) {
+            Ok(group) if group == process_group => return Ok(true),
+            Ok(_) | Err(rustix::io::Errno::SRCH) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn transfer_child_to_reaper(child: Child, thread_name: &'static str) -> io::Result<()> {
+    let owner = Arc::new(std::sync::Mutex::new(Some(child)));
+    let reaper_owner = Arc::clone(&owner);
+    match thread::Builder::new()
+        .name(thread_name.to_owned())
         .spawn(move || {
-            let _ = child.wait();
-        });
+            let child = reaper_owner
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            if let Some(mut child) = child {
+                let _ = wait_owned_child(&mut child);
+            }
+        }) {
+        Ok(_reaper) => Ok(()),
+        Err(spawn_error) => {
+            let child = owner
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            let Some(mut child) = child else {
+                return Err(io::Error::other(format!(
+                    "the supervised child reaper could not start and child ownership was unavailable: {spawn_error}"
+                )));
+            };
+            wait_owned_child(&mut child).map_err(|wait_error| {
+                io::Error::other(format!(
+                    "the supervised child reaper could not start ({spawn_error}) and synchronous reaping failed: {wait_error}"
+                ))
+            })
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn wait_owned_child(child: &mut Child) -> io::Result<()> {
+    loop {
+        match child.wait() {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn merge_spawn_rollback_error(primary: io::Error, cleanup: Option<io::Error>) -> io::Error {
+    let Some(cleanup) = cleanup else {
+        return primary;
+    };
+    io::Error::new(
+        primary.kind(),
+        format!(
+            "{primary}; supervised process spawn rollback required additional recovery: {cleanup}"
+        ),
+    )
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn merge_cleanup_errors(
+    first: Option<io::Error>,
+    second: Option<io::Error>,
+    third: Option<io::Error>,
+) -> io::Error {
+    let messages = [first, second, third]
+        .into_iter()
+        .flatten()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    io::Error::other(messages.join("; "))
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -448,14 +1009,24 @@ fn run_output_reader(
     mut stdout: ChildStdout,
     mut stderr: ChildStderr,
     mut cancel: UnixStream,
-    output: Arc<Mutex<OutputQueue>>,
+    output: Arc<PlatformOutputQueue>,
+    stopped: Arc<AtomicBool>,
 ) {
+    let _stopped = OutputReaderStoppedGuard(stopped);
     let result = read_output_until_cancelled(&mut stdout, &mut stderr, &mut cancel, &output);
-    if let Ok(mut output) = output.lock() {
-        if let Err(error) = result {
-            output.record_failure(error);
-        }
-        output.stopped = true;
+    if let Err(error) = result {
+        output.record_failure(error);
+    }
+    output.notify();
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct OutputReaderStoppedGuard(Arc<AtomicBool>);
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl Drop for OutputReaderStoppedGuard {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
     }
 }
 
@@ -464,7 +1035,7 @@ fn read_output_until_cancelled(
     stdout: &mut ChildStdout,
     stderr: &mut ChildStderr,
     cancel: &mut UnixStream,
-    output: &Arc<Mutex<OutputQueue>>,
+    output: &PlatformOutputQueue,
 ) -> io::Result<()> {
     let mut stdout_open = true;
     let mut stderr_open = true;
@@ -544,7 +1115,7 @@ fn output_ready(events: PollFlags) -> bool {
 fn drain_stream(
     reader: &mut impl Read,
     stream: SupervisedProcessStream,
-    output: &Arc<Mutex<OutputQueue>>,
+    output: &PlatformOutputQueue,
 ) -> io::Result<bool> {
     let mut bytes_read = 0;
     let mut buffer = [0_u8; OUTPUT_READ_CHUNK_BYTES];
@@ -555,14 +1126,7 @@ fn drain_stream(
             Ok(0) => return Ok(true),
             Ok(read) => {
                 bytes_read += read;
-                output
-                    .lock()
-                    .map_err(output_lock_poisoned)?
-                    .push(PlatformOutput {
-                        stream,
-                        bytes: buffer[..read].to_vec(),
-                        loss: false,
-                    });
+                output.push(stream, buffer[..read].to_vec())?;
             }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -573,109 +1137,21 @@ fn drain_stream(
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-#[derive(Default)]
-struct OutputQueue {
-    records: VecDeque<PlatformOutput>,
-    retained_bytes: usize,
-    dropped_stdout_bytes: u64,
-    dropped_stderr_bytes: u64,
-    failure: Option<io::Error>,
-    stopped: bool,
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-impl OutputQueue {
-    fn push(&mut self, output: PlatformOutput) {
-        let bytes = output.bytes.len();
-        if self.records.len() >= MAX_PENDING_OUTPUT_RECORDS
-            || self.retained_bytes.saturating_add(bytes) > MAX_PENDING_OUTPUT_BYTES
-        {
-            let dropped = u64::try_from(bytes).unwrap_or(u64::MAX);
-            match output.stream {
-                SupervisedProcessStream::Stdout => {
-                    self.dropped_stdout_bytes = self.dropped_stdout_bytes.saturating_add(dropped);
-                }
-                SupervisedProcessStream::Stderr => {
-                    self.dropped_stderr_bytes = self.dropped_stderr_bytes.saturating_add(dropped);
-                }
-            }
-            return;
-        }
-        self.retained_bytes += bytes;
-        self.records.push_back(output);
-    }
-
-    fn pop(&mut self) -> io::Result<Option<PlatformOutput>> {
-        if let Some(output) = self.records.pop_front() {
-            self.retained_bytes -= output.bytes.len();
-            return Ok(Some(output));
-        }
-        if self.dropped_stdout_bytes != 0 {
-            let dropped = std::mem::take(&mut self.dropped_stdout_bytes);
-            return Ok(Some(dropped_output(
-                SupervisedProcessStream::Stdout,
-                dropped,
-            )));
-        }
-        if self.dropped_stderr_bytes != 0 {
-            let dropped = std::mem::take(&mut self.dropped_stderr_bytes);
-            return Ok(Some(dropped_output(
-                SupervisedProcessStream::Stderr,
-                dropped,
-            )));
-        }
-        if let Some(error) = self.failure.take() {
-            return Err(error);
-        }
-        Ok(None)
-    }
-
-    fn record_failure(&mut self, error: io::Error) {
-        if self.failure.is_none() {
-            self.failure = Some(error);
-        }
-    }
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn dropped_output(stream: SupervisedProcessStream, dropped: u64) -> PlatformOutput {
-    let name = match stream {
-        SupervisedProcessStream::Stdout => "stdout",
-        SupervisedProcessStream::Stderr => "stderr",
-    };
-    PlatformOutput {
-        stream,
-        bytes: format!("[nara-editor: dropped {dropped} bytes from {name}]\n").into_bytes(),
-        loss: true,
-    }
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn record_cancelled_stream(
-    output: &Arc<Mutex<OutputQueue>>,
+    output: &PlatformOutputQueue,
     stream: SupervisedProcessStream,
 ) -> io::Result<()> {
     let name = match stream {
         SupervisedProcessStream::Stdout => "stdout",
         SupervisedProcessStream::Stderr => "stderr",
     };
-    output
-        .lock()
-        .map_err(output_lock_poisoned)?
-        .push(PlatformOutput {
-            stream,
-            bytes: format!(
-                "[nara-editor: {name} capture was cancelled before EOF; remaining bytes were not retained]\n"
-            )
-            .into_bytes(),
-            loss: true,
-        });
-    Ok(())
-}
-
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-fn output_lock_poisoned<T>(_error: std::sync::PoisonError<T>) -> io::Error {
-    io::Error::other("the supervised process output queue was poisoned")
+    output.push_loss(
+        stream,
+        format!(
+            "[nara-editor: {name} capture was cancelled before EOF; remaining bytes were not retained]\n"
+        )
+        .into_bytes(),
+    )
 }
 
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

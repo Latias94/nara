@@ -1,3 +1,5 @@
+//! Product project-root selection without current-directory inference.
+
 use std::{
     error::Error,
     fmt,
@@ -75,7 +77,7 @@ impl fmt::Display for ProductProjectRootError {
 
 impl Error for ProductProjectRootError {}
 
-fn validate_absolute_path(
+pub(super) fn validate_absolute_path(
     path: &Path,
     allow_root: bool,
 ) -> Result<PathBuf, ProductProjectRootError> {

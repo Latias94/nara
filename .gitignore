@@ -1,5 +1,6 @@
 target/
 repo-ref/
 .worktrees/
+.nara-supervised-play-canary-*/
 .nara/import-cache/
 __pycache__/

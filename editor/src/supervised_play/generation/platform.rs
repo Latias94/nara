@@ -1,8 +1,11 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, File},
     io,
     path::Path,
 };
+
+#[cfg(windows)]
+use std::fs::OpenOptions;
 
 #[cfg(windows)]
 pub(super) const EXECUTABLE_NAME: &str = "product.exe";

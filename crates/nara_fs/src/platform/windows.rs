@@ -31,13 +31,14 @@ use windows_sys::Win32::{
         DELETE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
         FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DISPOSITION_FLAG_DELETE,
         FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
-        FILE_DISPOSITION_INFO_EX, FILE_ID_INFO, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-        FILE_READ_DATA, FILE_READ_EA, FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, FILE_STANDARD_INFO, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES,
-        FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, FileDispositionInfoEx, FileIdInfo,
-        FileStandardInfo, FlushFileBuffers, GetFileInformationByHandleEx,
-        GetVolumeInformationByHandleW, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
-        LockFileEx, SYNCHRONIZE, SetFileInformationByHandle, UnlockFileEx,
+        FILE_DISPOSITION_INFO_EX, FILE_EXECUTE, FILE_ID_INFO, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_READ_EA, FILE_RENAME_INFO, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FILE_TRAVERSE,
+        FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo,
+        FileDispositionInfoEx, FileIdInfo, FileStandardInfo, FlushFileBuffers,
+        GetFileInformationByHandleEx, GetVolumeInformationByHandleW, LOCKFILE_EXCLUSIVE_LOCK,
+        LOCKFILE_FAIL_IMMEDIATELY, LockFileEx, SYNCHRONIZE, SetFileInformationByHandle,
+        UnlockFileEx,
     },
     System::IO::{IO_STATUS_BLOCK, OVERLAPPED},
     System::SystemInformation::OSVERSIONINFOW,
@@ -69,6 +70,140 @@ pub(crate) struct DirectoryEnumerationCursor {
     file: File,
     restart_scan: bool,
     buffer: Box<[usize; DIRECTORY_ENUMERATION_BUFFER_WORDS]>,
+}
+
+pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
+    restrictive_exact_self(
+        file,
+        FileKind::Directory,
+        FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_DIRECTORY_FILE,
+        "restrictive exact-self directory lease",
+    )
+}
+
+pub(crate) fn restrictive_clone_file(file: &File) -> Result<File, FsError> {
+    restrictive_exact_self(
+        file,
+        FileKind::Regular,
+        FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_NON_DIRECTORY_FILE,
+        "restrictive exact-self file lease",
+    )
+}
+
+pub(crate) fn restrictive_clone_executable(file: &File) -> Result<File, FsError> {
+    restrictive_exact_self(
+        file,
+        FileKind::Regular,
+        FILE_READ_DATA | FILE_EXECUTE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        FILE_NON_DIRECTORY_FILE,
+        "restrictive exact-self executable lease",
+    )
+}
+
+fn restrictive_exact_self(
+    source: &File,
+    expected_kind: FileKind,
+    desired_access: u32,
+    type_options: u32,
+    capability: &'static str,
+) -> Result<File, FsError> {
+    let original = facts(source)?;
+    if original.kind != expected_kind {
+        return match expected_kind {
+            FileKind::Directory => Err(FsError::NotDirectory),
+            FileKind::Regular => Err(FsError::NotRegularFile),
+            FileKind::Other => Err(FsError::Unproven {
+                operation: FsOperation::CloneHandle,
+                proof: "exact launch leases cannot target device or other non-file objects",
+            }),
+        };
+    }
+    if let Some(tag) = original.reparse_tag {
+        return Err(FsError::ReparsePoint { tag });
+    }
+    if !original.identity_proven {
+        return Err(FsError::Unproven {
+            operation: FsOperation::CloneHandle,
+            proof: "the Windows handle cannot prove local live-object identity for an exact lease",
+        });
+    }
+
+    let empty_name = UNICODE_STRING {
+        Length: 0,
+        MaximumLength: 0,
+        Buffer: ptr::null_mut(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: raw_handle(source),
+        ObjectName: ptr::addr_of!(empty_name),
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: ptr::null(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let mut status_block = IO_STATUS_BLOCK::default();
+    let mut handle = ptr::null_mut();
+    // SAFETY: the source handle is the capability owner’s live authority. The empty relative name
+    // asks the NT object manager to reopen that exact object; no ambient path is consulted. The
+    // restrictive share mode prevents later ordinary write/delete opens while the lease lives.
+    let status = unsafe {
+        NtOpenFile(
+            &mut handle,
+            desired_access,
+            ptr::addr_of!(attributes),
+            &mut status_block,
+            FILE_SHARE_READ,
+            FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT | type_options,
+        )
+    };
+    if status != 0 {
+        let code = unsafe { RtlNtStatusToDosError(status) };
+        if matches!(
+            code,
+            ERROR_NOT_SUPPORTED | ERROR_CALL_NOT_IMPLEMENTED | ERROR_INVALID_FUNCTION
+        ) {
+            return Err(FsError::Unsupported {
+                operation: FsOperation::CloneHandle,
+                capability,
+            });
+        }
+        if code == 0 {
+            return Err(FsError::Unproven {
+                operation: FsOperation::CloneHandle,
+                proof: "the Windows exact-self lease returned a non-success NTSTATUS",
+            });
+        }
+        return Err(FsError::io(
+            FsOperation::CloneHandle,
+            io::Error::from_raw_os_error(code as i32),
+        ));
+    }
+    if handle.is_null() {
+        return Err(FsError::IdentityUnavailable);
+    }
+
+    // SAFETY: strict `NtOpenFile` success transferred unique ownership of `handle`.
+    let reopened = unsafe { File::from_raw_handle(handle.cast()) };
+    let current = facts(&reopened)?;
+    if current.kind != expected_kind {
+        return Err(FsError::CapabilityIdentityDrift {
+            operation: FsOperation::CloneHandle,
+        });
+    }
+    if let Some(tag) = current.reparse_tag {
+        return Err(FsError::ReparsePoint { tag });
+    }
+    if !current.identity_proven
+        || current.identity != original.identity
+        || current.link_count != original.link_count
+    {
+        return Err(FsError::CapabilityIdentityDrift {
+            operation: FsOperation::CloneHandle,
+        });
+    }
+    Ok(reopened)
 }
 
 pub(crate) const fn capability_matrix() -> PlatformCapabilityMatrix {

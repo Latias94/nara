@@ -40,6 +40,20 @@ pub use composition::{
     compiled_product_capabilities, resolve_product_recipe,
 };
 pub use ingest::{ProjectCandidateError, ProjectCandidateErrorKind, ingest_project_manifest};
+#[cfg(feature = "runtime-core")]
+#[doc(hidden)]
+pub use product_launch::{
+    MAX_SUPERVISED_DESKTOP_EXECUTABLE_BYTES, MAX_SUPERVISED_DESKTOP_LAUNCH_CONTEXT_BYTES,
+    MAX_SUPERVISED_DESKTOP_READY_ATTESTATION_BYTES, ProductSupervisedDesktopBootstrapError,
+    ProductSupervisedDesktopLaunchCandidate, ProductSupervisedDesktopReadyAdvance,
+    ProductSupervisedDesktopReadyPublication, ProductSupervisedDesktopSession,
+    SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION, SUPERVISED_DESKTOP_READY_ATTESTATION_VERSION,
+    SUPERVISED_DESKTOP_READY_WRITE_TIMEOUT, SupervisedDesktopGenerationId,
+    SupervisedDesktopLaunchContext, SupervisedDesktopProductIdentity,
+    SupervisedDesktopReadyAttestation, SupervisedDesktopRuntimeClosureFacts,
+    SupervisedDesktopSessionNonce, SupervisedDesktopWireError,
+    supervised_desktop_ready_frame_length,
+};
 #[doc(hidden)]
 pub use product_launch::{
     ProductProjectRootError, ProductProjectRootSource, resolve_product_project_root,
@@ -73,6 +87,16 @@ pub use runtime::{
     feature = "runtime-2d",
     feature = "serde",
     feature = "tooling",
+    feature = "presentation-2d"
+))]
+pub use runtime::{
+    EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
+    EditorPreviewPresentation,
+};
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    feature = "tooling",
     any(feature = "presentation-2d", feature = "presentation-ui")
 ))]
 pub use runtime::{
@@ -94,7 +118,9 @@ pub use runtime::{
     EditorProjectCloseProgress, EditorProjectCloseReceipt, EditorProjectOpenAttempt,
     EditorProjectOpenError, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
     EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
-    EditorProjectOpenProgress, EditorProjectSession, TrustedCompiledEditorProjectIntent,
+    EditorProjectOpenProgress, EditorProjectSession, SupervisedDesktopSourceAdmissionError,
+    SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
+    admit_supervised_desktop_source_receipt,
 };
 #[cfg(all(
     feature = "runtime-2d",

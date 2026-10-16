@@ -35,6 +35,9 @@ use super::{
     source_index::ProjectSourceIndexState,
 };
 
+mod catalogue;
+use catalogue::{ReferenceCatalogue, charge_database_record, insert_asset_record};
+
 const SOURCE_OPEN_HANDLE_PEAK: usize = 7;
 const VALUE_NODE_RETAINED_BYTES: usize = 32;
 const AUTHORING_RECORD_RETAINED_OVERHEAD: usize = 64;
@@ -256,6 +259,7 @@ struct AuthoringProjectSnapshotInner {
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
+    asset_database: Arc<ProjectAssetDatabase>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Box<[Arc<AuthoringSourceFact>]>,
     usage: AuthoringProjectAdmissionUsage,
@@ -280,6 +284,26 @@ impl AuthoringProjectSnapshot {
     #[must_use]
     pub(crate) fn project_root(&self) -> DirectoryCapability {
         self.inner.schema.project_root()
+    }
+
+    #[must_use]
+    pub(crate) fn manifest_digest(&self) -> ContentDigest {
+        self.inner.schema.manifest_digest()
+    }
+
+    #[must_use]
+    pub(crate) fn authoring_bundle_path(&self) -> &ProjectPath {
+        self.inner.schema.bundle_path()
+    }
+
+    #[must_use]
+    pub(crate) fn authoring_bundle_digest(&self) -> ContentDigest {
+        self.inner.schema.bundle_digest()
+    }
+
+    #[must_use]
+    pub(crate) fn schema_fingerprint_hex(&self) -> String {
+        self.inner.schema.composition_fingerprint().to_hex()
     }
 
     #[must_use]
@@ -415,6 +439,7 @@ impl AuthoringProjectReceipt {
                 startup_scene: inner.startup_scene,
                 prefabs: inner.prefabs,
                 assets: inner.assets,
+                asset_database: inner.asset_database,
                 unresolved_dependencies: inner.unresolved_dependencies,
                 source_facts: inner.source_facts,
                 usage: inner.usage,
@@ -465,6 +490,7 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
     startup_scene: Arc<PublishedAuthoringSceneDocument>,
     prefabs: Box<[AuthoringPrefabSource]>,
     assets: Box<[AuthoringAssetSource]>,
+    asset_database: Arc<ProjectAssetDatabase>,
     unresolved_dependencies: Box<[AuthoringUnresolvedDependency]>,
     source_facts: Box<[Arc<AuthoringSourceFact>]>,
     usage: AuthoringProjectAdmissionUsage,
@@ -472,6 +498,11 @@ pub(crate) struct AuthoringProjectSessionSnapshot {
 }
 
 impl AuthoringProjectSessionSnapshot {
+    #[must_use]
+    pub(crate) fn asset_database(&self) -> Arc<ProjectAssetDatabase> {
+        Arc::clone(&self.asset_database)
+    }
+
     #[must_use]
     pub(crate) fn attempt_generation(&self) -> AuthoringProjectAttemptGeneration {
         self.schema.attempt_generation()
@@ -485,6 +516,26 @@ impl AuthoringProjectSessionSnapshot {
     #[must_use]
     pub(crate) fn project_root(&self) -> DirectoryCapability {
         self.schema.project_root()
+    }
+
+    #[must_use]
+    pub(crate) const fn manifest_digest(&self) -> ContentDigest {
+        self.schema.manifest_digest()
+    }
+
+    #[must_use]
+    pub(crate) const fn authoring_bundle_digest(&self) -> ContentDigest {
+        self.schema.bundle_digest()
+    }
+
+    #[must_use]
+    pub(crate) fn schema_fingerprint_hex(&self) -> String {
+        self.schema.composition_fingerprint().to_hex()
+    }
+
+    #[must_use]
+    pub(crate) fn source_facts(&self) -> impl ExactSizeIterator<Item = &AuthoringSourceFact> {
+        self.source_facts.iter().map(Arc::as_ref)
     }
 
     #[must_use]
@@ -708,6 +759,10 @@ impl PreparedAuthoringProject {
         let mut loaded_paths = BTreeSet::new();
         let mut pending_assets = BTreeMap::new();
         let mut unresolved_dependencies = Vec::new();
+        let mut catalogue = ReferenceCatalogue::new(
+            self.schema.project_root.share(),
+            [asset_root.clone(), prefab_root.clone()],
+        );
         enqueue_document_prefabs(
             &startup_scene.document().entities,
             0,
@@ -715,6 +770,7 @@ impl PreparedAuthoringProject {
             &mut queued_depths,
             &loaded_paths,
             &mut unresolved_dependencies,
+            &mut catalogue,
             &mut self.schema.budget,
         )?;
         enqueue_document_assets(
@@ -722,6 +778,7 @@ impl PreparedAuthoringProject {
             0,
             &mut pending_assets,
             &mut unresolved_dependencies,
+            &mut catalogue,
             &mut self.schema.budget,
         )?;
 
@@ -817,6 +874,7 @@ impl PreparedAuthoringProject {
                 &mut queued_depths,
                 &loaded_paths,
                 &mut unresolved_dependencies,
+                &mut catalogue,
                 &mut self.schema.budget,
             )?;
             enqueue_document_assets(
@@ -824,10 +882,37 @@ impl PreparedAuthoringProject {
                 depth,
                 &mut pending_assets,
                 &mut unresolved_dependencies,
+                &mut catalogue,
                 &mut self.schema.budget,
             )?;
         }
         drop(prefabs_directory);
+
+        let mut asset_database = ProjectAssetDatabase::default();
+        if catalogue.is_indexed() && !prefabs.is_empty() {
+            let directory = open_source_directory(
+                &self.schema.project_root,
+                &prefab_root,
+                AuthoringSourceKind::Prefab,
+                &mut self.schema.budget,
+            )?;
+            for path in prefabs.keys() {
+                if let Some((record, source)) =
+                    catalogue.admit_prefab_metadata(&directory, path, &mut self.schema.budget)?
+                {
+                    if identities.contains_key(&source.identity()) {
+                        return Err(
+                            AuthoringProjectSourceAdmissionError::SourceIdentityKindConflict {
+                                path: source.project_path().clone(),
+                            },
+                        );
+                    }
+                    insert_asset_record(&mut asset_database, record)?;
+                    identities.insert(source.identity(), LoadedIdentity::AssetMetadata);
+                    source_facts.insert(source.project_path().as_str().to_owned(), source);
+                }
+            }
+        }
 
         let assets_directory = if pending_assets.is_empty() {
             None
@@ -839,7 +924,6 @@ impl PreparedAuthoringProject {
                 &mut self.schema.budget,
             )?)
         };
-        let mut asset_database = ProjectAssetDatabase::default();
         let mut assets = BTreeMap::new();
         for (path, depth) in pending_assets {
             let directory = assets_directory
@@ -864,6 +948,7 @@ impl PreparedAuthoringProject {
                 metadata_limits.encoded_bytes().get(),
                 &mut self.schema.budget,
             )?;
+            catalogue.verify_metadata(&path, false, &metadata_read.source)?;
             let exact_metadata_limit = ByteLimit::new(metadata_read.read_limit)
                 .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
             let metadata_encoded_bytes = metadata_read.bytes.len();
@@ -894,6 +979,7 @@ impl PreparedAuthoringProject {
                     },
                 })?;
             let record = AssetRecord::from(metadata.identity().clone());
+            charge_database_record(&record, &mut self.schema.budget)?;
             charge_asset_metadata(
                 &metadata_source,
                 metadata_encoded_bytes,
@@ -943,6 +1029,34 @@ impl PreparedAuthoringProject {
         }
         drop(assets_directory);
 
+        #[cfg(feature = "presentation-2d")]
+        {
+            // The preview shares this database until the first accepted image adds an identity.
+            // Reserve its one private copy before publishing the authoring session.
+            for asset in assets.values() {
+                charge_database_record(asset.record(), &mut self.schema.budget)?;
+            }
+            for path in prefabs.keys() {
+                if let Some(record) = asset_database.record_for_path(path) {
+                    charge_database_record(record, &mut self.schema.budget)?;
+                }
+            }
+            self.schema.budget.charge_source_bytes(
+                0,
+                0,
+                0,
+                size_of::<ProjectAssetDatabase>() + 2 * size_of::<usize>(),
+            )?;
+            let growth = checked_sum([
+                checked_product(super::MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES, 9)?,
+                checked_product(
+                    super::MAX_AUTHORING_IMAGE_IDENTITIES,
+                    size_of::<AssetRecord>() + 3 * size_of::<AssetPath>() + 192,
+                )?,
+            ])?;
+            self.schema.budget.charge_source_bytes(0, 0, 0, growth)?;
+        }
+
         let prefab_path_bytes = prefabs.keys().try_fold(0_usize, |total, path| {
             total
                 .checked_add(path.as_str().len())
@@ -981,6 +1095,7 @@ impl PreparedAuthoringProject {
                 startup_scene,
                 prefabs: prefabs.into_values().collect::<Vec<_>>().into_boxed_slice(),
                 assets: assets.into_values().collect::<Vec<_>>().into_boxed_slice(),
+                asset_database: Arc::new(asset_database),
                 unresolved_dependencies: unresolved_dependencies.into_boxed_slice(),
                 source_facts: source_facts.into_boxed_slice(),
                 usage,
@@ -1502,6 +1617,7 @@ fn enqueue_document_assets(
     current_depth: usize,
     pending: &mut BTreeMap<AssetPath, usize>,
     unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
+    catalogue: &mut ReferenceCatalogue,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     let dependency_depth = current_depth
@@ -1509,17 +1625,18 @@ fn enqueue_document_assets(
         .ok_or(AuthoringProjectSourceAdmissionError::AccountingOverflow)?;
     for record in records {
         for declared in record.schema_declared_asset_references() {
-            match declared.asset_ref() {
-                AssetRef::Path(path) => {
+            let reference = declared.asset_ref();
+            match catalogue.resolve(reference, false, budget)? {
+                Some(path) => {
                     budget.charge_reference(path.as_str().len(), dependency_depth, true)?;
                     pending
-                        .entry(path.clone())
+                        .entry(path)
                         .and_modify(|observed_depth| {
                             *observed_depth = (*observed_depth).min(dependency_depth);
                         })
                         .or_insert(dependency_depth);
                 }
-                reference @ AssetRef::StableId(_) => {
+                None => {
                     budget.charge_reference(16, dependency_depth, true)?;
                     unresolved_dependencies.push(AuthoringUnresolvedDependency {
                         kind: AuthoringUnresolvedDependencyKind::Asset,
@@ -1540,6 +1657,7 @@ fn enqueue_document_prefabs(
     queued_depths: &mut BTreeMap<AssetPath, usize>,
     loaded_paths: &BTreeSet<AssetPath>,
     unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
+    catalogue: &mut ReferenceCatalogue,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     let next_depth = current_depth.saturating_add(1);
@@ -1551,6 +1669,7 @@ fn enqueue_document_prefabs(
             queued_depths,
             loaded_paths,
             unresolved_dependencies,
+            catalogue,
             budget,
         )?;
     }
@@ -1564,6 +1683,7 @@ fn enqueue_entity_prefabs(
     queued_depths: &mut BTreeMap<AssetPath, usize>,
     loaded_paths: &BTreeSet<AssetPath>,
     unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
+    catalogue: &mut ReferenceCatalogue,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     let Some(prefab) = &entity.prefab else {
@@ -1576,6 +1696,7 @@ fn enqueue_entity_prefabs(
         queued_depths,
         loaded_paths,
         unresolved_dependencies,
+        catalogue,
         budget,
     )?;
     enqueue_patch_prefabs(
@@ -1585,6 +1706,7 @@ fn enqueue_entity_prefabs(
         queued_depths,
         loaded_paths,
         unresolved_dependencies,
+        catalogue,
         budget,
     )
 }
@@ -1596,6 +1718,7 @@ fn enqueue_patch_prefabs(
     queued_depths: &mut BTreeMap<AssetPath, usize>,
     loaded_paths: &BTreeSet<AssetPath>,
     unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
+    catalogue: &mut ReferenceCatalogue,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
     for operation in &patch.operations {
@@ -1607,6 +1730,7 @@ fn enqueue_patch_prefabs(
                 queued_depths,
                 loaded_paths,
                 unresolved_dependencies,
+                catalogue,
                 budget,
             )?,
             ScenePatchOperation::RestoreEntity {
@@ -1621,6 +1745,7 @@ fn enqueue_patch_prefabs(
                     queued_depths,
                     loaded_paths,
                     unresolved_dependencies,
+                    catalogue,
                     budget,
                 )?;
                 for descendant in descendants {
@@ -1631,6 +1756,7 @@ fn enqueue_patch_prefabs(
                         queued_depths,
                         loaded_paths,
                         unresolved_dependencies,
+                        catalogue,
                         budget,
                     )?;
                 }
@@ -1648,9 +1774,10 @@ fn enqueue_prefab_reference(
     queued_depths: &mut BTreeMap<AssetPath, usize>,
     loaded_paths: &BTreeSet<AssetPath>,
     unresolved_dependencies: &mut Vec<AuthoringUnresolvedDependency>,
+    catalogue: &mut ReferenceCatalogue,
     budget: &mut AuthoringProjectAdmissionBudget,
 ) -> Result<(), AuthoringProjectSourceAdmissionError> {
-    let AssetRef::Path(path) = reference else {
+    let Some(path) = catalogue.resolve(reference, true, budget)? else {
         budget.charge_reference(16, dependency_depth, true)?;
         unresolved_dependencies.push(AuthoringUnresolvedDependency {
             kind: AuthoringUnresolvedDependencyKind::Prefab,
@@ -1660,10 +1787,10 @@ fn enqueue_prefab_reference(
         return Ok(());
     };
     budget.charge_reference(path.as_str().len(), dependency_depth, true)?;
-    if loaded_paths.contains(path) {
+    if loaded_paths.contains(&path) {
         return Ok(());
     }
-    if let Some(previous_depth) = queued_depths.get(path).copied() {
+    if let Some(previous_depth) = queued_depths.get(&path).copied() {
         if previous_depth <= dependency_depth {
             return Ok(());
         }
@@ -1734,6 +1861,7 @@ fn snapshot_index_retained_bytes(
 ) -> Result<usize, AuthoringProjectSourceAdmissionError> {
     checked_sum([
         size_of::<AuthoringProjectSnapshotInner>(),
+        size_of::<ProjectAssetDatabase>() + 2 * size_of::<usize>(),
         checked_product(source_count, size_of::<Arc<AuthoringSourceFact>>())?,
         checked_product(prefab_count, size_of::<AuthoringPrefabSource>())?,
         checked_product(asset_count, size_of::<AuthoringAssetSource>())?,
@@ -1846,6 +1974,10 @@ pub(crate) enum AuthoringProjectSourceAdmissionError {
         path: AssetPath,
         source: AssetDatabaseError,
     },
+    CatalogueNameInvalid,
+    AssetMetadataChanged {
+        path: AssetPath,
+    },
     PrefabDirectoryAuthorityUnavailable,
     AssetDirectoryAuthorityUnavailable,
     AccountingOverflow,
@@ -1927,6 +2059,12 @@ impl Display for AuthoringProjectSourceAdmissionError {
                 formatter,
                 "asset identity for '{path}' conflicts within the authoring project closure"
             ),
+            Self::CatalogueNameInvalid => formatter
+                .write_str("asset catalogue entry cannot become a portable UTF-8 logical path"),
+            Self::AssetMetadataChanged { path } => write!(
+                formatter,
+                "asset metadata for '{path}' changed after stable reference lookup; retry admission",
+            ),
             Self::PrefabDirectoryAuthorityUnavailable => formatter
                 .write_str("Prefab closure traversal lost its retained directory authority"),
             Self::AssetDirectoryAuthorityUnavailable => {
@@ -1961,6 +2099,8 @@ impl Error for AuthoringProjectSourceAdmissionError {
             | Self::SourceTooLarge { .. }
             | Self::UnsupportedSourceEncoding { .. }
             | Self::AssetMetadataPathMismatch { .. }
+            | Self::CatalogueNameInvalid
+            | Self::AssetMetadataChanged { .. }
             | Self::PrefabDirectoryAuthorityUnavailable
             | Self::AssetDirectoryAuthorityUnavailable
             | Self::AccountingOverflow => None,

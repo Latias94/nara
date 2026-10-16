@@ -315,7 +315,7 @@ impl EditorFrameModel {
     }
 
     #[must_use]
-    pub const fn play(&self) -> crate::EditorPlayView {
+    pub const fn play(&self) -> &crate::EditorPlayView {
         self.project.play()
     }
 
@@ -455,7 +455,7 @@ impl EditorDocumentMutation {
     }
 }
 
-/// Persistence actions emitted from one exact Editor frame.
+/// Revision-bound persistence commands and result acknowledgement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPersistenceAction {
     Save {
@@ -493,6 +493,7 @@ pub enum EditorPlayAction {
     StepFixedTick,
     Stop,
     Restart,
+    RunLastGood,
     RetryRetirement,
     RetryClose,
     AcknowledgeResult,
@@ -528,16 +529,22 @@ pub enum EditorAction {
 impl EditorAction {
     #[doc(hidden)]
     #[must_use]
-    pub const fn revision_advancing_document(&self) -> Option<EditorDocumentId> {
+    pub const fn requires_current_frame(&self) -> bool {
         match self {
-            Self::Mutate(mutation) => Some(mutation.document()),
-            Self::Persistence(EditorPersistenceAction::Reopen { target }) => Some(match target {
-                EditorReopenTarget::OpenDocument { document, .. } => *document,
-                EditorReopenTarget::Unavailable => return None,
-            }),
-            Self::ApplyChanges { document, .. } => Some(*document),
-            Self::Gesture(action) => action.revision_advancing_document(),
-            _ => None,
+            Self::Navigate(_)
+            | Self::ProjectBrowser(_)
+            | Self::ImageImport(_)
+            | Self::RuntimeEdit { .. }
+            | Self::ApplyChanges { .. }
+            | Self::Gesture(_) => true,
+            Self::Play(action) => matches!(action, EditorPlayAction::Play { .. }),
+            Self::Mutate(_)
+            | Self::Persistence(_)
+            | Self::ProjectContent(_)
+            | Self::WorkspaceIntent(_)
+            | Self::ReportFieldValidation(_)
+            | Self::AcknowledgeRuntimeEditResult
+            | Self::AcknowledgeApplyChangesResult => false,
         }
     }
 
@@ -560,7 +567,7 @@ impl EditorAction {
     }
 }
 
-/// One ordered Adapter submission bound to an immutable Editor frame.
+/// Ordered commands with their originating frame for geometry-sensitive admission.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorActionBatch {
     frame_revision: EditorFrameRevision,
@@ -594,6 +601,14 @@ impl EditorActionBatch {
     pub fn first_field_target(&self) -> Option<EditorFieldTarget> {
         self.actions.iter().find_map(EditorAction::field_target)
     }
+
+    #[doc(hidden)]
+    #[must_use]
+    pub fn requires_current_frame(&self) -> bool {
+        self.actions
+            .iter()
+            .any(EditorAction::requires_current_frame)
+    }
 }
 
 /// Host-level rejection that does not silently rebase an Editor action.
@@ -603,9 +618,6 @@ pub enum EditorActionRejection {
     StaleFrame {
         expected: EditorFrameRevision,
         received: EditorFrameRevision,
-    },
-    FrameAlreadyDispatched {
-        revision: EditorFrameRevision,
     },
     DocumentNotInFrame {
         document: EditorDocumentId,
@@ -618,9 +630,6 @@ pub enum EditorActionRejection {
     ActiveDocumentChanged {
         expected: EditorDocumentId,
         actual: Option<EditorDocumentId>,
-    },
-    MutationAlreadySubmitted {
-        document: EditorDocumentId,
     },
     FieldContractMismatch {
         document: EditorDocumentId,
@@ -704,7 +713,7 @@ pub enum EditorActionOutcome {
     Rejected(EditorActionRejection),
 }
 
-/// Outcomes for one accepted frame-bound action batch.
+/// Outcomes for an ordered action batch, retaining its originating frame context.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditorActionBatchReport {
     frame_revision: EditorFrameRevision,

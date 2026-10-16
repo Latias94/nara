@@ -9,14 +9,57 @@ impl EditorProjectSession {
             .active_scene()
             .map(nara_tooling::EditorSceneSlot::revision);
         let Some(lane) = self.trusted_compiled() else {
-            return EditorPlayView::new(
+            let view = EditorPlayView::new(
                 EditorPlayState::Empty,
                 None,
                 None,
                 current_revision,
-                false,
+                self.external_play_view().is_some_and(|external| {
+                    matches!(
+                        external.state(),
+                        nara_tooling::EditorExternalPlayState::Running
+                            | nara_tooling::EditorExternalPlayState::Starting
+                            | nara_tooling::EditorExternalPlayState::Building
+                            | nara_tooling::EditorExternalPlayState::Stopping
+                    ) && !self.external_source_matches_bound_generation()
+                }),
                 self.play_result,
             );
+            let out_of_date = view.is_out_of_date();
+            return self.external_play_view().map_or(view, |external| {
+                let state = match external.state() {
+                    nara_tooling::EditorExternalPlayState::Idle => EditorPlayState::Empty,
+                    nara_tooling::EditorExternalPlayState::Building => {
+                        EditorPlayState::PreparingPlay
+                    }
+                    nara_tooling::EditorExternalPlayState::Starting => EditorPlayState::Starting,
+                    nara_tooling::EditorExternalPlayState::Running => EditorPlayState::Running,
+                    nara_tooling::EditorExternalPlayState::Stopping => EditorPlayState::Stopping,
+                    nara_tooling::EditorExternalPlayState::Faulted => EditorPlayState::Faulted,
+                    nara_tooling::EditorExternalPlayState::CleanupIncomplete => {
+                        if matches!(
+                            self.play_result,
+                            Some(EditorPlayOperationResult::Failed {
+                                operation: EditorPlayOperation::RetryClose,
+                                ..
+                            })
+                        ) {
+                            EditorPlayState::CloseIncomplete
+                        } else {
+                            EditorPlayState::RetirementIncomplete
+                        }
+                    }
+                };
+                EditorPlayView::new(
+                    state,
+                    external.generation(),
+                    None,
+                    current_revision,
+                    out_of_date,
+                    self.play_result,
+                )
+                .with_external(external)
+            });
         };
         let (state, source_revision) = match &lane.runtime_owner {
             EditorRuntimeOwnerState::Empty => (EditorPlayState::Empty, None),
@@ -56,6 +99,7 @@ impl EditorProjectSession {
                             | EditorPlayOperation::Restart
                             | EditorPlayOperation::RetryClose => EditorPlayState::Stopping,
                             EditorPlayOperation::Play
+                            | EditorPlayOperation::RunLastGood
                             | EditorPlayOperation::Cancel
                             | EditorPlayOperation::Pause
                             | EditorPlayOperation::Resume
@@ -98,10 +142,11 @@ impl EditorProjectSession {
                 EditorPlayRequestResult::Rejected(EditorPlayRejection::ResultPending)
             };
         }
+        if self.external_play_view().is_some() && self.trusted_compiled().is_none() {
+            return self.request_external_play(command);
+        }
         if self.trusted_compiled().is_none() {
-            let reason = EditorPlayRejection::RuntimeUnavailable(
-                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-            );
+            let reason = self.runtime_unavailable_rejection();
             self.play_result = Some(EditorPlayOperationResult::Rejected {
                 operation: play_operation(command),
                 reason,
@@ -128,12 +173,13 @@ impl EditorProjectSession {
 
         if matches!(
             command,
-            EditorPlayCommand::Play | EditorPlayCommand::Restart
+            EditorPlayCommand::Play | EditorPlayCommand::Restart | EditorPlayCommand::RunLastGood
         ) && !self.play_source_is_current()
         {
             let operation = match command {
                 EditorPlayCommand::Play => EditorPlayOperation::Play,
                 EditorPlayCommand::Restart => EditorPlayOperation::Restart,
+                EditorPlayCommand::RunLastGood => EditorPlayOperation::RunLastGood,
                 _ => unreachable!(),
             };
             self.play_result = Some(EditorPlayOperationResult::Rejected {
@@ -145,6 +191,7 @@ impl EditorProjectSession {
 
         match command {
             EditorPlayCommand::Play => self.request_start(EditorPlayOperation::Play),
+            EditorPlayCommand::RunLastGood => self.request_start(EditorPlayOperation::RunLastGood),
             EditorPlayCommand::Cancel => self.request_start_cancel(),
             EditorPlayCommand::Pause => {
                 self.request_active_control(EditorPlayOperation::Pause, RuntimeControl::Pause)
@@ -168,11 +215,8 @@ impl EditorProjectSession {
             ),
             EditorPlayCommand::RetryRetirement => {
                 let Some(lane) = self.trusted_compiled_mut() else {
-                    return EditorPlayRequestResult::Rejected(
-                        EditorPlayRejection::RuntimeUnavailable(
-                            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-                        ),
-                    );
+                    let reason = self.runtime_unavailable_rejection();
+                    return EditorPlayRequestResult::Rejected(reason);
                 };
                 let state = std::mem::replace(
                     &mut lane.runtime_owner,
@@ -201,10 +245,14 @@ impl EditorProjectSession {
         document: EditorDocumentId,
         revision: nara_scene::SceneAuthoringRevision,
     ) -> EditorPlayRequestResult {
+        if self.external_play_view().is_some() && self.trusted_compiled().is_none() {
+            if self.workspace.document_revision(document) != Some(revision) {
+                return EditorPlayRequestResult::Rejected(EditorPlayRejection::StaleDocument);
+            }
+            return self.request_external_play(EditorPlayCommand::Play);
+        }
         if self.trusted_compiled().is_none() {
-            let reason = EditorPlayRejection::RuntimeUnavailable(
-                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-            );
+            let reason = self.runtime_unavailable_rejection();
             self.play_result = Some(EditorPlayOperationResult::Rejected {
                 operation: EditorPlayOperation::Play,
                 reason,
@@ -215,9 +263,7 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
         }
         let Some(lane) = self.trusted_compiled() else {
-            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
-                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-            ));
+            return EditorPlayRequestResult::Rejected(self.runtime_unavailable_rejection());
         };
         if !matches!(&lane.runtime_owner, EditorRuntimeOwnerState::Empty)
             || lane.pending_control.is_some()
@@ -246,9 +292,7 @@ impl EditorProjectSession {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::StaleDocument);
         }
         let Some(lane) = self.trusted_compiled_mut() else {
-            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
-                EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-            ));
+            return EditorPlayRequestResult::Rejected(self.runtime_unavailable_rejection());
         };
         lane.runtime_owner = EditorRuntimeOwnerState::Preparing {
             document,
@@ -264,9 +308,20 @@ impl EditorProjectSession {
     pub(super) fn play_source_is_current(&self) -> bool {
         self.project_content.is_current() && !self.workspace.has_dirty_prefab()
     }
+
+    fn runtime_unavailable_rejection(&self) -> EditorPlayRejection {
+        let reason = match self.project_readiness().runtime() {
+            EditorRuntimeAvailability::Unavailable(reason) => reason,
+            EditorRuntimeAvailability::TrustedInProcess
+            | EditorRuntimeAvailability::ExternalSupervised => {
+                EditorRuntimeUnavailableReason::SupervisedPlayUnavailable
+            }
+        };
+        EditorPlayRejection::RuntimeUnavailable(reason)
+    }
 }
 
-fn play_operation(command: EditorPlayCommand) -> EditorPlayOperation {
+pub(super) fn play_operation(command: EditorPlayCommand) -> EditorPlayOperation {
     match command {
         EditorPlayCommand::Play => EditorPlayOperation::Play,
         EditorPlayCommand::Cancel => EditorPlayOperation::Cancel,
@@ -275,6 +330,7 @@ fn play_operation(command: EditorPlayCommand) -> EditorPlayOperation {
         EditorPlayCommand::StepFixedTick => EditorPlayOperation::StepFixedTick,
         EditorPlayCommand::Stop => EditorPlayOperation::Stop,
         EditorPlayCommand::Restart => EditorPlayOperation::Restart,
+        EditorPlayCommand::RunLastGood => EditorPlayOperation::RunLastGood,
         EditorPlayCommand::RetryClose => EditorPlayOperation::RetryClose,
         EditorPlayCommand::RetryRetirement => EditorPlayOperation::RetryRetirement,
         EditorPlayCommand::AcknowledgeResult => {

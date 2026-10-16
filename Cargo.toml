@@ -133,6 +133,7 @@ rustix = "1.1.4"
 windows-sys = "0.61.2"
 
 [dependencies]
+blake3 = { workspace = true, optional = true }
 getrandom = { workspace = true, optional = true }
 nara_app = { workspace = true, optional = true }
 nara_asset = { workspace = true, optional = true }
@@ -167,6 +168,18 @@ serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
+], optional = true }
+
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+rustix = { workspace = true, features = ["net"], optional = true }
+
 [dev-dependencies]
 bevy_ecs.workspace = true
 image.workspace = true
@@ -185,6 +198,9 @@ yaml-rust2.workspace = true
 [features]
 default = ["runtime-core"]
 runtime-core = [
+    "dep:blake3",
+    "dep:rustix",
+    "dep:windows-sys",
     "dep:nara_app",
     "dep:nara_asset",
     "dep:nara_core",
@@ -261,7 +277,8 @@ project-workflow = [
     "dep:toml",
 ]
 project-workflow-cargo-facts = ["project-workflow", "dep:serde_json"]
-project-workflow-cli = ["project-workflow-cargo-facts"]
+project-tooling = ["project-workflow-cargo-facts"]
+project-workflow-cli = ["project-tooling"]
 
 [[bin]]
 name = "nara"
@@ -281,6 +298,11 @@ required-features = ["desktop-winit", "render-wgpu"]
 [[example]]
 name = "windowed_sprites"
 path = "examples/windowed_sprites.rs"
+required-features = ["presentation-2d", "desktop-winit", "render-wgpu"]
+
+[[example]]
+name = "palette_material"
+path = "examples/palette_material.rs"
 required-features = ["presentation-2d", "desktop-winit", "render-wgpu"]
 
 [[example]]

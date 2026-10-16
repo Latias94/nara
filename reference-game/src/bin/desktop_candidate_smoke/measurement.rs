@@ -117,8 +117,7 @@ impl CandidateMeasurement {
         samples: impl IntoIterator<Item = CandidateCompletionSample>,
     ) -> Result<(), &'static str> {
         for sample in samples {
-            if sample.render_transaction_frame_index
-                == self.identity.render_transaction_frame_index
+            if sample.render_transaction_frame_index == self.identity.render_transaction_frame_index
             {
                 self.observe(sample)?;
             }
@@ -325,11 +324,7 @@ mod tests {
     fn arm_boundary_retains_only_the_exact_presented_completion() {
         let mut measurement = CandidateMeasurement::arm(test_identity());
         measurement
-            .observe_arm_boundary([
-                sample(10, 9, 90),
-                sample(11, 10, 100),
-                sample(12, 11, 110),
-            ])
+            .observe_arm_boundary([sample(10, 9, 90), sample(11, 10, 100), sample(12, 11, 110)])
             .unwrap();
 
         assert_eq!(measurement.presented_completion, Some(sample(11, 10, 100)));

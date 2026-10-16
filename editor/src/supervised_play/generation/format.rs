@@ -1,6 +1,9 @@
 use std::fmt::{self, Debug, Formatter};
 
-use nara::fs::{ContentDigest, RelativePath};
+use nara::{
+    fs::{ContentDigest, RelativePath},
+    project_host::SupervisedDesktopProductIdentity,
+};
 
 use super::store::GenerationStoreError;
 
@@ -157,8 +160,19 @@ impl GenerationManifestInput {
         }
     }
 
-    pub(crate) fn source_receipt_digest(&self) -> ContentDigest {
-        ContentDigest::of_bytes(&self.source.source_receipt)
+    pub(crate) fn into_source_receipt(self) -> Vec<u8> {
+        self.source.source_receipt
+    }
+
+    pub(crate) fn product_identity(
+        &self,
+    ) -> Result<SupervisedDesktopProductIdentity, GenerationStoreError> {
+        SupervisedDesktopProductIdentity::from_cargo_product(
+            &self.target.package.name,
+            &self.target.package.version,
+            &self.target.target_name,
+        )
+        .map_err(GenerationStoreError::ProductIdentity)
     }
 }
 

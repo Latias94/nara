@@ -150,6 +150,7 @@ pub fn request_play(
         EditorPlayCommand::StepFixedTick => EditorPlayAction::StepFixedTick,
         EditorPlayCommand::Stop => EditorPlayAction::Stop,
         EditorPlayCommand::Restart => EditorPlayAction::Restart,
+        EditorPlayCommand::RunLastGood => EditorPlayAction::RunLastGood,
         EditorPlayCommand::RetryRetirement => EditorPlayAction::RetryRetirement,
         EditorPlayCommand::RetryClose => EditorPlayAction::RetryClose,
         EditorPlayCommand::AcknowledgeResult => EditorPlayAction::AcknowledgeResult,

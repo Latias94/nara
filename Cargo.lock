@@ -2283,6 +2283,7 @@ name = "nara"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
+ "blake3",
  "getrandom 0.3.4",
  "image",
  "nara_app",
@@ -2317,6 +2318,7 @@ dependencies = [
  "proc-macro2",
  "raw-window-handle",
  "ron",
+ "rustix 1.1.4",
  "serde",
  "serde_json",
  "static_assertions",
@@ -2325,6 +2327,7 @@ dependencies = [
  "toml",
  "tracing",
  "trybuild",
+ "windows-sys 0.61.2",
  "yaml-rust2",
 ]
 
@@ -2515,11 +2518,11 @@ dependencies = [
 name = "nara_material"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "nara_asset",
- "nara_core",
+ "nara_ecs",
+ "nara_image",
  "serde",
- "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2596,8 +2599,10 @@ dependencies = [
  "nara_material",
  "nara_reflect",
  "nara_render",
+ "nara_sprite",
  "nara_sprite_render",
  "nara_text",
+ "nara_tilemap",
  "nara_transform",
  "nara_ui",
  "nara_ui_kernel",
@@ -2720,6 +2725,7 @@ dependencies = [
  "nara_diagnostic",
  "nara_identity",
  "nara_reflect",
+ "nara_render",
  "nara_scene",
  "nara_tooling",
  "nara_ui",

@@ -14,8 +14,12 @@ pub(crate) use document::{
 #[cfg(any(feature = "tooling", test))]
 pub(crate) use project::{
     AuthoringProjectReadiness, AuthoringProjectReceipt, AuthoringProjectSessionSnapshot,
-    AuthoringProjectSourceAdmissionError, AuthoringSourceKind, PreparedAuthoringProject,
+    AuthoringProjectSnapshot, AuthoringProjectSourceAdmissionError, AuthoringSourceKind,
+    PreparedAuthoringProject,
 };
+
+pub(crate) const MAX_AUTHORING_IMAGE_IDENTITIES: usize = 4_096;
+pub(crate) const MAX_AUTHORING_IMAGE_IDENTITY_PATH_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) use source_index::{
     ProjectSourceIndexBudgetUsage, ProjectSourceIndexDiagnostic, ProjectSourceIndexDiagnosticPhase,
     ProjectSourceIndexEntry, ProjectSourceIndexFailure, ProjectSourceIndexGeneration,
@@ -1217,6 +1221,192 @@ mod tests {
             project::AuthoringUnresolvedDependencyKind::Asset
         );
         assert_eq!(dependency.reference(), &AssetRef::StableId(stable_id));
+
+        drop(snapshot);
+        drop(receipt);
+        fs::create_dir_all(project.root.join("assets/textures")).unwrap();
+        let source = b"stable authoring image bytes";
+        let admit = || {
+            let mut host = AuthoringProjectAdmissionHost::default();
+            let schema = host
+                .prepare(project.capability(), None)
+                .unwrap()
+                .admit_bundle()
+                .unwrap()
+                .publish();
+            PreparedAuthoringProject::new(schema, Box::new([]))
+                .admit_startup_closure()
+                .unwrap()
+                .publish()
+        };
+        for (previous, path) in [
+            (None, "textures/original.png"),
+            (Some("textures/original.png"), "textures/renamed.png"),
+        ] {
+            if let Some(previous) = previous {
+                fs::rename(
+                    project.root.join("assets").join(previous),
+                    project.root.join("assets").join(path),
+                )
+                .unwrap();
+                fs::remove_file(project.root.join("assets").join(format!("{previous}.meta")))
+                    .unwrap();
+            } else {
+                fs::write(project.root.join("assets").join(path), source).unwrap();
+            }
+            fs::write(
+                project.root.join("assets").join(format!("{path}.meta")),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(
+                        stable_id,
+                        AssetPath::new(path).unwrap(),
+                        AssetSourceKind::Image,
+                    ),
+                    (),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+            let loaded = admit();
+            let snapshot = loaded.snapshot();
+            assert!(snapshot.unresolved_dependencies().is_empty());
+            assert_eq!(snapshot.assets()[0].path().as_str(), path);
+            assert_eq!(snapshot.assets()[0].bytes(), source);
+            assert_eq!(snapshot.startup_scene().document(), &scene);
+            // Unknown native owners remain degraded even after their data dependencies resolve.
+            assert_eq!(snapshot.readiness(), AuthoringProjectReadiness::Degraded);
+        }
+    }
+
+    #[test]
+    fn stable_prefab_closure_survives_rename_without_enabling_generic_nested_preview() {
+        let project = TestAuthoringProject::new(
+            "stable-prefab-closure",
+            AuthoringSchemaBundle::new(std::iter::empty::<AuthoringSchemaBundleOwner>()).unwrap(),
+        );
+        project.write_startup_manifest();
+        fs::create_dir_all(project.root.join("scenes")).unwrap();
+        fs::create_dir_all(project.root.join("prefabs")).unwrap();
+        let stable_id = StableAssetId::parse_str("4e438770-1757-44f0-bbeb-6237cd6768ab").unwrap();
+        let mut anchor = SceneEntityRecord::new(SceneEntityId::new("instance").unwrap());
+        anchor.prefab = Some(PrefabInstance {
+            source: AssetRef::StableId(stable_id),
+            overrides: ScenePatchDocument::default(),
+        });
+        let scene = SceneDocument::from_ordered_roots([anchor]);
+        let prefab = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(
+            SceneEntityId::new("leaf").unwrap(),
+        )]);
+        fs::write(
+            project.root.join("scenes/startup.scene.json"),
+            scene.to_json_string().unwrap(),
+        )
+        .unwrap();
+        for (previous, path) in [
+            (None, "original.prefab.json"),
+            (Some("original.prefab.json"), "renamed.prefab.json"),
+        ] {
+            if let Some(previous) = previous {
+                fs::rename(
+                    project.root.join("prefabs").join(previous),
+                    project.root.join("prefabs").join(path),
+                )
+                .unwrap();
+                fs::remove_file(
+                    project
+                        .root
+                        .join("prefabs")
+                        .join(format!("{previous}.meta")),
+                )
+                .unwrap();
+            } else {
+                fs::write(
+                    project.root.join("prefabs").join(path),
+                    prefab.to_json_string().unwrap(),
+                )
+                .unwrap();
+            }
+            fs::write(
+                project.root.join("prefabs").join(format!("{path}.meta")),
+                AssetMeta::new(
+                    AssetMetaIdentity::new(
+                        stable_id,
+                        AssetPath::new(path).unwrap(),
+                        AssetSourceKind::Prefab,
+                    ),
+                    (),
+                )
+                .to_json_string()
+                .unwrap(),
+            )
+            .unwrap();
+            let mut host = AuthoringProjectAdmissionHost::default();
+            let schema = host
+                .prepare(project.capability(), None)
+                .unwrap()
+                .admit_bundle()
+                .unwrap()
+                .publish();
+            let loaded = PreparedAuthoringProject::new(schema, Box::new([]))
+                .admit_startup_closure()
+                .unwrap()
+                .publish();
+            let snapshot = loaded.snapshot();
+            assert_eq!(snapshot.readiness(), AuthoringProjectReadiness::Complete);
+            assert!(snapshot.unresolved_dependencies().is_empty());
+            assert_eq!(snapshot.prefabs()[0].path().as_str(), path);
+            assert_eq!(snapshot.startup_scene().document(), &scene);
+            assert!(
+                snapshot
+                    .source_facts()
+                    .any(|fact| fact.project_path().as_str() == format!("prefabs/{path}.meta"))
+            );
+            let projection = nara_scene::__private::project_published_authoring_scene_preview(
+                snapshot.startup_scene(),
+            );
+            assert_eq!(projection.omissions().len(), 1);
+            assert_eq!(
+                projection.omissions()[0].reason(),
+                nara_scene::__private::AuthoringPreviewOmissionReason::NestedPrefabUnsupported
+            );
+            assert!(projection.document().entities[0].prefab.is_none());
+        }
+
+        fs::write(
+            project.root.join("prefabs/duplicate.prefab.json.meta"),
+            AssetMeta::new(
+                AssetMetaIdentity::new(
+                    stable_id,
+                    AssetPath::new("duplicate.prefab.json").unwrap(),
+                    AssetSourceKind::Prefab,
+                ),
+                (),
+            )
+            .to_json_string()
+            .unwrap(),
+        )
+        .unwrap();
+        let mut host = AuthoringProjectAdmissionHost::default();
+        let schema = host
+            .prepare(project.capability(), None)
+            .unwrap()
+            .admit_bundle()
+            .unwrap()
+            .publish();
+        let error = match PreparedAuthoringProject::new(schema, Box::new([]))
+            .admit_startup_closure()
+        {
+            Ok(_) => panic!("duplicate stable identities must not publish an authoring closure"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            error,
+            AuthoringProjectSourceAdmissionError::AssetIdentity {
+                source: nara_asset::AssetDatabaseError::DuplicateStableId { .. },
+                ..
+            }
+        ));
     }
 
     #[test]

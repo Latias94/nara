@@ -12,6 +12,8 @@ use nara_gameplay::GameplayCommandSubmission;
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use nara_winit::{WinitControlFlow, WinitRunner};
 
+#[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
+use super::super::{ProductSupervisedDesktopSession, SupervisedDesktopProductIdentity};
 use super::super::{
     StartupContentClosureReceipt,
     check::{
@@ -21,8 +23,8 @@ use super::super::{
 };
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 use super::desktop_verification::{
-    DesktopFirstPresentOutcome, DesktopFirstPresentVerification,
-    DesktopPresentationVerificationReceipt,
+    DesktopFirstPresentFailure, DesktopFirstPresentOutcome, DesktopFirstPresentRequest,
+    DesktopFirstPresentVerification, DesktopPresentationVerificationReceipt,
 };
 use super::{
     CleanupDriveOutcome, HostFault, ProjectHost, RuntimeHostPolicyContribution,
@@ -157,7 +159,7 @@ pub struct DesktopRunIntent {
     cleanup_policy: RuntimeClosePolicy,
     recipe: ProductRecipe,
     runner: WinitRunner,
-    verify_first_present: bool,
+    first_present: Option<DesktopFirstPresentRequest>,
 }
 
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
@@ -169,7 +171,13 @@ impl fmt::Debug for DesktopRunIntent {
             .field("cleanup_policy", &self.cleanup_policy)
             .field("recipe", &self.recipe)
             .field("runner", &self.runner)
-            .field("verifies_first_present", &self.verify_first_present)
+            .field(
+                "first_present_mode",
+                &self
+                    .first_present
+                    .as_ref()
+                    .map(DesktopFirstPresentRequest::label),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -190,7 +198,7 @@ impl DesktopRunIntent {
             cleanup_policy: RuntimeClosePolicy::default(),
             recipe: ProductRecipe::new(),
             runner: WinitRunner::default(),
-            verify_first_present: false,
+            first_present: None,
         }
     }
 
@@ -226,7 +234,23 @@ impl DesktopRunIntent {
     /// remain unchanged.
     #[must_use]
     pub fn with_first_present_verification(mut self) -> Self {
-        self.verify_first_present = true;
+        self.first_present = Some(DesktopFirstPresentRequest::VerificationCanary);
+        self
+    }
+
+    /// Publishes one supervised READY attestation after Runtime startup and the first exact
+    /// presentation, then keeps the interactive desktop product running.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_supervised_desktop_activation(
+        mut self,
+        session: ProductSupervisedDesktopSession,
+        product_identity: SupervisedDesktopProductIdentity,
+    ) -> Self {
+        self.first_present = Some(DesktopFirstPresentRequest::SupervisedActivation {
+            session,
+            product_identity,
+        });
         self
     }
 }
@@ -407,9 +431,19 @@ impl DesktopRun {
             cleanup_policy,
             recipe,
             runner,
-            verify_first_present,
+            first_present,
         } = intent;
-        let verification = verify_first_present.then(DesktopFirstPresentVerification::new);
+        if first_present
+            .as_ref()
+            .is_some_and(|request| !request.is_bound_to_project_root(&project_root))
+        {
+            self.diagnostics.extend(single_error(
+                "project.desktop.supervised-project-root-mismatch",
+                "Desktop supervised activation was verified against another project capability",
+            ));
+            return DesktopRunState::Failed;
+        }
+        let verification = first_present.map(DesktopFirstPresentVerification::new);
         let host_policy = verification
             .as_ref()
             .map(DesktopFirstPresentVerification::host_policy);
@@ -446,7 +480,18 @@ impl DesktopRun {
             }
         }
         if let Some(verification) = verification.as_ref() {
-            verification.arm();
+            let startup_content_closure = self
+                .startup_content_closure
+                .as_ref()
+                .expect("desktop activation starts only after project checking succeeds");
+            if verification.arm(startup_content_closure).is_err() {
+                self.diagnostics.extend(single_error(
+                    "project.desktop.supervised-runtime-closure-invalid",
+                    "Desktop supervised activation could not derive its strict Runtime closure",
+                ));
+                host.retire_running();
+                return desktop_state_after_failure(host);
+            }
         }
 
         let run_result = {
@@ -498,6 +543,29 @@ impl DesktopRun {
                     self.diagnostics.extend(single_error(
                         "project.desktop.presentation-unarmed",
                         "Desktop first-presentation verification was not armed",
+                    ));
+                    terminal = PendingDesktopTerminal::Failed;
+                }
+                DesktopFirstPresentOutcome::Publishing => {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.supervised-ready-incomplete",
+                        "Desktop runner exited before supervised READY publication completed",
+                    ));
+                    terminal = PendingDesktopTerminal::Failed;
+                }
+                DesktopFirstPresentOutcome::Failed(DesktopFirstPresentFailure::RuntimeClosure) => {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.supervised-runtime-closure-invalid",
+                        "Desktop supervised activation did not publish a strict Runtime closure",
+                    ));
+                    terminal = PendingDesktopTerminal::Failed;
+                }
+                DesktopFirstPresentOutcome::Failed(
+                    DesktopFirstPresentFailure::ReadyPublication,
+                ) => {
+                    self.diagnostics.extend(single_error(
+                        "project.desktop.supervised-ready-failed",
+                        "Desktop supervised READY publication failed closed",
                     ));
                     terminal = PendingDesktopTerminal::Failed;
                 }
@@ -647,11 +715,8 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
         AppRunError::Plugin { .. } => "plugin",
         AppRunError::Runner { .. } => "runner",
         AppRunError::RunnerTeardown { .. } => "runner-teardown",
-        AppRunError::RunnerAuthority { .. } => "runner-authority",
         AppRunError::Time { .. } => "time",
-        AppRunError::DirectRuntime { .. } => "direct-runtime",
         AppRunError::ManagedRuntime { .. } => "managed-runtime",
-        AppRunError::Shutdown { .. } => "shutdown",
     };
     let diagnostic = runtime_fault_diagnostic(
         error.runtime_fault_detail(),
@@ -673,19 +738,12 @@ fn desktop_runner_failure_report(error: &AppRunError) -> DiagnosticReport {
 #[cfg(all(feature = "desktop-winit", feature = "render-wgpu"))]
 fn runtime_fault(error: &AppRunError) -> Option<(RuntimeFaultKind, &'static str)> {
     match error {
-        AppRunError::DirectRuntime {
-            kind, fault_source, ..
-        }
-        | AppRunError::ManagedRuntime {
+        AppRunError::ManagedRuntime {
             kind, fault_source, ..
         } => Some((*kind, *fault_source)),
         AppRunError::RunnerTeardown { prior, teardown } => {
             runtime_fault(prior).or_else(|| runtime_fault(teardown))
         }
-        AppRunError::RunnerAuthority { runner, authority } => {
-            runtime_fault(authority).or_else(|| runtime_fault(runner))
-        }
-        AppRunError::Shutdown { prior, .. } => prior.as_deref().and_then(runtime_fault),
         AppRunError::Plugin { .. } | AppRunError::Runner { .. } | AppRunError::Time { .. } => None,
     }
 }

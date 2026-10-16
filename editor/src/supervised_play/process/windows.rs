@@ -1,6 +1,5 @@
 use std::{
     cmp::Ordering,
-    collections::VecDeque,
     ffi::{OsStr, OsString, c_void},
     io,
     mem::{size_of, size_of_val},
@@ -9,7 +8,7 @@ use std::{
         io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle},
         process::ExitStatusExt,
     },
-    path::Path,
+    path::{Path, PathBuf},
     ptr::{null, null_mut},
     sync::{
         Arc, Mutex, MutexGuard,
@@ -18,12 +17,13 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+use nara::fs::RestrictiveCapabilityHandleLease;
 use windows_sys::Win32::{
     Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_IO_PENDING,
+        CloseHandle, ERROR_ACCESS_DENIED, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_IO_PENDING,
         ERROR_NOT_FOUND, ERROR_OPERATION_ABORTED, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
         GENERIC_READ, GENERIC_WRITE, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
-        SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0,
+        RtlNtStatusToDosError, SetHandleInformation, WAIT_FAILED, WAIT_OBJECT_0,
     },
     Globalization::{CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringOrdinal},
     Security::{
@@ -32,7 +32,8 @@ use windows_sys::Win32::{
     },
     Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
-        OPEN_EXISTING, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
+        FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
+        PIPE_ACCESS_INBOUND, ReadFile, VOLUME_NAME_DOS, WriteFile,
     },
     System::{
         IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED},
@@ -47,16 +48,21 @@ use windows_sys::Win32::{
             PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe,
         },
         Threading::{
-            CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, CreateEventW, CreateProcessW,
-            DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess,
-            INFINITE, InitializeProcThreadAttributeList, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-            PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION, ResetEvent, STARTF_USESTDHANDLES,
-            STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+            CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateEventW,
+            CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT,
+            GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION,
+            ResetEvent, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+            UpdateProcThreadAttribute, WaitForSingleObject,
         },
     },
 };
 
-use super::{PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream};
+use super::{
+    PlatformOutput, SupervisedProcessCommand, SupervisedProcessStream,
+    SupervisedProductEnvironmentPolicy, SupervisedProductProcessCommand,
+    output::PlatformOutputQueue,
+};
 
 const WINDOWS_COMMAND_LINE_LIMIT: usize = 32_767;
 const WINDOWS_ENVIRONMENT_LIMIT: usize = 32_767;
@@ -68,10 +74,67 @@ const OUTPUT_POLL_RECORD_BUDGET: usize = 64;
 const PIPE_NAME_ATTEMPTS: usize = 4;
 const TERMINATE_EXIT_CODE: u32 = 0x4e41_5201;
 const FORCE_KILL_EXIT_CODE: u32 = 0x4e41_5202;
+const PROCESS_IMAGE_FILE_MAPPING_INFORMATION_CLASS: i32 = 44;
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtQueryInformationProcess(
+        process_handle: HANDLE,
+        process_information_class: i32,
+        process_information: *mut c_void,
+        process_information_length: u32,
+        return_length: *mut u32,
+    ) -> i32;
+}
 
 pub(super) struct SpawnedProcess {
     pub(super) process: PlatformProcess,
     pub(super) bootstrap: Option<BootstrapChannel>,
+}
+
+/// Handle-bound authority for launching one already-verified immutable generation.
+///
+/// The guards are restrictive leases produced by `nara_fs`; this adapter never applies
+/// `ReOpenFile` to an arbitrary foreign handle. The executable path is derived from the guarded
+/// file itself, and the created process remains suspended until Windows proves that its mapped
+/// image shares the guarded executable's underlying file stream.
+pub(super) struct ExactGenerationLaunchAuthority {
+    guards: ExactGenerationLaunchGuards,
+    executable_path: PathBuf,
+}
+
+struct ExactGenerationLaunchGuards {
+    _directory: RestrictiveCapabilityHandleLease,
+    executable: RestrictiveCapabilityHandleLease,
+    _launch_manifest: RestrictiveCapabilityHandleLease,
+}
+
+impl ExactGenerationLaunchAuthority {
+    pub(super) fn new(
+        executable: RestrictiveCapabilityHandleLease,
+        generation_directory: RestrictiveCapabilityHandleLease,
+        launch_manifest: RestrictiveCapabilityHandleLease,
+    ) -> io::Result<Self> {
+        let generation_directory_path = final_path(&generation_directory, "generation directory")?;
+        let executable_path = final_path(&executable, "generation executable")?;
+        let expected_parent = executable_path.parent().ok_or_else(|| {
+            io::Error::other("the exact generation executable has no parent directory")
+        })?;
+        if !paths_equal(expected_parent, &generation_directory_path) {
+            return Err(io::Error::other(
+                "the exact generation executable is no longer bound to its verified directory",
+            ));
+        }
+
+        Ok(Self {
+            guards: ExactGenerationLaunchGuards {
+                _directory: generation_directory,
+                executable,
+                _launch_manifest: launch_manifest,
+            },
+            executable_path,
+        })
+    }
 }
 
 pub(super) struct PlatformProcess {
@@ -80,13 +143,24 @@ pub(super) struct PlatformProcess {
     job: OwnedHandle,
     process: Option<OwnedHandle>,
     exit_code: Option<u32>,
-    output: Arc<OutputQueue>,
+    output: Arc<PlatformOutputQueue>,
     output_poll_budget: usize,
     stdout_reader: OutputReaderOwner,
     stderr_reader: OutputReaderOwner,
+    _exact_generation: Option<ExactGenerationLaunchGuards>,
 }
 
 impl PlatformProcess {
+    #[cfg(test)]
+    pub(super) fn test_enqueue_loss(&self) {
+        self.output
+            .push_loss(
+                SupervisedProcessStream::Stderr,
+                b"[nara-editor: test output loss]\n".to_vec(),
+            )
+            .expect("the test loss marker is accepted");
+    }
+
     pub(super) fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
         if let Some(code) = self.exit_code {
             return Ok(Some(std::process::ExitStatus::from_raw(code)));
@@ -152,7 +226,7 @@ impl PlatformProcess {
         self.stdout_reader.joined() && self.stderr_reader.joined() && self.output.is_drained()
     }
 
-    pub(super) fn containment_empty(&self) -> io::Result<bool> {
+    pub(super) fn containment_empty(&mut self) -> io::Result<bool> {
         Ok(job_active_processes(&self.job)? == 0)
     }
 
@@ -171,15 +245,60 @@ impl Drop for PlatformProcess {
 }
 
 pub(super) struct BootstrapChannel {
-    parent: OwnedHandle,
+    control: Arc<BootstrapControl>,
     event: OwnedHandle,
 }
 
+struct BootstrapControl {
+    handle: OwnedHandle,
+    issuing: Mutex<()>,
+    cancelled: AtomicBool,
+}
+
+#[derive(Clone)]
+pub(super) struct BootstrapCancellation {
+    control: Arc<BootstrapControl>,
+}
+
+impl BootstrapCancellation {
+    pub(super) fn cancel(&self) -> io::Result<()> {
+        let _issuing = lock_unpoisoned(&self.control.issuing);
+        self.control.cancelled.store(true, AtomicOrdering::Release);
+        // SAFETY: the shared handle remains live for this call. The issuing lock closes the race
+        // where cancellation could otherwise complete immediately before the writer installs a
+        // new overlapped operation.
+        let cancelled = unsafe { CancelIoEx(raw_handle(&self.control.handle), null()) };
+        if cancelled != 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_NOT_FOUND as i32) {
+            Ok(())
+        } else {
+            Err(with_operation("CancelIoEx(bootstrap)", error))
+        }
+    }
+}
+
 impl BootstrapChannel {
+    pub(super) fn cancellation(&self) -> BootstrapCancellation {
+        BootstrapCancellation {
+            control: Arc::clone(&self.control),
+        }
+    }
+
+    pub(super) fn write_some(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        let length = bytes.len().min(u32::MAX as usize);
+        cancellable_overlapped_write(&self.control, &self.event, &bytes[..length])
+    }
+
+    #[cfg(test)]
     pub(super) fn write_all(&mut self, mut bytes: &[u8]) -> io::Result<()> {
         while !bytes.is_empty() {
-            let length = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
-            let written = overlapped_write(&self.parent, &self.event, &bytes[..length as usize])?;
+            let written = self.write_some(bytes)?;
             if written == 0 {
                 return Err(io::Error::new(
                     io::ErrorKind::WriteZero,
@@ -201,7 +320,7 @@ impl BootstrapChannel {
         // except `available`, which points to initialized writable storage.
         let peeked = unsafe {
             PeekNamedPipe(
-                raw_handle(&self.parent),
+                raw_handle(&self.control.handle),
                 null_mut(),
                 0,
                 null_mut(),
@@ -219,24 +338,72 @@ impl BootstrapChannel {
         let length = bytes
             .len()
             .min(usize::try_from(available).unwrap_or(usize::MAX));
-        overlapped_read(&self.parent, &self.event, &mut bytes[..length])
+        overlapped_read(&self.control.handle, &self.event, &mut bytes[..length])
     }
 }
 
-pub(super) fn spawn(command: &SupervisedProcessCommand) -> io::Result<SpawnedProcess> {
-    let application = wide_path(command.executable(), "executable")?;
-    let current_directory = wide_path(command.working_directory(), "working directory")?;
-    let mut command_line = encode_command_line(command.executable(), command.arguments_ref())?;
-    let environment = environment_block(command.environment_ref())?;
+pub(super) fn spawn(
+    command: &SupervisedProcessCommand,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
+    let environment = inherited_environment_block(command.environment_ref())?;
+    spawn_windows(
+        command.executable(),
+        command.working_directory(),
+        command.arguments_ref(),
+        environment,
+        command.bootstrap_requested(),
+        None,
+        wake,
+    )
+}
+
+pub(super) fn spawn_exact_generation(
+    authority: ExactGenerationLaunchAuthority,
+    command: &SupervisedProductProcessCommand,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
+    let environment = product_environment_block(command.environment_policy())?;
+    let ExactGenerationLaunchAuthority {
+        guards,
+        executable_path,
+    } = authority;
+    spawn_windows(
+        &executable_path,
+        command.working_directory(),
+        command.arguments_ref(),
+        environment,
+        true,
+        Some(guards),
+        wake,
+    )
+}
+
+fn spawn_windows(
+    executable: &Path,
+    working_directory: &Path,
+    arguments: &[OsString],
+    environment: Vec<u16>,
+    bootstrap_requested: bool,
+    exact_generation: Option<ExactGenerationLaunchGuards>,
+    wake: crate::supervised_play::wake::SupervisedPlayWake,
+) -> io::Result<SpawnedProcess> {
+    let application = wide_path(executable, "executable")?;
+    let current_directory = wide_path(working_directory, "working directory")?;
+    let mut command_line = encode_command_line(executable, arguments)?;
 
     let job = create_kill_on_close_job()?;
     let stdout = create_named_pipe_pair(PipeKind::Output, "stdout")?;
     let stderr = create_named_pipe_pair(PipeKind::Output, "stderr")?;
-    let (bootstrap, bootstrap_child) = if command.bootstrap_requested() {
+    let (bootstrap, bootstrap_child) = if bootstrap_requested {
         let pair = create_named_pipe_pair(PipeKind::Bootstrap, "bootstrap")?;
         (
             Some(BootstrapChannel {
-                parent: pair.parent,
+                control: Arc::new(BootstrapControl {
+                    handle: pair.parent,
+                    issuing: Mutex::new(()),
+                    cancelled: AtomicBool::new(false),
+                }),
                 event: create_event()?,
             }),
             Some(pair.child),
@@ -276,19 +443,44 @@ pub(super) fn spawn(command: &SupervisedProcessCommand) -> io::Result<SpawnedPro
     startup.StartupInfo.hStdError = raw_handle(&stderr.child);
     startup.lpAttributeList = attributes.as_ptr();
 
-    let mut creation_flags = EXTENDED_STARTUPINFO_PRESENT;
-    if environment.is_some() {
-        creation_flags |= CREATE_UNICODE_ENVIRONMENT;
-    }
-    if !command.bootstrap_requested() {
+    let mut creation_flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
+    if !bootstrap_requested {
         creation_flags |= CREATE_NO_WINDOW;
     }
+    if exact_generation.is_some() {
+        creation_flags |= CREATE_SUSPENDED;
+    }
+
+    // Start both reader owners before any child exists. A thread-construction failure therefore
+    // cannot detach a running process or a half-owned reader set.
+    let output = Arc::new(PlatformOutputQueue::with_wake(
+        OUTPUT_QUEUE_RECORD_LIMIT,
+        OUTPUT_QUEUE_BYTE_LIMIT,
+        wake,
+    ));
+    let mut stdout_reader = OutputReaderOwner::spawn(
+        SupervisedProcessStream::Stdout,
+        stdout.parent,
+        Arc::clone(&output),
+    )?;
+    let mut stderr_reader = match OutputReaderOwner::spawn(
+        SupervisedProcessStream::Stderr,
+        stderr.parent,
+        Arc::clone(&output),
+    ) {
+        Ok(reader) => reader,
+        Err(error) => {
+            let cleanup = stdout_reader.cancel_and_join();
+            return Err(merge_spawn_rollback_error(error, cleanup.err()));
+        }
+    };
 
     let mut process_information = PROCESS_INFORMATION::default();
     // SAFETY: every pointer refers to live, correctly sized storage for the duration of the call.
     // The attribute values and exact inheritable-handle allowlist remain alive until CreateProcessW
     // returns. PROC_THREAD_ATTRIBUTE_JOB_LIST makes Job assignment part of creation, so no project
-    // instruction can run outside containment. No CREATE_SUSPENDED/late assignment fallback exists.
+    // instruction can run outside containment. Exact-generation children additionally remain
+    // suspended until their actual image mapping is verified below.
     let created = unsafe {
         CreateProcessW(
             application.as_ptr(),
@@ -297,63 +489,72 @@ pub(super) fn spawn(command: &SupervisedProcessCommand) -> io::Result<SpawnedPro
             null(),
             1,
             creation_flags,
-            environment
-                .as_ref()
-                .map_or(null(), |block| block.as_ptr().cast::<c_void>()),
+            environment.as_ptr().cast::<c_void>(),
             current_directory.as_ptr(),
             (&startup as *const STARTUPINFOEXW).cast(),
             &mut process_information,
         )
     };
     if created == 0 {
-        return Err(last_os_error("CreateProcessW"));
+        let error = last_os_error("CreateProcessW");
+        drop(stdin);
+        drop(stdout.child);
+        drop(stderr.child);
+        drop(attributes);
+        let stdout_cleanup = stdout_reader.cancel_and_join();
+        let stderr_cleanup = stderr_reader.cancel_and_join();
+        return Err(merge_spawn_rollback_errors(
+            error,
+            [stdout_cleanup.err(), stderr_cleanup.err()],
+        ));
     }
 
-    let process = owned_handle(
+    let process = match owned_handle(
         process_information.hProcess,
         "CreateProcessW process handle",
-    )?;
-    let thread = owned_handle(process_information.hThread, "CreateProcessW thread handle")?;
-    drop(thread);
+    ) {
+        Ok(process) => process,
+        Err(error) => {
+            close_handle_if_valid(process_information.hThread);
+            drop(stdin);
+            drop(stdout.child);
+            drop(stderr.child);
+            drop(attributes);
+            let cleanup =
+                rollback_job_without_process(&job, &mut stdout_reader, &mut stderr_reader);
+            return Err(merge_spawn_rollback_error(error, cleanup.err()));
+        }
+    };
+    let thread = match owned_handle(process_information.hThread, "CreateProcessW thread handle") {
+        Ok(thread) => thread,
+        Err(error) => {
+            drop(stdin);
+            drop(stdout.child);
+            drop(stderr.child);
+            drop(attributes);
+            let cleanup =
+                rollback_created_process(&job, &process, &mut stdout_reader, &mut stderr_reader);
+            return Err(merge_spawn_rollback_error(error, cleanup.err()));
+        }
+    };
     drop(stdin);
     drop(stdout.child);
     drop(stderr.child);
     drop(attributes);
 
-    let output = Arc::new(OutputQueue::new());
-    let stdout_reader = match OutputReaderOwner::spawn(
-        SupervisedProcessStream::Stdout,
-        stdout.parent,
-        Arc::clone(&output),
-    ) {
-        Ok(reader) => reader,
-        Err(error) => {
-            let _ = terminate_job(&job, FORCE_KILL_EXIT_CODE);
-            // SAFETY: `process` is a live process handle. The bounded wait is best-effort rollback,
-            // not a cleanup receipt.
-            unsafe {
-                WaitForSingleObject(raw_handle(&process), 500);
-            }
-            return Err(error);
+    if let Some(exact_generation) = exact_generation.as_ref() {
+        if let Err(error) = verify_process_image_mapping(&process, &exact_generation.executable) {
+            let cleanup =
+                rollback_created_process(&job, &process, &mut stdout_reader, &mut stderr_reader);
+            return Err(merge_spawn_rollback_error(error, cleanup.err()));
         }
-    };
-    let stderr_reader = match OutputReaderOwner::spawn(
-        SupervisedProcessStream::Stderr,
-        stderr.parent,
-        Arc::clone(&output),
-    ) {
-        Ok(reader) => reader,
-        Err(error) => {
-            let _ = stdout_reader.cancel();
-            let _ = terminate_job(&job, FORCE_KILL_EXIT_CODE);
-            // SAFETY: `process` is a live process handle. The bounded wait is best-effort rollback,
-            // not a cleanup receipt.
-            unsafe {
-                WaitForSingleObject(raw_handle(&process), 500);
-            }
-            return Err(error);
+        if let Err(error) = resume_verified_primary_thread(&thread) {
+            let cleanup =
+                rollback_created_process(&job, &process, &mut stdout_reader, &mut stderr_reader);
+            return Err(merge_spawn_rollback_error(error, cleanup.err()));
         }
-    };
+    }
+    drop(thread);
 
     Ok(SpawnedProcess {
         process: PlatformProcess {
@@ -364,6 +565,7 @@ pub(super) fn spawn(command: &SupervisedProcessCommand) -> io::Result<SpawnedPro
             output_poll_budget: OUTPUT_POLL_RECORD_BUDGET,
             stdout_reader,
             stderr_reader,
+            _exact_generation: exact_generation,
         },
         bootstrap,
     })
@@ -379,7 +581,7 @@ impl OutputReaderOwner {
     fn spawn(
         stream: SupervisedProcessStream,
         handle: OwnedHandle,
-        output: Arc<OutputQueue>,
+        output: Arc<PlatformOutputQueue>,
     ) -> io::Result<Self> {
         let control = Arc::new(ReaderControl {
             handle,
@@ -398,8 +600,9 @@ impl OutputReaderOwner {
             .spawn(move || {
                 let _stopped = ReaderStoppedGuard(thread_stopped);
                 if let Err(error) = drain_output_pipe(stream, thread_control, &output) {
-                    output.record_error(error);
+                    output.record_failure(error);
                 }
+                output.notify();
             })?;
         Ok(Self {
             control: Some(control),
@@ -414,7 +617,25 @@ impl OutputReaderOwner {
             .map_or(Ok(()), |control| control.cancel())
     }
 
-    fn join_if_finished(&mut self, output: &OutputQueue) {
+    fn cancel_and_join(&mut self) -> io::Result<()> {
+        let cancellation = self.cancel();
+        let joined = match self.join.take() {
+            Some(join) => {
+                if join.join().is_err() {
+                    Err(io::Error::other(
+                        "a supervised process output reader panicked during spawn rollback",
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            None => Ok(()),
+        };
+        self.control.take();
+        cancellation.and(joined)
+    }
+
+    fn join_if_finished(&mut self, output: &PlatformOutputQueue) {
         if !self.stopped.load(AtomicOrdering::Acquire) {
             return;
         }
@@ -422,7 +643,7 @@ impl OutputReaderOwner {
             return;
         };
         if join.join().is_err() {
-            output.record_error(io::Error::other(
+            output.record_failure(io::Error::other(
                 "a supervised process output reader panicked",
             ));
         }
@@ -471,15 +692,18 @@ impl ReaderControl {
 fn drain_output_pipe(
     stream: SupervisedProcessStream,
     control: Arc<ReaderControl>,
-    output: &OutputQueue,
+    output: &PlatformOutputQueue,
 ) -> io::Result<()> {
     let event = create_event()?;
     let mut buffer = vec![0_u8; OUTPUT_READ_CHUNK_BYTES];
     loop {
         match cancellable_overlapped_read(&control, &event, &mut buffer) {
             Ok(0) => return Ok(()),
-            Ok(read) => output.push(stream, buffer[..read].to_vec()),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(()),
+            Ok(read) => output.push(stream, buffer[..read].to_vec())?,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                record_cancelled_stream(output, stream)?;
+                return Ok(());
+            }
             Err(error) => return Err(error),
         }
     }
@@ -537,116 +761,21 @@ fn cancellable_overlapped_read(
     )
 }
 
-struct OutputQueue {
-    state: Mutex<OutputQueueState>,
-}
-
-impl OutputQueue {
-    fn new() -> Self {
-        Self {
-            state: Mutex::new(OutputQueueState::default()),
-        }
-    }
-
-    fn push(&self, stream: SupervisedProcessStream, mut bytes: Vec<u8>) {
-        let mut state = lock_unpoisoned(&self.state);
-        if bytes.len() > OUTPUT_QUEUE_BYTE_LIMIT {
-            let dropped = bytes.len() - OUTPUT_QUEUE_BYTE_LIMIT;
-            bytes.drain(..dropped);
-            state.record_drop(stream, dropped);
-        }
-        while state.records.len() >= OUTPUT_QUEUE_RECORD_LIMIT
-            || state.retained_bytes.saturating_add(bytes.len()) > OUTPUT_QUEUE_BYTE_LIMIT
-        {
-            let Some(evicted) = state.records.pop_front() else {
-                break;
-            };
-            state.retained_bytes = state.retained_bytes.saturating_sub(evicted.bytes.len());
-            state.record_drop(evicted.stream, evicted.bytes.len());
-        }
-        state.retained_bytes = state.retained_bytes.saturating_add(bytes.len());
-        state.records.push_back(PlatformOutput {
-            stream,
-            bytes,
-            loss: false,
-        });
-    }
-
-    fn record_error(&self, error: io::Error) {
-        let mut state = lock_unpoisoned(&self.state);
-        if state.error.is_none() {
-            state.error = Some(error);
-        }
-    }
-
-    fn pop(&self) -> io::Result<Option<PlatformOutput>> {
-        let mut state = lock_unpoisoned(&self.state);
-        if state.dropped_stdout > 0 {
-            let dropped = std::mem::take(&mut state.dropped_stdout);
-            return Ok(Some(overflow_marker(
-                SupervisedProcessStream::Stdout,
-                dropped,
-            )));
-        }
-        if state.dropped_stderr > 0 {
-            let dropped = std::mem::take(&mut state.dropped_stderr);
-            return Ok(Some(overflow_marker(
-                SupervisedProcessStream::Stderr,
-                dropped,
-            )));
-        }
-        if let Some(output) = state.records.pop_front() {
-            state.retained_bytes = state.retained_bytes.saturating_sub(output.bytes.len());
-            return Ok(Some(output));
-        }
-        if let Some(error) = state.error.take() {
-            return Err(error);
-        }
-        Ok(None)
-    }
-
-    fn is_drained(&self) -> bool {
-        let state = lock_unpoisoned(&self.state);
-        state.records.is_empty()
-            && state.dropped_stdout == 0
-            && state.dropped_stderr == 0
-            && state.error.is_none()
-    }
-}
-
-#[derive(Default)]
-struct OutputQueueState {
-    records: VecDeque<PlatformOutput>,
-    retained_bytes: usize,
-    dropped_stdout: u64,
-    dropped_stderr: u64,
-    error: Option<io::Error>,
-}
-
-impl OutputQueueState {
-    fn record_drop(&mut self, stream: SupervisedProcessStream, bytes: usize) {
-        let bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
-        let target = match stream {
-            SupervisedProcessStream::Stdout => &mut self.dropped_stdout,
-            SupervisedProcessStream::Stderr => &mut self.dropped_stderr,
-        };
-        *target = target.saturating_add(bytes);
-    }
-}
-
-fn overflow_marker(stream: SupervisedProcessStream, dropped: u64) -> PlatformOutput {
+fn record_cancelled_stream(
+    output: &PlatformOutputQueue,
+    stream: SupervisedProcessStream,
+) -> io::Result<()> {
     let stream_name = match stream {
         SupervisedProcessStream::Stdout => "stdout",
         SupervisedProcessStream::Stderr => "stderr",
     };
-    PlatformOutput {
+    output.push_loss(
         stream,
-        bytes: format!(
-            "[nara-editor: dropped {dropped} {stream_name} bytes before log projection]\n"
+        format!(
+            "[nara-editor: {stream_name} capture was cancelled before EOF; remaining bytes were not retained]\n"
         )
         .into_bytes(),
-        loss: true,
-    }
+    )
 }
 
 enum PipeKind {
@@ -894,6 +1023,138 @@ fn terminate_job(job: &OwnedHandle, exit_code: u32) -> io::Result<()> {
     Ok(())
 }
 
+fn rollback_created_process(
+    job: &OwnedHandle,
+    process: &OwnedHandle,
+    stdout_reader: &mut OutputReaderOwner,
+    stderr_reader: &mut OutputReaderOwner,
+) -> io::Result<()> {
+    let mut failures = Vec::new();
+    record_cleanup_failure(
+        &mut failures,
+        "terminate Job",
+        terminate_job(job, FORCE_KILL_EXIT_CODE),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "stop stdout reader",
+        stdout_reader.cancel_and_join(),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "stop stderr reader",
+        stderr_reader.cancel_and_join(),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "reap direct child",
+        wait_for_signaled(process, "WaitForSingleObject(spawn rollback process)"),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "observe direct-child exit code",
+        process_exit_code(process).map(|_| ()),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "wait for empty Job",
+        wait_for_signaled(job, "WaitForSingleObject(spawn rollback Job)"),
+    );
+    record_cleanup_failure(&mut failures, "prove empty Job", require_empty_job(job));
+    cleanup_failures(failures)
+}
+
+fn rollback_job_without_process(
+    job: &OwnedHandle,
+    stdout_reader: &mut OutputReaderOwner,
+    stderr_reader: &mut OutputReaderOwner,
+) -> io::Result<()> {
+    let mut failures = Vec::new();
+    record_cleanup_failure(
+        &mut failures,
+        "terminate Job",
+        terminate_job(job, FORCE_KILL_EXIT_CODE),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "stop stdout reader",
+        stdout_reader.cancel_and_join(),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "stop stderr reader",
+        stderr_reader.cancel_and_join(),
+    );
+    record_cleanup_failure(
+        &mut failures,
+        "wait for empty Job",
+        wait_for_signaled(job, "WaitForSingleObject(spawn rollback Job)"),
+    );
+    record_cleanup_failure(&mut failures, "prove empty Job", require_empty_job(job));
+    cleanup_failures(failures)
+}
+
+fn wait_for_signaled(handle: &OwnedHandle, operation: &'static str) -> io::Result<()> {
+    // SAFETY: `handle` remains live for the complete wait. Spawn rollback deliberately waits to a
+    // proof boundary instead of returning while a process or containment owner is detached.
+    match unsafe { WaitForSingleObject(raw_handle(handle), INFINITE) } {
+        WAIT_OBJECT_0 => Ok(()),
+        WAIT_FAILED => Err(last_os_error(operation)),
+        value => Err(io::Error::other(format!(
+            "{operation} returned unexpected status {value:#x}"
+        ))),
+    }
+}
+
+fn require_empty_job(job: &OwnedHandle) -> io::Result<()> {
+    match job_active_processes(job)? {
+        0 => Ok(()),
+        active => Err(io::Error::other(format!(
+            "spawn rollback left {active} active process(es) in the Job"
+        ))),
+    }
+}
+
+fn record_cleanup_failure(failures: &mut Vec<String>, stage: &'static str, result: io::Result<()>) {
+    if let Err(error) = result {
+        failures.push(format!("{stage}: {error}"));
+    }
+}
+
+fn cleanup_failures(failures: Vec<String>) -> io::Result<()> {
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(io::Error::other(failures.join("; ")))
+    }
+}
+
+fn merge_spawn_rollback_error(primary: io::Error, cleanup: Option<io::Error>) -> io::Error {
+    merge_spawn_rollback_errors(primary, [cleanup])
+}
+
+fn merge_spawn_rollback_errors(
+    primary: io::Error,
+    cleanups: impl IntoIterator<Item = Option<io::Error>>,
+) -> io::Error {
+    let cleanup = cleanups
+        .into_iter()
+        .flatten()
+        .map(|error| error.to_string())
+        .collect::<Vec<_>>();
+    if cleanup.is_empty() {
+        primary
+    } else {
+        io::Error::new(
+            primary.kind(),
+            format!(
+                "{primary}; supervised process spawn rollback was incomplete: {}",
+                cleanup.join("; ")
+            ),
+        )
+    }
+}
+
 fn job_active_processes(job: &OwnedHandle) -> io::Result<u32> {
     let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
     let mut returned = 0_u32;
@@ -1060,28 +1321,50 @@ fn append_windows_argument(output: &mut Vec<u16>, argument: &OsStr) -> io::Resul
     Ok(())
 }
 
-fn environment_block(overrides: &[(OsString, OsString)]) -> io::Result<Option<Vec<u16>>> {
-    if overrides.is_empty() {
-        return Ok(None);
-    }
-
+fn inherited_environment_block(overrides: &[(OsString, OsString)]) -> io::Result<Vec<u16>> {
     let mut entries: Vec<(OsString, OsString)> = Vec::new();
     for (name, value) in std::env::vars_os() {
-        if let Some(existing) = entries
-            .iter_mut()
-            .find(|(existing_name, _)| environment_names_equal(existing_name, &name))
-        {
-            *existing = (name, value);
-        } else {
-            entries.push((name, value));
-        }
+        merge_environment_entry(&mut entries, name, value);
     }
     for (name, value) in overrides {
         validate_environment_name(name)?;
         wide_without_nul(value, "environment value")?;
-        entries.retain(|(existing, _)| !environment_names_equal(existing, name));
-        entries.push((name.clone(), value.clone()));
+        merge_environment_entry(&mut entries, name.clone(), value.clone());
     }
+    encode_environment_block(entries)
+}
+
+fn product_environment_block(policy: SupervisedProductEnvironmentPolicy) -> io::Result<Vec<u16>> {
+    encode_environment_block(project_product_environment(policy, std::env::vars_os()))
+}
+
+fn project_product_environment(
+    policy: SupervisedProductEnvironmentPolicy,
+    environment: impl IntoIterator<Item = (OsString, OsString)>,
+) -> Vec<(OsString, OsString)> {
+    let mut projected = Vec::new();
+    for (name, value) in environment {
+        if policy
+            .allowlisted_names()
+            .iter()
+            .any(|allowed| environment_names_equal(&name, OsStr::new(allowed)))
+        {
+            merge_environment_entry(&mut projected, name, value);
+        }
+    }
+    projected
+}
+
+fn merge_environment_entry(
+    entries: &mut Vec<(OsString, OsString)>,
+    name: OsString,
+    value: OsString,
+) {
+    entries.retain(|(existing, _)| !environment_names_equal(existing, &name));
+    entries.push((name, value));
+}
+
+fn encode_environment_block(mut entries: Vec<(OsString, OsString)>) -> io::Result<Vec<u16>> {
     entries.sort_by(|(left, _), (right, _)| compare_environment_names(left, right));
 
     let mut block = Vec::new();
@@ -1091,14 +1374,18 @@ fn environment_block(overrides: &[(OsString, OsString)]) -> io::Result<Option<Ve
         block.extend(wide_without_nul(&value, "environment value")?);
         block.push(0);
     }
-    block.push(0);
+    if block.is_empty() {
+        block.extend([0, 0]);
+    } else {
+        block.push(0);
+    }
     if block.len() > WINDOWS_ENVIRONMENT_LIMIT {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "the encoded Windows environment exceeds 32,767 UTF-16 code units",
         ));
     }
-    Ok(Some(block))
+    Ok(block)
 }
 
 fn validate_environment_name(name: &OsStr) -> io::Result<()> {
@@ -1128,6 +1415,99 @@ fn compare_environment_names(left: &OsStr, right: &OsStr) -> Ordering {
         CSTR_EQUAL => Ordering::Equal,
         CSTR_GREATER_THAN => Ordering::Greater,
         _ => left.cmp(&right),
+    }
+}
+
+fn final_path<T: AsRawHandle + ?Sized>(handle: &T, label: &'static str) -> io::Result<PathBuf> {
+    let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
+    // SAFETY: the null buffer and zero length form the documented sizing query.
+    let required = unsafe { GetFinalPathNameByHandleW(raw_handle(handle), null_mut(), 0, flags) };
+    if required == 0 {
+        return Err(last_os_error("GetFinalPathNameByHandleW(size query)"));
+    }
+    let capacity = required
+        .checked_add(1)
+        .and_then(|length| usize::try_from(length).ok())
+        .ok_or_else(|| io::Error::other(format!("the Windows {label} path is too large")))?;
+    let mut path = vec![0_u16; capacity];
+    let length = u32::try_from(path.len()).map_err(|_| {
+        io::Error::other(format!(
+            "the Windows {label} path exceeds the platform limit"
+        ))
+    })?;
+    // SAFETY: `path` is writable for `length` UTF-16 code units and the exact handle remains live.
+    let written =
+        unsafe { GetFinalPathNameByHandleW(raw_handle(handle), path.as_mut_ptr(), length, flags) };
+    if written == 0 {
+        return Err(last_os_error("GetFinalPathNameByHandleW"));
+    }
+    let written = usize::try_from(written)
+        .map_err(|_| io::Error::other(format!("the Windows {label} path is too large")))?;
+    if written >= path.len() {
+        return Err(io::Error::other(format!(
+            "the Windows {label} path changed during its bounded handle query"
+        )));
+    }
+    path.truncate(written);
+    use std::os::windows::ffi::OsStringExt as _;
+    Ok(PathBuf::from(OsString::from_wide(&path)))
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    environment_names_equal(left.as_os_str(), right.as_os_str())
+}
+
+fn verify_process_image_mapping(
+    process: &OwnedHandle,
+    exact_executable: &RestrictiveCapabilityHandleLease,
+) -> io::Result<()> {
+    verify_process_image_mapping_handle(raw_handle(process), exact_executable)
+}
+
+fn verify_process_image_mapping_handle(
+    process: HANDLE,
+    exact_executable: &RestrictiveCapabilityHandleLease,
+) -> io::Result<()> {
+    let mut executable_handle = raw_handle(exact_executable);
+    let mut returned = 0_u32;
+    // SAFETY: the newly created process is contained and suspended. The input buffer contains the
+    // live guarded executable handle required by ProcessImageFileMapping. The native contract
+    // compares the process image section and candidate handle through their shared underlying file
+    // stream's SectionObjectPointer; it does not claim FileObject pointer identity.
+    let status = unsafe {
+        NtQueryInformationProcess(
+            process,
+            PROCESS_IMAGE_FILE_MAPPING_INFORMATION_CLASS,
+            (&mut executable_handle as *mut HANDLE).cast(),
+            u32::try_from(size_of::<HANDLE>()).expect("HANDLE size fits in u32"),
+            &mut returned,
+        )
+    };
+    if status == 0 {
+        return Ok(());
+    }
+    // SAFETY: the returned NTSTATUS value is accepted by the documented conversion routine.
+    let code = unsafe { RtlNtStatusToDosError(status) };
+    if code == 0 {
+        return Err(io::Error::other(format!(
+            "NtQueryInformationProcess(ProcessImageFileMapping) returned non-success NTSTATUS {status:#x}"
+        )));
+    }
+    Err(with_operation(
+        "NtQueryInformationProcess(ProcessImageFileMapping)",
+        io::Error::from_raw_os_error(code as i32),
+    ))
+}
+
+fn resume_verified_primary_thread(thread: &OwnedHandle) -> io::Result<()> {
+    // SAFETY: `thread` is the primary thread returned by CREATE_SUSPENDED process creation.
+    let previous_count = unsafe { ResumeThread(raw_handle(thread)) };
+    match previous_count {
+        1 => Ok(()),
+        u32::MAX => Err(last_os_error("ResumeThread(exact generation)")),
+        count => Err(io::Error::other(format!(
+            "ResumeThread(exact generation) observed unexpected suspend count {count}"
+        ))),
     }
 }
 
@@ -1202,7 +1582,18 @@ fn overlapped_read(
     )
 }
 
-fn overlapped_write(handle: &OwnedHandle, event: &OwnedHandle, bytes: &[u8]) -> io::Result<usize> {
+fn cancellable_overlapped_write(
+    control: &BootstrapControl,
+    event: &OwnedHandle,
+    bytes: &[u8],
+) -> io::Result<usize> {
+    let issuing = lock_unpoisoned(&control.issuing);
+    if control.cancelled.load(AtomicOrdering::Acquire) {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "the supervised bootstrap write was cancelled",
+        ));
+    }
     reset_event(event)?;
     let mut overlapped = Box::new(OVERLAPPED {
         hEvent: raw_handle(event),
@@ -1210,10 +1601,11 @@ fn overlapped_write(handle: &OwnedHandle, event: &OwnedHandle, bytes: &[u8]) -> 
     });
     let length = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
     let mut transferred = 0_u32;
-    // SAFETY: handle, buffer, event, and boxed OVERLAPPED remain live until completion below.
+    // SAFETY: the handle, buffer, event, and boxed OVERLAPPED remain live until completion below.
+    // The issuing lock prevents cancellation from racing before this operation is installed.
     let started = unsafe {
         WriteFile(
-            raw_handle(handle),
+            raw_handle(&control.handle),
             bytes.as_ptr(),
             length,
             &mut transferred,
@@ -1233,8 +1625,9 @@ fn overlapped_write(handle: &OwnedHandle, event: &OwnedHandle, bytes: &[u8]) -> 
     if error.raw_os_error() != Some(ERROR_IO_PENDING as i32) {
         return Err(with_operation("WriteFile(bootstrap)", error));
     }
+    drop(issuing);
     wait_for_overlapped(
-        handle,
+        &control.handle,
         event,
         &overlapped,
         "WriteFile(bootstrap)",
@@ -1377,7 +1770,18 @@ fn owned_handle(raw: HANDLE, operation: &'static str) -> io::Result<OwnedHandle>
     Ok(unsafe { OwnedHandle::from_raw_handle(raw as RawHandle) })
 }
 
-fn raw_handle(handle: &OwnedHandle) -> HANDLE {
+fn close_handle_if_valid(raw: HANDLE) {
+    if raw.is_null() || raw == INVALID_HANDLE_VALUE {
+        return;
+    }
+    // SAFETY: this helper is used only for a raw handle returned by a successful creation call
+    // before ownership could be transferred into `OwnedHandle`.
+    unsafe {
+        CloseHandle(raw);
+    }
+}
+
+fn raw_handle<T: AsRawHandle + ?Sized>(handle: &T) -> HANDLE {
     handle.as_raw_handle() as HANDLE
 }
 
@@ -1437,10 +1841,74 @@ mod tests {
         );
     }
 
+    #[test]
+    fn explicit_empty_environment_block_is_double_terminated() {
+        assert_eq!(
+            encode_environment_block(Vec::new()).expect("an empty environment is encodable"),
+            vec![0, 0]
+        );
+    }
+
+    #[test]
+    fn product_environment_projection_excludes_authority_and_injection_values() {
+        let projected = project_product_environment(
+            SupervisedProductEnvironmentPolicy::AllowlistedDesktopSession,
+            [
+                (OsString::from("SystemRoot"), OsString::from(r"C:\Windows")),
+                (OsString::from("temp"), OsString::from(r"C:\Temp")),
+                (OsString::from("PATH"), OsString::from(r"C:\attack")),
+                (
+                    OsString::from("HTTP_PROXY"),
+                    OsString::from("http://127.0.0.1:9"),
+                ),
+                (
+                    OsString::from("AWS_ACCESS_KEY_ID"),
+                    OsString::from("secret"),
+                ),
+            ],
+        );
+        let block = encode_environment_block(projected)
+            .expect("the allowlisted product environment is encodable");
+        assert_eq!(
+            decode_environment_block(&block),
+            vec![r"SystemRoot=C:\Windows", r"temp=C:\Temp"]
+        );
+        assert!(
+            project_product_environment(
+                SupervisedProductEnvironmentPolicy::Sealed,
+                [(OsString::from("SystemRoot"), OsString::from(r"C:\Windows"))],
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn cancelled_output_capture_publishes_an_explicit_loss_marker() {
+        let output = PlatformOutputQueue::new(4, 1024);
+        record_cancelled_stream(&output, SupervisedProcessStream::Stdout)
+            .expect("the cancellation marker is retained");
+
+        let marker = output
+            .pop()
+            .expect("the output queue remains readable")
+            .expect("the cancellation marker is available");
+        assert_eq!(marker.stream, SupervisedProcessStream::Stdout);
+        assert!(marker.loss);
+        assert!(String::from_utf8_lossy(&marker.bytes).contains("cancelled before EOF"));
+    }
+
     fn encode_argument(argument: &str) -> String {
         let mut encoded = Vec::new();
         append_windows_argument(&mut encoded, OsStr::new(argument))
             .expect("the test argument is encodable");
         String::from_utf16(&encoded).expect("the test argument is valid UTF-16")
+    }
+
+    fn decode_environment_block(block: &[u16]) -> Vec<String> {
+        block
+            .split(|unit| *unit == 0)
+            .take_while(|entry| !entry.is_empty())
+            .map(|entry| String::from_utf16(entry).expect("the environment entry is UTF-16"))
+            .collect()
     }
 }

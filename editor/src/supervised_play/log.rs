@@ -1,4 +1,7 @@
-use std::{borrow::Cow, collections::VecDeque, error::Error, fmt, num::NonZeroUsize};
+use std::{collections::VecDeque, error::Error, fmt, num::NonZeroUsize};
+
+#[cfg(test)]
+use std::borrow::Cow;
 
 pub(super) use super::ProcessOutputStream as ProcessLogStream;
 
@@ -24,6 +27,7 @@ impl ProcessLogLimits {
         self.byte_limit.get()
     }
 
+    #[cfg(test)]
     pub(super) fn try_from_counts(
         record_limit: usize,
         byte_limit: usize,
@@ -36,12 +40,14 @@ impl ProcessLogLimits {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProcessLogLimitsError {
     ZeroRecordLimit,
     ZeroByteLimit,
 }
 
+#[cfg(test)]
 impl fmt::Display for ProcessLogLimitsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
@@ -51,6 +57,7 @@ impl fmt::Display for ProcessLogLimitsError {
     }
 }
 
+#[cfg(test)]
 impl Error for ProcessLogLimitsError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -87,6 +94,7 @@ impl ProcessLogEntry {
         self.truncated_prefix_bytes
     }
 
+    #[cfg(test)]
     pub(super) fn text(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.bytes)
     }
@@ -104,18 +112,22 @@ pub(super) struct ProcessLogStats {
 }
 
 impl ProcessLogStats {
+    #[cfg(test)]
     pub(super) const fn observed_records(self) -> u64 {
         self.observed_records
     }
 
+    #[cfg(test)]
     pub(super) const fn observed_bytes(self) -> u64 {
         self.observed_bytes
     }
 
+    #[cfg(test)]
     pub(super) const fn retained_records(self) -> usize {
         self.retained_records
     }
 
+    #[cfg(test)]
     pub(super) const fn retained_bytes(self) -> usize {
         self.retained_bytes
     }
@@ -142,6 +154,7 @@ pub(super) struct ProcessLogAppendOutcome {
     evicted_bytes: u64,
 }
 
+#[cfg(test)]
 impl ProcessLogAppendOutcome {
     pub(super) const fn sequence(self) -> ProcessLogSequence {
         self.sequence
@@ -178,6 +191,7 @@ pub(super) struct ProcessLogPurge {
     bytes: usize,
 }
 
+#[cfg(test)]
 impl ProcessLogPurge {
     pub(super) const fn records(self) -> usize {
         self.records
@@ -287,14 +301,17 @@ impl ProcessLogRing {
         self.records.iter()
     }
 
+    #[cfg(test)]
     pub(super) const fn retained_bytes(&self) -> usize {
         self.retained_bytes
     }
 
+    #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         self.records.len()
     }
 
+    #[cfg(test)]
     pub(super) fn is_empty(&self) -> bool {
         self.records.is_empty()
     }

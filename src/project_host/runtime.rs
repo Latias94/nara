@@ -55,6 +55,11 @@ pub use action::{HeadlessRun, HeadlessRunIntent, HeadlessRunOutcome, HeadlessRun
 pub use desktop_verification::DesktopPresentationVerificationReceipt;
 #[cfg(all(feature = "tooling", feature = "presentation-ui"))]
 pub use editor::EditorUiPreviewCandidate;
+#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
+pub use editor::{
+    EditorAcceptedPreview, EditorPresentationError, EditorPresentationImage, EditorPresentedToken,
+    EditorPreviewPresentation,
+};
 #[cfg(all(
     feature = "tooling",
     any(feature = "presentation-2d", feature = "presentation-ui")
@@ -73,7 +78,9 @@ pub use editor::{
     EditorProjectCloseProgress, EditorProjectCloseReceipt, EditorProjectOpenAttempt,
     EditorProjectOpenError, EditorProjectOpenFailure, EditorProjectOpenFailureImpact,
     EditorProjectOpenFailureSource, EditorProjectOpenHost, EditorProjectOpenPhase,
-    EditorProjectOpenProgress, EditorProjectSession, TrustedCompiledEditorProjectIntent,
+    EditorProjectOpenProgress, EditorProjectSession, SupervisedDesktopSourceAdmissionError,
+    SupervisedDesktopSourceAuthority, TrustedCompiledEditorProjectIntent,
+    admit_supervised_desktop_source_receipt,
 };
 #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
 pub use editor::{EditorUiAuthoringEditError, EditorUiAuthoringFrame};
@@ -1007,22 +1014,23 @@ fn materialize_project_runtime(
                 "Project runtime fault reporter is unavailable",
             ))
         })?;
-    let mut queue = world
-        .get_resource_mut::<GameplayCommandQueue>()
-        .expect("the queue presence was checked before scene allocation");
-    for command in commands {
-        queue.submit(command).map_err(|_| {
-            faults.report(RuntimeFault::engine(
-                RuntimeFaultKind::GameplayLifecycle,
-                "nara.project-host.command-submit",
-            ));
-            HostFault::new(single_error(
-                "project.run.command-rejected",
-                "Project semantic control input was rejected",
-            ))
-        })?;
+    {
+        let mut queue = world
+            .get_resource_mut::<GameplayCommandQueue>()
+            .expect("the queue presence was checked before scene allocation");
+        for command in commands {
+            queue.submit(command).map_err(|_| {
+                faults.report(RuntimeFault::engine(
+                    RuntimeFaultKind::GameplayLifecycle,
+                    "nara.project-host.command-submit",
+                ));
+                HostFault::new(single_error(
+                    "project.run.command-rejected",
+                    "Project semantic control input was rejected",
+                ))
+            })?;
+        }
     }
-    drop(queue);
     verify_runtime_registry(world, plan)?;
     Ok(diagnostics)
 }
@@ -1267,8 +1275,6 @@ fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
         PluginPlanError::DuplicatePlugin { .. } => "duplicate-plugin",
         PluginPlanError::DivergentDefinition { .. } => "divergent-definition",
         PluginPlanError::MissingPlugin { .. } => "missing-plugin",
-        PluginPlanError::MissingCapability { .. } => "missing-capability",
-        PluginPlanError::MissingService { .. } => "missing-service",
         PluginPlanError::MissingSchemaProvider { .. } => "missing-schema-provider",
         PluginPlanError::Conflict { .. } => "plugin-conflict",
         PluginPlanError::OrderingCycle { .. } => "ordering-cycle",
@@ -1323,14 +1329,6 @@ fn plugin_plan_failure_report(error: &PluginPlanError) -> DiagnosticReport {
         } => {
             diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
             diagnostic = attach_identifier(diagnostic, "related-plugin", required.as_str());
-        }
-        PluginPlanError::MissingCapability { plugin, required } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "capability", required.as_str());
-        }
-        PluginPlanError::MissingService { plugin, required } => {
-            diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
-            diagnostic = attach_identifier(diagnostic, "service", required.as_str());
         }
         PluginPlanError::MissingSchemaProvider { plugin, required } => {
             diagnostic = attach_identifier(diagnostic, "plugin", plugin.as_str());
@@ -1442,6 +1440,7 @@ fn plugin_hook_failure_report(error: &PluginError) -> DiagnosticReport {
             diagnostic = attach_identifier(diagnostic, "participant", participant_id.as_str());
         }
         PluginError::AppSealed
+        | PluginError::DuplicateDriverPort { .. }
         | PluginError::RawBuiltInScheduleMutationForbidden
         | PluginError::ScheduleCompatibility(_)
         | PluginError::ShutdownObligationOutsideBuild
@@ -1456,6 +1455,7 @@ fn plugin_error_reason(error: &PluginError) -> &'static str {
     match error {
         PluginError::HookMutationForbidden { .. } => "hook-mutation-forbidden",
         PluginError::AppSealed => "app-sealed",
+        PluginError::DuplicateDriverPort { .. } => "duplicate-driver-port",
         PluginError::RawBuiltInScheduleMutationForbidden => "raw-schedule-mutation-forbidden",
         PluginError::ScheduleCompatibility(_) => "schedule-compatibility",
         PluginError::SetupFailed { .. } => "setup-failed",
@@ -1477,8 +1477,6 @@ fn plugin_error_reason(error: &PluginError) -> &'static str {
 
 fn admission_failure_report(error: &RuntimeAdmissionError) -> DiagnosticReport {
     let reason = match error {
-        RuntimeAdmissionError::AppStarted => "app-started",
-        RuntimeAdmissionError::RawRunnerInstalled => "raw-runner-installed",
         RuntimeAdmissionError::AppNotReady { .. } => "app-not-ready",
         RuntimeAdmissionError::GenerationExhausted => "generation-exhausted",
         RuntimeAdmissionError::Obligation(_) => "obligation-invalid",
@@ -1712,7 +1710,6 @@ const fn plugin_hook_id(hook: PluginHook) -> &'static str {
 const fn plugin_mutation_id(mutation: PluginHookMutation) -> &'static str {
     match mutation {
         PluginHookMutation::PluginMembership => "plugin-membership",
-        PluginHookMutation::RunnerSelection => "runner-selection",
     }
 }
 

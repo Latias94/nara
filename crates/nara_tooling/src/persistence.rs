@@ -195,6 +195,7 @@ pub enum EditorPersistenceRejection {
     RequiresReconcile,
     RuntimeActive,
     PreservationMismatch,
+    CleanupPending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -420,8 +421,8 @@ impl EditorProjectView {
     }
 
     #[must_use]
-    pub const fn play(&self) -> EditorPlayView {
-        self.play
+    pub const fn play(&self) -> &EditorPlayView {
+        &self.play
     }
 
     #[must_use]
@@ -469,7 +470,7 @@ mod tests {
 
     #[test]
     fn ordinary_degraded_authoring_does_not_fabricate_runtime_project_content() {
-        let runtime_reason = EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented;
+        let runtime_reason = EditorRuntimeUnavailableReason::SupervisedPlayContractMissing;
         let project = EditorProjectView::new(
             EditorProjectReadinessView::new(
                 EditorAuthoringReadiness::Degraded,

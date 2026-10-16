@@ -1,497 +1,731 @@
-#![allow(
-    dead_code,
-    reason = "SPL-U0 publishes the value-only contract consumed by later supervised-play units"
-)]
-
 use std::{error::Error, fmt};
 
-use nara_fs::ContentDigest;
-use nara_project::{DESKTOP_SUPERVISED_PLAY_V1_CONTRACT, ProjectPath, ProjectPathError};
+use nara_fs::{ContentDigest, RelativePath};
+use nara_project::ProjectPath;
+use nara_tooling::{EditorRuntimeAvailability, EditorRuntimeUnavailableReason};
 
-const SOURCE_RECEIPT_MAGIC: &[u8] = b"nara.editor-external-play-source.v1\0";
-const MAX_SOURCE_FACTS: usize = 4_096;
-const MAX_IDENTITY_BYTES: usize = 128;
-const MAX_PROFILE_BYTES: usize = 128;
-const MAX_PROJECT_PATH_BYTES: usize = 4_096;
-pub(crate) const MAX_EXTERNAL_PLAY_SOURCE_RECEIPT_BYTES: usize = 256 * 1024;
-pub(crate) const EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION: u16 = 1;
+use crate::project_content::{StartupContentMemberKind, startup_content_digest_from_members};
+use crate::project_host::authoring::{
+    AuthoringProjectAdmissionHost, AuthoringProjectSessionSnapshot, AuthoringProjectSnapshot,
+    AuthoringSourceKind, PreparedAuthoringProject, first_party_authoring_adapters,
+};
+use crate::project_host::composition::built_in_schema_providers;
+use crate::project_host::product_launch::{
+    EditorExternalPlaySourceFact, EditorExternalPlaySourceKind, EditorExternalPlaySourceReceipt,
+    EditorExternalPlayTarget, SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION,
+};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum EditorExternalPlaySourceKind {
-    Scene,
-    Prefab,
-    AssetMetadata,
-    AssetSource,
-    CargoManifest,
-    CargoLock,
+use super::{EditorProjectSession, single_error};
+use nara_tooling::{
+    EditorExternalPlayObservation, EditorExternalPlayOutput, EditorExternalPlayRequest,
+    EditorExternalPlayState, EditorExternalPlayView, EditorPlayCommand, EditorPlayOperationResult,
+    EditorPlayRejection, EditorPlayRequestResult,
+};
+
+/// Capability-free source authority admitted for one supervised desktop launch.
+///
+/// The decoded receipt remains the single semantic source of project/profile and strict Runtime
+/// expectations. Canonical bytes are retained separately for immutable generation identity and the
+/// child bootstrap envelope. Neither value contains source capabilities or absolute paths.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SupervisedDesktopSourceAuthority {
+    canonical_source_receipt: Box<[u8]>,
+    receipt: EditorExternalPlaySourceReceipt,
 }
 
+/// Typed failure while preparing an Editor-owned source receipt for supervised Play.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EditorExternalPlayTarget {
-    Desktop,
+pub enum EditorExternalPlayReceiptError {
+    NotAuthoringProject,
+    ContractMissing,
+    ContractUnsupported,
+    ProjectIdentityMissing,
+    CargoSourceUnavailable,
+    StartupClosureRejected,
+    SourceBasisChanged,
+    SourceReceiptRejected,
 }
 
-impl EditorExternalPlayTarget {
-    const fn wire_value(self) -> u8 {
-        match self {
-            Self::Desktop => 1,
-        }
-    }
-
-    fn from_wire_value(value: u8) -> Result<Self, EditorExternalPlaySourceReceiptError> {
-        match value {
-            1 => Ok(Self::Desktop),
-            _ => Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "product target is unsupported",
-            )),
-        }
-    }
-}
-
-impl EditorExternalPlaySourceKind {
-    const fn wire_value(self) -> u8 {
-        match self {
-            Self::Scene => 1,
-            Self::Prefab => 2,
-            Self::AssetMetadata => 3,
-            Self::AssetSource => 4,
-            Self::CargoManifest => 5,
-            Self::CargoLock => 6,
-        }
-    }
-
-    fn from_wire_value(value: u8) -> Result<Self, EditorExternalPlaySourceReceiptError> {
-        match value {
-            1 => Ok(Self::Scene),
-            2 => Ok(Self::Prefab),
-            3 => Ok(Self::AssetMetadata),
-            4 => Ok(Self::AssetSource),
-            5 => Ok(Self::CargoManifest),
-            6 => Ok(Self::CargoLock),
-            _ => Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "source kind is unsupported",
-            )),
-        }
+impl fmt::Display for EditorExternalPlayReceiptError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::NotAuthoringProject => "the Editor project is not in the Authoring lane",
+            Self::ContractMissing => {
+                "the selected project profile does not declare a supervised Play contract"
+            }
+            Self::ContractUnsupported => {
+                "the selected project profile declares an unsupported execution contract"
+            }
+            Self::ProjectIdentityMissing => {
+                "the supervised Play project is missing project.stable_id"
+            }
+            Self::CargoSourceUnavailable => {
+                "the Cargo manifest or lockfile could not be admitted for supervised Play"
+            }
+            Self::StartupClosureRejected => {
+                "the saved startup content could not be admitted for supervised Play"
+            }
+            Self::SourceBasisChanged => {
+                "the project manifest or authoring schema changed after the Editor session opened"
+            }
+            Self::SourceReceiptRejected => {
+                "the supervised Play source receipt could not be encoded canonically"
+            }
+        })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EditorExternalPlaySourceFact {
-    kind: EditorExternalPlaySourceKind,
-    project_path: ProjectPath,
-    digest: ContentDigest,
+impl Error for EditorExternalPlayReceiptError {}
+
+/// Returns the neutral runtime availability advertised by an Authoring project.
+pub(crate) fn authoring_runtime_availability(
+    project: &AuthoringProjectSessionSnapshot,
+) -> EditorRuntimeAvailability {
+    let Some(contract) = project.settings().execution.contract.as_ref() else {
+        return EditorRuntimeAvailability::Unavailable(
+            EditorRuntimeUnavailableReason::SupervisedPlayContractMissing,
+        );
+    };
+    if !contract.is_desktop_supervised_play_v1() {
+        return EditorRuntimeAvailability::Unavailable(
+            EditorRuntimeUnavailableReason::SupervisedPlayContractUnsupported,
+        );
+    }
+    if project.settings().project.stable_id.is_none() {
+        return EditorRuntimeAvailability::Unavailable(
+            EditorRuntimeUnavailableReason::ProjectIdentityMissing,
+        );
+    }
+    if !supervised_play_platform_supported() {
+        return EditorRuntimeAvailability::Unavailable(
+            EditorRuntimeUnavailableReason::SupervisedPlayPlatformUnsupported,
+        );
+    }
+    EditorRuntimeAvailability::ExternalSupervised
 }
 
-impl EditorExternalPlaySourceFact {
-    pub(crate) const fn new(
-        kind: EditorExternalPlaySourceKind,
-        project_path: ProjectPath,
-        digest: ContentDigest,
-    ) -> Self {
-        Self {
-            kind,
-            project_path,
-            digest,
-        }
-    }
-
-    pub(crate) const fn kind(&self) -> EditorExternalPlaySourceKind {
-        self.kind
-    }
-
-    pub(crate) const fn project_path(&self) -> &ProjectPath {
-        &self.project_path
-    }
-
-    pub(crate) const fn digest(&self) -> ContentDigest {
-        self.digest
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct EditorExternalPlaySourceReceipt {
-    project_stable_id: String,
-    profile_name: String,
-    target: EditorExternalPlayTarget,
-    launch_context_version: u16,
-    manifest_digest: ContentDigest,
-    authoring_bundle_digest: ContentDigest,
-    content_digest: ContentDigest,
-    schema_fingerprint: [u8; 32],
-    source_facts: Box<[EditorExternalPlaySourceFact]>,
-}
-
-impl EditorExternalPlaySourceReceipt {
-    pub(crate) fn new(
-        project_stable_id: String,
-        profile_name: String,
-        target: EditorExternalPlayTarget,
-        launch_context_version: u16,
-        manifest_digest: ContentDigest,
-        authoring_bundle_digest: ContentDigest,
-        content_digest: ContentDigest,
-        schema_fingerprint: [u8; 32],
-        mut source_facts: Vec<EditorExternalPlaySourceFact>,
-    ) -> Result<Self, EditorExternalPlaySourceReceiptError> {
-        validate_identifier(
-            &project_stable_id,
-            MAX_IDENTITY_BYTES,
-            "project stable identity",
-        )?;
-        validate_identifier(&profile_name, MAX_PROFILE_BYTES, "profile name")?;
-        if launch_context_version == 0 {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidField(
-                "launch context version",
-            ));
-        }
-        if source_facts.len() > MAX_SOURCE_FACTS {
-            return Err(EditorExternalPlaySourceReceiptError::TooManySourceFacts);
-        }
-        if source_facts
-            .iter()
-            .any(|fact| fact.project_path().as_str().len() > MAX_PROJECT_PATH_BYTES)
-        {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidField(
-                "source project path",
-            ));
-        }
-
-        source_facts.sort_by(|left, right| {
-            left.project_path()
-                .as_str()
-                .cmp(right.project_path().as_str())
-                .then_with(|| left.kind().cmp(&right.kind()))
+pub(crate) fn build_supervised_desktop_source_receipt(
+    project: &AuthoringProjectSessionSnapshot,
+) -> Result<Vec<u8>, EditorExternalPlayReceiptError> {
+    if !matches!(
+        authoring_runtime_availability(project),
+        EditorRuntimeAvailability::ExternalSupervised
+    ) {
+        return Err(match project.settings().execution.contract.as_ref() {
+            None => EditorExternalPlayReceiptError::ContractMissing,
+            Some(contract) if !contract.is_desktop_supervised_play_v1() => {
+                EditorExternalPlayReceiptError::ContractUnsupported
+            }
+            Some(_) if project.settings().project.stable_id.is_none() => {
+                EditorExternalPlayReceiptError::ProjectIdentityMissing
+            }
+            Some(_) => EditorExternalPlayReceiptError::StartupClosureRejected,
         });
-        if source_facts
-            .windows(2)
-            .any(|facts| facts[0].project_path().as_str() == facts[1].project_path().as_str())
-        {
-            return Err(EditorExternalPlaySourceReceiptError::DuplicateSourcePath);
-        }
-
-        let receipt = Self {
-            project_stable_id,
-            profile_name,
-            target,
-            launch_context_version,
-            manifest_digest,
-            authoring_bundle_digest,
-            content_digest,
-            schema_fingerprint,
-            source_facts: source_facts.into_boxed_slice(),
-        };
-        if receipt.encode_canonical()?.len() > MAX_EXTERNAL_PLAY_SOURCE_RECEIPT_BYTES {
-            return Err(EditorExternalPlaySourceReceiptError::EncodedTooLarge);
-        }
-        Ok(receipt)
     }
 
-    pub(crate) fn project_stable_id(&self) -> &str {
-        &self.project_stable_id
+    let project_stable_id = project
+        .settings()
+        .project
+        .stable_id
+        .clone()
+        .ok_or(EditorExternalPlayReceiptError::ProjectIdentityMissing)?;
+    let profile_name = project
+        .settings()
+        .profile_name
+        .as_deref()
+        .unwrap_or("default")
+        .to_owned();
+
+    let current = readmit_current_authoring_project(project)?;
+    if !authoring_basis_matches(project, &current) {
+        return Err(EditorExternalPlayReceiptError::SourceBasisChanged);
     }
 
-    pub(crate) fn profile_name(&self) -> &str {
-        &self.profile_name
+    let mut source_facts = Vec::with_capacity(current.source_facts().len() + 4);
+    append_source_fact(
+        EditorExternalPlaySourceKind::ProjectManifest,
+        ProjectPath::new("nara.toml".to_owned())
+            .map_err(|_| EditorExternalPlayReceiptError::SourceReceiptRejected)?,
+        current.manifest_digest(),
+        &mut source_facts,
+    )?;
+    append_source_fact(
+        EditorExternalPlaySourceKind::AuthoringSchemaBundle,
+        current.authoring_bundle_path().clone(),
+        current.authoring_bundle_digest(),
+        &mut source_facts,
+    )?;
+
+    let mut content_members = Vec::with_capacity(current.source_facts().len());
+    for fact in current.source_facts() {
+        let (source_kind, content_kind) = authoring_source_kinds(fact.kind());
+        let path = fact.project_path().clone();
+        append_source_fact(source_kind, path.clone(), fact.digest(), &mut source_facts)?;
+        content_members.push((content_kind, path, fact.digest()));
     }
 
-    pub(crate) const fn target(&self) -> EditorExternalPlayTarget {
-        self.target
-    }
+    append_cargo_fact(
+        &current.project_root(),
+        "Cargo.toml",
+        EditorExternalPlaySourceKind::CargoManifest,
+        &mut source_facts,
+    )?;
+    append_cargo_fact(
+        &current.project_root(),
+        "Cargo.lock",
+        EditorExternalPlaySourceKind::CargoLock,
+        &mut source_facts,
+    )?;
 
-    pub(crate) const fn launch_context_version(&self) -> u16 {
-        self.launch_context_version
-    }
+    let content_digest =
+        startup_content_digest_from_members(current.manifest_digest(), content_members)
+            .map_err(|_| EditorExternalPlayReceiptError::StartupClosureRejected)?;
+    let schema_fingerprint = parse_schema_fingerprint(&current.schema_fingerprint_hex())
+        .ok_or(EditorExternalPlayReceiptError::SourceReceiptRejected)?;
+    let receipt = EditorExternalPlaySourceReceipt::new(
+        project_stable_id,
+        profile_name,
+        EditorExternalPlayTarget::Desktop,
+        SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION,
+        current.manifest_digest(),
+        current.authoring_bundle_digest(),
+        content_digest,
+        schema_fingerprint,
+        source_facts,
+    )
+    .map_err(|_| EditorExternalPlayReceiptError::SourceReceiptRejected)?;
+    receipt
+        .encode_canonical()
+        .map_err(|_| EditorExternalPlayReceiptError::SourceReceiptRejected)
+}
 
-    pub(crate) const fn manifest_digest(&self) -> ContentDigest {
-        self.manifest_digest
-    }
+fn readmit_current_authoring_project(
+    project: &AuthoringProjectSessionSnapshot,
+) -> Result<AuthoringProjectSnapshot, EditorExternalPlayReceiptError> {
+    let mut admission = AuthoringProjectAdmissionHost::default();
+    let schema = admission
+        .prepare(
+            project.project_root(),
+            project.settings().profile_name.as_deref(),
+        )
+        .and_then(|prepared| prepared.admit_bundle())
+        .map_err(|_| EditorExternalPlayReceiptError::StartupClosureRejected)?
+        .publish();
+    let adapters = first_party_authoring_adapters(built_in_schema_providers())
+        .map_err(|_| EditorExternalPlayReceiptError::StartupClosureRejected)?;
+    let receipt = PreparedAuthoringProject::new(schema, adapters)
+        .admit_startup_closure()
+        .map_err(|_| EditorExternalPlayReceiptError::StartupClosureRejected)?
+        .publish();
+    Ok(receipt.snapshot())
+}
 
-    pub(crate) const fn authoring_bundle_digest(&self) -> ContentDigest {
-        self.authoring_bundle_digest
-    }
+fn authoring_basis_matches(
+    project: &AuthoringProjectSessionSnapshot,
+    current: &AuthoringProjectSnapshot,
+) -> bool {
+    current.root_identity() == project.project_root().identity()
+        && current.settings() == project.settings()
+        && current.manifest_digest() == project.manifest_digest()
+        && current.authoring_bundle_digest() == project.authoring_bundle_digest()
+        && current.schema_fingerprint_hex() == project.schema_fingerprint_hex()
+}
 
-    pub(crate) const fn content_digest(&self) -> ContentDigest {
-        self.content_digest
-    }
-
-    pub(crate) const fn schema_fingerprint(&self) -> [u8; 32] {
-        self.schema_fingerprint
-    }
-
-    pub(crate) fn source_facts(&self) -> &[EditorExternalPlaySourceFact] {
-        &self.source_facts
-    }
-
-    pub(crate) fn encode_canonical(&self) -> Result<Vec<u8>, EditorExternalPlaySourceReceiptError> {
-        let mut encoded = Vec::with_capacity(256 + self.source_facts.len() * 64);
-        encoded.extend_from_slice(SOURCE_RECEIPT_MAGIC);
-        encoded.push(self.target.wire_value());
-        write_string(&mut encoded, DESKTOP_SUPERVISED_PLAY_V1_CONTRACT)?;
-        write_string(&mut encoded, &self.project_stable_id)?;
-        write_string(&mut encoded, &self.profile_name)?;
-        encoded.extend_from_slice(&self.launch_context_version.to_le_bytes());
-        write_digest(&mut encoded, self.manifest_digest);
-        write_digest(&mut encoded, self.authoring_bundle_digest);
-        write_digest(&mut encoded, self.content_digest);
-        encoded.extend_from_slice(&self.schema_fingerprint);
-        let fact_count = u16::try_from(self.source_facts.len())
-            .map_err(|_| EditorExternalPlaySourceReceiptError::TooManySourceFacts)?;
-        encoded.extend_from_slice(&fact_count.to_le_bytes());
-        for fact in &self.source_facts {
-            encoded.push(fact.kind().wire_value());
-            write_string(&mut encoded, fact.project_path().as_str())?;
-            write_digest(&mut encoded, fact.digest());
-        }
-        if encoded.len() > MAX_EXTERNAL_PLAY_SOURCE_RECEIPT_BYTES {
-            return Err(EditorExternalPlaySourceReceiptError::EncodedTooLarge);
-        }
-        Ok(encoded)
-    }
-
-    pub(crate) fn decode_canonical(
-        encoded: &[u8],
-    ) -> Result<Self, EditorExternalPlaySourceReceiptError> {
-        if encoded.len() > MAX_EXTERNAL_PLAY_SOURCE_RECEIPT_BYTES {
-            return Err(EditorExternalPlaySourceReceiptError::EncodedTooLarge);
-        }
-        let mut reader = ReceiptReader::new(encoded);
-        if reader.read_exact(SOURCE_RECEIPT_MAGIC.len())? != SOURCE_RECEIPT_MAGIC {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "source receipt magic does not match",
-            ));
-        }
-        let target = EditorExternalPlayTarget::from_wire_value(reader.read_u8()?)?;
-        if reader.read_string(MAX_IDENTITY_BYTES)? != DESKTOP_SUPERVISED_PLAY_V1_CONTRACT {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "execution contract is unsupported",
-            ));
-        }
-        let project_stable_id = reader.read_string(MAX_IDENTITY_BYTES)?.to_owned();
-        let profile_name = reader.read_string(MAX_PROFILE_BYTES)?.to_owned();
-        let launch_context_version = reader.read_u16()?;
-        let manifest_digest = reader.read_digest()?;
-        let authoring_bundle_digest = reader.read_digest()?;
-        let content_digest = reader.read_digest()?;
-        let schema_fingerprint = reader.read_array::<32>()?;
-        let fact_count = usize::from(reader.read_u16()?);
-        if fact_count > MAX_SOURCE_FACTS {
-            return Err(EditorExternalPlaySourceReceiptError::TooManySourceFacts);
-        }
-        let mut source_facts = Vec::with_capacity(fact_count);
-        for _ in 0..fact_count {
-            let kind = EditorExternalPlaySourceKind::from_wire_value(reader.read_u8()?)?;
-            let project_path =
-                ProjectPath::new(reader.read_string(MAX_PROJECT_PATH_BYTES)?.to_owned())?;
-            let digest = reader.read_digest()?;
-            source_facts.push(EditorExternalPlaySourceFact::new(
-                kind,
-                project_path,
-                digest,
-            ));
-        }
-        if !reader.is_finished() {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "source receipt contains trailing bytes",
-            ));
-        }
-
-        let receipt = Self::new(
-            project_stable_id,
-            profile_name,
-            target,
-            launch_context_version,
-            manifest_digest,
-            authoring_bundle_digest,
-            content_digest,
-            schema_fingerprint,
-            source_facts,
-        )?;
-        if receipt.encode_canonical()?.as_slice() != encoded {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "source receipt is not canonical",
-            ));
-        }
-        Ok(receipt)
+const fn authoring_source_kinds(
+    kind: AuthoringSourceKind,
+) -> (EditorExternalPlaySourceKind, StartupContentMemberKind) {
+    match kind {
+        AuthoringSourceKind::Scene => (
+            EditorExternalPlaySourceKind::Scene,
+            StartupContentMemberKind::Scene,
+        ),
+        AuthoringSourceKind::Prefab => (
+            EditorExternalPlaySourceKind::Prefab,
+            StartupContentMemberKind::Prefab,
+        ),
+        AuthoringSourceKind::AssetMetadata => (
+            EditorExternalPlaySourceKind::AssetMetadata,
+            StartupContentMemberKind::AssetMetadata,
+        ),
+        AuthoringSourceKind::AssetSource => (
+            EditorExternalPlaySourceKind::AssetSource,
+            StartupContentMemberKind::AssetSource,
+        ),
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum EditorExternalPlaySourceReceiptError {
-    InvalidField(&'static str),
-    TooManySourceFacts,
-    DuplicateSourcePath,
-    EncodedTooLarge,
-    InvalidEncoding(&'static str),
-    InvalidProjectPath(ProjectPathError),
+fn append_source_fact(
+    kind: EditorExternalPlaySourceKind,
+    path: ProjectPath,
+    digest: ContentDigest,
+    facts: &mut Vec<EditorExternalPlaySourceFact>,
+) -> Result<(), EditorExternalPlayReceiptError> {
+    let fact = EditorExternalPlaySourceFact::new(kind, path, digest)
+        .map_err(|_| EditorExternalPlayReceiptError::SourceReceiptRejected)?;
+    facts.push(fact);
+    Ok(())
 }
 
-impl fmt::Display for EditorExternalPlaySourceReceiptError {
+fn append_cargo_fact(
+    root: &nara_fs::DirectoryCapability,
+    path: &str,
+    kind: EditorExternalPlaySourceKind,
+    facts: &mut Vec<EditorExternalPlaySourceFact>,
+) -> Result<(), EditorExternalPlayReceiptError> {
+    let project_path = ProjectPath::new(path.to_owned())
+        .map_err(|_| EditorExternalPlayReceiptError::SourceReceiptRejected)?;
+    let relative = RelativePath::new(path)
+        .map_err(|_| EditorExternalPlayReceiptError::SourceReceiptRejected)?;
+    let file = root
+        .open_file(&relative)
+        .map_err(|_| EditorExternalPlayReceiptError::CargoSourceUnavailable)?;
+    let digest = file
+        .digest(64 * 1024 * 1024)
+        .map_err(|_| EditorExternalPlayReceiptError::CargoSourceUnavailable)?;
+    append_source_fact(kind, project_path, digest, facts)
+}
+
+fn parse_schema_fingerprint(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut bytes = [0_u8; 32];
+    for (index, pair) in hex.as_bytes().chunks_exact(2).enumerate() {
+        bytes[index] = (hex_nibble(pair[0])? << 4) | hex_nibble(pair[1])?;
+    }
+    Some(bytes)
+}
+
+fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        _ => None,
+    }
+}
+
+#[cfg(all(unix, target_os = "linux", target_arch = "x86_64"))]
+const fn supervised_play_platform_supported() -> bool {
+    true
+}
+
+#[cfg(windows)]
+const fn supervised_play_platform_supported() -> bool {
+    true
+}
+
+#[cfg(not(any(all(unix, target_os = "linux", target_arch = "x86_64"), windows)))]
+const fn supervised_play_platform_supported() -> bool {
+    false
+}
+
+impl SupervisedDesktopSourceAuthority {
+    #[must_use]
+    pub fn canonical_source_receipt(&self) -> &[u8] {
+        &self.canonical_source_receipt
+    }
+
+    #[must_use]
+    pub fn project_stable_id(&self) -> &str {
+        self.receipt.project_stable_id()
+    }
+
+    #[must_use]
+    pub fn profile_name(&self) -> &str {
+        self.receipt.profile_name()
+    }
+
+    #[must_use]
+    pub const fn manifest_digest(&self) -> ContentDigest {
+        self.receipt.manifest_digest()
+    }
+
+    #[must_use]
+    pub const fn authoring_bundle_digest(&self) -> ContentDigest {
+        self.receipt.authoring_bundle_digest()
+    }
+
+    #[must_use]
+    pub const fn content_digest(&self) -> ContentDigest {
+        self.receipt.content_digest()
+    }
+
+    #[must_use]
+    pub const fn schema_fingerprint(&self) -> [u8; 32] {
+        self.receipt.schema_fingerprint()
+    }
+
+    /// Returns the admitted Cargo manifest digest carried by the source receipt.
+    #[must_use]
+    pub fn cargo_manifest_digest(&self) -> Option<ContentDigest> {
+        self.receipt
+            .source_facts()
+            .iter()
+            .find(|fact| fact.kind() == EditorExternalPlaySourceKind::CargoManifest)
+            .map(EditorExternalPlaySourceFact::digest)
+    }
+
+    /// Returns the admitted Cargo lockfile digest carried by the source receipt.
+    #[must_use]
+    pub fn cargo_lock_digest(&self) -> Option<ContentDigest> {
+        self.receipt
+            .source_facts()
+            .iter()
+            .find(|fact| fact.kind() == EditorExternalPlaySourceKind::CargoLock)
+            .map(EditorExternalPlaySourceFact::digest)
+    }
+}
+
+/// Admits one canonical Editor-owned source receipt for the exact supervised desktop contract.
+#[doc(hidden)]
+pub fn admit_supervised_desktop_source_receipt(
+    encoded: &[u8],
+) -> Result<SupervisedDesktopSourceAuthority, SupervisedDesktopSourceAdmissionError> {
+    let receipt = EditorExternalPlaySourceReceipt::decode_canonical(encoded)
+        .map_err(|_| SupervisedDesktopSourceAdmissionError::InvalidSourceReceipt)?;
+    if receipt.target() != EditorExternalPlayTarget::Desktop {
+        return Err(SupervisedDesktopSourceAdmissionError::UnsupportedTarget);
+    }
+    if receipt.launch_context_version() != SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION {
+        return Err(
+            SupervisedDesktopSourceAdmissionError::UnsupportedLaunchContextVersion {
+                expected: SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION,
+                actual: receipt.launch_context_version(),
+            },
+        );
+    }
+
+    Ok(SupervisedDesktopSourceAuthority {
+        canonical_source_receipt: encoded.into(),
+        receipt,
+    })
+}
+
+/// Typed failure from admitting an Editor-owned source receipt for supervised desktop launch.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SupervisedDesktopSourceAdmissionError {
+    InvalidSourceReceipt,
+    UnsupportedTarget,
+    UnsupportedLaunchContextVersion { expected: u16, actual: u16 },
+}
+
+impl fmt::Display for SupervisedDesktopSourceAdmissionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidField(field) => write!(formatter, "external Play {field} is invalid"),
-            Self::TooManySourceFacts => {
-                formatter.write_str("external Play source receipt has too many source facts")
+            Self::InvalidSourceReceipt => formatter
+                .write_str("supervised desktop source receipt is malformed or is not canonical"),
+            Self::UnsupportedTarget => {
+                formatter.write_str("supervised desktop source receipt targets another product")
             }
-            Self::DuplicateSourcePath => formatter
-                .write_str("external Play source receipt contains a duplicate project path"),
-            Self::EncodedTooLarge => {
-                formatter.write_str("external Play source receipt exceeds its byte limit")
-            }
-            Self::InvalidEncoding(reason) => {
-                write!(
-                    formatter,
-                    "external Play source receipt encoding is invalid: {reason}"
-                )
-            }
-            Self::InvalidProjectPath(error) => {
-                write!(formatter, "external Play source path is invalid: {error}")
-            }
+            Self::UnsupportedLaunchContextVersion { expected, actual } => write!(
+                formatter,
+                "supervised desktop source receipt uses launch context version {actual}; expected {expected}"
+            ),
         }
     }
 }
 
-impl Error for EditorExternalPlaySourceReceiptError {}
+impl Error for SupervisedDesktopSourceAdmissionError {}
 
-impl From<ProjectPathError> for EditorExternalPlaySourceReceiptError {
-    fn from(error: ProjectPathError) -> Self {
-        Self::InvalidProjectPath(error)
-    }
-}
-
-fn validate_identifier(
-    value: &str,
-    maximum_bytes: usize,
-    field: &'static str,
-) -> Result<(), EditorExternalPlaySourceReceiptError> {
-    if value.is_empty()
-        || value.len() > maximum_bytes
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-    {
-        return Err(EditorExternalPlaySourceReceiptError::InvalidField(field));
-    }
-    Ok(())
-}
-
-fn write_string(
-    encoded: &mut Vec<u8>,
-    value: &str,
-) -> Result<(), EditorExternalPlaySourceReceiptError> {
-    let length = u16::try_from(value.len())
-        .map_err(|_| EditorExternalPlaySourceReceiptError::EncodedTooLarge)?;
-    encoded.extend_from_slice(&length.to_le_bytes());
-    encoded.extend_from_slice(value.as_bytes());
-    Ok(())
-}
-
-fn write_digest(encoded: &mut Vec<u8>, digest: ContentDigest) {
-    encoded.extend_from_slice(&digest.length().to_le_bytes());
-    encoded.extend_from_slice(digest.as_bytes());
-}
-
-struct ReceiptReader<'a> {
-    encoded: &'a [u8],
-    position: usize,
-}
-
-impl<'a> ReceiptReader<'a> {
-    const fn new(encoded: &'a [u8]) -> Self {
-        Self {
-            encoded,
-            position: 0,
+impl EditorProjectSession {
+    pub(crate) fn external_play_view(&self) -> Option<EditorExternalPlayView> {
+        if !matches!(
+            self.project_readiness().runtime(),
+            EditorRuntimeAvailability::ExternalSupervised
+        ) {
+            return None;
         }
+        let view = self.external_play_view.clone().unwrap_or_else(|| {
+            EditorExternalPlayView::new(
+                EditorExternalPlayState::Idle,
+                None,
+                false,
+                EditorExternalPlayOutput::default(),
+            )
+        });
+        Some(EditorExternalPlayView::new(
+            view.state(),
+            view.generation(),
+            view.last_good_available() && self.external_source_matches_bound_generation(),
+            view.output().clone(),
+        ))
     }
 
-    fn read_exact(
+    #[doc(hidden)]
+    pub fn take_external_play_request(&mut self) -> Option<EditorExternalPlayRequest> {
+        self.external_play_request.take()
+    }
+
+    #[doc(hidden)]
+    pub fn apply_external_play_observation(
         &mut self,
-        length: usize,
-    ) -> Result<&'a [u8], EditorExternalPlaySourceReceiptError> {
-        let end = self.position.checked_add(length).ok_or(
-            EditorExternalPlaySourceReceiptError::InvalidEncoding("length overflow"),
-        )?;
-        let value = self.encoded.get(self.position..end).ok_or(
-            EditorExternalPlaySourceReceiptError::InvalidEncoding("source receipt is truncated"),
-        )?;
-        self.position = end;
-        Ok(value)
-    }
-
-    fn read_array<const N: usize>(
-        &mut self,
-    ) -> Result<[u8; N], EditorExternalPlaySourceReceiptError> {
-        self.read_exact(N)?.try_into().map_err(|_| {
-            EditorExternalPlaySourceReceiptError::InvalidEncoding("array length does not match")
-        })
-    }
-
-    fn read_u8(&mut self) -> Result<u8, EditorExternalPlaySourceReceiptError> {
-        Ok(self.read_exact(1)?[0])
-    }
-
-    fn read_u16(&mut self) -> Result<u16, EditorExternalPlaySourceReceiptError> {
-        Ok(u16::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_u64(&mut self) -> Result<u64, EditorExternalPlaySourceReceiptError> {
-        Ok(u64::from_le_bytes(self.read_array()?))
-    }
-
-    fn read_string(
-        &mut self,
-        maximum_bytes: usize,
-    ) -> Result<&'a str, EditorExternalPlaySourceReceiptError> {
-        let length = usize::from(self.read_u16()?);
-        if length > maximum_bytes {
-            return Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(
-                "string exceeds its byte limit",
-            ));
+        observation: EditorExternalPlayObservation,
+    ) -> bool {
+        if self.external_play_attempt != Some(observation.attempt()) {
+            return false;
         }
-        std::str::from_utf8(self.read_exact(length)?).map_err(|_| {
-            EditorExternalPlaySourceReceiptError::InvalidEncoding("string is not UTF-8")
-        })
+        if let Some(source_digest) = observation.source_receipt_digest() {
+            self.external_play_bound_source_digest = Some(source_digest);
+        }
+        let view = EditorExternalPlayView::new(
+            observation.state(),
+            observation.generation(),
+            observation.last_good_available() && self.external_source_matches_bound_generation(),
+            observation.output().clone(),
+        );
+        let changed = self.external_play_view.as_ref() != Some(&view)
+            || observation
+                .result()
+                .is_some_and(|result| self.play_result != Some(result));
+        self.external_play_view = Some(view);
+        if let Some(result) = observation.result() {
+            self.play_result = Some(result);
+        }
+        changed
     }
 
-    fn read_digest(&mut self) -> Result<ContentDigest, EditorExternalPlaySourceReceiptError> {
-        let length = self.read_u64()?;
-        let hash = self.read_array::<32>()?;
-        Ok(ContentDigest::from_parts(length, hash))
+    pub(crate) fn request_external_play(
+        &mut self,
+        command: EditorPlayCommand,
+    ) -> EditorPlayRequestResult {
+        let operation = super::play::play_operation(command);
+        let current = self.external_play_view().unwrap_or_else(|| {
+            EditorExternalPlayView::new(
+                EditorExternalPlayState::Idle,
+                None,
+                false,
+                EditorExternalPlayOutput::default(),
+            )
+        });
+        let unsupported = match command {
+            EditorPlayCommand::Pause => Some(nara_tooling::EditorPlayControl::Pause),
+            EditorPlayCommand::Resume => Some(nara_tooling::EditorPlayControl::Resume),
+            EditorPlayCommand::StepFixedTick => {
+                Some(nara_tooling::EditorPlayControl::StepFixedTick)
+            }
+            _ => None,
+        };
+        if let Some(control) = unsupported {
+            let reason = EditorPlayRejection::UnsupportedControl(control);
+            self.play_result = Some(EditorPlayOperationResult::Rejected { operation, reason });
+            return EditorPlayRequestResult::Rejected(reason);
+        }
+
+        if !external_command_allowed(current.state(), command) {
+            return EditorPlayRequestResult::Rejected(
+                if matches!(
+                    current.state(),
+                    EditorExternalPlayState::Building
+                        | EditorExternalPlayState::Starting
+                        | EditorExternalPlayState::Running
+                        | EditorExternalPlayState::Stopping
+                        | EditorExternalPlayState::CleanupIncomplete
+                ) {
+                    EditorPlayRejection::Busy
+                } else {
+                    EditorPlayRejection::InvalidState
+                },
+            );
+        }
+        if command == EditorPlayCommand::RunLastGood && !current.last_good_available() {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState);
+        }
+        if matches!(
+            command,
+            EditorPlayCommand::Play | EditorPlayCommand::RunLastGood
+        ) && !self.saved_documents_are_launchable()
+        {
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation,
+                reason: EditorPlayRejection::RuntimeOutOfDate,
+            });
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate);
+        }
+
+        let source_receipt = if matches!(
+            command,
+            EditorPlayCommand::Play | EditorPlayCommand::RunLastGood
+        ) {
+            match self.supervised_desktop_source_receipt() {
+                Ok(receipt) => Some(receipt),
+                Err(error) => {
+                    self.current_saved_source_digest = None;
+                    let (reason, code, summary) = match error {
+                        EditorExternalPlayReceiptError::SourceBasisChanged => (
+                            EditorPlayRejection::RuntimeOutOfDate,
+                            "project.editor.supervised-play-source-out-of-date",
+                            "the project manifest or authoring schema changed after this Editor session opened",
+                        ),
+                        _ => (
+                            EditorPlayRejection::RuntimeUnavailable(
+                                EditorRuntimeUnavailableReason::SupervisedPlayUnavailable,
+                            ),
+                            "project.editor.supervised-play-source-rejected",
+                            "the saved project source could not be admitted for supervised Play",
+                        ),
+                    };
+                    let _ = self.diagnostics.extend(single_error(code, summary));
+                    self.play_result =
+                        Some(EditorPlayOperationResult::Rejected { operation, reason });
+                    return EditorPlayRequestResult::Rejected(reason);
+                }
+            }
+        } else {
+            None
+        };
+        let source_receipt_digest = source_receipt.as_deref().map(ContentDigest::of_bytes);
+        if command == EditorPlayCommand::RunLastGood
+            && source_receipt_digest != self.external_play_bound_source_digest
+        {
+            self.play_result = Some(EditorPlayOperationResult::Rejected {
+                operation,
+                reason: EditorPlayRejection::RuntimeOutOfDate,
+            });
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate);
+        }
+        let attempt = self.next_external_play_attempt;
+        self.next_external_play_attempt = self.next_external_play_attempt.saturating_add(1);
+        let request = EditorExternalPlayRequest::new(attempt, operation, source_receipt)
+            .expect("a supervised Play attempt is allocated from a non-zero counter");
+        self.external_play_attempt = Some(attempt);
+        self.external_play_request = Some(request);
+        if let Some(source_digest) = source_receipt_digest {
+            self.current_saved_source_digest = Some(source_digest);
+            self.external_play_bound_source_digest = Some(source_digest);
+        }
+        let state = match command {
+            EditorPlayCommand::Stop
+            | EditorPlayCommand::Cancel
+            | EditorPlayCommand::Restart
+            | EditorPlayCommand::RetryClose
+            | EditorPlayCommand::RetryRetirement => EditorExternalPlayState::Stopping,
+            _ => EditorExternalPlayState::Building,
+        };
+        let output = if matches!(
+            command,
+            EditorPlayCommand::Play | EditorPlayCommand::Restart | EditorPlayCommand::RunLastGood
+        ) {
+            EditorExternalPlayOutput::default()
+        } else {
+            current.output().clone()
+        };
+        self.external_play_view = Some(EditorExternalPlayView::new(
+            state,
+            current.generation(),
+            current.last_good_available(),
+            output,
+        ));
+        self.play_result = Some(EditorPlayOperationResult::Pending { operation });
+        EditorPlayRequestResult::Accepted
     }
 
-    const fn is_finished(&self) -> bool {
-        self.position == self.encoded.len()
+    pub(crate) fn external_source_matches_bound_generation(&self) -> bool {
+        let Some(bound) = self.external_play_bound_source_digest else {
+            return true;
+        };
+        self.current_saved_source_digest == Some(bound)
+    }
+
+    fn saved_documents_are_launchable(&self) -> bool {
+        // Degraded authoring is still eligible for supervised desktop Play. The source receipt
+        // builder and child READY admission own strict executable validation; this predicate only
+        // prevents a launch from silently ignoring unsaved document edits.
+        self.authoring_project().is_some()
+            && self
+                .workspace
+                .__document_ids()
+                .into_iter()
+                .all(|document| !self.workspace.document_is_dirty(document).unwrap_or(true))
+    }
+
+    pub(super) fn refresh_current_saved_source_digest(&mut self) {
+        if self.external_play_bound_source_digest.is_none() {
+            return;
+        }
+        self.current_saved_source_digest = self
+            .supervised_desktop_source_receipt()
+            .ok()
+            .map(|receipt| ContentDigest::of_bytes(&receipt));
+    }
+}
+
+fn external_command_allowed(state: EditorExternalPlayState, command: EditorPlayCommand) -> bool {
+    match state {
+        EditorExternalPlayState::Idle => matches!(
+            command,
+            EditorPlayCommand::Play | EditorPlayCommand::RunLastGood
+        ),
+        EditorExternalPlayState::Faulted => matches!(
+            command,
+            EditorPlayCommand::Play | EditorPlayCommand::RunLastGood | EditorPlayCommand::Stop
+        ),
+        EditorExternalPlayState::Building => {
+            matches!(command, EditorPlayCommand::Cancel | EditorPlayCommand::Stop)
+        }
+        EditorExternalPlayState::Starting => {
+            matches!(command, EditorPlayCommand::Cancel | EditorPlayCommand::Stop)
+        }
+        EditorExternalPlayState::Running => matches!(
+            command,
+            EditorPlayCommand::Stop | EditorPlayCommand::Restart
+        ),
+        EditorExternalPlayState::CleanupIncomplete => matches!(
+            command,
+            EditorPlayCommand::RetryRetirement | EditorPlayCommand::RetryClose
+        ),
+        EditorExternalPlayState::Stopping => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use nara_project::ProjectPath;
+
+    use crate::project_host::product_launch::{
+        EditorExternalPlaySourceFact, EditorExternalPlaySourceKind,
+    };
+
     use super::*;
 
+    fn source_fact(
+        kind: EditorExternalPlaySourceKind,
+        path: &str,
+        bytes: &[u8],
+    ) -> EditorExternalPlaySourceFact {
+        EditorExternalPlaySourceFact::new(
+            kind,
+            ProjectPath::new(path).unwrap(),
+            ContentDigest::of_bytes(bytes),
+        )
+        .unwrap()
+    }
+
     fn source_receipt(
-        profile: &str,
         launch_context_version: u16,
-        schema_fingerprint: [u8; 32],
         scene: &[u8],
     ) -> EditorExternalPlaySourceReceipt {
         EditorExternalPlaySourceReceipt::new(
             "018f27e2-52b8-7bd4-b38f-68cb5725891f".to_owned(),
-            profile.to_owned(),
+            "desktop".to_owned(),
             EditorExternalPlayTarget::Desktop,
             launch_context_version,
             ContentDigest::of_bytes(b"manifest"),
             ContentDigest::of_bytes(b"authoring bundle"),
             ContentDigest::of_bytes(b"content"),
-            schema_fingerprint,
+            [7; 32],
             vec![
-                EditorExternalPlaySourceFact::new(
+                source_fact(
                     EditorExternalPlaySourceKind::CargoManifest,
-                    ProjectPath::new("Cargo.toml").unwrap(),
-                    ContentDigest::of_bytes(b"cargo manifest"),
+                    "Cargo.toml",
+                    b"cargo manifest",
                 ),
-                EditorExternalPlaySourceFact::new(
+                source_fact(
                     EditorExternalPlaySourceKind::Scene,
-                    ProjectPath::new("scenes/main.scene.json").unwrap(),
-                    ContentDigest::of_bytes(scene),
+                    "scenes/main.scene.json",
+                    scene,
                 ),
             ],
         )
@@ -499,96 +733,87 @@ mod tests {
     }
 
     #[test]
-    fn source_receipt_roundtrips_canonically_without_host_authority() {
-        let receipt = source_receipt(
-            "desktop",
-            EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION,
-            [7; 32],
-            b"scene",
-        );
-
+    fn supervised_source_authority_retains_one_decoded_canonical_receipt() {
+        let receipt = source_receipt(SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION, b"scene");
         let encoded = receipt.encode_canonical().unwrap();
-        let decoded = EditorExternalPlaySourceReceipt::decode_canonical(&encoded).unwrap();
 
-        assert_eq!(decoded, receipt);
-        assert_eq!(decoded.encode_canonical().unwrap(), encoded);
-        assert!(encoded.len() <= MAX_EXTERNAL_PLAY_SOURCE_RECEIPT_BYTES);
-        for forbidden in [
-            b"F:\\SourceCodes".as_slice(),
-            b"DirectoryCapability",
-            b"FileIdentity",
-        ] {
-            assert!(
-                !encoded
-                    .windows(forbidden.len())
-                    .any(|bytes| bytes == forbidden)
-            );
-        }
+        let authority = admit_supervised_desktop_source_receipt(&encoded).unwrap();
+
+        assert_eq!(authority.canonical_source_receipt(), encoded);
+        assert_eq!(authority.project_stable_id(), receipt.project_stable_id());
+        assert_eq!(authority.profile_name(), receipt.profile_name());
+        assert_eq!(authority.manifest_digest(), receipt.manifest_digest());
+        assert_eq!(
+            authority.authoring_bundle_digest(),
+            receipt.authoring_bundle_digest()
+        );
+        assert_eq!(authority.content_digest(), receipt.content_digest());
+        assert_eq!(authority.schema_fingerprint(), receipt.schema_fingerprint());
     }
 
     #[test]
-    fn source_receipt_identity_includes_profile_schema_content_and_launch_context() {
-        let receipt = source_receipt(
-            "desktop",
-            EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION,
-            [7; 32],
-            b"scene",
+    fn supervised_source_authority_rejects_tampered_and_noncanonical_receipts() {
+        let receipt = source_receipt(SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION, b"scene");
+        let mut tampered = receipt.encode_canonical().unwrap();
+        tampered[0] ^= 0xff;
+        assert_eq!(
+            admit_supervised_desktop_source_receipt(&tampered),
+            Err(SupervisedDesktopSourceAdmissionError::InvalidSourceReceipt)
         );
 
-        assert_ne!(
-            receipt,
-            source_receipt(
-                "release",
-                EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION,
-                [7; 32],
-                b"scene"
-            )
+        let mut noncanonical = receipt.encode_canonical().unwrap();
+        noncanonical.push(0);
+        assert_eq!(
+            admit_supervised_desktop_source_receipt(&noncanonical),
+            Err(SupervisedDesktopSourceAdmissionError::InvalidSourceReceipt)
         );
-        assert_ne!(
-            receipt,
-            source_receipt(
-                "desktop",
-                EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION,
-                [8; 32],
-                b"scene"
-            )
-        );
-        assert_ne!(
-            receipt,
-            source_receipt(
-                "desktop",
-                EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION,
-                [7; 32],
-                b"changed scene"
-            )
-        );
-        assert_ne!(
-            receipt,
-            source_receipt(
-                "desktop",
-                EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION + 1,
-                [7; 32],
-                b"scene"
+    }
+
+    #[test]
+    fn supervised_source_authority_rejects_another_launch_context_version() {
+        let actual = SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION + 1;
+        let encoded = source_receipt(actual, b"scene").encode_canonical().unwrap();
+
+        assert_eq!(
+            admit_supervised_desktop_source_receipt(&encoded),
+            Err(
+                SupervisedDesktopSourceAdmissionError::UnsupportedLaunchContextVersion {
+                    expected: SUPERVISED_DESKTOP_LAUNCH_CONTEXT_VERSION,
+                    actual,
+                }
             )
         );
     }
 
     #[test]
-    fn source_receipt_rejects_absolute_and_noncanonical_source_paths() {
-        assert!(ProjectPath::new("F:/project/scenes/main.scene.json").is_err());
-        assert!(ProjectPath::new("../scenes/main.scene.json").is_err());
-
-        let receipt = source_receipt(
-            "desktop",
-            EXTERNAL_PLAY_LAUNCH_CONTEXT_VERSION,
-            [7; 32],
-            b"scene",
-        );
-        let mut encoded = receipt.encode_canonical().unwrap();
-        encoded.push(0);
-        assert!(matches!(
-            EditorExternalPlaySourceReceipt::decode_canonical(&encoded),
-            Err(EditorExternalPlaySourceReceiptError::InvalidEncoding(_))
+    fn external_command_matrix_keeps_restart_exact_and_cleanup_retry_explicit() {
+        assert!(external_command_allowed(
+            EditorExternalPlayState::Running,
+            EditorPlayCommand::Restart
+        ));
+        assert!(!external_command_allowed(
+            EditorExternalPlayState::Running,
+            EditorPlayCommand::Play
+        ));
+        assert!(external_command_allowed(
+            EditorExternalPlayState::CleanupIncomplete,
+            EditorPlayCommand::RetryRetirement
+        ));
+        assert!(!external_command_allowed(
+            EditorExternalPlayState::CleanupIncomplete,
+            EditorPlayCommand::Restart
+        ));
+        assert!(external_command_allowed(
+            EditorExternalPlayState::Faulted,
+            EditorPlayCommand::Stop
+        ));
+        assert!(external_command_allowed(
+            EditorExternalPlayState::Building,
+            EditorPlayCommand::Cancel
+        ));
+        assert!(!external_command_allowed(
+            EditorExternalPlayState::Stopping,
+            EditorPlayCommand::Stop
         ));
     }
 }

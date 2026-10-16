@@ -1,10 +1,14 @@
 use std::{env, ffi::OsString, process::ExitCode, time::Instant};
 
-use nara::project_host::{DesktopRun, DesktopRunIntent, DesktopRunOutcome};
-use nara_game::open_project_root;
+use nara::project_host::{
+    DesktopRun, DesktopRunIntent, DesktopRunOutcome, ProductSupervisedDesktopLaunchCandidate,
+    SupervisedDesktopProductIdentity,
+};
+use nara_game::{open_explicit_project_root, open_project_root};
 
 const VERIFY_FIRST_PRESENT_ARGUMENT: &str = "--verify-first-present";
 const CLEANUP_DEADLINE_SECONDS: u64 = 5;
+const DESKTOP_BINARY_TARGET: &str = "desktop";
 
 fn main() -> ExitCode {
     let verify_first_present = match parse_arguments(env::args_os().skip(1)) {
@@ -14,20 +18,65 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let project_root = match open_project_root() {
+    let supervised_candidate =
+        match ProductSupervisedDesktopLaunchCandidate::read_from_inherited_bootstrap() {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                eprintln!("failed to read supervised desktop launch: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+    if verify_first_present && supervised_candidate.is_some() {
+        eprintln!(
+            "{VERIFY_FIRST_PRESENT_ARGUMENT} cannot be combined with a supervised desktop launch"
+        );
+        return ExitCode::FAILURE;
+    }
+    let project_root = match supervised_candidate.as_ref() {
+        Some(candidate) => open_explicit_project_root(candidate.context().project_root()),
+        None => open_project_root(),
+    };
+    let project_root = match project_root {
         Ok(project_root) => project_root,
         Err(error) => {
             eprintln!("failed to open project source: {error}");
             return ExitCode::FAILURE;
         }
     };
+    let supervised_session = match supervised_candidate {
+        Some(candidate) => match candidate.verify_project_source(&project_root) {
+            Ok(session) => Some(session),
+            Err(error) => {
+                eprintln!("failed to revalidate supervised desktop source facts: {error}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let profile = supervised_session
+        .as_ref()
+        .map(|session| session.context().profile_name().to_owned())
+        .unwrap_or_else(|| "desktop".to_owned());
     let intent = DesktopRunIntent::new()
-        .with_profile("desktop")
+        .with_profile(profile)
         .with_recipe(nara_game::product_recipe());
-    let intent = if verify_first_present {
-        intent.with_first_present_verification()
-    } else {
-        intent
+    let intent = match supervised_session {
+        Some(session) => {
+            let product_identity = match SupervisedDesktopProductIdentity::from_cargo_product(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                DESKTOP_BINARY_TARGET,
+            ) {
+                Ok(identity) => identity,
+                Err(error) => {
+                    eprintln!("failed to construct desktop product identity: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            intent.with_supervised_desktop_activation(session, product_identity)
+        }
+        None if verify_first_present => intent.with_first_present_verification(),
+        None => intent,
     };
     let mut run = DesktopRun::new(project_root, intent);
     let deadline = Instant::now() + std::time::Duration::from_secs(CLEANUP_DEADLINE_SECONDS);

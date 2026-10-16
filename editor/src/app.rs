@@ -1,10 +1,13 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
 };
+
+#[cfg(windows)]
+use std::fs::OpenOptions;
 
 use nara::{
     diagnostic::DiagnosticReport,
@@ -39,6 +42,7 @@ const EDITOR_SESSION_CLOSE_RETRY_DELAY: Duration = Duration::from_millis(16);
 #[path = "shell.rs"]
 mod shell;
 
+use crate::supervised_play::SupervisedPlayWake;
 pub use shell::EditorApplicationState;
 pub(crate) use shell::EditorApplicationSurface;
 use shell::{
@@ -232,6 +236,7 @@ pub struct EditorApplication {
     next_attempt_generation: u64,
     session_retirement: Option<EditorSessionRetirement>,
     session_close_retry_at: Option<Instant>,
+    supervised_play_wake: SupervisedPlayWake,
 }
 
 impl std::fmt::Debug for EditorApplication {
@@ -271,6 +276,7 @@ impl EditorApplication {
             next_attempt_generation: 1,
             session_retirement: None,
             session_close_retry_at: None,
+            supervised_play_wake: SupervisedPlayWake::default(),
         }
     }
 
@@ -287,9 +293,12 @@ impl EditorApplication {
         let request = EditorProjectRequest::new(project_root.clone(), options.profile.clone());
         let project_root = open_project_root(&project_root)?;
         let session = EditorProjectSession::open_trusted_compiled(project_root, intent)?;
+        let supervised_play_wake = SupervisedPlayWake::default();
         Ok(Self {
             state: EditorProductState::from_published(PublishedEditorProject::new(
-                request, session,
+                request,
+                session,
+                supervised_play_wake.clone(),
             )),
             open_host: EditorProjectOpenHost::new(),
             shell_panel: EguiProjectShellPanel::new(),
@@ -299,6 +308,7 @@ impl EditorApplication {
             next_attempt_generation: 1,
             session_retirement: None,
             session_close_retry_at: None,
+            supervised_play_wake,
         })
     }
 
@@ -316,6 +326,33 @@ impl EditorApplication {
                 read_only: self.ordinary_input_locked(),
             },
             None => EditorApplicationSurface::ProjectShell,
+        }
+    }
+
+    pub(crate) fn install_supervised_play_wake(&mut self, wake: SupervisedPlayWake) {
+        self.supervised_play_wake = wake.clone();
+        match &mut self.state {
+            EditorProductState::AuthoringReady(project)
+            | EditorProductState::AuthoringDegraded(project) => {
+                project.supervised_play.set_wake(wake);
+            }
+            EditorProductState::OpeningReplacement(
+                OpeningReplacementState::Preparing { retained, .. }
+                | OpeningReplacementState::Refreshing { retained, .. },
+            ) => {
+                retained.supervised_play.set_wake(wake);
+            }
+            EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                retained,
+                candidate,
+                ..
+            }) => {
+                retained.supervised_play.set_wake(wake.clone());
+                candidate.supervised_play.set_wake(wake);
+            }
+            EditorProductState::ProjectManager(_)
+            | EditorProductState::OpeningInitial(_)
+            | EditorProductState::Recovery(_) => {}
         }
     }
 
@@ -953,27 +990,39 @@ impl EditorApplication {
         actions_observed: bool,
         drive_runtime: bool,
     ) -> EditorApplicationUpdate {
+        self.drive_editor_frame_at(real_delta, actions_observed, drive_runtime, Instant::now())
+    }
+
+    fn drive_editor_frame_at(
+        &mut self,
+        real_delta: Duration,
+        actions_observed: bool,
+        drive_runtime: bool,
+        now: Instant,
+    ) -> EditorApplicationUpdate {
         if let EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
             retained,
             ..
         }) = &mut self.state
         {
+            let external_observed = drive_supervised_play_owner(retained, now);
             retained
                 .session
                 .drive_editor_frame_with_runtime(real_delta, drive_runtime);
-            return self.finish_replacement_handoff(actions_observed);
+            return self.finish_replacement_handoff(actions_observed || external_observed);
         }
         match &mut self.state {
             EditorProductState::AuthoringReady(project)
             | EditorProductState::AuthoringDegraded(project) => {
+                let external_observed = drive_supervised_play_owner(project, now);
                 project
                     .session
                     .drive_editor_frame_with_runtime(real_delta, drive_runtime);
                 if self.session_retirement.is_some() {
-                    self.finish_session_retirement(actions_observed)
+                    self.finish_session_retirement(actions_observed || external_observed)
                 } else {
                     EditorApplicationUpdate {
-                        actions_observed,
+                        actions_observed: actions_observed || external_observed,
                         exit_ready: false,
                     }
                 }
@@ -991,6 +1040,84 @@ impl EditorApplication {
                 actions_observed,
                 exit_ready: false,
             },
+        }
+    }
+
+    /// Advances retained supervised Play owners without consuming presentation-bound input.
+    pub(crate) fn drive_supervised_play_effects(
+        &mut self,
+        now: Instant,
+    ) -> EditorApplicationUpdate {
+        match &mut self.state {
+            EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                retained,
+                ..
+            }) => {
+                let observed = drive_supervised_play_owner(retained, now);
+                if observed {
+                    retained
+                        .session
+                        .drive_editor_frame_with_runtime(Duration::ZERO, false);
+                }
+                self.finish_replacement_handoff(observed)
+            }
+            EditorProductState::AuthoringReady(project)
+            | EditorProductState::AuthoringDegraded(project) => {
+                let observed = drive_supervised_play_owner(project, now);
+                if observed {
+                    project
+                        .session
+                        .drive_editor_frame_with_runtime(Duration::ZERO, false);
+                }
+                if self.session_retirement.is_some() {
+                    self.finish_session_retirement(observed)
+                } else {
+                    EditorApplicationUpdate {
+                        actions_observed: observed,
+                        exit_ready: false,
+                    }
+                }
+            }
+            EditorProductState::OpeningReplacement(
+                OpeningReplacementState::Preparing { retained, .. }
+                | OpeningReplacementState::Refreshing { retained, .. },
+            ) => {
+                let observed = drive_supervised_play_owner(retained, now);
+                if observed {
+                    retained
+                        .session
+                        .drive_editor_frame_with_runtime(Duration::ZERO, false);
+                }
+                EditorApplicationUpdate {
+                    actions_observed: observed,
+                    exit_ready: false,
+                }
+            }
+            _ => self.drive_editor_frame_at(Duration::ZERO, false, false, now),
+        }
+    }
+
+    pub(crate) fn next_supervised_play_deadline(&self) -> Option<Instant> {
+        match &self.state {
+            EditorProductState::AuthoringReady(project)
+            | EditorProductState::AuthoringDegraded(project) => {
+                project.supervised_play.next_deadline()
+            }
+            EditorProductState::OpeningReplacement(
+                OpeningReplacementState::Preparing { retained, .. }
+                | OpeningReplacementState::Refreshing { retained, .. },
+            ) => retained.supervised_play.next_deadline(),
+            EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
+                retained,
+                candidate,
+                ..
+            }) => earliest_instant(
+                retained.supervised_play.next_deadline(),
+                candidate.supervised_play.next_deadline(),
+            ),
+            EditorProductState::ProjectManager(_)
+            | EditorProductState::OpeningInitial(_)
+            | EditorProductState::Recovery(_) => None,
         }
     }
 
@@ -1192,6 +1319,25 @@ impl EditorApplication {
                 intent: EditorWorkspaceIntent::Exit,
             }) => {
                 if self.session_close_retry_deferred() {
+                    return EditorApplicationUpdate {
+                        actions_observed,
+                        exit_ready: false,
+                    };
+                }
+                let (supervised_play_ready, supervised_play_retry_required) = match &mut self.state
+                {
+                    EditorProductState::AuthoringReady(project)
+                    | EditorProductState::AuthoringDegraded(project) => {
+                        project.supervised_play.request_close(Instant::now());
+                        (
+                            project.supervised_play.close_complete(),
+                            project.supervised_play.close_retry_required(),
+                        )
+                    }
+                    _ => (true, false),
+                };
+                if !supervised_play_ready {
+                    self.defer_supervised_play_close_retry(supervised_play_retry_required);
                     return EditorApplicationUpdate {
                         actions_observed,
                         exit_ready: false,
@@ -1492,9 +1638,12 @@ impl EditorApplication {
         match frame.workspace_intent().result() {
             Some(EditorWorkspaceIntentResult::Applied {
                 intent: EditorWorkspaceIntent::Exit,
-            }) => match retained.session.advance_close() {
-                EditorProjectCloseProgress::Incomplete { .. } => {
-                    self.defer_session_close_retry();
+            }) => {
+                retained.supervised_play.request_close(Instant::now());
+                if !retained.supervised_play.close_complete() {
+                    self.defer_supervised_play_close_retry(
+                        retained.supervised_play.close_retry_required(),
+                    );
                     self.state =
                         EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
                             entry_generation,
@@ -1505,15 +1654,34 @@ impl EditorApplication {
                             save_attempted,
                         });
                     return EditorApplicationUpdate {
-                        actions_observed: true,
+                        actions_observed,
                         exit_ready: false,
                     };
                 }
-                EditorProjectCloseProgress::Complete(_) => {
-                    self.session_close_retry_at = None;
-                    self.state = EditorProductState::from_published(candidate);
+                match retained.session.advance_close() {
+                    EditorProjectCloseProgress::Incomplete { .. } => {
+                        self.defer_session_close_retry();
+                        self.state = EditorProductState::OpeningReplacement(
+                            OpeningReplacementState::Closing {
+                                entry_generation,
+                                attempt_generation,
+                                retained,
+                                candidate,
+                                close_started,
+                                save_attempted,
+                            },
+                        );
+                        return EditorApplicationUpdate {
+                            actions_observed: true,
+                            exit_ready: false,
+                        };
+                    }
+                    EditorProjectCloseProgress::Complete(_) => {
+                        self.session_close_retry_at = None;
+                        self.state = EditorProductState::from_published(candidate);
+                    }
                 }
-            },
+            }
             Some(
                 EditorWorkspaceIntentResult::Cancelled {
                     intent: EditorWorkspaceIntent::Exit,
@@ -1637,9 +1805,13 @@ impl EditorApplication {
                         opening.step = OpeningProjectStep::Host(attempt);
                         OpenStepResult::Pending
                     }
-                    EditorProjectOpenProgress::Opened(session) => OpenStepResult::Opened(
-                        PublishedEditorProject::new(opening.request.clone(), session),
-                    ),
+                    EditorProjectOpenProgress::Opened(session) => {
+                        OpenStepResult::Opened(PublishedEditorProject::new(
+                            opening.request.clone(),
+                            session,
+                            self.supervised_play_wake.clone(),
+                        ))
+                    }
                     EditorProjectOpenProgress::Rejected(failure) => {
                         OpenStepResult::Rejected(RecoveryState::from_host_failure(
                             opening.entry_generation,
@@ -1680,6 +1852,11 @@ impl EditorApplication {
 
     fn defer_session_close_retry(&mut self) {
         self.session_close_retry_at = Some(Instant::now() + EDITOR_SESSION_CLOSE_RETRY_DELAY);
+    }
+
+    fn defer_supervised_play_close_retry(&mut self, explicit_retry_required: bool) {
+        self.session_close_retry_at =
+            (!explicit_retry_required).then(|| Instant::now() + EDITOR_SESSION_CLOSE_RETRY_DELAY);
     }
 
     fn take_state(&mut self) -> EditorProductState {
@@ -1729,7 +1906,8 @@ fn dispatch_project_actions(
                 dispatch.requires_runtime_drive = true;
             }
             EditorAction::Play(EditorPlayAction::Resume)
-            | EditorAction::Play(EditorPlayAction::Play { .. }) => {
+            | EditorAction::Play(EditorPlayAction::Play { .. })
+            | EditorAction::Play(EditorPlayAction::RunLastGood) => {
                 dispatch.starts_cadence = true;
                 dispatch.requires_runtime_drive = true;
             }
@@ -1753,6 +1931,7 @@ fn dispatch_project_actions(
             true
         }
     };
+    submit_supervised_play_request(project);
     dispatch
 }
 
@@ -1769,6 +1948,8 @@ fn dispatch_close_resolution_actions(
             matches!(
                 action,
                 EditorAction::WorkspaceIntent(EditorWorkspaceIntentAction::Resolve(_))
+                    | EditorAction::Play(EditorPlayAction::RetryClose)
+                    | EditorAction::Play(EditorPlayAction::RetryRetirement)
             )
         })
         .inspect(|action| {
@@ -1869,6 +2050,32 @@ fn request_exit_on_project(project: &mut PublishedEditorProject) -> EditorApplic
     EditorApplicationUpdate {
         actions_observed: dispatch.actions_observed(),
         exit_ready: false,
+    }
+}
+
+fn submit_supervised_play_request(project: &mut PublishedEditorProject) {
+    let Some(request) = project.session.take_external_play_request() else {
+        return;
+    };
+    project.supervised_play.submit(
+        request,
+        project.request.project_root().to_path_buf(),
+        Instant::now(),
+    );
+}
+
+fn drive_supervised_play_owner(project: &mut PublishedEditorProject, now: Instant) -> bool {
+    let Some(observation) = project.supervised_play.advance(now) else {
+        return false;
+    };
+    project.session.apply_external_play_observation(observation)
+}
+
+fn earliest_instant(left: Option<Instant>, right: Option<Instant>) -> Option<Instant> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.min(right)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
     }
 }
 
@@ -1987,5 +2194,89 @@ mod tests {
 
         #[cfg(not(any(windows, target_os = "linux")))]
         assert_eq!(portable_project_root_trust(), TrustMode::TrustedLocal);
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
+    fn quiet_supervised_wake_preserves_the_published_authoring_frame() {
+        let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
+        let mut application = super::EditorApplication::new(
+            super::EditorLaunchOptions::new(project.clone()).with_profile("desktop"),
+        );
+        let _ = application.native_shell_ready();
+        for _ in 0..64 {
+            if application.current_frame().is_some() {
+                break;
+            }
+            let _ = application.advance_project_open();
+        }
+        let before = application
+            .current_frame()
+            .expect("the reference authoring project opens");
+        let update = application.drive_supervised_play_effects(std::time::Instant::now());
+        assert!(!update.actions_observed());
+        assert!(std::sync::Arc::ptr_eq(
+            &before,
+            &application.current_frame().unwrap()
+        ));
+
+        assert!(application.request_project_replacement(project, None));
+        for _ in 0..64 {
+            if matches!(
+                application.state,
+                super::EditorProductState::OpeningReplacement(
+                    super::OpeningReplacementState::Closing { .. }
+                )
+            ) {
+                break;
+            }
+            let _ = application.advance_project_open();
+        }
+        assert!(matches!(
+            application.state,
+            super::EditorProductState::OpeningReplacement(
+                super::OpeningReplacementState::Closing { .. }
+            )
+        ));
+        application.session_close_retry_at =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
+        let closing_frame = application.current_frame().unwrap();
+        let update = application.drive_supervised_play_effects(std::time::Instant::now());
+        let closing_actions_observed = update.actions_observed();
+        let closing_frame_preserved =
+            std::sync::Arc::ptr_eq(&closing_frame, &application.current_frame().unwrap());
+        application.session_close_retry_at = None;
+        let replacement_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while matches!(
+            application.state,
+            super::EditorProductState::OpeningReplacement(_)
+        ) {
+            let _ = application.advance_project_open();
+            let _ = application.drive_editor_frame(std::time::Duration::ZERO, false, false);
+            assert!(
+                std::time::Instant::now() < replacement_deadline,
+                "the replacement did not retire"
+            );
+            std::thread::yield_now();
+        }
+
+        let _ = application.request_exit();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while application.current_frame().is_some() {
+            let update = application.drive_editor_frame(std::time::Duration::ZERO, false, false);
+            if update.exit_ready() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the quiet Editor did not close"
+            );
+            std::thread::yield_now();
+        }
+        assert!(!closing_actions_observed);
+        assert!(
+            closing_frame_preserved,
+            "a late quiet wake must not stale the displayed closing action frame"
+        );
     }
 }

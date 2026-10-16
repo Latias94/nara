@@ -1,6 +1,7 @@
 //! Authorized, World-independent startup content loading.
 
 mod budget;
+mod catalogue;
 mod closure;
 
 use std::{
@@ -55,10 +56,34 @@ pub use budget::{
     ProjectContentBudgetError, ProjectContentBudgetHost, ProjectContentBudgetKind,
     ProjectContentBudgetSnapshot, ProjectContentLimits,
 };
+use catalogue::ReferenceCatalogue;
 use closure::{StartupContentClosureBuilder, StartupContentClosureDraft};
 pub use closure::{
     StartupContentClosureReceipt, StartupContentMemberKind, StartupContentMemberReceipt,
 };
+
+/// Computes the canonical Runtime startup-content digest from already admitted logical members.
+///
+/// The closure builder remains the sole owner of digest framing and ordering. Callers must
+/// provide only members that belong to the Runtime content closure; manifest and schema-bundle
+/// facts are intentionally excluded from this digest by the builder's invariant.
+pub(crate) fn startup_content_digest_from_members(
+    manifest_digest: ContentDigest,
+    members: impl IntoIterator<
+        Item = (
+            StartupContentMemberKind,
+            nara_project::ProjectPath,
+            ContentDigest,
+        ),
+    >,
+) -> Result<ContentDigest, ProjectContentError> {
+    let mut builder = StartupContentClosureBuilder::new(manifest_digest)?;
+    for (kind, path, digest) in members {
+        builder.insert_project_path(kind, path, digest)?;
+    }
+    let framed_bytes = builder.content_digest_framed_bytes()?;
+    builder.content_digest(framed_bytes)
+}
 
 // nara_fs relative traversal retains at most one intermediate handle while opening the next, and
 // bounded reads clone the opened file for the reader. Reserve both slots before either operation.
@@ -139,8 +164,21 @@ struct ProjectContentSnapshotInner {
     expanded_startup_scene_provenance: Arc<SceneEntityProvenanceMap>,
     prefabs: Box<[ProjectPrefabContent]>,
     images: Box<[ProjectImageContent]>,
+    assets: Arc<ProjectContentAssets>,
     _generation_lease: ProjectContentGenerationLease,
     _runtime_lease: ProjectContentLease,
+}
+
+/// Keeps a materializer's admitted identity context and its reservation together.
+pub(crate) struct ProjectContentAssets {
+    database: ProjectAssetDatabase,
+    _lease: ProjectContentLease,
+}
+
+impl ProjectContentAssets {
+    pub(crate) fn database(&self) -> &ProjectAssetDatabase {
+        &self.database
+    }
 }
 
 impl ProjectContentSnapshot {
@@ -205,6 +243,15 @@ impl ProjectContentSnapshot {
         &self.inner.prefabs
     }
 
+    pub(crate) fn resolved_asset_path(&self, reference: &AssetRef) -> Option<&AssetPath> {
+        self.inner
+            .assets
+            .database()
+            .resolve_ref(reference)
+            .ok()
+            .map(AssetRecord::path)
+    }
+
     #[must_use]
     pub fn images(&self) -> &[ProjectImageContent] {
         &self.inner.images
@@ -223,6 +270,7 @@ impl ProjectContentSnapshot {
         StartupSceneSource::from_project_content(
             Arc::clone(&self.inner.expanded_startup_scene),
             Arc::clone(&self.inner.expanded_startup_scene_provenance),
+            Arc::clone(&self.inner.assets),
             self.inner._runtime_lease.clone(),
             startup_scene_retained_bytes(
                 &self.inner.expanded_startup_scene,
@@ -239,11 +287,13 @@ impl ProjectContentSnapshot {
     ) -> Result<StartupSceneSource, ProjectContentError> {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
+            database: self.inner.assets.database(),
         };
-        let expansion = document.expand_prefabs_with_options(
+        let expansion = document.expand_prefabs_with_options_and_asset_database(
             registry,
             &resolver,
             nara_scene::PrefabExpansionOptions::default(),
+            self.inner.assets.database(),
         );
         let nara_scene::PrefabExpansionReport {
             document,
@@ -253,7 +303,8 @@ impl ProjectContentSnapshot {
         let expanded = document.ok_or_else(|| {
             map_scene_diagnostics(ProjectContentErrorKind::PrefabExpansion, diagnostics)
         })?;
-        let diagnostics = expanded.validate(registry);
+        let diagnostics =
+            expanded.validate_with_asset_database(registry, self.inner.assets.database());
         if diagnostics.has_errors() {
             return Err(map_scene_diagnostics(
                 ProjectContentErrorKind::ScenePublication,
@@ -269,6 +320,7 @@ impl ProjectContentSnapshot {
         Ok(StartupSceneSource::from_project_content(
             Arc::new(expanded),
             Arc::new(provenance),
+            Arc::clone(&self.inner.assets),
             lease,
             retained_bytes,
         ))
@@ -283,21 +335,29 @@ impl ProjectContentSnapshot {
     ) -> nara_scene::SceneAuthoringSyncReport {
         let resolver = SnapshotPrefabResolver {
             prefabs: self.prefabs(),
+            database: self.inner.assets.database(),
         };
         session
-            .sync_world_with_prefab_resolver(world, registry, &resolver)
+            .sync_world_with_prefab_resolver_and_asset_database(
+                world,
+                registry,
+                &resolver,
+                self.inner.assets.database(),
+            )
             .expect("Editor preview materializers always retain native authority")
     }
 }
 
 struct SnapshotPrefabResolver<'a> {
     prefabs: &'a [ProjectPrefabContent],
+    database: &'a ProjectAssetDatabase,
 }
 
 impl PrefabSourceResolver for SnapshotPrefabResolver<'_> {
     fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        let AssetRef::Path(path) = source else {
-            return None;
+        let path = match source {
+            AssetRef::Path(path) => path,
+            AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),
         };
         self.prefabs
             .iter()
@@ -338,7 +398,6 @@ pub enum ProjectContentErrorKind {
     ScenePublication,
     PrefabExpansion,
     AssetReference,
-    UnsupportedStableAssetReference,
     AssetMeta,
     AssetMetaMismatch,
     UnsupportedAssetKind,
@@ -538,9 +597,6 @@ impl Display for ProjectContentError {
             ProjectContentErrorKind::PrefabExpansion => "project prefab expansion failed",
             ProjectContentErrorKind::AssetReference => {
                 "project component asset reference is invalid"
-            }
-            ProjectContentErrorKind::UnsupportedStableAssetReference => {
-                "stable asset references are unsupported for startup content"
             }
             ProjectContentErrorKind::AssetMeta => "project asset metadata is invalid",
             ProjectContentErrorKind::AssetMetaMismatch => {
@@ -780,6 +836,9 @@ struct LoadContext<'a> {
     startup_closure: Option<StartupContentClosureBuilder>,
     startup_closure_work_bytes: usize,
     asset_database: ProjectAssetDatabase,
+    asset_database_work_bytes: usize,
+    catalogue: Option<ReferenceCatalogue>,
+    catalogue_roots: Option<[nara_project::ProjectPath; 2]>,
 }
 
 struct ExpectedPrefabSource {
@@ -822,6 +881,9 @@ impl<'a> LoadContext<'a> {
             startup_closure: Some(StartupContentClosureBuilder::new(manifest_digest)?),
             startup_closure_work_bytes,
             asset_database: ProjectAssetDatabase::default(),
+            asset_database_work_bytes: 0,
+            catalogue: None,
+            catalogue_roots: None,
         })
     }
 
@@ -831,6 +893,10 @@ impl<'a> LoadContext<'a> {
     ) -> Result<ProjectContentSnapshot, ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::OpenHandles, 1)?;
         let settings = candidate.settings();
+        self.catalogue_roots = Some([
+            settings.paths.assets.clone(),
+            settings.paths.prefabs.clone(),
+        ]);
         self.startup_closure
             .as_mut()
             .expect("load context owns one startup closure builder until publication")
@@ -875,6 +941,9 @@ impl<'a> LoadContext<'a> {
 
         let loaded_prefabs =
             self.load_prefab_closure(&prefabs, &settings.paths.prefabs, &startup_scene)?;
+        for path in loaded_prefabs.keys() {
+            self.admit_prefab_metadata(&prefabs, &settings.paths.prefabs, path)?;
+        }
         if let Some(expected) = &self.expected_prefab
             && !expected.observed
         {
@@ -886,15 +955,25 @@ impl<'a> LoadContext<'a> {
                 expected.path.as_str(),
             ));
         }
-        let resolver = LoadedPrefabResolver::new(&loaded_prefabs);
         let expansion_work = prefab_expansion_work_plan(self.loader.limits.prefab_expansion())?;
         let work_before = self.reserve_work(expansion_work)?;
-        let expansion = startup_scene.expand_prefabs_with_options(
-            self.validation.registry(),
-            &resolver,
-            nara_scene::PrefabExpansionOptions::default()
-                .with_limits(self.loader.limits.prefab_expansion()),
-        );
+        let resolver = LoadedPrefabResolver::new(&loaded_prefabs, &self.asset_database);
+        let options = nara_scene::PrefabExpansionOptions::default()
+            .with_limits(self.loader.limits.prefab_expansion());
+        let expansion = if self.catalogue.is_some() {
+            startup_scene.expand_prefabs_with_options_and_asset_database(
+                self.validation.registry(),
+                &resolver,
+                options,
+                &self.asset_database,
+            )
+        } else {
+            startup_scene.expand_prefabs_with_options(
+                self.validation.registry(),
+                &resolver,
+                options,
+            )
+        };
         let nara_scene::PrefabExpansionReport {
             document,
             diagnostics,
@@ -917,6 +996,8 @@ impl<'a> LoadContext<'a> {
 
         let asset_refs = self.collect_image_candidates(&expanded)?;
         let images = self.load_images(&assets, &settings.paths.assets, asset_refs)?;
+        let database = self.retain_loaded_asset_identities(&loaded_prefabs, &images)?;
+        self.release_catalogue_work();
         drop((scenes, prefabs, assets));
         let open_handles = self.budget_value(ProjectContentBudgetKind::OpenHandles);
         self.subtract_budget(ProjectContentBudgetKind::OpenHandles, open_handles);
@@ -981,6 +1062,10 @@ impl<'a> LoadContext<'a> {
             .take()
             .expect("load context owns one budget ticket until publication");
         let runtime_lease = budget.into_lease().map_err(ProjectContentError::budget)?;
+        let assets = Arc::new(ProjectContentAssets {
+            database,
+            _lease: runtime_lease.clone(),
+        });
         if !images.is_empty() {
             let image_retention = Arc::new(runtime_lease.clone());
             for content in &mut images {
@@ -1037,6 +1122,7 @@ impl<'a> LoadContext<'a> {
                 expanded_startup_scene_provenance,
                 prefabs,
                 images,
+                assets,
                 _generation_lease: generation_lease,
                 _runtime_lease: runtime_lease,
             }),
@@ -1229,10 +1315,13 @@ impl<'a> LoadContext<'a> {
         let canonical = decode_scene_candidate(path, bytes, self.loader.limits.scene_file())?
             .canonicalize(self.validation.registry())
             .map_err(map_scene_publication_error)?;
-        self.reject_stable_component_asset_references(&canonical.document().entities)?;
-        let published = canonical
-            .publish(self.validation.registry())
-            .map_err(map_scene_publication_error)?;
+        self.prepare_component_asset_references(&canonical.document().entities)?;
+        let published = if self.catalogue.is_some() {
+            canonical.publish_with_asset_database(self.validation.registry(), &self.asset_database)
+        } else {
+            canonical.publish(self.validation.registry())
+        }
+        .map_err(map_scene_publication_error)?;
         self.source_upgrade_required |= published.source_upgrade_required();
         let document = published.into_document();
         let retained = scene_retained_bytes(&document)?;
@@ -1250,10 +1339,13 @@ impl<'a> LoadContext<'a> {
         let canonical = decode_prefab_candidate(path, bytes, self.loader.limits.scene_file())?
             .canonicalize(self.validation.registry())
             .map_err(map_scene_publication_error)?;
-        self.reject_stable_component_asset_references(&canonical.document().entities)?;
-        let published = canonical
-            .publish(self.validation.registry())
-            .map_err(map_scene_publication_error)?;
+        self.prepare_component_asset_references(&canonical.document().entities)?;
+        let published = if self.catalogue.is_some() {
+            canonical.publish_with_asset_database(self.validation.registry(), &self.asset_database)
+        } else {
+            canonical.publish(self.validation.registry())
+        }
+        .map_err(map_scene_publication_error)?;
         self.source_upgrade_required |= published.source_upgrade_required();
         let document = published.into_document();
         let retained = prefab_retained_bytes(&document)?
@@ -1287,6 +1379,7 @@ impl<'a> LoadContext<'a> {
         for operation in &patch.operations {
             match operation {
                 ScenePatchOperation::AddEntity { entity, .. } => {
+                    self.prepare_component_asset_references(std::slice::from_ref(entity))?;
                     self.enqueue_prefab_references(entity, depth, queue, discovered)?;
                 }
                 ScenePatchOperation::RestoreEntity {
@@ -1294,9 +1387,62 @@ impl<'a> LoadContext<'a> {
                     descendants,
                     ..
                 } => {
+                    self.prepare_component_asset_references(std::slice::from_ref(entity))?;
+                    self.prepare_component_asset_references(descendants)?;
                     self.enqueue_prefab_references(entity, depth, queue, discovered)?;
                     for descendant in descendants {
                         self.enqueue_prefab_references(descendant, depth, queue, discovered)?;
+                    }
+                }
+                ScenePatchOperation::SetAssetRefField {
+                    asset_ref: AssetRef::StableId(_),
+                    ..
+                } => {
+                    self.ensure_reference_catalogue()?;
+                }
+                ScenePatchOperation::SetField {
+                    component,
+                    field,
+                    value,
+                    ..
+                } => {
+                    let stable_asset = self
+                        .validation
+                        .registry()
+                        .schema(component)
+                        .and_then(|schema| {
+                            schema
+                                .fields()
+                                .iter()
+                                .find(|candidate| candidate.id() == field)
+                        })
+                        .is_some_and(|field| {
+                            field.value_kind() == nara_reflect::ComponentValueKind::AssetRef
+                                && field.has_capability(nara_reflect::ComponentCapability::AssetRef)
+                        })
+                        && matches!(value.get("kind"), Some(nara_reflect::ComponentValue::String(kind)) if kind == "stable_id");
+                    if stable_asset {
+                        self.ensure_reference_catalogue()?;
+                    }
+                }
+                ScenePatchOperation::AddComponent {
+                    component, value, ..
+                }
+                | ScenePatchOperation::ReplaceComponent {
+                    component, value, ..
+                } => {
+                    let references = collect_declared_asset_references(
+                        self.validation.registry(),
+                        component,
+                        value.version,
+                        &value.value,
+                    )
+                    .map_err(map_asset_reference_error)?;
+                    if references
+                        .iter()
+                        .any(|reference| matches!(reference.asset_ref(), AssetRef::StableId(_)))
+                    {
+                        self.ensure_reference_catalogue()?;
                     }
                 }
                 _ => {}
@@ -1314,15 +1460,9 @@ impl<'a> LoadContext<'a> {
     ) -> Result<(), ProjectContentError> {
         self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
         self.observe_depth(depth)?;
-        let AssetRef::Path(path) = source else {
-            return Err(ProjectContentError::single(
-                ProjectContentErrorKind::UnsupportedStableAssetReference,
-                "project.content.stable-asset-reference-unsupported",
-                "Stable asset references require a bounded catalogue",
-            ));
-        };
+        let path = self.resolve_reference_path(source, &AssetSourceKind::Prefab)?;
         self.observe_path(path.as_str())?;
-        if !discovered.contains(path) {
+        if !discovered.contains(&path) {
             self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
             discovered.insert(path.clone());
             queue.push_back((path.clone(), depth));
@@ -1346,15 +1486,10 @@ impl<'a> LoadContext<'a> {
                 .map_err(map_asset_reference_error)?;
                 for reference in references {
                     self.add_budget(ProjectContentBudgetKind::DependencyEdges, 1)?;
-                    let AssetRef::Path(path) = reference.asset_ref() else {
-                        return Err(ProjectContentError::single(
-                            ProjectContentErrorKind::UnsupportedStableAssetReference,
-                            "project.content.stable-asset-reference-unsupported",
-                            "Stable asset references require a bounded catalogue",
-                        ));
-                    };
+                    let path = self
+                        .resolve_reference_path(reference.asset_ref(), &AssetSourceKind::Image)?;
                     self.observe_path(path.as_str())?;
-                    if !paths.contains(path) {
+                    if !paths.contains(&path) {
                         self.add_budget(ProjectContentBudgetKind::QueuedJobs, 1)?;
                         paths.insert(path.clone());
                     }
@@ -1364,8 +1499,8 @@ impl<'a> LoadContext<'a> {
         Ok(paths)
     }
 
-    fn reject_stable_component_asset_references(
-        &self,
+    fn prepare_component_asset_references(
+        &mut self,
         entities: &[SceneEntityRecord],
     ) -> Result<(), ProjectContentError> {
         for entity in entities {
@@ -1381,11 +1516,7 @@ impl<'a> LoadContext<'a> {
                     .iter()
                     .any(|reference| matches!(reference.asset_ref(), AssetRef::StableId(_)))
                 {
-                    return Err(ProjectContentError::single(
-                        ProjectContentErrorKind::UnsupportedStableAssetReference,
-                        "project.content.stable-asset-reference-unsupported",
-                        "Stable asset references require a bounded catalogue",
-                    ));
+                    self.ensure_reference_catalogue()?;
                 }
             }
         }
@@ -1433,6 +1564,7 @@ impl<'a> LoadContext<'a> {
                 .encoded_bytes()
                 .get(),
         )?;
+        self.verify_catalogued_metadata(path, asset_root, meta_digest)?;
         self.record_member(
             StartupContentMemberKind::AssetMetadata,
             asset_root,
@@ -1469,9 +1601,14 @@ impl<'a> LoadContext<'a> {
             ));
         }
         let (identity, settings) = meta.into_parts();
-        self.asset_database
-            .insert_identity(path.clone(), identity.clone())
-            .map_err(|_| {
+        let record = AssetRecord::from(identity);
+        if let Some(indexed) = self.asset_database.record_for_path(path) {
+            if indexed != &record {
+                return Err(catalogue::identity_conflict(path));
+            }
+        } else {
+            self.reserve_asset_database_work(&record)?;
+            self.asset_database.insert(record.clone()).map_err(|_| {
                 ProjectContentError::with_identifier(
                     ProjectContentErrorKind::AssetMetaMismatch,
                     "project.content.asset-identity-conflict",
@@ -1480,7 +1617,7 @@ impl<'a> LoadContext<'a> {
                     path.as_str(),
                 )
             })?;
-        let record = AssetRecord::from(identity);
+        }
         let ceiling = self
             .loader
             .image_importer
@@ -1822,18 +1959,23 @@ fn map_scene_diagnostics(
 
 struct LoadedPrefabResolver<'a> {
     prefabs: &'a BTreeMap<AssetPath, Arc<PrefabDocument>>,
+    database: &'a ProjectAssetDatabase,
 }
 
 impl<'a> LoadedPrefabResolver<'a> {
-    const fn new(prefabs: &'a BTreeMap<AssetPath, Arc<PrefabDocument>>) -> Self {
-        Self { prefabs }
+    const fn new(
+        prefabs: &'a BTreeMap<AssetPath, Arc<PrefabDocument>>,
+        database: &'a ProjectAssetDatabase,
+    ) -> Self {
+        Self { prefabs, database }
     }
 }
 
 impl PrefabSourceResolver for LoadedPrefabResolver<'_> {
     fn resolve_prefab(&self, source: &AssetRef) -> Option<&PrefabDocument> {
-        let AssetRef::Path(path) = source else {
-            return None;
+        let path = match source {
+            AssetRef::Path(path) => path,
+            AssetRef::StableId(_) => self.database.resolve_ref(source).ok()?.path(),
         };
         self.prefabs.get(path).map(Arc::as_ref)
     }
@@ -2192,6 +2334,14 @@ fn map_fs_error(error: FsError) -> ProjectContentError {
                 usize::try_from(limit).unwrap_or(usize::MAX),
             );
             ProjectContentError::budget(error)
+        }
+        FsError::DirectoryEnumerationEntryLimitExceeded { limit }
+        | FsError::DirectoryEnumerationRejectedFactLimitExceeded { limit } => {
+            ProjectContentError::budget(ProjectContentBudgetError::synthetic(
+                ProjectContentBudgetKind::DirectoryEntries,
+                limit.saturating_add(1),
+                limit,
+            ))
         }
         _ => ProjectContentError::single(
             ProjectContentErrorKind::HostAuthorityRejected,

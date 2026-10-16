@@ -362,7 +362,7 @@ pub(super) fn require_workspace_contract(
     let active_game_start = application.active_game_start_request().is_some();
     if runtime
         == EditorRuntimeAvailability::Unavailable(
-            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            EditorRuntimeUnavailableReason::SupervisedPlayContractMissing,
         )
         && project_content == EditorProjectContentView::NotInstalled
         && play.state() == EditorPlayState::Empty

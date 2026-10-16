@@ -163,3 +163,15 @@ pub(crate) fn try_lock(_file: &File, _mode: LockMode) -> Result<(), FsError> {
 pub(crate) fn unlock(_file: &File) -> Result<(), FsError> {
     unsupported(FsOperation::Unlock)
 }
+
+pub(crate) fn restrictive_clone_directory(_file: &File) -> Result<File, FsError> {
+    unsupported(FsOperation::CloneHandle)
+}
+
+pub(crate) fn restrictive_clone_file(_file: &File) -> Result<File, FsError> {
+    unsupported(FsOperation::CloneHandle)
+}
+
+pub(crate) fn restrictive_clone_executable(_file: &File) -> Result<File, FsError> {
+    unsupported(FsOperation::CloneHandle)
+}

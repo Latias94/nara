@@ -21,6 +21,14 @@ use crate::inspector::{
 };
 use crate::snapshot::WorldIdentitySnapshot;
 
+mod external;
+
+pub use external::{
+    EditorExternalPlayCompilerLevel, EditorExternalPlayDiagnostics, EditorExternalPlayMessage,
+    EditorExternalPlayMessageKind, EditorExternalPlayObservation, EditorExternalPlayOutput,
+    EditorExternalPlayRequest, EditorExternalPlayState, EditorExternalPlayView,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPlayCommand {
     Play,
@@ -30,6 +38,7 @@ pub enum EditorPlayCommand {
     StepFixedTick,
     Stop,
     Restart,
+    RunLastGood,
     RetryRetirement,
     RetryClose,
     AcknowledgeResult,
@@ -44,6 +53,7 @@ pub enum EditorPlayOperation {
     StepFixedTick,
     Stop,
     Restart,
+    RunLastGood,
     RetryRetirement,
     RetryClose,
 }
@@ -66,7 +76,11 @@ pub enum EditorPlayState {
 /// Closed reason why an Editor session cannot create a Runtime execution owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorRuntimeUnavailableReason {
-    ExternalExecutionHostNotImplemented,
+    SupervisedPlayContractMissing,
+    SupervisedPlayContractUnsupported,
+    ProjectIdentityMissing,
+    SupervisedPlayPlatformUnsupported,
+    SupervisedPlayUnavailable,
 }
 
 /// Runtime execution capability published by one immutable Editor project frame.
@@ -74,6 +88,7 @@ pub enum EditorRuntimeUnavailableReason {
 pub enum EditorRuntimeAvailability {
     Unavailable(EditorRuntimeUnavailableReason),
     TrustedInProcess,
+    ExternalSupervised,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,11 +100,20 @@ pub enum EditorPlayRejection {
     StaleDocument,
     RuntimeOutOfDate,
     RuntimeUnavailable(EditorRuntimeUnavailableReason),
+    UnsupportedControl(EditorPlayControl),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorPlayControl {
+    Pause,
+    Resume,
+    StepFixedTick,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorPlayFailure {
     Preparation,
+    Superseded,
     Start,
     Runtime,
     Presentation,
@@ -125,7 +149,7 @@ pub enum EditorPlayRequestResult {
     Rejected(EditorPlayRejection),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditorPlayView {
     state: EditorPlayState,
     generation: Option<u64>,
@@ -133,6 +157,7 @@ pub struct EditorPlayView {
     current_revision: Option<SceneAuthoringRevision>,
     out_of_date: bool,
     result: Option<EditorPlayOperationResult>,
+    external: Option<EditorExternalPlayView>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -217,37 +242,49 @@ impl EditorPlayView {
             current_revision,
             out_of_date,
             result,
+            external: None,
         }
     }
 
     #[must_use]
-    pub const fn state(self) -> EditorPlayState {
+    pub const fn state(&self) -> EditorPlayState {
         self.state
     }
 
     #[must_use]
-    pub const fn generation(self) -> Option<u64> {
+    pub const fn generation(&self) -> Option<u64> {
         self.generation
     }
 
     #[must_use]
-    pub const fn source_revision(self) -> Option<SceneAuthoringRevision> {
+    pub const fn source_revision(&self) -> Option<SceneAuthoringRevision> {
         self.source_revision
     }
 
     #[must_use]
-    pub const fn current_revision(self) -> Option<SceneAuthoringRevision> {
+    pub const fn current_revision(&self) -> Option<SceneAuthoringRevision> {
         self.current_revision
     }
 
     #[must_use]
-    pub const fn is_out_of_date(self) -> bool {
+    pub const fn is_out_of_date(&self) -> bool {
         self.out_of_date
     }
 
     #[must_use]
-    pub const fn result(self) -> Option<EditorPlayOperationResult> {
+    pub const fn result(&self) -> Option<EditorPlayOperationResult> {
         self.result
+    }
+
+    #[must_use]
+    pub const fn external(&self) -> Option<&EditorExternalPlayView> {
+        self.external.as_ref()
+    }
+
+    #[must_use]
+    pub fn with_external(mut self, external: EditorExternalPlayView) -> Self {
+        self.external = Some(external);
+        self
     }
 }
 

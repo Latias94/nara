@@ -19,8 +19,7 @@ fn installed_generic_editor_opens_reference_game_without_runtime_publication() {
             EditorApplicationState::AuthoringReady
             | EditorApplicationState::AuthoringDegraded
             | EditorApplicationState::Recovery => break,
-            EditorApplicationState::OpeningInitial
-            | EditorApplicationState::OpeningReplacement => {
+            EditorApplicationState::OpeningInitial | EditorApplicationState::OpeningReplacement => {
                 let _ = application.advance_project_open();
             }
             EditorApplicationState::ProjectManager => {
@@ -42,13 +41,10 @@ fn installed_generic_editor_opens_reference_game_without_runtime_publication() {
     );
     assert_eq!(
         frame.runtime_availability(),
-        EditorRuntimeAvailability::Unavailable(
-            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
-        )
+        EditorRuntimeAvailability::ExternalSupervised
     );
     assert_eq!(
         frame.project_content(),
         EditorProjectContentView::NotInstalled
     );
-
 }

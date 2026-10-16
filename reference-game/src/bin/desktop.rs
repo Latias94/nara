@@ -9,18 +9,23 @@ use std::{
 use nara::{
     app::AppExit,
     diagnostic::{DiagnosticReport, DiagnosticSeverity},
-    project_host::{DesktopRun, DesktopRunOutcome},
+    project_host::{
+        DesktopRun, DesktopRunOutcome, ProductSupervisedDesktopLaunchCandidate,
+        ProductSupervisedDesktopSession, SupervisedDesktopProductIdentity,
+    },
 };
-use nara_reference_game::bundled_desktop_run;
+use nara_reference_game::{bundled_desktop_run, wave_desktop_intent};
 
 mod desktop_candidate_smoke;
 mod support;
 use desktop_candidate_smoke::{CandidateSmokeEvidenceSink, candidate_smoke_run};
-use support::project_root::open_project_root;
+use support::project_root::{open_explicit_project_root, open_project_root};
 
 const CLEANUP_DEADLINE: Duration = Duration::from_secs(5);
 const CANDIDATE_SMOKE_ARGUMENT: &str = "--candidate-smoke";
+const VERIFY_FIRST_PRESENT_ARGUMENT: &str = "--verify-first-present";
 const CANDIDATE_SMOKE_SUCCESS: &str = "desktop_candidate_smoke: ok";
+const DESKTOP_BINARY_TARGET: &str = "desktop";
 const UI_OBSERVATION_ENV: &str = "NARA_REFERENCE_UI_OBSERVATION";
 
 fn main() -> ExitCode {
@@ -31,7 +36,25 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let project_root = match open_project_root() {
+    let supervised_candidate =
+        match ProductSupervisedDesktopLaunchCandidate::read_from_inherited_bootstrap() {
+            Ok(candidate) => candidate,
+            Err(_) => {
+                let diagnostic = supervised_bootstrap_diagnostic();
+                emit_static_error(&diagnostic.code, &diagnostic.summary);
+                return ExitCode::FAILURE;
+            }
+        };
+    if supervised_candidate.is_some() && !mode.accepts_supervised_activation() {
+        let diagnostic = supervised_mode_diagnostic();
+        emit_static_error(&diagnostic.code, &diagnostic.summary);
+        return ExitCode::FAILURE;
+    }
+    let project_root = match supervised_candidate.as_ref() {
+        Some(candidate) => open_explicit_project_root(candidate.context().project_root()),
+        None => open_project_root(),
+    };
+    let project_root = match project_root {
         Ok(project_root) => project_root,
         Err(error) => {
             let diagnostic = first_error_diagnostic(error.diagnostics());
@@ -39,9 +62,59 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (mut run, observation) = desktop_run(project_root, mode);
+    let supervised_session = match supervised_candidate {
+        Some(candidate) => match candidate.verify_project_source(&project_root) {
+            Ok(session) => Some(session),
+            Err(_) => {
+                let diagnostic = supervised_source_diagnostic();
+                emit_static_error(&diagnostic.code, &diagnostic.summary);
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let (mut run, observation) = match desktop_run(project_root, mode, supervised_session) {
+        Ok(run) => run,
+        Err(diagnostic) => {
+            emit_static_error(&diagnostic.code, &diagnostic.summary);
+            return ExitCode::FAILURE;
+        }
+    };
     let exit = drive_desktop_process(
-        || lower_run_report(&run.execute()),
+        || {
+            let report = run.execute();
+            if matches!(report.outcome(), DesktopRunOutcome::Completed(_)) {
+                if mode == DesktopMode::VerifyFirstPresent
+                    && report.presentation_verification().is_none()
+                {
+                    return DesktopProcessStep::Failed(ProcessDiagnostic {
+                        code: "reference-game.desktop.first-present-missing".to_owned(),
+                        summary: "Desktop verification completed without an exact presented frame"
+                            .to_owned(),
+                    });
+                }
+                let result = report
+                    .startup_content_closure()
+                    .ok_or_else(|| {
+                        io::Error::other(
+                            "desktop run completed without its admitted startup closure",
+                        )
+                    })
+                    .and_then(|closure| {
+                        nara::project_tooling::record_product_observation(
+                            nara::project_tooling::ProductObservationTarget::Desktop,
+                            closure,
+                        )
+                    });
+                if let Err(error) = result {
+                    return DesktopProcessStep::Failed(ProcessDiagnostic {
+                        code: "reference-game.product-observation.failed".to_owned(),
+                        summary: error.to_string(),
+                    });
+                }
+            }
+            lower_run_report(&report)
+        },
         Instant::now,
         std::thread::park_timeout,
         emit_static_error,
@@ -84,6 +157,7 @@ fn main() -> ExitCode {
 enum DesktopMode {
     Interactive,
     CandidateSmoke,
+    VerifyFirstPresent,
 }
 
 impl DesktopMode {
@@ -93,6 +167,9 @@ impl DesktopMode {
             (None, None) => Ok(Self::Interactive),
             (Some(argument), None) if argument == CANDIDATE_SMOKE_ARGUMENT => {
                 Ok(Self::CandidateSmoke)
+            }
+            (Some(argument), None) if argument == VERIFY_FIRST_PRESENT_ARGUMENT => {
+                Ok(Self::VerifyFirstPresent)
             }
             _ => Err(ProcessDiagnostic {
                 code: "reference-game.desktop.arguments-invalid".to_owned(),
@@ -104,22 +181,56 @@ impl DesktopMode {
     const fn accepts_completion(self, exit: DesktopProcessExit) -> bool {
         match (self, exit) {
             (Self::Interactive, DesktopProcessExit::Success(_))
-            | (Self::CandidateSmoke, DesktopProcessExit::Success(AppExit::Success)) => true,
+            | (
+                Self::CandidateSmoke | Self::VerifyFirstPresent,
+                DesktopProcessExit::Success(AppExit::Success),
+            ) => true,
             (_, DesktopProcessExit::Failure)
-            | (Self::CandidateSmoke, DesktopProcessExit::Success(AppExit::Requested)) => false,
+            | (
+                Self::CandidateSmoke | Self::VerifyFirstPresent,
+                DesktopProcessExit::Success(AppExit::Requested),
+            ) => false,
         }
+    }
+
+    const fn accepts_supervised_activation(self) -> bool {
+        matches!(self, Self::Interactive)
     }
 }
 
 fn desktop_run(
     project_root: nara::fs::DirectoryCapability,
     mode: DesktopMode,
-) -> (DesktopRun, Option<CandidateSmokeEvidenceSink>) {
-    match mode {
-        DesktopMode::Interactive => (bundled_desktop_run(project_root), None),
-        DesktopMode::CandidateSmoke => {
+    supervised_session: Option<ProductSupervisedDesktopSession>,
+) -> Result<(DesktopRun, Option<CandidateSmokeEvidenceSink>), ProcessDiagnostic> {
+    match (mode, supervised_session) {
+        (DesktopMode::Interactive, Some(session)) => {
+            let profile = session.context().profile_name().to_owned();
+            let product_identity = SupervisedDesktopProductIdentity::from_cargo_product(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                DESKTOP_BINARY_TARGET,
+            )
+            .map_err(|_| product_identity_diagnostic())?;
+            let intent = wave_desktop_intent()
+                .with_profile(profile)
+                .with_supervised_desktop_activation(session, product_identity);
+            Ok((DesktopRun::new(project_root, intent), None))
+        }
+        (DesktopMode::Interactive, None) => Ok((bundled_desktop_run(project_root), None)),
+        (DesktopMode::CandidateSmoke, None) => {
             let (run, observation) = candidate_smoke_run(project_root);
-            (run, Some(observation))
+            Ok((run, Some(observation)))
+        }
+        (DesktopMode::VerifyFirstPresent, None) => Ok((
+            DesktopRun::new(
+                project_root,
+                wave_desktop_intent().with_first_present_verification(),
+            ),
+            None,
+        )),
+        (DesktopMode::CandidateSmoke | DesktopMode::VerifyFirstPresent, Some(_)) => {
+            Err(supervised_mode_diagnostic())
         }
     }
 }
@@ -185,6 +296,34 @@ fn generic_failure_diagnostic() -> ProcessDiagnostic {
     ProcessDiagnostic {
         code: "reference-game.desktop.failed".to_owned(),
         summary: "Desktop product action failed".to_owned(),
+    }
+}
+
+fn supervised_bootstrap_diagnostic() -> ProcessDiagnostic {
+    ProcessDiagnostic {
+        code: "reference-game.desktop.supervised-bootstrap-invalid".to_owned(),
+        summary: "Supervised desktop launch context could not be admitted".to_owned(),
+    }
+}
+
+fn supervised_mode_diagnostic() -> ProcessDiagnostic {
+    ProcessDiagnostic {
+        code: "reference-game.desktop.supervised-mode-invalid".to_owned(),
+        summary: "Supervised desktop launch is available only in interactive mode".to_owned(),
+    }
+}
+
+fn supervised_source_diagnostic() -> ProcessDiagnostic {
+    ProcessDiagnostic {
+        code: "reference-game.desktop.supervised-source-invalid".to_owned(),
+        summary: "Supervised desktop source facts could not be revalidated".to_owned(),
+    }
+}
+
+fn product_identity_diagnostic() -> ProcessDiagnostic {
+    ProcessDiagnostic {
+        code: "reference-game.desktop.product-identity-invalid".to_owned(),
+        summary: "Compiled desktop product identity is invalid".to_owned(),
     }
 }
 
@@ -258,7 +397,7 @@ mod tests {
     use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
     #[test]
-    fn desktop_arguments_select_only_the_interactive_or_bounded_candidate_mode() {
+    fn desktop_arguments_select_the_explicit_product_modes() {
         assert_eq!(
             DesktopMode::parse(std::iter::empty()),
             Ok(DesktopMode::Interactive)
@@ -266,6 +405,10 @@ mod tests {
         assert_eq!(
             DesktopMode::parse([OsString::from(CANDIDATE_SMOKE_ARGUMENT)]),
             Ok(DesktopMode::CandidateSmoke)
+        );
+        assert_eq!(
+            DesktopMode::parse([OsString::from(VERIFY_FIRST_PRESENT_ARGUMENT)]),
+            Ok(DesktopMode::VerifyFirstPresent)
         );
         for arguments in [
             vec![OsString::from("--unknown")],
@@ -298,6 +441,9 @@ mod tests {
             DesktopMode::Interactive
                 .accepts_completion(DesktopProcessExit::Success(AppExit::Requested))
         );
+        assert!(DesktopMode::Interactive.accepts_supervised_activation());
+        assert!(!DesktopMode::CandidateSmoke.accepts_supervised_activation());
+        assert!(!DesktopMode::VerifyFirstPresent.accepts_supervised_activation());
     }
 
     fn diagnostic(code: &str, summary: &str) -> ProcessDiagnostic {

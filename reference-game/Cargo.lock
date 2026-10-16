@@ -2119,6 +2119,7 @@ dependencies = [
 name = "nara"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "getrandom 0.3.4",
  "nara_app",
  "nara_asset",
@@ -2148,8 +2149,11 @@ dependencies = [
  "nara_ui_render",
  "nara_window",
  "nara_winit",
+ "rustix 1.1.4",
+ "serde_json",
  "thiserror 2.0.18",
  "toml",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2160,7 +2164,9 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "nara",
+ "rustix 1.1.4",
  "thiserror 2.0.18",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
@@ -2326,10 +2332,11 @@ dependencies = [
 name = "nara_material"
 version = "0.1.0"
 dependencies = [
- "blake3",
  "nara_asset",
- "nara_core",
+ "nara_ecs",
+ "nara_image",
  "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2516,6 +2523,7 @@ dependencies = [
  "nara_diagnostic",
  "nara_identity",
  "nara_reflect",
+ "nara_render",
  "nara_scene",
  "nara_tooling",
  "nara_ui",

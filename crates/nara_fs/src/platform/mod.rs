@@ -98,6 +98,20 @@ pub(crate) fn capability_matrix() -> PlatformCapabilityMatrix {
     imp::capability_matrix()
 }
 
+pub(crate) fn preflight_temporary_publication(
+    expected: crate::ExpectedTarget,
+) -> Result<(), FsError> {
+    #[cfg(all(unix, not(target_os = "linux")))]
+    if matches!(expected, crate::ExpectedTarget::Missing) {
+        return Err(FsError::Unsupported {
+            operation: crate::FsOperation::Replace,
+            capability: "same-parent no-replace temporary-file publication",
+        });
+    }
+    let _ = expected;
+    Ok(())
+}
+
 pub(crate) fn facts(file: &File) -> Result<FileFacts, FsError> {
     #[cfg(test)]
     if let Some(facts) = TEST_FACTS_OVERRIDE.with(|slot| slot.borrow_mut().take()) {
@@ -499,6 +513,24 @@ pub(crate) fn unlock(file: &File) -> Result<(), FsError> {
 pub(crate) fn clone_file(file: &File) -> Result<File, FsError> {
     file.try_clone()
         .map_err(|source| FsError::io(crate::FsOperation::CloneHandle, source))
+}
+
+/// Reopens a directory through the capability handle with the restrictive exact-self contract
+/// required by an immutable-generation launch.
+pub(crate) fn restrictive_clone_directory(file: &File) -> Result<File, FsError> {
+    imp::restrictive_clone_directory(file)
+}
+
+/// Reopens a regular file through the capability handle with the restrictive exact-self contract
+/// required by an immutable-generation launch.
+pub(crate) fn restrictive_clone_file(file: &File) -> Result<File, FsError> {
+    imp::restrictive_clone_file(file)
+}
+
+/// Reopens an executable regular file with the additional execute access needed by the native
+/// image-mapping attestation.
+pub(crate) fn restrictive_clone_executable(file: &File) -> Result<File, FsError> {
+    imp::restrictive_clone_executable(file)
 }
 
 #[cfg(unix)]

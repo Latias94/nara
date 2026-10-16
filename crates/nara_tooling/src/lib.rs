@@ -61,12 +61,16 @@ pub use persistence::{
 #[doc(hidden)]
 pub use play::__export_apply_changes_from_world;
 pub use play::{
-    EditorApplyChangesRejection, EditorApplyChangesResult, EditorPlayCommand, EditorPlayFailure,
-    EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection, EditorPlayRequestResult,
-    EditorPlayState, EditorPlayView, EditorRuntimeAvailability, EditorRuntimeEditRejection,
-    EditorRuntimeEditRequest, EditorRuntimeEditResult, EditorRuntimeUnavailableReason,
-    SceneApplyChangesComponentReport, SceneApplyChangesComponentStatus, SceneApplyChangesReport,
-    SceneApplyChangesRequest, SceneEditorModel, SceneEditorState,
+    EditorApplyChangesRejection, EditorApplyChangesResult, EditorExternalPlayCompilerLevel,
+    EditorExternalPlayDiagnostics, EditorExternalPlayMessage, EditorExternalPlayMessageKind,
+    EditorExternalPlayObservation, EditorExternalPlayOutput, EditorExternalPlayRequest,
+    EditorExternalPlayState, EditorExternalPlayView, EditorPlayCommand, EditorPlayControl,
+    EditorPlayFailure, EditorPlayOperation, EditorPlayOperationResult, EditorPlayRejection,
+    EditorPlayRequestResult, EditorPlayState, EditorPlayView, EditorRuntimeAvailability,
+    EditorRuntimeEditRejection, EditorRuntimeEditRequest, EditorRuntimeEditResult,
+    EditorRuntimeUnavailableReason, SceneApplyChangesComponentReport,
+    SceneApplyChangesComponentStatus, SceneApplyChangesReport, SceneApplyChangesRequest,
+    SceneEditorModel, SceneEditorState,
 };
 pub use project_browser::{
     EditorProjectBrowserAction, EditorProjectBrowserActionOutcome, EditorProjectBrowserBudgetUsage,

@@ -53,7 +53,7 @@ pub(super) fn require_workspace_contract(
     let play = frame.play();
     if runtime
         == EditorRuntimeAvailability::Unavailable(
-            EditorRuntimeUnavailableReason::ExternalExecutionHostNotImplemented,
+            EditorRuntimeUnavailableReason::SupervisedPlayContractMissing,
         )
         && project_content == EditorProjectContentView::NotInstalled
         && play.state() == EditorPlayState::Empty

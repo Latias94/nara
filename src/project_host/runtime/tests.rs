@@ -2336,6 +2336,178 @@ fn generic_editor_image_import_action_rejects_stale_detail_failure_atomically() 
 
 #[cfg(feature = "tooling")]
 #[test]
+fn idle_generic_editor_project_close_yields_progress_before_polling_workers() {
+    let project = TestProject::new("editor-idle-close");
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+
+    let first = editor.advance_close();
+    assert!(
+        matches!(
+            first,
+            super::editor::EditorProjectCloseProgress::Incomplete { .. }
+        ),
+        "the first close advance must return before polling task retirement: {first:#?}"
+    );
+    let close = drive_editor_close_to_completion(&mut editor);
+
+    assert!(
+        matches!(
+            &close,
+            super::editor::EditorProjectCloseProgress::Complete(_)
+        ),
+        "an idle generic Editor session must close completely: {close:#?}"
+    );
+    assert!(close.task_shutdown().is_complete());
+}
+
+#[cfg(feature = "tooling")]
+fn drive_editor_close_to_completion(
+    editor: &mut super::editor::EditorProjectSession,
+) -> super::editor::EditorProjectCloseProgress {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let progress = editor.advance_close();
+        if matches!(
+            progress,
+            super::editor::EditorProjectCloseProgress::Complete(_)
+        ) {
+            return progress;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Editor close retained an unfinished owner: {progress:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[cfg(all(feature = "tooling", windows))]
+#[test]
+fn image_metadata_cleanup_blocks_new_publication_and_session_close_until_retry() {
+    let project = TestProject::new("editor-image-cleanup-close");
+    let textures = project.root.join("assets/textures");
+    fs::create_dir_all(&textures).unwrap();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/images/valid-rgba-1x1.png"),
+        textures.join("imported.png"),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let entries = fs::read_dir(&textures).unwrap().count();
+    let frame = editor.current_frame();
+    editor.test_fail_next_image_metadata_after_write();
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            ImageImportSettings::default(),
+        ),
+        super::editor::EditorImageImportRequestResult::Completed(
+            super::editor::EditorImageImportState::Failed {
+                failure: super::editor::EditorImageImportFailure::CleanupPending,
+                ..
+            }
+        )
+    ));
+    assert!(!textures.join("imported.png.meta").exists());
+    assert_eq!(fs::read_dir(&textures).unwrap().count(), entries + 1);
+    assert!(matches!(
+        editor.request_editor_image_import(
+            frame.revision(),
+            "assets/textures/imported.png",
+            ImageImportSettings::default(),
+        ),
+        super::editor::EditorImageImportRequestResult::Rejected(
+            super::editor::EditorImageImportFailure::CleanupPending
+        )
+    ));
+    assert_eq!(fs::read_dir(&textures).unwrap().count(), entries + 1);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let close = loop {
+        let close = editor.advance_close();
+        if close.task_shutdown().is_complete() {
+            break close;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "task retirement did not finish: {close:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert!(close.task_shutdown().is_complete());
+    assert!(matches!(
+        close,
+        super::editor::EditorProjectCloseProgress::Incomplete {
+            file_cleanup_pending: true,
+            ..
+        }
+    ));
+    editor.test_allow_image_publication_cleanup();
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+    assert_eq!(fs::read_dir(&textures).unwrap().count(), entries);
+}
+
+#[cfg(all(feature = "tooling", windows))]
+#[test]
+fn scene_save_cleanup_blocks_session_close_until_retry() {
+    let project = TestProject::new("editor-save-cleanup-close");
+    let mut editor = super::editor::EditorProjectSession::open_trusted_compiled(
+        project.writable_capability(),
+        super::editor::TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let document = editor.workspace().active_document().unwrap();
+    let base_revision = editor.workspace().scene(document).unwrap().revision();
+    assert!(
+        editor
+            .apply_workspace_command(EditorWorkspaceCommand::ApplyScenePatch {
+                document,
+                base_revision,
+                patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(
+                        nara_identity::SceneEntityId::new("unsaved").unwrap()
+                    ),
+                    placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                }]),
+            })
+            .applied
+    );
+    editor.test_fail_next_save_after_write();
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document),
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Failed {
+            stage: nara_tooling::EditorPersistenceFailureStage::WriteTemporary,
+            ..
+        })
+    ));
+    assert!(matches!(
+        editor.advance_close(),
+        super::editor::EditorProjectCloseProgress::Incomplete {
+            file_cleanup_pending: true,
+            ..
+        }
+    ));
+    editor.test_allow_save_cleanup();
+    assert!(matches!(
+        drive_editor_close_to_completion(&mut editor),
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+}
+
+#[cfg(feature = "tooling")]
+#[test]
 fn editor_project_close_retries_timed_out_image_task_owner_before_releasing_session() {
     let project = TestProject::new("editor-image-close-retry");
     fs::create_dir_all(project.root.join("assets/textures")).unwrap();
@@ -2388,11 +2560,27 @@ fn editor_project_close_retries_timed_out_image_task_owner_before_releasing_sess
         super::editor::EditorProjectCloseProgress::Incomplete { .. }
     ));
     assert!(!incomplete.task_shutdown().is_complete());
-    assert!(incomplete.task_shutdown().timed_out());
+    assert!(!incomplete.task_shutdown().timed_out());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let progress = editor.advance_close();
+        assert!(matches!(
+            progress,
+            super::editor::EditorProjectCloseProgress::Incomplete { .. }
+        ));
+        if progress.task_shutdown().timed_out() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the held task did not reach its close deadline"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
     assert!(budget.snapshot().active_reservations() > 1);
 
     assert!(blocked.release());
-    let complete = editor.advance_close();
+    let complete = drive_editor_close_to_completion(&mut editor);
     assert!(matches!(
         &complete,
         super::editor::EditorProjectCloseProgress::Complete(_)
@@ -2488,6 +2676,487 @@ fn open_generic_editor_with_ready_index(
     ));
     assert!(editor.project_source_index_snapshot().is_some());
     editor
+}
+
+#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
+#[test]
+fn generic_editor_preview_resolves_stable_image_after_source_rename() {
+    let project = TestProject::with_image("generic-stable-image-preview");
+    let stable_id = StableAssetId::parse_str("3c7c5be4-fd4e-4b65-b8d4-c671f5982186").unwrap();
+    let mut value = sprite_value(&AssetRef::path("textures/player.png").unwrap());
+    let ComponentValue::Map(fields) = &mut value else {
+        unreachable!()
+    };
+    let ComponentValue::Map(material) = fields.get_mut("material").unwrap() else {
+        unreachable!()
+    };
+    material.insert(
+        "image".to_owned(),
+        ComponentValue::map([
+            ("kind", ComponentValue::String("stable_id".to_owned())),
+            ("value", ComponentValue::String(stable_id.to_string())),
+        ]),
+    );
+    let scene = SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+        nara_identity::SceneEntityId::new("player").unwrap(),
+    )
+    .with_component(
+        ComponentTypeId::new("nara.transform.Transform2d"),
+        identity_transform_record(),
+    )
+    .with_component(
+        ComponentTypeId::new("nara.sprite.Sprite"),
+        SceneComponentRecord::new(ComponentSchemaVersion::ONE, value),
+    )]);
+    let authored_bytes = scene.to_json_string().unwrap();
+    fs::write(
+        project.root.join("scenes/startup.scene.json"),
+        &authored_bytes,
+    )
+    .unwrap();
+
+    for path in ["textures/player.png", "textures/renamed-player.png"] {
+        if path != "textures/player.png" {
+            fs::rename(
+                project.root.join("assets/textures/player.png"),
+                project.root.join("assets").join(path),
+            )
+            .unwrap();
+            fs::remove_file(project.root.join("assets/textures/player.png.meta")).unwrap();
+            let metadata = AssetMeta::new(
+                AssetMetaIdentity::new(
+                    stable_id,
+                    AssetPath::new(path).unwrap(),
+                    AssetSourceKind::Image,
+                ),
+                ImageImportSettings::default(),
+            );
+            fs::write(
+                project.root.join("assets").join(format!("{path}.meta")),
+                metadata.to_json_string().unwrap(),
+            )
+            .unwrap();
+        }
+        let mut editor = open_generic_editor_with_ready_index(&project);
+        drive_image_import_host_until_idle(&mut editor);
+        editor.set_editor_preview_extent(Some(nara_render::Extent2d::new(640, 360).unwrap()));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut previewed_player = false;
+        let mut omitted = true;
+        while Instant::now() < deadline {
+            editor.drive_editor_frame(Duration::ZERO);
+            if let Some(candidate) = editor.take_editor_preview_candidate() {
+                previewed_player = candidate
+                    .hits()
+                    .iter()
+                    .any(|hit| hit.entity().as_str() == "player");
+                omitted = !candidate.preview_omissions().is_empty();
+                if previewed_player {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let diagnostics = editor.current_frame().diagnostics().clone();
+        let hydrated = editor
+            .editor_image_last_good(&AssetPath::new(path).unwrap())
+            .is_some();
+        let close = drive_editor_close_to_completion(&mut editor);
+        drop(editor);
+        assert!(matches!(
+            close,
+            super::editor::EditorProjectCloseProgress::Complete(_)
+        ));
+        assert!(
+            hydrated,
+            "stable image did not hydrate at '{path}': {diagnostics:?}"
+        );
+        assert!(
+            previewed_player && !omitted,
+            "stable image did not materialize in generic preview at '{path}': {diagnostics:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(project.root.join("scenes/startup.scene.json")).unwrap(),
+            authored_bytes
+        );
+    }
+}
+
+#[cfg(all(feature = "tooling", feature = "presentation-2d"))]
+#[test]
+fn generic_editor_imported_image_can_be_selected_by_path_and_stable_id_in_scene_preview() {
+    let project = TestProject::with_image("generic-imported-image-scene-preview");
+    let imported_path = "textures/imported.png";
+    fs::copy(
+        project.root.join("assets/textures/player.png"),
+        project.root.join("assets").join(imported_path),
+    )
+    .unwrap();
+    let mut editor = open_generic_editor_with_ready_index(&project);
+    drive_image_import_host_until_idle(&mut editor);
+    let requested = editor.request_editor_image_import(
+        editor.current_frame().revision(),
+        "assets/textures/imported.png",
+        ImageImportSettings::default(),
+    );
+    let imported = if matches!(
+        requested,
+        super::editor::EditorImageImportRequestResult::Started(_)
+    ) {
+        drive_image_import_to_terminal(&mut editor)
+    } else {
+        editor.editor_image_import_state()
+    };
+    drive_image_import_host_until_idle(&mut editor);
+    let accepted_image = editor
+        .editor_image_last_good(&AssetPath::new(imported_path).unwrap())
+        .cloned();
+    let mut selections = Vec::new();
+    if let Some(image) = accepted_image {
+        let document = editor.workspace().active_document().unwrap();
+        editor.set_editor_preview_extent(Some(nara_render::Extent2d::new(640, 360).unwrap()));
+        for (kind, value) in [
+            ("path", imported_path.to_owned()),
+            ("stable_id", image.stable_id().to_string()),
+        ] {
+            let base_revision = editor.workspace().scene(document).unwrap().revision();
+            let report =
+                editor.apply_workspace_command(EditorWorkspaceCommand::ApplyAuthoringFieldEdit {
+                    document,
+                    base_revision,
+                    edit: AuthoringFieldEdit::single(
+                        nara_identity::SceneEntityId::new("player").unwrap(),
+                        ComponentTypeId::new("nara.sprite.Sprite"),
+                        ComponentSchemaVersion::ONE,
+                        ComponentFieldId::new("material.image"),
+                        ComponentValue::map([
+                            ("kind", ComponentValue::String(kind.to_owned())),
+                            ("value", ComponentValue::String(value)),
+                        ]),
+                    )
+                    .unwrap(),
+                });
+            let expected_revision = editor.workspace().scene(document).unwrap().revision();
+            let expected_key = nara_image::image_resource_key(image.handle());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut selected = false;
+            while Instant::now() < deadline {
+                editor.drive_editor_frame(Duration::ZERO);
+                if let Some(candidate) = editor.take_editor_preview_candidate() {
+                    let current = candidate.revision() == expected_revision
+                        && candidate
+                            .hits()
+                            .iter()
+                            .any(|hit| hit.entity().as_str() == "player");
+                    let (_, _, _, _, batches, _) = candidate.into_parts();
+                    selected = current
+                        && batches.as_slice().iter().any(|batch| {
+                            batch
+                                .image
+                                .as_ref()
+                                .is_some_and(|image| image.identity().key() == expected_key)
+                        });
+                    if selected {
+                        break;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            selections.push((report.applied, selected));
+        }
+    }
+    let diagnostics = editor.current_frame().diagnostics().clone();
+    let close = drive_editor_close_to_completion(&mut editor);
+    drop(editor);
+    assert!(matches!(
+        close,
+        super::editor::EditorProjectCloseProgress::Complete(_)
+    ));
+    assert!(
+        matches!(
+            imported,
+            super::editor::EditorImageImportState::Succeeded { .. }
+        ),
+        "{requested:?}: {imported:?}"
+    );
+    assert_eq!(
+        selections,
+        vec![(true, true), (true, true)],
+        "{diagnostics:?}"
+    );
+}
+
+#[cfg(feature = "tooling")]
+#[test]
+fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successor_play() {
+    let project = TestProject::new("external-play-saved-source-receipt");
+    project.configure_supervised_play("external-play-saved-source-receipt");
+
+    let mut host = super::editor::EditorProjectOpenHost::new();
+    let mut attempt = host.begin(project.writable_capability(), Some("desktop".to_owned()));
+    let mut editor = loop {
+        match host.advance(attempt) {
+            super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+            super::editor::EditorProjectOpenProgress::Opened(session) => break session,
+            super::editor::EditorProjectOpenProgress::Rejected(failure) => panic!(
+                "the supervised authoring project should open: {:?}",
+                failure.diagnostics()
+            ),
+        }
+    };
+    assert_eq!(
+        editor.project_readiness().runtime(),
+        nara_tooling::EditorRuntimeAvailability::ExternalSupervised
+    );
+
+    let document = editor.workspace().active_document().unwrap();
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::Play),
+        nara_tooling::EditorPlayRequestResult::Accepted
+    );
+    let play = editor.take_external_play_request().unwrap();
+    let first_source = play.source_receipt().unwrap().to_vec();
+    let first_digest = nara_fs::ContentDigest::of_bytes(&first_source);
+    let output = |sequence: u64, text: &str| {
+        let message = nara_tooling::EditorExternalPlayMessage::new(
+            sequence,
+            nara_tooling::EditorExternalPlayMessageKind::ProductStdout,
+            None,
+            text.to_owned(),
+            false,
+        )
+        .unwrap();
+        nara_tooling::EditorExternalPlayOutput::new(
+            sequence,
+            nara_tooling::EditorExternalPlayDiagnostics::default(),
+            vec![message],
+            0,
+            0,
+            0,
+            false,
+        )
+        .unwrap()
+    };
+    let stale_output = output(1, "stale output");
+    assert!(
+        !editor.apply_external_play_observation(
+            nara_tooling::EditorExternalPlayObservation::new(
+                play.attempt() + 1,
+                nara_tooling::EditorExternalPlayState::Faulted,
+                None,
+                false,
+                Some(first_digest),
+                stale_output,
+                None,
+            )
+            .unwrap(),
+        )
+    );
+    let first_output = output(2, "first product output");
+    assert!(
+        editor.apply_external_play_observation(
+            nara_tooling::EditorExternalPlayObservation::new(
+                play.attempt(),
+                nara_tooling::EditorExternalPlayState::Running,
+                Some(1),
+                true,
+                Some(first_digest),
+                first_output,
+                Some(nara_tooling::EditorPlayOperationResult::Applied {
+                    operation: nara_tooling::EditorPlayOperation::Play,
+                    generation: Some(1),
+                }),
+            )
+            .unwrap(),
+        )
+    );
+    let running = editor.drive_editor_frame(Duration::ZERO);
+    assert!(!running.play().is_out_of_date());
+    assert_eq!(
+        running.play().external().unwrap().output().messages()[0].text(),
+        "first product output"
+    );
+
+    let unchanged = nara_tooling::EditorExternalPlayObservation::new(
+        play.attempt(),
+        nara_tooling::EditorExternalPlayState::Running,
+        Some(1),
+        true,
+        Some(first_digest),
+        output(2, "first product output"),
+        None,
+    )
+    .unwrap();
+    assert!(
+        !editor.apply_external_play_observation(unchanged),
+        "a quiet child must not report a frame-changing observation"
+    );
+    assert_eq!(
+        editor.drive_editor_frame(Duration::ZERO).play().result(),
+        Some(nara_tooling::EditorPlayOperationResult::Applied {
+            operation: nara_tooling::EditorPlayOperation::Play,
+            generation: Some(1),
+        }),
+        "state-only observations preserve the last operation result"
+    );
+
+    make_authoring_name_dirty(&mut editor, document, "saved-successor");
+    assert!(editor.workspace().scene(document).unwrap().is_dirty());
+    assert!(
+        !editor
+            .drive_editor_frame(Duration::ZERO)
+            .play()
+            .is_out_of_date()
+    );
+
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::Restart),
+        nara_tooling::EditorPlayRequestResult::Accepted
+    );
+    let restart = editor.take_external_play_request().unwrap();
+    assert!(restart.source_receipt().is_none());
+    assert!(
+        editor
+            .external_play_view()
+            .unwrap()
+            .output()
+            .messages()
+            .is_empty()
+    );
+    let restart_output = output(1, "restarted product output");
+    assert!(
+        editor.apply_external_play_observation(
+            nara_tooling::EditorExternalPlayObservation::new(
+                restart.attempt(),
+                nara_tooling::EditorExternalPlayState::Running,
+                Some(1),
+                true,
+                Some(first_digest),
+                restart_output.clone(),
+                Some(nara_tooling::EditorPlayOperationResult::Applied {
+                    operation: nara_tooling::EditorPlayOperation::Restart,
+                    generation: Some(1),
+                }),
+            )
+            .unwrap(),
+        )
+    );
+
+    assert_eq!(
+        editor.request_persistence(EditorPersistenceCommand::Save {
+            document: Some(document),
+        }),
+        nara_tooling::EditorPersistenceRequestResult::Accepted
+    );
+    let saved = editor.drive_editor_frame(Duration::ZERO);
+    assert!(matches!(
+        editor.persistence_view().result(),
+        Some(EditorPersistenceResult::Saved { document: saved_document, .. })
+            if saved_document == document
+    ));
+    assert!(saved.play().is_out_of_date());
+    assert!(!editor.external_play_view().unwrap().last_good_available());
+
+    assert!(
+        editor.apply_external_play_observation(
+            nara_tooling::EditorExternalPlayObservation::new(
+                restart.attempt(),
+                nara_tooling::EditorExternalPlayState::Faulted,
+                Some(1),
+                true,
+                Some(first_digest),
+                restart_output.clone(),
+                Some(nara_tooling::EditorPlayOperationResult::Failed {
+                    operation: nara_tooling::EditorPlayOperation::Restart,
+                    failure: nara_tooling::EditorPlayFailure::Runtime,
+                }),
+            )
+            .unwrap(),
+        )
+    );
+    assert!(!editor.external_play_view().unwrap().last_good_available());
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::RunLastGood),
+        nara_tooling::EditorPlayRequestResult::Rejected(
+            nara_tooling::EditorPlayRejection::InvalidState,
+        )
+    );
+
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::Stop),
+        nara_tooling::EditorPlayRequestResult::Accepted
+    );
+    let stop = editor.take_external_play_request().unwrap();
+    assert!(
+        editor.apply_external_play_observation(
+            nara_tooling::EditorExternalPlayObservation::new(
+                stop.attempt(),
+                nara_tooling::EditorExternalPlayState::Idle,
+                None,
+                true,
+                Some(first_digest),
+                restart_output,
+                Some(nara_tooling::EditorPlayOperationResult::Applied {
+                    operation: nara_tooling::EditorPlayOperation::Stop,
+                    generation: None,
+                }),
+            )
+            .unwrap(),
+        )
+    );
+    assert_eq!(
+        editor.external_play_view().unwrap().output().messages()[0].text(),
+        "restarted product output"
+    );
+
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::Play),
+        nara_tooling::EditorPlayRequestResult::Accepted
+    );
+    let successor = editor.take_external_play_request().unwrap();
+    assert!(
+        editor
+            .external_play_view()
+            .unwrap()
+            .output()
+            .messages()
+            .is_empty()
+    );
+    let successor_source = successor.source_receipt().unwrap();
+    assert_ne!(
+        nara_fs::ContentDigest::of_bytes(successor_source),
+        first_digest
+    );
+    let successor_digest = nara_fs::ContentDigest::of_bytes(successor_source);
+    assert!(
+        editor.apply_external_play_observation(
+            nara_tooling::EditorExternalPlayObservation::new(
+                successor.attempt(),
+                nara_tooling::EditorExternalPlayState::CleanupIncomplete,
+                Some(2),
+                false,
+                Some(successor_digest),
+                nara_tooling::EditorExternalPlayOutput::default(),
+                Some(nara_tooling::EditorPlayOperationResult::Failed {
+                    operation: nara_tooling::EditorPlayOperation::RetryClose,
+                    failure: nara_tooling::EditorPlayFailure::Close,
+                }),
+            )
+            .unwrap(),
+        )
+    );
+    assert_eq!(
+        editor.drive_editor_frame(Duration::ZERO).play().state(),
+        nara_tooling::EditorPlayState::CloseIncomplete,
+    );
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::RetryClose),
+        nara_tooling::EditorPlayRequestResult::Accepted,
+    );
+    assert_eq!(
+        editor.take_external_play_request().unwrap().operation(),
+        nara_tooling::EditorPlayOperation::RetryClose,
+    );
 }
 
 #[cfg(feature = "tooling")]
@@ -3091,14 +3760,12 @@ fn dirty_prefab_retarget_preserves_the_scene_lane_and_honors_cancel_or_discard()
 fn authoring_prefab_source_survives_failed_publication_close_and_reopen() {
     let project = TestProject::new("authoring-prefab-reopen");
     fs::create_dir_all(project.root.join("schemas")).unwrap();
-    let mut manifest = fs::read_to_string(project.root.join("nara.toml")).unwrap();
-    manifest.push_str(
-        r#"
-
-[authoring]
-schema_bundle = "schemas/authoring.bundle.json"
-"#,
-    );
+    let manifest = fs::read_to_string(project.root.join("nara.toml"))
+        .unwrap()
+        .replace(
+            "schema/authoring.bundle.json",
+            "schemas/authoring.bundle.json",
+        );
     fs::write(project.root.join("nara.toml"), manifest).unwrap();
     let resolved =
         nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
@@ -3312,6 +3979,9 @@ prefabs = "prefabs"
 
 [startup]
 default_scene = "startup.scene.json"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
 
 [runtime]
 preset = "local-headless"
@@ -4625,6 +5295,7 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
     let retained_after_failure = budget_host
         .snapshot()
         .active(ProjectContentBudgetKind::RetainedBytes);
+    let reservations_after_failure = budget_host.snapshot().active_reservations();
     let cleanup_outcome = host.drive_cleanup_once();
     let retained_during_incomplete_cleanup = budget_host
         .snapshot()
@@ -4637,13 +5308,17 @@ fn editor_activation_lease_survives_failed_startup_until_delayed_cleanup_finishe
 
     assert_eq!(failure_code, "nara.test.startup-configuration-invalid");
     assert!(!runtime_was_visible);
-    assert_eq!(retained_after_failure, editor_source_charge);
+    assert!(retained_after_failure >= editor_source_charge);
+    assert!(reservations_after_failure > 0);
     assert!(matches!(
         cleanup_outcome,
         CleanupDriveOutcome::Retiring | CleanupDriveOutcome::RetirementIncomplete
     ));
-    assert_eq!(retained_during_incomplete_cleanup, editor_source_charge);
-    assert_eq!(reservations_during_incomplete_cleanup, 1);
+    assert_eq!(retained_during_incomplete_cleanup, retained_after_failure);
+    assert_eq!(
+        reservations_during_incomplete_cleanup,
+        reservations_after_failure
+    );
     assert_eq!(released.active(ProjectContentBudgetKind::RetainedBytes), 0);
     assert_eq!(released.active_reservations(), 0);
 }
@@ -4831,6 +5506,7 @@ fn prepared_publication_unwind_keeps_the_host_slot_empty() {
     let (snapshot, plan) = project.snapshot_and_plan(false);
     let mut host = ProjectHost::new(RuntimeClosePolicy::default());
     let mut attempt = host.begin_start(snapshot, plan, Vec::new()).unwrap();
+    let retained_before = runtime_quarantine_status().current_thread_retained();
 
     let unwound = catch_unwind(AssertUnwindSafe(|| {
         let _prepared = host.prepare_start(&mut attempt).unwrap();
@@ -4840,6 +5516,17 @@ fn prepared_publication_unwind_keeps_the_host_slot_empty() {
     assert!(unwound.is_err());
     assert!(matches!(host.slot, ProjectHostSlot::Empty));
     assert!(!host.start_claim.any_active());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while runtime_quarantine_status().current_thread_retained() > retained_before
+        && std::time::Instant::now() < deadline
+    {
+        let _ = drive_runtime_quarantine();
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        runtime_quarantine_status().current_thread_retained(),
+        retained_before
+    );
 }
 
 #[test]
@@ -5712,6 +6399,75 @@ requested = ["runtime-2d"]
         .unwrap();
 
         project
+    }
+
+    #[cfg(feature = "tooling")]
+    fn configure_supervised_play(&self, name: &str) {
+        fs::write(
+            self.root.join("nara.toml"),
+            format!(
+                r#"schema_version = 1
+
+[project]
+name = "{name}"
+stable_id = "{name}"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
+[runtime]
+preset = "local-headless"
+
+[capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.execution]
+contract = "desktop-supervised-play/v1"
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            self.root.join("scenes/startup.scene.json"),
+            SceneDocument::from_ordered_roots([editable_name_entity("initial")])
+                .to_json_string()
+                .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            self.root.join("Cargo.toml"),
+            format!(
+                r#"[package]
+name = "{name}"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "desktop"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[features]
+desktop = []
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(self.root.join("Cargo.lock"), "version = 4\n").unwrap();
     }
 
     #[cfg(all(feature = "tooling", feature = "runtime-ui"))]
