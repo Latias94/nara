@@ -1,0 +1,1114 @@
+{
+  "subject": "Editor extension models for a standalone Rust game editor",
+  "researched_at": "2026-08-18T00:00:00+08:00",
+  "scope": {
+    "question": "How mature game engines let users extend editor UI and tools without rebuilding the editor itself, and which isolation model should Nara adopt.",
+    "source_policy": "Official documentation, official API references, official source repositories, and Nara repository authority only. No community sources were used.",
+    "version_scope": {
+      "godot": "Godot 4.7 / 4.7.1-stable",
+      "unity": "Unity 6.5 / 6000.5 documentation",
+      "unreal": "Current Unreal Engine 5.x official documentation accessed 2026-08-18",
+      "wasmtime": "Current official Wasmtime documentation accessed 2026-08-18",
+      "nara": "Repository authority snapshot on branch refactor/engine-foundation-contracts, 2026-08-18"
+    },
+    "deprecation_check": {
+      "result": "None of the current official pages reviewed displays a sunset or whole-family deprecation notice for the named Godot, Unity, or Unreal extension APIs. They are documented as active extension points as of 2026-08-18.",
+      "important_compatibility_findings": [
+        "Godot's broad EditorPlugin family remains active, but legacy dock/bottom-panel methods are deprecated in 4.7 in favor of EditorDock-based APIs; EditorDock is currently marked experimental. GDExtension compatibility is explicitly version- and platform-library-sensitive, and reload is opt-in rather than a universal live-state migration guarantee.",
+        "Unity editor extensions are tied to the Unity Editor API version and managed assembly compilation/domain reload behavior; UPM package metadata can constrain the minimum Unity version. UI Toolkit is the recommended path for complex new Editor UI while IMGUI remains supported.",
+        "Unreal native Editor modules are tied to UnrealBuildTool, generated reflection, module descriptors, engine binaries, and matching build identity. UAssetDefinition is the current asset identification/open-policy direction replacing legacy Asset Actions; FAssetEditorToolkit remains a current asset-editor implementation base.",
+        "Wasmtime documents strong sandbox goals but not a permanently stable embedding API: embedders must pin and deliberately upgrade the runtime and WIT/protocol contract."
+      ]
+    },
+    "nara_authority_note": "Nara currently has no active implementation plan for editor extensions. OQ-031 is open, ADR 0090 is Proposed rather than Accepted, and the staged model below is a research recommendation, not current architecture authority."
+  },
+  "verdict": {
+    "summary": "Nara should keep one generic, long-lived editor executable and adopt a tiered extension model. The default must be non-executable, declarative, Host-rendered, and document-safe. Ordinary executable tools should run in a replaceable supervised Extension Host over a versioned semantic protocol. A trusted native companion should be an explicit advanced path with exact build identity and restart semantics, never the prerequisite for opening or losslessly saving a project.",
+    "default_path": "A versioned authoring schema bundle plus capability-specific declarative contributions for inspectors, property presentation, menus, commands, simple panels, gizmo primitives, asset-type metadata, and domain recipes. The Editor owns UI widgets, workspace state, selection, undo, persistence, GPU/window access, and all mutations.",
+    "ordinary_executable_path": "A supervised child Extension Host speaking bounded, generation-stamped RPC. It is the default executable tier for importers, validators, generators, complex panels, graph tools, and custom workflows. Process isolation is a crash boundary, not automatically an OS security sandbox.",
+    "optional_wasm_path": "Use Wasm only for proven bounded workloads that benefit from portability and capability confinement, such as validation, deterministic transforms, procedural gizmo geometry, or small host-rendered panel reducers. Do not make Wasm a mandatory second author language or a universal editor ABI.",
+    "advanced_trusted_path": "A project/studio-built native companion with exact Nara/editor build identity, explicit Host-owned approval, immutable generations, last-good retention, and truthful Editor restart requirements. Prefer a separate native process. Same-process native placement is reserved for measured latency or authority needs and accepts the Editor crash domain.",
+    "product_guarantee": "A missing, disabled, crashed, incompatible, or unbuilt extension must not prevent the generic editor shell from opening a document whose envelope and generic value grammar are understood. Unsupported records remain visibly degraded and losslessly preserved; unsupported top-level formats or unknown value delimiters fail closed without rewriting the file.",
+    "why": [
+      "Godot proves the value of a generic editor, broad capability-specific extension APIs, recovery mode, and missing-type placeholders, but its tool scripts and native extensions share the Editor fault domain.",
+      "Unity proves the productivity of custom inspectors, drawers, windows, tools, importers, packages, and recovery-oriented Safe Mode, but its model depends on a managed runtime, project assembly compilation, and domain reload semantics that Rust does not naturally provide.",
+      "Unreal proves the ceiling of deeply integrated native Editor modules, Slate, Details customization, asset editors, importers, and Live Coding, but also demonstrates exact engine coupling, native crash scope, and difficult live-object reinstancing.",
+      "Rust has no stable native Rust ABI suitable for loading arbitrary third-party trait objects into a long-lived editor. A semantic protocol, stable data format, Wasm guest boundary, C-compatible opaque ABI, or static exact-build companion is required.",
+      "Nara already assigns workspace, document, undo, selection, persistence, UI shell, window/event loop, and registry authority to the Host. Extension interfaces should deepen that ownership rather than expose mutable Editor internals."
+    ]
+  },
+  "comparisons": [
+    {
+      "model": "Godot EditorPlugin plus script/GDExtension tooling",
+      "editor_rebuild_required": "No for the generic Godot editor. GDScript addons are loaded from the project. C# editor code requires a project assembly build. GDExtension requires a compatible prebuilt native library. Traditional engine modules still require a custom engine/editor build.",
+      "extension_entries": {
+        "plugin_root": "EditorPlugin loaded from an enabled addon described by plugin.cfg; tool scripts register and remove contributions in lifecycle callbacks.",
+        "inspector": "EditorInspectorPlugin selects handled objects and injects or replaces property editors during Inspector parsing.",
+        "property_drawer_equivalent": "EditorProperty controls registered through EditorInspectorPlugin parsing hooks.",
+        "window_panel": "Main-screen plugins, EditorDock-based docks/floating docks, bottom panels, controls in editor containers, dialogs, tool menus, context menus, and command-palette actions. Legacy dock/bottom-panel methods are deprecated in 4.7 and the replacement EditorDock API is currently experimental.",
+        "gizmo": "EditorNode3DGizmoPlugin and related gizmo/handle APIs provide visualization, picking, drag handles, and committed changes.",
+        "importer": "EditorImportPlugin/ResourceImporter converts source assets and exposes import settings and reimport behavior.",
+        "menu_command": "EditorPlugin tool-menu, context-menu, and command-palette registration.",
+        "native": "GDExtension can register native classes and EditorPlugins through a stable C-facing engine interface."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Project addon enablement, plugin configuration validation, script loading, then EditorPlugin enter/exit lifecycle.",
+        "reload": "Scripts can reload in the Editor. GDExtension reload is opt-in and may fail for arbitrary live object graphs.",
+        "compatibility": "GDExtension descriptors select platform/architecture libraries and declare compatibility bounds; resource formats also carry versions.",
+        "recovery": "Recovery mode suppresses executable extensions, and invalid addons are diagnosed rather than requiring a rebuilt Editor."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "Tool scripts and native extensions execute inside the Editor process and can access broad Editor/project APIs.",
+        "crash_scope": "No plugin sandbox. Official @tool documentation warns that tool code can manipulate the edited scene and can crash the Editor.",
+        "containment": "Configuration validation and recovery mode improve startup recovery, but do not isolate an already running plugin fault."
+      },
+      "missing_extension_round_trip": {
+        "open": "Strongest mature-engine precedent. MissingNode and MissingResource retain original type identity and properties when a type is unavailable.",
+        "save": "PackedScene/source resource paths contain explicit preservation behavior for missing node/resource records.",
+        "limit": "This is not universal. Godot explicitly warns that when a MissingNode represents an unavailable instanced external scene, saving discards the instance, its properties, and editable-child changes. Custom ResourceFormatLoader data, importer state, and plugin-private documents also have no general lossless guarantee."
+      },
+      "coverage": {
+        "scene": "High: inspectors, custom types, scene tools, 2D/3D domain plugins, and gizmos.",
+        "ui": "High: Control-based editor UI plus docks, main screens, and custom controls.",
+        "animation": "Medium-high: built-in animation tooling is plugin-composed and extensions can add Inspector/editor UI, but there is no one universal animation-extension protocol.",
+        "shader_material": "Medium-high: built-in shader/material/visual-shader tools are plugin-composed; public addons can add panels, inspectors, resources, and importers.",
+        "importer": "High: explicit custom importer API and derived import cache.",
+        "gizmo": "High: dedicated 3D gizmo plugin lifecycle and handle semantics.",
+        "window": "High for main screens, docks, floating docks, bottom panels, menus, and dialogs, but the new EditorDock API is experimental and legacy dock methods are deprecated."
+      },
+      "nara_lesson": {
+        "adopt": [
+          "One generic editor product with capability-specific plugin entry points.",
+          "Recovery launch that suppresses executable extensions.",
+          "Missing-type records that preserve original identity and payload.",
+          "Authored source separated from regenerable import artifacts."
+        ],
+        "adapt": [
+          "Replace load-code-to-discover-schema with a non-executable authoring schema bundle.",
+          "Replace direct Editor mutation with immutable read models and revision-bound typed commands.",
+          "Put ordinary executable tools outside the long-lived Editor process."
+        ],
+        "reject": [
+          "A global dynamic object/Variant system as the prerequisite for Rust project authoring.",
+          "Unrestricted in-process @tool or native code as the default third-party extension tier."
+        ]
+      },
+      "sources": ["GODOT_EDITORPLUGIN", "GODOT_EDITOR_DOCK", "GODOT_INSPECTOR_PLUGIN", "GODOT_GIZMO_PLUGIN", "GODOT_IMPORT_PLUGIN", "GODOT_TOOL_CODE", "GODOT_MISSING_RESOURCE", "GODOT_MISSING_NODE_SOURCE", "GODOT_MISSING_NODE_BEHAVIOR", "GODOT_GDEXTENSION", "GODOT_GDEXTENSION_LOADER", "GODOT_GDEXTENSION_MANAGER"]
+    },
+    {
+      "model": "Unity project/package Editor assemblies",
+      "editor_rebuild_required": "No relink of the Unity Editor executable. Project and package C# compile into managed assemblies that the Editor loads, followed by script/domain reload. Native plugins are separately built platform libraries.",
+      "extension_entries": {
+        "plugin_root": "UPM package or project Editor assembly, normally partitioned by Assembly Definition files.",
+        "inspector": "CustomEditor with SerializedObject/SerializedProperty for Undo, multi-object editing, serialization, and Prefab override integration.",
+        "property_drawer": "PropertyDrawer customizes serialized field/type presentation and IMGUI or UI Toolkit behavior.",
+        "window_panel": "EditorWindow provides dockable or floating windows; UI Toolkit and IMGUI render their content.",
+        "gizmo": "EditorTool, OnSceneGUI, Handles, DrawGizmo, overlays, and related Scene view APIs.",
+        "importer": "ScriptedImporter defines new source formats; AssetPostprocessor observes or modifies import stages.",
+        "menu_command": "MenuItem and package/editor initialization APIs register commands and tooling.",
+        "package": "UPM package manifests, semantic versions, dependencies, Editor/Runtime assembly layout, samples, tests, and documentation."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Asset refresh detects source and package changes, compiles affected assemblies, loads them, and refreshes Editor state.",
+        "reload": "Script compilation triggers scripting/domain reload. Assembly Definitions reduce the compilation closure. Enter Play Mode can disable domain reload only with explicit static-state/event obligations.",
+        "package_versioning": "UPM manifests provide package identity, version, dependencies, metadata, and minimum Unity-version compatibility.",
+        "recovery": "Safe Mode imports only script-related assets until compilation errors are repaired; current code-lifecycle APIs distinguish initialization before and after first scene load."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "Managed Editor code runs in the Unity Editor scripting domain with broad UnityEditor and .NET capabilities. Native plugins run native code in the process.",
+        "crash_scope": "Managed exceptions, compile errors, reload failures, import loops, or native crashes can destabilize the Editor. Safe Mode is recovery, not a per-package sandbox.",
+        "containment": "Unity can use out-of-process asset import workers for parts of import processing, but the general Editor extension model is still trusted and in-process."
+      },
+      "missing_extension_round_trip": {
+        "open": "If only a CustomEditor or PropertyDrawer is absent while the serialized runtime type still exists, Unity can fall back to its generic Inspector/property presentation. Unity also recognizes missing MonoBehaviour components in normal editor APIs. However, Safe Mode disables managed extensions and intentionally prevents opening scenes and other non-script assets until compile errors are fixed.",
+        "save": "SerializeReference has an explicit missing-type API and retains serialized data for later restoration. FormerlySerializedAs supports planned field renames.",
+        "limit": "Official documentation does not state one universal lossless round-trip guarantee for every field of an ordinary missing MonoBehaviour or every custom serializer."
+      },
+      "coverage": {
+        "scene": "High: CustomEditor, EditorTool, Handles, overlays, Scene view callbacks, and serialized property integration.",
+        "ui": "High for editor UI: dockable/floating windows and UI Toolkit/IMGUI. Runtime UI authoring remains a separate domain tool.",
+        "animation": "Medium-high: public clip/curve APIs and custom windows exist, while the first-party Animation window remains a specialized domain product.",
+        "shader_material": "High: ShaderGUI, material property drawers, packages, and package-delivered Shader Graph workflows.",
+        "importer": "High: ScriptedImporter, AssetPostprocessor, dependency declarations, and artifact invalidation.",
+        "gizmo": "High: dedicated Scene tool, Handles, gizmo, and overlay APIs.",
+        "window": "High: EditorWindow is a first-class dockable/floating extension surface."
+      },
+      "nara_lesson": {
+        "adopt": [
+          "Package identity/version/dependency metadata separate from each contribution kind.",
+          "Generic serialized-property editing integrated with undo and overrides.",
+          "Compilation-unit partitioning and last-good recovery concepts.",
+          "A visible repair mode for broken project code."
+        ],
+        "adapt": [
+          "Nara recovery must still open supported documents in degraded mode; Unity Safe Mode is too restrictive as the only recovery path.",
+          "Use semantic protocols and immutable generations instead of CLR domain reload as the central lifecycle primitive.",
+          "Keep package resolution anchored to Cargo/Git/local sources until a measured product gap justifies more."
+        ],
+        "reject": [
+          "Assuming a managed-runtime style unload/reload model exists for arbitrary Rust code.",
+          "Loading arbitrary project assemblies or native plugins into the long-lived Editor as the ordinary trust tier."
+        ]
+      },
+      "sources": ["UNITY_EDITOR_WINDOW", "UNITY_CUSTOM_INSPECTOR", "UNITY_PROPERTY_DRAWER", "UNITY_EDITOR_TOOL", "UNITY_SCRIPTED_IMPORTER", "UNITY_ASSET_POSTPROCESSOR", "UNITY_CODE_LIFECYCLE", "UNITY_ASSEMBLY_DEFINITIONS", "UNITY_SAFE_MODE", "UNITY_PACKAGE_MANIFEST", "UNITY_PACKAGE_LAYOUT", "UNITY_MISSING_MANAGED_REFERENCE", "UNITY_MISSING_MONOBEHAVIOUR"]
+    },
+    {
+      "model": "Unreal Editor modules and native plugin ecosystem",
+      "editor_rebuild_required": "The stock UnrealEditor executable remains generic, but C++ project/plugin Editor modules must be compiled against the engine and loaded as compatible binaries. Native iteration may use Live Coding; structural changes can still require a full rebuild and restart.",
+      "extension_entries": {
+        "plugin_root": ".uplugin/.uproject module descriptors plus UnrealBuildTool Build.cs and Editor targets; modules register in StartupModule and retire in ShutdownModule.",
+        "inspector": "IDetailCustomization customizes reflected object layouts; IPropertyTypeCustomization customizes reflected property/value types.",
+        "property_drawer_equivalent": "PropertyEditor customization interfaces and Slate widgets.",
+        "window_panel": "Slate widgets, tab spawners, ToolMenus, workflow-centric applications, Editor Utility Widgets, and Python utilities.",
+        "asset_editor": "UAssetDefinition owns current asset identification and open policy, while FAssetEditorToolkit/FBaseAssetToolkit and related workflow application classes host dedicated asset editors with tabs, menus, toolbars, undo, and document/toolkit identity.",
+        "gizmo": "FComponentVisualizer and the Interactive Tools Framework provide custom visualization, hit testing, transforms, and interactive tools.",
+        "importer": "Interchange, factories, asset tools, and reimport infrastructure provide native import pipelines.",
+        "menu_command": "UToolMenus, command lists, Slate actions, and module startup registration.",
+        "native": "Native Editor modules and code plugins can register reflected types and deep Editor integrations."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Module descriptors choose type and loading phase; compatible binaries load into UnrealEditor and execute startup/shutdown registration.",
+        "reload": "Live Coding patches C++ binaries and can use Object Reinstancing, but pointer/cache cleanup and constructor/default limitations remain. Restart/full rebuild is part of the correctness model.",
+        "compatibility": "Generated reflection, engine module APIs, asset package versions, plugin descriptors, and build identity couple extensions to the engine version.",
+        "recovery": "Crash reporting and Disaster Recovery help after failures; they do not isolate arbitrary native plugins."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "Editor modules are native in-process code with broad engine, file, UI, UObject, renderer, and platform authority.",
+        "crash_scope": "A native module bug, invalid pointer after reinstancing, or ABI mismatch can take down or corrupt the Editor process.",
+        "containment": "Post-crash reporting and transaction recovery reduce aftermath but are not plugin isolation."
+      },
+      "missing_extension_round_trip": {
+        "open": "There is no documented universal placeholder contract for arbitrary assets whose defining native class or plugin is unavailable.",
+        "save": "Core Redirects support deliberate type/property renames, and asset versioning can reject incompatible packages. Official docs note that unknown properties can be discarded and newer incompatible versions may refuse to load.",
+        "limit": "Nara must not infer lossless degraded authoring from Unreal's binary asset/plugin model."
+      },
+      "coverage": {
+        "scene": "Very high: Level Editor modules, Details, visualizers, modes, interactive tools, and Slate integration.",
+        "ui": "Very high: Slate and UMG tooling, tabs, menus, widgets, and native Editor applications.",
+        "animation": "Very high through specialized native animation, Control Rig, Sequencer, and asset-editor modules.",
+        "shader_material": "Very high through specialized material/shader editors and compiler integration.",
+        "importer": "Very high through Interchange, factories, asset tools, reimport, and native pipelines.",
+        "gizmo": "Very high through component visualizers and the Interactive Tools Framework.",
+        "window": "Very high through Slate tabs, nomad tabs, toolkits, and workflow-centric asset editors."
+      },
+      "nara_lesson": {
+        "adopt": [
+          "Capability-specific domain interfaces rather than one universal plugin callback.",
+          "Dedicated asset-editor Modules for animation, shader/material, UI, and other complex domains.",
+          "Generated reflection/schema sufficient for generic inspection, with bespoke tools layered on top.",
+          "Clear startup/shutdown and contribution registration lifecycles."
+        ],
+        "adapt": [
+          "Use Host-rendered semantic protocols instead of passing Slate/egui widgets or UObject-like mutable graphs across the boundary.",
+          "Use restartable generations instead of Live Coding-style object reinstancing as the correctness baseline.",
+          "Keep native companions opt-in, exact-build, and explicitly trusted."
+        ],
+        "reject": [
+          "A native in-process module ecosystem as Nara's default third-party model.",
+          "Stable Rust ABI assumptions, direct trait-object loading, or arbitrary GPU/window handle sharing.",
+          "Live object reinstancing as a product promise for structural Rust changes."
+        ]
+      },
+      "sources": ["UNREAL_MODULES", "UNREAL_PLUGINS", "UNREAL_DETAILS_CUSTOMIZATION", "UNREAL_PROPERTY_CUSTOMIZATION", "UNREAL_ASSET_DEFINITION", "UNREAL_ASSET_EDITOR_TOOLKIT", "UNREAL_TOOL_MENUS", "UNREAL_COMPONENT_VISUALIZER", "UNREAL_INTERACTIVE_TOOLS", "UNREAL_INTERCHANGE", "UNREAL_LIVE_CODING", "UNREAL_CORE_REDIRECTS", "UNREAL_ASSET_VERSIONING"]
+    },
+    {
+      "model": "Declarative authoring schema and contribution catalog",
+      "editor_rebuild_required": "No. The generic Editor reads versioned data artifacts.",
+      "extension_entries": {
+        "inspector": "Stable type/field identities, value kinds, labels, groups, units, ranges, enums, asset filters, read-only states, diagnostics, and selection predicates expressed through a closed grammar.",
+        "property_drawer": "Host-owned control recipes selected from a bounded widget vocabulary; no arbitrary callback or toolkit object.",
+        "window_panel": "Host-rendered simple panels backed by immutable read models, stable widget/action IDs, and typed commands.",
+        "gizmo": "Declarative draw primitives, colors, anchors, hit-target IDs, and bounded manipulation recipes that lower to Host-validated patches.",
+        "importer": "Can declare source kinds, settings schema, output kinds, dependencies, and execution requirements, but cannot perform the conversion by itself.",
+        "menu_command": "Static placement, availability facts, keyboard binding request, typed command identity, and optional confirmation metadata."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Parse and validate a candidate contribution catalog, resolve conflicts/dependencies, then atomically publish an immutable generation.",
+        "compatibility": "Separate document-format, generic value-grammar, schema-owner, schema-version, contribution-protocol, and package-version identities.",
+        "reload": "Data-only replacement of one catalog generation; no executable code unload."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "No executable authority. The Editor renders controls and validates every command.",
+        "crash_scope": "Parser/validator bugs remain Editor bugs, but package content cannot directly execute or hold Editor pointers.",
+        "containment": "Strict size/depth/count budgets, schema validation, conflict checks, and atomic generation publication."
+      },
+      "missing_extension_round_trip": {
+        "open": "Yes when the file envelope and generic value grammar are understood. Unknown schema records remain bounded semantic values or opaque delimited records.",
+        "save": "Yes under an explicit preservation proof: unsupported record identity, version, payload, ordering, references, and semantic digest remain unchanged unless the user explicitly deletes the whole record.",
+        "limit": "Unknown top-level formats, unknown delimiters/tags, or values exceeding budgets must fail closed rather than guess."
+      },
+      "coverage": {
+        "scene": "High for generic hierarchy, component inspection, recipes, diagnostics, and bounded gizmos.",
+        "ui": "Medium-high for existing UI domain schemas and closed recipes; insufficient for arbitrary workflow logic.",
+        "animation": "Low until Nara owns an animation document/evaluator/editor Module; schema alone does not create a timeline.",
+        "shader_material": "Low until Nara owns shader/material source, compiler diagnostics, preview, and graph/text editor Modules.",
+        "importer": "Metadata only; execution requires a built-in, Wasm, or process Adapter.",
+        "gizmo": "Medium for declarative primitives and common handles; complex procedural tools need executable logic.",
+        "window": "Medium for data-centric Host-rendered panels; arbitrary applications need an executable tier."
+      },
+      "nara_fit": "Best default. It preserves fast project opening, stable documents, Host authority, and Rust-first semantics without inventing a second runtime language."
+    },
+    {
+      "model": "Wasm component extension",
+      "editor_rebuild_required": "No. A compatible Wasm component is instantiated by an embedded runtime against a versioned host interface.",
+      "extension_entries": {
+        "logic": "Validators, transformations, generators, procedural gizmo geometry, custom field logic, and host-rendered panel reducers.",
+        "ui": "Semantic view model and events only; no egui/Slate/Unity UI object crossing.",
+        "importer": "Possible through capability-scoped input/output streams or directories, with output staged and validated by the Host.",
+        "protocol": "WIT/component interfaces or an equivalently explicit stable wire contract."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Instantiate a candidate with declared capabilities, run bounded initialization, then publish it as part of an extension generation.",
+        "reload": "Drop the instance and construct a successor. Durable state must be explicit data, not hidden guest memory.",
+        "compatibility": "Pin the Wasmtime/runtime version and version the semantic guest interface independently. Wasmtime does not promise one forever-stable embedding API."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "Linear memory is isolated and host functions define capabilities. Filesystem, network, clocks, randomness, subprocess, GPU, window, and project access are absent unless explicitly granted.",
+        "crash_scope": "Guest traps and memory errors are normally contained, with store limits, fuel, epoch interruption, and cancellation available. Runtime/host bugs still exist, so this is stronger confinement but not an absolute security theorem.",
+        "containment": "Use per-call budgets, bounded messages, no ambient paths, generation stamps, and instance replacement."
+      },
+      "missing_extension_round_trip": {
+        "open": "Yes, because document parsing and preservation remain Host-owned.",
+        "save": "Yes, provided the Editor never requires guest execution to delimit or reserialize unsupported records.",
+        "limit": "A Wasm migration must be optional and explicit; missing migration code cannot become a reason to discard data."
+      },
+      "coverage": {
+        "scene": "Medium-high for validation, recipes, and procedural tools.",
+        "ui": "Medium for host-rendered panels; poor fit for direct native-widget embedding.",
+        "animation": "Medium once a first-party animation domain protocol exists.",
+        "shader_material": "Medium for graph transforms and validation, not direct backend compiler/GPU authority.",
+        "importer": "Medium-high for portable pure transformations; large native toolchains may fit a process better.",
+        "gizmo": "Medium for cached geometry and gesture proposals; per-frame/high-frequency callbacks require careful latency design.",
+        "window": "Medium for semantic panels, not arbitrary native windows."
+      },
+      "nara_fit": "Optional after concrete tracers prove that portability and confinement outweigh runtime, tooling, and protocol cost. Not the initial universal extension boundary."
+    },
+    {
+      "model": "Supervised subprocess RPC Extension Host",
+      "editor_rebuild_required": "No. Native or managed extension executables are built separately and speak a stable local protocol.",
+      "extension_entries": {
+        "logic": "Complex inspectors, batch tools, validators, generators, custom asset editors, graph tools, build helpers, and diagnostics.",
+        "ui": "The child publishes semantic panel models and receives user events; the Editor owns actual windows, widgets, accessibility, input, and layout.",
+        "gizmo": "The child returns bounded geometry/hit descriptions and receives gesture snapshots; the Host owns picking authority and commits patches.",
+        "importer": "Strong fit. A worker receives explicit read capabilities and settings, writes into scratch output, and returns a manifest/dependency set for atomic Host publication.",
+        "protocol": "Length-bounded, versioned messages over stdio or local sockets with session, generation, request, document, revision, deadline, and capability identities."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Resolve package and trust, spawn a candidate, perform compatibility/capability handshake, prepare contributions, then atomically switch the active generation.",
+        "reload": "Spawn a successor while the last-good generation remains active; retire the old child only after successful activation.",
+        "compatibility": "Protocol and contribution schemas are versioned independently from the child implementation language and compiler."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "A child process is not automatically sandboxed and normally has the user's OS authority. The protocol should pass explicit content or capabilities rather than ambient project paths; stronger OS sandboxing can be added per platform.",
+        "crash_scope": "Process crash, panic, deadlock, leak, or most native memory corruption is contained to the child. The Editor can time out, kill, restart, quarantine, and continue with documents intact.",
+        "containment": "Deadlines, cancellation, message limits, process/resource budgets, orphan cleanup, scratch outputs, generation checks, and last-good activation."
+      },
+      "missing_extension_round_trip": {
+        "open": "Yes, because executable participation is not required for core parsing.",
+        "save": "Yes, because child results are proposals and the Host owns validated mutation/persistence.",
+        "limit": "Semantic editing of unavailable custom records remains degraded until a compatible extension returns."
+      },
+      "coverage": {
+        "scene": "High for complex tools with cached read models.",
+        "ui": "High for workflow logic with Host-rendered UI; direct native-widget embedding is intentionally excluded.",
+        "animation": "High once Nara defines domain documents, commands, preview requests, and evaluator boundaries.",
+        "shader_material": "High for editors, code generation, compilers, and diagnostics; preview/GPU submission remains Host-owned.",
+        "importer": "Very high and the recommended first executable tracer.",
+        "gizmo": "Medium-high; high-frequency tools require batching, prediction, or a trusted tier.",
+        "window": "High for docked Host-rendered panels and workflows; independent OS windows should remain separately admitted."
+      },
+      "nara_fit": "Recommended ordinary executable tier. It matches OQ-031's current isolated Extension Host hypothesis and works with Rust, managed, native, or future language adapters."
+    },
+    {
+      "model": "Trusted native companion",
+      "editor_rebuild_required": "Optional tradeoff. Prefer a separately built native companion process using the same semantic protocol. A same-process or statically linked project Editor companion may require relinking/restarting that companion, but never the shared generic Editor as the only recovery/open path.",
+      "extension_entries": {
+        "logic": "Latency-sensitive gizmos, specialized previews, deep first-party/studio tools, proprietary native SDK integration, or direct renderer/toolkit adapters after a measured need.",
+        "abi": "For same-process dynamic loading, require a separately designed C-compatible ABI with opaque handles and explicit allocation, panic, callback, thread, and retirement rules. Raw Rust trait objects are forbidden.",
+        "static_companion": "A project/studio executable may statically link exact Nara/editor libraries and project contributions as a high-power composition root."
+      },
+      "lifecycle_and_versioning": {
+        "activation": "Host-owned approval binds project root plus source/manifest/lock/features or artifact digest and exact Nara/editor build identity.",
+        "reload": "Immutable build generations and Editor restart are the default. No promise of unloading arbitrary Rust code or migrating all live state.",
+        "compatibility": "Exact-build compatibility, not a stable Rust ABI. Keep the last-good companion and a generic recovery editor."
+      },
+      "permission_and_failure_isolation": {
+        "authority": "Fully trusted native code. Same-process placement receives the Editor fault domain; a native companion process retains crash isolation but not OS sandboxing.",
+        "crash_scope": "Same-process memory corruption or abort can terminate the Editor. The product must state this plainly and recover through journals, last-good generations, and extension-disabled restart.",
+        "containment": "Explicit opt-in, external approval storage, digest drift invalidation, exact version checks, restart, and no automatic trust from project data."
+      },
+      "missing_extension_round_trip": {
+        "open": "The generic recovery editor still opens supported documents without the companion.",
+        "save": "Lossless degraded save remains a core Host contract, not a companion feature.",
+        "limit": "Advanced semantic tooling and previews disappear until the compatible companion is available."
+      },
+      "coverage": {
+        "scene": "Very high.",
+        "ui": "Very high.",
+        "animation": "Very high after domain ownership exists.",
+        "shader_material": "Very high after domain ownership exists.",
+        "importer": "Very high, but prefer a process even for trusted importers so crashes and partial writes are contained.",
+        "gizmo": "Very high and the strongest latency path.",
+        "window": "Very high, subject to Editor Shell/window ownership."
+      },
+      "nara_fit": "Correct high-power escape hatch for first-party and trusted studio tools, but unsuitable as the default product architecture."
+    }
+  ],
+  "recommended_stages": [
+    {
+      "stage": 0,
+      "name": "Make documents independent from executable project code",
+      "status": "Architecture prerequisite",
+      "default_or_advanced": "foundation",
+      "deliverables": [
+        "Admit an Accepted successor to the Proposed ADR 0090 contract before implementation: Complete, KnownSchemaUnbound, UnknownSchema, MissingMigration, and UnsupportedEnvelope must have explicit semantics.",
+        "Publish a versioned, non-executable ProjectAuthoringBundle containing stable schema owner/type/field identities, value grammar version, tombstones, migration metadata, presentation hints, and content fingerprints.",
+        "Open the generic Editor shell before full schema/runtime admission and provide a recovery launch that suppresses all executable extensions.",
+        "Prove open, unrelated edit, undo/redo, atomic save, close/reopen, and semantic-digest equality for documents containing unavailable extension records.",
+        "Keep runtime admission strict: missing executable bindings or required migrations reject Play/runtime publication even when authoring remains available."
+      ],
+      "exit_evidence": [
+        "Reference Game opens while its Rust crate intentionally fails to compile.",
+        "An unavailable component survives two save/reopen cycles unchanged while a sibling known field and entity name are edited.",
+        "An unsupported top-level format or unknown generic value tag is rejected without rewriting the file."
+      ]
+    },
+    {
+      "stage": 1,
+      "name": "Declarative Product Package contributions",
+      "status": "Recommended first plugin product",
+      "default_or_advanced": "default",
+      "deliverables": [
+        "Define package identity, provenance, version constraints, dependencies, installed/enabled/ready/active states, and contribution descriptors without creating a second Cargo resolver or remote registry.",
+        "Add immutable contribution catalogs for InspectorPresentation, MenuCommand, SimplePanel, GizmoRecipe, AssetType, ImporterDescriptor, DiagnosticProviderDescriptor, and domain-specific recipes.",
+        "Render all controls in the Editor and lower all edits through existing revision-bound typed actions and Host validation.",
+        "Start with a closed control vocabulary and explicit domain recipes. Do not add callbacks, expressions, arbitrary scripting, or a universal UI DSL to the schema.",
+        "Keep package aggregation separate from contribution activation: each contribution has its own Host, target, lifecycle, readiness, and retirement semantics."
+      ],
+      "best_first_tracers": [
+        "One third-party declarative Inspector section for a real Reference Game component.",
+        "One menu command that emits an existing typed Editor action.",
+        "One bounded scene gizmo recipe using Host-owned draw primitives and gesture lowering.",
+        "One package removal/reinstall scenario that preserves unavailable records and modified project-owned files."
+      ],
+      "exit_evidence": [
+        "No extension can obtain egui, WGPU, native window, filesystem, World, or mutable workspace handles.",
+        "Conflicting or invalid contribution catalogs fail candidate preparation without changing the active generation.",
+        "Package disable/removal withdraws UI contributions but does not delete or rewrite authored records."
+      ]
+    },
+    {
+      "stage": 2,
+      "name": "Supervised process Extension Host",
+      "status": "Recommended ordinary executable tier",
+      "default_or_advanced": "default executable path",
+      "deliverables": [
+        "Create one versioned semantic RPC crate/protocol with bounded frames and no Rust trait objects or internal domain enums leaked wholesale.",
+        "Implement candidate spawn, handshake, capability grant, prepare, atomic activation, health checks, cancellation, timeout, retirement, restart, quarantine, and last-good retention.",
+        "Make importer execution the first process tracer: explicit input capability, settings, scratch output, dependency report, deterministic digest, validation, and atomic publication.",
+        "Add Host-rendered panel and complex Inspector protocols only after importer lifecycle is proven; preserve stable widget/action IDs and revision-bound commands.",
+        "Treat process isolation as crash containment. Add platform sandboxing only when separately proven; do not label a normal child process a sandbox."
+      ],
+      "best_first_tracers": [
+        "A custom source importer that intentionally crashes, hangs, writes malformed output, and returns stale results.",
+        "A complex project tool panel that survives child replacement while preserving Editor workspace state.",
+        "A custom gizmo with cached geometry and begin/preview/commit/cancel gestures under process latency."
+      ],
+      "exit_evidence": [
+        "The Editor remains usable after extension panic, abort, hang, oversized message, malformed response, and forced termination.",
+        "No partial import output becomes authored or active content.",
+        "A stale child generation cannot mutate a newer document revision or publish contributions after replacement."
+      ]
+    },
+    {
+      "stage": 3,
+      "name": "Optional Wasm component adapter",
+      "status": "Evidence-gated",
+      "default_or_advanced": "optional isolated path",
+      "deliverables": [
+        "Admit only after at least two real extensions need portable distribution or stronger capability confinement than a normal child process provides.",
+        "Reuse the same semantic contribution and command model as the process Host; Wasm is another Adapter, not a second plugin product model.",
+        "Pin the runtime, version the WIT/semantic protocol, enforce memory/table/instance limits, fuel or epoch interruption, cancellation, and no ambient WASI capabilities.",
+        "Keep durable state in Host-owned versioned data so an instance can be discarded and recreated without document loss."
+      ],
+      "good_fits": [
+        "Validation and lint rules.",
+        "Deterministic data transformations.",
+        "Procedural gizmo geometry.",
+        "Small host-rendered panel reducers.",
+        "Portable importers that do not require large native SDKs."
+      ],
+      "poor_fits": [
+        "Direct egui/WGPU/native-window integration.",
+        "Per-event high-frequency UI callbacks with large state transfer.",
+        "Native SDK/toolchain integration where a child process is simpler and more reliable.",
+        "A universal mandatory second author language."
+      ]
+    },
+    {
+      "stage": 4,
+      "name": "Trusted native companion",
+      "status": "Advanced opt-in",
+      "default_or_advanced": "advanced trusted path",
+      "deliverables": [
+        "Provide a project/studio native companion process using the same protocol for high-performance native tools without loading Rust into the Editor.",
+        "If a measured need still requires same-process placement, write a focused ADR and conformance plan for either a statically linked exact-build editor companion or a narrow C-compatible ABI with opaque handles.",
+        "Store trust approval outside project data and bind it to project-root capability, source/manifest/lock/features or artifact digest, target, and exact Nara/editor build identity.",
+        "Activate immutable generations with last-good fallback. State plainly that same-process native changes may require full Editor restart and can crash the Editor.",
+        "Keep the generic recovery editor and lossless degraded authoring path available at all times."
+      ],
+      "exit_evidence": [
+        "The trusted companion adds one capability impossible or measurably inadequate through the process/Wasm paths.",
+        "Trust drift, build mismatch, panic, abort, stale callback, shutdown, and restart are covered by conformance tests.",
+        "Shipping/runtime targets do not accidentally include Editor-only dependencies or privileges."
+      ]
+    }
+  ],
+  "nara_interfaces": {
+    "design_principle": "Expose a small number of deep Host interfaces. Packages contribute immutable facts and proposed actions; the Editor retains authority. Hide discovery, resolution, execution placement, lifecycle, fault handling, and toolkit/backend details behind Modules.",
+    "public_root": {
+      "name": "EditorExtensionSystem",
+      "responsibilities": [
+        "Discover and resolve project/package contribution candidates.",
+        "Prepare a complete candidate generation without changing current Editor behavior.",
+        "Atomically activate or reject the generation.",
+        "Publish one immutable EditorContributionSnapshot to the shell/tooling adapters.",
+        "Dispatch bounded extension requests through the selected declarative, process, Wasm, or trusted Adapter.",
+        "Retire old generations and retain last-good recovery state."
+      ],
+      "illustrative_interface": [
+        "discover(ProjectCapability) -> ExtensionInventory",
+        "prepare(ExtensionSelection, CurrentProjectGeneration) -> PreparedExtensionGeneration",
+        "activate(PreparedExtensionGeneration, ExpectedActiveGeneration) -> ExtensionActivationReceipt",
+        "snapshot() -> EditorContributionSnapshot",
+        "dispatch(ExtensionInvocation) -> ExtensionOutcome",
+        "retire(ExtensionGenerationId) -> RetirementReceipt"
+      ],
+      "hidden_implementation": [
+        "Package/provenance resolution and lock interpretation.",
+        "Manifest and contribution validation.",
+        "Process/Wasm/native Adapter selection.",
+        "Child spawn, IPC, cancellation, timeouts, resource limits, and orphan cleanup.",
+        "Crash counters, quarantine, last-good retention, recovery mode, and diagnostics.",
+        "Toolkit widgets, windowing, GPU, persistence, workspace, selection, and undo."
+      ]
+    },
+    "deep_modules": [
+      {
+        "name": "ProjectAuthoringBundleLoader",
+        "interface": "load(ProjectCapability) -> ProjectAuthoringSnapshot",
+        "owns": "Bounded parsing of project manifest, document/index metadata, non-executable schemas, presentation facts, package content mounts, and fingerprints.",
+        "must_not_own": "Cargo execution, native binding registration, Editor widgets, Runtime World creation, or extension callbacks."
+      },
+      {
+        "name": "ExtensionCatalogResolver",
+        "interface": "resolve(Inventory, Selection, TrustSnapshot) -> CandidateContributionCatalog",
+        "owns": "Package/contribution identity, dependency checks, version/protocol compatibility, conflict detection, target restrictions, provenance, and lifecycle effect classification.",
+        "must_not_own": "UI rendering, document mutation, process implementation details, or package-file deletion."
+      },
+      {
+        "name": "ContributionGenerationManager",
+        "interface": "prepare -> activate -> retire",
+        "owns": "Candidate/publication/retirement state machine, atomic generation switch, last-good retention, stale-result rejection, and active snapshot publication.",
+        "must_not_own": "Domain-specific Inspector, gizmo, importer, or panel semantics."
+      },
+      {
+        "name": "EditorReadModelGateway",
+        "interface": "snapshot(ExtensionReadRequest) -> BoundedEditorReadModel",
+        "owns": "Immutable, capability-filtered views of document identity/revision, selection, schema facts, asset facts, diagnostics, viewport facts, and domain projections.",
+        "must_not_own": "Live references to World, workspace slots, toolkit state, GPU resources, or file handles."
+      },
+      {
+        "name": "EditorCommandGateway",
+        "interface": "propose(ExtensionCommand) -> CommandReceipt",
+        "owns": "Authorization, exact document/revision checks, validation, lowering to existing typed actions/patches, undo transaction boundaries, commit, and diagnostics.",
+        "must_not_own": "Extension-private state or allow direct mutation callbacks."
+      },
+      {
+        "name": "InspectorContributionHost",
+        "interface": "describe(InspectorContext) -> InspectorContributionModel; handle(InspectorEvent) -> ExtensionCommandBatch",
+        "owns": "Closed field-control vocabulary, grouping/order, stable control IDs, validation display, multi-selection facts, and unknown-field read-only presentation.",
+        "must_not_own": "Serialization, Prefab overrides, document writes, or arbitrary code embedded in schema metadata."
+      },
+      {
+        "name": "PanelContributionHost",
+        "interface": "render_model(PanelContext) -> PanelModel; handle(PanelEvent) -> ExtensionCommandBatch",
+        "owns": "Host-rendered semantic panel tree, stable widget/event IDs, bounded local view state, accessibility facts, and docking intent.",
+        "must_not_own": "Native windows, event loop, egui Context, raw pixels as the only interaction model, or durable workspace data."
+      },
+      {
+        "name": "GizmoContributionHost",
+        "interface": "draw(GizmoContext) -> GizmoFrame; gesture(GizmoGesture) -> ExtensionCommandBatch",
+        "owns": "Bounded draw primitives, hit IDs, hover/selection facts, begin/preview/commit/cancel semantics, and revision-bound patch proposals.",
+        "must_not_own": "WGPU handles, picking authority, selection authority, or direct World mutation."
+      },
+      {
+        "name": "ImportExecutionHost",
+        "interface": "prepare(ImportRequest) -> ImportCandidate; validate_and_publish(ImportCandidate) -> ImportReceipt",
+        "owns": "Input/settings/dependency identity, scratch output capability, execution deadline, deterministic artifact manifest, validation, cache key, and atomic publication.",
+        "must_not_own": "Unscoped project filesystem access, direct authored-file writes, or publication from inside the importer process."
+      },
+      {
+        "name": "ExecutableExtensionHost",
+        "interface": "start -> handshake -> invoke/cancel -> health -> retire",
+        "owns": "Versioned protocol, process/Wasm Adapter, message budgets, capability delivery, deadlines, traps/crashes, quarantine, and restart.",
+        "must_not_own": "Editor domain authority or a universal cross-process Rust object model."
+      },
+      {
+        "name": "ExtensionTrustStore",
+        "interface": "evaluate(ProjectCapability, ArtifactIdentity, RequestedCapabilities) -> TrustDecision",
+        "owns": "User/Host approval outside project data, identity binding, drift invalidation, capability grants, and audit facts.",
+        "must_not_own": "Package discovery policy or allow a manifest to approve itself."
+      },
+      {
+        "name": "DegradedAuthoringGuard",
+        "interface": "classify/open/preflight/preserve",
+        "owns": "Record readiness classification, allowed-operation matrix, semantic preservation proofs, explicit whole-record deletion, runtime fail-closed admission, and diagnostics.",
+        "must_not_own": "Placeholder ECS components, auto-loading provider code, or guessing unknown wire formats."
+      }
+    ],
+    "activation_order": [
+      "Read project/package manifests and non-executable authoring bundle under bounded capabilities.",
+      "Resolve package identities, versions, provenance, trust requirements, and contribution dependencies.",
+      "Validate schema and declarative contributions into an immutable candidate catalog.",
+      "Start and handshake executable candidates without publishing them.",
+      "Prepare capability-specific contribution models and reject conflicts or unsupported protocols.",
+      "Atomically publish one ExtensionGeneration and EditorContributionSnapshot.",
+      "Invalidate stale panel/gizmo/import requests by generation and document revision.",
+      "Retire prior executables and derived artifacts only after the successor is active and no lease remains."
+    ],
+    "forbidden_boundary_values": [
+      "Rust dyn trait objects or Rust-layout structs across independently compiled artifacts.",
+      "bevy_ecs::World, Entity, ComponentId, commands, systems, schedules, or raw component pointers.",
+      "egui Context/Ui/Response, Slate widgets, native window handles, event-loop objects, IME/clipboard handles, or WGPU resources.",
+      "Unbounded filesystem paths, arbitrary environment inheritance, ambient network authority, or unrestricted subprocess spawning.",
+      "Workspace/document mutable references, persistence receipts, undo stacks, selection owners, or RuntimeInstance handles.",
+      "Function pointers, callbacks, allocator ownership, panic unwinding, threads, or borrowed memory without a separately admitted C ABI contract."
+    ]
+  },
+  "failure_model": {
+    "states_are_distinct": [
+      "Installed",
+      "Enabled",
+      "ArtifactReady",
+      "Prepared",
+      "ActiveGeneration",
+      "Degraded",
+      "Crashed",
+      "Quarantined",
+      "Incompatible",
+      "Removed"
+    ],
+    "document_readiness": [
+      {
+        "state": "Complete",
+        "meaning": "Schema and required authoring semantics are available.",
+        "allowed": "Normal typed editing and save; Runtime still requires its own complete binding check."
+      },
+      {
+        "state": "KnownSchemaUnbound",
+        "meaning": "Stable schema is available but executable/native binding is absent.",
+        "allowed": "Schema-backed editing that does not require executable semantics; preserve record; reject Runtime publication."
+      },
+      {
+        "state": "UnknownSchema",
+        "meaning": "The record is delimited by a known generic grammar but its schema owner/type is unavailable.",
+        "allowed": "Read-only record display, unrelated proven edits, structural edits only when hidden dependency semantics cannot be violated, explicit undoable whole-record delete, and lossless save."
+      },
+      {
+        "state": "MissingMigration",
+        "meaning": "Type identity is known but the record version cannot be interpreted safely.",
+        "allowed": "Preserve and display diagnostics; no typed field edits; no Runtime publication."
+      },
+      {
+        "state": "UnsupportedEnvelope",
+        "meaning": "Top-level format, delimiter, value tag, or resource budget is unsupported.",
+        "allowed": "Reject open or open raw read-only bytes in a separate recovery viewer; never rewrite the file."
+      }
+    ],
+    "save_contract": [
+      "Before any save, preflight every unavailable record and every operation whose semantics might depend on it.",
+      "Preserve original stable identity, schema version, generic value/payload, ordering, ownership, references, and unknown metadata within the admitted grammar.",
+      "Compare semantic digests for untouched unavailable records before publication.",
+      "Use Host-owned atomic replacement and an exact persistence receipt; extension output cannot mark a document saved.",
+      "If preservation cannot be proven, reject save with an actionable diagnostic rather than silently dropping data."
+    ],
+    "extension_activation": [
+      "Prepare all contributions in a candidate generation; no partial registration into live menus, panels, importers, or schema catalogs.",
+      "A candidate failure leaves the prior active generation unchanged.",
+      "All calls carry extension generation, document identity/revision where relevant, request sequence, deadline, and capability identity.",
+      "Late responses from retired generations are ignored and reported, never applied.",
+      "Removal withdraws catalog entries atomically; it does not run arbitrary uninstall code against authored content."
+    ],
+    "process_or_wasm_fault": [
+      "Trap, panic, abort, EOF, protocol violation, timeout, excessive resource use, or malformed response produces a typed extension fault.",
+      "Cancel outstanding calls, discard scratch outputs, retire the candidate/active instance as policy requires, and keep the Editor workspace/documents alive.",
+      "Repeated faults within a bounded window quarantine the extension and restart the Editor contribution set without it.",
+      "The user can explicitly retry, inspect diagnostics, or start extension-disabled recovery mode."
+    ],
+    "trusted_native_fault": [
+      "Same-process native code is fully trusted and can terminate or corrupt the Editor; no wording may call it isolated.",
+      "On restart, the Editor uses crash/session recovery, disables the suspect generation, opens documents without executable extensions, and retains the last-good companion identity.",
+      "Native activation defaults to restart; hot unload/reload is not a correctness guarantee."
+    ],
+    "import_fault": [
+      "Importers receive explicit inputs and write only to scratch capability roots.",
+      "A Host validator checks artifact kind, size, references, dependencies, provenance, and digest before atomic cache/content publication.",
+      "Crash, cancel, timeout, or stale generation discards scratch output and leaves the previous artifact active.",
+      "Importer cache keys include importer implementation/protocol identity, settings, inputs, declared dependencies, target, and relevant schema generation."
+    ],
+    "trust_and_permissions": [
+      "Project files and package manifests may request capabilities but cannot approve native or executable trust.",
+      "Approval is Host-owned outside the project and binds an exact project-root capability plus source/manifest/lock/features or artifact digest.",
+      "Relevant drift invalidates approval and requires a new decision.",
+      "Declarative contributions receive no executable permissions.",
+      "Wasm receives only explicit host functions/capabilities.",
+      "A normal subprocess receives crash isolation but may still have ambient OS user permissions; stronger sandbox claims require a proven platform Adapter."
+    ]
+  },
+  "rejected_models": [
+    {
+      "model": "Raw Rust dynamic libraries exposing Box<dyn Plugin>, trait objects, or Rust-layout structs",
+      "reason": "Rust layout/ABI is not stable across independently compiled artifacts. Allocator ownership, panic behavior, vtables, compiler versions, callbacks, threads, and unloading make this unsuitable for a stable third-party product boundary.",
+      "replacement": "Versioned semantic RPC/WIT, a narrow C-compatible opaque ABI after separate proof, or a statically linked exact-build companion."
+    },
+    {
+      "model": "A bespoke project Editor executable as the mandatory default",
+      "reason": "Project compile errors, missing native dependencies, or incompatible tools would block basic authoring and recovery. It also turns Rust compile/relink latency into every user's project-open tax.",
+      "replacement": "Generic editor plus non-executable authoring bundle; optional native companion for high-trust projects."
+    },
+    {
+      "model": "Arbitrary in-process project/editor code as the ordinary extension tier",
+      "reason": "Godot, Unity, and Unreal show high productivity but also shared crash scope and broad authority. Rust unsafe/native faults can corrupt the entire Editor and cannot be contained by exception handling or Safe Mode alone.",
+      "replacement": "Replaceable supervised Extension Host; explicit fully trusted same-process privilege only after measured need."
+    },
+    {
+      "model": "One universal plugin trait or callback registry with mutable EditorHost/World access",
+      "reason": "It collapses package, panel, importer, gizmo, schema, runtime, build, and persistence lifecycles into a shallow interface; destroys ownership locality; and makes versioning, isolation, testing, and retirement inseparable.",
+      "replacement": "Capability-specific deep Modules aggregated by package identity but activated independently."
+    },
+    {
+      "model": "Passing egui/UI toolkit, WGPU, native window, ECS, or filesystem objects across extension boundaries",
+      "reason": "It binds extensions to toolkit/backend/thread/process internals, defeats isolation, expands ABI surface, and grants authority the Host currently owns.",
+      "replacement": "Immutable semantic read models, Host-rendered UI/gizmo primitives, typed commands, content capabilities, and validated receipts."
+    },
+    {
+      "model": "A mandatory universal Wasm boundary or second official author language",
+      "reason": "It contradicts Nara's current strategy, creates a large host API and tooling burden before evidence, and is a poor fit for many native SDK and high-frequency editor workflows.",
+      "replacement": "Use Wasm as an optional Adapter for bounded portable/constrained workloads after real tracers."
+    },
+    {
+      "model": "A declarative schema that grows callbacks, expressions, async queries, UI logic, importer algorithms, and renderer behavior",
+      "reason": "That recreates an incomplete compiler/VM and a mandatory second programming language, making the schema hard to version, secure, and reason about.",
+      "replacement": "Keep schema as finite data; move executable behavior to the process, optional Wasm, or trusted tier."
+    },
+    {
+      "model": "Live Coding/domain reload/object reinstancing as the correctness baseline for Rust",
+      "reason": "Unity and Unreal require substantial runtime machinery and still document state/reset/reinstancing obligations and restart cases. Rust structural changes, native resources, trait objects, and unsafe code make a universal in-place guarantee unrealistic.",
+      "replacement": "Immutable artifact generations, candidate activation, last-good retention, explicit restart, and selective data/state restoration."
+    },
+    {
+      "model": "Recovery mode that cannot open or losslessly save documents",
+      "reason": "Unity Safe Mode is valuable for repair but intentionally blocks scene/non-script asset workflows. Nara's Rust-first product needs recovery even while project code is broken.",
+      "replacement": "Extension-disabled generic Editor plus degraded authoring and strict runtime rejection."
+    },
+    {
+      "model": "Package data self-authorizes native code or uninstall scripts delete project files",
+      "reason": "Repository data cannot grant trust, and source ownership differs from derived caches, mounted package content, copied samples, and user-modified project files.",
+      "replacement": "External Host-owned approval and provenance-aware, receipt-backed removal semantics."
+    },
+    {
+      "model": "Importer writes directly into authored project locations",
+      "reason": "Crash, timeout, malicious behavior, or stale execution can leave partial or inconsistent source/content state.",
+      "replacement": "Capability-scoped inputs, scratch outputs, declared dependencies, validation, and atomic Host publication."
+    }
+  ],
+  "primary_sources": [
+    {
+      "id": "GODOT_EDITORPLUGIN",
+      "authority": "official_documentation",
+      "title": "Godot EditorPlugin class reference",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/classes/class_editorplugin.html",
+      "supports": "Plugin root; main screens, docks, bottom panels, menus, command palette, custom types, inspector/import/gizmo registration, undo integration and lifecycle."
+    },
+    {
+      "id": "GODOT_EDITOR_DOCK",
+      "authority": "official_documentation",
+      "title": "Godot EditorDock class reference",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/classes/class_editordock.html",
+      "supports": "Current dock/floating-dock contribution model and explicit experimental status; EditorPlugin documents deprecated legacy dock APIs."
+    },
+    {
+      "id": "GODOT_INSPECTOR_PLUGIN",
+      "authority": "official_documentation",
+      "title": "Godot EditorInspectorPlugin class reference",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/classes/class_editorinspectorplugin.html",
+      "supports": "Inspector object selection, property parsing, and custom property editors."
+    },
+    {
+      "id": "GODOT_GIZMO_PLUGIN",
+      "authority": "official_documentation",
+      "title": "Godot EditorNode3DGizmoPlugin class reference",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/classes/class_editornode3dgizmoplugin.html",
+      "supports": "3D gizmo creation, redraw, selection, handles, sub-gizmos and committed edits."
+    },
+    {
+      "id": "GODOT_IMPORT_PLUGIN",
+      "authority": "official_documentation",
+      "title": "Godot EditorImportPlugin class reference",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/classes/class_editorimportplugin.html",
+      "supports": "Custom source extensions, import options, importer versioning and conversion."
+    },
+    {
+      "id": "GODOT_TOOL_CODE",
+      "authority": "official_documentation",
+      "title": "Godot: Running code in the editor",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/tutorials/plugins/running_code_in_the_editor.html",
+      "supports": "@tool execution model and explicit warning that tool code can alter scenes and crash the editor."
+    },
+    {
+      "id": "GODOT_GDEXTENSION",
+      "authority": "official_documentation",
+      "title": "Godot: What is GDExtension?",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/engine_details/engine_api/gdextension/what_is_gdextension.html",
+      "supports": "Native shared-library extension without recompiling the engine and C-facing API boundary."
+    },
+    {
+      "id": "GODOT_MISSING_RESOURCE",
+      "authority": "official_documentation",
+      "title": "Godot MissingResource class reference",
+      "version": "4.7",
+      "url": "https://docs.godotengine.org/en/4.7/classes/class_missingresource.html",
+      "supports": "Unavailable resource types retain original class and properties for later restoration."
+    },
+    {
+      "id": "GODOT_MISSING_NODE_SOURCE",
+      "authority": "official_source",
+      "title": "Godot MissingNode and MissingResource source",
+      "version": "4.7.1-stable",
+      "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/scene/main/missing_node.h#L35-L70",
+      "supports": "Original class/scene identity and property/signal preservation fields."
+    },
+    {
+      "id": "GODOT_MISSING_NODE_BEHAVIOR",
+      "authority": "official_source",
+      "title": "Godot MissingNode configuration warnings",
+      "version": "4.7.1-stable",
+      "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/scene/main/missing_node.cpp",
+      "supports": "Ordinary missing custom node types are safe to re-save, while an unavailable instanced external scene is explicitly discarded with its properties and editable-child changes on save."
+    },
+    {
+      "id": "GODOT_GDEXTENSION_LOADER",
+      "authority": "official_source",
+      "title": "Godot GDExtension library loader",
+      "version": "4.7.1-stable",
+      "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/core/extension/gdextension_library_loader.cpp#L320-L390",
+      "supports": "Platform library selection, compatibility bounds and reloadable metadata."
+    },
+    {
+      "id": "GODOT_GDEXTENSION_MANAGER",
+      "authority": "official_source",
+      "title": "Godot GDExtension manager lifecycle",
+      "version": "4.7.1-stable",
+      "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/core/extension/gdextension_manager.cpp#L134-L213",
+      "supports": "Load/unload/reload and recovery-mode suppression."
+    },
+    {
+      "id": "UNITY_EDITOR_WINDOW",
+      "authority": "official_documentation",
+      "title": "Unity EditorWindow API",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/EditorWindow.html",
+      "supports": "Dockable/floating custom Editor windows and lifecycle."
+    },
+    {
+      "id": "UNITY_CUSTOM_INSPECTOR",
+      "authority": "official_documentation",
+      "title": "Unity: Create a custom Inspector",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/UIE-HowTo-CreateCustomInspector.html",
+      "supports": "CustomEditor integration through serialized properties, undo and Prefab overrides."
+    },
+    {
+      "id": "UNITY_PROPERTY_DRAWER",
+      "authority": "official_documentation",
+      "title": "Unity PropertyDrawer API",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/PropertyDrawer.html",
+      "supports": "Custom rendering/interaction for serializable classes and fields."
+    },
+    {
+      "id": "UNITY_EDITOR_TOOL",
+      "authority": "official_documentation",
+      "title": "Unity EditorTool API",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/EditorTools.EditorTool.html",
+      "supports": "Custom Scene view tools and handle interaction."
+    },
+    {
+      "id": "UNITY_SCRIPTED_IMPORTER",
+      "authority": "official_documentation",
+      "title": "Unity ScriptedImporter API",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/AssetImporters.ScriptedImporter.html",
+      "supports": "Custom file extensions, importer versions, main/sub-assets and dependencies."
+    },
+    {
+      "id": "UNITY_ASSET_POSTPROCESSOR",
+      "authority": "official_documentation",
+      "title": "Unity AssetPostprocessor API",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/AssetPostprocessor.html",
+      "supports": "Import callbacks and post-processing extension points."
+    },
+    {
+      "id": "UNITY_CODE_LIFECYCLE",
+      "authority": "official_documentation",
+      "title": "Unity code lifecycle",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/programming-code-lifecycle.html",
+      "supports": "Compile managed assemblies, load assemblies, domain reload and initialization phases."
+    },
+    {
+      "id": "UNITY_ASSEMBLY_DEFINITIONS",
+      "authority": "official_documentation",
+      "title": "Unity Assembly Definition files",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/assembly-definition-files.html",
+      "supports": "Compilation-unit partitioning, Editor-only assemblies and dependency control."
+    },
+    {
+      "id": "UNITY_SAFE_MODE",
+      "authority": "official_documentation",
+      "title": "Unity Safe Mode",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/SafeMode.html",
+      "supports": "Script-only recovery import and documented restriction on scenes/other assets until errors are fixed."
+    },
+    {
+      "id": "UNITY_PACKAGE_MANIFEST",
+      "authority": "official_documentation",
+      "title": "Unity package manifest",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/upm-manifestPkg.html",
+      "supports": "Package identity, semantic version, dependencies, metadata and Unity compatibility."
+    },
+    {
+      "id": "UNITY_PACKAGE_LAYOUT",
+      "authority": "official_documentation",
+      "title": "Unity package layout",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/cus-layout.html",
+      "supports": "Runtime/Editor code, tests, samples, documentation and package distribution shape."
+    },
+    {
+      "id": "UNITY_MISSING_MANAGED_REFERENCE",
+      "authority": "official_documentation",
+      "title": "Unity SerializationUtility.GetManagedReferencesWithMissingTypes",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/SerializationUtility.GetManagedReferencesWithMissingTypes.html",
+      "supports": "Missing managed-reference metadata and retained serialized data for later restoration."
+    },
+    {
+      "id": "UNITY_MISSING_MONOBEHAVIOUR",
+      "authority": "official_documentation",
+      "title": "Unity GameObjectUtility.GetMonoBehavioursWithMissingScriptCount",
+      "version": "6000.5",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/GameObjectUtility.GetMonoBehavioursWithMissingScriptCount.html",
+      "supports": "Explicit recognition of GameObjects containing missing MonoBehaviour scripts."
+    },
+    {
+      "id": "UNREAL_MODULES",
+      "authority": "official_documentation",
+      "title": "Unreal Engine Modules",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/unreal-engine-modules",
+      "supports": "Modules, Build.cs dependencies, include paths and compile-time isolation."
+    },
+    {
+      "id": "UNREAL_PLUGINS",
+      "authority": "official_documentation",
+      "title": "Plugins in Unreal Engine",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/plugins-in-unreal-engine",
+      "supports": "Plugin descriptors, code/content plugins, dependencies, binaries, configuration and engine/project placement."
+    },
+    {
+      "id": "UNREAL_DETAILS_CUSTOMIZATION",
+      "authority": "official_documentation",
+      "title": "Unreal IDetailCustomization API",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/PropertyEditor/IDetailCustomization",
+      "supports": "Native customization of Details layouts for reflected object classes."
+    },
+    {
+      "id": "UNREAL_PROPERTY_CUSTOMIZATION",
+      "authority": "official_documentation",
+      "title": "Unreal IPropertyTypeCustomization API",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/PropertyEditor/IPropertyTypeCustomization",
+      "supports": "Native customization of reflected property types."
+    },
+    {
+      "id": "UNREAL_ASSET_DEFINITION",
+      "authority": "official_documentation",
+      "title": "Unreal UAssetDefinition API",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/AssetDefinition/UAssetDefinition",
+      "supports": "Current asset description, display, open-policy and asset-action definition layer replacing legacy Asset Actions."
+    },
+    {
+      "id": "UNREAL_ASSET_EDITOR_TOOLKIT",
+      "authority": "official_documentation",
+      "title": "Unreal FAssetEditorToolkit API",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/Toolkits/FAssetEditorToolkit",
+      "supports": "Base infrastructure for dedicated asset editors, tabs, menus, toolbars and toolkit identity."
+    },
+    {
+      "id": "UNREAL_TOOL_MENUS",
+      "authority": "official_documentation",
+      "title": "Unreal UToolMenus API",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Developer/ToolMenus/UToolMenus",
+      "supports": "Menu and toolbar registration/extensibility."
+    },
+    {
+      "id": "UNREAL_COMPONENT_VISUALIZER",
+      "authority": "official_documentation",
+      "title": "Unreal FComponentVisualizer API",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/API/Editor/UnrealEd/FComponentVisualizer",
+      "supports": "Component visualization and editing in the scene viewport."
+    },
+    {
+      "id": "UNREAL_INTERACTIVE_TOOLS",
+      "authority": "official_documentation",
+      "title": "Unreal Interactive Tools Framework",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/interactive-tools-framework-in-unreal-engine",
+      "supports": "Interactive editor/runtime tool architecture and input/tool lifecycle."
+    },
+    {
+      "id": "UNREAL_INTERCHANGE",
+      "authority": "official_documentation",
+      "title": "Unreal Interchange Framework",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/importing-assets-using-interchange-in-unreal-engine",
+      "supports": "Customizable import pipelines, source formats and reimport workflows."
+    },
+    {
+      "id": "UNREAL_LIVE_CODING",
+      "authority": "official_documentation",
+      "title": "Unreal Live Coding",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/using-live-coding-to-recompile-unreal-engine-applications-at-runtime",
+      "supports": "Binary patching, Object Reinstancing, constructor/default limitations, pointer cleanup obligations and restart cases."
+    },
+    {
+      "id": "UNREAL_CORE_REDIRECTS",
+      "authority": "official_documentation",
+      "title": "Unreal Core Redirects",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/core-redirects-in-unreal-engine",
+      "supports": "Planned class/struct/enum/function/property/package rename migration and warning that unmatched removed properties can be discarded."
+    },
+    {
+      "id": "UNREAL_ASSET_VERSIONING",
+      "authority": "official_documentation",
+      "title": "Unreal versioning of assets and packages",
+      "version": "current UE5",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/versioning-of-assets-and-packages-in-unreal-engine",
+      "supports": "Package/custom version checks and rejection of incompatible newer data."
+    },
+    {
+      "id": "RUST_ABI",
+      "authority": "official_language_reference",
+      "title": "The Rust Reference: External blocks and ABI",
+      "version": "current stable reference",
+      "url": "https://doc.rust-lang.org/reference/items/external-blocks.html#abi",
+      "supports": "The native Rust ABI explicitly offers no stability guarantees, while C/system ABIs are the interoperable calling-convention choices."
+    },
+    {
+      "id": "RUST_TYPE_LAYOUT",
+      "authority": "official_language_reference",
+      "title": "The Rust Reference: Type Layout",
+      "version": "current stable reference",
+      "url": "https://doc.rust-lang.org/reference/type-layout.html",
+      "supports": "Rust representation has minimal guarantees and field layout/order is not a stable plugin ABI."
+    },
+    {
+      "id": "WASMTIME_SECURITY",
+      "authority": "official_documentation",
+      "title": "Wasmtime security",
+      "version": "current",
+      "url": "https://docs.wasmtime.dev/security.html",
+      "supports": "Sandbox threat model, capability boundary, resource limits, fuel/epoch interruption and security assumptions."
+    },
+    {
+      "id": "WASMTIME_STABILITY",
+      "authority": "official_documentation",
+      "title": "Wasmtime stability and release process",
+      "version": "current",
+      "url": "https://docs.wasmtime.dev/stability-release.html",
+      "supports": "Embedding API compatibility policy, version cadence and requirement to manage upgrades deliberately."
+    },
+    {
+      "id": "WASM_COMPONENT_MODEL",
+      "authority": "official_bytecode_alliance_documentation",
+      "title": "WebAssembly Component Model documentation",
+      "version": "current",
+      "url": "https://component-model.bytecodealliance.org/",
+      "supports": "WIT interfaces, components, imports/exports and language-neutral semantic boundaries."
+    },
+    {
+      "id": "NARA_STRATEGY",
+      "authority": "nara_repository_authority",
+      "title": "Nara Strategy",
+      "path": "STRATEGY.md",
+      "supports": "Rust-first integrated product, stable extension seams, evidence-driven generalization, and explicit non-goal of a mandatory universal Wasm boundary or second author language."
+    },
+    {
+      "id": "NARA_ADR_0081",
+      "authority": "nara_accepted_adr",
+      "title": "Schema Source, Stable Identity, Catalog, and Runtime Binding",
+      "path": "docs/architecture/adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md",
+      "supports": "Runtime-independent immutable schema catalog, stable type/field identities, fingerprints, tombstones and separate native binding authority."
+    },
+    {
+      "id": "NARA_ADR_0090",
+      "authority": "nara_proposed_adr",
+      "title": "Unavailable Schema and Lossless Authoring",
+      "path": "docs/architecture/adr/0090-unavailable-schema-and-lossless-authoring.md",
+      "supports": "Proposed degraded-authoring classification, bounded semantic preservation, operation gates, and strict runtime rejection. Not current implementation authority."
+    },
+    {
+      "id": "NARA_ADR_0104",
+      "authority": "nara_accepted_adr",
+      "title": "Host-Owned Editor Workspace Installation",
+      "path": "docs/architecture/adr/0104-host-owned-editor-workspace-installation.md",
+      "supports": "Host owns workspace, persistence and product orchestration; tooling remains UI-neutral and does not own World, filesystem, window or renderer."
+    },
+    {
+      "id": "NARA_ADR_0107",
+      "authority": "nara_accepted_adr",
+      "title": "Shared UI Foundation and Independent Product Layers",
+      "path": "docs/architecture/adr/0107-shared-ui-foundation-and-independent-product-layers.md",
+      "supports": "Editor Shell owns panel placement while Host owns window, input and GPU; game UI and Editor UI remain independent product layers."
+    },
+    {
+      "id": "NARA_OQ_031",
+      "authority": "nara_open_question",
+      "title": "Product Package, Contribution, and Trust Topology",
+      "path": "docs/architecture/open-questions.md#oq-031-product-package-contribution-and-trust-topology",
+      "supports": "Current hypothesis of package/contribution separation, ordinary isolated Extension Host, explicit fully trusted same-process privilege, external trust approval, semantic protocol, and forbidden raw Rust/UI/GPU ABI values."
+    }
+  ]
+}

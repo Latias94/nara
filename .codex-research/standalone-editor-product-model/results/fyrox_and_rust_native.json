@@ -1,0 +1,601 @@
+{
+  "item": "Fyrox and Rust-native editor models",
+  "category": "rust-ecosystem",
+  "researched_at": "2026-08-18T00:00:00+08:00",
+  "version_scope": {
+    "fyrox_source_commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+    "fyrox_source_date": "2026-08-17",
+    "fyrox_documentation": "Fyrox Book, accessed 2026-08-18",
+    "bevy_source_commit": "e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59",
+    "bevy_source_date": "2026-08-07",
+    "third_party_scope": [
+      "bevy_editor_pls at 1d640f0ff62be4a021393757b05ea77089384b0e; its README support table ends at Bevy 0.14",
+      "bevy-inspector-egui at ac6729854a97a9abcd7657b29d7356bdea63c568; release commit for 0.37.0"
+    ],
+    "scope_note": "Fyrox is the primary Rust-native editor case because it ships a substantial scene editor and project manager. Bevy's official repository and two upstream Bevy tooling projects are used to distinguish an official engine substrate, an in-game editor overlay, and reflection-driven inspectors. Proposed Bevy editor designs and popularity claims are excluded unless the current source or official issue tracker verifies them."
+  },
+  "categories": {
+    "product_experience": {
+      "primary_editor_entry": {
+        "summary": "Fyrox exposes a standalone fyroxed executable and a graphical project manager, but the complete project-authoring path is project-specific: pressing Edit builds and runs a generated editor Cargo package that links or dynamically loads the project's game plugin. The standalone binary can handle engine-known content, but it cannot safely and faithfully author every project scene: unknown custom node types reject deserialization, while unavailable scripts are deliberately skipped rather than preserved as editable unknown records.",
+        "details": [
+          "Fyrox's repository contains editor-standalone/fyroxed, whose main function creates the generic editor without registering a game plugin. This is a real standalone editor product, not merely a Cargo subcommand wrapper.",
+          "The Project Manager's Edit action does not simply pass a project path to fyroxed. It selects BuildProfile::debug_editor or debug_editor_hot_reloading and invokes a build/run profile named editor. Its UI tooltip is explicit: Build the editor and run it.",
+          "The project template generates an editor crate with a direct optional dependency on the game crate. Static mode calls editor.add_game_plugin(Game::default()); dynamic mode calls editor.add_dynamic_plugin(...) for game_dylib.",
+          "A scene containing only engine-native nodes may be viewable in standalone fyroxed. An unknown custom node UUID returns a deserialization error. Missing or incompatible scripts follow a different policy: Base deliberately ignores the scripts collection's Visit error so the node can still load, but the Vec visitor clears and incrementally rebuilds the script list. No opaque unknown-script placeholder was found, so safe lossless round-tripping is not established. Therefore the generic binary is not a complete fidelity path for arbitrary projects.",
+          "The official Fyrox Book still teaches cargo run --package editor --release as the normal project editor launch. This is project-specific editor compilation even though the editor implementation itself is shared through fyroxed_base.",
+          "The current Bevy repository has no shipped official editor crate; official issue #85 remains open. The best-known Rust-native Bevy tools in this scope are libraries compiled into an application rather than a Unity/Godot-style standalone editor.",
+          "bevy_editor_pls explicitly describes itself as debug/editor UI added to the game executable and says it is not meant to be the eventual properly designed Bevy editor. bevy-inspector-egui similarly adds inspector plugins to a Bevy App."
+        ],
+        "nara_relevance": "Nara should keep nara-editor.exe as the primary, project-generic application. A project path may select data, schemas, build recipes and runtime targets, but must not select a separately compiled editor executable merely to view ordinary scenes. Project-specific native code may still be compiled for Play or advanced extensions, but it must not be the default scene-open gate.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-STANDALONE",
+          "FYROX-SRC-PROJECT-MANAGER",
+          "FYROX-SRC-TEMPLATE-EDITOR",
+          "FYROX-DOC-GETTING-STARTED",
+          "FYROX-SRC-UNKNOWN-TYPES",
+          "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "BEVY-ISSUE-EDITOR",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-INSPECTOR-README"
+        ]
+      },
+      "first_open_and_iteration": {
+        "summary": "Fyrox's first complete project open crosses a Cargo build boundary. Subsequent iteration can avoid rebuilding the whole editor by loading a project game dylib, but project code still must compile and the dynamic path inherits Rust ABI and state-migration risks. Bevy's in-app tools have the same fundamental compile-before-tools property, while Bevy Remote can only help after a project runtime is already built and running.",
+        "details": [
+          "Project Manager Edit starts a build profile for the generated editor package. The official book describes a first editor compilation in the order of tens of seconds, but this is a documentation estimate rather than a reproducible benchmark and varies with hardware, cache and project size.",
+          "In the default static Fyrox template, changing a game script changes the game crate dependency of the editor package. Cargo can reuse dependencies, but the project editor executable must relink before it sees the new native type implementation.",
+          "Hot-reload mode changes the boundary: game_dylib is compiled separately, the editor loads its fyrox_plugin entry point, watches the source library, copies it to a process-specific path and reloads it when changed. The long-lived editor can therefore survive many game-code rebuilds.",
+          "Hot reload does not remove compilation. The developer still runs cargo build --package game_dylib with a dedicated dynamic profile. The Fyrox Book also warns that the Rust compiler version used for the dylib must match the editor's compiler version.",
+          "The dynamic loader itself warns that this mode is slower than static linking, unsafe under compiler-version mismatch and strongly discouraged for production builds. Project Manager labels hot reload experimental and potentially subtly buggy.",
+          "If the project plugin fails to build or load, project-specific nodes and property editors remain unavailable; project scripts may be omitted during load rather than represented losslessly. The generic editor can remain a shell, but it cannot faithfully author those records using the current data model.",
+          "bevy_editor_pls and bevy-inspector-egui are compiled as plugins into the user's Bevy App, so code changes follow normal application compilation. They optimize local debugging ergonomics, not first-open project authoring.",
+          "Bevy Remote Protocol offers a useful alternative seam: an external client can inspect, alter and request schemas from a running Bevy App. However the app must first be compiled with RemotePlugin plus a transport, so it is not an offline scene-open solution."
+        ],
+        "nara_relevance": "The mature target is not zero compilation forever; it is zero project-editor compilation for ordinary opening and data edits. Nara can require a game build when the user adds new Rust types or presses Play, while keeping the editor open and useful against the last valid non-executable schema bundle. Runtime rebuild, schema refresh and editor startup must be visibly separate states.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-PROJECT-MANAGER",
+          "FYROX-SRC-BUILD-PROFILES",
+          "FYROX-DOC-GETTING-STARTED",
+          "FYROX-DOC-HOT-RELOAD",
+          "FYROX-SRC-DYLIB",
+          "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-INSPECTOR-README",
+          "BEVY-SRC-REMOTE"
+        ]
+      },
+      "authoring_coverage": {
+        "summary": "Fyrox demonstrates that a Rust engine can deliver a broad integrated editor: 2D/3D scene hierarchy and gizmos, UI scenes, reflection-based Inspector, asset browser and previews, animation and animation-state-machine tools, materials, shader-backed material fields, tile maps, terrain, physics helpers and external Play. The Bevy tools reviewed are much narrower and should not be mistaken for production editors.",
+        "details": [
+          "Fyrox's editor registers internal EditorPlugin implementations for Inspector, material editing, animation, animation blend state machines, curve editing, tile maps, colliders, ragdolls, reflection probes, statistics and settings.",
+          "The scene editor supports engine graph nodes, selection, hierarchy, move/rotate/scale gizmos, camera navigation, multi-scene tabs, commands, Undo/Redo and saving. UI scenes have a distinct controller and world-viewer provider inside the same editor shell.",
+          "Animation authoring is not only an Inspector field: the source contains a dedicated animation timeline/track editor and a separate ABSM graph editor. This is the appropriate product depth benchmark for Nara's future animation workspace.",
+          "Material editing is first-party and can change shader resources, bindings and property-group values. Fyrox also exposes shader property editors and external shader resources. No current primary source in this review proved a built-in shader source IDE or node-based shader graph equivalent to mature commercial engines, so that capability should not be inferred.",
+          "The editor includes an asset browser, preview cache, asset creators and dependency views. The official book documents a dedicated UI editor and shader resource model.",
+          "Current Fyrox Play is an external child-process workflow: the editor saves the scene, optionally executes build commands, runs the configured executor with --override-scene, captures stdout/stderr and kills the child on Stop.",
+          "bevy_editor_pls provides hierarchy, component inspection, a separate editor camera, diagnostics panels, scene export and custom panels, but its own missing-features list includes scene import. It is an in-game debug authoring overlay rather than a source project editor.",
+          "bevy-inspector-egui provides generic Reflect inspectors and drop-in resource/world/asset inspector plugins. It does not provide project creation, source scene lifecycle, import, animation, material/shader, Play supervision or recovery workflows."
+        ],
+        "nara_relevance": "Nara should treat Scene, UI, Animation, Material/Shader, Asset, Game and Debug views as first-party domain editors hosted by one application. The initial product slice can be smaller, but the data contracts must allow these editors to operate without loading arbitrary project Rust code. Runtime inspection plugins alone are not an acceptable substitute for source authoring.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-DOC-EDITOR-OVERVIEW",
+          "FYROX-DOC-UI-EDITOR",
+          "FYROX-DOC-SHADERS",
+          "FYROX-SRC-BUILTIN-EDITORS",
+          "FYROX-SRC-PLAY",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-INSPECTOR-README"
+        ]
+      }
+    },
+    "architecture": {
+      "persistent_data_model": {
+        "summary": "Fyrox persists reflective engine objects rather than a fully self-describing editor document. Scene records contain stable type UUIDs, but concrete node and script constructors still come from executable plugin registration. Bevy shows two complementary pieces—a typed scene notation and runtime schema export—but neither currently constitutes a complete offline generic editor model.",
+        "details": [
+          "Fyrox's Visitor infrastructure serializes scenes, resources, scripts and plugin state. Scene nodes and scripts carry type UUIDs; deserialization asks SerializationContext for a node or script constructor and then visits the type's fields.",
+          "Game scripts derive Visit and Reflect, provide a stable type UUID and are registered by Plugin::register. Reflection supplies Inspector structure and custom property editors can be registered by Plugin::register_property_editors.",
+          "The UUID is persistent identity, but it is not a complete non-executable schema. Without a compiled constructor, a custom node cannot be instantiated and a script cannot be reconstructed. The current script policy can continue loading the owning node after ignoring the script error, but that is degradation, not generic lossless authoring.",
+          "Fyrox scenes use the engine's binary Visitor format by default; an editor debugging option can emit text alongside the binary scene. The reviewed sources do not establish a project-wide text source format that a generic editor can safely manipulate without type constructors.",
+          "Current Bevy source defines composable scenes through the typed BSN Rust macro. Its documentation explicitly says .bsn asset files are future work or not yet released in the inspected commit, which limits its immediate use as an offline editor source format.",
+          "Bevy Remote Protocol can enumerate registered types and export JSON-schema-like descriptions containing field definitions, type information and reflect metadata from the running App's TypeRegistry. This is a strong runtime introspection seam, but the schema exists only after project code has registered the types.",
+          "bevy-inspector-egui likewise depends on Reflect and explicit register_type calls for project-defined resources and components. It proves generic Inspector rendering over reflection, not independent source-schema ownership."
+        ],
+        "nara_relevance": "Nara needs a versioned, non-executable Authoring Schema Bundle that is sufficient to parse, display, validate, patch and losslessly preserve project records. Stable component/resource IDs, fields, variants, defaults, numeric ranges, units, asset-reference kinds, editor hints and migration identity should be data. Runtime constructors and systems remain compiled code and are checked later through a schema fingerprint handshake.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-DOC-SERIALIZATION",
+          "FYROX-DOC-SCRIPTING",
+          "FYROX-SRC-PLUGIN-REGISTRATION",
+          "FYROX-SRC-UNKNOWN-TYPES",
+          "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "BEVY-SRC-SCENE",
+          "BEVY-SRC-REMOTE-SCHEMA",
+          "BEVY-INSPECTOR-README"
+        ]
+      },
+      "project_code_loading": {
+        "summary": "Rust-native tools reviewed make project code available in one of three ways: statically link it into a project editor/app, load a Rust dylib into the editor/runtime, or connect an external client to an already running project process. Each works, but none provides the safe, compile-free offline project opening that Nara wants.",
+        "details": [
+          "Fyrox static mode links the game crate into the generated editor and passes Game::default() to add_game_plugin. This is simple, strongly typed and gives the editor direct access to constructors and custom property editors, at the cost of a project-specific editor binary.",
+          "Fyrox dynamic mode exports a fyrox_plugin symbol whose Rust signature returns Box<dyn Plugin>. The editor loads it with libloading and can watch/reload the library. This keeps a shared editor process alive but uses Rust trait objects across a native dynamic-library boundary.",
+          "Fyrox's own source documents the consequences: dynamic plugins are slower, compiler mismatch can be unsafe and the mode is discouraged for production. This is direct upstream evidence against treating arbitrary Rust dylibs as Nara's default editor extension ABI.",
+          "Plugin::register is the point where project code registers scripts and custom scene nodes into SerializationContext. register_property_editors adds project-specific Inspector behavior. The current scene loader therefore couples project code availability to full scene fidelity: custom nodes can reject loading and unavailable scripts cannot be reconstructed for safe editing.",
+          "Fyrox EditorPlugin is a separate native trait for full editor tools. The public path is add_editor_plugin<P: EditorPlugin + 'static>. The inspected source has a dylib loader for game Plugin, not for EditorPlugin. It is therefore a high-confidence inference that custom full editor windows/tools are normally compiled into the project editor, while dynamic game plugins can contribute constructors and property editors only.",
+          "bevy_editor_pls and bevy-inspector-egui choose static in-process composition: users add plugins and custom panels to their App source. This minimizes architecture but couples tooling startup and versioning to the game build.",
+          "Bevy Remote chooses process isolation: a compiled App registers RemotePlugin and an HTTP transport, while a generic external client speaks JSON-RPC. It can inspect/mutate the world, discover methods and read schemas, but it cannot supply missing offline source schemas before that App starts."
+        ],
+        "nara_relevance": "Nara should separate four authorities: offline authoring schema data, editor domain modules, project runtime code and optional executable editor extensions. The default editor must consume only the first two. Runtime code is built and launched for Play. Executable project tools should eventually use a versioned Wasm or out-of-process protocol; arbitrary Rust trait-object dylibs should be rejected as the default product contract.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-TEMPLATE-EDITOR",
+          "FYROX-SRC-DYLIB",
+          "FYROX-SRC-PLUGIN-REGISTRATION",
+          "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "FYROX-SRC-EDITOR-PLUGIN",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-INSPECTOR-README",
+          "BEVY-SRC-REMOTE"
+        ]
+      },
+      "play_execution_model": {
+        "summary": "Current Fyrox master uses a clean authoring/runtime separation for Play: build commands and the game executor run as child processes, the edited scene path is passed as an override, output is captured, and Stop terminates the child. This is more transferable to Nara than Fyrox's project-specific editor loading model.",
+        "details": [
+          "On Play, Fyrox requires a saved active scene, saves it, reads the selected BuildProfile and starts the run command with --override-scene <path>.",
+          "Build mode executes configured commands sequentially, streams their stdout/stderr to a build window, returns to Edit on failure and enters Play only after the full queue succeeds.",
+          "The default debug profile builds and runs the executor package. Hot-reload profiles first build game_dylib and then run an executor configured to load that dylib.",
+          "Play owns a child process handle. The editor polls for exit, captures logs and kills the process when returning to Edit. A game crash therefore does not inherently take down the editor process.",
+          "The inspected current path is a separate game window/process, not an embedded Game View transport. This reduces implementation coupling but does not yet provide Unity/Godot-style integrated presentation.",
+          "bevy_editor_pls does not provide a separate Play process; the editor UI is inside the running game App and can pause/unpause time. This is convenient for debugging but conflates source authoring, transient runtime state and tool failure domains.",
+          "Bevy Remote can underpin a separate runtime inspector, but it is a world-control protocol rather than a complete build/run/stop/session authority."
+        ],
+        "nara_relevance": "Nara should copy the external supervised Play process first: build only the game target, stream structured diagnostics, launch with an explicit scene/document revision and schema/content fingerprints, expose Stop/Restart, and keep the editor alive on failure. An embedded Game View can later present frames and forward input without collapsing the process boundary.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-PLAY",
+          "FYROX-SRC-BUILD-PROFILES",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-SRC-REMOTE"
+        ]
+      },
+      "editor_extension_model": {
+        "summary": "Fyrox has a capable native EditorPlugin contract with lifecycle hooks and command-based model mutation, but full custom editor tools are compile-time Rust extensions. Bevy's upstream tools make the same trade: custom panels and Inspector behavior are Rust code linked into the App. These are productive internal APIs, not safe project-generic plugin distribution models.",
+        "details": [
+          "Fyrox EditorPlugin explicitly recommends MVC: UI mirrors the data model and must not become persistent authority. It also requires scene modifications to use commands so Undo/Redo remains correct.",
+          "The trait receives startup/exit, model synchronization, mode changes, scene changes, UI messages, suspension/resume, preview, update and editor control messages. This is broad enough for internal Animation, Material, Inspector, Tile Map and other domain tools.",
+          "Editor::add_editor_plugin is generic over a concrete Rust type and stores Box<dyn EditorPlugin>. Adding a custom panel or gizmo therefore normally means modifying and recompiling the generated project editor or another editor host crate.",
+          "A game Plugin, including a dynamically loaded one, can register custom property editors. This offers a narrower project extension seam, but it still executes native project code inside the editor and depends on the Rust dylib compatibility constraints.",
+          "bevy_editor_pls custom windows implement an EditorWindow Rust trait and are registered in App construction. bevy-inspector-egui custom primitive editors and type data are likewise registered from Rust code.",
+          "None of the reviewed Rust-native tools provides a verified marketplace-grade, stable, isolated editor extension ABI comparable to a managed script host, a stable C ABI or a Wasm component model."
+        ],
+        "nara_relevance": "Nara can copy Fyrox's internal Editor Domain plugin shape—commands, Undo/Redo, model synchronization and lifecycle—but should not expose egui objects or native Rust trait objects as the durable third-party contract. Start with declarative Inspector metadata and editor actions, then add isolated Wasm or out-of-process extensions for custom panels/importers/gizmos when concrete product workflows require them.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-EDITOR-PLUGIN",
+          "FYROX-SRC-DYNAMIC-AND-EDITOR-PLUGIN-APIS",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-INSPECTOR-README"
+        ]
+      },
+      "failure_and_versioning_model": {
+        "summary": "Fyrox uses mixed missing-type behavior: unknown custom node types fail closed, while script-loading errors are intentionally swallowed so the owning node can still open. The latter improves recoverability but is not a verified lossless placeholder model. Dynamic reload attempts state preservation, while ABI mismatch and in-editor native code remain material reliability risks.",
+        "details": [
+          "When deserializing a custom scene node, Fyrox looks up its type UUID in node_constructors and returns an Unknown node type uuid error if absent.",
+          "When deserializing a script, Fyrox looks up script_type_uuid in script_constructors and produces an error if no constructor exists. Base intentionally ignores the scripts collection's Visit result so the node remains loadable. Because Vec deserialization clears the destination and only pushes successfully visited items, unavailable scripts are not represented by a verified opaque placeholder and saving after degraded load risks omitting them.",
+          "During game-plugin hot reload, Fyrox serializes plugin-owned nodes, scripts and scene user data into binary blobs, unloads the plugin, registers the replacement and deserializes state back into the scenes. Failure in serialization, loading, registration or restoration can abort the reload.",
+          "The dynamic library is copied to a process-specific path to work around loaded-library replacement constraints. File watching requests reload when the source artifact changes.",
+          "The loader warns that mismatched compiler versions may be unsafe. Because the plugin entry returns a Rust trait object, this is not merely a friendly compatibility check; it is a native process-safety boundary.",
+          "External Play improves crash isolation: build failure returns to Edit, and the game process can exit or be killed without necessarily terminating the editor.",
+          "Bevy Remote exposes strict and non-strict errors for missing/unreflectable components and derives schema from the running registry. A stale or failed game build means the remote schema is unavailable, which again argues for a separate offline schema artifact.",
+          "bevy_editor_pls and bevy-inspector-egui execute in the game process. Tool panics or incompatible plugin versions share the application's failure domain."
+        ],
+        "nara_relevance": "Nara should retain fail-closed validation for unsafe writes while making project opening resilient. Unknown records should be losslessly preserved and shown as unavailable/read-only rather than causing the entire generic editor to fail. Schema bundles and runtime handshakes need explicit versions/fingerprints. Native project extensions must be optional, recovery-disableable and never required to recover authored data.",
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-UNKNOWN-TYPES",
+          "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "FYROX-SRC-HOT-RELOAD-STATE",
+          "FYROX-SRC-DYLIB",
+          "FYROX-SRC-PLAY",
+          "BEVY-SRC-REMOTE",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-INSPECTOR-README"
+        ]
+      }
+    },
+    "engineering_tradeoffs": {
+      "strengths": {
+        "summary": "Fyrox proves that Rust can support a genuinely useful integrated scene editor and that direct native type access yields excellent implementation leverage. Its command-based editor architecture and external Play process are particularly strong reference points.",
+        "details": [
+          "Static game-plugin linking gives exact Rust types, constructors, reflection and property editors with minimal marshaling or schema duplication.",
+          "The shared fyroxed_base crate means projects do not fork the editor implementation; the generated editor crate is a thin composition root.",
+          "Dynamic game-plugin reload can keep the editor UI alive while rebuilding a smaller project artifact, materially improving iteration compared with relinking all engine/editor code.",
+          "EditorPlugin uses explicit MVC and command/Undo conventions rather than allowing every panel to mutate hidden widget state.",
+          "The editor's built-in domain breadth—UI, animation, ABSM, materials, tile maps and asset tooling—shows that modular Rust editor components can scale beyond a debug inspector.",
+          "Current external child-process Play cleanly separates build, run, logs, Stop and crash lifecycles.",
+          "Bevy Remote demonstrates that a Rust runtime can expose reflected state and machine-readable type schemas through a process boundary without sharing Rust ABI types with the client."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-TEMPLATE-EDITOR",
+          "FYROX-SRC-EDITOR-PLUGIN",
+          "FYROX-SRC-BUILTIN-EDITORS",
+          "FYROX-SRC-PLAY",
+          "BEVY-SRC-REMOTE-SCHEMA"
+        ]
+      },
+      "weaknesses": {
+        "summary": "The main cost is that source data is not independently authorable: complete scene loading and custom editor behavior depend on successfully compiling and loading project Rust code. Hot reload reduces latency but adds unsafe ABI and state-transfer complexity rather than removing the coupling.",
+        "details": [
+          "The first faithful project open can require compiling a generated editor package, which is exactly the productivity problem the requested Nara product shape wants to avoid.",
+          "A missing custom node constructor can block deserialization. A missing or incompatible script is skipped so the node can open, but the editor cannot fall back to a complete opaque data representation of that script, creating a potential lossy-save boundary.",
+          "Static composition relinks a project editor after relevant code changes. Dynamic composition avoids relinking the editor but still compiles game_dylib and requires exact toolchain compatibility.",
+          "Rust trait-object dylib loading is unsafe across incompatible compilers and lacks a stable long-term plugin distribution contract.",
+          "Full custom EditorPlugin tools appear to require compilation into the editor host; the dynamic project plugin path is narrower and still in-process native code.",
+          "Hot reload must serialize, remove and restore live plugin-owned nodes and scripts. This is powerful but creates migration and partial-failure states that are difficult to make universally reliable.",
+          "Fyrox's strong built-in editor coverage does not by itself solve asset source/import provenance, arbitrary project extension isolation or lossless unknown-type authoring.",
+          "Bevy's in-app tools are even more tightly coupled to the game executable and are intentionally incomplete as source editors. Bevy Remote improves isolation but only after a runtime is available."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-PROJECT-MANAGER",
+          "FYROX-SRC-UNKNOWN-TYPES",
+          "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "FYROX-SRC-DYLIB",
+          "FYROX-SRC-HOT-RELOAD-STATE",
+          "FYROX-SRC-DYNAMIC-AND-EDITOR-PLUGIN-APIS",
+          "BEVY-EDITOR-PLS-README",
+          "BEVY-SRC-REMOTE"
+        ]
+      },
+      "nara_transferable_lessons": {
+        "summary": "Nara should copy the product-quality editor internals and external Play boundary, adapt reflection into a non-executable schema contract, and reject project-generated editor binaries or arbitrary Rust dylibs as the routine authoring path.",
+        "copy": [
+          "A standalone editor application with a real project manager/open-project experience.",
+          "One shell hosting Scene, UI, Animation, Material/Shader, Asset, Game and Debug domain editors.",
+          "Editor mutations represented as commands so Undo/Redo, dirty state and persistence stay centralized.",
+          "Internal editor modules with explicit lifecycle and model synchronization rather than toolkit-state ownership.",
+          "External supervised game execution with build queue, logs, scene override, Stop and recovery to Edit.",
+          "Optional runtime reflection/remote inspection that exports type schemas and live values across a process boundary."
+        ],
+        "adapt": [
+          "Turn Rust reflection/codegen output into a checked, versioned Authoring Schema Bundle stored or cached as data. The editor consumes this bundle without linking project code.",
+          "Represent scene/prefab/UI records generically by stable schema IDs and losslessly retained field payloads. Runtime constructors consume the same identity but are not required for ordinary editor opening.",
+          "When Rust code changes, rebuild only the game/schema producer. Keep the editor and documents open against the last-good schema, show stale status, and atomically adopt a newly verified bundle.",
+          "Use a runtime protocol inspired by Bevy Remote for Play inspection, but bind it to Nara document revision, content identity and schema fingerprint so remote state never becomes source authority.",
+          "Use declarative editor contributions first: Inspector layout hints, ranges, units, asset pickers, menus/actions, gizmo descriptors and validation rules. Add Wasm or out-of-process code extensions only for workflows that cannot be expressed declaratively.",
+          "Build Animation and Material/Shader editors as first-party data editors. Validating or compiling a shader asset may invoke an engine compiler service, but it must not rebuild nara-editor.exe."
+        ],
+        "reject": [
+          "Do not generate or compile a separate editor executable for every project as the normal path.",
+          "Do not require a running game process merely to discover schemas or display source scenes.",
+          "Do not dlopen arbitrary Rust trait objects into the editor as the default plugin ABI.",
+          "Do not treat an in-game hierarchy/Inspector overlay as a substitute for source scene, asset, animation, material and recovery workflows.",
+          "Do not silently drop or zero unknown project data when a schema or plugin is unavailable.",
+          "Do not let custom editor UI own document, selection, Undo, persistence or Play lifecycle state."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "FYROX-SRC-EDITOR-PLUGIN",
+          "FYROX-SRC-PLAY",
+          "FYROX-SRC-DYLIB",
+          "FYROX-SRC-UNKNOWN-TYPES",
+          "BEVY-SRC-REMOTE-SCHEMA",
+          "BEVY-EDITOR-PLS-README"
+        ]
+      },
+      "minimum_viable_path": {
+        "summary": "The smallest credible Nara path preserves the mature-editor experience by making nara-editor.exe data-complete before it is code-extensible: open source documents from a schema bundle, edit through domain commands, then build and launch only the game for Play.",
+        "stages": [
+          {
+            "stage": 1,
+            "name": "Offline generic project opening",
+            "deliverables": [
+              "nara-editor.exe opens nara.toml directly or through a minimal Project Manager; no project-specific editor binary is generated.",
+              "The project contains or can obtain a versioned Authoring Schema Bundle describing engine and project component/resource types without executable Rust code.",
+              "Scene and prefab loaders materialize generic authoring records by stable schema ID. Unknown records are preserved losslessly and displayed as unavailable/read-only rather than blocking the whole project.",
+              "A stale or missing schema produces an actionable project-level diagnostic and a Refresh Schema action; it does not close the editor application."
+            ]
+          },
+          {
+            "stage": 2,
+            "name": "Productive source authoring",
+            "deliverables": [
+              "Scene Tree, selection, Inspector, Undo/Redo, dirty state, Save and reopen work over generic records.",
+              "UI layout/value editing uses the same document transaction model.",
+              "Animation clips/timelines and material/shader assets are first-party resource documents with previews and structured diagnostics.",
+              "Internal editor domain modules use a private lifecycle/action seam modeled on the good parts of Fyrox EditorPlugin, while egui remains an adapter."
+            ]
+          },
+          {
+            "stage": 3,
+            "name": "External Play and schema handshake",
+            "deliverables": [
+              "Play invokes Cargo or a build host for the game target only, streams structured diagnostics and leaves the editor responsive.",
+              "The child game receives the selected scene/document revision and performs a schema/content fingerprint handshake before accepting inspection or input authority.",
+              "Stop, restart, logs and failure recovery are owned by the editor. The first implementation may use a separate game window.",
+              "A newly built schema bundle is adopted atomically only after validation; failed builds leave the last-good authoring session intact."
+            ]
+          },
+          {
+            "stage": 4,
+            "name": "Runtime inspection, Game View and safe extensions",
+            "deliverables": [
+              "Add a versioned process protocol for live hierarchy/value inspection and controlled mutations, borrowing the schema-discovery idea from Bevy Remote without making runtime state persistent authority.",
+              "Embed frames and forward input for Game View only after the external process lifecycle is reliable.",
+              "Add declarative project tools first; add Wasm or out-of-process custom Inspector/panel/importer extensions with capability limits and recovery disablement when real workflows require them.",
+              "Keep an optional native extension tier explicitly advanced and never necessary for opening or recovering project source data."
+            ]
+          }
+        ],
+        "acceptance_trajectory": "Launch nara-editor.exe -> open an unbuilt project containing project-defined scene components -> inspect the Scene Tree and fields from the schema bundle -> edit a value -> undo/redo -> save/reopen -> edit UI, animation and material/shader data -> press Play -> build only the game -> launch a child runtime with matching schema/content identity -> inspect logs/live state -> stop -> break project Rust code or remove an optional extension -> reopen and recover authored data without compiling another editor.",
+        "explicit_non_goal": "The first milestone does not need arbitrary native editor plugins, in-process hot reload, embedded Game View, a plugin marketplace or a universal importer framework. It does need the offline schema/source boundary; omitting that boundary recreates Fyrox's project-editor coupling.",
+        "confidence": "medium-high",
+        "evidence": [
+          "FYROX-SRC-PROJECT-MANAGER",
+          "FYROX-SRC-UNKNOWN-TYPES",
+          "FYROX-SRC-EDITOR-PLUGIN",
+          "FYROX-SRC-PLAY",
+          "BEVY-SRC-REMOTE-SCHEMA",
+          "BEVY-EDITOR-PLS-README"
+        ]
+      }
+    },
+    "evidence": {
+      "primary_sources": [
+        {
+          "id": "FYROX-DOC-GETTING-STARTED",
+          "title": "Getting Started",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-PROJECT-MANAGER",
+          "title": "Project Manager",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/beginning/project_manager.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-SCRIPTING",
+          "title": "Scripting",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/beginning/scripting.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-HOT-RELOAD",
+          "title": "Hot Reloading",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/beginning/hot_reloading.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-SERIALIZATION",
+          "title": "Data Management / Serialization",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/serialization/index.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-EDITOR-OVERVIEW",
+          "title": "Editor Overview",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/beginning/editor_overview.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-UI-EDITOR",
+          "title": "UI Editor",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/ui/editor/editor.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-DOC-SHADERS",
+          "title": "Shaders",
+          "kind": "official_documentation",
+          "version": "live Fyrox Book",
+          "url": "https://fyrox-book.github.io/rendering/shaders.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "FYROX-SRC-STANDALONE",
+          "title": "Standalone fyroxed entry point",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "editor-standalone/src/main.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/editor-standalone/src/main.rs#L25-L51"
+        },
+        {
+          "id": "FYROX-SRC-PROJECT-MANAGER",
+          "title": "Project Manager builds and runs the project editor package",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "project-manager/src/manager.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/project-manager/src/manager.rs#L969-L990",
+          "additional_url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/project-manager/src/manager.rs#L503-L526"
+        },
+        {
+          "id": "FYROX-SRC-TEMPLATE-EDITOR",
+          "title": "Generated editor crate statically links or dynamically loads the game plugin",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "template-core/src/lib.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/template-core/src/lib.rs#L416-L483"
+        },
+        {
+          "id": "FYROX-SRC-BUILD-PROFILES",
+          "title": "Game, editor and hot-reload Cargo build/run profiles",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "fyrox-build-tools/src/lib.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-build-tools/src/lib.rs#L76-L259"
+        },
+        {
+          "id": "FYROX-SRC-PLUGIN-REGISTRATION",
+          "title": "Game Plugin registration owns script/node constructors and custom property editors",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "fyrox-impl/src/plugin/mod.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-impl/src/plugin/mod.rs#L570-L592"
+        },
+        {
+          "id": "FYROX-SRC-UNKNOWN-TYPES",
+          "title": "Unknown custom nodes fail and script constructor lookup produces an error",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "fyrox-impl/src/scene/node/container.rs; fyrox-impl/src/scene/base.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-impl/src/scene/base.rs#L1151-L1183",
+          "additional_url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-impl/src/scene/node/container.rs#L35-L53"
+        },
+        {
+          "id": "FYROX-SRC-SCRIPT-FAILURE-POLICY",
+          "title": "Base ignores script Visit failures; Vec deserialization clears and rebuilds incrementally",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "fyrox-impl/src/scene/base.rs; fyrox-core/src/visitor/impls.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-impl/src/scene/base.rs#L1214-L1225",
+          "additional_url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-core/src/visitor/impls.rs#L143-L168"
+        },
+        {
+          "id": "FYROX-SRC-DYLIB",
+          "title": "Rust dylib plugin loading, watcher and compiler-version safety warning",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "fyrox-impl/src/plugin/dylib.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-impl/src/plugin/dylib.rs#L38-L174"
+        },
+        {
+          "id": "FYROX-SRC-HOT-RELOAD-STATE",
+          "title": "Plugin-owned scene/script state serialization and restoration during reload",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "fyrox-impl/src/engine/hotreload.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/fyrox-impl/src/engine/hotreload.rs#L70-L278"
+        },
+        {
+          "id": "FYROX-SRC-EDITOR-PLUGIN",
+          "title": "EditorPlugin lifecycle, MVC and command/Undo contract",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "editor/src/plugin.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/editor/src/plugin.rs#L25-L151"
+        },
+        {
+          "id": "FYROX-SRC-DYNAMIC-AND-EDITOR-PLUGIN-APIS",
+          "title": "Dynamic game plugin and compile-time EditorPlugin registration APIs",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "editor/src/lib.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/editor/src/lib.rs#L2830-L2890"
+        },
+        {
+          "id": "FYROX-SRC-BUILTIN-EDITORS",
+          "title": "Built-in Inspector, animation, ABSM, material, curve and tile-map editor plugins",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "editor/src/lib.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/editor/src/lib.rs#L1068-L1087"
+        },
+        {
+          "id": "FYROX-SRC-PLAY",
+          "title": "Editor build queue and supervised child-process Play lifecycle",
+          "kind": "official_source",
+          "commit": "d1e3469ca5cd17d9a88da26246593d5ef63564f0",
+          "path": "editor/src/lib.rs",
+          "url": "https://github.com/FyroxEngine/Fyrox/blob/d1e3469ca5cd17d9a88da26246593d5ef63564f0/editor/src/lib.rs#L1619-L1762"
+        },
+        {
+          "id": "BEVY-ISSUE-EDITOR",
+          "title": "Bevy Editor tracking issue #85",
+          "kind": "official_issue",
+          "state_as_of_access": "open",
+          "url": "https://github.com/bevyengine/bevy/issues/85",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "BEVY-SRC-SCENE",
+          "title": "Current Bevy Scene/BSN model and unreleased .bsn asset-file note",
+          "kind": "official_source",
+          "commit": "e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59",
+          "path": "crates/bevy_scene/src/lib.rs",
+          "url": "https://github.com/bevyengine/bevy/blob/e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59/crates/bevy_scene/src/lib.rs#L1-L105"
+        },
+        {
+          "id": "BEVY-SRC-REMOTE",
+          "title": "Bevy Remote Protocol inspection, mutation and custom methods",
+          "kind": "official_source",
+          "commit": "e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59",
+          "path": "crates/bevy_remote/src/lib.rs",
+          "url": "https://github.com/bevyengine/bevy/blob/e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59/crates/bevy_remote/src/lib.rs#L1-L10"
+        },
+        {
+          "id": "BEVY-SRC-REMOTE-SCHEMA",
+          "title": "Runtime type-registry JSON schema export",
+          "kind": "official_source",
+          "commit": "e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59",
+          "path": "crates/bevy_remote/src/schemas/json_schema.rs",
+          "url": "https://github.com/bevyengine/bevy/blob/e8b3598ff5e5ec40e8ba84edd5750a1c0e4d4e59/crates/bevy_remote/src/schemas/json_schema.rs#L1-L124"
+        },
+        {
+          "id": "BEVY-EDITOR-PLS-README",
+          "title": "bevy_editor_pls project model and limitations",
+          "kind": "upstream_project_source",
+          "commit": "1d640f0ff62be4a021393757b05ea77089384b0e",
+          "path": "README.md",
+          "url": "https://github.com/jakobhellermann/bevy_editor_pls/blob/1d640f0ff62be4a021393757b05ea77089384b0e/README.md#L1-L32"
+        },
+        {
+          "id": "BEVY-INSPECTOR-README",
+          "title": "bevy-inspector-egui reflection and plugin usage",
+          "kind": "upstream_project_source",
+          "commit": "ac6729854a97a9abcd7657b29d7356bdea63c568",
+          "path": "README.md",
+          "url": "https://github.com/jakobhellermann/bevy-inspector-egui/blob/ac6729854a97a9abcd7657b29d7356bdea63c568/README.md#L1-L84"
+        }
+      ]
+    }
+  },
+  "uncertain": [
+    {
+      "topic": "Exact first-open and incremental compilation latency",
+      "reason": "Fyrox documentation gives a rough first-build estimate, but no reproducible benchmark was run and latency depends heavily on cache, linker, toolchain, hardware and project size."
+    },
+    {
+      "topic": "Standalone fyroxed behavior for every partially unknown scene shape",
+      "reason": "Source proves that unknown custom nodes return a deserialization error and that script errors are swallowed at Base after Vec begins rebuilding the list. This review did not run a save/reopen matrix covering script position, multiple missing scripts, resources, dynamic types and editor-only metadata."
+    },
+    {
+      "topic": "Lossless recovery of unknown Fyrox project types",
+      "reason": "No first-party MissingScript or generic unknown-node placeholder was found in the inspected current paths. Source structure indicates a potential lossy-save boundary for skipped scripts, but no destructive round-trip test was run, and absence from the inspected paths is not proof that no specialized recovery path exists elsewhere."
+    },
+    {
+      "topic": "Dynamic full EditorPlugin loading in Fyrox",
+      "reason": "Current source clearly exposes dynamic loading for game Plugin and a generic add_editor_plugin API for concrete EditorPlugin types. No dynamic EditorPlugin loader was found, so rebuild requirements for full custom editor UI are a high-confidence inference rather than an explicit upstream prohibition."
+    },
+    {
+      "topic": "Fyrox integrated shader-code or shader-graph authoring",
+      "reason": "Material and shader property editing are verified. The research did not find authoritative evidence of a full integrated shader text IDE or visual shader graph in the inspected version."
+    },
+    {
+      "topic": "Future official Bevy editor architecture",
+      "reason": "The official issue is open and current source has useful scene, reflection and remote substrates, but proposals in issue comments are not accepted architecture and were intentionally excluded."
+    },
+    {
+      "topic": "Security and performance of a future Nara Wasm or out-of-process editor extension host",
+      "reason": "These are architectural recommendations derived from the observed Rust ABI problem. Concrete sandbox, IPC and latency properties require a focused prototype and threat model."
+    }
+  ]
+}

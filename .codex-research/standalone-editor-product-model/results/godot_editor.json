@@ -1,0 +1,579 @@
+{
+  "item": "Godot Editor",
+  "category": "mature-engine",
+  "researched_at": "2026-08-18T00:00:00+08:00",
+  "version_scope": {
+    "engine_release": "Godot 4.7.1-stable",
+    "release_date": "2026-07-14",
+    "official_source_tag": "4.7.1-stable",
+    "official_source_commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+    "documentation_branch": "4.7",
+    "scope_note": "Findings describe the standalone desktop editor in Godot 4.7.1. Where behavior differs by project language, GDScript, C#/.NET, and GDExtension are distinguished explicitly."
+  },
+  "categories": {
+    "product_experience": {
+      "primary_editor_entry": {
+        "summary": "Godot presents one generic, standalone tools-enabled editor executable. Launching it without a selected project opens Project Manager; opening a project starts the same executable with the project path and editor mode. A project-specific editor executable is not compiled before ordinary scene/resource authoring.",
+        "details": [
+          "Project Manager discovers existing projects, creates/imports projects, tracks favorites/tags, and opens the selected project. Its source starts another instance of the same executable with --path <project> and --editor, then exits the manager window.",
+          "The same engine entry point constructs ProjectManager, EditorNode, or the running game according to launch mode. The product identity is therefore a standalone editor application, not a build-tool subcommand and not a project-generated editor shell.",
+          "The editor can directly open project.godot and engine-understood scene/resource data. This avoids compiling project code for scenes composed only from built-in types and already-available scripts/extensions.",
+          "The no-project-build promise is conditional for custom executable types: GDScript is parsed by the editor without native compilation, but C# types require a managed project build and GDExtension types require a matching native shared library. Godot preserves the generic editor executable; it does not eliminate all compilation of project code."
+        ],
+        "nara_relevance": "Nara should preserve nara-editor.exe as the primary product and treat CLI launch as an optional forwarding convenience. Opening declarative scene/UI/animation/shader data must not require compiling a project-specific editor. Project runtime code may still be built when Play is requested or when an optional native extension is explicitly needed.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-PROJECT-MANAGER",
+          "GODOT-SRC-MAIN-MODES",
+          "GODOT-SRC-PROJECT-OPEN"
+        ]
+      },
+      "first_open_and_iteration": {
+        "summary": "First open is a project scan/import/reconciliation workflow rather than an editor compilation workflow. Iteration quality depends on the project language and extension type: data and GDScript changes are fast-path reloads; C# and native extensions cross compilation/reload boundaries.",
+        "details": [
+          "On first project open, EditorFileSystem scans the project source tree, recognizes resource types, updates script-class metadata, and imports source assets through registered ResourceImporter implementations. Generated import products live under .godot/imported and are treated as cache artifacts.",
+          "Subsequent file changes are detected by EditorFileSystem::scan_changes. Godot can periodically scan while the editor is unfocused and reimport changed assets; script and shader editors also detect external disk changes.",
+          "GDScript is a Script resource interpreted/compiled by the language module inside the generic editor. Saving or externally changing scripts can reparse/reload them, and the editor debugger can ask a running child process to reload scripts.",
+          "C# uses the generic .NET-enabled Godot editor, but Build Project invokes MSBuild and then reloads assemblies/scripts. This is a project-code compilation step, not a recompilation of the editor executable.",
+          "GDExtension loads an already-built native shared library. Optional hot reload requires the descriptor to mark the extension reloadable and the library to support reloading; failed or incompatible libraries can leave custom types unavailable until corrected.",
+          "Recovery mode is a first-class project-open path. It suppresses GDExtension loading, and addon plugin loading disables a plugin whose script is invalid instead of requiring a new editor build.",
+          "No reproducible latency claim is made here: initial import cost is asset- and project-dependent, and the official sources specify workflow rather than stable timing targets."
+        ],
+        "nara_relevance": "Nara needs a project source database and deterministic import/cache invalidation before it needs project-specific editor compilation. The UI should distinguish source scan, import, schema availability, runtime build, and extension load as separate states with actionable recovery.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-IMPORT-PROCESS",
+          "GODOT-SRC-EDITOR-FILE-SYSTEM",
+          "GODOT-SRC-SCRIPT-RELOAD",
+          "GODOT-SRC-CSHARP-BUILD",
+          "GODOT-SRC-GDEXTENSION-RELOAD",
+          "GODOT-SRC-PROJECT-OPEN",
+          "GODOT-SRC-ADDON-LOADING"
+        ]
+      },
+      "authoring_coverage": {
+        "summary": "Godot's editor is a broad production tool built around one shared object/resource model: scene hierarchy, reusable scene instances, 2D/3D/UI layout, resources and inspector editing, animation, materials/shaders, asset import, scripting, debugging, and runtime inspection all live in the same editor product.",
+        "details": [
+          "Scene authoring uses a node tree and PackedScene resources. A saved scene can be instanced or inherited, giving Godot a prefab-like reusable composition workflow without a separate prefab type.",
+          "UI authoring uses Control nodes, anchors, offsets, containers, themes, focus, and input APIs in the 2D canvas workflow; the Inspector edits exported properties and nested Resources.",
+          "Animation authoring is integrated through AnimationPlayer/AnimationMixer resources, a timeline/track editor, property keying from the Inspector and 2D/3D transform editors, animation libraries, markers, and blend-tree editors.",
+          "Material and shader authoring includes Material resource inspectors/previews, a text shader editor, shader includes, and VisualShader graph tooling registered as editor plugins.",
+          "Asset authoring includes the FileSystem dock, per-asset import options, reimport, importer plugins, dependency tracking, and generated imported artifacts.",
+          "Runtime workflows include Run Project, Run Current Scene, multiple instances, breakpoints, errors, profiler/monitors, remote scene tree and remote inspector, script reload, and an optional embedded game view.",
+          "The built-in editor itself registers CanvasItem, Node3D, Script, Game View, Animation, Material, Shader, audio and other tools through EditorPlugin-style composition, demonstrating that domain editors can be modular without becoming separate applications."
+        ],
+        "nara_relevance": "Nara should organize Scene View, UI View, Animation, Shader/Material, Inspector, Asset Browser, Game View, and Debugger as domain editors hosted by one application. Their durable state should remain domain data/resources, while panels and immediate-mode toolkit state remain adapters.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-RESOURCES",
+          "GODOT-DOC-UI",
+          "GODOT-SRC-EDITOR-PLUGIN-REGISTRATION",
+          "GODOT-SRC-ANIMATION-EDITOR",
+          "GODOT-SRC-SHADER-EDITOR",
+          "GODOT-DOC-GAME-EMBEDDING",
+          "GODOT-SRC-REMOTE-SCENE"
+        ]
+      }
+    },
+    "architecture": {
+      "persistent_data_model": {
+        "summary": "Godot persists projects as source assets plus typed Resource/PackedScene graphs. Type and property metadata come from ClassDB and loaded Script/GDExtension classes; imported artifacts are derived caches rather than source authority.",
+        "details": [
+          "project.godot owns project settings and enabled editor addons. Scenes and arbitrary Resources are stored as text (.tscn/.tres) or binary (.scn/.res). PackedScene serializes node type, hierarchy, ownership, groups, connections, properties, subresources and external resource references.",
+          "Resource is the general serializable data primitive. Exported script properties become Inspector-editable and serializable. Resources can contain nested resources, arrays, dictionaries, paths and object references.",
+          "Text resource headers contain a format version and optional UID. ResourceUID maintains stable identifiers with a .godot/uid_cache.bin cache, while paths remain human-facing source locations.",
+          "External source assets retain their original files. Import metadata records the importer and settings; converted engine-ready artifacts are written under .godot/imported. The import cache is regenerable and should not be treated as authored source.",
+          "Godot's editor generally obtains custom type schema by loading the corresponding script or extension implementation into its object system. It does not rely on a fully independent, non-executable schema catalog for every project-defined type.",
+          "When a class or resource type is unavailable, MissingNode and MissingResource can retain original class identity and a property bag. PackedScene saves a MissingNode using the original class name, providing a concrete loss-preservation mechanism."
+        ],
+        "nara_relevance": "Nara should copy the separation between authored source and regenerable import cache, stable resource identities, reusable scene instances, and lossless unknown records. It should not copy Godot's requirement that custom schema usually becomes known by executing/loading project code; Nara needs an explicit non-executable authoring schema bundle because Rust project types cannot safely be introspected by a generic editor process.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-RESOURCES",
+          "GODOT-DOC-IMPORT-PROCESS",
+          "GODOT-SRC-TEXT-RESOURCE-FORMAT",
+          "GODOT-SRC-RESOURCE-UID",
+          "GODOT-SRC-MISSING-TYPES",
+          "GODOT-SRC-PACKED-SCENE"
+        ]
+      },
+      "project_code_loading": {
+        "summary": "Godot supports several project-code loading models under one generic editor: in-process dynamic scripts, managed assemblies, and native GDExtension libraries. Their productivity and failure properties differ materially.",
+        "details": [
+          "GDScript source is loaded as a Script resource by the embedded language module. class_name and exported properties feed the editor type/Inspector experience without rebuilding Godot. @tool scripts and GDScript EditorPlugins may execute inside the editor process.",
+          "C# uses a .NET-enabled editor distribution. Project assemblies are built through MSBuild and reloaded by the editor. Users do not compile a custom editor, but custom C# type availability does depend on a successful project build.",
+          "GDExtension uses a stable C-facing engine API to load a platform/architecture-selected native dynamic library described by a .gdextension file. The extension registers classes and optionally editor plugins into the running editor. The native project library must already be compiled.",
+          "GDExtension hot reload is opt-in through reloadable=true and engine support. Version compatibility minimum/maximum and per-platform library selection are checked while opening the extension.",
+          "Traditional Godot engine modules are statically compiled into a custom engine/editor build, but GDExtension is the supported way to avoid rebuilding the engine for native extensions.",
+          "All of these code-bearing extension forms execute in the editor process when used for editor types or plugins. They are not a sandbox boundary."
+        ],
+        "nara_relevance": "A generic Nara editor should not dlopen arbitrary Rust crates through the unstable Rust ABI. The default authoring path should consume data plus stable schema descriptors. If executable editor extensions are needed, use a deliberately versioned boundary such as Wasm, a stable C ABI, or an out-of-process protocol; native Rust extensions should remain an advanced compiled path rather than the prerequisite for opening scenes.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-GDEXTENSION",
+          "GODOT-SRC-GDEXTENSION-LOADER",
+          "GODOT-SRC-GDEXTENSION-RELOAD",
+          "GODOT-SRC-CSHARP-BUILD",
+          "GODOT-SRC-SCRIPT-RELOAD",
+          "GODOT-DOC-TOOL-SCRIPTS"
+        ]
+      },
+      "play_execution_model": {
+        "summary": "Godot decouples authoring from game execution. Play launches a child instance of the engine with project path, selected scene and remote-debug arguments; even Embedded Game mode keeps the game in a separate process.",
+        "details": [
+          "EditorRun forwards project-scoped CLI arguments, --path, --remote-debug, --editor-pid, breakpoints, debug overlays, optional scene and custom run arguments, then creates one or more child instances.",
+          "Stop kills tracked child process IDs and clears the run state. Multiple run instances are supported through per-instance argument/custom-feature configuration.",
+          "The editor debugger communicates with the child process for errors, breakpoints, script reload, remote scene tree, remote object inspection, profiler data and other debugging messages.",
+          "Embedded Game is a window-management presentation mode, not an in-process runtime. Official documentation states that the game always runs in a separate process; on failure or unsupported platforms it falls back to a floating game window.",
+          "While running, the editor can display and inspect the remote scene tree. Local scene edits may be synchronized depending on feature/settings, but transient remote state is not the persistent scene authority.",
+          "GDScript normally needs no ahead-of-time project build before Play. C# and native extension projects require their respective build artifacts before the child runtime can use those types."
+        ],
+        "nara_relevance": "Nara's first mature Play model should build only the game/runtime target, start it as a supervised child process, stream structured build/runtime diagnostics, and expose Stop/Restart plus remote inspection. Game View embedding should be a later presentation layer over that process boundary, not a reason to run gameplay inside the editor or compile a project-specific editor.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-SRC-EDITOR-RUN",
+          "GODOT-DOC-GAME-EMBEDDING",
+          "GODOT-SRC-REMOTE-SCENE",
+          "GODOT-SRC-SCRIPT-RELOAD"
+        ]
+      },
+      "editor_extension_model": {
+        "summary": "Godot exposes a project-scoped EditorPlugin model that can extend most editor surfaces without replacing or recompiling the editor application. The same general plugin abstraction is also used internally for built-in domain editors.",
+        "details": [
+          "A conventional addon lives under res://addons/<name>, has plugin.cfg metadata, and names a tool script inheriting EditorPlugin. Enabled addon names are stored in project settings.",
+          "EditorPlugin contributions include main-screen editors, docks, bottom panels, tool/context menus, command palette actions, custom types, autoloads, inspector plugins, debugger plugins, import/export plugins, gizmos, resource conversion and scene-format tooling.",
+          "EditorInspectorPlugin can decide which objects it handles and inject or fully parse custom property editors. EditorImportPlugin and ResourceImporter add source-asset pipelines. EditorNode3DGizmoPlugin and related APIs add viewport handles and visualization.",
+          "EditorUndoRedoManager integrates plugin operations with editor history. Plugins are expected to register in _enter_tree and remove contributions in _exit_tree.",
+          "Invalid addon config, missing scripts, parse errors, wrong base types or missing @tool mode are diagnosed; a script-erroring addon may be removed from the enabled set to prevent repeated startup failures.",
+          "GDExtension can register native editor plugins, but those extensions remain native libraries loaded into the editor process. There is no isolation equivalent to a browser extension sandbox."
+        ],
+        "nara_relevance": "Nara should eventually expose capability-specific extension points for Inspector, panes, menus/actions, importers, gizmos, animation tracks, shader nodes and diagnostics. The durable contract should be versioned data/actions, not access to egui memory or arbitrary internal Rust types. Start with declarative and/or isolated extensions, then add native performance paths only where evidence requires them.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-MAKING-PLUGINS",
+          "GODOT-DOC-EDITOR-PLUGIN",
+          "GODOT-SRC-ADDON-LOADING",
+          "GODOT-SRC-EDITOR-PLUGIN-REGISTRATION",
+          "GODOT-SRC-GDEXTENSION-RELOAD"
+        ]
+      },
+      "failure_and_versioning_model": {
+        "summary": "Godot combines versioned resource/extension formats, derived-cache rebuilding, recoverable plugin loading, recovery mode, and missing-type placeholders. It is resilient but not fully isolated: project tool code and native extensions can still crash or corrupt the editor process.",
+        "details": [
+          "Text and binary resource loaders carry explicit format versions and reject unsupported newer formats/engine major versions. Project upgrade tools perform targeted migrations and force cache regeneration where necessary.",
+          "Imported artifacts and UID caches are derived project data. They can be regenerated after deletion or upgrade; authored source files remain the durable authority.",
+          "MissingNode records the original class/scene plus arbitrary properties and signals; MissingResource records original class and properties. PackedScene has explicit load/save paths that preserve missing type identity instead of silently replacing it with a normal built-in class.",
+          "Project Manager can open in recovery mode. GDExtension loading/reloading is suppressed in recovery mode, allowing the editor to open projects whose executable extensions are broken.",
+          "Addon plugin loading validates config, script existence, parseability, EditorPlugin inheritance and @tool mode. Some startup failures remove the addon from the enabled set to avoid a repeated failure loop.",
+          "GDExtension descriptors select libraries by platform/architecture and can declare minimum/maximum engine compatibility. Reload is opt-in and can fail; engine code explicitly handles a previous reload attempt that left a library closed.",
+          "@tool scripts and native extensions execute in the editor process. Official documentation warns that tool scripts can manipulate the edited scene and potentially crash the editor; extension/plugin crash isolation is therefore weaker than the separate Play process boundary."
+        ],
+        "nara_relevance": "Nara should make unknown-schema preservation and guarded editing a first-class product contract, keep imports disposable, support a safe/recovery launch that suppresses executable extensions, and version both schema and extension protocols. Out-of-process or Wasm extensions offer a stronger default reliability boundary than copying Godot's unrestricted in-process project tooling.",
+        "confidence": "high",
+        "evidence": [
+          "GODOT-SRC-TEXT-RESOURCE-FORMAT",
+          "GODOT-SRC-MISSING-TYPES",
+          "GODOT-SRC-PACKED-SCENE",
+          "GODOT-SRC-PROJECT-OPEN",
+          "GODOT-SRC-GDEXTENSION-LOADER",
+          "GODOT-SRC-GDEXTENSION-RELOAD",
+          "GODOT-SRC-ADDON-LOADING",
+          "GODOT-DOC-TOOL-SCRIPTS"
+        ]
+      }
+    },
+    "engineering_tradeoffs": {
+      "strengths": {
+        "summary": "Godot achieves a coherent production-tool experience by keeping project discovery, data authoring, import, extension, Play, debugging and recovery inside one generic editor product while preserving a separate runtime process.",
+        "items": [
+          "Users launch a recognizable editor application and can open ordinary projects without producing a project-specific editor build.",
+          "The Resource/PackedScene model gives scene, prefab-like instancing, UI, animation, materials and custom data a common persistence and Inspector surface.",
+          "The editor and runtime share type/property semantics, reducing translation layers between authored and executed data.",
+          "GDScript and project-scoped EditorPlugins provide a low-friction extension loop without rebuilding the engine/editor.",
+          "Play remains a child process even when visually embedded, improving restartability and separating transient runtime state from persistent authoring state.",
+          "Missing-type placeholders, recovery mode and regenerable imports provide practical failure recovery.",
+          "Built-in tools use plugin composition, proving that one editor can grow many domain-specific workspaces without becoming one indivisible implementation unit."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "GODOT-SRC-PROJECT-OPEN",
+          "GODOT-DOC-RESOURCES",
+          "GODOT-DOC-MAKING-PLUGINS",
+          "GODOT-DOC-GAME-EMBEDDING",
+          "GODOT-SRC-MISSING-TYPES"
+        ]
+      },
+      "weaknesses": {
+        "summary": "Godot's smoothest workflow relies on dynamic/runtime-reflected languages. Native and managed project code still introduces build and reload costs, and executable editor extensions share the editor's fault domain.",
+        "items": [
+          "A custom GDExtension class is unavailable until a matching native library is built and successfully loaded; C# custom types depend on an MSBuild/assembly reload cycle.",
+          "Because custom schema is commonly learned from loaded code, missing or broken project code can reduce authoring fidelity. MissingNode/MissingResource mitigates loss but does not provide full semantic editing.",
+          "GDScript @tool, EditorPlugin, C# editor code and GDExtension execute in-process. Bugs can stall or crash the editor and can mutate authoring state directly.",
+          "Hot reload must reconcile live instances, type registrations, script references and native library lifecycle. The implementation and user failure modes are inherently complex.",
+          "The global Object/ClassDB/Variant model is flexible but carries dynamic typing, string identity and broad runtime surface area that Nara has intentionally avoided in its core architecture.",
+          "The import database, plugin lifecycle, project settings and caches create multiple invalidation/recovery states that require strong diagnostics.",
+          "Embedded Game depends on platform window embedding and has documented limitations; it is not a portable zero-cost primitive."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "GODOT-DOC-GDEXTENSION",
+          "GODOT-SRC-GDEXTENSION-RELOAD",
+          "GODOT-SRC-CSHARP-BUILD",
+          "GODOT-DOC-TOOL-SCRIPTS",
+          "GODOT-DOC-GAME-EMBEDDING"
+        ]
+      },
+      "nara_transferable_lessons": {
+        "summary": "Nara should copy Godot's product shape and workflow boundaries, adapt its resilience mechanisms to Nara's typed/data-driven architecture, and reject the parts that depend on a global dynamic object system or unsafe in-process project code.",
+        "copy": [
+          "A standalone nara-editor.exe with Project Manager, recent projects, create/import/open, and direct project-path launch.",
+          "One editor hosting Scene, UI, Animation, Shader/Material, Inspector, Asset, Game and Debug workspaces through internal domain-plugin composition.",
+          "Authored source versus derived import cache separation, stable resource identity and deterministic reimport.",
+          "Reusable scene/prefab instances and resources as data, not as editor widget state.",
+          "External supervised Play process with structured debug IPC; optional embedding that does not erase the process boundary.",
+          "Recovery mode and explicit missing-type placeholders that retain original identity and payload."
+        ],
+        "adapt": [
+          "Replace Godot's load-code-to-discover-schema approach with a non-executable, versioned authoring schema bundle that the generic editor can load before any Rust project build.",
+          "Expose project extension points as typed capabilities and transactional editor actions. Custom Inspector/UI panels should consume document/selection APIs, not own durable state.",
+          "Use stable resource/schema fingerprints between editor documents, built game processes and packages so Play can reject stale runtime code without preventing scene viewing/editing.",
+          "Use a stable ABI, Wasm guest model or out-of-process protocol for third-party editor extensions. Native Rust code may exist as an explicit advanced tier, but not as the default authoring dependency.",
+          "Make unknown records lossless and visibly degraded. Permit safe structural operations while blocking edits whose schema is unavailable, rather than either refusing the entire project or silently discarding fields."
+        ],
+        "reject": [
+          "Do not require a project-generated editor binary for routine scene inspection or editing.",
+          "Do not dlopen arbitrary project Rust crates through the unstable Rust ABI.",
+          "Do not copy a global Object/Variant/ClassDB authority into Nara's runtime foundation merely to make the editor easier.",
+          "Do not run the game world in the editor process as the primary Play model.",
+          "Do not let toolkit/plugin memory become the authority for documents, selection, undo, persistence or Play lifecycle."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "GODOT-SRC-MAIN-MODES",
+          "GODOT-SRC-PROJECT-OPEN",
+          "GODOT-DOC-IMPORT-PROCESS",
+          "GODOT-SRC-MISSING-TYPES",
+          "GODOT-DOC-GAME-EMBEDDING",
+          "GODOT-DOC-EDITOR-PLUGIN",
+          "GODOT-DOC-GDEXTENSION"
+        ]
+      },
+      "minimum_viable_path": {
+        "summary": "The smallest credible Nara path is a generic data-authoring editor plus an external Play pipeline. It should prove the mature product loop before adding arbitrary native editor plugins or embedded rendering.",
+        "stages": [
+          {
+            "stage": 1,
+            "name": "Standalone generic authoring",
+            "deliverables": [
+              "nara-editor.exe opens a project directly or through a minimal Project Manager.",
+              "The editor loads nara.toml, source asset index, scene/prefab/UI documents and a non-executable authoring schema bundle without compiling project Rust code.",
+              "Scene Tree, Inspector, asset browser and one 2D/UI canvas operate through document commands with Undo/Redo and Save.",
+              "Unknown component/resource records are retained losslessly and shown as degraded, with unsafe field edits disabled."
+            ]
+          },
+          {
+            "stage": 2,
+            "name": "Asset and domain authoring",
+            "deliverables": [
+              "A source-versus-imported asset database with stable IDs, importer receipts and actionable failures.",
+              "Animation and material/shader resources become first-party data editors, using the same selection/undo/persistence contracts rather than project code callbacks.",
+              "Internal editor modules register panes, inspectors and actions through a private capability-oriented extension seam."
+            ]
+          },
+          {
+            "stage": 3,
+            "name": "External Play and debugging",
+            "deliverables": [
+              "Play invokes Cargo/build tooling for the game target only, streams structured diagnostics, and starts a supervised child game process.",
+              "A versioned handshake binds project/schema/content fingerprints before the editor accepts runtime inspection or commands.",
+              "Stop, restart, logs, runtime errors and a minimal remote scene/entity inspector work with a floating game window."
+            ]
+          },
+          {
+            "stage": 4,
+            "name": "Production extension and Game View",
+            "deliverables": [
+              "Add declarative/Wasm/out-of-process project extensions for custom inspectors, importers, gizmos and tools without recompiling nara-editor.",
+              "Embed the already-separate game process through a platform-neutral frame/input transport only after the external process workflow is reliable.",
+              "Keep an explicit native extension tier optional and recovery-disableable."
+            ]
+          }
+        ],
+        "acceptance_trajectory": "Launch nara-editor.exe -> open an unbuilt starter/reference project -> inspect and modify a scene/UI value -> undo/redo -> save/reopen -> edit animation and shader/material data -> press Play -> build only the game -> view runtime output and diagnostics -> inspect runtime state -> stop -> recover after a missing schema/plugin without losing authored records.",
+        "confidence": "medium-high",
+        "evidence": [
+          "GODOT-SRC-PROJECT-OPEN",
+          "GODOT-DOC-RESOURCES",
+          "GODOT-DOC-IMPORT-PROCESS",
+          "GODOT-SRC-MISSING-TYPES",
+          "GODOT-SRC-EDITOR-RUN",
+          "GODOT-DOC-GAME-EMBEDDING",
+          "GODOT-DOC-EDITOR-PLUGIN"
+        ]
+      }
+    },
+    "evidence": {
+      "primary_sources": [
+        {
+          "id": "GODOT-RELEASE-4.7.1",
+          "title": "Maintenance release: Godot 4.7.1",
+          "kind": "official_release",
+          "version": "4.7.1-stable",
+          "url": "https://godotengine.org/article/maintenance-release-godot-4-7-1/",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-PROJECT-MANAGER",
+          "title": "Project Manager",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/editor/project_manager.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-RESOURCES",
+          "title": "Resources",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/scripting/resources.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-IMPORT-PROCESS",
+          "title": "Import process",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/assets_pipeline/import_process.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-UI",
+          "title": "User interface (UI)",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/ui/index.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-GAME-EMBEDDING",
+          "title": "Game embedding",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/editor/game_embedding.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-GDEXTENSION",
+          "title": "What is GDExtension?",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/engine_details/engine_api/gdextension/what_is_gdextension.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-MAKING-PLUGINS",
+          "title": "Making plugins",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/plugins/editor/making_plugins.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-EDITOR-PLUGIN",
+          "title": "EditorPlugin class reference",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/classes/class_editorplugin.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-DOC-TOOL-SCRIPTS",
+          "title": "Running code in the editor",
+          "kind": "official_documentation",
+          "version": "4.7",
+          "url": "https://docs.godotengine.org/en/4.7/tutorials/plugins/running_code_in_the_editor.html",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "GODOT-SRC-MAIN-MODES",
+          "title": "main/main.cpp: constructs EditorNode, ProjectManager, or game mode",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "main/main.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/main/main.cpp#L4600-L4818"
+        },
+        {
+          "id": "GODOT-SRC-PROJECT-OPEN",
+          "title": "Project Manager launches the generic editor for a selected project",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/project_manager/project_manager.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/project_manager/project_manager.cpp#L565-L608"
+        },
+        {
+          "id": "GODOT-SRC-EDITOR-FILE-SYSTEM",
+          "title": "EditorFileSystem scan, change detection and reimport pipeline",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/file_system/editor_file_system.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/file_system/editor_file_system.cpp#L1710-L1840"
+        },
+        {
+          "id": "GODOT-SRC-SCRIPT-RELOAD",
+          "title": "Script reload paths in editor and remote runtime",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/script/script_editor_plugin.cpp; core/debugger/remote_debugger.cpp; modules/gdscript/gdscript.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/script/script_editor_plugin.cpp#L2523-L2575"
+        },
+        {
+          "id": "GODOT-SRC-CSHARP-BUILD",
+          "title": "C# project build and assembly/script reload",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "modules/mono/editor/GodotTools/GodotTools/Build/MSBuildPanel.cs; modules/mono/editor/GodotTools/GodotTools/Build/BuildManager.cs",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/modules/mono/editor/GodotTools/GodotTools/Build/MSBuildPanel.cs#L48-L105"
+        },
+        {
+          "id": "GODOT-SRC-TEXT-RESOURCE-FORMAT",
+          "title": "Versioned text scene/resource load and save",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "scene/resources/resource_format_text.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/scene/resources/resource_format_text.cpp#L1025-L1162"
+        },
+        {
+          "id": "GODOT-SRC-RESOURCE-UID",
+          "title": "Resource UID cache ownership",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "core/io/resource_uid.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/core/io/resource_uid.cpp#L40-L55"
+        },
+        {
+          "id": "GODOT-SRC-MISSING-TYPES",
+          "title": "MissingNode and MissingResource preserve original class and properties",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "scene/main/missing_node.h; core/io/missing_resource.h",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/scene/main/missing_node.h#L35-L70"
+        },
+        {
+          "id": "GODOT-SRC-PACKED-SCENE",
+          "title": "PackedScene instantiation and loss-preserving missing-node serialization",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "scene/resources/packed_scene.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/scene/resources/packed_scene.cpp#L226-L343"
+        },
+        {
+          "id": "GODOT-SRC-GDEXTENSION-LOADER",
+          "title": "GDExtension library selection, compatibility and reloadable metadata",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "core/extension/gdextension_library_loader.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/core/extension/gdextension_library_loader.cpp#L320-L390"
+        },
+        {
+          "id": "GODOT-SRC-GDEXTENSION-RELOAD",
+          "title": "GDExtension load, unload, recovery-mode and hot-reload lifecycle",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "core/extension/gdextension_manager.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/core/extension/gdextension_manager.cpp#L134-L213"
+        },
+        {
+          "id": "GODOT-SRC-EDITOR-RUN",
+          "title": "Editor launches and supervises game child processes",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/run/editor_run.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/run/editor_run.cpp#L40-L232"
+        },
+        {
+          "id": "GODOT-SRC-REMOTE-SCENE",
+          "title": "Remote scene tree and remote object inspection",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/debugger/editor_debugger_node.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/debugger/editor_debugger_node.cpp#L90-L130"
+        },
+        {
+          "id": "GODOT-SRC-ADDON-LOADING",
+          "title": "Project addon loading, validation and failure handling",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/editor_node.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/editor_node.cpp#L4441-L4545"
+        },
+        {
+          "id": "GODOT-SRC-EDITOR-PLUGIN-REGISTRATION",
+          "title": "Built-in domain editors registered as editor plugins",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/editor_node.cpp; editor/register_editor_types.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/editor_node.cpp#L9380-L9425"
+        },
+        {
+          "id": "GODOT-SRC-ANIMATION-EDITOR",
+          "title": "Animation editor property and transform keying integration",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/animation/animation_player_editor_plugin.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/animation/animation_player_editor_plugin.cpp#L2345-L2395"
+        },
+        {
+          "id": "GODOT-SRC-SHADER-EDITOR",
+          "title": "Shader and material editor plugin implementation",
+          "kind": "official_source",
+          "version": "4.7.1-stable",
+          "commit": "a13da4feb8d8aefc283c3763d33a2f170a18d541",
+          "path": "editor/shader/shader_editor_plugin.cpp; editor/scene/material_editor_plugin.cpp; modules/visual_shader/editor/visual_shader_editor_plugin.cpp",
+          "url": "https://github.com/godotengine/godot/blob/4.7.1-stable/editor/shader/shader_editor_plugin.cpp#L140-L227"
+        }
+      ]
+    }
+  },
+  "uncertain": [
+    {
+      "topic": "First-open and iteration latency",
+      "reason": "Official docs and source define scan/import/reload behavior but do not provide stable, reproducible cross-project latency measurements."
+    },
+    {
+      "topic": "Universal losslessness of all unknown project data",
+      "reason": "MissingNode/MissingResource explicitly preserve original class and properties, but the research did not prove lossless round-tripping for every plugin-defined container, metadata convention, signal target, or custom ResourceFormatLoader."
+    },
+    {
+      "topic": "GDExtension hot-reload reliability for arbitrary object graphs",
+      "reason": "The lifecycle and opt-in reload mechanism are implemented, but no official guarantee was found that every native extension can migrate all live state safely."
+    },
+    {
+      "topic": "Exact C# assembly unload/isolation behavior under all editor/runtime configurations",
+      "reason": "The official source proves project build and assembly/script reload paths; detailed runtime isolation behavior was outside this focused review."
+    },
+    {
+      "topic": "Embedded Game portability and performance",
+      "reason": "The official documentation lists platform/window-manager limitations and fallback behavior, but no general performance result should be inferred without measurement."
+    },
+    {
+      "topic": "Third-party plugin ecosystem safety",
+      "reason": "The execution model is clearly in-process, but failure rates, plugin quality distribution and operational impact require empirical ecosystem data rather than source inspection."
+    }
+  ]
+}

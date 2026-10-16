@@ -1,0 +1,1007 @@
+{
+  "item": "Nara current editor and prior decisions",
+  "category": "repository",
+  "researched_at": "2026-08-18T00:00:00+08:00",
+  "version_scope": {
+    "repository_commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+    "branch": "refactor/engine-foundation-contracts",
+    "authority_snapshot": "2026-08-18",
+    "scope_note": "Read-only archaeology of the generic nara-editor product, nara_tooling, nara_tooling_egui, project_host, project_content, the Reference Game, Accepted Editor ADRs, Proposed ADR 0090, open questions, completed Editor plans, and verification evidence. No Cargo command was run."
+  },
+  "categories": {
+    "product_experience": {
+      "primary_editor_entry": {
+        "summary": "Nara has a real standalone first-party nara-editor executable and a reusable generic Editor shell, but it is not yet a project-generic product in the mature-engine sense. The executable accepts one project root, constructs an empty ProductRecipe, fully resolves schemas and startup content before creating the native window, and exits on open failure. It can open projects whose persistent types are supplied by the engine features compiled into nara-editor, but it cannot fully open the current Reference Game because that project needs Reference Game schema providers and runtime plugins that are only available through a separately compiled Rust intent.",
+        "why_reference_game_does_not_open_without_project_compilation": [
+          "The CLI accepts at most one project root and an optional profile; without a root it uses the current directory. There is no Project Manager, recent-project list, create/import screen, or recovery shell before project admission.",
+          "The public generic open path calls EditorProjectIntent::new(). Its recipe is ProductRecipe::new(), so the generic executable contributes no project-specific Rust plugins or schemas.",
+          "Project open ingests nara.toml, resolves a RuntimePlan from the compiled recipe, builds a ProjectContentSnapshot under that plan's schema authority, and opens the startup Scene through the same complete registry. This is a complete-schema admission path, not a raw document browser.",
+          "The root package contributes only the schema providers compiled into its selected Nara features. A recipe can add more providers, but only because those provider functions and native bindings are already compiled into the calling product.",
+          "Reference Game startup content contains reference_game.WaveSpawn, InitialHealth, InitialVelocity2d, PlayerRole, and Weapon records. Those stable type IDs are not engine-built-in schemas.",
+          "Reference Game defines its provider, native validation/registration callbacks, plugins, and ProductRecipe in Rust. Even its versioned JSON schema catalogs are include_bytes! inputs to compiled provider functions rather than a disk-discovered non-executable Editor bundle.",
+          "The only native Reference Game Editor proof is a project-specific canary feature and binary that depend on nara-editor and call run_game_view_canary_with_intent with wave_game_view_intent(). This proves the Host and UI contracts, but it is not the generic nara-editor opening arbitrary project Rust code.",
+          "ADR 0090's lossless unavailable-schema mode is Proposed and not started. Therefore the generic Editor has no authorized degraded path that could preserve and display the Reference Game's known-but-unbound records while withholding Runtime execution."
+        ],
+        "layer_map": [
+          {
+            "layer": "Generic Editor shell",
+            "current_owner": "The private nara-editor application, NativeEditorHost, EguiEditorPanel, and Host-owned EditorProjectSession.",
+            "current_behavior": "One fixed Winit/egui/WGPU window presents document tabs, toolbar, Scene/UI hierarchy, Authoring or Game viewport, Inspector, and Diagnostics. The adapter owns transient toolkit state only.",
+            "not_this_layer": "It does not discover project Rust code, own document persistence, or define project-specific schemas."
+          },
+          {
+            "layer": "Non-executable authoring schema",
+            "current_owner": "Conceptually ComponentSchemaCatalog and stable component/field IDs under ADR 0081.",
+            "current_behavior": "Catalogs are immutable, versioned, fingerprinted, and intended to be runtime-independent, but project-owned catalogs currently enter the Editor through compiled ComponentSchemaProviderDefinition functions and a complete binding plan.",
+            "not_this_layer": "There is no independently generated, project-discoverable authoring bundle, no persisted owner/package lineage descriptor, and no accepted KnownUnbound/UnknownSchema editing state."
+          },
+          {
+            "layer": "Project Rust code",
+            "current_owner": "Cargo plus a statically compiled ProductRecipe containing runtime plugins, typed configuration, schema contributions, codecs, validation, registration, and native behavior.",
+            "current_behavior": "Code-first products can share the same recipe across headless, desktop, and private Editor entry points.",
+            "not_this_layer": "nara.toml cannot introduce Rust code or select arbitrary plugins/providers by string, and nara-editor has no Cargo build orchestrator or dynamic project-module loader."
+          },
+          {
+            "layer": "Runtime and Play",
+            "current_owner": "A fresh managed RuntimeInstance and the private Editor Game View bridge, using the already resolved compiled recipe and immutable project-content generation.",
+            "current_behavior": "Play is an isolated in-process runtime lifecycle with exact start reservations, presentation receipts, input authority, Pause/Resume/Step/Stop/Restart, and no write-back on Stop.",
+            "not_this_layer": "The Runtime does not own the Editor workspace, and current Play does not build missing project code, load arbitrary modules, run in a child process, or provide general live edit."
+          },
+          {
+            "layer": "Plugin and Editor UI extensions",
+            "current_owner": "No implemented external Editor extension host. Current panels, inspectors, Canvas, Scene View, and Game View are fixed first-party code compiled into nara-editor.",
+            "current_behavior": "Nara's current Plugin/ProductRecipe contracts compose trusted runtime code and schemas; the egui adapter consumes immutable tooling facts and returns typed actions.",
+            "not_this_layer": "A runtime Plugin is not a package, editor panel, importer, custom inspector, gizmo, menu, or stable binary ABI. OQ-031 owns the future multi-contribution package and isolated Extension Host question."
+          }
+        ],
+        "product_implication": "The missing product is not another bespoke Reference Game editor. Nara needs one long-lived generic shell that can open declarative project truth before executable project code is available, then acquire richer schemas, tools, and Runtime behavior through explicit generated artifacts and isolated lifecycle boundaries.",
+        "confidence": "high",
+        "evidence": [
+          "NARA-CLI-ENTRY",
+          "NARA-APP-OPEN",
+          "NARA-PLATFORM-OPEN",
+          "NARA-EDITOR-INTENT",
+          "NARA-EDITOR-OPEN-PIPELINE",
+          "NARA-BUILTIN-SCHEMAS",
+          "NARA-RECIPE-SCHEMAS",
+          "NARA-REFERENCE-MANIFEST",
+          "NARA-REFERENCE-SCENE",
+          "NARA-REFERENCE-RECIPE",
+          "NARA-REFERENCE-CANARY",
+          "NARA-ADR-0090",
+          "NARA-IMPLEMENTATION-LEDGER"
+        ]
+      },
+      "first_open_and_iteration": {
+        "summary": "First open is a synchronous, fail-closed project admission rather than a staged generic-shell workflow. The Editor resolves settings, recipe, schemas, startup closure, Prefabs, images, startup Scene, preview owners, and initial workspace before the event loop starts. Ordinary data edits are strong and immediate once open, but project-code iteration, build diagnostics, schema regeneration, artifact activation, and recovery from broken code are not Editor product capabilities yet.",
+        "current_flow": [
+          "Launch nara-editor [project-root] [--profile name], or implicitly use the current directory.",
+          "Open nara.toml through a project-root capability and resolve an exact settings lineage and compiled runtime plan.",
+          "Load a bounded startup content closure: startup Scene, recursively referenced Prefabs, and image assets required by the expanded Scene/UI graph.",
+          "Validate the closure against the plan's complete schema registry and initialize edit-preview, UI preview, document workspace, persistence lanes, and Play state.",
+          "Only after EditorApplication::open succeeds does the native event loop and window begin. Open errors are printed to stderr and the process exits."
+        ],
+        "implemented_iteration": [
+          "Exact schema-backed field edits, stale-revision rejection, per-document Undo/Redo, receipt-backed Save, Reopen, and dirty-close Save/Discard/Cancel.",
+          "Edit-world Scene preview and exact presented-frame picking without constructing a Play Runtime.",
+          "UI Prefab source editing and unsaved Canvas preview; after Save, the Host rebuilds a complete immutable successor ProjectContentSnapshot.",
+          "A running Runtime remains on its old content generation and is marked out of date; explicit Restart or a fresh Play starts from the successor generation."
+        ],
+        "missing_iteration_contracts": [
+          "Project discovery, recent projects, create/import/open UX, first-open progress, session restore, and an Editor shell that survives project-admission failure.",
+          "Cargo metadata integration, target selection, cancellable builds, structured compiler diagnostics, schema-generation jobs, generation-stamped artifacts, stale-result rejection, and last-good activation.",
+          "A Safe Mode or degraded authoring mode for missing project code, missing providers, unavailable native bindings, failed migrations, or future schemas.",
+          "File watching and a complete external-reload conflict/merge workflow; current Reopen is explicit and exact but not a collaborative or general merge system.",
+          "Measured cold-open, import, schema-load, build, and Restart latency budgets."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-CLI-ENTRY",
+          "NARA-PLATFORM-OPEN",
+          "NARA-EDITOR-OPEN-PIPELINE",
+          "NARA-PROJECT-CONTENT",
+          "NARA-SHELL-CODE",
+          "NARA-EFI-EVIDENCE",
+          "NARA-EUA-EVIDENCE",
+          "NARA-ADR-0113",
+          "NARA-IMPLEMENTATION-LEDGER"
+        ]
+      },
+      "authoring_coverage": {
+        "summary": "Nara now has a coherent bounded Editor vertical slice rather than only tooling primitives. Scene, first-class UI Prefab, edit-world Canvas, embedded Game View, exact input, persistence, and a fixed shell are product-proven. Coverage remains deliberately narrow: one startup closure, two document kinds, a small first-party composition vocabulary, no general asset browser, and no mature animation/material/debugging/editor-extension workflows.",
+        "implemented": {
+          "editor_shell": [
+            "Fixed single-window egui shell with document tabs, toolbar, left hierarchy/tree, central Authoring or Game viewport, right Inspector, Diagnostics, operation status, and dirty-close modal.",
+            "The immutable EditorFrameModel and ordered action batch keep document, persistence, Runtime, and GPU authority out of the toolkit adapter."
+          ],
+          "scene": [
+            "Opens the startup Scene as a first-class Scene document with canonical tree, selection, typed schema-backed Inspector, field feedback, exact revision-bound patches, Undo/Redo, Save, Reopen, and Close.",
+            "Scene Composition can create Empty Entity or Colored Sprite recipes, add/remove the bounded Transform2d and Sprite component kinds, and move/reparent with cycle-safe exact placement.",
+            "Scene View renders an editor-owned edit-preview World, displays it through the one private WGPU owner, supports resize and exact presented-generation picking, and preserves the document through bounded GPU-owner recovery."
+          ],
+          "ui_and_prefab": [
+            "A selected Scene instance can navigate to its exact Prefab source. Prefab remains nominally distinct from Scene and has its own session, source binding, selection, revision, history, persistence lane, Save, and Reopen.",
+            "UI authoring exposes an ordered hierarchy, typed fields, a Nara UI Canvas, exact pick authority, and Begin/Preview/Commit/Cancel gestures for supported absolute-pixel movement and resize, with one Undo record per committed gesture.",
+            "The closed first-party structural catalog contains Container, Text, Image, and Button. The Editor can create, reorder/reparent, and delete source-local UI nodes through complete recipes and exact placement preflight.",
+            "Save, full project-content refresh, Reopen, and explicit Runtime Restart consume the same canonical Prefab source; image references introduced only by UI still enter the startup closure."
+          ],
+          "play_and_game_view": [
+            "Play starts a real isolated in-process Runtime from the current accepted Scene revision; an unsaved accepted document edit may be used, while transient toolkit drafts are excluded.",
+            "The central Game viewport presents sprites and Runtime UI through the Editor's single GPU owner. Keyboard and pointer input require the exact final Editor-window composite receipt.",
+            "Visible controls cover Play, Pause, Resume, one exact fixed Step, Stop, Restart, cancellation, retirement retry, and close retry. Paused authoring is isolated; Stop does not write Runtime state back to source.",
+            "The generic starter and a separately compiled Reference Game canary prove the bounded lifecycle, including resize, out-of-date feedback, Restart, 2D sprites, Runtime UI, and exact input."
+          ],
+          "save_and_recovery": [
+            "Workspace dirty state is branch-safe and receipt-backed. Only a Host-owned exact replacement receipt can advance the saved checkpoint.",
+            "Persistence results distinguish saved, reopened, rejected, failed, and uncertain. Reopen publishes a fresh document session only after validated canonical source succeeds.",
+            "Prefab Save and project-content publication are separate generations. Refresh failure keeps the saved file honest and retains the last-good content snapshot."
+          ]
+        },
+        "not_yet_a_mature_editor": [
+          "No Project Manager, project browser, recent projects, general multi-document asset browsing, search, or import-status UX.",
+          "No general Scene component/preset catalog beyond Empty/ColoredSprite and Transform2d/Sprite; no public extensible authoring recipe registry.",
+          "No animation timeline, clip/curve/event editor, animation graph, or accepted animation write-arbitration contract.",
+          "No material inspector, reusable material asset editor, shader text/graph authoring, preview compiler, or shader variant/fallback workflow.",
+          "No structured data-asset editor, general asset database/browser, importer settings UI, dependency view, reimport queue, or artifact cache product.",
+          "No nested Prefab override authoring, general cross-document composition, drag-and-drop framework, copy/paste, multi-selection, responsive UI breakpoints, bindings, or UI animation workflow.",
+          "No docking, detached/native multi-window layout, complete IME/accessibility baseline, profiler, timeline, breakpoint/system-step debugger, remote inspector, or collaboration session.",
+          "No third-party custom inspectors, panels, gizmos, menus, importers, build hooks, package manager, or recovery-disableable Editor extension host."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-SHELL-CODE",
+          "NARA-DOCUMENT-KINDS",
+          "NARA-SCENE-COMPOSITION-CATALOG",
+          "NARA-UI-COMPOSITION-CATALOG",
+          "NARA-PREFAB-NAVIGATION",
+          "NARA-EFI-EVIDENCE",
+          "NARA-ESV-EVIDENCE",
+          "NARA-EGV-EVIDENCE",
+          "NARA-EUA-EVIDENCE",
+          "NARA-EUSC-EVIDENCE",
+          "NARA-OPEN-QUESTIONS-DOMAINS",
+          "NARA-OPEN-QUESTIONS-EDITOR"
+        ]
+      }
+    },
+    "architecture": {
+      "persistent_data_model": {
+        "summary": "Authoritative source is file-backed Scene/Prefab data with stable entity, component, field, and asset identities; schema catalogs and runtime bindings are separate concepts; imported/expanded startup content is an immutable derived snapshot. The current implementation nevertheless requires a complete compiled schema/binding plan to load authoring data, so the conceptual non-executable schema plane is not yet a standalone product artifact.",
+        "current_contract": [
+          "SceneEntityRecord stores stable entity IDs, ordered children, a map of stable component type IDs to versioned generic values, and optional Prefab instance provenance.",
+          "ComponentSchemaCatalog has an owner-local generation, predecessor fingerprint, component/field IDs, aliases, and tombstones. Canonical fingerprints exclude generation/predecessor and identify catalog content.",
+          "ADR 0081 makes catalog semantics immutable and runtime-independent, while native bindings are a separate frozen Runtime authority. Stable IDs, not Rust paths, TypeId, Bevy ComponentId, or display names, are persistent identity.",
+          "ProjectContentSnapshot retains exact settings lineage, schema composition fingerprint, content revision/digest, startup Scene, expanded Scene plus Prefab provenance, loaded Prefabs, loaded images, and bounded generation leases.",
+          "ProjectContentLoader currently builds only the startup closure rooted in the selected startup Scene, recursively loads referenced Prefabs, expands them under the complete registry, traverses declared image references, and publishes a bounded immutable snapshot. It is not a general project asset database or editor-wide import graph.",
+          "EditorWorkspace owns document slots, kind, exact source binding, revision, selection, history, dirty/saved state, and external-reload state; only Scene and Prefab kinds are currently admitted."
+        ],
+        "missing_owning_contracts": [
+          "A generated, versioned, non-executable authoring bundle that can be read without loading project Rust: schema owner/package lineage, current and predecessor catalogs, tombstones/migrations metadata, presentation metadata, contribution descriptors, and a recipe/schema fingerprint.",
+          "Accepted unavailable-schema states and operation gates for Complete, KnownUnbound, UnknownSchema, missing migration, future schema, and unknown dependency semantics. ADR 0090 is still Proposed.",
+          "A project-wide composed source-content graph and asset browser, stable durable asset/document identity, importer dependency/artifact graph, reimport semantics, and source-versus-derived provenance.",
+          "A canonical authoring serialization decision. JSON and RON readers/fixtures are current evidence, while OQ-046 still owns the long-term format choice.",
+          "Crash recovery journals, strong concurrent-writer policy, external reload merge UX, and old-or-new multi-document publication."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-SCENE-DATA",
+          "NARA-SCHEMA-DATA",
+          "NARA-PROJECT-CONTENT",
+          "NARA-DOCUMENT-KINDS",
+          "NARA-ADR-0047",
+          "NARA-ADR-0081",
+          "NARA-ADR-0090",
+          "NARA-OPEN-QUESTIONS-SCHEMA",
+          "NARA-IMPLEMENTATION-LEDGER"
+        ]
+      },
+      "project_code_loading": {
+        "summary": "Project code is statically compiled Rust composition. ProductRecipe is a pure Rust value that gathers runtime plugins and typed SchemaContribution values; Cargo and the compiled root decide which code exists. The Editor has no interpreted project language, managed assembly domain, stable native module ABI, dynamic Rust plugin loader, or child Extension Host.",
+        "current_model": [
+          "nara.toml owns file-backed project settings and semantic capability requests, but it cannot introduce code or select an arbitrary plugin/provider by string identity.",
+          "Built-in Nara schemas are selected by root crate features. Project schemas and behaviors enter only when a compiled caller supplies a ProductRecipe through EditorProjectIntent.",
+          "Reference Game's schema provider couples catalog source, validation, native component registration, and plugin declarations in compiled Rust. Its Editor intents reuse the same wave/desktop recipes as other product hosts.",
+          "A runtime Plugin is trusted in-process Rust that configures an App/Runtime candidate. It is not a distribution package, Editor extension, importer, build hook, or stable ABI.",
+          "Prior research correctly rejected Box<dyn Plugin> across independently compiled Rust artifacts as a default ABI. Rust source/Cargo integration, a compiled contribution catalog, and fresh process/runtime reconstruction were the chosen initial direction."
+        ],
+        "missing_owning_contracts": [
+          "A project build host that consumes cargo metadata and Cargo JSON messages rather than parsing manifests, selects exact Editor-schema and game targets, supports cancellation, and publishes generation-stamped artifacts with provenance and last-good retention.",
+          "A schema extraction/generation target whose output is non-executable and loadable before the game or optional Editor extensions compile.",
+          "A clear artifact activation matrix for data-only changes, schema-only compatible changes, runtime rebuild/restart, Extension Host replacement, and full Editor restart.",
+          "A trust decision before Cargo build scripts, proc macros, native dependencies, importers, or project game code execute. Project files cannot self-authorize native trust.",
+          "If same-process native extensions are eventually required, a separately admitted C-compatible ABI with opaque generation handles, allocator, panic, thread, callback, and retirement rules; raw Rust trait objects and UI/GPU handles must remain outside it."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-REFERENCE-RECIPE",
+          "NARA-ADR-0095",
+          "NARA-ADR-0112",
+          "NARA-EXTENSION-RESEARCH",
+          "NARA-PACKAGE-LIFECYCLE-RESEARCH",
+          "NARA-OPEN-QUESTIONS-PACKAGES",
+          "NARA-IMPLEMENTATION-LEDGER"
+        ]
+      },
+      "play_execution_model": {
+        "summary": "Current Play is a bounded private in-process placement over already compiled code and already loaded immutable content. It is architecturally isolated from the authoring workspace and failure-atomic at Runtime/viewport publication, but it is not yet the standalone Editor's build-and-run pipeline for arbitrary projects.",
+        "current_contract": [
+          "EditorProjectSession owns Play preparation and lifecycle; RuntimeInstance owns simulation; NativeEditorHost owns window, GPU target, egui integration, and physical input arbitration.",
+          "A Runtime reservation and inactive GPU target reservation carry the same document revision, recipe/profile lineage, runtime generation, logical-window request, backend instance, and device epoch. One Host commit publishes both or neither.",
+          "Scene Preview and Game Runtime are mutually exclusive source streams over one private image-target slot. The final Editor-window composite receipt is the only authority for Runtime UI Presented and gameplay input.",
+          "Play can start from the current accepted unsaved Scene revision. Paused authoring is isolated; ordinary edits make the Runtime out of date. Stop never writes Runtime state back, and explicit Restart is the normal freshness path.",
+          "The first product path implements Play, Pause, Resume, exact fixed Step, Stop, Restart, cancellation and bounded retirement/close recovery. Runtime faults do not automatically restart or write back."
+        ],
+        "missing_owning_contracts": [
+          "Build-on-Play for project game code, exact target/profile resolution, compiler diagnostics, artifact identity, stale build rejection, last-good executable activation, and build cancellation.",
+          "A supervised child-process or hybrid Play placement with crash isolation and a versioned local transport. OQ-039 remains open; ADR 0112 deliberately selects only the first private in-process bridge.",
+          "A tooling observation/command session with baseline, monotonic sequence, backpressure, resynchronization, correlation, disconnect, and reconnect across runtime generations under OQ-041.",
+          "General live edit under OQ-040 and field-level Apply Changes conflict rules under OQ-009. Current Restart is correct, not a temporary bug.",
+          "Debugger/profiler ownership, system-level stepping/breakpoints, logs and runtime inspection across a separate process, and final standalone player Build/Run integration."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-SHELL-CODE",
+          "NARA-ADR-0112",
+          "NARA-EGV-EVIDENCE",
+          "NARA-EUA-EVIDENCE",
+          "NARA-OPEN-QUESTIONS-PLAY",
+          "NARA-OPEN-QUESTIONS-DOMAINS"
+        ]
+      },
+      "editor_extension_model": {
+        "summary": "There is no implemented external Editor extension model. Extensibility today means first-party Rust code compiled into nara-editor or a project-specific compiled host. The durable seam that does exist is valuable: Editor Domain owns immutable models and typed actions, Host owns authority, and egui is a replaceable adapter. Prior research and OQ-031 describe a future package/contribution model, but those documents are evidence and an open question, not implementation authority.",
+        "current_contract": [
+          "EguiEditorPanel is a fixed struct containing Inspector, Scene View, UI authoring, UI Canvas, and Game View panels. It is not a runtime registry of third-party panels.",
+          "nara_tooling is a pure UI-neutral domain module and owns no App, World, filesystem, window, renderer, or process lifetime. Adapters receive immutable views and return typed commands.",
+          "Editor Shell owns logical panel placement; Host owns windows, surfaces, focus, IME, clipboard, GPU generations, viewport leases, and Play lifecycle. Runtime UI and Editor UI are independent product layers over a limited shared foundation.",
+          "The current four-kind UI creation catalog is a closed first-party authoring recipe set, not a public custom-widget or plugin registry.",
+          "ProductRecipe and SchemaContribution compose runtime code/schema. They do not express panels, custom inspectors, gizmos, menus, importers, build/export hooks, package install/update/remove, or Editor-only lifecycle."
+        ],
+        "prior_research_direction": [
+          "Keep Product Package identity separate from runtime Plugin. One package may declare runtime, Editor, importer, inspector/gizmo, schema, build/export, content, sample, documentation, and migration contributions, each retaining its own domain contract.",
+          "Default executable Editor contributions to a replaceable isolated Extension Host with a versioned semantic protocol. The long-lived Editor Shell retains workspace, undo, selection, window/event-loop, package transaction, and registry authority.",
+          "Make registrations generation-owned leases so disabling or replacing one contribution automatically revokes its panels, commands, inspectors, gizmos, importers, and other registrations.",
+          "Treat same-process managed/native placement as an explicit trusted privilege justified by measured latency or scarce authority, with truthful restart requirements."
+        ],
+        "missing_owning_contracts": [
+          "A versioned Editor Contribution catalog and capability model for panels, inspectors, property editors, gizmos, menus/actions, asset editors, importers, build/export operations, diagnostics, and bounded surface intents.",
+          "An Extension Host process protocol, lifecycle, generation/lease retirement, crash recovery, resource limits, permissions/trust, compatibility negotiation, and last-good replacement.",
+          "A toolkit-neutral custom Inspector protocol over schema/value observations and validated patches, including refresh, read-only state, validation, Undo, provenance, multi-edit, and unavailable-schema behavior.",
+          "A docking/layout/session persistence contract and native multi-window ownership contract. OQ-010 explicitly does not authorize these, and no focused owning question currently closes them.",
+          "Package discovery, install/enable/update/remove planning, reverse dependencies, contribution impact preview, content ownership, and safe removal."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-SHELL-CODE",
+          "NARA-ADR-0015",
+          "NARA-ADR-0104",
+          "NARA-ADR-0107",
+          "NARA-ADR-0113",
+          "NARA-EXTENSION-RESEARCH",
+          "NARA-PACKAGE-LIFECYCLE-RESEARCH",
+          "NARA-MISSING-TYPE-RESEARCH",
+          "NARA-OPEN-QUESTIONS-PACKAGES",
+          "NARA-OPEN-QUESTIONS-EDITOR"
+        ]
+      },
+      "failure_and_versioning_model": {
+        "summary": "Nara's implemented narrow paths have unusually strong identity, stale-work, failure-atomicity, and receipt semantics. The major product weakness is at project admission: missing project code/schema is still fatal before the shell appears, and broader build/import/package/recovery generations do not yet exist.",
+        "implemented_strengths": [
+          "Mutation, Undo, Redo, persistence, picking, Canvas manipulation, Game input, Runtime start, project-content refresh, and GPU replacement all bind exact identities and reject stale or foreign work rather than retargeting it to the latest state.",
+          "Schema catalogs carry generation, predecessor, aliases, field/type tombstones, and canonical fingerprints; Runtime uses a complete frozen binding authority.",
+          "Save can advance clean state only from a matching Host-owned replacement receipt. Rejection, failure, source drift, or ambiguity cannot be relabeled as success.",
+          "Prefab Save publishes source truth before a separate full content refresh. Refresh failure retains the last-good snapshot and reports typed stale/pending state; a running Runtime never mutates in place.",
+          "Scene/Game/Canvas presentation and input use exact final composite receipts. Device loss replaces the whole private GPU execution owner and retires old receipts."
+        ],
+        "missing_failure_contracts": [
+          "No accepted lossless unavailable-schema path. Missing provider, binding, migration, or future schema blocks opening instead of entering a bounded repair mode.",
+          "No last-good schema bundle, game executable, Extension Host, importer artifact group, or project build candidate activation protocol in the Editor product.",
+          "No complete crash journal, concurrent-writer CAS, external reload merge, multi-document atomic publication, or session restoration contract.",
+          "No child-process Runtime/Extension Host crash isolation, reconnect/resynchronization, or quarantined extension disable flow.",
+          "No stabilized compatibility contract for a non-executable authoring bundle, Editor contribution protocol, local Play protocol, or canonical source format."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-ADR-0047",
+          "NARA-ADR-0081",
+          "NARA-ADR-0090",
+          "NARA-ADR-0111",
+          "NARA-ADR-0112",
+          "NARA-ADR-0113",
+          "NARA-IMPLEMENTATION-LEDGER",
+          "NARA-OPEN-QUESTIONS-SCHEMA",
+          "NARA-MISSING-TYPE-RESEARCH"
+        ]
+      }
+    },
+    "engineering_tradeoffs": {
+      "strengths": {
+        "summary": "The current bounded Editor is architecturally coherent and already proves several difficult mature-editor invariants.",
+        "items": [
+          "One generic first-party shell already exists; the product does not need to invent its window, document, command, persistence, Scene View, Canvas, or Game View foundations from scratch.",
+          "Host ownership is crisp: the shell and adapters cannot silently acquire document, filesystem, Runtime, window, or GPU authority.",
+          "Authoring source remains authoritative and Play is isolated. Accepted unsaved Scene edits can be tested without letting Runtime mutations overwrite source.",
+          "Exact revisions, content states, generations, fingerprints, receipts, and leases make stale work and partial publication explicit across editing, saving, rendering, picking, input, Play, refresh, and recovery.",
+          "Scene and Prefab are first-class nominal documents, avoiding synthetic expansion/write-back corruption. UI Canvas consumes the same accepted source projection as Runtime UI-related content.",
+          "The Editor shell, non-executable tooling models, project Rust recipe, Runtime instance, and GPU execution already have distinct ownership boundaries, which is the correct base for a standalone product.",
+          "The project has already researched package/runtime separation, Rust ABI limits, trust, missing types, extension generations, and source/artifact/delivery graph separation; the main risk is failure to turn those findings into owned product contracts, not lack of awareness."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-ADR-0047",
+          "NARA-ADR-0104",
+          "NARA-ADR-0111",
+          "NARA-ADR-0112",
+          "NARA-ADR-0113",
+          "NARA-EFI-EVIDENCE",
+          "NARA-ESV-EVIDENCE",
+          "NARA-EGV-EVIDENCE",
+          "NARA-EUSC-EVIDENCE"
+        ]
+      },
+      "weaknesses": {
+        "summary": "The product boundary stops immediately before the concerns that make a mature Editor project-generic: non-executable project understanding, build/module lifecycle, asset/import breadth, failure recovery, and extension-hosted specialization.",
+        "items": [
+          "The generic binary's empty recipe and complete-schema-only open path make project-specific persistent types a launch blocker. This couples basic authoring availability to compiled Rust composition.",
+          "Because EditorApplication::open completes before the native event loop starts, a broken manifest, schema, startup closure, Prefab, or image dependency cannot be repaired inside the normal Editor shell.",
+          "Reference Game proof currently requires compiling a project-specific canary that links the game's recipe. This is strong integration evidence but the wrong end-user product shape.",
+          "ProjectContentSnapshot is a startup closure, not a general source asset database. There is no asset browser, importer graph, background job model, artifact cache UX, or project-wide content discovery.",
+          "The authoring surface is intentionally small: two document kinds, two Scene recipes, two component recipes, four UI node recipes, one primary UI surface, one Scene/Game target slot, and a fixed shell.",
+          "No build host, child-process Play, extension host, package manager, Safe Mode, degraded authoring, last-good code/schema activation, or code-change classification is connected to the Editor UI.",
+          "Current in-process project/runtime code is fully trusted and can share the Editor process. This is acceptable for the first private path but weak for arbitrary third-party projects and extensions.",
+          "Important product owners are absent or underspecified: Project Manager/first-open UX, docking/session layout, external reload merge, multi-document transactions, collaboration, and a complete Editor-wide asset workflow."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-PLATFORM-OPEN",
+          "NARA-EDITOR-INTENT",
+          "NARA-REFERENCE-CANARY",
+          "NARA-PROJECT-CONTENT",
+          "NARA-SCENE-COMPOSITION-CATALOG",
+          "NARA-UI-COMPOSITION-CATALOG",
+          "NARA-IMPLEMENTATION-LEDGER",
+          "NARA-OPEN-QUESTIONS-EDITOR"
+        ]
+      },
+      "nara_transferable_lessons": {
+        "summary": "Preserve Nara's strong ownership and exactness, but move project understanding and specialization out of the editor executable's static link boundary. Existing research already points to a generated declarative plane plus isolated executable contribution hosts; the next work should make that a complete product workflow rather than add more first-party panels to a compiled project canary.",
+        "decisions_already_made": [
+          "Editor is a client of Runtime contracts; Runtime crates do not depend on Editor code, and UI adapters issue validated commands rather than mutating Runtime or documents directly.",
+          "Host is the sole owner of live Editor workspaces, persistence, windows, GPU, and Play lifecycle; nara_tooling remains a pure UI-neutral domain.",
+          "Stable schema identity/catalog is separate from native Runtime binding. Runtime remains complete-binding and fail-closed.",
+          "Specialized domains are plugin-owned and selected by Cargo plus compiled Rust composition; nara.toml does not become a string-based code/plugin loader.",
+          "Runtime UI and Editor UI are independent products over a limited shared foundation; egui is the first Editor shell, not an automatic final toolkit choice.",
+          "Scene View uses one private GPU owner and an exact fixed image-to-egui-to-window receipt chain; Game View uses the first bounded private in-process placement.",
+          "Prefab is a first-class source document. Save and project-content publication are separate generations, and running Runtime content changes through explicit Restart."
+        ],
+        "early_constraints_not_final_product_promises": [
+          "egui-first, one fixed single-window layout, and no docking are v1 product choices. The durable contract is the immutable model/action seam and Host authority, not permanent egui ownership.",
+          "One private GPU owner, one image target, and one fixed serialized edge are accepted for the proven topology, not a rejection of future multiple viewports, detached windows, or a later render scheduler when a real second consumer demands one.",
+          "In-process Game View is the first placement, not the final process topology. Child-process, remote, crash-isolated, and hybrid placements remain open under OQ-039.",
+          "Restart is the current ordinary freshness path, not a promise that live edit will never exist. OQ-040 and OQ-020 retain bounded live-edit/hot-patch questions.",
+          "One primary UI surface and the Container/Text/Image/Button catalog are closed v1 scopes, not a public final widget/plugin catalogue.",
+          "No public generic document trait is an evidence-based deferral while Scene and Prefab are the only consumers, not a prohibition on a later abstraction after a genuinely heterogeneous document workflow.",
+          "Complete-schema-only is current implementation authority because ADR 0090 remains Proposed; it should not be mistaken for a desired mature-Editor experience."
+        ],
+        "copy": [
+          "Keep nara-editor as one standalone long-lived product and make project-specific compilation enrich it rather than define whether it can launch.",
+          "Keep authoritative source, schema identity, compiled/runtime binding, derived artifacts, and cooked delivery as distinct graphs and generations.",
+          "Keep all first-party and third-party authoring operations on the same document/revision/action/Undo/persistence authority; custom UI must never become an alternate data model.",
+          "Keep exact last-good publication and generation retirement semantics for schemas, builds, import artifacts, Runtime processes, and Editor contributions."
+        ],
+        "adapt": [
+          "Publish a non-executable authoring bundle from the Rust project, but make it independently readable and versioned. The Editor should open the last-good bundle or degraded raw records before executing project code.",
+          "Use Cargo as the Rust dependency/build authority and consume cargo metadata plus JSON compiler messages. Add a Nara contribution catalog without creating a second Rust resolver.",
+          "Move normal Play to a supervised child process with a versioned schema/content/recipe handshake; retain the current in-process path as a private optimization or first-party mode only if measured benefits justify its trust and restart costs.",
+          "Default executable Editor extensions and importers to replaceable isolated hosts. Expose semantic observations, actions, jobs, diagnostics, and bounded surface intents rather than Rust trait objects, egui objects, World, or WGPU handles.",
+          "Admit missing-schema editing by precise state and operation gates, not a universal placeholder. Structure inspection, raw payload preservation, field editing, reference traversal, migration, Runtime spawn, cook, and export need separate permissions."
+        ],
+        "reject": [
+          "Do not compile a bespoke Editor executable per project as the primary product workflow.",
+          "Do not make ProductRecipe or dyn Plugin the universal package/editor/import/build extension abstraction.",
+          "Do not let nara.toml name arbitrary native providers or grant its own code-execution trust.",
+          "Do not promise arbitrary Rust dylib hot reload or pass Rust/Bevy/toolkit/GPU objects across an extension boundary.",
+          "Do not mistake reflection/catalog completeness for a mature Inspector, asset pipeline, package manager, or Editor extension UX.",
+          "Do not generalize the current four UI recipes, two Scene recipes, fixed viewport topology, or startup closure into premature public frameworks before the missing end-to-end product workflows exist."
+        ],
+        "confidence": "high",
+        "evidence": [
+          "NARA-STRATEGY",
+          "NARA-ADR-0015",
+          "NARA-ADR-0047",
+          "NARA-ADR-0081",
+          "NARA-ADR-0095",
+          "NARA-ADR-0104",
+          "NARA-ADR-0107",
+          "NARA-ADR-0111",
+          "NARA-ADR-0112",
+          "NARA-ADR-0113",
+          "NARA-EXTENSION-RESEARCH",
+          "NARA-PACKAGE-LIFECYCLE-RESEARCH",
+          "NARA-FOUR-GRAPH-RESEARCH"
+        ]
+      },
+      "minimum_viable_path": {
+        "summary": "The smallest credible path is not a full plugin ecosystem or immediate hot reload. It is a generic Editor that can always open project source through a non-executable authoring bundle, then build and launch the game in a separate supervised process. Extension-hosted custom tools and broader authoring domains follow after that core loop works for Reference Game without a bespoke Editor binary.",
+        "missing_owning_contracts_by_plane": [
+          {
+            "plane": "Generic Editor shell and project lifecycle",
+            "needed_contracts": [
+              "Project discovery/recent/create/import/open and a shell that exists before project admission.",
+              "Workspace/session layout persistence, docking, native multi-window, IME/accessibility completion, open progress, diagnostics, and recovery mode.",
+              "External reload conflict/merge and multi-document transaction/recovery semantics."
+            ],
+            "current_owner_status": "No single focused owner covers Project Manager or full shell topology. ADR 0104/0107 defer shell choices, and OQ-010 explicitly does not authorize docking or native multi-window."
+          },
+          {
+            "plane": "Non-executable authoring schema and source content",
+            "needed_contracts": [
+              "Generated authoring bundle format and discovery, persisted schema-owner/package lineage, contribution/schema fingerprints, migrations/tombstones, and last-good retention.",
+              "Accepted degraded-authoring states and operation gates under a successor to Proposed ADR 0090 and OQ-044.",
+              "Canonical source format, durable asset/document identity, project-wide content index, and general asset browser/import settings."
+            ],
+            "current_owner_status": "ADR 0081 provides stable catalog semantics; ADR 0090 is Proposed; OQ-044 and OQ-046 own unresolved lineage/readiness and format decisions; Proposed ADRs 0083/0087 and OQ-033 cover adjacent identity/import/data gaps."
+          },
+          {
+            "plane": "Project Rust build and Runtime",
+            "needed_contracts": [
+              "Cargo-based schema/game target planning, structured diagnostics, cancellation, artifact provenance, generation stamping, stale rejection, and last-good activation.",
+              "Supervised child-process Play, versioned local transport, schema/content/recipe handshake, crash isolation, logs, Stop/Restart, and reconnect/resync.",
+              "Explicit change classification for data refresh, schema regeneration, game rebuild, Runtime replacement, Extension Host replacement, Editor restart, and optional bounded hot patch."
+            ],
+            "current_owner_status": "Proposed ADR 0086 owns build/executable generation pressure; OQ-039 owns placement/transport; OQ-041 owns observation sessions; OQ-020 owns optional Rust hot patch."
+          },
+          {
+            "plane": "Plugin, package, and Editor UI extensions",
+            "needed_contracts": [
+              "Product Package identity, dependency/provenance/lock state, trust, install/enable/build/activate/update/remove lifecycle, and contribution impact preview.",
+              "Versioned Editor Contribution protocol for panels, inspectors, gizmos, menus, asset editors, importers, build/export hooks, commands, observations, diagnostics, and bounded surfaces.",
+              "Isolated Extension Host lifecycle with generation-owned leases, failure containment, last-good replacement, and explicit privileged same-process tier if later justified."
+            ],
+            "current_owner_status": "OQ-031 owns the broad package/contribution/trust topology; OQ-045 owns compiled ProductRecipe ergonomics. Existing research recommends this direction but does not authorize implementation."
+          },
+          {
+            "plane": "Mature first-party authoring domains",
+            "needed_contracts": [
+              "General Scene component/preset composition and projection/baking.",
+              "Animation clips/timeline/graph and write arbitration; material/shader assets and preview/variant pipeline; structured data assets.",
+              "General asset browser/import/reimport/dependency UX, nested Prefab overrides, responsive UI authoring, bindings, copy/paste, multi-selection, and debugging/profiling."
+            ],
+            "current_owner_status": "OQ-002, OQ-008, OQ-019, OQ-028, OQ-032, OQ-033, and OQ-043 own important domain questions, but complete Editor workflows and product admission plans are not active."
+          }
+        ],
+        "stages": [
+          {
+            "stage": 1,
+            "name": "Generic open and degraded authoring",
+            "deliverables": [
+              "Keep one engine-built nara-editor executable and add a minimal project chooser/open/recovery shell.",
+              "Generate and load a versioned non-executable authoring bundle independently of project game code.",
+              "Accept a bounded successor to ADR 0090: open Reference Game with complete, known-unbound, or explicitly unknown records preserved; disable unsafe field/reference/runtime operations with precise diagnostics.",
+              "Open Scene/Prefab/UI documents, inspect hierarchy/raw identity, edit admitted fields/structure, Undo/Redo, Save/Reopen, and retain last-good schema/source state even when project Rust does not compile."
+            ]
+          },
+          {
+            "stage": 2,
+            "name": "Build host and external Play",
+            "deliverables": [
+              "Use cargo metadata and Cargo JSON messages to build the exact game/schema targets with cancellation and structured diagnostics.",
+              "Publish generation-stamped schema and game artifacts, reject stale results, and preserve last-good launchable artifacts.",
+              "Start a supervised child game process with a versioned handshake over project, schema, recipe, profile, and content fingerprints.",
+              "Provide Play/Pause/Resume/Step/Stop/Restart, logs, crash diagnostics, and a separate game window before embedding frames."
+            ]
+          },
+          {
+            "stage": 3,
+            "name": "Project-wide content and core authoring breadth",
+            "deliverables": [
+              "Add a composed source-content index and asset browser, importer jobs/artifacts, dependency/reimport status, and source-versus-derived provenance.",
+              "Generalize Scene composition from the current two recipes through schema-owned complete presets without exposing arbitrary hooks.",
+              "Add first-party structured data, animation, and material/shader asset workflows on the same document/action/persistence contracts.",
+              "Complete Prefab override, multi-document navigation, external reload, and recovery workflows required by Reference Game-scale production."
+            ]
+          },
+          {
+            "stage": 4,
+            "name": "Editor contributions and integrated Game View",
+            "deliverables": [
+              "Introduce a versioned contribution catalog and isolated Extension Host for inspectors, panels, gizmos, menus, importers, and build tools.",
+              "Make registrations generation-owned and recovery-disableable; keep the Editor Shell as the sole workspace/window/GPU authority.",
+              "Embed the already separate game process through a bounded frame/input transport only after external Play is reliable.",
+              "Add a privileged native same-process tier only if measured latency/authority evidence justifies a separately specified ABI."
+            ]
+          },
+          {
+            "stage": 5,
+            "name": "Mature shell and production diagnostics",
+            "deliverables": [
+              "Docking, session restore, detached/native multi-window, complete keyboard/IME/accessibility, command palette/search, and robust project recovery UX.",
+              "Remote inspector, profiler/timeline, system stepping/breakpoints, build/import task center, and package lifecycle UI.",
+              "Measured cold-open, schema-load, import, build, Play-start, Restart, and extension-replacement budgets."
+            ]
+          }
+        ],
+        "acceptance_trajectory": "Build or download nara-editor once -> launch with no project and choose Reference Game -> open the project while its Rust game target is absent or intentionally failing -> inspect and safely edit/save/reopen Scene and UI Prefab source through a last-good/non-executable schema bundle -> see precise degraded records and blocked operations rather than process exit -> press Play -> build only the game target with structured diagnostics -> launch a supervised child Runtime -> present its output, input, Pause/Step/Stop/Restart and logs -> recover from a failed build or crash using last-good artifacts -> repeat with a second clean-room Rust project without compiling a bespoke Editor binary.",
+        "confidence": "medium-high",
+        "evidence": [
+          "NARA-AUTHORITY-MAP",
+          "NARA-IMPLEMENTATION-LEDGER",
+          "NARA-OPEN-QUESTIONS-DOMAINS",
+          "NARA-OPEN-QUESTIONS-PACKAGES",
+          "NARA-OPEN-QUESTIONS-PLAY",
+          "NARA-OPEN-QUESTIONS-SCHEMA",
+          "NARA-EXTENSION-RESEARCH",
+          "NARA-PACKAGE-LIFECYCLE-RESEARCH",
+          "NARA-MISSING-TYPE-RESEARCH",
+          "NARA-FOUR-GRAPH-RESEARCH"
+        ]
+      }
+    },
+    "evidence": {
+      "primary_sources": [
+        {
+          "id": "NARA-AUTHORITY-MAP",
+          "title": "Architecture Document Map",
+          "kind": "repository_documentation",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/README.md",
+          "lines": "6-34",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-STRATEGY",
+          "title": "Nara Strategy",
+          "kind": "repository_strategy",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "STRATEGY.md",
+          "lines": "18-23, 59-108",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EDITOR-PACKAGE",
+          "title": "nara-editor package manifest",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "editor/Cargo.toml",
+          "lines": "1-15",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-CLI-ENTRY",
+          "title": "Generic Editor CLI entry",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "editor/src/main.rs",
+          "lines": "15-64",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-APP-OPEN",
+          "title": "EditorApplication generic and compiled-intent open paths",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "editor/src/app.rs",
+          "lines": "147-183",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-PLATFORM-OPEN",
+          "title": "Editor open before native event-loop creation",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "editor/src/platform.rs",
+          "lines": "70-135",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EDITOR-INTENT",
+          "title": "EditorProjectIntent default empty ProductRecipe",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "src/project_host/runtime/editor.rs",
+          "lines": "317-367",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EDITOR-OPEN-PIPELINE",
+          "title": "Editor project open, runtime-plan, content, preview, and startup-Scene admission",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "src/project_host/runtime/editor.rs",
+          "lines": "607-720",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-BUILTIN-SCHEMAS",
+          "title": "Schemas compiled into the root Nara product",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "src/project_host/composition.rs",
+          "lines": "609-635",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-RECIPE-SCHEMAS",
+          "title": "Compiled recipe providers joined into runtime schema validation",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "src/project_host/composition.rs",
+          "lines": "756-800",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-REFERENCE-MANIFEST",
+          "title": "Reference Game project manifest",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "reference-game/nara.toml",
+          "lines": "1-64",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-REFERENCE-SCENE",
+          "title": "Reference Game startup Scene custom persistent component records",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "reference-game/scenes/startup.scene.json",
+          "lines": "120-150, 402-441, 533-548",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-REFERENCE-RECIPE",
+          "title": "Reference Game schema provider, ProductRecipe, Editor intents, and embedded catalogs",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "reference-game/src/lib.rs",
+          "lines": "70-105, 284-310, 434-448, 587-629",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-REFERENCE-CANARY",
+          "title": "Project-specific compiled Reference Game Editor Game View canary",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "reference-game/src/bin/editor_game_view_canary.rs",
+          "lines": "1-47",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-REFERENCE-PACKAGE",
+          "title": "Reference Game separate workspace and optional nara-editor dependency",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "reference-game/Cargo.toml",
+          "lines": "1-27",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-SHELL-CODE",
+          "title": "Fixed egui Editor shell, toolbar, viewports, diagnostics, persistence, and close UX",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_tooling_egui/src/editor.rs",
+          "lines": "47-75, 230-380, 383-500, 503-647, 661-800, 830-896",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-DOCUMENT-KINDS",
+          "title": "Currently admitted Editor document kinds",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_tooling/src/workspace.rs",
+          "lines": "45-56",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-SCENE-COMPOSITION-CATALOG",
+          "title": "Bounded first Scene Composition recipes",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_tooling/src/composition.rs",
+          "lines": "20-47",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-UI-COMPOSITION-CATALOG",
+          "title": "Closed first-party UI node catalog",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_ui/src/authoring_composition.rs",
+          "lines": "29-54",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-PREFAB-NAVIGATION",
+          "title": "Open exact Prefab source navigation",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_tooling_egui/src/inspector.rs",
+          "lines": "425-452",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-SCENE-DATA",
+          "title": "Scene document validation and persistent entity records",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_scene/src/document.rs",
+          "lines": "35-123",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-SCHEMA-DATA",
+          "title": "Versioned ComponentSchemaCatalog and canonical fingerprint",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "crates/nara_reflect/src/schema.rs",
+          "lines": "320-445",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-PROJECT-CONTENT",
+          "title": "Immutable startup content closure and complete-schema ProjectContentLoader",
+          "kind": "repository_source",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "src/project_content.rs",
+          "lines": "128-230, 541-695, 763-845",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0015",
+          "title": "ADR 0015: Editor Tooling and Dogfooding Boundary",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0015-editor-tooling-and-dogfooding-boundary.md",
+          "lines": "37-79",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0047",
+          "title": "ADR 0047: Editor Workspace and Scene Document State",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0047-editor-workspace-and-scene-document-state.md",
+          "lines": "27-79, 157-177, 198-203",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0081",
+          "title": "ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0081-schema-source-stable-identity-catalog-and-runtime-binding.md",
+          "lines": "43-115, 180-204",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0090",
+          "title": "ADR 0090: Unavailable Schema and Lossless Authoring",
+          "kind": "proposed_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0090-unavailable-schema-and-lossless-authoring.md",
+          "lines": "3-13, 33-159, 198-248",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0095",
+          "title": "ADR 0095: Plugin-Owned Specialized Domains and Project Configuration",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0095-plugin-owned-specialized-domains-and-project-configuration.md",
+          "lines": "50-100, 102-178, 180-195",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0104",
+          "title": "ADR 0104: Host-Owned Editor Workspace Installation",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0104-host-owned-editor-workspace-installation.md",
+          "lines": "29-70, 89-100",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0107",
+          "title": "ADR 0107: Shared UI Foundation and Independent Product Layers",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0107-shared-ui-foundation-and-independent-product-layers.md",
+          "lines": "28-71, 95-107",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0111",
+          "title": "ADR 0111: Editor Scene View Execution and Picking Authority",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0111-editor-scene-view-execution-and-picking-authority.md",
+          "lines": "33-118, 134-156",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0112",
+          "title": "ADR 0112: Editor Game View Runtime Presentation and Input Authority",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0112-editor-game-view-runtime-presentation-and-input-authority.md",
+          "lines": "40-164, 183-199",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ADR-0113",
+          "title": "ADR 0113: Editor UI Prefab Authoring and Canvas Authority",
+          "kind": "accepted_adr",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/0113-editor-ui-prefab-authoring-and-canvas-authority.md",
+          "lines": "28-149, 168-180",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-IMPLEMENTATION-LEDGER",
+          "title": "ADR implementation status for Editor, schema, package, build, and persistence gaps",
+          "kind": "implementation_ledger",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/adr/implementation-status.md",
+          "lines": "145-150, 157, 161, 165-168, 174, 178, 194, 236",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-OPEN-QUESTIONS-DOMAINS",
+          "title": "Open Editor-relevant domain questions",
+          "kind": "open_questions",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/open-questions.md",
+          "lines": "23-52, 239-277, 356-372, 471-480, 577-605",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-OPEN-QUESTIONS-PACKAGES",
+          "title": "OQ-031 Product Package, Contribution, and Trust Topology",
+          "kind": "open_question",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/open-questions.md",
+          "lines": "504-575",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-OPEN-QUESTIONS-PLAY",
+          "title": "OQ-039 through OQ-041: Play placement, live edit, and tooling sessions",
+          "kind": "open_questions",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/open-questions.md",
+          "lines": "682-733",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-OPEN-QUESTIONS-SCHEMA",
+          "title": "OQ-043 through OQ-046: composition, schema lineage, recipe ergonomics, and authoring format",
+          "kind": "open_questions",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/open-questions.md",
+          "lines": "750-835",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-OPEN-QUESTIONS-EDITOR",
+          "title": "Editor toolkit convergence and resolved/future render ownership boundaries",
+          "kind": "open_questions",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/architecture/open-questions.md",
+          "lines": "11-21, 262-277, 385-396",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EFI-EVIDENCE",
+          "title": "Editor Authoring Loop v1 conformance",
+          "kind": "verification_evidence",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/verification/2026-08/2026-08-15T233000Z-efi-u5-editor-authoring-loop-conformance-b1cd751875db4d91958a0fb9e609a04d.md",
+          "lines": "21-52, 91-98",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-ESV-EVIDENCE",
+          "title": "Editor Scene View and composition product conformance",
+          "kind": "verification_evidence",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/verification/2026-08/2026-08-16T121124Z-esv-u3-through-esv-u5-scene-view-product-conformance-b8ad1393f7f945b3984d9847b37cc7ba.md",
+          "lines": "22-45, 69-92",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EGV-EVIDENCE",
+          "title": "Editor Game View v1 product conformance",
+          "kind": "verification_evidence",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/verification/2026-08/2026-08-17T100847Z-egv-u5-embedded-game-view-product-conformance-9d0b0a17beef4c39bea70a8d6f025455.md",
+          "lines": "17-43, 64-70",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EUA-EVIDENCE",
+          "title": "Saved Prefab content refresh and Runtime restart conformance",
+          "kind": "verification_evidence",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md",
+          "lines": "20-49, 53-59",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EUSC-EVIDENCE",
+          "title": "Persisted UI structure and native Canvas conformance",
+          "kind": "verification_evidence",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/verification/2026-08/2026-08-18T072626Z-eusc-u5-persisted-ui-structure-and-native-canvas-conformance-436c589870ba4f3c83548d349caa6d4c.md",
+          "lines": "25-40",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-EXTENSION-RESEARCH",
+          "title": "Extension Ecosystem Engine Research",
+          "kind": "prior_repository_research",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/extension-ecosystem-engine-research.md",
+          "lines": "37-90, 238-293, 295-354, 356-364",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-PACKAGE-LIFECYCLE-RESEARCH",
+          "title": "Godot and Unity Package/Extension Lifecycle Research",
+          "kind": "prior_repository_research",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/godot-unity-package-extension-lifecycle-research.md",
+          "lines": "42-105, 107-115",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-MISSING-TYPE-RESEARCH",
+          "title": "Unity/Godot Missing Type and Inspector Primary-Source Research",
+          "kind": "prior_repository_research",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/2026-07/2026-07-22T061500Z-unity-godot-missing-type-and-inspector-primary-source-research-d2790ff6945b481a89b8218e370dd2dc.md",
+          "lines": "20-23, 25-89, 91-120",
+          "accessed": "2026-08-18"
+        },
+        {
+          "id": "NARA-FOUR-GRAPH-RESEARCH",
+          "title": "Content and Product Package Graph Research",
+          "kind": "prior_repository_research",
+          "commit": "a6afc4bfb64ac87dbd086baaa071ff2a9608a457",
+          "path": "docs/knowledge/engineering/2026-07/2026-07-22T054245Z-content-and-product-package-graph-research-1c0d7699f5024b15a3b5ea43dc6b6ed9.md",
+          "lines": "113-199, 201-227",
+          "accessed": "2026-08-18"
+        }
+      ]
+    }
+  },
+  "uncertain": [
+    {
+      "topic": "Exact diagnostic emitted by the generic nara-editor when pointed at Reference Game",
+      "reason": "The conclusion is a high-confidence static trace from the empty generic recipe, complete-schema load path, Reference Game custom component records, and Proposed ADR 0090 status. The requested constraints prohibited running Cargo, so the exact first diagnostic code was not reproduced."
+    },
+    {
+      "topic": "Cold-open, schema generation, build, import, Restart, and Game View latency",
+      "reason": "Repository evidence proves correctness trajectories but does not provide reproducible representative project latency distributions for a standalone Editor product."
+    },
+    {
+      "topic": "Final process topology and Editor toolkit",
+      "reason": "ADR 0112 deliberately selects only the first private in-process Game View and OQ-039 remains open. ADR 0107 keeps egui-first while requiring later evidence before toolkit convergence."
+    },
+    {
+      "topic": "Exact degraded-authoring permissions for every missing-schema case",
+      "reason": "ADR 0090 is Proposed, OQ-044 remains open, and prior research warns that missing provider, missing native binding, missing migration, future schema, unknown dependencies, and missing instantiated content require different preservation and edit gates."
+    },
+    {
+      "topic": "Editor contribution technology",
+      "reason": "OQ-031 contains an isolated Extension Host hypothesis and prior research recommends versioned semantic protocols, but no Accepted ADR selects process transport, wire encoding, Wasm, managed code, or a native ABI."
+    },
+    {
+      "topic": "Canonical authoring source format",
+      "reason": "Current JSON/RON readers and fixtures are implementation evidence; OQ-046 explicitly leaves the canonical format and migration policy undecided."
+    },
+    {
+      "topic": "Release product status of the Reference Game native canary",
+      "reason": "The canary is a private compiled verification path and proves contracts, not a shipped project-generic Editor entry or an end-user supported workflow."
+    }
+  ]
+}

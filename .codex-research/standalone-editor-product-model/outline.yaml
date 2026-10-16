@@ -1,0 +1,24 @@
+topic: "Standalone generic game editor product model for Nara"
+items:
+  - name: "Nara current editor and prior decisions"
+    category: "repository"
+    description: "Map the current standalone Editor, schema, Scene/Prefab authoring, Play, Game View, extension, and project-composition seams, including prior research and explicit gaps."
+  - name: "Godot Editor"
+    category: "mature-engine"
+    description: "Study project opening, scene/resource editing, scripts/extensions, import, run/debug, editor plugins, and how one editor binary remains project-generic."
+  - name: "Unity Editor"
+    category: "mature-engine"
+    description: "Study serialization, Asset Database, script compilation/domain reload, Play Mode, custom inspectors/windows, packages, animation, and shader authoring."
+  - name: "Unreal Editor"
+    category: "mature-engine"
+    description: "Study reflection/assets, project modules, Blueprints, PIE, Live Coding, editor plugins, materials, animation, and executable/editor ownership."
+  - name: "Fyrox and Rust-native editor models"
+    category: "rust-ecosystem"
+    description: "Identify why some Rust engines rebuild or embed the editor per project, the resulting workflow costs, and any alternatives already attempted."
+  - name: "Nara candidate architectures"
+    category: "synthesis"
+    description: "Compare standalone data-driven authoring, native dynamic modules, generated project editor binaries, external project runtimes, and hybrid extension models against Nara's constraints."
+execution:
+  batch_size: 6
+  items_per_agent: 1
+  output_dir: ".codex-research/standalone-editor-product-model/results"

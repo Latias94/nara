@@ -1,0 +1,349 @@
+{
+  "primary_editor_entry": {
+    "summary": "Unity presents one installed Editor application per Editor version. Unity Hub discovers projects, records their paths and Editor versions, and launches the selected installed Editor against the selected project. The Editor can also be launched directly with -projectPath. The Editor executable is not rebuilt for each game project.",
+    "project_code_requirement": "Opening a project does trigger project-specific asset refresh and C# compilation. Project scripts and editor extensions become managed assemblies loaded by the running Editor; they are not statically linked into a project-specific Unity Editor executable. A project can enter Safe Mode when script compilation fails, so recovery does not require successfully compiling the whole content pipeline first.",
+    "product_shape": [
+      "Launch Unity Hub or a versioned Unity Editor installation.",
+      "Select or pass a project directory.",
+      "Open the generic Editor shell immediately enough to show progress or Safe Mode while project assets and scripts are refreshed.",
+      "Use the same Editor process and built-in windows for Scene, Game, Inspector, animation, materials, packages, profiling, and build/run workflows."
+    ],
+    "source_refs": ["U01", "U02", "U03", "U04"]
+  },
+  "first_open_and_iteration": {
+    "project_open": "On open or focus regain, AssetDatabase.Refresh scans Assets and Packages for additions, changes, and deletions. Unity hashes source files and metadata, updates the source Asset Database, imports changed assets into the Library folder, and updates the artifact database. The refresh loop can restart when imports or callbacks create further changes.",
+    "script_iteration": "When Unity detects code-related changes, it compiles C# into managed assemblies, reloads the scripting domain, then post-processes and imports remaining assets. Assembly Definition files partition compilation units so a local code change need not rebuild every project script assembly.",
+    "reload_behavior": "By default, entering Play Mode reloads the scripting domain and scene. Developers can disable domain and/or scene reload to reduce iteration latency, but then static fields and static event handlers must be explicitly reset because the normal clean-state guarantee is removed.",
+    "failure_recovery": "When opening a project with compilation errors, Safe Mode imports only script-related assets so the developer can fix code without waiting for a potentially broken full import. Unity also retains a Library artifact cache for subsequent opens, although Library is derived and can be regenerated.",
+    "architectural_observation": "Unity's fast-feeling generic Editor is supported by a persistent source/artifact database plus dynamically reloadable managed project assemblies. The experience is not evidence that arbitrary native project code can be safely loaded without a compatibility boundary.",
+    "source_refs": ["U02", "U03", "U04", "U05", "U06", "U07", "U08"]
+  },
+  "authoring_coverage": {
+    "scene_and_game": "Scene view is an interactive world-authoring viewport with selection, transforms, overlays, tools, gizmos, and camera navigation. Game view renders from project cameras and emulates the final application display while the Editor is in Play Mode.",
+    "prefab": "Prefab Mode opens a Prefab asset in isolation or in context. Overrides, apply/revert operations, nested Prefabs, and Prefab Variants provide explicit reusable composition and inheritance workflows.",
+    "ui_and_inspector": "The Inspector is serialization-driven and extensible. Default inspectors operate from serialized properties; custom inspectors can replace or augment presentation while SerializedObject/SerializedProperty preserve Undo, multi-object editing, and Prefab override handling.",
+    "animation": "The Animation window can preview clips, record property changes as keyframes, edit curves and events, and target selected GameObjects or Prefab instances. Animation authoring is integrated with Scene and Inspector selection.",
+    "material_and_shader": "Shader Graph is a package-provided node editor that authors shader assets visually. Materials, shaders, textures, and their import settings remain project assets, so graph editing participates in the same Asset Database and package system.",
+    "debugging": "Play Mode, Game view, Console, Profiler, Frame Debugger, and project build/player workflows are all surfaces of the same Editor product. Play Mode changes to scene objects are generally transient unless explicitly copied or authored back outside Play Mode.",
+    "source_refs": ["U09", "U10", "U11", "U12", "U13", "U14", "U15", "U16"]
+  },
+  "persistent_data_model": {
+    "source_identity": "Assets live under Assets and immutable package content under Packages. Most assets have adjacent .meta files containing a GUID. Serialized references use GUID plus local file identifier rather than depending only on paths, allowing asset moves when metadata moves with the asset.",
+    "serialized_authoring": "Scenes, Prefabs, ScriptableObjects, MonoBehaviours, animation clips, materials, and many settings use Unity serialization. With text serialization enabled, many native Unity asset files are YAML-like text. Serializable fields follow Unity's serialization rules rather than arbitrary CLR object semantics.",
+    "derived_artifacts": "Imported representations are stored under Library and indexed by the artifact database. Artifact identity depends on source content, metadata, importer version and settings, dependencies, platform, and other environment inputs. Library is a cache, not the authoritative project source.",
+    "schema_and_reflection": "Built-in native types and compiled managed types provide the reflection/serialization schema visible to the Inspector. ScriptableObject and MonoBehaviour types are identified through project script assets and compiled assemblies. Managed-reference serialization additionally records fully qualified type information and exposes explicit APIs for missing managed-reference types.",
+    "versioning": "Unity uses Editor-version project upgrades, importer versions, package versions, API Updater support, serialization callbacks, and attributes such as FormerlySerializedAs for compatible evolution. The project should be backed up before opening in a newer Editor because upgrades can rewrite assets and are not guaranteed to be reversible.",
+    "source_refs": ["U03", "U17", "U18", "U19", "U20", "U21"]
+  },
+  "project_code_loading": {
+    "managed_scripts": "Unity compiles project C# source into managed assemblies. Assembly Definition assets control assembly boundaries, references, platform constraints, and whether an assembly is Editor-only. The Editor loads those assemblies into its scripting domain and performs a domain reload after compilation.",
+    "editor_code": "Custom inspectors, EditorWindow implementations, menu commands, property drawers, asset processors, importers, gizmos, and many package tools are ordinary project/package C# compiled into Editor assemblies. This is why one Editor executable can acquire project-specific behavior without relinking itself.",
+    "plugins": "Precompiled managed assemblies can be added as managed plug-ins. Native plug-ins are platform-specific dynamic libraries loaded by Unity, with explicit platform and Editor compatibility settings. Native plug-ins do not provide a stable Rust-level object ABI analogous to managed reflection.",
+    "trust_and_isolation": "Project and package editor code executes with substantial authority inside the Editor environment. Asset importing can use worker processes, but Unity's public documentation does not establish general crash or capability isolation for every custom Editor extension.",
+    "source_refs": ["U02", "U05", "U07", "U22", "U23", "U24"]
+  },
+  "play_execution_model": {
+    "play_mode": "The Play button enters an Editor-hosted simulation using the project's currently loaded assemblies and scene state. The Game view displays camera output; pause and frame-step controls support iteration. By default Unity reloads the scripting domain and scene to provide a clean execution state.",
+    "latency_controls": "Enter Play Mode Options can disable domain reload and scene reload. This is a performance tradeoff rather than a semantic free lunch: static state, event subscriptions, and other initialization assumptions must be reset by project code.",
+    "build_and_player": "Separate Build and Run workflows produce and launch a standalone player. Thus Unity distinguishes rapid in-Editor Play Mode from final player construction and execution.",
+    "authoring_boundary": "Runtime mutations made during Play Mode normally disappear when Play Mode ends. The Editor therefore maintains an explicit boundary between persistent authoring state and transient simulation state, even though both are hosted by the same product.",
+    "source_refs": ["U06", "U08", "U10", "U15", "U25"]
+  },
+  "editor_extension_model": {
+    "custom_inspector": "A CustomEditor targets a component or asset type and defines its Inspector UI. SerializedObject and SerializedProperty are the preferred bridge because they supply Undo, multi-selection, Prefab override, and serialization integration.",
+    "windows_and_tools": "EditorWindow provides project-specific dockable or floating tools. UI Toolkit and IMGUI are available for editor UI; packages can add windows, menus, overlays, scene tools, handles, gizmos, settings providers, and contextual workflows.",
+    "asset_pipeline": "ScriptedImporter declares support for file extensions and converts custom source files into Unity objects and sub-assets. AssetPostprocessor observes or modifies import stages. Importer versions and declared dependencies participate in artifact invalidation.",
+    "packages": "Unity Package Manager resolves packages described by package manifests. A package can contain Runtime and Editor assemblies, assets, samples, tests, importers, and UI tooling, allowing one distribution unit to contribute both runtime capability and authoring experience.",
+    "shader_and_graph_tools": "Shader Graph demonstrates that sophisticated first-party authoring surfaces can be delivered as packages while still appearing as integrated Editor windows and assets.",
+    "source_refs": ["U13", "U14", "U16", "U22", "U26", "U27", "U28"]
+  },
+  "failure_and_versioning_model": {
+    "compile_failure": "Safe Mode is the primary project-open recovery path for script compilation failures. It constrains importing to script-related assets and lets the developer repair code within the standard Editor rather than requiring a separately rebuilt editor executable.",
+    "missing_script": "Unity explicitly represents GameObjects with missing MonoBehaviour scripts and exposes Editor APIs to count or remove those components. For SerializeReference data, Unity exposes missing-type information and retains serialized data so a restored type can be rehydrated. Public documentation is less explicit about guaranteed round-trip preservation of every field belonging to an ordinary missing MonoBehaviour, so Nara should not assume Unity provides a universal lossless-unknown-component contract.",
+    "renames_and_moves": "FormerlySerializedAs preserves serialized field values across field renames. API Updater and upgrade guidance address engine API changes; importer versions and reimport handle derived-format changes. Projects should be backed up before Editor-version upgrades.",
+    "stale_artifacts": "The artifact database fingerprints importer inputs and dependencies. Changed importer versions, settings, dependencies, platform, or source hashes trigger reimport instead of treating old Library results as authoritative.",
+    "extension_failure": "Because most Editor extensions execute as loaded managed code, a faulty package can produce compile errors, domain-reload failures, broken import loops, exceptions, or editor instability. Safe Mode mitigates compile-time recovery but is not a complete plugin sandbox.",
+    "source_refs": ["U03", "U04", "U17", "U19", "U20", "U21", "U29", "U30"]
+  },
+  "strengths": [
+    "A recognizable standalone productivity application opens every compatible project without rebuilding the Editor executable.",
+    "Source assets, stable GUID identity, import metadata, and derived artifacts have distinct responsibilities.",
+    "Built-in authoring surfaces cover the complete loop from scene composition through animation, materials, Play Mode, debugging, and standalone build.",
+    "Managed assembly loading makes project-specific inspectors and tools feel native and immediately available.",
+    "Safe Mode keeps the recovery workflow inside the main product even when project code does not compile.",
+    "SerializedObject integrates custom UI with Undo, multi-editing, and Prefab overrides instead of forcing every extension to rebuild transaction semantics."
+  ],
+  "weaknesses": [
+    "Project code and packages can execute inside the Editor, increasing trust, stability, and supply-chain risk.",
+    "Asset refresh can become a restart loop, and script compilation plus domain reload can create substantial iteration latency in large projects.",
+    "Disabling reload improves latency but transfers lifecycle correctness to project code and can leak static state or event subscriptions between Play sessions.",
+    "The generic-editor experience relies heavily on the CLR's loadable assemblies and reflection; it is not directly portable to Rust's unstable native ABI.",
+    "The Library/artifact system is powerful but complex, and cache invalidation depends on importers declaring all relevant dependencies.",
+    "Custom Editor UI can couple authoring workflows to executable plugin code, making broken or incompatible packages capable of blocking normal editing."
+  ],
+  "nara_transferable_lessons": {
+    "copy": [
+      "Ship nara-editor as one standalone, project-generic productivity application; a CLI may forward to it but must not be the primary product identity.",
+      "Separate authoritative source documents and stable asset/component identities from imported, generated, cached, and platform-specific artifacts.",
+      "Make Scene, Prefab, UI, Animation, material/shader, Inspector, Undo, Play controls, diagnostics, and build/export first-party Editor modules sharing one document/transaction model.",
+      "Keep the Editor operable when project code or schemas are missing: expose a recovery mode, retain unknown records losslessly, and allow repair or rebinding instead of refusing the whole project.",
+      "Use explicit version and dependency fingerprints for schemas, importers, packages, generated artifacts, and runtime handshakes.",
+      "Provide a single extension contribution model that can bundle runtime capability, schema, importers, inspectors, menus, and authoring tools without giving each concern a second configuration authority."
+    ],
+    "adapt": [
+      "Replace Unity's in-process CLR assembly loading with a Rust-safe boundary: declarative schema and inspector metadata for ordinary customization, plus a versioned WASM or process/RPC extension host for executable editor tools.",
+      "Start Play as an external project runtime controlled by nara-editor through a typed protocol. Add embedded Game View later through frame/input transport, not by linking the project's Rust crate into the Editor.",
+      "Generate or publish schema bundles as project artifacts, but preserve a last-good bundle and raw unknown component payloads so opening and basic scene editing never requires rebuilding nara-editor and need not wait for a successful game build.",
+      "Run custom importers outside the main Editor process with content-addressed outputs, declared inputs, cancellation, resource budgets, and crash diagnostics.",
+      "Make custom Inspector operations produce the same typed editor actions and transactions as first-party UI, analogous to Unity's SerializedObject integration."
+    ],
+    "reject": [
+      "Do not make every Rust project compile or statically link a private nara-editor binary.",
+      "Do not dynamically load arbitrary Rust cdylibs into the Editor and pretend Rust has a stable plugin ABI.",
+      "Do not let missing schemas silently erase fields or collapse unknown component data into an empty value.",
+      "Do not expose both a declarative project recipe and an unrestricted parallel plugin-editing authority for normal projects.",
+      "Do not implement hot reload by weakening lifecycle semantics before restart, failure, and stale-generation behavior are explicit."
+    ],
+    "source_refs": ["U02", "U03", "U04", "U07", "U13", "U22", "U24", "U26"]
+  },
+  "minimum_viable_path": {
+    "phase_1_open_and_edit": [
+      "Keep one nara-editor executable with a project browser and direct nara-editor <project> launch path.",
+      "Open nara.toml, the asset index, and Scene/Prefab source documents without loading or linking project Rust code.",
+      "Read a versioned authoring-schema bundle containing stable component IDs, fields, defaults, validation, asset-reference kinds, display metadata, and migration aliases. A missing or stale bundle activates a visible recovery state rather than blocking the entire scene.",
+      "Preserve unknown component records byte-for-byte or structurally losslessly; allow selection, hierarchy editing, transforms, deletion, and explicit rebinding while preventing unsafe field edits.",
+      "Deliver first-party Scene Tree, Inspector, Scene View, Game View shell, UI canvas, Undo/Redo, Save, diagnostics, and basic material/animation asset editors from the generic Editor."
+    ],
+    "phase_2_run": [
+      "The Play button invokes the project build through a controlled build host, displays compiler diagnostics, and launches the game as a child process using the selected ProductRecipe/profile.",
+      "Use a versioned handshake binding project revision, schema fingerprint, content revision, runtime capability set, and editor protocol version.",
+      "Initially use an external Play window. Then add an embedded Game View via an explicit surface/frame/input protocol while retaining process isolation and Stop/restart ownership in nara-editor.",
+      "Keep authoring documents authoritative and runtime worlds disposable; apply-back from Play, if added, must be an explicit diff/transaction workflow."
+    ],
+    "phase_3_extensions_and_assets": [
+      "Add a small asset database with stable IDs, source metadata, importer fingerprints, a derived artifact cache, background workers, and actionable failure records.",
+      "Define declarative property drawers, validators, menu/command contributions, icons, and preview providers before adding executable extension code.",
+      "For advanced custom windows, gizmos, importers, and graph tools, use a sandboxed WASM extension ABI or supervised process protocol. Packages may ship runtime crates plus editor metadata/extensions, but the Editor loads only stable artifacts and protocols.",
+      "Prove the model with both Reference Game and a structurally different project; neither may compile a project-specific Editor executable."
+    ],
+    "success_criterion": "A user can install nara-editor once, open Reference Game and another project, inspect and modify scenes even when the game crate currently fails to compile, author first-party assets, press Play, see build diagnostics or a running game, stop it, and reopen the project without any project-specific Editor relink."
+  },
+  "primary_sources": [
+    {
+      "id": "U01",
+      "title": "Unity Hub manual: Manage projects",
+      "url": "https://docs.unity3d.com/hub/manual/ManageProjects.html",
+      "version_or_date": "Unity Hub documentation; accessed 2026-08-18",
+      "supports": "Project discovery, version association, add/open workflow"
+    },
+    {
+      "id": "U02",
+      "title": "Unity Manual: Code lifecycle",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/programming-code-lifecycle.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Compile managed assemblies, load assemblies, domain reload, Play lifecycle"
+    },
+    {
+      "id": "U03",
+      "title": "Unity Manual: Refreshing the Asset Database",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/AssetDatabaseRefreshing.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Refresh loop, hashing, code compilation, domain reload, import ordering and restart conditions"
+    },
+    {
+      "id": "U04",
+      "title": "Unity Manual: The Asset Database",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/asset-database-contents.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Source database, artifact database, Library cache, importer dependency fingerprints"
+    },
+    {
+      "id": "U05",
+      "title": "Unity Manual: Assembly definitions",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/assembly-definition-files.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Managed compilation units, references, Editor-only assemblies, compile-time partitioning"
+    },
+    {
+      "id": "U06",
+      "title": "Unity Manual: Enter Play Mode with domain reload disabled",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/domain-reloading.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Domain reload default and disabled-reload static-state/event-handler obligations"
+    },
+    {
+      "id": "U07",
+      "title": "Unity Manual: Configurable Enter Play Mode",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/configurable-enter-play-mode.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Domain and scene reload controls"
+    },
+    {
+      "id": "U08",
+      "title": "Unity Manual: Safe Mode",
+      "url": "https://docs.unity3d.com/6000.2/Documentation/Manual/SafeMode.html",
+      "version_or_date": "Unity 6.2 (6000.2); accessed 2026-08-18",
+      "supports": "Recovery-oriented project open with script-only import"
+    },
+    {
+      "id": "U09",
+      "title": "Unity Manual: Scene view",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/UsingTheSceneView.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Interactive scene-authoring viewport"
+    },
+    {
+      "id": "U10",
+      "title": "Unity Manual: Game view",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/GameView.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Editor-hosted game rendering, Play controls, aspect and display emulation"
+    },
+    {
+      "id": "U11",
+      "title": "Unity Manual: Editing a Prefab in Prefab Mode",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/EditingInPrefabMode.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Prefab isolation and in-context authoring"
+    },
+    {
+      "id": "U12",
+      "title": "Unity Manual: Prefab Variants",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/PrefabVariants.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Prefab inheritance and overrides"
+    },
+    {
+      "id": "U13",
+      "title": "Unity Manual: Create a custom Inspector",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/UIE-HowTo-CreateCustomInspector.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Custom inspector integration with serialization, Undo and Prefab overrides"
+    },
+    {
+      "id": "U14",
+      "title": "Unity Scripting API: SerializedObject",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/SerializedObject.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Generic property editing, Undo, multi-object editing, Prefab override integration"
+    },
+    {
+      "id": "U15",
+      "title": "Unity Manual: The Animation window",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/AnimationEditorGuide.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Animation preview, record mode, keyframes, clips and property curves"
+    },
+    {
+      "id": "U16",
+      "title": "Unity Manual: Shader Graph",
+      "url": "https://docs.unity3d.com/6000.3/Documentation/Manual/com.unity.shadergraph.html",
+      "version_or_date": "Unity 6.3 (6000.3) package documentation; accessed 2026-08-18",
+      "supports": "Package-delivered visual shader authoring"
+    },
+    {
+      "id": "U17",
+      "title": "Unity Manual: Asset metadata",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/AssetMetadata.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": ".meta files, GUID identity, stable references across moves"
+    },
+    {
+      "id": "U18",
+      "title": "Unity Manual: Script serialization",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/script-serialization.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Field serialization rules, inline and managed-reference serialization"
+    },
+    {
+      "id": "U19",
+      "title": "Unity Scripting API: SerializationUtility.GetManagedReferencesWithMissingTypes",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/SerializationUtility.GetManagedReferencesWithMissingTypes.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Explicit missing-type records and retained serialized managed-reference data"
+    },
+    {
+      "id": "U20",
+      "title": "Unity Scripting API: FormerlySerializedAsAttribute",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/Serialization.FormerlySerializedAsAttribute.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Lossless serialized field rename migration"
+    },
+    {
+      "id": "U21",
+      "title": "Unity Manual: Upgrade a project",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/upgrade-project.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Backup, Editor-version upgrade, irreversibility warning and API updating"
+    },
+    {
+      "id": "U22",
+      "title": "Unity Scripting API: EditorWindow",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/EditorWindow.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Dockable and floating project/package Editor windows"
+    },
+    {
+      "id": "U23",
+      "title": "Unity Manual: Managed plug-ins",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/plug-ins-managed.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Precompiled managed assembly loading"
+    },
+    {
+      "id": "U24",
+      "title": "Unity Manual: Native plug-ins",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/native-plugin-import.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Platform dynamic library import and compatibility configuration"
+    },
+    {
+      "id": "U25",
+      "title": "Unity Manual: The Play mode",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/Playmode.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Play, pause, step and transient scene-change behavior"
+    },
+    {
+      "id": "U26",
+      "title": "Unity Scripting API: ScriptedImporter",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/AssetImporters.ScriptedImporter.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Custom importer declaration, main objects, sub-assets, versions and dependencies"
+    },
+    {
+      "id": "U27",
+      "title": "Unity Manual: Package layout",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/cus-layout.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Runtime/Editor package directories, tests, samples and documentation"
+    },
+    {
+      "id": "U28",
+      "title": "Unity Manual: Package manifest",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/upm-manifestPkg.html",
+      "version_or_date": "Unity 6.5 (6000.5); page build 2026-08-17",
+      "supports": "Package identity, version, dependencies and metadata"
+    },
+    {
+      "id": "U29",
+      "title": "Unity Scripting API: GameObjectUtility.GetMonoBehavioursWithMissingScriptCount",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/ScriptReference/GameObjectUtility.GetMonoBehavioursWithMissingScriptCount.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Explicit recognition of missing MonoBehaviour components"
+    },
+    {
+      "id": "U30",
+      "title": "Unity Manual: Asset import workers",
+      "url": "https://docs.unity3d.com/6000.5/Documentation/Manual/ParallelImport.html",
+      "version_or_date": "Unity 6.5 (6000.5); accessed 2026-08-18",
+      "supports": "Out-of-process parallel asset importing and worker behavior"
+    }
+  ],
+  "uncertain": [
+    "Unity's public documentation does not fully specify process, memory, or capability isolation guarantees for all third-party Editor extensions and importers.",
+    "Guaranteed lossless round-trip behavior for every serialized field of an ordinary missing MonoBehaviour is not stated as broadly as it is for missing SerializeReference types.",
+    "No reproducible project-open, import, compilation, domain-reload, or Play-entry latency measurements were collected; performance comparisons are intentionally qualitative.",
+    "Some first-party visual tools may use proprietary internal extension points beyond the public EditorWindow, UI Toolkit, importer, and package APIs documented here."
+  ]
+}
