@@ -1,16 +1,16 @@
 # UI Product Boundaries, Editor Dogfooding, and Porting Strategy
 
-**Status**: Design Draft
+**Status**: Explanatory Guide
 **Date**: 2026-07-16
-**Normative Authority**: ADR 0015, ADR 0025, ADR 0041, ADR 0047, ADR 0078, and ADR 0094
-**Proposed Inputs**: ADR 0082 and ADR 0084; their Host/runtime roles remain hypotheses until
-accepted or replaced.
+**Last Revised**: 2026-10-16
+**Normative Authority**: ADR 0015, ADR 0025, ADR 0041, ADR 0047, ADR 0078, ADR 0094, ADR 0114, ADR 0117 and [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md)
+**Host Foundations**: Accepted ADRs 0082 and 0084, with their later focused refinements
 **Related Open Questions**: OQ-001, OQ-003, OQ-004, OQ-010, OQ-022, and OQ-031
-**Document Role**: UI boundary canonical draft; evidence-gated and not a toolkit selection.
+**Document Role**: UI boundary guide; Accepted ADRs own decisions and the implementation ledger owns evidence.
 
-This document is a pressure-tested direction, not a new accepted architecture decision. It explains
-how Nara can grow mature game UI and editor UI without prematurely forcing them into one toolkit or
-permanently separating every underlying service. The owning ADRs remain authoritative.
+This guide explains separate game/editor products and selective service reuse.
+The [Editor Foundation and Frontends plan](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md) now owns the finite editor successor under ADR 0118.
+It evaluates direct dear-imgui-rs 0.20.0 integration before a full replacement; neither that implementation nor a custom frontend is claimed complete.
 
 ## Purpose
 
@@ -28,7 +28,7 @@ The direction is:
 
 1. keep game UI and editor UI as separate product layers;
 2. share only narrow services or pure algorithms after their semantics are proven equal;
-3. keep egui as the productive early editor adapter;
+3. retain the current egui product while qualifying the Dear ImGui candidate, then remove the superseded frontend after complete parity;
 4. let Nara UI dogfood one complete editor panel only after the runtime UI is ready;
 5. use Open GPUI, egui, and Dear ImGui as evidence and selective implementation sources, not as
    authorities over Nara documents, Hosts, or render backends;
@@ -53,10 +53,9 @@ that the editor will definitely converge on `nara_ui` or definitely remain on a 
 
 ## Product And Authority Model
 
-The authority labels in this draft are integration hypotheses for RGF-U17 and OQ-022. An `Editor
-Host` is one concrete product-root owner, not a shared public trait. The platform and render labels
-mean the selected stock or separately admitted authorities; they do not imply that ADR 0094 has
-admitted replacement Render Host selection.
+An `Editor Host` is the concrete product-root owner described by ADRs 0015, 0114, 0117 and 0118, not a shared public trait.
+Platform and render labels mean selected authorities with accountable lifetimes, including controlled backend delegation for secondary native windows.
+They do not imply a public replacement Render Host or permission to create another event loop/device.
 
 ```mermaid
 flowchart TB
@@ -70,7 +69,7 @@ flowchart TB
   subgraph Editor[Editor UI Product]
     Tooling[Tooling models, commands, transactions, and undo]
     Contributions[Inspector, panel, asset tool, gizmo, and viewport contributions]
-    Adapter[egui now; possible Nara UI or another adapter later]
+    Adapter[Current egui / qualified Dear ImGui candidate / future custom UI]
     Shell[Docking, panel catalog, layout restore, and native-window policy]
     Tooling --> Contributions --> Adapter
     Shell --> Adapter
@@ -84,8 +83,8 @@ flowchart TB
     Algorithms[Proven motion, geometry, and virtualization algorithms]
   end
 
-  subgraph Authorities[Candidate Product Integration Authorities]
-    EditorHost[Concrete Editor Host candidate and Play runtime owner]
+  subgraph Authorities[Product Integration Authorities]
+    EditorHost[Concrete Editor Host and Play lifecycle owner]
     Platform[Selected platform / window authority]
     Render[Selected render execution authority]
   end
@@ -114,8 +113,8 @@ its own widget tree, layout strategy, transient state, component catalog, and vi
 | Runtime UI render domain | Backend-neutral visual extraction, clipping, ordering, and extensible visual submissions | Raw wgpu handles, editor workspace state, a permanently quad-only display model |
 | Tooling | UI-neutral editor models, document/selection authority, commands, validation, undo/redo, Play commands/views/status/observations, and Apply Changes | Toolkit widget trees, focus/scroll handles, raw window/GPU authority, `RuntimeRecipe`, `RuntimeStartAttempt`, or `RuntimeInstance` ownership |
 | Editor UI adapter | Toolkit-specific presentation and transient interaction state; lowering responses into tooling intents | Direct document mutation, runner selection, native window creation, Device/Queue ownership |
-| Editor shell | Panel catalog, dock graph, layout snapshots, tool composition, detached-window intent | Game UI scene schema or gameplay runtime policy |
-| Concrete Editor Host candidate | If RGF-U17 and the owning ADRs admit it: process-level composition and lifetime of selected platform/render/toolkit Adapters, platform input/output arbitration, Play recipe refresh, start-attempt publication, and `RuntimeInstance` drive/control/retirement | Business document mutation, workspace truth, package-owned widget semantics, or a second raw Device/Queue/window authority beside its selected Adapters |
+| Editor shell | Panel catalog/instances, layout preferences, tool composition and detached-window intent | Game UI scene schema or gameplay runtime policy |
+| Concrete Editor Host | Process-level composition and lifetime of selected platform/render/toolkit Adapters, platform input/output arbitration, Play recipe refresh, start-attempt publication, and runtime drive/control/retirement | Business document mutation, package-owned widget semantics, or a second competing Device/Queue/window authority beside its selected Adapters |
 | Platform/window and render execution authorities | Window/surface leases, Device/Queue, target lifecycle, submission, present, recovery, teardown | UI document or editor workspace truth |
 
 ## Runtime UI Direction
@@ -182,14 +181,15 @@ diagnostics as the egui version.
 
 Docking and multi-window support are Editor Shell and Host concerns, not runtime UI widgets.
 
-The durable part of docking is a logical graph and versioned layout snapshot. It may contain stable
-panel IDs, tabs, splits, floating placement hints, and explicit close/restore policy. It must not
-contain live views, runtime entities, native handles, surfaces, or transient render-view indices.
+The durable cross-frontend contract is stable panel identity, instance targets and close/restore policy.
+Toolkit-specific splits, tabs and floating positions may remain in a versioned preference blob, with a usable reset when incompatible.
+ADR 0118 does not require a second toolkit-neutral dock graph or serializer.
+Layout data must not contain live views, runtime entities, native handles, surfaces or transient render-view indices.
 
 The concrete Editor Host decides whether a floating item remains in-window or becomes a native
 window. Native creation is gated by platform capability, target policy, input/IME support, render
-target admission, and deterministic close/retirement. A UI callback emits an intent; it does not
-create a window or surface directly.
+target admission, and deterministic close/retirement.
+A panel callback emits an intent; a selected platform/renderer backend may create secondary windows/surfaces only through the Host's explicit lifecycle delegation.
 
 ## Open GPUI Transfer Policy
 
@@ -242,11 +242,12 @@ not legal advice.
 | UI-3: Render target UI | World-space or render-to-texture terminal with mapped input and custom visuals | OQ-001 admission evidence for target/view identity, input projection, render freedom, and lifecycle; no graph is selected by this gate alone |
 | UI-4: First editor dogfood | One complete Inspector or similarly demanding panel rendered by Nara UI | Adapter replaceability with command/undo/IME/accessibility parity |
 | UI-5: Heterogeneous editor | Inspector plus virtualized hierarchy/asset browser plus viewport/timeline/graph | Whether one Nara UI foundation can become the primary editor toolkit |
-| UI-6: Editor shell | Dock graph, layout restore, panel removal, stale state, and atomic tear-off fixtures | Editor-owned durable docking independent of a concrete toolkit |
+| UI-6: Editor shell | Stable panel instances, layout restore/reset, panel removal and tear-off fixtures | Product-owned panel lifetimes with replaceable toolkit layout preferences |
 | UI-7: Native multi-window | One real detached window with DPI/focus/IME/input/surface/device-loss/close coverage | OQ-022 admission evidence for platform/window and render-execution ownership; no replacement Host role is selected by this gate alone |
 
 Failure at UI-4 or UI-5 is not a failure of Nara's game UI. It is valid evidence for keeping a
-separate editor toolkit. Success permits convergence but does not mandate immediate removal of egui.
+separate editor toolkit.
+Success permits convergence but does not establish full replacement parity; the planned successor removes the old production frontend only after that parity passes.
 
 ## Alternatives Considered
 
@@ -295,9 +296,9 @@ platform/window and render-execution authorities, ECS, and tooling.
 |---|---|---|
 | Persistent-data purity | Zero toolkit contexts, runtime entities, native handles, or GPU handles in game UI documents and editor layout snapshots | Schema/fixture audits and boundary searches |
 | Editor mutation parity | egui and any future Nara UI panel emit semantically equivalent tooling commands and produce identical validation/undo results | Cross-adapter command fixtures |
-| Host exclusivity | No UI adapter creates an event loop, native window, surface, Device/Queue, or submits/presents independently | Dependency/API audit and Host integration tests |
+| Host exclusivity | One event-loop/device-creation authority; any adapter-owned secondary window/surface/render route is an explicit Host lifecycle delegation | Dependency/API audit and Host integration tests |
 | Runtime scalability | Virtual collections materialize bounded visible/overscan work and preserve stable selection/reveal state through reorder and measurement changes | Headless workload tests and measured frame traces |
-| Docking atomicity | Every rejected move/split/merge/close/tear-off leaves the logical graph and published layout unchanged | Failure-matrix tests |
+| Panel/layout consistency | Layout reset, rejected restore and panel relocation preserve document/history state and leave a usable workspace | Layout and panel lifecycle fixtures |
 | Extension freedom | Independent packages can add a runtime UI capability or editor contribution without importing private workspace, toolkit, window, or backend handles | Clean-room package compile/runtime fixtures |
 | Product independence | Failure to dogfood an editor workload does not require changing runtime UI documents or gameplay-facing APIs | UI-4/UI-5 decision review |
 | Port provenance | Every copied or closely translated source file records source commit, license, notices, and modifications | Source ledger and release audit |
@@ -310,10 +311,15 @@ platform/window and render-execution authorities, ECS, and tooling.
 | Editor needs pollute runtime UI and shipping dependencies | High | Medium | Keep Editor Shell, docking, tables, property grids, and native windows in editor-owned product layers |
 | ECS authoring becomes an inefficient permanent execution tree | High | Medium | Preserve an internal optimized projection with stable keys, invalidation, spatial indexing, and virtualization |
 | Two toolkits compete for input, IME, windows, or GPU submission | Critical | Medium | One concrete Editor Host arbitrates every platform stream and render target |
-| Migration duplicates every widget indefinitely | Medium | Medium | Migrate complete panels, keep egui optional, and stop work when parity evidence is weak |
+| Migration duplicates every widget indefinitely | Medium | Medium | Migrate complete workflows, keep the existing frontend during qualification, then remove the superseded production path |
 | Third-party extensions are limited to composing stock widgets | High | Medium | Preserve separate behavior, layout, semantic, visual, panel, viewport, and Host-gated contribution levels |
 | Literal source ports violate provenance or license expectations | High | Low | Require file-level source/license review, NOTICE propagation, and clean-room reimplementation when uncertain |
 | Current panel rendering freezes game UI visual freedom | High | Medium | Treat panel/quad batching as a seed and retain extensible backend-neutral visual submissions |
+
+## Current Research
+
+The [pinned Dear ImGui study](../research/2026-10-16-editor-foundation/dear-imgui-020.md), [mature-editor comparison](../research/2026-10-16-editor-foundation/mature-editors.md) and [Nara module study](../research/2026-10-16-editor-foundation/nara-module-seams.md) provide the current source evidence.
+They distinguish docking from native multi-viewport and engine render views, and separate source-supported routes from native platform verification.
 
 ## Open Questions
 

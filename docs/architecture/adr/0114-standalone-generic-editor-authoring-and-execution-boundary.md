@@ -7,6 +7,7 @@
 `nara_tooling`, and project workflow owners
 **Refines**: [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md) and
 [ADR 0112](0112-editor-game-view-runtime-presentation-and-input-authority.md)
+**Refined By**: [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md)
 **Related**: [ADR 0006](0006-scene-and-prefab-data-model.md),
 [ADR 0026](0026-editor-command-patch-and-undo-model.md),
 [ADR 0047](0047-editor-workspace-and-scene-document-state.md),
@@ -46,6 +47,9 @@ bounded in-process Game View remains useful evidence and a trusted first-party A
 not define the ordinary product identity.
 
 ## Decision
+
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) adds pure creation templates, finite generic structural authoring and replaceable private frontend/workspace boundaries.
+It retains this ADR's ordinary data-only Open and strict compiled-project execution separation; trusted source-built Editor contributions do not authorize executing arbitrary project extensions on Open.
 
 Nara will ship one standalone, project-generic `nara-editor`. Project open and source authoring use
 a non-executable Authoring Project contract. Runtime construction remains a separate, strict

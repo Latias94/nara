@@ -2,14 +2,14 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-08-17
+**Last Revised**: 2026-10-16
 **Refined By**: ADR 0044: Root Facade and Prelude Layering Policy; ADR 0045: Component Schema
 Capability Metadata; ADR 0047: Editor Workspace and Scene Document State; ADR 0095: Plugin-Owned
 Specialized Domains and Project Configuration;
 [ADR 0101](0101-ordered-persistent-placement-and-runtime-projection.md): Ordered Persistent
 Placement and Runtime Projection;
 [ADR 0104](0104-host-owned-editor-workspace-installation.md): Host-Owned Editor Workspace
-Installation
+Installation; [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md): Editor Workspaces, Frontends, and Creation Templates
 **Related Design Draft**: [UI Product Boundaries, Editor Dogfooding, and Porting
 Strategy](../ui-product-boundaries-editor-dogfood-and-porting-strategy.md)
 **Implementation Plans**: [Editor Authoring Loop v1](../../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md); [Editor Game View v1](../../plans/2026-08-16-2157-feat-editor-game-view-v1-plan.md)
@@ -23,6 +23,11 @@ Toolkit-neutral tooling models and commands are a product boundary, not proof th
 toolkits are interchangeable. One panel implemented in a second toolkit proves only that panel's
 model/command separation. A reusable toolkit Adapter or replacement Editor Shell requires a real
 second product workflow and its own admission evidence.
+
+## ADR 0118 Refinement
+
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) owns the private frontend/application split, stable panel instances, layout preferences, independent render views and controlled secondary-window delegation.
+It admits the direct dear-imgui-rs 0.20.0 evaluation route, with adoption conditional on actual product parity; it does not claim a replacement is implemented.
 
 ## Context
 
@@ -135,3 +140,9 @@ flowchart TD
 | UI dogfooding slows core runtime | Medium | Medium | Phase UI dogfooding; start with egui/imgui if needed |
 | Premature toolkit convergence pollutes game UI or editor delivery | High | Medium | Migrate complete panels and require heterogeneous workload evidence before choosing a final topology |
 | Editor needs private access | High | Medium | Add explicit inspection/patch interfaces instead of breaking encapsulation |
+
+## Consequences
+
+The application and toolkit adapter must coordinate without sharing document mutation ownership.
+The ADR 0118 successor may break private egui-shaped product interfaces and remove the superseded frontend after parity.
+Widgets and toolkit layout remain replacement work; the reusable contract is semantic authoring and Host-owned lifecycle, not a universal UI abstraction.

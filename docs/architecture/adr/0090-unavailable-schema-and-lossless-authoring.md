@@ -12,7 +12,8 @@ mutation
 for lexical byte/comment preservation proves semantic record preservation insufficient
 **Related**: ADR 0006, ADR 0011, ADR 0026, ADR 0034, ADR 0038, ADR 0043, ADR 0045, ADR 0047,
 ADR 0049, ADR 0051, ADR 0068, ADR 0079, ADR 0081, ADR 0083, ADR 0084, ADR 0093, ADR 0095
-**Refined By**: [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md)
+**Refined By**: [ADR 0114](0114-standalone-generic-editor-authoring-and-execution-boundary.md) and
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md)
 
 ## Context
 
@@ -52,6 +53,9 @@ omits data-only records with an explicit reason while retaining their complete s
 record. This refinement never adds a native binding or executes project codecs.
 
 ## Decision
+
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits a finite generic structural successor: empty-entity insertion and adding/removing current data-editable components, with complete unavailable-manifest preservation through forward and inverse operations.
+It does not admit unavailable-record deletion or broad entity reference-closure mutation.
 
 Nara authoring preserves a complete bounded semantic component record when the
 file envelope, document shape, and generic `ComponentValue` grammar are understood but its schema,

@@ -2,14 +2,15 @@
 
 **Status**: Accepted
 **Date**: 2026-07-12
-**Last Revised**: 2026-07-18
+**Last Revised**: 2026-10-16
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
 native Rust derive authoring and public headless consumer on 2026-07-13; RGF-U12 World-independent
 content/fingerprint handoff on 2026-07-18; RGF-U29 explicit persistent composition and guarded
 target-World eligibility on 2026-07-18
 **Refines**: ADR 0011, ADR 0045, ADR 0051
 **Refined By**: [ADR 0095](0095-plugin-owned-specialized-domains-and-project-configuration.md) and
-[ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md)
+[ADR 0098](0098-schema-owner-lineage-and-active-runtime-composition.md), and
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md)
 **Related**: ADR 0034, ADR 0058, ADR 0076
 
 ## ADR 0095 Refinement
@@ -17,9 +18,14 @@ target-World eligibility on 2026-07-18
 A schema owner's durable identity/version/tombstone lineage is distinct from one product recipe's
 composed catalog fingerprint. Omitting an optional plugin from a composition does not tombstone its
 types and must not prevent later reactivation of the same compatible owner lineage. Runtime still
-requires a complete frozen native binding registry. Lossless authoring with known-but-unbound or
-unknown schema remains Proposed under ADR 0090; until admitted, missing schema fails closed rather
-than creating placeholders.
+requires a complete frozen native binding registry.
+Lossless authoring with known-but-unbound or unknown schema is now governed by Accepted ADR 0090 and its refinements; Runtime still rejects missing native bindings rather than creating placeholders.
+
+## ADR 0118 Refinement
+
+[ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits optional complete creation-only schema templates.
+Catalog identity includes present template metadata, while same-version durable decode semantics exclude it.
+Field missing-value defaults, strict native binding and owned schema lineage retain their existing roles.
 
 ## Context
 

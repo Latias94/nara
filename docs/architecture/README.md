@@ -27,8 +27,10 @@ an index, not another source of architecture decisions.
    Reviewed source `25f5c8b` proves finite scalar derives and ordinary schema-driven
    editing with native preview and strict Runtime admission kept separate. A clean
    committed-source external game confirms saved custom values affect gameplay.
-   No successor is active automatically. Remaining native platform limitations are
-   recorded in the implementation ledger.
+   The new [Editor Foundation and Frontends](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md)
+   plan carries the editor/module successor under [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md).
+   Its planning delivery is not implementation evidence or unconditional Dear ImGui adoption.
+   No implementation successor is active automatically. Remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
    Its last predecessor boundary remains registered by
@@ -134,7 +136,7 @@ an index, not another source of architecture decisions.
 | [Extension Package Concept Guide](extension-package-concept-guide.md) | Explanatory guide | Explains vocabulary only and never adds decisions. |
 | [Render Capability Demand and Pressure Matrix](render-capability-pressure-matrix.md) | Render evidence/admission appendix | Evaluates whether a capability deserves a tracer; it is not a renderer roadmap. |
 | [Render Extension Capability Interface Design](render-extension-capability-interface-design.md) | Future render canonical harness | Inactive and needs rebaseline; the RGF closure architecture handoff owns activation against the landed render owners and evidence. |
-| [UI Product Boundaries, Editor Dogfooding, and Porting Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md) | UI boundary canonical draft | Evidence-gated; it does not select a final editor toolkit or a shared game/editor widget core. |
+| [UI Product Boundaries, Editor Dogfooding, and Porting Strategy](ui-product-boundaries-editor-dogfood-and-porting-strategy.md) | UI boundary explanatory guide | Rebased on ADR 0118; Dear ImGui is a qualified evaluation candidate and no shared game/editor widget core is selected. |
 | [UI Foundation Design](ui-foundation-design.md) | UI deep-module design blueprint | Non-normative module map, reference-pressure matrix, component admission map, and scale vocabulary. ADR 0102 and ADR 0107-0109 own durable decisions. |
 
 `Canonical harness` means the primary non-normative scenario workbench for one subject. `Appendix`
