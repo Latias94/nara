@@ -12,7 +12,7 @@ fn renamed_dependencies_resolve_derive_crates() {
 }
 
 #[test]
-fn reference_game_depends_only_on_the_public_root_package() {
+fn reference_game_runtime_uses_the_public_root_package() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = repository.join("reference-game").join("Cargo.toml");
     let output = Command::new(cargo_executable())
@@ -42,8 +42,12 @@ fn reference_game_depends_only_on_the_public_root_package() {
     let dependencies = packages[0]["dependencies"]
         .as_array()
         .expect("package dependencies must be an array");
-    assert_eq!(dependencies.len(), 1, "{dependencies:#?}");
-    let dependency = &dependencies[0];
+    let runtime_dependencies = dependencies
+        .iter()
+        .filter(|dependency| dependency["kind"].is_null() && dependency["optional"] == false)
+        .collect::<Vec<_>>();
+    assert_eq!(runtime_dependencies.len(), 1, "{runtime_dependencies:#?}");
+    let dependency = runtime_dependencies[0];
     assert_eq!(dependency["name"], "nara");
     assert!(dependency["rename"].is_null());
     assert!(dependency["source"].is_null());
@@ -53,7 +57,7 @@ fn reference_game_depends_only_on_the_public_root_package() {
     assert_eq!(dependency["uses_default_features"], false);
     assert_eq!(
         dependency["features"],
-        serde_json::json!(["runtime-2d", "runtime-ui", "serde"])
+        serde_json::json!(["runtime-2d", "runtime-ui", "serde", "project-tooling"])
     );
 
     let dependency_path = dependency["path"]
@@ -195,5 +199,7 @@ fn cargo_executable() -> OsString {
 }
 
 fn target_directory(repository: &Path) -> PathBuf {
-    repository.join("target").join("derive-dependency-fixtures")
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repository.join("target"))
 }
