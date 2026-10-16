@@ -9,7 +9,7 @@ use nara_reflect::{
     ComponentValueKind,
 };
 use nara_scene::{
-    AuthoringFieldEdit, AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness,
+    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness,
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
 };
@@ -86,7 +86,10 @@ impl SceneInspectorState {
         session: &mut SceneAuthoringSession,
         command: SceneInspectorCommand,
     ) -> SceneInspectorCommandReport {
-        if !matches!(&command, SceneInspectorCommand::SetField { .. }) {
+        if !matches!(
+            &command,
+            SceneInspectorCommand::SetField { .. } | SceneInspectorCommand::SetAssetRefField { .. }
+        ) {
             return inspector_authoring_command_error_report();
         }
         let entity = command.target_entity().clone();
@@ -110,44 +113,44 @@ impl SceneInspectorState {
                 };
             }
         };
-        let SceneInspectorCommand::SetField {
-            entity,
-            component,
-            component_version,
-            field,
-            value,
-        } = command
-        else {
-            unreachable!("the authoring command kind was checked before conversion")
+        let (entity, component, component_version) = match &command {
+            SceneInspectorCommand::SetField {
+                entity,
+                component,
+                component_version,
+                ..
+            }
+            | SceneInspectorCommand::SetAssetRefField {
+                entity,
+                component,
+                component_version,
+                ..
+            } => (entity, component, component_version),
+            _ => unreachable!("the authoring command kind was checked before conversion"),
         };
         let Some(record) = session
             .document()
             .entities
             .iter()
-            .find(|record| record.id == entity)
-            .and_then(|record| record.components.get(&component))
+            .find(|record| &record.id == entity)
+            .and_then(|record| record.components.get(component))
         else {
             return inspector_authoring_component_error_report(
                 "tooling.inspector-authoring-component-missing",
                 "inspector field command targets a component that is not in the authoring document",
-                &entity,
-                &component,
+                entity,
+                component,
             );
         };
-        if record.version != component_version {
+        if record.version != *component_version {
             return inspector_authoring_component_error_report(
                 "tooling.inspector-authoring-version-mismatch",
                 "inspector field command does not match the persistent component version",
-                &entity,
-                &component,
+                entity,
+                component,
             );
         }
-        let edit =
-            match AuthoringFieldEdit::single(entity, component, component_version, field, value) {
-                Ok(edit) => edit,
-                Err(_) => return inspector_authoring_command_error_report(),
-            };
-        let patch_report = session.apply_authoring_field_edit(edit);
+        let patch_report = session.apply_authoring_patch(&patch);
         SceneInspectorCommandReport {
             applied: patch_report.applied,
             patch: Some(patch),
@@ -512,6 +515,7 @@ fn build_inspector_model(
                 parent: parent.cloned(),
                 depth,
                 inspectable_component_count: inspectable_component_count(
+                    session,
                     entity,
                     registry,
                     &authoring_record_facts,
@@ -527,6 +531,7 @@ fn build_inspector_model(
 
     let selected_entity_view = match (selected_entity, selected_record) {
         (Some(_), Some((entity, parent))) => Some(build_entity_view(
+            session,
             entity,
             parent,
             registry,
@@ -558,6 +563,7 @@ fn build_inspector_model(
 }
 
 fn inspectable_component_count(
+    session: &SceneAuthoringSession,
     entity: &nara_scene::SceneEntityRecord,
     registry: Option<&ComponentRegistry>,
     authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
@@ -567,8 +573,13 @@ fn inspectable_component_count(
         .keys()
         .filter(|component_id| {
             if let Some(fact) = authoring_record_facts.get(&entity.id, component_id) {
-                if !fact.readiness().is_available() || registry.is_none() {
+                if !fact.readiness().is_available() {
                     return true;
+                }
+                if registry.is_none() {
+                    return session
+                        .authoring_component_schema(&entity.id, component_id)
+                        .is_some_and(|schema| schema.has_capability(ComponentCapability::Inspect));
                 }
             }
             registry
@@ -580,6 +591,7 @@ fn inspectable_component_count(
 }
 
 fn build_entity_view(
+    session: &SceneAuthoringSession,
     entity: &nara_scene::SceneEntityRecord,
     parent: Option<&SceneEntityId>,
     registry: Option<&ComponentRegistry>,
@@ -599,7 +611,12 @@ fn build_entity_view(
                     ));
                 }
                 if registry.is_none() {
-                    return Some(build_authoring_component_view(component_id, component));
+                    let schema = session.authoring_component_schema(&entity.id, component_id)?;
+                    return schema
+                        .has_capability(ComponentCapability::Inspect)
+                        .then(|| {
+                            build_component_view(component_id, component, schema, &component.value)
+                        });
                 }
             }
             let registry = registry.filter(|registry| registry.is_frozen())?;
@@ -715,20 +732,6 @@ fn build_unavailable_component_view(
             SceneInspectorReadOnlyReason::from_record_readiness(fact.readiness())
                 .expect("unavailable authoring facts cannot be Available"),
         ),
-        capabilities: BTreeSet::new(),
-        fields: Vec::new(),
-    }
-}
-
-fn build_authoring_component_view(
-    component_id: &ComponentTypeId,
-    component: &SceneComponentRecord,
-) -> SceneInspectorComponentView {
-    SceneInspectorComponentView {
-        component: component_id.clone(),
-        document_version: component.version,
-        schema_version: component.version,
-        access: SceneInspectorComponentAccess::editable(),
         capabilities: BTreeSet::new(),
         fields: Vec::new(),
     }
@@ -897,6 +900,127 @@ mod tests {
 
     fn scene_id(value: &str) -> SceneEntityId {
         SceneEntityId::new(value).expect("test scene entity id must be valid")
+    }
+
+    #[test]
+    fn generic_asset_ref_inspector_edit_preserves_unavailable_records_and_history() {
+        use nara_reflect::{
+            AuthoringSchemaBundle, AuthoringSchemaBundleOwner, PersistentComponentSchemaOwnerId,
+        };
+        use nara_scene::{AuthoringDocumentSource, SceneDocumentCandidate};
+
+        let resolved =
+            nara_reflect::__private::resolve_schema_provider(nara_sprite::SPRITE_SCHEMA_PROVIDER)
+                .unwrap();
+        let owner =
+            PersistentComponentSchemaOwnerId::try_new(nara_sprite::SPRITE_SCHEMA_OWNER_ID.as_str())
+                .unwrap();
+        let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+            owner.clone(),
+            resolved.current().catalog().clone(),
+            resolved
+                .predecessor()
+                .map(|record| record.catalog().clone()),
+        )])
+        .unwrap();
+        let sprite = ComponentTypeId::new("nara.sprite.Sprite");
+        let adapter = nara_scene::__private::AuthoringAdapterReceipt::from_trusted_provider(
+            resolved.contribution_receipt(),
+            "nara.sprite.first-party-authoring-adapter",
+            1,
+            1,
+            [sprite.clone()],
+        )
+        .unwrap();
+        let entity = scene_id("player");
+        let original = SceneDocument::from_ordered_roots([SceneEntityRecord::new(entity.clone())
+            .with_component(
+                sprite.clone(),
+                SceneComponentRecord::new(
+                    ComponentSchemaVersion::ONE,
+                    ComponentValue::map([
+                        (
+                            "material",
+                            ComponentValue::map([("image", ComponentValue::Null)]),
+                        ),
+                        ("layer", ComponentValue::I64(0)),
+                    ]),
+                )
+                .with_owner(owner),
+            )
+            .with_component(
+                ComponentTypeId::new("project.Unavailable"),
+                SceneComponentRecord::new(ComponentSchemaVersion::ONE, ComponentValue::U64(7)),
+            )]);
+        let published = SceneDocumentCandidate::decode_json_bytes(
+            original.to_json_string().unwrap().as_bytes(),
+        )
+        .unwrap()
+        .admit_authoring(
+            AuthoringDocumentSource::new(AssetRef::path("scenes/main.scene.json").unwrap()),
+            &bundle,
+            &[adapter],
+        )
+        .unwrap()
+        .publish();
+        let manifest = published.unavailable_manifest().clone();
+        let mut session = SceneAuthoringSession::from_published_authoring_document(published);
+        let inspector = SceneInspectorState::new();
+        let model = inspector.authoring_model_with_selection(&session, Some(&entity));
+        let sprite_view = model
+            .selected_entity_view
+            .unwrap()
+            .components
+            .into_iter()
+            .find(|component| component.component == sprite)
+            .unwrap();
+        let image = sprite_view
+            .fields
+            .iter()
+            .find(|field| field.id == ComponentFieldId::new("material.image"))
+            .unwrap();
+        assert!(sprite_view.access.is_editable());
+        assert_eq!(image.value_kind, ComponentValueKind::AssetRef);
+        assert_eq!(image.value, Some(ComponentValue::Null));
+
+        let image_ref = AssetRef::path("textures/player.png").unwrap();
+        let command = SceneInspectorCommand::SetAssetRefField {
+            entity: entity.clone(),
+            component: sprite.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("material.image"),
+            asset_ref: image_ref.clone(),
+        };
+        let applied = inspector.apply_authoring_command(&mut session, command);
+        assert!(applied.applied, "{:#?}", applied.diagnostics);
+        assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+        assert_eq!(
+            session.authoring_record_facts().unwrap()[0].schema_declared_asset_references()[0]
+                .asset_ref(),
+            &image_ref
+        );
+        assert!(session.undo_authoring().applied);
+        assert_eq!(session.document(), &original);
+        assert!(session.redo_authoring().applied);
+
+        let accepted = session.document().clone();
+        let revision = session.revision();
+        let history = session.history_status();
+        let rejected = inspector.apply_authoring_command(
+            &mut session,
+            SceneInspectorCommand::SetAssetRefField {
+                entity,
+                component: sprite,
+                component_version: ComponentSchemaVersion::ONE,
+                field: ComponentFieldId::new("layer"),
+                asset_ref: image_ref,
+            },
+        );
+        assert!(!rejected.applied);
+        assert_eq!(session.document(), &accepted);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_status(), history);
+        assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
     }
 
     #[test]

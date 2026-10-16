@@ -1,3 +1,4 @@
+use nara_asset::AssetRef;
 use nara_identity::EntityReference;
 use nara_reflect::{ComponentValue, ComponentValueKind};
 use nara_tooling::{SceneInspectorComponentView, SceneInspectorFieldView};
@@ -72,6 +73,14 @@ pub(crate) fn parse_editable_value(
     }
 }
 
+pub(crate) fn parse_asset_reference(text: &str) -> Result<AssetRef, String> {
+    if let Some(id) = text.strip_prefix("stable_id:") {
+        AssetRef::stable_id(id).map_err(|error| error.to_string())
+    } else {
+        AssetRef::path(text).map_err(|error| error.to_string())
+    }
+}
+
 fn component_value_label(value: &ComponentValue) -> String {
     match value {
         ComponentValue::Null => "null".to_owned(),
@@ -102,10 +111,21 @@ fn editable_value_text(kind: ComponentValueKind, value: &ComponentValue) -> Opti
         ComponentValueKind::U64 => value.as_u64().map(|value| value.to_string()),
         ComponentValueKind::F64 => value.as_f64().map(|value| value.to_string()),
         ComponentValueKind::String => value.as_str().map(ToOwned::to_owned),
+        ComponentValueKind::AssetRef => {
+            let ComponentValue::Map(fields) = value else {
+                return None;
+            };
+            let kind = fields.get("kind")?.as_str()?;
+            let reference = fields.get("value")?.as_str()?;
+            match kind {
+                "path" => Some(reference.to_owned()),
+                "stable_id" => Some(format!("stable_id:{reference}")),
+                _ => None,
+            }
+        }
         ComponentValueKind::Null
         | ComponentValueKind::List
         | ComponentValueKind::Map
-        | ComponentValueKind::AssetRef
         | ComponentValueKind::EntityRef => None,
     }
 }

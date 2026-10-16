@@ -2722,6 +2722,7 @@ name = "nara_tooling_egui"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "nara_asset",
  "nara_diagnostic",
  "nara_identity",
  "nara_reflect",

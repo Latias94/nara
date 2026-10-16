@@ -4131,6 +4131,21 @@ mod tests {
             .unwrap()
             .editor
             .inspector;
+        let name_view = inspector
+            .selected_entity_view
+            .as_ref()
+            .unwrap()
+            .components
+            .iter()
+            .find(|component| component.component == name)
+            .unwrap();
+        assert!(name_view.access.is_editable());
+        assert_eq!(name_view.fields.len(), 1);
+        assert_eq!(name_view.fields[0].id, ComponentFieldId::new("value"));
+        assert_eq!(
+            name_view.fields[0].value,
+            Some(ComponentValue::String("Player".to_owned()))
+        );
         let visibility_view = inspector
             .selected_entity_view
             .as_ref()
@@ -4150,17 +4165,18 @@ mod tests {
         assert!(visibility_view.fields.is_empty());
 
         let edit_base_revision = workspace.document_revision(document).unwrap();
-        let edit = workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyScenePatch {
-            document,
-            base_revision: edit_base_revision,
-            patch: ScenePatchDocument::new([ScenePatchOperation::SetField {
-                entity: entity.clone(),
-                component: name.clone(),
-                component_version: ComponentSchemaVersion::ONE,
-                field: ComponentFieldId::new("value"),
-                value: ComponentValue::String("Renamed".to_owned()),
-            }]),
-        });
+        let edit =
+            workspace.apply_authoring_command(EditorWorkspaceCommand::ApplyInspectorCommand {
+                document,
+                base_revision: edit_base_revision,
+                command: SceneInspectorCommand::SetField {
+                    entity: entity.clone(),
+                    component: name.clone(),
+                    component_version: ComponentSchemaVersion::ONE,
+                    field: ComponentFieldId::new("value"),
+                    value: ComponentValue::String("Renamed".to_owned()),
+                },
+            });
         assert!(edit.applied, "{:#?}", edit.diagnostics);
         assert_ne!(edit.revision, Some(edit_base_revision));
 

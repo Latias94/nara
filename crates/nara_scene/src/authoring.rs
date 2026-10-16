@@ -1169,6 +1169,29 @@ impl SceneAuthoringSession {
         &self.document
     }
 
+    /// Returns the existing authoring basis for an Available, current direct component.
+    ///
+    /// This read-only projection never resolves a Runtime registry or admits an unavailable
+    /// record for editing.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_component_schema(
+        &self,
+        entity: &crate::SceneEntityId,
+        component: &nara_reflect::ComponentTypeId,
+    ) -> Option<&nara_reflect::ComponentSchema> {
+        let record = self
+            .document
+            .entities
+            .iter()
+            .find(|record| &record.id == entity)?
+            .components
+            .get(component)?;
+        self.authority
+            .published()?
+            .available_component_schema(entity, component, record.version)
+    }
+
     #[must_use]
     pub fn revision(&self) -> SceneAuthoringRevision {
         self.history.revision()

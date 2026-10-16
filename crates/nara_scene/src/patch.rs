@@ -2798,7 +2798,7 @@ fn is_asset_ref_value(value: &ComponentValue) -> bool {
     )
 }
 
-fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
+pub(crate) fn asset_ref_value(asset_ref: &AssetRef) -> ComponentValue {
     match asset_ref {
         AssetRef::Path(path) => ComponentValue::map([
             ("kind", ComponentValue::String("path".to_string())),

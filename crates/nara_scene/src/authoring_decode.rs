@@ -916,6 +916,30 @@ impl AuthoringDocumentState {
         &self.record_facts
     }
 
+    pub(crate) fn available_component_schema(
+        &self,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+        version: ComponentSchemaVersion,
+    ) -> Option<&ComponentSchema> {
+        let available = self.record_facts.iter().any(|fact| {
+            fact.readiness == AuthoringRecordReadiness::Available
+                && &fact.component == component
+                && matches!(
+                    &fact.location,
+                    AuthoringRecordLocation::EntityComponent { entity: owner } if owner == entity
+                )
+        });
+        if !available {
+            return None;
+        }
+        self.basis
+            .schemas
+            .get(component)
+            .map(|entry| &entry.schema)
+            .filter(|schema| schema.version() == version)
+    }
+
     pub(crate) const fn unavailable_manifest(&self) -> &UnavailableRecordManifest {
         &self.unavailable_manifest
     }
@@ -1906,33 +1930,45 @@ fn field_edits_from_patch(
     patch
         .operations
         .iter()
-        .map(|operation| match operation {
-            ScenePatchOperation::SetField {
-                entity,
-                component,
-                component_version,
-                field,
-                value,
-            } => {
-                let cost = value.cost();
-                value_nodes = value_nodes.saturating_add(cost.nodes());
-                logical_bytes = logical_bytes.saturating_add(cost.logical_bytes());
-                if !fields.insert((entity, component, field))
-                    || value_nodes > MAX_AUTHORING_FIELD_VALUE_NODES
-                    || logical_bytes > MAX_AUTHORING_FIELD_LOGICAL_BYTES
-                {
-                    return Err(authoring_field_patch_rejection());
+        .map(|operation| {
+            let asset_value;
+            let (entity, component, component_version, field, value) = match operation {
+                ScenePatchOperation::SetField {
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    value,
+                } => (entity, component, component_version, field, value),
+                ScenePatchOperation::SetAssetRefField {
+                    entity,
+                    component,
+                    component_version,
+                    field,
+                    asset_ref,
+                } => {
+                    asset_value = crate::patch::asset_ref_value(asset_ref);
+                    (entity, component, component_version, field, &asset_value)
                 }
-                AuthoringFieldEdit::single(
-                    entity.clone(),
-                    component.clone(),
-                    *component_version,
-                    field.clone(),
-                    value.clone(),
-                )
-                .map_err(|_| authoring_field_patch_rejection())
+                _ => return Err(authoring_field_patch_rejection()),
+            };
+            let cost = value.cost();
+            value_nodes = value_nodes.saturating_add(cost.nodes());
+            logical_bytes = logical_bytes.saturating_add(cost.logical_bytes());
+            if !fields.insert((entity, component, field))
+                || value_nodes > MAX_AUTHORING_FIELD_VALUE_NODES
+                || logical_bytes > MAX_AUTHORING_FIELD_LOGICAL_BYTES
+            {
+                return Err(authoring_field_patch_rejection());
             }
-            _ => Err(authoring_field_patch_rejection()),
+            AuthoringFieldEdit::single(
+                entity.clone(),
+                component.clone(),
+                *component_version,
+                field.clone(),
+                value.clone(),
+            )
+            .map_err(|_| authoring_field_patch_rejection())
         })
         .collect()
 }

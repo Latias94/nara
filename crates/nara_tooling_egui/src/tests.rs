@@ -848,6 +848,58 @@ fn inspector_edit_uses_the_exact_document_and_revision_from_its_frame() {
 }
 
 #[test]
+fn inspector_asset_reference_emits_the_typed_revision_bound_edit() {
+    let mut scene = scene_model(
+        revision(),
+        false,
+        SceneAuthoringHistoryStatus::default(),
+        true,
+    );
+    let field = &mut scene
+        .editor
+        .inspector
+        .selected_entity_view
+        .as_mut()
+        .unwrap()
+        .components[0]
+        .fields[0];
+    field.value_kind = ComponentValueKind::AssetRef;
+    field.capabilities.insert(ComponentCapability::AssetRef);
+    field.value = Some(ComponentValue::map([
+        ("kind", ComponentValue::String("path".to_owned())),
+        (
+            "value",
+            ComponentValue::String("images/player.png".to_owned()),
+        ),
+    ]));
+    let frame = default_frame(Some(scene.clone()));
+    let batch = click_control(
+        &mut EguiEditorPanel::new(),
+        &frame,
+        "field-apply:player:nara.test.Transform:x",
+    );
+    assert_eq!(
+        batch,
+        EditorActionBatch::new(
+            frame.revision(),
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyInspectorCommand {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    command: SceneInspectorCommand::SetAssetRefField {
+                        entity: SceneEntityId::new("player").unwrap(),
+                        component: ComponentTypeId::new("nara.test.Transform"),
+                        component_version: ComponentSchemaVersion::ONE,
+                        field: ComponentFieldId::new("x"),
+                        asset_ref: nara_asset::AssetRef::path("images/player.png").unwrap(),
+                    },
+                }
+            )],
+        ),
+    );
+}
+
+#[test]
 fn document_or_revision_change_invalidates_drafts_and_inline_errors() {
     let first = scene_model(
         revision(),

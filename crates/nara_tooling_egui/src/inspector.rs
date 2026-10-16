@@ -16,8 +16,8 @@ use nara_tooling::{
 };
 
 use crate::fields::{
-    component_title, field_edit_source_text, field_value_label, parse_editable_value,
-    value_kind_label,
+    component_title, field_edit_source_text, field_value_label, parse_asset_reference,
+    parse_editable_value, value_kind_label,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -550,13 +550,13 @@ impl EguiSceneInspectorPanel {
                 ComponentValueKind::I64
                 | ComponentValueKind::U64
                 | ComponentValueKind::F64
-                | ComponentValueKind::String => {
+                | ComponentValueKind::String
+                | ComponentValueKind::AssetRef => {
                     self.show_text_field(ui, target, field, field_editing_enabled, actions)
                 }
                 ComponentValueKind::Null
                 | ComponentValueKind::List
                 | ComponentValueKind::Map
-                | ComponentValueKind::AssetRef
                 | ComponentValueKind::EntityRef => {
                     ui.monospace(field_value_label(field));
                 }
@@ -679,19 +679,29 @@ impl EguiSceneInspectorPanel {
         if !apply {
             return;
         }
-        match parse_editable_value(field.value_kind, &text) {
-            Ok(value) => {
+        let command = if field.value_kind == ComponentValueKind::AssetRef {
+            parse_asset_reference(&text).map(|asset_ref| SceneInspectorCommand::SetAssetRefField {
+                entity: target.key.entity.clone(),
+                component: target.key.component.clone(),
+                component_version: target.component_version,
+                field: target.key.field.clone(),
+                asset_ref,
+            })
+        } else {
+            parse_editable_value(field.value_kind, &text).map(|value| {
+                SceneInspectorCommand::SetField {
+                    entity: target.key.entity.clone(),
+                    component: target.key.component.clone(),
+                    component_version: target.component_version,
+                    field: target.key.field.clone(),
+                    value,
+                }
+            })
+        };
+        match command {
+            Ok(command) => {
                 self.field_drafts.remove(&target.key);
-                actions.push(document_mutation(
-                    &target.key,
-                    SceneInspectorCommand::SetField {
-                        entity: target.key.entity.clone(),
-                        component: target.key.component.clone(),
-                        component_version: target.component_version,
-                        field: target.key.field.clone(),
-                        value,
-                    },
-                ));
+                actions.push(document_mutation(&target.key, command));
             }
             Err(error) => {
                 self.field_drafts.insert(
@@ -818,11 +828,13 @@ fn field_feedback_summary(reason: EditorFieldFeedbackReason) -> &'static str {
             "Expected a finite number"
         }
         EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::String) => "Expected text",
+        EditorFieldFeedbackReason::InvalidValue(ComponentValueKind::AssetRef) => {
+            "Expected a logical asset path or stable_id:<UUID>"
+        }
         EditorFieldFeedbackReason::InvalidValue(
             ComponentValueKind::Null
             | ComponentValueKind::List
             | ComponentValueKind::Map
-            | ComponentValueKind::AssetRef
             | ComponentValueKind::EntityRef,
         ) => "This field kind is not editable as text",
         EditorFieldFeedbackReason::StaleAction => "The field changed before this edit was applied",
