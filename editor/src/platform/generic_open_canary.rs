@@ -13,6 +13,7 @@ use nara::tooling::{
 };
 use winit::window::WindowId;
 
+use crate::frontend::EguiEditorFrontend;
 use crate::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
 
 use super::{EditorRunError, NativeEditorCanaryAdvance};
@@ -233,6 +234,7 @@ impl EditorGenericOpenCanaryHost {
         &mut self,
         rendered_state: EditorApplicationState,
         application: &mut EditorApplication,
+        frontend: &mut EguiEditorFrontend,
         window_id: WindowId,
     ) -> Result<NativeEditorCanaryAdvance, EditorRunError> {
         self.require_before_deadline(application.state())?;
@@ -284,7 +286,7 @@ impl EditorGenericOpenCanaryHost {
                     usage: snapshot.usage(),
                 };
                 drop(frame);
-                if !application.select_project_browser_sidebar() {
+                if !frontend.select_project_browser_sidebar() {
                     return Err(canary_state_error(
                         &stage,
                         application.state(),
@@ -296,7 +298,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingProjectBrowserPresentation(baseline) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 require_browser_baseline(application, &baseline, &stage)?;
                 if !application.apply_project_browser_local_action(
                     EditorProjectBrowserLocalAction::SetPathFilter {
@@ -313,7 +315,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingSceneFilter(baseline) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 require_path_filter(browser, EXTERNAL_SCENE_FILTER, application.state(), &stage)?;
@@ -344,7 +346,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingSceneSelection(baseline) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 require_selected_path(browser, EXTERNAL_SCENE_PATH, application.state(), &stage)?;
@@ -355,7 +357,7 @@ impl EditorGenericOpenCanaryHost {
                 }))
             }
             EditorGenericOpenCanaryStage::AwaitingSceneOpen(baseline) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let scene_document = require_document(
                     &frame,
@@ -391,7 +393,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingPrefabFilter(scene) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 require_path_filter(browser, EXTERNAL_PREFAB_FILTER, application.state(), &stage)?;
@@ -436,7 +438,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingPrefabSelection(scene) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 require_selected_path(browser, EXTERNAL_PREFAB_PATH, application.state(), &stage)?;
@@ -452,7 +454,7 @@ impl EditorGenericOpenCanaryHost {
                 }))
             }
             EditorGenericOpenCanaryStage::AwaitingPrefabOpen(scene) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 require_document_id(
                     &frame,
@@ -486,7 +488,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(project_browser_action(EditorProjectBrowserAction::Refresh))
             }
             EditorGenericOpenCanaryStage::AwaitingEquivalentRefresh(documents) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 if browser.has_pending_work() {
@@ -518,7 +520,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(project_browser_action(EditorProjectBrowserAction::Refresh))
             }
             EditorGenericOpenCanaryStage::AwaitingFailureRevalidation(refreshed) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 require_last_good_snapshot(browser, &refreshed, application.state(), &stage)?;
@@ -550,7 +552,7 @@ impl EditorGenericOpenCanaryHost {
                 Ok(NativeEditorCanaryAdvance::redraw())
             }
             EditorGenericOpenCanaryStage::AwaitingLastGoodFailure(refreshed) => {
-                require_project_browser_sidebar_presentation(application, &stage)?;
+                require_project_browser_sidebar_presentation(application, frontend, &stage)?;
                 let frame = require_current_frame(application, &stage)?;
                 let browser = frame.project_browser();
                 if browser.has_pending_work() {

@@ -39,10 +39,12 @@ use nara::{
         EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
         SceneInspectorCommand, SceneInspectorReadOnlyReason,
     },
-    tooling_egui::{EguiEditorProjectAction, EguiProjectOpenDraft},
     ui::__private::{UiAuthoringCanvasProjection, UiAuthoringFieldValue},
 };
-use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
+use nara_editor::{
+    EditorApplication, EditorApplicationState, EditorLaunchOptions, EditorProjectAction,
+    EguiEditorFrontend,
+};
 
 const NARA_GIT_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -713,9 +715,10 @@ fn workspace_open_project_action_enters_the_retained_replacement_flow() {
     .unwrap();
     let before = current_frame(&application);
 
-    let selected = application.submit_project_action(EguiEditorProjectAction::OpenProject(
-        EguiProjectOpenDraft::new(replacement.root().to_string_lossy(), ""),
-    ));
+    let selected = application.submit_project_action(EditorProjectAction::OpenProject {
+        project_root: replacement.root().to_owned(),
+        profile: None,
+    });
 
     assert!(selected.actions_observed());
     assert!(!selected.exit_ready());
@@ -759,7 +762,13 @@ fn replacement_cancel_restores_the_exact_retained_workspace() {
 
     assert!(application.request_project_replacement(replacement.root(), None));
     let context = egui::Context::default();
-    render_application(&context, &mut application, egui::RawInput::default());
+    let mut frontend = EguiEditorFrontend::new();
+    render_application(
+        &context,
+        &mut frontend,
+        &mut application,
+        egui::RawInput::default(),
+    );
     let mut cancel = egui::RawInput::default();
     cancel.events.push(egui::Event::Key {
         key: egui::Key::Enter,
@@ -768,7 +777,7 @@ fn replacement_cancel_restores_the_exact_retained_workspace() {
         repeat: false,
         modifiers: egui::Modifiers::default(),
     });
-    render_application(&context, &mut application, cancel);
+    render_application(&context, &mut frontend, &mut application, cancel);
 
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert!(Arc::ptr_eq(&before, &current_frame(&application)));
@@ -787,7 +796,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
     let before = current_frame(&application);
     let before_scene = active_scene_state(&before);
 
-    let requested = application.submit_project_action(EguiEditorProjectAction::CloseProject);
+    let requested = application.submit_project_action(EditorProjectAction::CloseProject);
     assert!(requested.actions_observed());
     assert!(!requested.exit_ready());
     assert_eq!(
@@ -836,7 +845,7 @@ fn close_project_reuses_the_exit_decision_without_exiting_the_process() {
         before_scene
     );
 
-    let _ = application.submit_project_action(EguiEditorProjectAction::CloseProject);
+    let _ = application.submit_project_action(EditorProjectAction::CloseProject);
     let awaiting_discard = current_frame(&application);
     let closed = application.submit_and_drive(
         EditorActionBatch::new(
@@ -930,12 +939,18 @@ fn ordinary_play_reports_typed_supervised_play_contract_missing() {
 
 fn render_once(application: &mut EditorApplication) -> EditorActionBatch {
     let context = egui::Context::default();
-    render_application(&context, application, egui::RawInput::default())
-        .expect("the fixed Editor panel returns one workspace result")
+    render_application(
+        &context,
+        &mut EguiEditorFrontend::new(),
+        application,
+        egui::RawInput::default(),
+    )
+    .expect("the fixed Editor panel returns one workspace result")
 }
 
 fn render_application(
     context: &egui::Context,
+    frontend: &mut EguiEditorFrontend,
     application: &mut EditorApplication,
     mut input: egui::RawInput,
 ) -> Option<EditorActionBatch> {
@@ -945,7 +960,7 @@ fn render_application(
     ));
     let mut batch = None;
     let output = context.run_ui(input, |ui| {
-        batch = Some(application.show(ui));
+        batch = Some(frontend.show(ui, application));
     });
     output.drop_without_applying_deltas();
     batch.expect("the Editor application should render exactly one surface")

@@ -28,7 +28,9 @@ use nara::{
         SceneInspectorCommand, SceneInspectorComponentView,
     },
 };
-use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
+use nara_editor::{
+    EditorApplication, EditorApplicationState, EditorLaunchOptions, EguiEditorFrontend,
+};
 use serde_json::Value;
 
 const CAMERA: &str = "nara.render.Camera2d";
@@ -354,12 +356,13 @@ fn reimport_and_assign_image(mut application: EditorApplication, root: &Path) ->
     let pixels = fs::read(root.join(IMAGE_SOURCE)).unwrap();
     let mut metadata = SourceRestore::new(root.join(format!("{IMAGE_SOURCE}.meta")));
     settle_image_work(&mut application);
+    let mut frontend = EguiEditorFrontend::new();
     let mut harness = Harness::builder()
         .with_size(egui::vec2(1280.0, 800.0))
         .build_ui_state(
-            |ui, application: &mut EditorApplication| {
-                if let Some(batch) = application.show(ui) {
-                    application.submit_and_drive(batch, Duration::ZERO);
+            move |ui, application: &mut EditorApplication| {
+                if let Some(batch) = frontend.show(ui, application) {
+                    frontend.submit_and_drive(application, batch, Duration::ZERO);
                 }
             },
             application,

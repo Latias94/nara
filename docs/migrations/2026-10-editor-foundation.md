@@ -27,3 +27,28 @@ The declared minimum compiler remains Rust 1.95 and must be verified against the
 
 [ADR 0118](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md) and the [implementation plan](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md) own subsequent application/frontend, creation-template and window/view changes.
 Dependency migration alone does not establish Dear ImGui adoption or multi-window product support.
+
+`EditorApplication` owns project opening, replacement, recovery, document actions and Play without toolkit state.
+Move egui drawing calls from `EditorApplication::show` to a separately owned `EguiEditorFrontend::show(ui, &mut application)`.
+Interactive egui consumers submit their returned batch through `EguiEditorFrontend::submit_and_drive`; it observes that exact dispatch result before advancing the application.
+Native integration likewise delivers the returned dispatch feedback immediately.
+The neutral `EditorApplication::submit_and_drive` remains available for consumers without widget feedback.
+Recreating a frontend resets only local widgets and drafts; it does not replace the project session, accepted document changes, history or Play owner.
+
+## Component creation metadata
+
+`ComponentSchema` can publish an optional complete `authoring_initial_value` through `with_authoring_initial_value`.
+Catalog admission checks it against every declared field, including optional fields that ordinary stored records may omit.
+This value is copied for an explicit creation operation; it does not change field `default_value` or make required stored fields optional.
+Schemas without a template retain their previous serialization and fingerprint and do not gain generic creation capability.
+
+Scalar derives opt in with `#[nara(authoring_initial)]` and specify `#[nara(initial = ...)]` on every field.
+Only scalar literals and negative numeric literals are admitted.
+Rust checks the actual field type, including aliases; floating-point finite checks happen at compile time before the existing sealed codec constructs the data.
+Arbitrary expressions and native `Default` callbacks are unsupported.
+
+The built-in Transform2d, Sprite, Name and Visibility schemas now publish explicit complete templates.
+Their transform, sprite and Scene component owners advance to catalog generation 2, retaining generation 1 as their predecessor; component wire versions remain 1.
+Refresh a compiled project's declared schema bundle explicitly with its own recipe using `nara schema <project-directory> --write`, then reopen the Editor.
+Strict Check/Play still rejects a bundle that differs from the selected native definitions.
+Intentionally historical or degraded data-only fixtures need not be upgraded to claim capabilities they do not have.

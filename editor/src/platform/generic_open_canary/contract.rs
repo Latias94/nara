@@ -8,6 +8,7 @@ use nara::tooling::{
     EditorProjectSourceOpenCapability, EditorRuntimeAvailability, EditorRuntimeUnavailableReason,
 };
 
+use crate::frontend::EguiEditorFrontend;
 use crate::{EditorApplication, EditorApplicationState};
 
 use super::super::{EditorRunError, NativeEditorCanaryAdvance};
@@ -38,9 +39,10 @@ pub(super) fn require_current_frame(
 
 pub(super) fn require_project_browser_sidebar_presentation(
     application: &EditorApplication,
+    frontend: &EguiEditorFrontend,
     stage: &EditorGenericOpenCanaryStage,
 ) -> Result<(), EditorRunError> {
-    if application.project_browser_sidebar_selected() {
+    if frontend.project_browser_sidebar_selected() {
         return Ok(());
     }
     Err(canary_state_error(

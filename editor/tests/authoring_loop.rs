@@ -44,7 +44,7 @@ use nara::{
         EditorWorkspaceIntentAction, EditorWorkspaceIntentResult, SceneInspectorCommand,
     },
 };
-use nara_editor::{EditorApplication, EditorLaunchOptions};
+use nara_editor::{EditorApplication, EditorLaunchOptions, EguiEditorFrontend};
 use serde_json::Value;
 
 const PROJECT_SLUG: &str = "editor-authoring-loop";
@@ -574,6 +574,14 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     assert_eq!(scene_member.digest(), saved_scene_digest);
     let manifest_digest = checked.manifest_digest();
     let content_digest = checked.content_digest();
+    let closure_plan_digest = checked.closure_plan_digest();
+    let schema_fingerprint = checked.schema_fingerprint().to_string();
+    let authoring_bundle_digest = checked
+        .members()
+        .iter()
+        .find(|member| member.kind() == StartupContentMemberKind::AuthoringSchemaBundle)
+        .expect("the checked closure contains its exact schema bundle")
+        .digest();
     drop(checked);
 
     let product_observation = run_generated_headless(&root, &project);
@@ -584,6 +592,29 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         manifest_digest,
         content_digest,
     );
+    assert_eq!(
+        product_observation
+            .get("schema_fingerprint")
+            .and_then(Value::as_str),
+        Some(schema_fingerprint.as_str())
+    );
+    for (prefix, digest) in [
+        ("closure_plan", closure_plan_digest),
+        ("authoring_bundle", authoring_bundle_digest),
+    ] {
+        assert_eq!(
+            product_observation
+                .get(format!("{prefix}_length"))
+                .and_then(Value::as_u64),
+            Some(digest.length())
+        );
+        assert_eq!(
+            product_observation
+                .get(format!("{prefix}_blake3"))
+                .and_then(Value::as_str),
+            Some(digest_hex(digest).as_str())
+        );
+    }
 
     let export_observation = run_export(&root, &project);
     assert_digest_value(
@@ -652,12 +683,13 @@ fn create_project(root: &TrajectoryRoot) -> PathBuf {
 }
 
 fn editor_harness(application: EditorApplication) -> Harness<'static, EditorApplication> {
+    let mut frontend = EguiEditorFrontend::new();
     Harness::builder()
         .with_size(egui::vec2(1280.0, 800.0))
         .build_ui_state(
-            |ui, application| {
-                if let Some(batch) = application.show(ui) {
-                    application.submit_and_drive(batch, Duration::ZERO);
+            move |ui, application| {
+                if let Some(batch) = frontend.show(ui, application) {
+                    frontend.submit_and_drive(application, batch, Duration::ZERO);
                 }
             },
             application,
@@ -955,7 +987,7 @@ fn assert_product_observation(
 ) {
     let manifest_hash = digest_hex(manifest_digest);
     let content_hash = digest_hex(content_digest);
-    assert_eq!(value.get("version").and_then(Value::as_u64), Some(1));
+    assert_eq!(value.get("version").and_then(Value::as_u64), Some(2));
     assert_eq!(value.get("target").and_then(Value::as_str), Some(target));
     assert_eq!(value.get("profile").and_then(Value::as_str), Some(profile));
     assert_eq!(

@@ -6,7 +6,6 @@ use nara::{
         EditorProjectSession,
     },
     tooling::{EditorAuthoringReadiness, EditorFrameModel},
-    tooling_egui::{EguiEditorPanel, EguiProjectOpenDraft},
 };
 
 use crate::supervised_play::{SupervisedDesktopPlayOwner, SupervisedPlayWake};
@@ -22,7 +21,7 @@ pub enum EditorApplicationState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct EditorProjectRequest {
+pub(crate) struct EditorProjectRequest {
     project_root: PathBuf,
     profile: Option<String>,
 }
@@ -35,26 +34,12 @@ impl EditorProjectRequest {
         }
     }
 
-    pub(super) fn from_draft(draft: &EguiProjectOpenDraft) -> Self {
-        Self::new(
-            PathBuf::from(draft.project_path().trim()),
-            Some(draft.profile().to_owned()),
-        )
-    }
-
-    pub(super) fn project_root(&self) -> &std::path::Path {
+    pub(crate) fn project_root(&self) -> &std::path::Path {
         &self.project_root
     }
 
-    pub(super) fn owned_profile(&self) -> Option<String> {
+    pub(crate) fn owned_profile(&self) -> Option<String> {
         self.profile.clone()
-    }
-
-    pub(super) fn draft(&self) -> EguiProjectOpenDraft {
-        EguiProjectOpenDraft::new(
-            self.project_root.to_string_lossy(),
-            self.profile.as_deref().unwrap_or_default(),
-        )
     }
 }
 
@@ -66,22 +51,23 @@ fn normalize_profile(profile: Option<String>) -> Option<String> {
 }
 
 pub(super) struct PublishedEditorProject {
+    pub(super) generation: u64,
     pub(super) request: EditorProjectRequest,
     pub(super) session: Box<EditorProjectSession>,
-    pub(super) panel: EguiEditorPanel,
     pub(super) supervised_play: Box<SupervisedDesktopPlayOwner>,
 }
 
 impl PublishedEditorProject {
     pub(super) fn new(
+        generation: u64,
         request: EditorProjectRequest,
         session: EditorProjectSession,
         supervised_play_wake: SupervisedPlayWake,
     ) -> Self {
         Self {
+            generation,
             request,
             session: Box::new(session),
-            panel: EguiEditorPanel::new(),
             supervised_play: Box::new(SupervisedDesktopPlayOwner::with_wake(supervised_play_wake)),
         }
     }
@@ -100,19 +86,19 @@ impl std::fmt::Debug for PublishedEditorProject {
 #[derive(Debug)]
 pub(super) struct ProjectManagerState {
     pub(super) entry_generation: u64,
-    pub(super) draft: EguiProjectOpenDraft,
+    pub(super) suggested_request: EditorProjectRequest,
 }
 
 impl ProjectManagerState {
-    pub(super) fn new(entry_generation: u64, draft: EguiProjectOpenDraft) -> Self {
+    pub(super) fn new(entry_generation: u64, suggested_request: EditorProjectRequest) -> Self {
         Self {
             entry_generation,
-            draft,
+            suggested_request,
         }
     }
 
     pub(super) fn placeholder() -> Self {
-        Self::new(0, EguiProjectOpenDraft::default())
+        Self::new(0, EditorProjectRequest::new(PathBuf::new(), None))
     }
 }
 
@@ -210,12 +196,10 @@ impl OpeningReplacementState {
         }
     }
 
-    pub(super) fn draft(&self) -> EguiProjectOpenDraft {
+    pub(super) fn request(&self) -> &EditorProjectRequest {
         match self {
-            Self::Preparing { opening, .. } | Self::Refreshing { opening, .. } => {
-                opening.request.draft()
-            }
-            Self::Closing { candidate, .. } => candidate.request.draft(),
+            Self::Preparing { opening, .. } | Self::Refreshing { opening, .. } => &opening.request,
+            Self::Closing { candidate, .. } => &candidate.request,
         }
     }
 
@@ -254,13 +238,13 @@ impl std::fmt::Debug for OpeningReplacementState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct RecoveryDiagnostic {
-    pub(super) code: String,
-    pub(super) phase: String,
-    pub(super) relative_source: Option<String>,
-    pub(super) summary: String,
-    pub(super) impact: String,
-    pub(super) repair_hint: String,
+pub(crate) struct RecoveryDiagnostic {
+    pub(crate) code: String,
+    pub(crate) phase: String,
+    pub(crate) relative_source: Option<String>,
+    pub(crate) summary: String,
+    pub(crate) impact: String,
+    pub(crate) repair_hint: String,
 }
 
 #[derive(Debug)]
@@ -426,6 +410,40 @@ pub(crate) enum EditorApplicationSurface {
         ui_authoring: Option<Arc<nara::project_host::EditorUiAuthoringFrame>>,
         read_only: bool,
     },
+}
+
+/// Read-only project lifecycle facts; editable form buffers belong to a frontend.
+pub(crate) enum EditorProjectShellModel<'a> {
+    ProjectManager {
+        entry_generation: u64,
+        suggested_request: &'a EditorProjectRequest,
+    },
+    Opening {
+        entry_generation: u64,
+        attempt_generation: u64,
+        request: &'a EditorProjectRequest,
+        phase: &'static str,
+        summary: &'static str,
+        replacement: bool,
+    },
+    Recovery {
+        entry_generation: u64,
+        attempt_generation: u64,
+        request: &'a EditorProjectRequest,
+        diagnostics: &'a [RecoveryDiagnostic],
+    },
+}
+
+pub(crate) enum EditorProjectShellAction {
+    OpenProject {
+        project_root: PathBuf,
+        profile: Option<String>,
+    },
+    Retry,
+    Cancel,
+    CloseProject,
+    ReturnToProjectManager,
+    Exit,
 }
 
 pub(super) fn open_phase_label(phase: EditorProjectOpenPhase) -> &'static str {

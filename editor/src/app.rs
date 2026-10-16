@@ -22,17 +22,10 @@ use nara::{
     render::Extent2d,
     scene::UnavailableRecordManifest,
     tooling::{
-        EditorAction, EditorActionBatch, EditorFrameModel, EditorPersistenceResult,
-        EditorPlayAction, EditorProjectBrowserLocalAction, EditorWorkspaceIntent,
-        EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
-    },
-    tooling_egui::{
-        EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorOutput,
-        EguiEditorProjectAction, EguiEditorViewport, EguiEditorViewportIntent,
-        EguiProjectManagerInput, EguiProjectOpeningInput, EguiProjectRecoveryDiagnostic,
-        EguiProjectRecoveryInput, EguiProjectShellAction, EguiProjectShellInput,
-        EguiProjectShellPanel, EguiUiAuthoringImages, EguiUiAuthoringInput,
-        EguiUiAuthoringMutations,
+        EditorAction, EditorActionBatch, EditorActionBatchReport, EditorActionRejection,
+        EditorFrameModel, EditorPersistenceResult, EditorPlayAction,
+        EditorProjectBrowserLocalAction, EditorWorkspaceIntent, EditorWorkspaceIntentAction,
+        EditorWorkspaceIntentPhase, EditorWorkspaceIntentResult,
     },
 };
 use thiserror::Error;
@@ -49,35 +42,16 @@ use shell::{
     EditorProductState, EditorProjectRequest, OpeningProjectState, OpeningProjectStep,
     OpeningReplacementState, ProjectManagerState, PublishedEditorProject, RecoveryState,
 };
+pub(crate) use shell::{EditorProjectShellAction, EditorProjectShellModel};
 
-pub(crate) struct EditorWorkspaceRenderOutput {
-    editor: EguiEditorOutput,
-    project_browser_local_changed: bool,
-}
-
-impl EditorWorkspaceRenderOutput {
-    fn into_action_batch(self) -> EditorActionBatch {
-        self.editor.into_parts().0
-    }
-
-    pub(crate) fn into_parts(
-        self,
-    ) -> (
-        EditorActionBatch,
-        Option<EguiEditorProjectAction>,
-        EguiCentralViewportOutput,
-        Option<EguiEditorViewportIntent>,
-        bool,
-    ) {
-        let (actions, project_action, viewport, viewport_intent) = self.editor.into_parts();
-        (
-            actions,
-            project_action,
-            viewport,
-            viewport_intent,
-            self.project_browser_local_changed,
-        )
-    }
+/// A project lifecycle request, separate from document mutation and history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EditorProjectAction {
+    OpenProject {
+        project_root: PathBuf,
+        profile: Option<String>,
+    },
+    CloseProject,
 }
 
 /// Immutable launch configuration for one private Editor process.
@@ -164,6 +138,13 @@ pub struct EditorApplicationUpdate {
 }
 
 impl EditorApplicationUpdate {
+    pub(crate) const fn from_action(actions_observed: bool, exit_ready: bool) -> Self {
+        Self {
+            actions_observed,
+            exit_ready,
+        }
+    }
+
     #[must_use]
     pub const fn idle() -> Self {
         Self {
@@ -183,7 +164,7 @@ impl EditorApplicationUpdate {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct EditorApplicationDispatch {
     actions_observed: bool,
     invalidates_game_input: bool,
@@ -191,31 +172,40 @@ pub(crate) struct EditorApplicationDispatch {
     starts_cadence: bool,
     requests_step: bool,
     requires_runtime_drive: bool,
+    feedback: Option<Result<EditorActionBatchReport, EditorActionRejection>>,
 }
 
 impl EditorApplicationDispatch {
-    pub(crate) const fn actions_observed(self) -> bool {
+    pub(crate) const fn actions_observed(&self) -> bool {
         self.actions_observed
     }
 
-    pub(crate) const fn invalidates_game_input(self) -> bool {
+    pub(crate) const fn invalidates_game_input(&self) -> bool {
         self.invalidates_game_input
     }
 
-    pub(crate) const fn retires_cadence(self) -> bool {
+    pub(crate) const fn retires_cadence(&self) -> bool {
         self.retires_cadence
     }
 
-    pub(crate) const fn starts_cadence(self) -> bool {
+    pub(crate) const fn starts_cadence(&self) -> bool {
         self.starts_cadence
     }
 
-    pub(crate) const fn requests_step(self) -> bool {
+    pub(crate) const fn requests_step(&self) -> bool {
         self.requests_step
     }
 
-    pub(crate) const fn requires_runtime_drive(self) -> bool {
+    pub(crate) const fn requires_runtime_drive(&self) -> bool {
         self.requires_runtime_drive
+    }
+
+    pub(crate) fn feedback(
+        &self,
+    ) -> Option<Result<&EditorActionBatchReport, EditorActionRejection>> {
+        self.feedback
+            .as_ref()
+            .map(|feedback| feedback.as_ref().map_err(|rejection| *rejection))
     }
 }
 
@@ -229,7 +219,6 @@ enum EditorSessionRetirement {
 pub struct EditorApplication {
     state: EditorProductState,
     open_host: EditorProjectOpenHost,
-    shell_panel: EguiProjectShellPanel,
     initial_request: Option<EditorProjectRequest>,
     native_ready: bool,
     next_entry_generation: u64,
@@ -257,19 +246,15 @@ impl EditorApplication {
             .project_root
             .clone()
             .map(|root| EditorProjectRequest::new(root, options.profile.clone()));
-        let draft = initial_request
-            .as_ref()
-            .map(EditorProjectRequest::draft)
-            .unwrap_or_else(|| {
-                nara::tooling_egui::EguiProjectOpenDraft::new(
-                    "",
-                    options.profile.as_deref().unwrap_or_default(),
-                )
-            });
+        let suggested_request = initial_request
+            .clone()
+            .unwrap_or_else(|| EditorProjectRequest::new(PathBuf::new(), options.profile.clone()));
         Self {
-            state: EditorProductState::ProjectManager(ProjectManagerState::new(1, draft)),
+            state: EditorProductState::ProjectManager(ProjectManagerState::new(
+                1,
+                suggested_request,
+            )),
             open_host: EditorProjectOpenHost::new(),
-            shell_panel: EguiProjectShellPanel::new(),
             initial_request,
             native_ready: false,
             next_entry_generation: 2,
@@ -296,12 +281,12 @@ impl EditorApplication {
         let supervised_play_wake = SupervisedPlayWake::default();
         Ok(Self {
             state: EditorProductState::from_published(PublishedEditorProject::new(
+                1,
                 request,
                 session,
                 supervised_play_wake.clone(),
             )),
             open_host: EditorProjectOpenHost::new(),
-            shell_panel: EguiProjectShellPanel::new(),
             initial_request: None,
             native_ready: false,
             next_entry_generation: 2,
@@ -424,103 +409,60 @@ impl EditorApplication {
         }
     }
 
-    /// Renders Project Manager, Opening, or Recovery and applies one typed shell action.
-    pub(crate) fn show_project_shell(&mut self, root: &mut egui::Ui) -> EditorApplicationUpdate {
-        if matches!(
-            &self.state,
-            EditorProductState::AuthoringReady(_) | EditorProductState::AuthoringDegraded(_)
-        ) {
-            return EditorApplicationUpdate::idle();
-        }
-        let output = egui::Frame::central_panel(root.style())
-            .show(root, |ui| self.show_project_shell_contents(ui))
-            .inner;
-        let action_observed = output.action().is_some();
-        let (draft, action) = output.into_parts();
-        let exit_ready = self.apply_shell_action(draft, action);
-        EditorApplicationUpdate {
-            actions_observed: action_observed,
-            exit_ready,
-        }
-    }
-
-    fn show_project_shell_contents(
-        &mut self,
-        ui: &mut egui::Ui,
-    ) -> nara::tooling_egui::EguiProjectShellOutput {
+    /// Projects the current lifecycle without lending project or document authority.
+    pub(crate) fn project_shell_model(&self) -> Option<EditorProjectShellModel<'_>> {
         match &self.state {
-            EditorProductState::ProjectManager(manager) => self.shell_panel.show(
-                ui,
-                EguiProjectShellInput::ProjectManager(EguiProjectManagerInput::new(
-                    manager.entry_generation,
-                    &manager.draft,
-                )),
-            ),
-            EditorProductState::OpeningInitial(opening) => {
-                let draft = opening.request.draft();
-                self.shell_panel.show(
-                    ui,
-                    EguiProjectShellInput::OpeningInitial(EguiProjectOpeningInput::new(
-                        opening.entry_generation,
-                        &draft,
-                        opening.attempt_generation,
-                        opening.phase_label(),
-                        opening.summary(),
-                    )),
-                )
+            EditorProductState::ProjectManager(manager) => {
+                Some(EditorProjectShellModel::ProjectManager {
+                    entry_generation: manager.entry_generation,
+                    suggested_request: &manager.suggested_request,
+                })
             }
+            EditorProductState::OpeningInitial(opening) => Some(EditorProjectShellModel::Opening {
+                entry_generation: opening.entry_generation,
+                attempt_generation: opening.attempt_generation,
+                request: &opening.request,
+                phase: opening.phase_label(),
+                summary: opening.summary(),
+                replacement: false,
+            }),
             EditorProductState::OpeningReplacement(replacement) => {
-                let draft = replacement.draft();
-                let input = EguiProjectOpeningInput::new(
-                    replacement.entry_generation(),
-                    &draft,
-                    replacement.attempt_generation(),
-                    replacement.phase_label(),
-                    replacement.summary(),
-                );
-                self.shell_panel
-                    .show(ui, EguiProjectShellInput::OpeningReplacement(input))
+                Some(EditorProjectShellModel::Opening {
+                    entry_generation: replacement.entry_generation(),
+                    attempt_generation: replacement.attempt_generation(),
+                    request: replacement.request(),
+                    phase: replacement.phase_label(),
+                    summary: replacement.summary(),
+                    replacement: true,
+                })
             }
-            EditorProductState::Recovery(recovery) => {
-                let draft = recovery.request.draft();
-                let diagnostics = recovery
-                    .diagnostics
-                    .iter()
-                    .map(|diagnostic| {
-                        EguiProjectRecoveryDiagnostic::new(
-                            &diagnostic.code,
-                            &diagnostic.phase,
-                            diagnostic.relative_source.as_deref(),
-                            &diagnostic.summary,
-                            &diagnostic.impact,
-                            &diagnostic.repair_hint,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                self.shell_panel.show(
-                    ui,
-                    EguiProjectShellInput::Recovery(EguiProjectRecoveryInput::new(
-                        recovery.entry_generation,
-                        &draft,
-                        recovery.attempt_generation,
-                        &diagnostics,
-                    )),
-                )
-            }
+            EditorProductState::Recovery(recovery) => Some(EditorProjectShellModel::Recovery {
+                entry_generation: recovery.entry_generation,
+                attempt_generation: recovery.attempt_generation,
+                request: &recovery.request,
+                diagnostics: &recovery.diagnostics,
+            }),
             EditorProductState::AuthoringReady(_) | EditorProductState::AuthoringDegraded(_) => {
-                unreachable!("a published workspace is rendered through the workspace Adapter")
+                None
             }
         }
     }
 
-    fn apply_shell_action(
+    pub(crate) fn submit_shell_action(
         &mut self,
-        draft: nara::tooling_egui::EguiProjectOpenDraft,
-        action: Option<EguiProjectShellAction>,
-    ) -> bool {
+        action: EditorProjectShellAction,
+    ) -> EditorApplicationUpdate {
+        let exit_ready = self.apply_shell_action(action);
+        EditorApplicationUpdate::from_action(true, exit_ready)
+    }
+
+    fn apply_shell_action(&mut self, action: EditorProjectShellAction) -> bool {
         match action {
-            Some(EguiProjectShellAction::OpenProject) => {
-                let request = EditorProjectRequest::from_draft(&draft);
+            EditorProjectShellAction::OpenProject {
+                project_root,
+                profile,
+            } => {
+                let request = EditorProjectRequest::new(project_root, profile);
                 let state = self.take_state();
                 match state {
                     EditorProductState::ProjectManager(_) | EditorProductState::Recovery(_)
@@ -544,18 +486,18 @@ impl EditorApplication {
                 }
                 false
             }
-            Some(EguiProjectShellAction::Retry) => {
+            EditorProjectShellAction::Retry => {
                 let _ = self.retry_project_open();
                 false
             }
-            Some(EguiProjectShellAction::Cancel) => {
+            EditorProjectShellAction::Cancel => {
                 let state = self.take_state();
                 match state {
                     EditorProductState::OpeningInitial(opening) => {
                         let entry_generation = self.allocate_entry_generation();
                         self.state = EditorProductState::ProjectManager(ProjectManagerState::new(
                             entry_generation,
-                            opening.request.draft(),
+                            opening.request,
                         ));
                     }
                     EditorProductState::OpeningReplacement(replacement) => {
@@ -565,46 +507,35 @@ impl EditorApplication {
                 }
                 false
             }
-            Some(EguiProjectShellAction::CloseProject) => {
+            EditorProjectShellAction::CloseProject => {
                 let state = self.take_state();
                 match state {
                     EditorProductState::Recovery(_) => {
                         let entry_generation = self.allocate_entry_generation();
                         self.state = EditorProductState::ProjectManager(ProjectManagerState::new(
                             entry_generation,
-                            nara::tooling_egui::EguiProjectOpenDraft::default(),
+                            EditorProjectRequest::new(PathBuf::new(), None),
                         ));
                     }
                     other => self.state = other,
                 }
                 false
             }
-            Some(EguiProjectShellAction::ReturnToProjectManager) => {
+            EditorProjectShellAction::ReturnToProjectManager => {
                 let state = self.take_state();
                 match state {
                     EditorProductState::Recovery(recovery) => {
                         let entry_generation = self.allocate_entry_generation();
                         self.state = EditorProductState::ProjectManager(ProjectManagerState::new(
                             entry_generation,
-                            recovery.request.draft(),
+                            recovery.request,
                         ));
                     }
                     other => self.state = other,
                 }
                 false
             }
-            Some(EguiProjectShellAction::Exit) => true,
-            None => {
-                match &mut self.state {
-                    EditorProductState::ProjectManager(manager) => manager.draft = draft,
-                    EditorProductState::OpeningInitial(_)
-                    | EditorProductState::OpeningReplacement(_)
-                    | EditorProductState::AuthoringReady(_)
-                    | EditorProductState::AuthoringDegraded(_)
-                    | EditorProductState::Recovery(_) => {}
-                }
-                false
-            }
+            EditorProjectShellAction::Exit => true,
         }
     }
 
@@ -650,22 +581,25 @@ impl EditorApplication {
         }
     }
 
-    /// Applies one egui product action without mixing it into the workspace action batch.
+    /// Applies one project lifecycle action without mixing it into the workspace action batch.
     #[doc(hidden)]
     pub fn submit_project_action(
         &mut self,
-        action: EguiEditorProjectAction,
+        action: EditorProjectAction,
     ) -> EditorApplicationUpdate {
         match action {
-            EguiEditorProjectAction::OpenProject(draft) => {
-                let requested =
-                    self.start_project_replacement(EditorProjectRequest::from_draft(&draft));
+            EditorProjectAction::OpenProject {
+                project_root,
+                profile,
+            } => {
+                let requested = self
+                    .start_project_replacement(EditorProjectRequest::new(project_root, profile));
                 EditorApplicationUpdate {
                     actions_observed: requested,
                     exit_ready: false,
                 }
             }
-            EguiEditorProjectAction::CloseProject => self.request_close_project(),
+            EditorProjectAction::CloseProject => self.request_close_project(),
         }
     }
 
@@ -732,17 +666,8 @@ impl EditorApplication {
     }
 
     #[must_use]
-    pub(crate) fn select_project_browser_sidebar(&mut self) -> bool {
-        self.state
-            .workspace_mut()
-            .is_some_and(|project| project.panel.select_project_browser_sidebar())
-    }
-
-    #[must_use]
-    pub(crate) fn project_browser_sidebar_selected(&self) -> bool {
-        self.state
-            .workspace()
-            .is_some_and(|project| project.panel.project_browser_sidebar_selected())
+    pub(crate) fn workspace_generation(&self) -> Option<u64> {
+        self.state.published().map(|project| project.generation)
     }
 
     #[must_use]
@@ -768,169 +693,6 @@ impl EditorApplication {
                 .cloned()
         })
     }
-
-    #[must_use]
-    pub fn show(&mut self, root: &mut egui::Ui) -> Option<EditorActionBatch> {
-        self.show_with_viewport(
-            root,
-            EguiCentralViewportInput::unavailable(),
-            EguiEditorViewport::Authoring,
-        )
-        .map(EditorWorkspaceRenderOutput::into_action_batch)
-    }
-
-    #[must_use]
-    pub(crate) fn show_with_viewport(
-        &mut self,
-        root: &mut egui::Ui,
-        viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
-    ) -> Option<EditorWorkspaceRenderOutput> {
-        let replacement_opening = match &self.state {
-            EditorProductState::OpeningReplacement(replacement) => Some((
-                replacement.entry_generation(),
-                replacement.attempt_generation(),
-                replacement.draft(),
-                replacement.phase_label(),
-                replacement.summary(),
-            )),
-            _ => None,
-        };
-        let read_only = self.ordinary_input_locked();
-        let project = match &mut self.state {
-            EditorProductState::AuthoringReady(project)
-            | EditorProductState::AuthoringDegraded(project)
-            | EditorProductState::OpeningReplacement(OpeningReplacementState::Preparing {
-                retained: project,
-                ..
-            })
-            | EditorProductState::OpeningReplacement(OpeningReplacementState::Refreshing {
-                retained: project,
-                ..
-            })
-            | EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
-                retained: project,
-                ..
-            }) => project,
-            EditorProductState::ProjectManager(_)
-            | EditorProductState::OpeningInitial(_)
-            | EditorProductState::Recovery(_) => return None,
-        };
-        let frame = project.session.current_frame();
-        let ui_authoring = project.session.current_ui_authoring_frame();
-        let mut editor_output = egui::Frame::central_panel(root.style())
-            .show(root, |ui| {
-                let field_editing_enabled = |key: &nara::ui::__private::UiAuthoringFieldKey| {
-                    ui_authoring
-                        .as_ref()
-                        .is_some_and(|authoring| authoring.field_editing_enabled(key))
-                };
-                let mut lower_continuous_field =
-                    |key: &nara::ui::__private::UiAuthoringFieldKey,
-                     value: nara::ui::__private::UiAuthoringFieldValue| {
-                        ui_authoring
-                            .as_ref()
-                            .ok_or_else(|| "UI authoring is unavailable".to_owned())?
-                            .lower_field_edit(key, value)
-                            .map_err(|error| error.to_string())
-                    };
-                let mut lower_discrete_field =
-                    |key: &nara::ui::__private::UiAuthoringFieldKey,
-                     value: nara::ui::__private::UiAuthoringFieldValue| {
-                        ui_authoring
-                            .as_ref()
-                            .ok_or_else(|| "UI authoring is unavailable".to_owned())?
-                            .lower_discrete_field_edit(key, value)
-                            .map_err(|error| error.to_string())
-                    };
-                let mut lower_direct = |edit: &nara::ui::__private::UiAuthoringDirectEdit| {
-                    ui_authoring
-                        .as_ref()
-                        .ok_or_else(|| "UI authoring is unavailable".to_owned())?
-                        .lower_direct_edit(edit)
-                        .map_err(|error| error.to_string())
-                };
-                let mut lower_structure = |intent: &nara::ui::__private::UiStructureIntent| {
-                    ui_authoring
-                        .as_ref()
-                        .ok_or_else(|| "UI authoring is unavailable".to_owned())?
-                        .lower_structure_intent(intent)
-                        .map_err(|error| error.to_string())
-                };
-                let authoring = ui_authoring.as_ref().and_then(|authoring| {
-                    (authoring.editor_frame() == frame.revision()).then(|| {
-                        EguiUiAuthoringInput::new(
-                            authoring.document(),
-                            authoring.revision(),
-                            authoring.selection(),
-                            authoring.gesture(),
-                            authoring.projection(),
-                            EguiUiAuthoringImages::new(
-                                authoring.image_choice_generation(),
-                                authoring.image_choices(),
-                            ),
-                            EguiUiAuthoringMutations::new(
-                                &field_editing_enabled,
-                                authoring.direct_editing_enabled(),
-                                authoring.structure_editing_enabled(),
-                                &mut lower_continuous_field,
-                                &mut lower_discrete_field,
-                                &mut lower_direct,
-                                &mut lower_structure,
-                            ),
-                        )
-                    })
-                });
-                project.panel.show_with_authoring_lock(
-                    ui,
-                    &frame,
-                    authoring,
-                    viewport,
-                    selected_viewport,
-                    read_only,
-                )
-            })
-            .inner;
-        let project_browser_local_changed = editor_output
-            .take_project_browser_local_actions()
-            .into_iter()
-            .fold(false, |changed, action| {
-                project.session.apply_project_browser_local_action(action) || changed
-            });
-
-        if let Some((entry_generation, attempt_generation, draft, phase, summary)) =
-            replacement_opening
-        {
-            let mut shell_output = None;
-            egui::Window::new("Project transition")
-                .id(egui::Id::new("nara_editor_replacement_progress"))
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .collapsible(false)
-                .resizable(false)
-                .show(root.ctx(), |ui| {
-                    shell_output = Some(self.shell_panel.show(
-                        ui,
-                        EguiProjectShellInput::OpeningReplacement(EguiProjectOpeningInput::new(
-                            entry_generation,
-                            &draft,
-                            attempt_generation,
-                            phase,
-                            summary,
-                        )),
-                    ));
-                });
-            if let Some(shell_output) = shell_output {
-                let (draft, action) = shell_output.into_parts();
-                let _ = self.apply_shell_action(draft, action);
-            }
-        }
-
-        Some(EditorWorkspaceRenderOutput {
-            editor: editor_output,
-            project_browser_local_changed,
-        })
-    }
-
     pub fn submit_and_drive(
         &mut self,
         batch: EditorActionBatch,
@@ -1373,11 +1135,11 @@ impl EditorApplication {
                 match state {
                     EditorProductState::AuthoringReady(project)
                     | EditorProductState::AuthoringDegraded(project) => {
-                        let draft = project.request.draft();
+                        let request = project.request;
                         let entry_generation = self.allocate_entry_generation();
                         self.state = EditorProductState::ProjectManager(ProjectManagerState::new(
                             entry_generation,
-                            draft,
+                            request,
                         ));
                     }
                     other => self.state = other,
@@ -1459,7 +1221,7 @@ impl EditorApplication {
                 let entry_generation = self.allocate_entry_generation();
                 self.state = EditorProductState::ProjectManager(ProjectManagerState::new(
                     entry_generation,
-                    opening.request.draft(),
+                    opening.request,
                 ));
                 EditorApplicationUpdate {
                     actions_observed: true,
@@ -1807,6 +1569,7 @@ impl EditorApplication {
                     }
                     EditorProjectOpenProgress::Opened(session) => {
                         OpenStepResult::Opened(PublishedEditorProject::new(
+                            opening.entry_generation,
                             opening.request.clone(),
                             session,
                             self.supervised_play_wake.clone(),
@@ -1923,11 +1686,13 @@ fn dispatch_project_actions(
     dispatch.actions_observed = match project.session.dispatch_editor_actions(batch) {
         Ok(report) => {
             let observed = !report.outcomes().is_empty();
-            project.panel.observe_action_report(&report);
+            if observed {
+                dispatch.feedback = Some(Ok(report));
+            }
             observed
         }
         Err(rejection) => {
-            project.panel.observe_action_rejection(rejection);
+            dispatch.feedback = Some(Err(rejection));
             true
         }
     };
@@ -2194,6 +1959,120 @@ mod tests {
 
         #[cfg(not(any(windows, target_os = "linux")))]
         assert_eq!(portable_project_root_trust(), TrustMode::TrustedLocal);
+    }
+
+    #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]
+    #[test]
+    fn consecutive_batches_preserve_each_originating_feedback_before_redraw() {
+        use nara::{
+            scene::{
+                SceneEntityId, SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+                ScenePlacement, ScenePlacementOwner,
+            },
+            tooling::{
+                EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
+                EditorWorkspaceIntent, EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase,
+            },
+        };
+
+        let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../reference-game");
+        let mut application = super::EditorApplication::new(
+            super::EditorLaunchOptions::new(project).with_profile("desktop"),
+        );
+        let _ = application.native_shell_ready();
+        for _ in 0..64 {
+            if application.current_frame().is_some() {
+                break;
+            }
+            let _ = application.advance_project_open();
+        }
+        let mut frontend = crate::EguiEditorFrontend::new();
+        let context = egui::Context::default();
+        let mut rendered_revision = None;
+        let output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                rendered_revision = frontend
+                    .show(ui, &mut application)
+                    .map(|batch| batch.frame_revision());
+            },
+        );
+        output.drop_without_applying_deltas();
+        let first_revision = rendered_revision.expect("the authoring workspace was rendered");
+        let frame = application.current_frame().unwrap();
+        let scene = frame.workspace().active_scene.as_ref().unwrap();
+        let first = application.dispatch_editor_actions(EditorActionBatch::new(
+            first_revision,
+            [EditorAction::Mutate(
+                EditorDocumentMutation::ApplyScenePatch {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                    patch: ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+                        entity: SceneEntityRecord::new(
+                            SceneEntityId::new("feedback-before-close").unwrap(),
+                        ),
+                        placement: ScenePlacement::last(ScenePlacementOwner::Root),
+                    }]),
+                },
+            )],
+        ));
+        let _ = application.drive_editor_frame(
+            std::time::Duration::ZERO,
+            first.actions_observed(),
+            true,
+        );
+        let second_revision = application.current_frame().unwrap().revision();
+        let second = application.dispatch_editor_actions(EditorActionBatch::new(
+            second_revision,
+            [EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::Request(EditorWorkspaceIntent::Exit),
+            )],
+        ));
+
+        // A native close request can arrive after a widget batch and before the next redraw. The
+        // first widget must still receive its own result, including a precise structural rejection.
+        let first_feedback_revision = first
+            .feedback()
+            .map(|feedback| feedback.map(|report| report.frame_revision()));
+        let second_feedback_revision = second
+            .feedback()
+            .map(|feedback| feedback.map(|report| report.frame_revision()));
+        frontend.observe_dispatch(&first);
+        frontend.observe_dispatch(&second);
+
+        // Complete physical session retirement before asserting so a regression failure cannot
+        // make the native session's unwind guard obscure the originating-feedback assertion.
+        let _ = application.request_exit();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while application.current_frame().is_some() && std::time::Instant::now() < deadline {
+            let frame = application.current_frame().unwrap();
+            let actions = (frame.workspace_intent().phase()
+                == Some(EditorWorkspaceIntentPhase::AwaitingDecision))
+            .then_some(EditorAction::WorkspaceIntent(
+                EditorWorkspaceIntentAction::Resolve(EditorCloseDecision::Discard),
+            ));
+            let update = application.submit_and_drive(
+                EditorActionBatch::new(frame.revision(), actions),
+                std::time::Duration::ZERO,
+            );
+            if update.exit_ready() {
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        assert!(first.actions_observed());
+        assert!(second.actions_observed());
+        assert_ne!(first_revision, second_revision);
+        assert_eq!(first_feedback_revision, Some(Ok(first_revision)));
+        assert_eq!(second_feedback_revision, Some(Ok(second_revision)));
+        assert!(application.current_frame().is_none());
     }
 
     #[cfg(any(windows, all(target_os = "linux", target_arch = "x86_64")))]

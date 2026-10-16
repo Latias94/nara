@@ -35,6 +35,7 @@ use winit::{
 };
 
 use crate::app::{EditorApplicationDispatch, EditorApplicationSurface};
+use crate::frontend::EguiEditorFrontend;
 use crate::supervised_play::SupervisedPlayWake;
 use crate::{
     EditorApplication, EditorApplicationOpenError, EditorApplicationUpdate, EditorLaunchOptions,
@@ -296,6 +297,7 @@ fn event_loop_error(error: EventLoopError) -> EditorRunError {
 
 struct NativeEditorHost {
     application: EditorApplication,
+    frontend: EguiEditorFrontend,
     supervised_play_wake: SupervisedPlayWake,
     context: egui::Context,
     window: Option<Arc<Window>>,
@@ -528,6 +530,7 @@ impl NativeEditorHost {
             matches!(canary.as_ref(), Some(NativeEditorCanary::ImageImport(_)));
         Ok(Self {
             application,
+            frontend: EguiEditorFrontend::new(),
             supervised_play_wake,
             context: egui::Context::default(),
             window: None,
@@ -1179,7 +1182,7 @@ impl NativeEditorHost {
         let rendered_state = self.application.state();
         let mut shell_update = EditorApplicationUpdate::idle();
         let output = self.context.run_ui(raw_input, |ui| {
-            shell_update = self.application.show_project_shell(ui);
+            shell_update = self.frontend.show_project_shell(ui, &mut self.application);
         });
         if shell_update.exit_ready() {
             event_loop.exit();
@@ -1589,8 +1592,9 @@ impl NativeEditorHost {
         }
         let mut panel_output = None;
         let output = self.context.run_ui(raw_input, |ui| {
-            panel_output = self.application.show_with_viewport(
+            panel_output = self.frontend.show_with_viewport(
                 ui,
+                &mut self.application,
                 EguiCentralViewportInput::new(scene_view_input, game_view_input)
                     .with_ui_canvas(ui_canvas_input),
                 selected_viewport,
@@ -1966,6 +1970,7 @@ impl NativeEditorHost {
                     let advance = canary.advance_workspace(
                         rendered_state,
                         &mut self.application,
+                        &mut self.frontend,
                         window.id(),
                     )?;
                     native_canary_advanced = advance.redraw;
@@ -2170,6 +2175,7 @@ impl NativeEditorHost {
         let play_state_before = editor_frame.play().state();
         let image_import_was_pending = editor_frame.image_import_work_pending();
         let dispatch = self.application.dispatch_editor_actions(batch);
+        self.frontend.observe_dispatch(&dispatch);
         if dispatch.invalidates_game_input() {
             self.game_input.invalidate_after_control(matches!(
                 play_state_before,
@@ -2185,7 +2191,7 @@ impl NativeEditorHost {
             || play_lifecycle_requires_runtime_drive(play_state_before);
         let delta = self
             .play_cadence
-            .real_delta(now, play_state_before, dispatch, drive_runtime);
+            .real_delta(now, play_state_before, &dispatch, drive_runtime);
         let update = self.application.drive_editor_frame(
             delta,
             dispatch.actions_observed() || open_update.actions_observed(),
@@ -2338,7 +2344,7 @@ impl NativeEditorHost {
         let dispatch = EditorApplicationDispatch::default();
         let delta = self
             .play_cadence
-            .real_delta(now, state, dispatch, drive_runtime);
+            .real_delta(now, state, &dispatch, drive_runtime);
         let update = self
             .application
             .drive_editor_frame(delta, false, drive_runtime);
@@ -2568,7 +2574,7 @@ impl EditorPlayCadence {
         &mut self,
         now: Instant,
         play_state: EditorPlayState,
-        dispatch: EditorApplicationDispatch,
+        dispatch: &EditorApplicationDispatch,
         drive_runtime: bool,
     ) -> Duration {
         if !drive_runtime {
@@ -2989,7 +2995,7 @@ mod tests {
             cadence.real_delta(
                 start + Duration::from_millis(16),
                 EditorPlayState::Running,
-                EditorApplicationDispatch::default(),
+                &EditorApplicationDispatch::default(),
                 true,
             ),
             Duration::from_millis(16)
@@ -3004,7 +3010,7 @@ mod tests {
             cadence.real_delta(
                 start + Duration::from_secs(30),
                 EditorPlayState::Running,
-                EditorApplicationDispatch::default(),
+                &EditorApplicationDispatch::default(),
                 true,
             ),
             Duration::ZERO
