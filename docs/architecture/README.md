@@ -14,12 +14,15 @@ an index, not another source of architecture decisions.
    and [acceptance evidence `b09676d3fa354aa899a795a5dfe9d2ba`](../knowledge/engineering/verification/2026-10/2026-10-15T202228Z-foundation-u1-u13-acceptance-closes-with-actual-consumers-and-completed-full-review-b09676d3fa354aa899a795a5dfe9d2ba.md).
    [ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) owns its focused contract
    refinements. All authorized implementation changes are committed locally through `ca3d803`; the separate
-   research archive is `652b2eb`. The explicitly activated successor is the
+   research archive is `652b2eb`. Its completed successor is the
    [First 2D Author Workflow](../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md),
-   registered by [record `6e9712ae19f4430ab3b197971361fb96`](../knowledge/engineering/registry/2026-10/2026-10-16T013451Z-nara-first-2d-author-workflow-codex-root-6e9712ae19f4430ab3b197971361fb96.md).
-   Its U1-U6 scope is independent creation, explicit schema refresh, a small public-API game,
-   ordinary editing/Play and development export. The full foundation review
-   scope and remaining native platform limitations are recorded in the implementation ledger.
+   closed by [registration `fe7312236c5d4906b8e950d366111171`](../knowledge/engineering/registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md)
+   and [acceptance `7a2024c6678b43a48a069406d6eb729d`](../knowledge/engineering/verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md).
+   U1-U6 proves independent creation, explicit schema refresh, a public-API game,
+   ordinary editing/Play and development export from committed source `78faa7c` on Windows.
+   It closes the prior excluded-source review scope and records actual iteration times.
+   No successor is active automatically. Remaining native platform limitations are
+   recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
    Its last predecessor boundary remains registered by

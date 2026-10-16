@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "bf50f47cee920d8d9fa5e5fb414c0044daefcabaa25ac1de0848132d2f3bfda3"
+source_fingerprint: "39eaa0e1e65c4ff6d6267cd11eefc3f1c370fbdd05afbb46319111d77f189ad9"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "bf50f47cee920d8d9fa5e5fb414c0044daefcabaa25ac1de0848132d2f3
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `bf50f47cee920d8d9fa5e5fb414c0044daefcabaa25ac1de0848132d2f3bfda3`
-- Immutable records: 620
-- Active lane heads: 1
+- Source fingerprint: `39eaa0e1e65c4ff6d6267cd11eefc3f1c370fbdd05afbb46319111d77f189ad9`
+- Immutable records: 625
+- Active lane heads: 0
 
 # Active Registrations
 
@@ -30,7 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
-- [First 2D author workflow](registry/2026-10/2026-10-16T013451Z-nara-first-2d-author-workflow-codex-root-6e9712ae19f4430ab3b197971361fb96.md): `active` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
+- [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T022923Z-reference-game-foundation-rgf-u18-codex-root-ff9c13e50df34a868c59c4ebd5435375.md): `completed` (reference-game-foundation-rgf-u18-codex-root; producer `codex-root`)
@@ -42,6 +42,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [First author workflow implementation and committed acceptance complete](progress/2026-10/2026-10-16T025216Z-first-author-workflow-implementation-and-committed-acceptance-complete-938d0131afec43d8b04a1210700ba21a.md) - Work Progress for First author workflow implementation and committed acceptance complete.
+- **Verification Evidence**: [First author workflow U1-U6 closes with clean committed external products and measured iteration](verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md) - Verification Evidence for First author workflow U1-U6 closes with clean committed external products and measured iteration.
+- **Subagent Finding**: [First author workflow review has no remaining product defects and one evidence gate](subagents/2026-10/2026-10-16T024040Z-first-author-workflow-review-has-no-remaining-product-defects-and-one-evidence-gate-680bdf8c0e7a4532a30d512fcd0e251e.md) - Subagent Finding for First author workflow review has no remaining product defects and one evidence gate.
+- **Verification Evidence**: [First author workflow closes the prior excluded source review scope](verification/2026-10/2026-10-16T023314Z-first-author-workflow-closes-the-prior-excluded-source-review-scope-136220880e154191a83573e2687f217f.md) - Verification Evidence for First author workflow closes the prior excluded source review scope.
 - **Work Progress**: [Foundation code and research commits are complete locally](progress/2026-10/2026-10-16T011248Z-foundation-code-and-research-commits-are-complete-locally-e217cdc7cfa342ab9e1c6058afa05a28.md) - Work Progress for Foundation code and research commits are complete locally.
 - **Verification Evidence**: [Foundation implementation is fully committed after final workspace check](verification/2026-10/2026-10-16T011247Z-foundation-implementation-is-fully-committed-after-final-workspace-check-a95bf9b605bb4510b9865799c2346991.md) - Verification Evidence for Foundation implementation is fully committed after final workspace check.
 - **Work Progress**: [Foundation U1-U13 implementation and full review are complete in the integrated worktree](progress/2026-10/2026-10-15T202259Z-foundation-u1-u13-implementation-and-full-review-are-complete-in-the-integrated-worktree-d237cddc6a5444559bb013eac57c4fe5.md) - Work Progress for Foundation U1-U13 implementation and full review are complete in the integrated worktree.
@@ -50,10 +54,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Work Progress**: [Foundation workflows and final static gates pass with full review in progress](progress/2026-10/2026-10-15T200426Z-foundation-workflows-and-final-static-gates-pass-with-full-review-in-progress-28848ee3f899494dbd153def40469040.md) - Work Progress for Foundation workflows and final static gates pass with full review in progress.
 - **Verification Evidence**: [Paused presentation no longer rewinds and late display completion cannot replace its successor](verification/2026-10/2026-10-15T200246Z-paused-presentation-no-longer-rewinds-and-late-display-completion-cannot-replace-its-successor-114c2cfd30854192a821c22b8afd8487.md) - Verification Evidence for Paused presentation no longer rewinds and late display completion cannot replace its successor.
 - **Verification Evidence**: [Final workspace compile formatting and correctness lint gates pass after focused fixture cleanup](verification/2026-10/2026-10-15T195046Z-final-workspace-compile-formatting-and-correctness-lint-gates-pass-after-focused-fixture-cleanup-2ec69f92ce4145b1bccd7f286981cc15.md) - Verification Evidence for Final workspace compile formatting and correctness lint gates pass after focused fixture cleanup.
-- **Verification Evidence**: [Interpolation, native Editor display and migrated Reference workflows pass before full review](verification/2026-10/2026-10-15T193836Z-interpolation-native-editor-display-and-migrated-reference-workflows-pass-before-full-review-a4de05216dbf4ca286f3e1ef0e0510da.md) - Verification Evidence for Interpolation, native Editor display and migrated Reference workflows pass before full review.
-- **Work Progress**: [Native domain, stable content and revision transactions verified while interpolation and final consumer gates continue](progress/2026-10/2026-10-15T190325Z-native-domain-stable-content-and-revision-transactions-verified-while-interpolation-and-final-consumer-gates-continue-ffc1c6a21f7e41dbad51d78a396a074d.md) - Work Progress for Native domain, stable content and revision transactions verified while interpolation and final consumer gates continue.
-- **Verification Evidence**: [Ordered view composition passes the full render and UI library gate before interpolation](verification/2026-10/2026-10-15T190132Z-ordered-view-composition-passes-the-full-render-and-ui-library-gate-before-interpolation-f8133f7091544de1aa8f2b0c3f565cec.md) - Verification Evidence for Ordered view composition passes the full render and UI library gate before interpolation.
-- **Verification Evidence**: [Toolkit-neutral preview ownership and revision-based editing pass the integrated Host gates](verification/2026-10/2026-10-15T185108Z-toolkit-neutral-preview-ownership-and-revision-based-editing-pass-the-integrated-host-gates-5aa5d3c1904b478186d78dd1b88ab694.md) - Verification Evidence for Toolkit-neutral preview ownership and revision-based editing pass the integrated Host gates.
 
 # Integration Notes
 

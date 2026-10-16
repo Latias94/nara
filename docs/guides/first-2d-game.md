@@ -132,7 +132,7 @@ The ordinary external lane does not supply Pause or Step.
 
 With Play stopped, replace `prefabs/player.prefab.json` with
 `variants/fast-player/player.prefab.json`, reopen and Check, then Play. The player
-becomes purple and moves faster without changing the plugin. Restore the original
+changes tint and moves faster without changing the plugin. Restore the original
 Prefab from your own version control when done.
 
 This is an explicit data mod example. It adds no discovery service, conflict
@@ -168,6 +168,25 @@ process startup alone does not prove a gameplay edit became visible. Keep comman
 timings separate from intervals that include human interaction. Do not label shared
 target runs cold, infer percentiles from one observation, or infer Linux/macOS
 release acceptance from Windows results.
+
+The [committed-source acceptance record](../knowledge/engineering/verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md)
+records one Windows 11 observation at engine revision `78faa7c`, Rust 1.99.0,
+one Cargo job, incremental compilation disabled, and an existing shared target:
+
+| Interval | Observed time |
+|---|---:|
+| First external starter Check, including compiled tooling | 56.939 s |
+| First starter desktop build/run through first presentation | 64.266 s |
+| Authored speed save through changed headless outcome | 0.113 s |
+| Rust movement expression save through changed headless outcome | 7.843 s |
+| First ordinary Editor Play through READY | 67.229 s |
+| Repaired ordinary Editor Play through READY | 7.553 s |
+
+The data edit changed the observed final player x from 108.0 to 110.4; the Rust
+edit changed it to 108.8. These command/result intervals are distinct from
+save-to-visible-pixel interaction latency. The linked record includes exact
+source/lockfile identity, features, profile, export, review and platform limits.
+They are individual cached observations, not cold builds or percentile estimates.
 
 An explicit integration check is available for a **disposable external copy**. It
 changes the camera and temporarily injects a compiler error before restoring the

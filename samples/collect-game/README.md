@@ -68,7 +68,7 @@ fields support the ordinary Inspector, Undo/Redo and Save workflow.
 ## A lightweight content variant
 
 `variants/fast-player/player.prefab.json` is a normal replacement Prefab with
-speed 300 and a purple tint. Stop Play, copy it over `prefabs/player.prefab.json`,
+speed 300 and an adjusted tint. Stop Play, copy it over `prefabs/player.prefab.json`,
 reopen the document, check, and Play again. The game code and native plugin are
 unchanged. Keep the original file in version control to restore the default.
 This demonstrates explicit data replacement; it is not a dynamic plugin ABI,

@@ -1,16 +1,24 @@
 # ADR Implementation Status
 
 **Status**: Active ledger
-**Last Verified Implementation**: 2026-10-16 @ committed code checkpoint `ca3d803`; research archive `652b2eb`; completed full review `20261015-194103-d42bfd69`; acceptance evidence `b09676d3fa354aa899a795a5dfe9d2ba`.
+**Last Verified Implementation**: 2026-10-16 @ first-author-workflow code checkpoint `78faa7c`, acceptance `7a2024c6678b43a48a069406d6eb729d`; foundation checkpoint `ca3d803`, acceptance `b09676d3fa354aa899a795a5dfe9d2ba`; research archive `652b2eb`.
 
 This ledger separates accepted decisions from implementation and platform evidence. The finite
 [2D foundation refactor](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 is implemented and locally verified through U1-U13 in the committed local branch. Its completed
 registration is `88b6faf455454957bc7e0f79e76b9850`, under stable lane ID
-`nara-2d-foundation-contracts-codex-root`. The explicitly activated successor is
+`nara-2d-foundation-contracts-codex-root`. Its completed successor is
 [First 2D Author Workflow](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md),
-registered by `6e9712ae19f4430ab3b197971361fb96`; its implementation evidence is recorded
-separately from the completed foundation.
+closed by registration `fe7312236c5d4906b8e950d366111171` and
+[acceptance `7a2024c6678b43a48a069406d6eb729d`](../../knowledge/engineering/verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md).
+Its U1-U6 source at `78faa7c` passes a clean committed-source external workflow on
+Windows: common-ancestor local creation, compiled-recipe schema refresh, independent
+game/plugin, generic Inspector edits and image assignment, native supervised Play,
+compiler recovery and two-product development Export from an unrelated CWD. The
+record includes actual build/data/Rust timings and bounded ergonomic follow-ups.
+Review `20261016-101126-0d3e71ba` has no remaining product-source defects; its sole
+plan-evidence finding #1 is closed by that acceptance, preserving the historical
+Not ready receipt. No successor is automatically active.
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) owns the focused refinements.
 
 The final acceptance record
@@ -64,10 +72,14 @@ or independent reviewer rerun of implementation tests is claimed.
 Workspace all-feature/all-target compilation, formatting and correctness/suspicious Clippy gates
 pass (`2ec69f92ce4145b1bccd7f286981cc15`); other style/deprecation warnings remain. The same
 source was rechecked with `cargo check --workspace --all-features --all-targets --locked --offline`
-before committing the complete integration at `ca3d803`, and the branch is now clean. These
+before committing the complete integration at `ca3d803`, when the branch was clean. These
 finite results do not claim one final whole-workspace nextest run. The full review excluded 39
 paths because they were untracked at review time; those implementation paths are now committed
-and covered by the final workspace check. Complete native Linux/macOS process/window/render
+and covered by the final workspace check. The successor's
+[bounded U1 review](../../knowledge/engineering/verification/2026-10/2026-10-16T023314Z-first-author-workflow-closes-the-prior-excluded-source-review-scope-136220880e154191a83573e2687f217f.md)
+now covers all 38 executable implementation paths (37 additions plus the rename),
+fixing the Linux import and child-output panic without rewriting the original
+review's scope. Complete native Linux/macOS process/window/render
 release trajectories and native macOS filesystem evidence remain separate release gates.
 
 The preceding
