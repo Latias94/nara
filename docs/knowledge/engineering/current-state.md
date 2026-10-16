@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c675bb8cbd97f2dd11f0719bf66450f748abbd88f50c81d3d43e2a227ac6ab5e"
+source_fingerprint: "bf50f47cee920d8d9fa5e5fb414c0044daefcabaa25ac1de0848132d2f3bfda3"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "c675bb8cbd97f2dd11f0719bf66450f748abbd88f50c81d3d43e2a227ac
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c675bb8cbd97f2dd11f0719bf66450f748abbd88f50c81d3d43e2a227ac6ab5e`
-- Immutable records: 619
-- Active lane heads: 0
+- Source fingerprint: `bf50f47cee920d8d9fa5e5fb414c0044daefcabaa25ac1de0848132d2f3bfda3`
+- Immutable records: 620
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -30,6 +30,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
+- [First 2D author workflow](registry/2026-10/2026-10-16T013451Z-nara-first-2d-author-workflow-codex-root-6e9712ae19f4430ab3b197971361fb96.md): `active` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U17](registry/2026-07/2026-07-21T052605Z-reference-game-foundation-rgf-u17-codex-root-407caac86ffc45bcad9caf50fedd90d1.md): `completed` (reference-game-foundation-rgf-u17-codex-root; producer `codex-root`)
 - [Reference-game-driven foundation refactor: RGF-U18](registry/2026-07/2026-07-20T022923Z-reference-game-foundation-rgf-u18-codex-root-ff9c13e50df34a868c59c4ebd5435375.md): `completed` (reference-game-foundation-rgf-u18-codex-root; producer `codex-root`)

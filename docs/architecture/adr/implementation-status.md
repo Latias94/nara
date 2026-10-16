@@ -7,7 +7,10 @@ This ledger separates accepted decisions from implementation and platform eviden
 [2D foundation refactor](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
 is implemented and locally verified through U1-U13 in the committed local branch. Its completed
 registration is `88b6faf455454957bc7e0f79e76b9850`, under stable lane ID
-`nara-2d-foundation-contracts-codex-root`. No successor lane is automatically active.
+`nara-2d-foundation-contracts-codex-root`. The explicitly activated successor is
+[First 2D Author Workflow](../../plans/2026-10-16-0940-feat-first-2d-author-workflow-plan.md),
+registered by `6e9712ae19f4430ab3b197971361fb96`; its implementation evidence is recorded
+separately from the completed foundation.
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) owns the focused refinements.
 
 The final acceptance record
