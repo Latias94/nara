@@ -9,7 +9,7 @@ use nara_reflect::{
     ComponentValueKind,
 };
 use nara_scene::{
-    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness,
+    AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, PrefabAuthoringSession,
     SceneAuthoringHistoryStatus, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneEntityId, ScenePatchDocument, ScenePatchOperation, ScenePatchReport, ScenePlacement,
 };
@@ -43,7 +43,12 @@ impl SceneInspectorState {
         selected_entity: Option<&SceneEntityId>,
         world_snapshot: Option<&WorldIdentitySnapshot>,
     ) -> SceneInspectorModel {
-        build_inspector_model(session, Some(registry), selected_entity, world_snapshot)
+        build_inspector_model(
+            InspectorSession::Scene(session),
+            Some(registry),
+            selected_entity,
+            world_snapshot,
+        )
     }
 
     /// Projects one generically published authoring Scene without consulting a Runtime registry.
@@ -53,7 +58,28 @@ impl SceneInspectorState {
         session: &SceneAuthoringSession,
         selected_entity: Option<&SceneEntityId>,
     ) -> SceneInspectorModel {
-        build_inspector_model(session, None, selected_entity, None)
+        build_inspector_model(
+            InspectorSession::Scene(session),
+            None,
+            selected_entity,
+            None,
+        )
+    }
+
+    /// Uses the same persistent tree and scalar Inspector for an independent Prefab source.
+    #[must_use]
+    pub fn prefab_model_with_selection(
+        &self,
+        session: &PrefabAuthoringSession,
+        registry: Option<&ComponentRegistry>,
+        selected_entity: Option<&SceneEntityId>,
+    ) -> SceneInspectorModel {
+        build_inspector_model(
+            InspectorSession::Prefab(session),
+            registry,
+            selected_entity,
+            None,
+        )
     }
 
     pub fn apply_command(
@@ -207,6 +233,21 @@ pub struct SceneInspectorModel {
     pub history: SceneAuthoringHistoryStatus,
     pub live_dirty: bool,
     pub diagnostics: DiagnosticReport,
+    pub composition: SceneCompositionCapabilities,
+}
+
+/// Catalog-derived composition choices, including explicit unavailable reasons.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneCompositionCapabilities {
+    pub generic_authoring: bool,
+    pub components: Vec<SceneComponentCompositionCapability>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneComponentCompositionCapability {
+    pub component: ComponentTypeId,
+    pub add_unavailable_reason: Option<&'static str>,
+    pub removable: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -407,7 +448,7 @@ impl SceneInspectorCommand {
         Ok(ScenePatchDocument::new([operation]))
     }
 
-    fn to_patch_for_document(
+    pub(crate) fn to_patch_for_document(
         &self,
         document: &SceneDocument,
         registry: &ComponentRegistry,
@@ -475,8 +516,88 @@ pub struct SceneInspectorCommandReport {
     pub diagnostics: DiagnosticReport,
 }
 
+#[derive(Clone, Copy)]
+enum InspectorSession<'a> {
+    Scene(&'a SceneAuthoringSession),
+    Prefab(&'a PrefabAuthoringSession),
+}
+
+#[derive(Clone, Copy)]
+struct InspectorDocument<'a> {
+    roots: &'a [SceneEntityId],
+    entities: &'a [nara_scene::SceneEntityRecord],
+}
+
+impl<'a> InspectorSession<'a> {
+    fn document(self) -> InspectorDocument<'a> {
+        match self {
+            Self::Scene(session) => InspectorDocument {
+                roots: &session.document().roots,
+                entities: &session.document().entities,
+            },
+            Self::Prefab(session) => InspectorDocument {
+                roots: &session.document().roots,
+                entities: &session.document().entities,
+            },
+        }
+    }
+
+    fn authoring_record_facts(self) -> Option<&'a [AuthoringRecordFact]> {
+        match self {
+            Self::Scene(session) => session.authoring_record_facts(),
+            Self::Prefab(session) => session.authoring_record_facts(),
+        }
+    }
+
+    fn authoring_readiness(self) -> Option<nara_scene::AuthoringDocumentReadiness> {
+        match self {
+            Self::Scene(session) => session.authoring_readiness(),
+            Self::Prefab(session) => session.authoring_readiness(),
+        }
+    }
+
+    fn authoring_component_schema(
+        self,
+        entity: &SceneEntityId,
+        component: &ComponentTypeId,
+    ) -> Option<&'a ComponentSchema> {
+        match self {
+            Self::Scene(session) => session.authoring_component_schema(entity, component),
+            Self::Prefab(session) => session.authoring_component_schema(entity, component),
+        }
+    }
+
+    fn catalog_components(self) -> Vec<(&'a ComponentSchema, bool)> {
+        match self {
+            Self::Scene(session) => session.authoring_catalog_components().collect(),
+            Self::Prefab(session) => session.authoring_catalog_components().collect(),
+        }
+    }
+
+    fn history_status(self) -> SceneAuthoringHistoryStatus {
+        match self {
+            Self::Scene(session) => session.history_status(),
+            Self::Prefab(session) => session.history_status(),
+        }
+    }
+
+    fn is_live_dirty(self) -> bool {
+        match self {
+            Self::Scene(session) => session.is_live_dirty(),
+            Self::Prefab(_) => false,
+        }
+    }
+
+    fn live_instance(self) -> Option<&'a nara_identity::SpawnedSceneInstance> {
+        match self {
+            Self::Scene(session) => session.live_instance(),
+            Self::Prefab(_) => None,
+        }
+    }
+}
+
 fn build_inspector_model(
-    session: &SceneAuthoringSession,
+    session: InspectorSession<'_>,
     registry: Option<&ComponentRegistry>,
     selected_entity: Option<&SceneEntityId>,
     world_snapshot: Option<&WorldIdentitySnapshot>,
@@ -559,11 +680,59 @@ fn build_inspector_model(
         history: session.history_status(),
         live_dirty: session.is_live_dirty(),
         diagnostics,
+        composition: build_composition_capabilities(session, registry),
+    }
+}
+
+fn build_composition_capabilities(
+    session: InspectorSession<'_>,
+    registry: Option<&ComponentRegistry>,
+) -> SceneCompositionCapabilities {
+    let generic_authoring = session.authoring_readiness().is_some();
+    let schemas = if generic_authoring {
+        session.catalog_components()
+    } else {
+        registry
+            .and_then(|registry| registry.schemas().ok())
+            .into_iter()
+            .flatten()
+            .map(|schema| (schema, true))
+            .collect()
+    };
+    let components = schemas
+        .into_iter()
+        .map(|(schema, available)| {
+            let removable = available
+                && schema.has_capability(ComponentCapability::Scene)
+                && schema.has_capability(ComponentCapability::Edit)
+                && schema
+                    .fields()
+                    .iter()
+                    .all(|field| field.has_capability(ComponentCapability::Edit));
+            let add_unavailable_reason = if !available {
+                Some("No authoring adapter for this exact catalog")
+            } else if !removable {
+                Some("Component does not admit whole-record data editing")
+            } else if schema.authoring_initial_value().is_none() {
+                Some("Component has no complete creation template")
+            } else {
+                None
+            };
+            SceneComponentCompositionCapability {
+                component: schema.id().clone(),
+                add_unavailable_reason,
+                removable,
+            }
+        })
+        .collect();
+    SceneCompositionCapabilities {
+        generic_authoring,
+        components,
     }
 }
 
 fn inspectable_component_count(
-    session: &SceneAuthoringSession,
+    session: InspectorSession<'_>,
     entity: &nara_scene::SceneEntityRecord,
     registry: Option<&ComponentRegistry>,
     authoring_record_facts: &DirectAuthoringRecordFactIndex<'_>,
@@ -591,7 +760,7 @@ fn inspectable_component_count(
 }
 
 fn build_entity_view(
-    session: &SceneAuthoringSession,
+    session: InspectorSession<'_>,
     entity: &nara_scene::SceneEntityRecord,
     parent: Option<&SceneEntityId>,
     registry: Option<&ComponentRegistry>,
@@ -669,7 +838,7 @@ fn build_entity_view(
 }
 
 fn ordered_scene_entities<'document>(
-    document: &'document SceneDocument,
+    document: InspectorDocument<'document>,
     entity_by_id: &HashMap<&'document str, &'document nara_scene::SceneEntityRecord>,
 ) -> Vec<(
     &'document nara_scene::SceneEntityRecord,
@@ -1044,10 +1213,16 @@ mod tests {
             .iter()
             .map(|entity| (entity.id.as_str(), entity))
             .collect::<HashMap<_, _>>();
-        let observed = ordered_scene_entities(&document, &entity_by_id)
-            .into_iter()
-            .map(|(entity, parent, depth)| (entity.id.clone(), parent.cloned(), depth))
-            .collect::<Vec<_>>();
+        let observed = ordered_scene_entities(
+            InspectorDocument {
+                roots: &document.roots,
+                entities: &document.entities,
+            },
+            &entity_by_id,
+        )
+        .into_iter()
+        .map(|(entity, parent, depth)| (entity.id.clone(), parent.cloned(), depth))
+        .collect::<Vec<_>>();
 
         assert_eq!(
             observed,

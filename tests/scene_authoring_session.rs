@@ -286,19 +286,11 @@ fn prefab_structural_cycle_rejects_without_publishing_partial_state() {
 }
 
 #[test]
-fn prefab_authoring_keeps_component_structure_closed() {
+fn prefab_component_structure_is_transactional_and_undo_restores_exact_records() {
     let registry = scene_registry();
     let entity = scene_id("entity");
     let original = PrefabDocument::from_ordered_roots([labeled_entity(entity.clone(), "Label")]);
     let operations = [
-        ScenePatchOperation::AddComponent {
-            entity: entity.clone(),
-            component: label_type_id(),
-            value: SceneComponentRecord::new(
-                ComponentSchemaVersion(1),
-                ComponentValue::map([("text", ComponentValue::String("Added".to_string()))]),
-            ),
-        },
         ScenePatchOperation::RemoveComponent {
             entity: entity.clone(),
             component: label_type_id(),
@@ -318,14 +310,30 @@ fn prefab_authoring_keeps_component_structure_closed() {
         let revision = session.revision();
         let report = session.apply_patch(&ScenePatchDocument::new([operation]), &registry);
 
-        assert!(!report.applied);
-        assert!(report.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code().as_str() == "scene.prefab-authoring-component-operation-unsupported"
-        }));
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert_ne!(session.revision(), revision);
+        let accepted = session.document().clone();
+        assert_eq!(session.history_usage().records, 1);
+        assert!(session.undo(&registry).applied);
         assert_eq!(session.document(), &original);
-        assert_eq!(session.revision(), revision);
-        assert_eq!(session.history_usage().records, 0);
+        assert!(session.redo(&registry).applied);
+        assert_eq!(session.document(), &accepted);
     }
+
+    let mut session = PrefabAuthoringSession::new(original.clone());
+    let revision = session.revision();
+    let duplicate = ScenePatchDocument::new([ScenePatchOperation::AddComponent {
+        entity: scene_id("entity"),
+        component: label_type_id(),
+        value: SceneComponentRecord::new(
+            ComponentSchemaVersion(1),
+            ComponentValue::map([("text", ComponentValue::String("Duplicate".into()))]),
+        ),
+    }]);
+    assert!(!session.apply_patch(&duplicate, &registry).applied);
+    assert_eq!(session.document(), &original);
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.history_usage().records, 0);
 }
 
 #[test]

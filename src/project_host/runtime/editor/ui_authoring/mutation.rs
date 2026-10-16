@@ -342,6 +342,8 @@ pub(in super::super) fn projection_admits_structure_command(
     image_choices: Option<&UiImageChoiceSet>,
 ) -> bool {
     match command {
+        PrefabCompositionCommand::AddComponent { .. }
+        | PrefabCompositionCommand::RemoveComponent { .. } => false,
         PrefabCompositionCommand::CreateEntity { draft, placement } => projection
             .revalidate_create_recipe(draft.components(), placement, image_choices)
             .is_ok(),

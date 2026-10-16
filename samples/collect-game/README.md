@@ -66,6 +66,12 @@ and Save workflow. The player Prefab's `PlayerConfig.speed` is also an authored
 version is not accepted as the floating schema. Refresh schema after Rust schema
 changes, reopen, and run `nara check .` after saving content.
 
+Both custom components opt into complete literal creation templates: PlayerConfig
+starts with speed 240 and Collectible with radius 20. The ordinary Scene and Prefab
+Inspector can add or remove these components, with Undo/Redo and Save/Reopen.
+The schema owner advances to catalog generation 2 while retaining the frozen
+generation-1 catalog; this creation-only metadata does not change wire version 2.
+
 The installed Editor handles supported declared scalar data without compiling or
 loading the game. Its first-party native preview omits custom configuration records
 with an explicit reason, while retaining them in source. The separately compiled

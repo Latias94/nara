@@ -52,3 +52,23 @@ Their transform, sprite and Scene component owners advance to catalog generation
 Refresh a compiled project's declared schema bundle explicitly with its own recipe using `nara schema <project-directory> --write`, then reopen the Editor.
 Strict Check/Play still rejects a bundle that differs from the selected native definitions.
 Intentionally historical or degraded data-only fixtures need not be upgraded to claim capabilities they do not have.
+
+## Generic Scene and Prefab composition
+
+`SceneCompositionCommand` component operations now take a stable `ComponentTypeId` instead of `SceneCompositionComponentKind`.
+Ordinary Prefab commands support the same admitted component addition and removal.
+Creation choices come from the exact retained catalog, including for an empty document; a missing template remains a visible unavailable capability.
+Generic authoring creates empty entities and adds or removes current data-editable direct component records through the existing document transaction and Undo/Redo owners.
+Entity deletion/reparenting and unavailable-record removal remain outside that finite generic vocabulary.
+
+Scene and ordinary Prefab sources share the tree and Inspector projection, whose document kind remains explicit.
+Native Prefab field edits and source navigation now use the ordinary Prefab persistence lane; they no longer require a UI root.
+This shared data projection does not turn a Prefab into a Scene preview producer.
+The Host retires an old Scene presentation when the active document changes to a non-Scene source.
+
+The canonical unavailable-record manifest now includes source-local semantic placement and nested patch placement in addition to complete identities, values and references.
+An insertion that changes an unavailable record's placement is rejected atomically; appending an unrelated entity and its inverse preserve the manifest.
+Specialized UI structure admission remains enforced for existing and newly introduced UI records, including when `runtime-ui` is disabled.
+
+The collection-game custom scalar owner now publishes generation-2 creation templates and retains its frozen generation-1 catalog.
+Its component wire versions remain 2; refresh the bundle with the compiled project recipe before strict Check or Play.

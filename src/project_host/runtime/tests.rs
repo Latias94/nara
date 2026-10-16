@@ -933,9 +933,23 @@ logical_height = 540
         ))
         .unwrap();
     let EditorActionOutcome::Workspace(non_ui) = &non_ui_report.outcomes()[1] else {
-        panic!("a non-UI Prefab rejection must remain a workspace outcome");
+        panic!("ordinary Prefab navigation must publish a workspace outcome");
     };
-    assert!(!non_ui.applied);
+    assert!(non_ui.applied, "{:?}", non_ui.diagnostics);
+    assert_eq!(editor.workspace().len(), 2);
+    let ordinary_document = non_ui.opened_document.unwrap();
+    assert_eq!(
+        editor.workspace().document_kind(ordinary_document),
+        Some(nara_tooling::EditorDocumentKind::Prefab)
+    );
+    assert_eq!(
+        editor.request_workspace_intent(EditorWorkspaceIntent::CloseDocument {
+            document: ordinary_document
+        }),
+        nara_tooling::EditorWorkspaceIntentRequestResult::Accepted
+    );
+    assert!(editor.workspace().prefab(ordinary_document).is_none());
+    let _ = editor.acknowledge_workspace_intent_result();
     assert_eq!(editor.workspace().len(), 1);
 
     let frame = editor.drive_editor_frame(Duration::ZERO);

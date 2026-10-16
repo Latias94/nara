@@ -1,0 +1,85 @@
+{
+  "kind": "component_schema_catalog",
+  "format_version": 1,
+  "engine_min_version": "0.1.0",
+  "generator": {
+    "name": "nara",
+    "version": "0.1.0"
+  },
+  "payload": {
+    "generation": 1,
+    "components": [
+      {
+        "id": "collect-game.Collectible",
+        "aliases": [
+          "Collectible"
+        ],
+        "version": 2,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "radius",
+            "aliases": [
+              "Collection radius"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "radius"
+              }
+            ],
+            "value_kind": "f64",
+            "numeric_domain": "f32",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      },
+      {
+        "id": "collect-game.PlayerConfig",
+        "aliases": [
+          "Player configuration"
+        ],
+        "version": 2,
+        "capabilities": [
+          "scene",
+          "inspect",
+          "edit"
+        ],
+        "fields": [
+          {
+            "id": "speed",
+            "aliases": [
+              "Movement speed"
+            ],
+            "path": [
+              {
+                "kind": "field",
+                "value": "speed"
+              }
+            ],
+            "value_kind": "f64",
+            "numeric_domain": "f32",
+            "required": true,
+            "capabilities": [
+              "scene",
+              "inspect",
+              "edit"
+            ]
+          }
+        ],
+        "field_tombstones": []
+      }
+    ],
+    "type_tombstones": []
+  }
+}

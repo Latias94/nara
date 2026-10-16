@@ -1,3 +1,5 @@
+#[cfg(feature = "serde")]
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use nara_asset::{AssetRef, ProjectAssetDatabase};
@@ -702,6 +704,35 @@ enum PatchTreeNode<'a> {
     Patch(&'a ScenePatchDocument),
 }
 
+#[cfg(feature = "serde")]
+pub(crate) fn authoring_entity_placements<'a>(
+    roots: &[SceneEntityId],
+    entities: impl IntoIterator<Item = &'a SceneEntityRecord>,
+) -> BTreeMap<SceneEntityId, ScenePlacement> {
+    let owners = std::iter::once((ScenePlacementOwner::Root, roots)).chain(
+        entities.into_iter().map(|entity| {
+            (
+                ScenePlacementOwner::Parent {
+                    parent: entity.id.clone(),
+                },
+                entity.children.as_slice(),
+            )
+        }),
+    );
+    let mut placements = BTreeMap::new();
+    for (owner, siblings) in owners {
+        for (index, entity) in siblings.iter().enumerate() {
+            let placement = if index == 0 {
+                ScenePlacement::first(owner.clone())
+            } else {
+                ScenePlacement::after(owner.clone(), siblings[index - 1].clone())
+            };
+            placements.insert(entity.clone(), placement);
+        }
+    }
+    placements
+}
+
 fn unsupported_patch_tree_format_version(patch: &ScenePatchDocument) -> Option<u32> {
     let mut pending = vec![PatchTreeNode::Patch(patch)];
     while let Some(node) = pending.pop() {
@@ -1235,17 +1266,98 @@ fn apply_prefab_operation(
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     match operation {
-        ScenePatchOperation::AddComponent { .. }
-        | ScenePatchOperation::RemoveComponent { .. }
-        | ScenePatchOperation::ReplaceComponent { .. } => Err(patch_diagnostic(
+        ScenePatchOperation::AddComponent {
+            entity,
+            component,
+            value,
+        } => add_component(
+            document,
+            registry,
+            entity,
+            component,
+            value,
             operation_index,
-            "scene.prefab-authoring-component-operation-unsupported",
-            "Prefab authoring accepts complete entity operations and field edits, not component structure edits",
-            None,
-            None,
-            None,
-        )),
+        ),
+        ScenePatchOperation::RemoveComponent { entity, component } => {
+            remove_component(document, registry, entity, component, operation_index)
+        }
+        ScenePatchOperation::ReplaceComponent {
+            entity,
+            component,
+            value,
+        } => replace_component(
+            document,
+            registry,
+            entity,
+            component,
+            value,
+            operation_index,
+        ),
         _ => apply_non_component_operation(document, registry, operation, operation_index),
+    }
+}
+
+/// Applies topology after the authoring owner has admitted the operation and component values.
+#[cfg(feature = "serde")]
+pub(crate) fn apply_authoring_structure_operation(
+    document: &mut SceneDocument,
+    operation: &ScenePatchOperation,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
+    match operation {
+        ScenePatchOperation::AddEntity { entity, placement } => {
+            prepare_entity_placement(document, entity, placement, operation_index)?;
+            let insertion =
+                resolve_insertion(document, &entity.id, placement, false, operation_index)?;
+            document.entities.push(entity.clone());
+            insert_placed_entity(document, &entity.id, insertion);
+            Ok(vec![ScenePatchOperation::RemoveEntity {
+                entity: entity.id.clone(),
+                from: placement.clone(),
+            }])
+        }
+        ScenePatchOperation::RemoveEntity { entity, from } => {
+            let index = find_entity(document, entity).ok_or_else(|| {
+                patch_diagnostic(
+                    operation_index,
+                    "scene.patch-missing-entity",
+                    "Patch removes a missing entity",
+                    Some(entity),
+                    None,
+                    None,
+                )
+            })?;
+            let record = &document.entities[index];
+            if !record.components.is_empty()
+                || !record.children.is_empty()
+                || record.prefab.is_some()
+                || !placement_matches(document, entity, from)
+            {
+                return Err(patch_diagnostic(
+                    operation_index,
+                    "scene.authoring-entity-inverse-unavailable",
+                    "Authoring history may remove only the exact empty entity it created",
+                    Some(entity),
+                    None,
+                    None,
+                ));
+            }
+            let record = document.entities.remove(index);
+            detach_entity(document, entity);
+            Ok(vec![ScenePatchOperation::AddEntity {
+                entity: record,
+                placement: from.clone(),
+            }])
+        }
+        ScenePatchOperation::AddComponent {
+            entity,
+            component,
+            value,
+        } => add_component_record(document, entity, component, value, operation_index),
+        ScenePatchOperation::RemoveComponent { entity, component } => {
+            remove_component_record(document, entity, component, operation_index)
+        }
+        _ => unreachable!("the authoring owner admits only its finite structure vocabulary"),
     }
 }
 
@@ -1685,8 +1797,8 @@ fn restore_entity<D: EntityDocument>(
     }])
 }
 
-fn add_component(
-    document: &mut SceneDocument,
+fn add_component<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
@@ -1694,6 +1806,16 @@ fn add_component(
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     require_whole_component_edit(registry, entity, component, operation_index)?;
+    add_component_record(document, entity, component, value, operation_index)
+}
+
+fn add_component_record<D: EntityDocument>(
+    document: &mut D,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+    value: &SceneComponentRecord,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     let record = entity_mut(document, entity, operation_index)?;
     if record.components.contains_key(component) {
         return Err(patch_diagnostic(
@@ -1712,14 +1834,23 @@ fn add_component(
     }])
 }
 
-fn remove_component(
-    document: &mut SceneDocument,
+fn remove_component<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
     operation_index: usize,
 ) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     require_whole_component_edit(registry, entity, component, operation_index)?;
+    remove_component_record(document, entity, component, operation_index)
+}
+
+fn remove_component_record<D: EntityDocument>(
+    document: &mut D,
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+    operation_index: usize,
+) -> Result<Vec<ScenePatchOperation>, Diagnostic> {
     let record = entity_mut(document, entity, operation_index)?;
     let Some(previous) = record.components.remove(component) else {
         return Err(patch_diagnostic(
@@ -1738,8 +1869,8 @@ fn remove_component(
     }])
 }
 
-fn replace_component(
-    document: &mut SceneDocument,
+fn replace_component<D: EntityDocument>(
+    document: &mut D,
     registry: &ComponentRegistry,
     entity: &SceneEntityId,
     component: &ComponentTypeId,
@@ -2039,6 +2170,19 @@ fn prepare_entity_insertion<D: EntityDocument + ?Sized>(
     placement: &ScenePlacement,
     operation_index: usize,
 ) -> Result<(), Diagnostic> {
+    prepare_entity_placement(document, entity, placement, operation_index)?;
+    for component in entity.components.keys() {
+        require_whole_component_edit(registry, &entity.id, component, operation_index)?;
+    }
+    Ok(())
+}
+
+fn prepare_entity_placement<D: EntityDocument + ?Sized>(
+    document: &D,
+    entity: &SceneEntityRecord,
+    placement: &ScenePlacement,
+    operation_index: usize,
+) -> Result<(), Diagnostic> {
     if find_entity(document, &entity.id).is_some() {
         return Err(patch_diagnostic(
             operation_index,
@@ -2058,9 +2202,6 @@ fn prepare_entity_insertion<D: EntityDocument + ?Sized>(
             None,
             None,
         ));
-    }
-    for component in entity.components.keys() {
-        require_whole_component_edit(registry, &entity.id, component, operation_index)?;
     }
     validate_placement_owner(document, &entity.id, placement, operation_index)
 }

@@ -39,7 +39,8 @@ const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefin
     ComponentSchemaProviderBindingId::new("collect-game.native", 2),
     catalog,
     register,
-);
+)
+.with_predecessor(predecessor_catalog);
 const DECLARATION: PluginDeclaration = PluginDeclaration::new(PLUGIN_ID, PluginCategory::Runtime)
     .requires_plugins(&[
         nara::reflect::COMPONENT_REGISTRY_PLUGIN_ID,
@@ -58,11 +59,12 @@ const VICTORY: Color = Color::rgb(0.06, 0.30, 0.16);
     id = "collect-game.PlayerConfig",
     version = 2,
     alias = "Player configuration",
+    authoring_initial,
     component_capabilities(scene, inspect, edit),
     field_capabilities(scene, inspect, edit)
 )]
 pub struct PlayerConfig {
-    #[nara(id = "speed", alias = "Movement speed")]
+    #[nara(id = "speed", alias = "Movement speed", initial = 240.0)]
     pub speed: f32,
 }
 
@@ -72,11 +74,12 @@ pub struct PlayerConfig {
     id = "collect-game.Collectible",
     version = 2,
     alias = "Collectible",
+    authoring_initial,
     component_capabilities(scene, inspect, edit),
     field_capabilities(scene, inspect, edit)
 )]
 pub struct Collectible {
-    #[nara(id = "radius", alias = "Collection radius")]
+    #[nara(id = "radius", alias = "Collection radius", initial = 20.0)]
     pub radius: f32,
 }
 
@@ -150,12 +153,23 @@ pub fn contribution() -> Result<SchemaContribution<CollectGamePlugin>, ProductRe
 }
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
-    Ok(ComponentSchemaCatalog {
-        components: vec![
-            PlayerConfig::persistent_component_schema(),
-            Collectible::persistent_component_schema(),
-        ],
-        ..Default::default()
+    let predecessor = predecessor_catalog()?;
+    let mut current = ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the fixed generation-one sample catalog has a successor");
+    current.components = vec![
+        PlayerConfig::persistent_component_schema(),
+        Collectible::persistent_component_schema(),
+    ];
+    Ok(current)
+}
+
+// The generation-one scalar wire contract predates creation-only metadata.
+fn predecessor_catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
+    ComponentSchemaCatalog::from_json_bytes(include_bytes!(
+        "../schema/component-schema-generation-1.json"
+    ))
+    .map_err(|_| {
+        ComponentSchemaProviderSourceError::new("collect-game.predecessor-catalog-invalid")
     })
 }
 

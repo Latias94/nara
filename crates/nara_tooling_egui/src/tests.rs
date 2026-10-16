@@ -22,10 +22,10 @@ use nara_tooling::{
     EditorSceneModel, EditorSceneTabModel, EditorSelectionSet, EditorWorkspaceIntent,
     EditorWorkspaceIntentAction, EditorWorkspaceIntentPhase, EditorWorkspaceIntentView,
     EditorWorkspaceModel, PrefabCompositionCommand, SceneCompositionCommand,
-    SceneCompositionComponentKind, SceneCompositionEntityKind, SceneEditorModel,
-    SceneInspectorCommand, SceneInspectorComponentAccess, SceneInspectorComponentView,
-    SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
-    SceneInspectorFieldView, SceneInspectorModel,
+    SceneCompositionEntityKind, SceneEditorModel, SceneInspectorCommand,
+    SceneInspectorComponentAccess, SceneInspectorComponentView, SceneInspectorEntityRow,
+    SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
+    SceneInspectorModel,
 };
 
 use crate::{
@@ -742,7 +742,7 @@ fn composition_controls_emit_exact_revision_bound_actions() {
                 base_revision: scene.revision,
                 command: SceneCompositionCommand::AddComponent {
                     entity: SceneEntityId::new("player").unwrap(),
-                    component: SceneCompositionComponentKind::Sprite,
+                    component: ComponentTypeId::new("nara.sprite.Sprite"),
                 },
             })]
         )
@@ -1162,6 +1162,7 @@ fn scene_model(
     });
     EditorSceneModel {
         document,
+        kind: nara_tooling::EditorDocumentKind::Scene,
         title: "Scene".to_owned(),
         dirty,
         revision,
@@ -1185,6 +1186,17 @@ fn scene_model(
                 history,
                 live_dirty: false,
                 diagnostics: DiagnosticReport::default(),
+                composition: nara_tooling::SceneCompositionCapabilities {
+                    generic_authoring: false,
+                    components: ["nara.transform.Transform2d", "nara.sprite.Sprite"]
+                        .into_iter()
+                        .map(|id| nara_tooling::SceneComponentCompositionCapability {
+                            component: ComponentTypeId::new(id),
+                            add_unavailable_reason: None,
+                            removable: true,
+                        })
+                        .collect(),
+                },
             },
             diagnostics: DiagnosticReport::default(),
         },

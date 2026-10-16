@@ -348,7 +348,34 @@ impl EditorProjectSession {
             });
         }
         if let EditorDocumentMutation::ComposePrefab { command, .. } = &action
+            && (self.prefab_uses_ui_authoring_domain(document)
+                || prefab_command_uses_ui_domain(command))
             && !self.ui_authoring_structure_matches(document, command)
+        {
+            return EditorActionOutcome::Rejected(
+                EditorActionRejection::StructureContractMismatch { document },
+            );
+        }
+        if let EditorDocumentMutation::ApplyPrefabPatch { patch, .. } = &action
+            && (self.prefab_uses_ui_authoring_domain(document)
+                || prefab_patch_uses_ui_domain(patch))
+            && patch.operations.iter().any(|operation| {
+                !matches!(
+                    operation,
+                    nara_scene::ScenePatchOperation::SetField { .. }
+                        | nara_scene::ScenePatchOperation::SetAssetRefField { .. }
+                )
+            })
+        {
+            return EditorActionOutcome::Rejected(
+                EditorActionRejection::StructureContractMismatch { document },
+            );
+        }
+        if let EditorDocumentMutation::ApplyInspectorCommand {
+            command: nara_tooling::SceneInspectorCommand::MoveEntity { .. },
+            ..
+        } = &action
+            && self.prefab_uses_ui_authoring_domain(document)
         {
             return EditorActionOutcome::Rejected(
                 EditorActionRejection::StructureContractMismatch { document },
@@ -747,6 +774,18 @@ impl EditorProjectSession {
         }
     }
 
+    pub(super) fn prefab_uses_ui_authoring_domain(&self, document: EditorDocumentId) -> bool {
+        self.workspace.prefab(document).is_some_and(|slot| {
+            slot.session().document().entities.iter().any(|entity| {
+                entity.components.keys().any(component_uses_ui_domain)
+                    || entity
+                        .prefab
+                        .as_ref()
+                        .is_some_and(|prefab| prefab_patch_uses_ui_domain(&prefab.overrides))
+            })
+        })
+    }
+
     fn ui_authoring_structure_matches(
         &self,
         document: EditorDocumentId,
@@ -848,6 +887,76 @@ impl EditorProjectSession {
         }
         Ok(())
     }
+}
+
+fn component_uses_ui_domain(component: &nara_reflect::ComponentTypeId) -> bool {
+    // Persistent domain identity remains meaningful when its executable module is absent.
+    matches!(
+        component.as_str(),
+        "nara.ui.UiRoot"
+            | "nara.ui.UiNode"
+            | "nara.ui.UiVisual"
+            | "nara.ui.UiText"
+            | "nara.ui.UiButton"
+            | "nara.ui.UiButtonVisuals"
+            | "nara.ui.UiSemantics"
+            | "nara.ui.UiTheme"
+    )
+}
+
+fn prefab_command_uses_ui_domain(command: &nara_tooling::PrefabCompositionCommand) -> bool {
+    use nara_tooling::PrefabCompositionCommand;
+    match command {
+        PrefabCompositionCommand::CreateEntity { draft, .. } => {
+            draft.components().keys().any(component_uses_ui_domain)
+        }
+        PrefabCompositionCommand::AddComponent { component, .. }
+        | PrefabCompositionCommand::RemoveComponent { component, .. } => {
+            component_uses_ui_domain(component)
+        }
+        PrefabCompositionCommand::MoveEntity { .. }
+        | PrefabCompositionCommand::RemoveEntity { .. } => false,
+    }
+}
+
+fn prefab_patch_uses_ui_domain(patch: &nara_scene::ScenePatchDocument) -> bool {
+    use nara_scene::ScenePatchOperation;
+    let mut pending = patch.operations.iter().collect::<Vec<_>>();
+    while let Some(operation) = pending.pop() {
+        match operation {
+            ScenePatchOperation::AddEntity { entity, .. } => {
+                if entity.components.keys().any(component_uses_ui_domain) {
+                    return true;
+                }
+                if let Some(prefab) = &entity.prefab {
+                    pending.extend(prefab.overrides.operations.iter());
+                }
+            }
+            ScenePatchOperation::RestoreEntity {
+                entity,
+                descendants,
+                ..
+            } => {
+                for entity in std::iter::once(entity).chain(descendants.iter()) {
+                    if entity.components.keys().any(component_uses_ui_domain) {
+                        return true;
+                    }
+                    if let Some(prefab) = &entity.prefab {
+                        pending.extend(prefab.overrides.operations.iter());
+                    }
+                }
+            }
+            ScenePatchOperation::AddComponent { component, .. }
+            | ScenePatchOperation::RemoveComponent { component, .. }
+            | ScenePatchOperation::ReplaceComponent { component, .. } => {
+                if component_uses_ui_domain(component) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn editor_action_rejection_diagnostic(rejection: EditorActionRejection) -> Diagnostic {

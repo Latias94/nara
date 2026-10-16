@@ -1003,6 +1003,7 @@ impl NativeEditorHost {
             nara::tooling::EditorDocumentId,
             nara::scene::SceneAuthoringRevision,
         )>,
+        has_authoring_scene: bool,
     ) -> Result<bool, EditorRunError> {
         match selected {
             EguiEditorViewport::Authoring if self.viewport_slot.is_game() => {
@@ -1048,7 +1049,10 @@ impl NativeEditorHost {
                 });
                 let should_retire = match authoring_ui {
                     Some(_) => self.viewport_slot.has_binding() && !source_matches,
-                    None => self.viewport_slot.is_ui_prefab_binding(),
+                    None => {
+                        self.viewport_slot.is_ui_prefab_binding()
+                            || (!has_authoring_scene && self.viewport_slot.is_scene())
+                    }
                 };
                 if !should_retire {
                     return Ok(false);
@@ -1354,6 +1358,18 @@ impl NativeEditorHost {
         let authoring_ui = ui_authoring_frame
             .as_ref()
             .map(|frame| (frame.document(), frame.revision()));
+        let has_authoring_scene = editor_frame
+            .workspace()
+            .active_scene
+            .as_ref()
+            .is_some_and(|document| document.kind == nara::tooling::EditorDocumentKind::Scene);
+        if !has_authoring_scene && self.requested_scene_extent.is_some() {
+            set_requested_scene_extent(
+                &mut self.application,
+                &mut self.requested_scene_extent,
+                None,
+            );
+        }
         let ui_authoring_identity = ui_authoring_frame.as_ref().and_then(|frame| {
             frame.canvas_generation().map(|canvas_generation| {
                 EditorUiCanvasIdentity::new(
@@ -1387,6 +1403,7 @@ impl NativeEditorHost {
             editor_frame.play().state(),
             window_packet,
             authoring_ui,
+            has_authoring_scene,
         )?;
         let mut pick_stamp = (selected_viewport == EguiEditorViewport::Authoring
             && authoring_ui.is_none())
@@ -1441,7 +1458,7 @@ impl NativeEditorHost {
                     }
                 }
             }
-            EguiEditorViewport::Authoring => {
+            EguiEditorViewport::Authoring if has_authoring_scene => {
                 match self.application.take_scene_preview_candidate() {
                     Some(candidate) => match self.scene_presenter.prepare(
                         &mut self.viewport_slot,
@@ -1465,6 +1482,7 @@ impl NativeEditorHost {
                     None => None,
                 }
             }
+            EguiEditorViewport::Authoring => None,
             EguiEditorViewport::Game
                 if self.viewport_slot.is_game()
                     && matches!(
@@ -1538,7 +1556,7 @@ impl NativeEditorHost {
             | None => None,
         };
         let mut scene_view_input =
-            if selected_viewport == EguiEditorViewport::Authoring && authoring_ui.is_none() {
+            if selected_viewport == EguiEditorViewport::Authoring && has_authoring_scene {
                 self.scene_presenter.scene_view_input(
                     &self.viewport_slot,
                     &editor_frame,
@@ -1672,7 +1690,8 @@ impl NativeEditorHost {
                     physical_viewport_extent(
                         scene_view_output.desired_size_points(),
                         output.pixels_per_point,
-                    ),
+                    )
+                    .filter(|_| has_authoring_scene),
                     None,
                     None,
                     false,

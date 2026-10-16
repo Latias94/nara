@@ -11,6 +11,101 @@
       {
         "owner": "collect-game",
         "current": {
+          "generation": 2,
+          "predecessor": "64daa30393557530a610c421a157a3bb62431195f837308c21ce2a8783147aa5",
+          "components": [
+            {
+              "id": "collect-game.Collectible",
+              "aliases": [
+                "Collectible"
+              ],
+              "version": 2,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "radius",
+                  "aliases": [
+                    "Collection radius"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "radius"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "numeric_domain": "f32",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "radius": {
+                    "type": "f64",
+                    "value": 20.0
+                  }
+                }
+              }
+            },
+            {
+              "id": "collect-game.PlayerConfig",
+              "aliases": [
+                "Player configuration"
+              ],
+              "version": 2,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "speed",
+                  "aliases": [
+                    "Movement speed"
+                  ],
+                  "path": [
+                    {
+                      "kind": "field",
+                      "value": "speed"
+                    }
+                  ],
+                  "value_kind": "f64",
+                  "numeric_domain": "f32",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "map",
+                "value": {
+                  "speed": {
+                    "type": "f64",
+                    "value": 240.0
+                  }
+                }
+              }
+            }
+          ],
+          "type_tombstones": []
+        },
+        "predecessor": {
           "generation": 1,
           "components": [
             {

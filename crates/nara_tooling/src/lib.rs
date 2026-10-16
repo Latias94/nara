@@ -14,8 +14,7 @@ mod workspace;
 
 pub use composition::{
     PrefabCompositionCommand, PrefabCompositionDraftError, PrefabCompositionEntityDraft,
-    PrefabCompositionOutcome, SceneCompositionCommand, SceneCompositionComponentKind,
-    SceneCompositionEntityKind,
+    PrefabCompositionOutcome, SceneCompositionCommand, SceneCompositionEntityKind,
 };
 #[doc(hidden)]
 pub use frame::EditorFrameClock;
@@ -42,10 +41,11 @@ pub use image_import::{
     EditorImageImportView,
 };
 pub use inspector::{
-    SceneInspectorCommand, SceneInspectorCommandReport, SceneInspectorComponentAccess,
-    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorEntityView,
-    SceneInspectorFieldState, SceneInspectorFieldView, SceneInspectorModel,
-    SceneInspectorReadOnlyReason, SceneInspectorState,
+    SceneComponentCompositionCapability, SceneCompositionCapabilities, SceneInspectorCommand,
+    SceneInspectorCommandReport, SceneInspectorComponentAccess, SceneInspectorComponentView,
+    SceneInspectorEntityRow, SceneInspectorEntityView, SceneInspectorFieldState,
+    SceneInspectorFieldView, SceneInspectorModel, SceneInspectorReadOnlyReason,
+    SceneInspectorState,
 };
 pub use persistence::{
     EditorAuthoringReadiness, EditorCloseDecision, EditorPersistenceCommand,

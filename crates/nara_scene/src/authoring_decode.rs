@@ -443,6 +443,8 @@ pub struct UnavailableRecord {
     source: AuthoringDocumentSource,
     document_kind: AuthoringDocumentKind,
     location: AuthoringRecordLocation,
+    placement: Option<crate::ScenePlacement>,
+    anchor_placement: Option<crate::ScenePlacement>,
     owner: AuthoringRecordOwnerClaim,
     component: ComponentTypeId,
     version: ComponentSchemaVersion,
@@ -453,6 +455,17 @@ pub struct UnavailableRecord {
 }
 
 impl UnavailableRecord {
+    /// Stable parent/root and relative ordering of the source-local owning entity.
+    #[must_use]
+    pub const fn placement(&self) -> Option<&crate::ScenePlacement> {
+        self.placement.as_ref()
+    }
+
+    /// Placement of the source-local entity containing a nested Prefab patch record.
+    #[must_use]
+    pub const fn anchor_placement(&self) -> Option<&crate::ScenePlacement> {
+        self.anchor_placement.as_ref()
+    }
     #[must_use]
     pub const fn source(&self) -> &AuthoringDocumentSource {
         &self.source
@@ -510,6 +523,7 @@ pub struct UnavailablePatchTarget {
     source: AuthoringDocumentSource,
     document_kind: AuthoringDocumentKind,
     anchor: SceneEntityId,
+    anchor_placement: Option<crate::ScenePlacement>,
     operation_path: Vec<usize>,
     target_kind: AuthoringPatchTargetKind,
     entity: SceneEntityId,
@@ -520,6 +534,10 @@ pub struct UnavailablePatchTarget {
 }
 
 impl UnavailablePatchTarget {
+    #[must_use]
+    pub const fn anchor_placement(&self) -> Option<&crate::ScenePlacement> {
+        self.anchor_placement.as_ref()
+    }
     #[must_use]
     pub const fn source(&self) -> &AuthoringDocumentSource {
         &self.source
@@ -1013,6 +1031,29 @@ pub(crate) struct AuthoringDocumentState {
 }
 
 impl AuthoringDocumentState {
+    pub(crate) fn catalog_components(&self) -> impl Iterator<Item = (&ComponentSchema, bool)> {
+        self.basis
+            .schemas
+            .values()
+            .map(|entry| (&entry.schema, entry.adapter.is_some()))
+    }
+
+    pub(crate) fn initial_component(
+        &self,
+        component: &ComponentTypeId,
+    ) -> Option<SceneComponentRecord> {
+        let entry = self.basis.schemas.get(component)?;
+        if entry.adapter.is_none() || !component_allows_composition(&entry.schema) {
+            return None;
+        }
+        Some(
+            SceneComponentRecord::new(
+                entry.schema.version(),
+                entry.schema.authoring_initial_value()?.clone(),
+            )
+            .with_owner(entry.owner.clone()),
+        )
+    }
     pub(crate) const fn readiness(&self) -> AuthoringDocumentReadiness {
         self.readiness
     }
@@ -1096,14 +1137,14 @@ impl AuthoringDocumentState {
     }
 }
 
-pub(crate) struct PreparedSceneAuthoringFieldEdit {
+pub(crate) struct PreparedSceneAuthoringPatch {
     pub(crate) document: SceneDocument,
     pub(crate) state: AuthoringDocumentState,
     pub(crate) patch: ScenePatchDocument,
     pub(crate) report: ScenePatchReport,
 }
 
-pub(crate) struct PreparedPrefabAuthoringFieldEdit {
+pub(crate) struct PreparedPrefabAuthoringPatch {
     pub(crate) document: PrefabDocument,
     pub(crate) state: AuthoringDocumentState,
     pub(crate) patch: ScenePatchDocument,
@@ -1357,6 +1398,7 @@ struct ClassificationContext<'a> {
     basis: &'a AuthoringClassificationBasis,
     record_facts: Vec<AuthoringRecordFact>,
     manifest: Vec<UnavailableRecordManifestEntry>,
+    placements: BTreeMap<SceneEntityId, crate::ScenePlacement>,
 }
 
 fn classify_scene_document(
@@ -1378,6 +1420,10 @@ fn classify_scene_document(
             basis: &basis,
             record_facts: Vec::new(),
             manifest: Vec::new(),
+            placements: crate::patch::authoring_entity_placements(
+                &document.roots,
+                &document.entities,
+            ),
         };
         for entity in &document.entities {
             classify_entity_components(entity, AuthoringRecordOrigin::Direct, &mut context)?;
@@ -1519,6 +1565,7 @@ enum AuthoringRecordOrigin {
         anchor: SceneEntityId,
         operation_path: Vec<usize>,
         slot: AuthoringPatchRecordSlot,
+        placement: Option<crate::ScenePlacement>,
     },
 }
 
@@ -1527,6 +1574,10 @@ fn classify_entity_components(
     origin: AuthoringRecordOrigin,
     context: &mut ClassificationContext<'_>,
 ) -> Result<(), AuthoringDocumentPublicationError> {
+    let placement = match &origin {
+        AuthoringRecordOrigin::Direct => context.placements.get(&entity.id).cloned(),
+        AuthoringRecordOrigin::Patch { placement, .. } => placement.clone(),
+    };
     for (component, record) in &entity.components {
         let location = match &origin {
             AuthoringRecordOrigin::Direct => AuthoringRecordLocation::EntityComponent {
@@ -1536,6 +1587,7 @@ fn classify_entity_components(
                 anchor,
                 operation_path,
                 slot,
+                ..
             } => AuthoringRecordLocation::PatchComponent {
                 anchor: anchor.clone(),
                 operation_path: operation_path.clone(),
@@ -1543,7 +1595,7 @@ fn classify_entity_components(
                 entity: entity.id.clone(),
             },
         };
-        classify_complete_record(location, &entity.id, component, record, context)?;
+        classify_complete_record(location, placement.clone(), component, record, context)?;
     }
     if let Some(prefab) = &entity.prefab {
         let (anchor, operation_path) = match origin {
@@ -1561,7 +1613,7 @@ fn classify_entity_components(
 
 fn classify_complete_record(
     location: AuthoringRecordLocation,
-    _entity: &SceneEntityId,
+    placement: Option<crate::ScenePlacement>,
     component: &ComponentTypeId,
     record: &SceneComponentRecord,
     context: &mut ClassificationContext<'_>,
@@ -1631,6 +1683,13 @@ fn classify_complete_record(
             .push(UnavailableRecordManifestEntry::Record(UnavailableRecord {
                 source: context.source.clone(),
                 document_kind: context.kind,
+                placement,
+                anchor_placement: match &location {
+                    AuthoringRecordLocation::EntityComponent { .. } => None,
+                    AuthoringRecordLocation::PatchComponent { anchor, .. } => {
+                        context.placements.get(anchor).cloned()
+                    }
+                },
                 location,
                 owner: classified.owner,
                 component: component.clone(),
@@ -1711,19 +1770,20 @@ fn classify_patch(
         let mut operation_path = parent_path.to_vec();
         operation_path.push(operation_index);
         match operation {
-            ScenePatchOperation::AddEntity { entity, .. } => classify_entity_components(
+            ScenePatchOperation::AddEntity { entity, placement } => classify_entity_components(
                 entity,
                 AuthoringRecordOrigin::Patch {
                     anchor: anchor.clone(),
                     operation_path,
                     slot: AuthoringPatchRecordSlot::AddEntity,
+                    placement: Some(placement.clone()),
                 },
                 context,
             )?,
             ScenePatchOperation::RestoreEntity {
                 entity,
                 descendants,
-                ..
+                placement,
             } => {
                 classify_entity_components(
                     entity,
@@ -1731,9 +1791,14 @@ fn classify_patch(
                         anchor: anchor.clone(),
                         operation_path: operation_path.clone(),
                         slot: AuthoringPatchRecordSlot::RestoreEntity,
+                        placement: Some(placement.clone()),
                     },
                     context,
                 )?;
+                let restored_placements = crate::patch::authoring_entity_placements(
+                    std::slice::from_ref(&entity.id),
+                    std::iter::once(entity).chain(descendants.iter()),
+                );
                 for (index, descendant) in descendants.iter().enumerate() {
                     classify_entity_components(
                         descendant,
@@ -1741,6 +1806,7 @@ fn classify_patch(
                             anchor: anchor.clone(),
                             operation_path: operation_path.clone(),
                             slot: AuthoringPatchRecordSlot::RestoreDescendant { index },
+                            placement: restored_placements.get(&descendant.id).cloned(),
                         },
                         context,
                     )?;
@@ -1757,7 +1823,7 @@ fn classify_patch(
                     slot: AuthoringPatchRecordSlot::AddComponent,
                     entity: entity.clone(),
                 },
-                entity,
+                None,
                 component,
                 value,
                 context,
@@ -1773,7 +1839,7 @@ fn classify_patch(
                     slot: AuthoringPatchRecordSlot::ReplaceComponent,
                     entity: entity.clone(),
                 },
-                entity,
+                None,
                 component,
                 value,
                 context,
@@ -1891,6 +1957,7 @@ fn classify_patch_target(
                 source: context.source.clone(),
                 document_kind: context.kind,
                 anchor: anchor.clone(),
+                anchor_placement: context.placements.get(anchor).cloned(),
                 operation_path,
                 target_kind,
                 entity: entity.clone(),
@@ -1937,7 +2004,16 @@ pub(crate) fn prepare_scene_authoring_patch(
     document: &SceneDocument,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
-) -> Result<PreparedSceneAuthoringFieldEdit, ScenePatchReport> {
+    history: bool,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    if patch.operations.iter().any(|operation| {
+        !matches!(
+            operation,
+            ScenePatchOperation::SetField { .. } | ScenePatchOperation::SetAssetRefField { .. }
+        )
+    }) {
+        return prepare_scene_authoring_structure(document, state, patch, history);
+    }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
     let (mut candidate, inverse) = prepare_field_edits(document.clone(), state, &edits)?;
@@ -1969,7 +2045,7 @@ pub(crate) fn prepare_scene_authoring_patch(
             "Authoring field edit changed the unavailable-record manifest",
         ));
     }
-    Ok(PreparedSceneAuthoringFieldEdit {
+    Ok(PreparedSceneAuthoringPatch {
         document: candidate,
         state: candidate_state,
         patch: patch.clone(),
@@ -1985,7 +2061,29 @@ pub(crate) fn prepare_prefab_authoring_patch(
     document: &PrefabDocument,
     state: &AuthoringDocumentState,
     patch: &ScenePatchDocument,
-) -> Result<PreparedPrefabAuthoringFieldEdit, ScenePatchReport> {
+    history: bool,
+) -> Result<PreparedPrefabAuthoringPatch, ScenePatchReport> {
+    if patch.operations.iter().any(|operation| {
+        !matches!(
+            operation,
+            ScenePatchOperation::SetField { .. } | ScenePatchOperation::SetAssetRefField { .. }
+        )
+    }) {
+        let prepared =
+            prepare_scene_authoring_structure(&document.instantiate(), state, patch, history)?;
+        let candidate = PrefabDocument::new(prepared.document.roots, prepared.document.entities);
+        if crate::format::validate_prefab_publication_shape(&candidate, state.limits).is_err() {
+            return Err(authoring_structure_rejection(
+                "Authoring structure exceeds the Prefab format boundary",
+            ));
+        }
+        return Ok(PreparedPrefabAuthoringPatch {
+            document: candidate,
+            state: prepared.state,
+            patch: prepared.patch,
+            report: prepared.report,
+        });
+    }
     let edits = field_edits_from_patch(patch)?;
     let edit = &edits[0];
     let scene = document.instantiate();
@@ -2022,7 +2120,7 @@ pub(crate) fn prepare_prefab_authoring_patch(
             "Authoring field edit changed the unavailable-record manifest",
         ));
     }
-    Ok(PreparedPrefabAuthoringFieldEdit {
+    Ok(PreparedPrefabAuthoringPatch {
         document: candidate,
         state: candidate_state,
         patch: patch.clone(),
@@ -2032,6 +2130,148 @@ pub(crate) fn prepare_prefab_authoring_patch(
             diagnostics: DiagnosticReport::default(),
         },
     })
+}
+
+fn component_allows_composition(schema: &ComponentSchema) -> bool {
+    schema.has_capability(ComponentCapability::Scene)
+        && schema.has_capability(ComponentCapability::Edit)
+        && schema
+            .fields()
+            .iter()
+            .all(|field| field.has_capability(ComponentCapability::Edit))
+}
+
+fn prepare_scene_authoring_structure(
+    document: &SceneDocument,
+    state: &AuthoringDocumentState,
+    patch: &ScenePatchDocument,
+    history: bool,
+) -> Result<PreparedSceneAuthoringPatch, ScenePatchReport> {
+    // Structural commands are one operation. Field-only transactions retain their existing
+    // bounded multi-write contract, and history never broadens the public mutation vocabulary.
+    if patch.format_version != ScenePatchDocument::CURRENT_FORMAT_VERSION
+        || patch.operations.len() != 1
+    {
+        return Err(authoring_structure_rejection(
+            "Authoring composition requires one explicit structural operation",
+        ));
+    }
+    let operation = &patch.operations[0];
+    match operation {
+        ScenePatchOperation::AddEntity { entity, .. } => {
+            if !entity.components.is_empty()
+                || !entity.children.is_empty()
+                || entity.prefab.is_some()
+            {
+                return Err(authoring_structure_rejection(
+                    "Generic authoring creates only an empty entity",
+                ));
+            }
+        }
+        ScenePatchOperation::RemoveEntity { .. } if history => {}
+        ScenePatchOperation::AddComponent {
+            component, value, ..
+        } => {
+            let Some(entry) = state.basis.schemas.get(component) else {
+                return Err(authoring_structure_rejection(
+                    "Component has no admitted authoring schema",
+                ));
+            };
+            if entry.adapter.is_none()
+                || !component_allows_composition(&entry.schema)
+                || value.version != entry.schema.version()
+                || (if history {
+                    value.owner().is_some_and(|owner| owner != &entry.owner)
+                } else {
+                    value.owner() != Some(&entry.owner)
+                })
+                || (!history && entry.schema.authoring_initial_value() != Some(&value.value))
+            {
+                return Err(authoring_structure_rejection(
+                    "Component creation requires its exact admitted complete template",
+                ));
+            }
+        }
+        ScenePatchOperation::RemoveComponent { entity, component } => {
+            let available = state.record_facts.iter().any(|fact| {
+                fact.readiness.is_available() && &fact.component == component
+                    && matches!(&fact.location, AuthoringRecordLocation::EntityComponent { entity: owner } if owner == entity)
+            });
+            if !available
+                || !state
+                    .basis
+                    .schemas
+                    .get(component)
+                    .is_some_and(|entry| component_allows_composition(&entry.schema))
+            {
+                return Err(authoring_structure_rejection(
+                    "Component removal requires a current data-editable direct record",
+                ));
+            }
+        }
+        _ => {
+            return Err(authoring_structure_rejection(
+                "This structural operation is unavailable for generic authoring",
+            ));
+        }
+    }
+    let mut candidate = document.clone();
+    let inverse = crate::patch::apply_authoring_structure_operation(&mut candidate, operation, 0)
+        .map_err(|diagnostic| {
+        let mut diagnostics = DiagnosticReport::default();
+        diagnostics.push(diagnostic);
+        ScenePatchReport {
+            applied: false,
+            inverse: None,
+            diagnostics,
+        }
+    })?;
+    if crate::format::validate_scene_publication_shape(&candidate, state.limits).is_err() {
+        return Err(authoring_structure_rejection(
+            "Authoring structure exceeds the persistent format boundary",
+        ));
+    }
+    candidate.canonicalize();
+    let candidate_state = classify_scene_document(
+        &candidate,
+        state.source.clone(),
+        state.kind,
+        Arc::clone(&state.basis),
+        state.limits,
+    )
+    .map_err(|error| ScenePatchReport {
+        applied: false,
+        inverse: None,
+        diagnostics: error.into_diagnostics(),
+    })?;
+    if candidate_state.unavailable_manifest != state.unavailable_manifest {
+        return Err(authoring_structure_rejection(
+            "Authoring structure changed the complete unavailable-record manifest",
+        ));
+    }
+    Ok(PreparedSceneAuthoringPatch {
+        document: candidate,
+        state: candidate_state,
+        patch: patch.clone(),
+        report: ScenePatchReport {
+            applied: true,
+            inverse: Some(ScenePatchDocument::new(inverse)),
+            diagnostics: DiagnosticReport::default(),
+        },
+    })
+}
+
+fn authoring_structure_rejection(summary: &'static str) -> ScenePatchReport {
+    let mut diagnostics = DiagnosticReport::default();
+    diagnostics.push(diagnostic_error(
+        "scene.authoring-structure-unavailable",
+        summary,
+    ));
+    ScenePatchReport {
+        applied: false,
+        inverse: None,
+        diagnostics,
+    }
 }
 
 fn field_edits_from_patch(

@@ -211,6 +211,14 @@ impl EditorProjectSession {
             return;
         };
 
+        if !self.prefab_uses_ui_authoring_domain(document) {
+            self.ui_authoring_frame = None;
+            self.ui_authoring_projection_cache = None;
+            #[cfg(feature = "presentation-ui")]
+            self.ui_preview.retire();
+            return;
+        }
+
         let revision = slot.revision();
         let source_binding = slot.source_binding().clone();
         let selection = slot.selection().clone();

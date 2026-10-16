@@ -9,10 +9,9 @@ use nara_scene::{SceneAuthoringRevision, SceneEntityId, ScenePlacement, ScenePla
 use nara_tooling::{
     EditorAction, EditorDocumentId, EditorDocumentMutation, EditorFieldFeedback,
     EditorFieldFeedbackReason, EditorFieldTarget, EditorFieldValidationFailure,
-    EditorNavigationAction, EditorSceneModel, SceneCompositionCommand,
-    SceneCompositionComponentKind, SceneCompositionEntityKind, SceneInspectorCommand,
-    SceneInspectorComponentView, SceneInspectorEntityRow, SceneInspectorFieldState,
-    SceneInspectorFieldView,
+    EditorNavigationAction, EditorSceneModel, SceneCompositionCommand, SceneCompositionEntityKind,
+    SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorEntityRow,
+    SceneInspectorFieldState, SceneInspectorFieldView,
 };
 
 use crate::fields::{
@@ -129,11 +128,11 @@ impl EguiSceneInspectorPanel {
         editing_enabled: bool,
         actions: &mut Vec<EditorAction>,
     ) {
-        let _heading = ui.heading("Scene Tree");
+        let _heading = ui.heading("Document Tree");
         #[cfg(test)]
         crate::editor::record_test_control("Scene Tree heading", _heading.rect);
         let Some(scene) = scene else {
-            ui.label(RichText::new("No active scene").weak());
+            ui.label(RichText::new("No active document").weak());
             return;
         };
         self.show_composition_toolbar(ui, scene, editing_enabled, actions);
@@ -188,14 +187,18 @@ impl EguiSceneInspectorPanel {
         ui.horizontal_wrapped(|ui| {
             let add_root = ui
                 .add_enabled(editing_enabled, Button::new("+ Root"))
-                .on_hover_text("Add a visible root entity");
+                .on_hover_text("Create an entity in this document");
             #[cfg(test)]
             crate::editor::record_test_control("Add Root", add_root.rect);
             if add_root.clicked() {
                 actions.push(compose_action(
                     scene,
                     SceneCompositionCommand::CreateEntity {
-                        kind: SceneCompositionEntityKind::ColoredSprite,
+                        kind: if scene.editor.inspector.composition.generic_authoring {
+                            SceneCompositionEntityKind::Empty
+                        } else {
+                            SceneCompositionEntityKind::ColoredSprite
+                        },
                         placement: ScenePlacement::last(ScenePlacementOwner::Root),
                     },
                 ));
@@ -218,7 +221,11 @@ impl EguiSceneInspectorPanel {
                 actions.push(compose_action(
                     scene,
                     SceneCompositionCommand::CreateEntity {
-                        kind: SceneCompositionEntityKind::ColoredSprite,
+                        kind: if scene.editor.inspector.composition.generic_authoring {
+                            SceneCompositionEntityKind::Empty
+                        } else {
+                            SceneCompositionEntityKind::ColoredSprite
+                        },
                         placement: ScenePlacement::last(ScenePlacementOwner::Parent { parent }),
                     },
                 ));
@@ -227,8 +234,17 @@ impl EguiSceneInspectorPanel {
             let (previous, next) =
                 selected.map_or((None, None), |selected| (selected.previous, selected.next));
             let move_up = ui
-                .add_enabled(editing_enabled && previous.is_some(), Button::new("Up"))
-                .on_hover_text("Move before the previous sibling");
+                .add_enabled(
+                    editing_enabled
+                        && !scene.editor.inspector.composition.generic_authoring
+                        && previous.is_some(),
+                    Button::new("Up"),
+                )
+                .on_hover_text(if scene.editor.inspector.composition.generic_authoring {
+                    "Generic entity reparenting is not admitted"
+                } else {
+                    "Move before the previous sibling"
+                });
             if move_up.clicked() {
                 let entity = selected
                     .expect("Move Up is enabled only with a selection")
@@ -248,7 +264,12 @@ impl EguiSceneInspectorPanel {
                 ));
             }
             let move_down = ui
-                .add_enabled(editing_enabled && next.is_some(), Button::new("Down"))
+                .add_enabled(
+                    editing_enabled
+                        && !scene.editor.inspector.composition.generic_authoring
+                        && next.is_some(),
+                    Button::new("Down"),
+                )
                 .on_hover_text("Move after the next sibling");
             if move_down.clicked() {
                 let entity = selected
@@ -267,8 +288,17 @@ impl EguiSceneInspectorPanel {
             }
 
             let remove = ui
-                .add_enabled(editing_enabled && selected.is_some(), Button::new("Remove"))
-                .on_hover_text("Remove the selected entity subtree");
+                .add_enabled(
+                    editing_enabled
+                        && !scene.editor.inspector.composition.generic_authoring
+                        && selected.is_some(),
+                    Button::new("Remove"),
+                )
+                .on_hover_text(if scene.editor.inspector.composition.generic_authoring {
+                    "Generic entity deletion is not admitted"
+                } else {
+                    "Remove the selected entity subtree"
+                });
             #[cfg(test)]
             crate::editor::record_test_control("Remove Entity", remove.rect);
             if remove.clicked() {
@@ -284,6 +314,15 @@ impl EguiSceneInspectorPanel {
         let Some(selected) = selected else {
             return;
         };
+        if scene.editor.inspector.composition.generic_authoring {
+            ui.label(
+                RichText::new(
+                    "Entity deletion and reparenting are unavailable for generic authoring",
+                )
+                .weak(),
+            );
+            return;
+        }
         let selected_id = &selected.row.id;
         let current_parent = selected.row.parent.as_ref();
         let selected_text = current_parent.map_or("Root", SceneEntityId::as_str);
@@ -383,25 +422,34 @@ impl EguiSceneInspectorPanel {
         actions: &mut Vec<EditorAction>,
     ) {
         ui.horizontal_wrapped(|ui| {
-            for (label, kind) in [
-                ("+ Transform", SceneCompositionComponentKind::Transform2d),
-                ("+ Sprite", SceneCompositionComponentKind::Sprite),
-            ] {
-                let present = view.components.iter().any(|component| {
-                    SceneCompositionComponentKind::from_component_type(&component.component)
-                        == Some(kind)
-                });
+            for capability in &scene.editor.inspector.composition.components {
+                let present = view
+                    .components
+                    .iter()
+                    .any(|component| component.component == capability.component);
+                let label = match capability.component.as_str() {
+                    "nara.transform.Transform2d" => "+ Transform".to_owned(),
+                    "nara.sprite.Sprite" => "+ Sprite".to_owned(),
+                    id => format!("+ {id}"),
+                };
                 let response = ui
-                    .add_enabled(editing_enabled && !present, Button::new(label))
-                    .on_hover_text("Add an admitted component");
+                    .add_enabled(
+                        editing_enabled && !present && capability.add_unavailable_reason.is_none(),
+                        Button::new(&label),
+                    )
+                    .on_hover_text(capability.add_unavailable_reason.unwrap_or(if present {
+                        "Component already exists"
+                    } else {
+                        "Copy this component's complete creation template"
+                    }));
                 #[cfg(test)]
-                crate::editor::record_test_control(label, response.rect);
+                crate::editor::record_test_control(&label, response.rect);
                 if response.clicked() {
                     actions.push(compose_action(
                         scene,
                         SceneCompositionCommand::AddComponent {
                             entity: view.id.clone(),
-                            component: kind,
+                            component: capability.component.clone(),
                         },
                     ));
                 }
@@ -421,7 +469,7 @@ impl EguiSceneInspectorPanel {
         #[cfg(test)]
         crate::editor::record_test_control("Inspector heading", _heading.rect);
         let Some(scene) = scene else {
-            ui.label(RichText::new("No active scene").weak());
+            ui.label(RichText::new("No active document").weak());
             return;
         };
         let Some(view) = &scene.editor.inspector.selected_entity_view else {
@@ -483,18 +531,34 @@ impl EguiSceneInspectorPanel {
             .id_salt(component_key)
             .default_open(true)
             .show(ui, |ui| {
-                if let Some(kind) =
-                    SceneCompositionComponentKind::from_component_type(&component.component)
-                    && ui
-                        .add_enabled(editing_enabled, Button::new("Remove Component"))
-                        .on_hover_text("Remove this admitted component")
-                        .clicked()
+                let removable = component.access.is_editable()
+                    && component.document_version == component.schema_version
+                    && scene
+                        .editor
+                        .inspector
+                        .composition
+                        .components
+                        .iter()
+                        .any(|capability| {
+                            capability.component == component.component && capability.removable
+                        });
+                if ui
+                    .add_enabled(
+                        editing_enabled && removable,
+                        Button::new("Remove Component"),
+                    )
+                    .on_hover_text(if removable {
+                        "Remove this current data-editable component"
+                    } else {
+                        "Unavailable or unsupported records cannot be removed"
+                    })
+                    .clicked()
                 {
                     actions.push(compose_action(
                         scene,
                         SceneCompositionCommand::RemoveComponent {
                             entity: entity.clone(),
-                            component: kind,
+                            component: component.component.clone(),
                         },
                     ));
                 }
@@ -750,6 +814,34 @@ impl EguiSceneInspectorPanel {
 }
 
 fn compose_action(scene: &EditorSceneModel, command: SceneCompositionCommand) -> EditorAction {
+    if scene.kind == nara_tooling::EditorDocumentKind::Prefab {
+        let command = match command {
+            SceneCompositionCommand::CreateEntity { placement, .. } => {
+                nara_tooling::PrefabCompositionCommand::CreateEntity {
+                    draft: nara_tooling::PrefabCompositionEntityDraft::new(Default::default())
+                        .expect("empty draft is within the composition envelope"),
+                    placement,
+                }
+            }
+            SceneCompositionCommand::AddComponent { entity, component } => {
+                nara_tooling::PrefabCompositionCommand::AddComponent { entity, component }
+            }
+            SceneCompositionCommand::RemoveComponent { entity, component } => {
+                nara_tooling::PrefabCompositionCommand::RemoveComponent { entity, component }
+            }
+            SceneCompositionCommand::MoveEntity { entity, to } => {
+                nara_tooling::PrefabCompositionCommand::MoveEntity { entity, to }
+            }
+            SceneCompositionCommand::RemoveEntity { entity } => {
+                nara_tooling::PrefabCompositionCommand::RemoveEntity { entity }
+            }
+        };
+        return EditorAction::Mutate(EditorDocumentMutation::ComposePrefab {
+            document: scene.document,
+            base_revision: scene.revision,
+            command,
+        });
+    }
     EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
         document: scene.document,
         base_revision: scene.revision,

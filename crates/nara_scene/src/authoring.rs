@@ -621,6 +621,46 @@ pub struct PrefabAuthoringSession {
 }
 
 impl PrefabAuthoringSession {
+    /// Projects the exact retained catalog independently from the records already present.
+    #[cfg(feature = "serde")]
+    pub fn authoring_catalog_components(
+        &self,
+    ) -> impl Iterator<Item = (&nara_reflect::ComponentSchema, bool)> {
+        self.authority
+            .published()
+            .into_iter()
+            .flat_map(|state| state.catalog_components())
+    }
+
+    /// Copies complete creation data without executing a native component provider.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_initial_component(
+        &self,
+        component: &nara_reflect::ComponentTypeId,
+    ) -> Option<crate::SceneComponentRecord> {
+        self.authority.published()?.initial_component(component)
+    }
+
+    /// Returns the retained schema only for a current Available direct record.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_component_schema(
+        &self,
+        entity: &crate::SceneEntityId,
+        component: &nara_reflect::ComponentTypeId,
+    ) -> Option<&nara_reflect::ComponentSchema> {
+        let record = self
+            .document
+            .entities
+            .iter()
+            .find(|record| &record.id == entity)?
+            .components
+            .get(component)?;
+        self.authority
+            .published()?
+            .available_component_schema(entity, component, record.version)
+    }
     #[must_use]
     pub fn new(document: PrefabDocument) -> Self {
         Self::new_with_history_limits(document, SceneAuthoringHistoryLimits::default())
@@ -897,7 +937,7 @@ impl PrefabAuthoringSession {
         self.apply_authoring_patch(&edit.to_patch())
     }
 
-    /// Commits one bounded field-only transaction while preserving unavailable source records.
+    /// Commits one admitted data transaction while preserving unavailable source records.
     #[cfg(feature = "serde")]
     pub fn apply_authoring_patch(&mut self, patch: &ScenePatchDocument) -> ScenePatchReport {
         let Some(state) = self.authority.published() else {
@@ -907,11 +947,12 @@ impl PrefabAuthoringSession {
             &self.document,
             state,
             patch,
+            false,
         ) {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };
-        let crate::authoring_decode::PreparedPrefabAuthoringFieldEdit {
+        let crate::authoring_decode::PreparedPrefabAuthoringPatch {
             document,
             state,
             patch,
@@ -1031,7 +1072,7 @@ impl PrefabAuthoringSession {
             self.history
                 .apply_history(&mut self.document, direction, |patch, document| {
                     let prepared = crate::authoring_decode::prepare_prefab_authoring_patch(
-                        document, state, patch,
+                        document, state, patch, true,
                     )?;
                     next_state = Some(prepared.state);
                     Ok((prepared.document, prepared.report))
@@ -1056,6 +1097,26 @@ impl PrefabAuthoringSession {
 }
 
 impl SceneAuthoringSession {
+    /// Projects the exact retained catalog independently from the records already present.
+    #[cfg(feature = "serde")]
+    pub fn authoring_catalog_components(
+        &self,
+    ) -> impl Iterator<Item = (&nara_reflect::ComponentSchema, bool)> {
+        self.authority
+            .published()
+            .into_iter()
+            .flat_map(|state| state.catalog_components())
+    }
+
+    /// Copies complete creation data without executing a native component provider.
+    #[cfg(feature = "serde")]
+    #[must_use]
+    pub fn authoring_initial_component(
+        &self,
+        component: &nara_reflect::ComponentTypeId,
+    ) -> Option<crate::SceneComponentRecord> {
+        self.authority.published()?.initial_component(component)
+    }
     #[must_use]
     pub fn new(document: SceneDocument) -> Self {
         Self::new_with_history_limits(document, SceneAuthoringHistoryLimits::default())
@@ -1368,7 +1429,7 @@ impl SceneAuthoringSession {
         self.apply_authoring_patch(&edit.to_patch())
     }
 
-    /// Commits one bounded field-only transaction while preserving unavailable source records.
+    /// Commits one admitted data transaction while preserving unavailable source records.
     #[cfg(feature = "serde")]
     pub fn apply_authoring_patch(&mut self, patch: &ScenePatchDocument) -> ScenePatchReport {
         let Some(state) = self.authority.published() else {
@@ -1378,11 +1439,12 @@ impl SceneAuthoringSession {
             &self.document,
             state,
             patch,
+            false,
         ) {
             Ok(prepared) => prepared,
             Err(report) => return report,
         };
-        let crate::authoring_decode::PreparedSceneAuthoringFieldEdit {
+        let crate::authoring_decode::PreparedSceneAuthoringPatch {
             document,
             state,
             patch,
@@ -1703,7 +1765,7 @@ impl SceneAuthoringSession {
             self.history
                 .apply_history(&mut self.document, direction, |patch, document| {
                     let prepared = crate::authoring_decode::prepare_scene_authoring_patch(
-                        document, state, patch,
+                        document, state, patch, true,
                     )?;
                     next_state = Some(prepared.state);
                     Ok((prepared.document, prepared.report))

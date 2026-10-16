@@ -2804,6 +2804,146 @@ mod tests {
     };
     use nara_scene::SceneEntityId;
 
+    #[cfg(feature = "runtime-ui")]
+    #[test]
+    fn native_prefab_patch_cannot_cross_into_ui_domain_without_ui_admission() {
+        use nara_scene::{
+            PrefabAuthoringSession, PrefabDocument, SceneComponentRecord, SceneDocument,
+            SceneEntityRecord, ScenePatchDocument, ScenePatchOperation,
+        };
+        use nara_tooling::{
+            EditorAction, EditorActionBatch, EditorActionOutcome, EditorDocumentMutation,
+            EditorDocumentSourceBinding,
+        };
+        use std::{
+            fs,
+            sync::atomic::{AtomicU64, Ordering},
+            time::Instant,
+        };
+
+        static NEXT_ROOT: AtomicU64 = AtomicU64::new(1);
+        let root = std::env::temp_dir().join(format!(
+            "nara-ui-transition-{}-{}",
+            std::process::id(),
+            NEXT_ROOT.fetch_add(1, Ordering::Relaxed)
+        ));
+        for directory in ["assets", "scenes", "prefabs", "schema"] {
+            fs::create_dir_all(root.join(directory)).unwrap();
+        }
+        fs::write(root.join("nara.toml"), "schema_version = 1\n[project]\nname = \"UI transition\"\n[paths]\nassets = \"assets\"\nscenes = \"scenes\"\nprefabs = \"prefabs\"\n[startup]\ndefault_scene = \"startup.scene.json\"\n[authoring]\nschema_bundle = \"schema/authoring.bundle.json\"\n[runtime]\npreset = \"local-headless\"\n[capabilities]\nrequested = [\"runtime-2d\", \"runtime-ui\"]\n").unwrap();
+        fs::write(
+            root.join("scenes/startup.scene.json"),
+            SceneDocument::default().to_json_string().unwrap(),
+        )
+        .unwrap();
+        let bundle = nara_reflect::AuthoringSchemaBundle::from_trusted_provider_definitions(
+            built_in_schema_providers(),
+        )
+        .unwrap();
+        fs::write(
+            root.join("schema/authoring.bundle.json"),
+            bundle.to_json_string().unwrap(),
+        )
+        .unwrap();
+        #[cfg(windows)]
+        let directory = {
+            use std::os::windows::fs::OpenOptionsExt;
+            fs::OpenOptions::new()
+                .read(true)
+                .share_mode(7)
+                .custom_flags(0x0200_0000 | 0x0020_0000)
+                .open(&root)
+                .unwrap()
+        };
+        #[cfg(unix)]
+        let directory = fs::File::open(&root).unwrap();
+        let capability = DirectoryCapability::from_host_handle(
+            directory,
+            nara_fs::HostCapabilityOptions::new(
+                nara_fs::CapabilityRights::ReadWrite,
+                nara_fs::TrustMode::TrustedLocal,
+            ),
+        )
+        .unwrap();
+        let mut editor = EditorProjectSession::open_trusted_compiled(
+            capability,
+            TrustedCompiledEditorProjectIntent::new(),
+        )
+        .unwrap();
+        let entity = SceneEntityId::new("ordinary").unwrap();
+        let original = PrefabDocument::from_ordered_roots([SceneEntityRecord::new(entity.clone())]);
+        let document = editor
+            .workspace
+            .open_prefab_session(
+                "Ordinary",
+                EditorDocumentSourceBinding::new("ordinary.prefab.json"),
+                PrefabAuthoringSession::new(original.clone()),
+            )
+            .unwrap()
+            .opened_document
+            .unwrap();
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        let revision = frame.workspace().document(document).unwrap().revision;
+        let report = editor
+            .dispatch_editor_actions(EditorActionBatch::new(
+                frame.revision(),
+                [EditorAction::Mutate(
+                    EditorDocumentMutation::ApplyPrefabPatch {
+                        document,
+                        base_revision: revision,
+                        patch: ScenePatchDocument::new([ScenePatchOperation::AddComponent {
+                            entity,
+                            component: ComponentTypeId::new("nara.ui.UiRoot"),
+                            value: SceneComponentRecord::new(
+                                ComponentSchemaVersion::ONE,
+                                ComponentValue::map([(
+                                    "layer",
+                                    ComponentValue::String("base".into()),
+                                )]),
+                            ),
+                        }]),
+                    },
+                )],
+            ))
+            .unwrap();
+        let accepted = matches!(&report.outcomes()[0], EditorActionOutcome::Workspace(report) if report.applied);
+        let slot = editor.workspace.prefab(document).unwrap();
+        let unchanged = slot.session().document() == &original
+            && slot.revision() == revision
+            && slot.session().history_status().undo_depth == 0;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if matches!(
+                editor.advance_close(),
+                EditorProjectCloseProgress::Complete(_)
+            ) {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        drop(editor);
+        let resolved = root.canonicalize().unwrap();
+        assert!(resolved.starts_with(std::env::temp_dir().canonicalize().unwrap()));
+        assert!(
+            resolved
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("nara-ui-transition-")
+        );
+        fs::remove_dir_all(resolved).unwrap();
+        assert!(
+            !accepted,
+            "an ordinary Prefab acquired a UI root without its required UiNode"
+        );
+        assert!(
+            unchanged,
+            "a rejected UI domain transition must preserve the document and history"
+        );
+    }
+
     #[derive(Debug, Component)]
     struct ComponentReadOnlyProbe {
         value: i64,

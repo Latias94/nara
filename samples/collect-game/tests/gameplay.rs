@@ -3,14 +3,37 @@ use std::{
     time::{Duration, Instant},
 };
 
-use collect_gameplay::{Direction, GameSnapshot, demonstration_commands, movement};
+use collect_gameplay::{
+    Collectible, Direction, GameSnapshot, PlayerConfig, demonstration_commands, movement,
+};
 use nara::{
     gameplay::{
         GameplayCommandIngressSource, GameplayCommandSourceSequence, GameplayCommandSubmission,
         GameplayCommandTick,
     },
     project_host::{HeadlessRun, HeadlessRunOutcome},
+    reflect::{ComponentValue, PersistentComponentProvider},
 };
+
+#[test]
+fn custom_creation_templates_keep_the_current_float_wire_contract() {
+    for (schema, field, expected) in [
+        (PlayerConfig::persistent_component_schema(), "speed", 240.0),
+        (Collectible::persistent_component_schema(), "radius", 20.0),
+    ] {
+        assert_eq!(schema.version().get(), 2);
+        let value = schema
+            .authoring_initial_value()
+            .expect("the sample publishes complete scalar creation data");
+        assert_eq!(
+            value,
+            &ComponentValue::map([(
+                field,
+                ComponentValue::f64(expected).expect("the creation value is finite"),
+            )])
+        );
+    }
+}
 
 fn run(ticks: u32, commands: Vec<GameplayCommandSubmission>) -> GameSnapshot {
     let mut run = HeadlessRun::<GameSnapshot>::from_recipe(

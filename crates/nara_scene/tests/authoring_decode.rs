@@ -21,6 +21,90 @@ use nara_scene::{
 const OWNER: &str = "nara.scene.hierarchy.components";
 
 #[test]
+fn generic_insertion_preserves_unknown_placement_and_rejects_prepend_atomically() {
+    let (bundle, adapter, document, _) = cross_component_authoring_fixture();
+    let published =
+        SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(source("scenes/placement.scene.json"), &bundle, &[adapter])
+            .unwrap()
+            .publish();
+    let mut session = SceneAuthoringSession::from_published_authoring_document(published);
+    let manifest = session.unavailable_record_manifest().unwrap().clone();
+    let before = session.document().clone();
+    let revision = session.revision();
+    let history = session.history_status();
+    let prepend =
+        session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(scene_id("prepended")),
+            placement: ScenePlacement::first(ScenePlacementOwner::Root),
+        }]));
+    assert!(
+        !prepend.applied,
+        "prepending changed the semantic placement of an unavailable record"
+    );
+    assert_eq!(session.document(), &before);
+    assert_eq!(session.revision(), revision);
+    assert_eq!(session.history_status(), history);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    let append =
+        session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(scene_id("appended")),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]));
+    assert!(append.applied, "{:?}", append.diagnostics);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &before);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+}
+
+#[test]
+fn generic_composition_preserves_unavailable_records_and_round_trips_history() {
+    let (bundle, adapter, document, _) = cross_component_authoring_fixture();
+    let published =
+        SceneDocumentCandidate::decode_json_bytes(document.to_json_string().unwrap().as_bytes())
+            .unwrap()
+            .admit_authoring(source("scenes/composition.scene.json"), &bundle, &[adapter])
+            .unwrap()
+            .publish();
+    let manifest = published.unavailable_manifest().clone();
+    let mut session = SceneAuthoringSession::from_published_authoring_document(published);
+    let created = scene_id("created");
+    let create =
+        session.apply_authoring_patch(&ScenePatchDocument::new([ScenePatchOperation::AddEntity {
+            entity: SceneEntityRecord::new(created.clone()),
+            placement: ScenePlacement::last(ScenePlacementOwner::Root),
+        }]));
+    assert!(create.applied, "{:?}", create.diagnostics);
+    assert_eq!(session.history_status().undo_depth, 1);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+
+    let add = session.apply_authoring_patch(&ScenePatchDocument::new([
+        ScenePatchOperation::AddComponent {
+            entity: created.clone(),
+            component: component_id("nara.scene.Name"),
+            value: SceneComponentRecord::new(
+                ComponentSchemaVersion::ONE,
+                ComponentValue::String("Entity".to_owned()),
+            )
+            .with_owner(persistent_owner(OWNER)),
+        },
+    ]));
+    assert!(add.applied, "{:?}", add.diagnostics);
+    let accepted = session.document().clone();
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    assert!(session.undo_authoring().applied);
+    assert!(session.undo_authoring().applied);
+    assert_eq!(session.document(), &document);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+    assert!(session.redo_authoring().applied);
+    assert!(session.redo_authoring().applied);
+    assert_eq!(session.document(), &accepted);
+    assert_eq!(session.unavailable_record_manifest(), Some(&manifest));
+}
+
+#[test]
 fn authoring_preview_projects_only_exact_available_direct_records() {
     let (bundle, adapter) = scene_bundle_and_name_adapter();
     let owner = persistent_owner(OWNER);

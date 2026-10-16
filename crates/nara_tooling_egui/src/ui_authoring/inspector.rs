@@ -212,6 +212,8 @@ impl EguiUiAuthoringPanel {
         self.structure_focus = Some(match outcome {
             PrefabCompositionOutcome::Created { entity }
             | PrefabCompositionOutcome::Moved { entity }
+            | PrefabCompositionOutcome::ComponentAdded { entity, .. }
+            | PrefabCompositionOutcome::ComponentRemoved { entity, .. }
             | PrefabCompositionOutcome::NoOp { entity } => {
                 EguiUiStructureFocus::Entity(entity.clone())
             }

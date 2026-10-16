@@ -7,7 +7,7 @@ use std::{
 
 use nara_diagnostic::Diagnostic;
 use nara_reflect::{
-    ComponentCapability, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
+    ComponentCapability, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
 };
 use nara_scene::{
     PrefabDocument, SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
@@ -29,32 +29,6 @@ pub enum SceneCompositionEntityKind {
     ColoredSprite,
 }
 
-/// The bounded component drafts admitted by the first Scene Composition product slice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SceneCompositionComponentKind {
-    Transform2d,
-    Sprite,
-}
-
-impl SceneCompositionComponentKind {
-    /// Resolves one admitted stable component type into the bounded composition vocabulary.
-    #[must_use]
-    pub fn from_component_type(component: &ComponentTypeId) -> Option<Self> {
-        match component.as_str() {
-            TRANSFORM_COMPONENT => Some(Self::Transform2d),
-            SPRITE_COMPONENT => Some(Self::Sprite),
-            _ => None,
-        }
-    }
-
-    const fn component_type_name(self) -> &'static str {
-        match self {
-            Self::Transform2d => TRANSFORM_COMPONENT,
-            Self::Sprite => SPRITE_COMPONENT,
-        }
-    }
-}
-
 /// One UI-neutral Scene Composition command.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SceneCompositionCommand {
@@ -67,11 +41,11 @@ pub enum SceneCompositionCommand {
     },
     AddComponent {
         entity: SceneEntityId,
-        component: SceneCompositionComponentKind,
+        component: ComponentTypeId,
     },
     RemoveComponent {
         entity: SceneEntityId,
-        component: SceneCompositionComponentKind,
+        component: ComponentTypeId,
     },
     MoveEntity {
         entity: SceneEntityId,
@@ -107,6 +81,61 @@ impl PreparedSceneComposition {
     }
 }
 
+pub(crate) fn prepare_generic_composition(
+    allocated_entity: Option<SceneEntityId>,
+    command: SceneCompositionCommand,
+    initial_component: impl FnOnce(&ComponentTypeId) -> Option<SceneComponentRecord>,
+) -> Result<PreparedSceneComposition, Diagnostic> {
+    let (operation, selection) = match command {
+        SceneCompositionCommand::CreateEntity {
+            kind: SceneCompositionEntityKind::Empty,
+            placement,
+        } => {
+            let entity = allocated_entity.ok_or_else(entity_id_exhausted)?;
+            (
+                ScenePatchOperation::AddEntity {
+                    entity: SceneEntityRecord::new(entity.clone()),
+                    placement,
+                },
+                SceneCompositionSelection::Select(Some(entity)),
+            )
+        }
+        SceneCompositionCommand::AddComponent { entity, component } => {
+            let value = initial_component(&component).ok_or_else(|| {
+                diagnostic::with_component(
+                    diagnostic::error(
+                        "tooling.composition-template-unavailable",
+                        "Component has no admitted complete creation template",
+                    ),
+                    &component,
+                )
+            })?;
+            (
+                ScenePatchOperation::AddComponent {
+                    entity,
+                    component,
+                    value,
+                },
+                SceneCompositionSelection::Preserve,
+            )
+        }
+        SceneCompositionCommand::RemoveComponent { entity, component } => (
+            ScenePatchOperation::RemoveComponent { entity, component },
+            SceneCompositionSelection::Preserve,
+        ),
+        _ => {
+            return Err(diagnostic::error(
+                "tooling.workspace-authoring-command-unsupported",
+                "Generic composition admits empty creation and current component addition/removal",
+            ));
+        }
+    };
+    Ok(PreparedSceneComposition {
+        patch: ScenePatchDocument::new([operation]),
+        selection,
+    })
+}
+
 pub(crate) fn prepare_scene_composition(
     document: &SceneDocument,
     registry: &ComponentRegistry,
@@ -120,9 +149,9 @@ pub(crate) fn prepare_scene_composition(
             let mut entity = SceneEntityRecord::new(entity_id.clone());
             if kind == SceneCompositionEntityKind::ColoredSprite {
                 let (transform_id, transform) =
-                    component_draft(registry, SceneCompositionComponentKind::Transform2d)?;
+                    component_draft(registry, ComponentTypeId::new(TRANSFORM_COMPONENT))?;
                 let (sprite_id, sprite) =
-                    component_draft(registry, SceneCompositionComponentKind::Sprite)?;
+                    component_draft(registry, ComponentTypeId::new(SPRITE_COMPONENT))?;
                 entity = entity
                     .with_component(transform_id, transform)
                     .with_component(sprite_id, sprite);
@@ -264,6 +293,14 @@ pub enum PrefabCompositionCommand {
     RemoveEntity {
         entity: SceneEntityId,
     },
+    AddComponent {
+        entity: SceneEntityId,
+        component: ComponentTypeId,
+    },
+    RemoveComponent {
+        entity: SceneEntityId,
+        component: ComponentTypeId,
+    },
 }
 
 impl PrefabCompositionCommand {
@@ -287,6 +324,14 @@ pub enum PrefabCompositionOutcome {
     },
     NoOp {
         entity: SceneEntityId,
+    },
+    ComponentAdded {
+        entity: SceneEntityId,
+        component: ComponentTypeId,
+    },
+    ComponentRemoved {
+        entity: SceneEntityId,
+        component: ComponentTypeId,
     },
 }
 
@@ -319,11 +364,39 @@ impl PreparedPrefabComposition {
 
 pub(crate) fn prepare_prefab_composition(
     document: &PrefabDocument,
+    registry: &ComponentRegistry,
     selected: Option<&SceneEntityId>,
     allocated_entity: Option<SceneEntityId>,
     command: PrefabCompositionCommand,
 ) -> Result<PreparedPrefabComposition, Diagnostic> {
     match command {
+        PrefabCompositionCommand::AddComponent { entity, component } => {
+            let (component, value) = component_draft(registry, component)?;
+            Ok(PreparedPrefabComposition {
+                patch: Some(ScenePatchDocument::new([
+                    ScenePatchOperation::AddComponent {
+                        entity: entity.clone(),
+                        component: component.clone(),
+                        value,
+                    },
+                ])),
+                selection: PrefabCompositionSelection::Preserve,
+                outcome: PrefabCompositionOutcome::ComponentAdded { entity, component },
+            })
+        }
+        PrefabCompositionCommand::RemoveComponent { entity, component } => {
+            admitted_component(registry, component.clone())?;
+            Ok(PreparedPrefabComposition {
+                patch: Some(ScenePatchDocument::new([
+                    ScenePatchOperation::RemoveComponent {
+                        entity: entity.clone(),
+                        component: component.clone(),
+                    },
+                ])),
+                selection: PrefabCompositionSelection::Preserve,
+                outcome: PrefabCompositionOutcome::ComponentRemoved { entity, component },
+            })
+        }
         PrefabCompositionCommand::CreateEntity { draft, placement } => {
             let entity_id = allocated_entity.ok_or_else(prefab_entity_id_exhausted)?;
             let mut entity = SceneEntityRecord::new(entity_id.clone());
@@ -426,19 +499,28 @@ fn prefab_entity_id_exhausted() -> Diagnostic {
 
 fn component_draft(
     registry: &ComponentRegistry,
-    component: SceneCompositionComponentKind,
+    component: ComponentTypeId,
 ) -> Result<(ComponentTypeId, SceneComponentRecord), Diagnostic> {
     let (component_id, version) = admitted_component(registry, component)?;
-    let value = match component {
-        SceneCompositionComponentKind::Transform2d => default_transform_value(),
-        SceneCompositionComponentKind::Sprite => default_sprite_value(),
-    };
+    let value = registry
+        .schema(&component_id)
+        .and_then(|schema| schema.authoring_initial_value())
+        .cloned()
+        .ok_or_else(|| {
+            diagnostic::with_component(
+                diagnostic::error(
+                    "tooling.composition-template-unavailable",
+                    "Component has no complete authoring creation template",
+                ),
+                &component_id,
+            )
+        })?;
     Ok((component_id, SceneComponentRecord::new(version, value)))
 }
 
 fn admitted_component(
     registry: &ComponentRegistry,
-    component: SceneCompositionComponentKind,
+    component: ComponentTypeId,
 ) -> Result<(ComponentTypeId, ComponentSchemaVersion), Diagnostic> {
     if !registry.is_frozen() {
         return Err(diagnostic::error(
@@ -446,7 +528,7 @@ fn admitted_component(
             "scene composition requires a frozen component registry",
         ));
     }
-    let component_id = component_type(component);
+    let component_id = component;
     let Some(schema) = registry.schema(&component_id) else {
         return Err(diagnostic::with_component(
             diagnostic::error(
@@ -456,10 +538,9 @@ fn admitted_component(
             &component_id,
         ));
     };
-    if schema.version() != ComponentSchemaVersion::ONE
-        || !ComponentCapability::SCENE_AUTHORING
-            .into_iter()
-            .all(|capability| schema.has_capability(capability))
+    if !ComponentCapability::SCENE_AUTHORING
+        .into_iter()
+        .all(|capability| schema.has_capability(capability))
     {
         return Err(diagnostic::with_component(
             diagnostic::error(
@@ -471,71 +552,6 @@ fn admitted_component(
     }
 
     Ok((component_id, schema.version()))
-}
-
-fn component_type(component: SceneCompositionComponentKind) -> ComponentTypeId {
-    ComponentTypeId::new(component.component_type_name())
-}
-
-fn default_transform_value() -> ComponentValue {
-    ComponentValue::map([
-        ("translation", vec2(0.0, 0.0)),
-        ("rotation", finite(0.0)),
-        ("scale", vec2(1.0, 1.0)),
-    ])
-}
-
-fn default_sprite_value() -> ComponentValue {
-    ComponentValue::map([
-        ("size", vec2(64.0, 64.0)),
-        ("anchor", vec2(0.0, 0.0)),
-        (
-            "material",
-            ComponentValue::map([
-                ("image", ComponentValue::Null),
-                (
-                    "sampler",
-                    ComponentValue::map([
-                        ("min_filter", ComponentValue::String("linear".to_string())),
-                        ("mag_filter", ComponentValue::String("linear".to_string())),
-                        (
-                            "mipmap_filter",
-                            ComponentValue::String("linear".to_string()),
-                        ),
-                        (
-                            "address_mode_u",
-                            ComponentValue::String("clamp_to_edge".to_string()),
-                        ),
-                        (
-                            "address_mode_v",
-                            ComponentValue::String("clamp_to_edge".to_string()),
-                        ),
-                    ]),
-                ),
-                ("alpha_mode", ComponentValue::String("blend".to_string())),
-                (
-                    "tint",
-                    ComponentValue::map([
-                        ("r", finite(0.20)),
-                        ("g", finite(0.55)),
-                        ("b", finite(0.95)),
-                        ("a", finite(1.0)),
-                    ]),
-                ),
-            ]),
-        ),
-        ("layer", ComponentValue::I64(0)),
-        ("sort_key", ComponentValue::I64(0)),
-        ("texture_region", ComponentValue::Null),
-    ])
-}
-
-fn vec2(x: f64, y: f64) -> ComponentValue {
-    ComponentValue::map([("x", finite(x)), ("y", finite(y))])
-}
-
-fn finite(value: f64) -> ComponentValue {
-    ComponentValue::f64(value).expect("composition draft constants must be finite")
 }
 
 fn require_entity(document: &SceneDocument, entity: &SceneEntityId) -> Result<(), Diagnostic> {

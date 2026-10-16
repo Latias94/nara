@@ -36,12 +36,6 @@ impl EditorProjectSession {
         if self.authoring_project().is_some() {
             return self.open_authoring_prefab_source(source_binding);
         }
-        if !cfg!(feature = "runtime-ui") {
-            return editor_workspace_command_rejected(
-                self.workspace.active_document(),
-                "project.editor.ui-authoring-unavailable",
-            );
-        }
         let Some(lane) = self.trusted_compiled() else {
             return editor_workspace_command_rejected(
                 self.workspace.active_document(),
@@ -66,12 +60,6 @@ impl EditorProjectSession {
                 );
             }
         };
-        if !prefab_contains_ui_root(session.document()) {
-            return editor_workspace_command_rejected(
-                self.workspace.active_document(),
-                "project.editor.prefab-source-not-ui",
-            );
-        }
         let project_path = self
             .trusted_compiled()
             .map(|lane| lane.content_candidate.settings().paths.prefabs.as_str())
@@ -988,18 +976,6 @@ impl EditorProjectSession {
                 ContentDigest::from_parts(digest.encoded_bytes(), digest.hash()),
             ),
         );
-    }
-}
-
-fn prefab_contains_ui_root(document: &nara_scene::PrefabDocument) -> bool {
-    #[cfg(feature = "runtime-ui")]
-    {
-        nara_ui::__private::prefab_contains_ui_root(document)
-    }
-    #[cfg(not(feature = "runtime-ui"))]
-    {
-        let _ = document;
-        false
     }
 }
 
