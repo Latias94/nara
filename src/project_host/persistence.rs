@@ -1,6 +1,4 @@
-mod file_publication;
-
-pub(super) use file_publication::{
+pub(super) use super::file_publication::{
     FilePublicationBinding, FilePublicationEvidence, FilePublicationFailureStage,
     FilePublicationHost, FilePublicationOutcome, FilePublicationRejection,
 };

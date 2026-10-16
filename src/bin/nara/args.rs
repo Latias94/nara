@@ -6,6 +6,7 @@ pub(crate) enum Command {
     Help,
     Version,
     Check(CheckArguments),
+    Schema(SchemaArguments),
     New(NewArguments),
     Export(ExportArguments),
     Repair(RepairArguments),
@@ -14,6 +15,12 @@ pub(crate) enum Command {
 pub(crate) struct CheckArguments {
     pub(crate) project: PathBuf,
     pub(crate) profile: Option<String>,
+}
+
+pub(crate) struct SchemaArguments {
+    pub(crate) project: PathBuf,
+    pub(crate) profile: Option<String>,
+    pub(crate) write: bool,
 }
 
 pub(crate) struct NewArguments {
@@ -59,6 +66,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Com
         Some("--help" | "-h" | "help") => ensure_terminal(arguments, Command::Help),
         Some("--version" | "-V") => ensure_terminal(arguments, Command::Version),
         Some("check") => parse_check(arguments),
+        Some("schema") => parse_schema(arguments),
         Some("new") => parse_new(arguments),
         Some("export") => parse_export(arguments),
         Some("repair") => parse_repair(arguments),
@@ -85,6 +93,31 @@ fn parse_check(mut arguments: impl Iterator<Item = OsString>) -> Result<Command,
         }
     }
     Ok(Command::Check(CheckArguments { project, profile }))
+}
+
+fn parse_schema(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {
+    let project = arguments
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| error("missing project directory"))?;
+    let mut profile = None;
+    let mut write = None;
+    while let Some(flag) = arguments.next() {
+        match flag.to_str() {
+            Some("--check") => set_once(&mut write, false)?,
+            Some("--write") => set_once(&mut write, true)?,
+            Some("--profile") => set_once(
+                &mut profile,
+                required_unicode(arguments.next(), "missing profile name")?,
+            )?,
+            _ => return Err(error("unknown schema-command option")),
+        }
+    }
+    Ok(Command::Schema(SchemaArguments {
+        project,
+        profile,
+        write: write.ok_or_else(|| error("choose exactly one of --check or --write"))?,
+    }))
 }
 
 fn parse_repair(mut arguments: impl Iterator<Item = OsString>) -> Result<Command, ParseError> {
@@ -273,5 +306,25 @@ mod tests {
             error.to_string(),
             "command option was provided more than once"
         );
+    }
+
+    #[test]
+    fn schema_requires_one_explicit_mode() {
+        for arguments in [
+            vec!["schema", "project"],
+            vec!["schema", "project", "--check", "--write"],
+            vec!["schema", "project", "--write", "--write"],
+            vec!["schema", "project", "--check", "--profile"],
+        ] {
+            assert!(parse(arguments.into_iter().map(OsString::from)).is_err());
+        }
+        let Command::Schema(arguments) =
+            parse(["schema", "project", "--write", "--profile", "desktop"].map(OsString::from))
+                .unwrap()
+        else {
+            panic!("schema selects its own command");
+        };
+        assert!(arguments.write);
+        assert_eq!(arguments.profile.as_deref(), Some("desktop"));
     }
 }

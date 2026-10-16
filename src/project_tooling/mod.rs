@@ -23,6 +23,7 @@ mod export;
 pub mod host_fs;
 mod product_observation;
 mod protocol;
+mod schema;
 
 pub use bootstrap::{ProjectToolInvocationError, invoke_project_tool};
 #[doc(hidden)]
@@ -33,6 +34,11 @@ pub enum ProjectToolRequest {
     Check {
         project: PathBuf,
         profile: Option<String>,
+    },
+    Schema {
+        project: PathBuf,
+        profile: Option<String>,
+        write: bool,
     },
     Export {
         project: PathBuf,
@@ -50,6 +56,7 @@ impl ProjectToolRequest {
     fn project(&self) -> &std::path::Path {
         match self {
             Self::Check { project, .. }
+            | Self::Schema { project, .. }
             | Self::Export { project, .. }
             | Self::RepairStartupScene { project, .. } => project,
         }
@@ -57,9 +64,9 @@ impl ProjectToolRequest {
 
     fn profile(&self) -> Option<&str> {
         match self {
-            Self::Check { profile, .. } | Self::RepairStartupScene { profile, .. } => {
-                profile.as_deref()
-            }
+            Self::Check { profile, .. }
+            | Self::Schema { profile, .. }
+            | Self::RepairStartupScene { profile, .. } => profile.as_deref(),
             Self::Export { .. } => None,
         }
     }
@@ -67,6 +74,8 @@ impl ProjectToolRequest {
     fn operation(&self) -> &'static str {
         match self {
             Self::Check { .. } => "check",
+            Self::Schema { write: false, .. } => "schema-check",
+            Self::Schema { write: true, .. } => "schema-write",
             Self::Export { .. } => "export",
             Self::RepairStartupScene { .. } => "repair-startup-scene",
         }
@@ -78,6 +87,9 @@ impl ProjectToolRequest {
 pub enum ProjectToolSummary {
     Checked {
         startup_members: usize,
+    },
+    Schema {
+        written: bool,
     },
     Exported {
         startup_members: usize,
@@ -180,6 +192,11 @@ fn execute(
                 startup_members: closure.members().len(),
             })
         }
+        ProjectToolRequest::Schema {
+            project,
+            profile,
+            write,
+        } => schema::execute(project, profile, write, recipe),
         ProjectToolRequest::Export {
             project,
             parent,

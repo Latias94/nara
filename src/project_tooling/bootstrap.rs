@@ -31,6 +31,7 @@ pub fn invoke_project_tool(
 ) -> Result<ProjectToolSummary, ProjectToolInvocationError> {
     match &mut request {
         ProjectToolRequest::Check { project, .. }
+        | ProjectToolRequest::Schema { project, .. }
         | ProjectToolRequest::RepairStartupScene { project, .. } => {
             *project = fs::canonicalize(&project).map_err(ProjectToolInvocationError::Resolve)?;
         }
@@ -53,7 +54,7 @@ pub fn invoke_project_tool(
         .arg("--project-root")
         .arg(request.project());
     match &request {
-        ProjectToolRequest::Check { profile, .. } => {
+        ProjectToolRequest::Check { profile, .. } | ProjectToolRequest::Schema { profile, .. } => {
             if let Some(profile) = profile {
                 command.arg("--profile").arg(profile);
             }
@@ -149,7 +150,7 @@ fn build_headless(project: &Path, desktop: bool) -> Result<PathBuf, ProjectToolI
         desktop,
     );
     if !status.success() {
-        return Err(ProjectToolInvocationError::Bootstrap("the project headless bootstrap build failed; fix its Cargo diagnostics before strict Check or Export".to_owned()));
+        return Err(ProjectToolInvocationError::Bootstrap("the project headless bootstrap build failed; fix its Cargo diagnostics before running the project tool".to_owned()));
     }
     selected
 }

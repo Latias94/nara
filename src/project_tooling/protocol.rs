@@ -67,6 +67,15 @@ fn parse_selected(
         Some("check") if parent.is_none() && destination.is_none() && replacement.is_none() => {
             Ok(ProjectToolRequest::Check { project, profile })
         }
+        Some("schema-check" | "schema-write")
+            if parent.is_none() && destination.is_none() && replacement.is_none() =>
+        {
+            Ok(ProjectToolRequest::Schema {
+                project,
+                profile,
+                write: operation.to_str() == Some("schema-write"),
+            })
+        }
         Some("export") if profile.is_none() && replacement.is_none() => {
             Ok(ProjectToolRequest::Export {
                 project,
@@ -94,6 +103,9 @@ pub(super) fn encode_response(
     match result {
         Ok(ProjectToolSummary::Checked { startup_members }) => {
             json!({"version":1,"operation":operation,"success":true,"startup_members":startup_members})
+        }
+        Ok(ProjectToolSummary::Schema { written }) => {
+            json!({"version":1,"operation":operation,"success":true,"written":written})
         }
         Ok(ProjectToolSummary::Exported {
             startup_members,
@@ -148,6 +160,12 @@ pub(super) fn decode_response(
                 "check" => ProjectToolSummary::Checked {
                     startup_members: count()?,
                 },
+                "schema-check" | "schema-write" => ProjectToolSummary::Schema {
+                    written: value["written"]
+                        .as_bool()
+                        .filter(|written| operation == "schema-write" || !*written)
+                        .ok_or("invalid project tool schema publication outcome")?,
+                },
                 "export" => ProjectToolSummary::Exported {
                     startup_members: count()?,
                     product_observations: value["product_observations"]
@@ -192,5 +210,57 @@ mod tests {
     #[test]
     fn gameplay_output_is_not_tool_agreement() {
         assert!(decode_response(b"starter_headless: ok fixed_ticks=1\n", "check").is_err());
+    }
+
+    #[test]
+    fn schema_operations_preserve_mode_profile_and_response() {
+        for (operation, write) in [("schema-check", false), ("schema-write", true)] {
+            let project = std::env::current_dir().unwrap();
+            let request = parse_request([
+                OsString::from(TOOL_ARGUMENT),
+                OsString::from(PROTOCOL_VERSION),
+                OsString::from(operation),
+                OsString::from("--project-root"),
+                project.clone().into_os_string(),
+                OsString::from("--profile"),
+                OsString::from("desktop"),
+            ])
+            .unwrap()
+            .unwrap();
+            assert!(matches!(request, ProjectToolRequest::Schema {
+                project: actual,
+                profile: Some(profile),
+                write: actual_write,
+            } if actual == project && profile == "desktop" && actual_write == write));
+            let summary = ProjectToolSummary::Schema { written: write };
+            let response = encode_response(operation, Ok(summary.clone()));
+            assert_eq!(
+                decode_response(&serde_json::to_vec(&response).unwrap(), operation),
+                Ok(Ok(summary))
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_operations_and_schema_mutation_claims_are_rejected() {
+        let project = std::env::current_dir().unwrap();
+        for operation in ["schema", "schema-delete", "run-untrusted"] {
+            assert!(
+                parse_request([
+                    OsString::from(TOOL_ARGUMENT),
+                    OsString::from(PROTOCOL_VERSION),
+                    OsString::from(operation),
+                    OsString::from("--project-root"),
+                    project.clone().into_os_string(),
+                ])
+                .unwrap()
+                .is_err()
+            );
+        }
+        let response = encode_response(
+            "schema-check",
+            Ok(ProjectToolSummary::Schema { written: true }),
+        );
+        assert!(decode_response(&serde_json::to_vec(&response).unwrap(), "schema-check").is_err());
     }
 }

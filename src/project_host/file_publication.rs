@@ -204,6 +204,10 @@ impl FilePublicationHost {
         self.cleanup.is_some()
     }
 
+    pub(in crate::project_host) fn cleanup(&self) -> Option<&TemporaryFileCleanup> {
+        self.cleanup.as_ref()
+    }
+
     pub(in crate::project_host) fn retry_cleanup(&mut self) -> bool {
         #[cfg(test)]
         if self.block_cleanup && self.cleanup.is_some() {

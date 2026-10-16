@@ -2,6 +2,16 @@ mod composition;
 mod ingest;
 mod product_launch;
 
+#[cfg(all(
+    feature = "runtime-2d",
+    feature = "serde",
+    any(feature = "tooling", feature = "project-tooling")
+))]
+mod file_publication;
+
+#[cfg(feature = "project-tooling")]
+pub(crate) mod schema;
+
 #[cfg(feature = "serde")]
 #[allow(
     dead_code,

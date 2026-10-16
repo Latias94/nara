@@ -8,12 +8,14 @@ mod check;
 mod export;
 mod new;
 mod repair;
+mod schema;
 
 const HELP: &str = "\
 Nara project workflow
 
 Usage:
   nara check <project-directory> [--profile <name>]
+  nara schema <project-directory> (--check | --write) [--profile <name>]
   nara new desktop-2d/v1 <slug> --parent <directory> --local-checkout <directory>
   nara new desktop-2d/v1 <slug> --parent <directory> --git <https-url> --rev <object-id>
   nara export <project-directory> --parent <directory> --destination <name>
@@ -33,6 +35,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(args::Command::Check(arguments)) => run_check(arguments),
+        Ok(args::Command::Schema(arguments)) => run_schema(arguments),
         Ok(args::Command::New(arguments)) => run_new(arguments),
         Ok(args::Command::Export(arguments)) => run_export(arguments),
         Ok(args::Command::Repair(arguments)) => run_repair(arguments),
@@ -50,6 +53,24 @@ fn run_check(arguments: args::CheckArguments) -> ExitCode {
                 "Project check passed with {} startup-closure members.",
                 startup_members
             );
+            ExitCode::SUCCESS
+        }
+        Ok(_) => ExitCode::FAILURE,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_schema(arguments: args::SchemaArguments) -> ExitCode {
+    match schema::execute(arguments) {
+        Ok(ProjectToolSummary::Schema { written: true }) => {
+            println!("Wrote the declared authoring schema bundle.");
+            ExitCode::SUCCESS
+        }
+        Ok(ProjectToolSummary::Schema { written: false }) => {
+            println!("The declared authoring schema bundle is current.");
             ExitCode::SUCCESS
         }
         Ok(_) => ExitCode::FAILURE,
