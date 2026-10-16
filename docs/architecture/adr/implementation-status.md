@@ -18,7 +18,10 @@ compiler recovery and two-product development Export from an unrelated CWD. The
 record includes actual build/data/Rust timings and bounded ergonomic follow-ups.
 Review `20261016-101126-0d3e71ba` has no remaining product-source defects; its sole
 plan-evidence finding #1 is closed by that acceptance, preserving the historical
-Not ready receipt. No successor is automatically active.
+Not ready receipt. The explicitly authorized
+[Custom Component Authoring](../../plans/2026-10-16-1101-feat-custom-component-authoring-plan.md)
+successor is active under registration `522f9c6d8d7b436abae267b098528179`.
+U1-U4 are pending verification; the predecessor evidence remains unchanged.
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) owns the focused refinements.
 
 The final acceptance record

@@ -21,7 +21,10 @@ an index, not another source of architecture decisions.
    U1-U6 proves independent creation, explicit schema refresh, a public-API game,
    ordinary editing/Play and development export from committed source `78faa7c` on Windows.
    It closes the prior excluded-source review scope and records actual iteration times.
-   No successor is active automatically. Remaining native platform limitations are
+   The explicitly authorized [Custom Component Authoring](../plans/2026-10-16-1101-feat-custom-component-authoring-plan.md)
+   successor is active under registration `522f9c6d8d7b436abae267b098528179`.
+   It covers finite scalar derives and ordinary schema-driven editing, with native
+   preview and strict Runtime admission kept separate. Remaining native platform limitations are
    recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).

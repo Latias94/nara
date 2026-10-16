@@ -32,6 +32,25 @@ code would weaken registry authority and turn untrusted data into code execution
 also remain strict: an unknown top-level file version or unknown `ComponentValue` wire tag cannot be
 preserved safely because the current engine does not know how to delimit or migrate it.
 
+## Schema-only authoring refinement (2026-10-16)
+
+The collection game's simple custom configuration triggers the schema-only Adapter
+revisit. The Host may install an engine-owned data Adapter for a non-empty component
+whose Scene/Inspect schema consists entirely of supported scalar fields.
+First-party asset-reference authoring retains its existing native Adapter. The
+data Adapter binds the exact persistent owner, catalog generation,
+fingerprint and predecessor; it is not an executable-provider receipt.
+
+Such records become authoring `Available` only after complete value coverage,
+required paths, kinds and finite numeric domains validate. Editing reuses the same
+checks and atomic document transactions. Unsupported shapes and unavailable schema
+versions retain the existing preservation gates. Hidden game-specific invariants
+are outside this descriptor and remain subject to strict Check and Runtime.
+
+Authoring availability does not imply a native preview binding. The typed preview
+omits data-only records with an explicit reason while retaining their complete source
+record. This refinement never adds a native binding or executes project codecs.
+
 ## Decision
 
 Nara authoring preserves a complete bounded semantic component record when the

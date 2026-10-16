@@ -4,3 +4,4 @@ repo-ref/
 .nara-supervised-play-canary-*/
 .nara/import-cache/
 __pycache__/
+docs/reviews/

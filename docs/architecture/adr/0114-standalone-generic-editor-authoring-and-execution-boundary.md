@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-18
-**Last Revised**: 2026-08-19
+**Last Revised**: 2026-10-16
 **Owner**: Private `nara-editor`, project Host, `nara_project`, `nara_reflect`, `nara_scene`,
 `nara_tooling`, and project workflow owners
 **Refines**: [ADR 0090](0090-unavailable-schema-and-lossless-authoring.md) and
@@ -144,6 +144,20 @@ every reachable source record is bound; a project-wide bundle may be a bounded s
 profiles.
 
 ### Lossless degraded authoring
+
+The ordinary Editor also installs the finite engine-owned data Adapter admitted by
+ADR 0090's 2026-10-16 refinement. Exact schema data grants only supported data
+inspection/editing, never native execution. Its compatibility receipt uses owned
+persistent catalog identity, separate from trusted executable-provider evidence.
+Open and external Play re-admission construct the same Adapter basis; browser
+documents and Reopen retain that basis. Field candidates validate complete schema
+coverage and numeric domains before publication.
+
+Native preview support is an independent capability. A data-editable record without
+that support remains in the source and is explicitly omitted from the first-party
+typed preview. Play/Check still validate against the compiled project's exact
+Runtime registry. A successful authoring edit cannot assert project-specific
+invariants absent from the finite descriptor.
 
 ADR 0090 is accepted and owns record readiness, semantic preservation, operation gates, and strict
 Runtime rejection. The generic Editor applies that contract as follows:
