@@ -16,7 +16,7 @@ mod platform {
         ffi::OsStr,
         fs::{self, DirBuilder},
         io,
-        os::unix::fs::MetadataExt as _,
+        os::unix::fs::{DirBuilderExt as _, MetadataExt as _},
         path::{Path, PathBuf},
     };
 

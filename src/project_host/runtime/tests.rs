@@ -62,6 +62,7 @@ use nara_scene::{ScenePatchDocument, ScenePatchOperation, ScenePlacement, SceneP
 use nara_tasks::{
     TASK_PLUGIN_ID, TaskDomainKey, TaskHandle, TaskPoolKind, TaskPools, TaskSpawnRequest,
 };
+#[cfg(feature = "tooling")]
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorActionOutcome, EditorActionRejection,
     EditorAtomicFieldEdit, EditorDocumentMutation, EditorFieldWrite, EditorGestureAction,
