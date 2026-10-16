@@ -1,0 +1,34 @@
+[package]
+name = "collect-game"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[package.metadata.nara]
+project-tool-protocol = 1
+
+[workspace]
+resolver = "3"
+members = ["gameplay-plugin"]
+
+[dependencies]
+nara = { path = "../..", default-features = false, features = ["runtime-2d", "serde", "project-tooling"] }
+collect-gameplay = { path = "gameplay-plugin" }
+
+[features]
+default = []
+desktop = ["nara/presentation-2d", "nara/desktop-winit", "nara/render-wgpu", "collect-gameplay/desktop"]
+
+[lib]
+name = "nara_game"
+path = "src/lib.rs"
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+
+[[bin]]
+name = "desktop"
+path = "src/bin/desktop.rs"
+required-features = ["desktop"]

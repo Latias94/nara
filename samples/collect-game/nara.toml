@@ -1,0 +1,45 @@
+schema_version = 1
+
+[project]
+name = "collect-game"
+stable_id = "collect-game"
+version = "0.1.0"
+
+[paths]
+assets = "assets"
+scenes = "scenes"
+prefabs = "prefabs"
+
+[authoring]
+schema_bundle = "schema/authoring.bundle.json"
+
+[startup]
+default_scene = "startup.scene.json"
+
+[runtime]
+preset = "local-headless"
+fixed_timestep_seconds = 0.02
+
+[window]
+enabled = false
+
+[capabilities]
+requested = ["runtime-2d"]
+
+[profiles.desktop.capabilities]
+requested = ["runtime-2d", "presentation-2d", "desktop-winit", "render-wgpu"]
+
+[profiles.desktop.execution]
+contract = "desktop-supervised-play/v1"
+
+[profiles.desktop.runtime]
+preset = "local-headless"
+fixed_timestep_seconds = 0.02
+
+[profiles.desktop.window]
+enabled = true
+title = "Collect three gems | WASD move | R reset"
+width = 1280
+height = 720
+present_mode = "fifo"
+resizable = true

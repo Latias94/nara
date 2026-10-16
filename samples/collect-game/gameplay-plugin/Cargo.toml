@@ -1,0 +1,13 @@
+[package]
+name = "collect-gameplay"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+nara = { path = "../../..", default-features = false, features = ["runtime-2d", "serde"] }
+
+[features]
+default = []
+desktop = ["nara/desktop-winit"]
