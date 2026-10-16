@@ -1,7 +1,7 @@
 # ADR Implementation Status
 
 **Status**: Active ledger
-**Last Verified Implementation**: 2026-10-16 @ first-author-workflow code checkpoint `78faa7c`, acceptance `7a2024c6678b43a48a069406d6eb729d`; foundation checkpoint `ca3d803`, acceptance `b09676d3fa354aa899a795a5dfe9d2ba`; research archive `652b2eb`.
+**Last Verified Implementation**: 2026-10-16 @ custom-authoring source `25f5c8b`, acceptance `27663c95797a48c58c16188165a86f97`; first-author-workflow source `78faa7c`, acceptance `7a2024c6678b43a48a069406d6eb729d`; foundation checkpoint `ca3d803`, acceptance `b09676d3fa354aa899a795a5dfe9d2ba`; research archive `652b2eb`.
 
 This ledger separates accepted decisions from implementation and platform evidence. The finite
 [2D foundation refactor](../../plans/2026-10-15-1636-refactor-2d-foundation-contracts-plan.md)
@@ -20,8 +20,15 @@ Review `20261016-101126-0d3e71ba` has no remaining product-source defects; its s
 plan-evidence finding #1 is closed by that acceptance, preserving the historical
 Not ready receipt. The explicitly authorized
 [Custom Component Authoring](../../plans/2026-10-16-1101-feat-custom-component-authoring-plan.md)
-successor is active under registration `522f9c6d8d7b436abae267b098528179`.
-U1-U4 are pending verification; the predecessor evidence remains unchanged.
+successor closes U1-U4 under registration `6aa104b8188c4f5285a0b6683a4d4672` and
+[acceptance `27663c95797a48c58c16188165a86f97`](../../knowledge/engineering/verification/2026-10/2026-10-16T040828Z-custom-scalar-authoring-closes-with-clean-committed-source-editor-and-strict-gameplay-27663c95797a48c58c16188165a86f97.md).
+Finite scalar derives and numeric domains now agree across authoring and native
+codecs. Ordinary custom-data editing retains exact owned catalog evidence and
+separate native preview support. Review `20261016-114129-dd0e4796` is complete with
+zero remaining actionable findings; its optional-null Undo defect is fixed and
+independently checked. Clean source `25f5c8b` passes an external ordinary Editor,
+strict gameplay, native Play and compiler-recovery trajectory. No successor starts
+automatically; predecessor evidence remains unchanged.
 [ADR 0117](0117-2d-foundation-ownership-and-authoring-contracts.md) owns the focused refinements.
 
 The final acceptance record

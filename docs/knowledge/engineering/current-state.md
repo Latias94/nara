@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "7456770df6d13d08e6b6a54992b04e02a3531583cfb70cd1915ccc97c7eb402b"
+source_fingerprint: "a0271f9258f732eb0d905dd6ac6f7b98e5444711d8362ff5549b60a0a5d7836d"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "7456770df6d13d08e6b6a54992b04e02a3531583cfb70cd1915ccc97c7e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `7456770df6d13d08e6b6a54992b04e02a3531583cfb70cd1915ccc97c7eb402b`
-- Immutable records: 627
-- Active lane heads: 1
+- Source fingerprint: `a0271f9258f732eb0d905dd6ac6f7b98e5444711d8362ff5549b60a0a5d7836d`
+- Immutable records: 629
+- Active lane heads: 0
 
 # Active Registrations
 
@@ -29,7 +29,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
-- [Nara custom component authoring](registry/2026-10/2026-10-16T031758Z-nara-custom-component-authoring-codex-root-522f9c6d8d7b436abae267b098528179.md): `active` (nara-custom-component-authoring-codex-root; producer `codex-root`)
+- [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -43,6 +43,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Custom scalar authoring closes with clean committed-source Editor and strict gameplay](verification/2026-10/2026-10-16T040828Z-custom-scalar-authoring-closes-with-clean-committed-source-editor-and-strict-gameplay-27663c95797a48c58c16188165a86f97.md) - R1-R5 and U1-U4 accepted through finite scalar contracts, exact data authoring, completed review and an external consumer of committed source.
 - **Subagent Finding**: [Custom component authoring plan review completes with six lenses](subagents/2026-10/2026-10-16T033000Z-custom-component-authoring-plan-review-completes-with-six-lenses-f408016c706f46d9b0855ea906e87c85.md) - Six completed Codex document review lenses report zero findings; finite data authoring clarification preserves R1-R5.
 - **Work Progress**: [First author workflow implementation and committed acceptance complete](progress/2026-10/2026-10-16T025216Z-first-author-workflow-implementation-and-committed-acceptance-complete-938d0131afec43d8b04a1210700ba21a.md) - Work Progress for First author workflow implementation and committed acceptance complete.
 - **Verification Evidence**: [First author workflow U1-U6 closes with clean committed external products and measured iteration](verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md) - Verification Evidence for First author workflow U1-U6 closes with clean committed external products and measured iteration.
@@ -54,7 +55,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Foundation U1-U13 acceptance closes with actual consumers and completed full review](verification/2026-10/2026-10-15T202228Z-foundation-u1-u13-acceptance-closes-with-actual-consumers-and-completed-full-review-b09676d3fa354aa899a795a5dfe9d2ba.md) - Verification Evidence for Foundation U1-U13 acceptance closes with actual consumers and completed full review.
 - **Subagent Finding**: [Full foundation review completes with resolved display coverage and explicit platform limits](subagents/2026-10/2026-10-15T202150Z-full-foundation-review-completes-with-resolved-display-coverage-and-explicit-platform-limits-2f0fee3044664b538a2590f95e61131a.md) - Subagent Finding for Full foundation review completes with resolved display coverage and explicit platform limits.
 - **Work Progress**: [Foundation workflows and final static gates pass with full review in progress](progress/2026-10/2026-10-15T200426Z-foundation-workflows-and-final-static-gates-pass-with-full-review-in-progress-28848ee3f899494dbd153def40469040.md) - Work Progress for Foundation workflows and final static gates pass with full review in progress.
-- **Verification Evidence**: [Paused presentation no longer rewinds and late display completion cannot replace its successor](verification/2026-10/2026-10-15T200246Z-paused-presentation-no-longer-rewinds-and-late-display-completion-cannot-replace-its-successor-114c2cfd30854192a821c22b8afd8487.md) - Verification Evidence for Paused presentation no longer rewinds and late display completion cannot replace its successor.
 
 # Integration Notes
 
