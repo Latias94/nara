@@ -87,6 +87,18 @@ pub struct EguiSceneViewOutput {
 }
 
 impl EguiSceneViewOutput {
+    /// No visible view produced a mapping or an input claim in this redraw.
+    #[must_use]
+    pub const fn unavailable() -> Self {
+        Self {
+            desired_size_points: Vec2::ZERO,
+            pick_uv: None,
+            pick_point: None,
+            mapping: None,
+            camera_changed: false,
+        }
+    }
+
     #[must_use]
     pub const fn desired_size_points(self) -> Vec2 {
         self.desired_size_points

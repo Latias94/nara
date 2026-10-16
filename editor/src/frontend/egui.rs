@@ -12,6 +12,7 @@ use nara::{
     },
 };
 
+use super::egui_workspace::{EguiEditorPanelPainter, EguiPanelPresentation, RegisteredEguiLayout};
 use crate::{
     EditorApplication, EditorApplicationUpdate, EditorProjectAction,
     app::{
@@ -61,12 +62,24 @@ pub struct EguiEditorFrontend {
     manager_draft: EguiProjectOpenDraft,
     workspace_generation: Option<u64>,
     workspace_panel: EguiEditorPanel,
+    panel_presentation: EguiPanelPresentation,
 }
 
 impl EguiEditorFrontend {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Installs only a trusted source-built frontend companion; semantic registration is separate.
+    pub fn register_panel_painter(
+        &mut self,
+        kind: impl Into<String>,
+        painter: EguiEditorPanelPainter,
+    ) {
+        self.panel_presentation
+            .painters
+            .insert(kind.into(), painter);
     }
 
     /// Submits a widget batch and observes its exact result before advancing the application.
@@ -84,8 +97,14 @@ impl EguiEditorFrontend {
     pub(crate) fn observe_dispatch(&mut self, dispatch: &EditorApplicationDispatch) {
         if let Some(feedback) = dispatch.feedback() {
             match feedback {
-                Ok(report) => self.workspace_panel.observe_action_report(report),
-                Err(rejection) => self.workspace_panel.observe_action_rejection(rejection),
+                Ok(report) => {
+                    self.workspace_panel.observe_action_report(report);
+                    self.panel_presentation.observe_report(report);
+                }
+                Err(rejection) => {
+                    self.workspace_panel.observe_action_rejection(rejection);
+                    self.panel_presentation.observe_rejection(rejection);
+                }
             }
         }
     }
@@ -186,13 +205,21 @@ impl EguiEditorFrontend {
                         )
                     })
                 });
-                self.workspace_panel.show_with_authoring_lock(
+                let mut layout = RegisteredEguiLayout {
+                    workspace: application.panel_workspace_mut(),
+                    presentation: &mut self.panel_presentation,
+                    active_gesture: ui_authoring
+                        .as_ref()
+                        .and_then(|authoring| authoring.gesture()),
+                };
+                self.workspace_panel.show_with_layout(
                     ui,
                     &frame,
                     authoring,
                     viewport,
                     selected_viewport,
                     read_only,
+                    &mut layout,
                 )
             })
             .inner;
@@ -232,20 +259,29 @@ impl EguiEditorFrontend {
     }
 
     fn synchronize_workspace(&mut self, application: &mut EditorApplication) {
+        application
+            .panel_workspace_mut()
+            .load_preferences("egui", 1, &[]);
         let generation = application.workspace_generation();
         if self.workspace_generation != generation {
             self.workspace_panel = EguiEditorPanel::new();
+            self.panel_presentation.reset_widgets();
             self.workspace_generation = generation;
         }
     }
 
     pub(crate) fn select_project_browser_sidebar(&mut self) -> bool {
-        self.workspace_generation.is_some() && self.workspace_panel.select_project_browser_sidebar()
+        if self.workspace_generation.is_none() {
+            return false;
+        }
+        let changed = !self.panel_presentation.observed_project_browser_visible;
+        self.panel_presentation.select_project_browser = true;
+        changed
     }
 
     pub(crate) fn project_browser_sidebar_selected(&self) -> bool {
         self.workspace_generation.is_some()
-            && self.workspace_panel.project_browser_sidebar_selected()
+            && self.panel_presentation.observed_project_browser_visible
     }
 
     pub(crate) fn show_project_shell(

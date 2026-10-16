@@ -1,0 +1,14 @@
+[package]
+name = "nara-editor-panel-module-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+egui = "0.36.2"
+nara-editor = { path = "../../editor" }
+nara_tooling = { path = "../../crates/nara_tooling" }
+
+[dev-dependencies]
+nara = { path = "../..", default-features = false, features = ["tooling"] }

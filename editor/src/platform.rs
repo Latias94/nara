@@ -149,7 +149,12 @@ pub fn run_trusted_compiled(
     run_application(application)
 }
 
-fn run_application(application: EditorApplication) -> Result<(), EditorRunError> {
+fn run_application(mut application: EditorApplication) -> Result<(), EditorRunError> {
+    if let Some(preferences) = crate::workspace::EditorWorkspacePreferences::user_default() {
+        application
+            .panel_workspace_mut()
+            .set_preferences(preferences);
+    }
     let _host = drive_native_editor(application, None)?;
     Ok(())
 }

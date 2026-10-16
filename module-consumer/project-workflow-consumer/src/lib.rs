@@ -27,6 +27,10 @@ pub fn publish_creation(prepared: PreparedProjectCreation) -> ProjectCreationOut
 }
 
 /// Checks one authorized project without a CLI, Cargo process, or desktop presentation stack.
+#[expect(
+    clippy::result_large_err,
+    reason = "This compile-only consumer preserves the public transaction result unchanged"
+)]
 pub fn check_startup_content(
     request: ProjectCheckRequest,
 ) -> Result<StartupContentClosureReceipt, ProjectCheckError> {
@@ -47,6 +51,10 @@ pub fn publish_export(prepared: PreparedProjectExport) -> ProjectExportOutcome {
 }
 
 /// Repairs one explicit startup Scene selection without importing CLI or process adapters.
+#[expect(
+    clippy::result_large_err,
+    reason = "This compile-only consumer preserves the public transaction result unchanged"
+)]
 pub fn repair_startup_scene_selection(
     request: ProjectStartupSceneRepairRequest,
 ) -> Result<ProjectStartupSceneRepairOutcome, ProjectStartupSceneRepairError> {

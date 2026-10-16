@@ -11,6 +11,8 @@ egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
 nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-workflow-cargo-facts", "render-wgpu", "runtime-ui", "tooling-egui"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
 winit.workspace = true
 
@@ -33,4 +35,3 @@ windows-sys = { workspace = true, features = [
 
 [dev-dependencies]
 egui_kittest.workspace = true
-serde_json.workspace = true

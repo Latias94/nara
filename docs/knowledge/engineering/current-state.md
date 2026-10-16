@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "c3bc48dd554ae3ba22a7d951242918e121b759efe5fbbf71f13952d1d9a98e8e"
+source_fingerprint: "05dfc3682ed6288983243815400aff1a088b56c4f7bb354902c2eadc3c76018a"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "c3bc48dd554ae3ba22a7d951242918e121b759efe5fbbf71f13952d1d9a
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `c3bc48dd554ae3ba22a7d951242918e121b759efe5fbbf71f13952d1d9a98e8e`
-- Immutable records: 637
+- Source fingerprint: `05dfc3682ed6288983243815400aff1a088b56c4f7bb354902c2eadc3c76018a`
+- Immutable records: 642
 - Active lane heads: 1
 
 # Active Registrations
@@ -31,7 +31,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
-- [Editor U9 committed and independent frontend and template units active](registry/2026-10/2026-10-16T060700Z-nara-editor-foundation-implementation-codex-root-56672773517542bc933100efe7d81bc6.md): `active` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
+- [Editor U1 U2 committed and generic composition plus panel workspace wave active](registry/2026-10/2026-10-16T071907Z-nara-editor-foundation-implementation-codex-root-64cfb629b7a24a75a520e628915f4f82.md): `active` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -45,6 +45,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Editor U3 generic composition and U4 trusted panel workspaces pass owner and native regression gates](verification/2026-10/2026-10-16T084808Z-editor-u3-generic-composition-and-u4-trusted-panel-workspaces-pass-owner-and-native-regression-gates-25b42156b4834a40b67d01eb54671485.md) - Verified uncommitted U3 U4 candidate with full affected owner suites, feature-off UI preservation, trusted panel consumer, focused reviews and Windows generic-open canary.
+- **Memory Event**: [Progress: U3 and U4 are implemented but not committed. Scene authoring_decode 13 tests pas](logs/2026-10/2026-10-16T075010Z-progress-u3-and-u4-are-implemented-but-not-committed-scene-authoring-decode-13-tests-pas-66528c32d1cb4dc5bb0833d5ca317cd8.md) - U3 and U4 are implemented but not committed. Scene authoring_decode 13 tests pass (9b3ed5b7); generic Scene/Prefab and actual panel scrollin
+- **Research**: [Editor U5 view owner research identifies independent admission clocks and exact multi-image composites](2026-10/2026-10-16T072527Z-editor-u5-view-owner-research-identifies-independent-admission-clocks-and-exact-multi-image-composites-9ab9c93b8d954dd5abb5bef8fe960f3b.md) - Read-only source findings for U5; no implementation or native multi-view acceptance claimed.
+- **Memory Event**: [Progress: U2 creation templates committed as 743c045 and U1 frontend separation as a99595d](logs/2026-10/2026-10-16T071907Z-progress-u2-creation-templates-committed-as-743c045-and-u1-frontend-separation-as-a99595d-7394377d6a394d78a784b0862477aebd.md) - U2 creation templates committed as 743c045 and U1 frontend separation as a99595d after full reflection, built-in, Editor, strict starter Exp
 - **Verification Evidence**: [Editor frontend separation and pure creation templates pass semantic and native workflow gates](verification/2026-10/2026-10-16T071148Z-editor-frontend-separation-and-pure-creation-templates-pass-semantic-and-native-workflow-gates-8863dd8fc56d4cad847b7eb255cbd321.md) - U1 and U2 verified through focused regressions, complete reflect and builtin suites, Editor lifecycle, external Play repair, strict starter Check and native Export; independent findings resolved.
 - **Work Progress**: [Editor U1 U2 implementation and review pass focused gates with external starter acceptance running](progress/2026-10/2026-10-16T065628Z-editor-u1-u2-implementation-and-review-pass-focused-gates-with-external-starter-acceptance-running-e8ac82081d064fd9bb59a49e5e5dc55e.md) - Frontend separation and pure templates implemented, 135 reflect plus 145 builtin plus 109 Editor tests pass; external full starter acceptance reruns after correcting its obsolete v1 observation assertion.
 - **Work Progress**: [Editor U9 committed and U1 U2 implementation wave begins with observed template red](progress/2026-10/2026-10-16T061240Z-editor-u9-committed-and-u1-u2-implementation-wave-begins-with-observed-template-red-73f2454f6826423683ab739bba24bd19.md) - 63ffe42 closes the dependency unit; frontend boundary and pure creation metadata workers are active, with root-only Cargo and observed missing-template API failure.
@@ -53,10 +57,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Verification Evidence**: [Custom scalar authoring closes with clean committed-source Editor and strict gameplay](verification/2026-10/2026-10-16T040828Z-custom-scalar-authoring-closes-with-clean-committed-source-editor-and-strict-gameplay-27663c95797a48c58c16188165a86f97.md) - R1-R5 and U1-U4 accepted through finite scalar contracts, exact data authoring, completed review and an external consumer of committed source.
 - **Subagent Finding**: [Custom component authoring plan review completes with six lenses](subagents/2026-10/2026-10-16T033000Z-custom-component-authoring-plan-review-completes-with-six-lenses-f408016c706f46d9b0855ea906e87c85.md) - Six completed Codex document review lenses report zero findings; finite data authoring clarification preserves R1-R5.
 - **Work Progress**: [First author workflow implementation and committed acceptance complete](progress/2026-10/2026-10-16T025216Z-first-author-workflow-implementation-and-committed-acceptance-complete-938d0131afec43d8b04a1210700ba21a.md) - Work Progress for First author workflow implementation and committed acceptance complete.
-- **Verification Evidence**: [First author workflow U1-U6 closes with clean committed external products and measured iteration](verification/2026-10/2026-10-16T025031Z-first-author-workflow-u1-u6-closes-with-clean-committed-external-products-and-measured-iteration-7a2024c6678b43a48a069406d6eb729d.md) - Verification Evidence for First author workflow U1-U6 closes with clean committed external products and measured iteration.
-- **Subagent Finding**: [First author workflow review has no remaining product defects and one evidence gate](subagents/2026-10/2026-10-16T024040Z-first-author-workflow-review-has-no-remaining-product-defects-and-one-evidence-gate-680bdf8c0e7a4532a30d512fcd0e251e.md) - Subagent Finding for First author workflow review has no remaining product defects and one evidence gate.
-- **Verification Evidence**: [First author workflow closes the prior excluded source review scope](verification/2026-10/2026-10-16T023314Z-first-author-workflow-closes-the-prior-excluded-source-review-scope-136220880e154191a83573e2687f217f.md) - Verification Evidence for First author workflow closes the prior excluded source review scope.
-- **Work Progress**: [Foundation code and research commits are complete locally](progress/2026-10/2026-10-16T011248Z-foundation-code-and-research-commits-are-complete-locally-e217cdc7cfa342ab9e1c6058afa05a28.md) - Work Progress for Foundation code and research commits are complete locally.
 
 # Integration Notes
 

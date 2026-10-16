@@ -72,3 +72,20 @@ Specialized UI structure admission remains enforced for existing and newly intro
 
 The collection-game custom scalar owner now publishes generation-2 creation templates and retains its frozen generation-1 catalog.
 Its component wire versions remain 2; refresh the bundle with the compiled project recipe before strict Check or Play.
+
+## Trusted panel contributions and user layouts
+
+The application owns `EditorPanelWorkspace`: a finite trusted descriptor registry, stable panel instances, explicit document targets and user layout preferences.
+Each frontend owns its painting companions and per-instance widgets; callbacks receive read-only semantic models and emit existing `EditorAction` values.
+The independently compiled `module-consumer/editor-panel-consumer` installs through the same registration and callback path as the built-ins.
+Ordinary project opening does not load that contribution from project data or execute project Rust.
+
+Use the Panels menu to open, hide or reset instances and explicitly save the workspace layout.
+The native product stores preferences in the user's configuration directory, outside Scene and Prefab source; headless consumers and canaries opt in separately.
+Source-targeted instances retain stable source kind/locator rather than persisting process-local document IDs.
+Missing contributions and incompatible toolkit data restore a usable layout with a reason.
+Closing an instance leaves document history intact and retires its local drafts; an accepted continuous gesture is cancelled through the existing Host action.
+The originating instance is confirmed from the exact accepted batch outcome, so a rejected Begin cannot steal another instance's gesture.
+
+These changes establish semantic layout ownership and same-window floating panels.
+Actual independent render views, native detached windows and monitor restoration require the subsequent Host/backend units.

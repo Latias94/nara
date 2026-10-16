@@ -217,6 +217,7 @@ enum EditorSessionRetirement {
 
 /// Product-local orchestration around the standalone shell and one Host-owned Editor session.
 pub struct EditorApplication {
+    panel_workspace: crate::workspace::EditorPanelWorkspace,
     state: EditorProductState,
     open_host: EditorProjectOpenHost,
     initial_request: Option<EditorProjectRequest>,
@@ -250,6 +251,7 @@ impl EditorApplication {
             .clone()
             .unwrap_or_else(|| EditorProjectRequest::new(PathBuf::new(), options.profile.clone()));
         Self {
+            panel_workspace: crate::workspace::EditorPanelWorkspace::default(),
             state: EditorProductState::ProjectManager(ProjectManagerState::new(
                 1,
                 suggested_request,
@@ -280,6 +282,7 @@ impl EditorApplication {
         let session = EditorProjectSession::open_trusted_compiled(project_root, intent)?;
         let supervised_play_wake = SupervisedPlayWake::default();
         Ok(Self {
+            panel_workspace: crate::workspace::EditorPanelWorkspace::default(),
             state: EditorProductState::from_published(PublishedEditorProject::new(
                 1,
                 request,
@@ -300,6 +303,15 @@ impl EditorApplication {
     #[must_use]
     pub fn state(&self) -> EditorApplicationState {
         self.state.kind()
+    }
+
+    #[must_use]
+    pub const fn panel_workspace(&self) -> &crate::workspace::EditorPanelWorkspace {
+        &self.panel_workspace
+    }
+
+    pub fn panel_workspace_mut(&mut self) -> &mut crate::workspace::EditorPanelWorkspace {
+        &mut self.panel_workspace
     }
 
     #[must_use]
