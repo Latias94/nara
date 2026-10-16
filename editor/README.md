@@ -34,15 +34,20 @@ The ordinary authoring lane currently supports the admitted Scene and Prefab wor
 editing, persistence, Scene preview, UI Canvas preview, and explicit PNG image Import/Reimport.
 Records without an installed exact authoring adapter remain visible but read-only. Supported saves
 preserve their exact owner, version, value, placement, and reference facts in canonical project
-source. Ordinary Play/Run is intentionally unavailable until Nara has a separate external
-execution Host; the Editor never falls back to compiling or executing project Rust in-process.
+source. Projects declaring `desktop-supervised-play/v1` support ordinary Play through an
+Editor-owned external process. Save before Play. After changing Rust, use Stop then Play to build
+the current source; Restart reuses the same executable generation. Compiler errors leave authoring
+available, and Stop or Editor exit retires the owned child. Opening a project still does not compile
+or execute its Rust code. Pause and Step belong to the separate trusted embedded runtime lane.
 
 ## Import a PNG image
 
 Open the Project sidebar, select a PNG under the project's configured assets root, choose `sRGB`
 or `Linear`, and press `Import`. The Editor creates or updates the adjacent canonical `.meta` file
 and publishes the accepted image into the current authoring session. A UI Prefab can then select
-that logical image path from its brush field and show it in the native UI Canvas.
+that logical image path from its brush field and show it in the native UI Canvas. Scene and Prefab
+Inspector asset-reference fields also accept the logical path, such as `textures/token.png`, or
+`stable_id:<UUID>`. Apply uses the same revision-bound document transaction as other field edits.
 
 `Reimport` applies a changed color-space recipe through the same explicit transaction. Saving a
 Prefab records only the logical image reference. Reopening the same project hydrates referenced
