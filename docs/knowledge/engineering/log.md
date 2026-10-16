@@ -4,6 +4,11 @@
 
 This file is a derived view of immutable shards. It is refreshed only during integration.
 
+## 2026-10-16
+* **Work Registration**: [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md) - Work Registration for Foundation implementation committed with research archived.
+* **Work Progress**: [Foundation code and research commits are complete locally](progress/2026-10/2026-10-16T011248Z-foundation-code-and-research-commits-are-complete-locally-e217cdc7cfa342ab9e1c6058afa05a28.md) - Work Progress for Foundation code and research commits are complete locally.
+* **Verification Evidence**: [Foundation implementation is fully committed after final workspace check](verification/2026-10/2026-10-16T011247Z-foundation-implementation-is-fully-committed-after-final-workspace-check-a95bf9b605bb4510b9865799c2346991.md) - Verification Evidence for Foundation implementation is fully committed after final workspace check.
+
 ## 2026-10-15
 * **Work Registration**: [Foundation U1-U13 completes with reviewed integrated consumer evidence](registry/2026-10/2026-10-15T202335Z-nara-2d-foundation-contracts-codex-root-88b6faf455454957bc7e0f79e76b9850.md) - Work Registration for Foundation U1-U13 completes with reviewed integrated consumer evidence.
 * **Work Progress**: [Foundation U1-U13 implementation and full review are complete in the integrated worktree](progress/2026-10/2026-10-15T202259Z-foundation-u1-u13-implementation-and-full-review-are-complete-in-the-integrated-worktree-d237cddc6a5444559bb013eac57c4fe5.md) - Work Progress for Foundation U1-U13 implementation and full review are complete in the integrated worktree.
@@ -130,8 +135,3 @@ This file is a derived view of immutable shards. It is refreshed only during int
 * **Verification Evidence**: [EUSC-U2 closed UI catalog and exact placement facts](verification/2026-08/2026-08-18T041119Z-eusc-u2-closed-ui-catalog-and-exact-placement-facts-7c4c0f3ba8924f7f84668341aa0011ad.md) - Verifies closed Container/Text/Image/Button recipes, exact source-local structure preflight, semantic brush schema migration, and generation-bound project image choices.
 * **Work Registration**: [Editor UI Prefab Structural Composition v1: EUSC-U2](registry/2026-08/2026-08-18T023409Z-editor-ui-prefab-structural-composition-v1-codex-root-7d7909f021ad48a7806020146ca69f6f.md) - Activates the closed UI catalog and exact source-local placement fact unit after verified Prefab structural patch authority.
 * **Verification Evidence**: [EUSC-U1 ordered Prefab structural patch authority](verification/2026-08/2026-08-18T023352Z-eusc-u1-ordered-prefab-structural-patch-authority-8386ed22067743af8cfb1f88b3ffd314.md) - Verifies failure-atomic ordered Prefab entity structure, inverse history, canonical order, and continued component-structure rejection.
-* **Work Registration**: [Editor UI Prefab Structural Composition v1: EUSC-U1](registry/2026-08/2026-08-18T020927Z-editor-ui-prefab-structural-composition-v1-codex-root-21e04043485446999ebe56db277c87bb.md) - Activates the first implementation unit for failure-atomic ordered Prefab structural patches.
-
-## 2026-08-17
-* **Work Registration**: [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md) - Completed registration for the five-unit Editor UI Prefab authoring and Canvas plan.
-* **Verification Evidence**: [EUA-U5 saved Prefab content refresh and Runtime restart conformance](verification/2026-08/2026-08-17T233048Z-eua-u5-saved-prefab-content-refresh-and-runtime-restart-conformance-cf11b0c7d23a44e7b127b41199ee4ee7.md) - Verifies receipt-bound Prefab Save, immutable successor project-content publication, bounded generations, stale-source containment, explicit Restart, and one same-source Reference Game trajectory.

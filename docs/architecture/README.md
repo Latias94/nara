@@ -13,9 +13,9 @@ an index, not another source of architecture decisions.
    [registration `88b6faf455454957bc7e0f79e76b9850`](../knowledge/engineering/registry/2026-10/2026-10-15T202335Z-nara-2d-foundation-contracts-codex-root-88b6faf455454957bc7e0f79e76b9850.md)
    and [acceptance evidence `b09676d3fa354aa899a795a5dfe9d2ba`](../knowledge/engineering/verification/2026-10/2026-10-15T202228Z-foundation-u1-u13-acceptance-closes-with-actual-consumers-and-completed-full-review-b09676d3fa354aa899a795a5dfe9d2ba.md).
    [ADR 0117](adr/0117-2d-foundation-ownership-and-authoring-contracts.md) owns its focused contract
-   refinements. The result is verified in the integrated worktree, with original overlapping
-   changes preserved. No successor lane is automatically active. Full tracked review and
-   platform/committed-HEAD limitations are recorded in the implementation ledger.
+   refinements. All authorized implementation changes are committed locally through `ca3d803`; the separate
+   research archive is `652b2eb`. No successor lane is automatically active. The full review
+   scope and remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
    Its last predecessor boundary remains registered by
