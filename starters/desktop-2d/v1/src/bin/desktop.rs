@@ -79,7 +79,7 @@ fn main() -> ExitCode {
         None => intent,
     };
     let mut run = DesktopRun::new(project_root, intent);
-    let deadline = Instant::now() + std::time::Duration::from_secs(CLEANUP_DEADLINE_SECONDS);
+    let mut cleanup_deadline = None;
 
     loop {
         let report = run.execute();
@@ -100,16 +100,20 @@ fn main() -> ExitCode {
                 println!("starter_desktop: ok first_present_verified=true");
                 return ExitCode::SUCCESS;
             }
-            DesktopRunOutcome::CleanupIncomplete if Instant::now() < deadline => {
-                std::thread::yield_now();
-            }
             DesktopRunOutcome::Completed(_) | DesktopRunOutcome::Failed => {
                 eprintln!("{:#?}", report.diagnostics());
                 return ExitCode::FAILURE;
             }
             DesktopRunOutcome::CleanupIncomplete => {
-                eprintln!("desktop cleanup exceeded its bounded deadline");
-                return ExitCode::FAILURE;
+                let now = Instant::now();
+                let deadline = cleanup_deadline.get_or_insert_with(|| {
+                    now + std::time::Duration::from_secs(CLEANUP_DEADLINE_SECONDS)
+                });
+                if now >= *deadline {
+                    eprintln!("desktop cleanup exceeded its bounded deadline");
+                    return ExitCode::FAILURE;
+                }
+                std::thread::yield_now();
             }
         }
     }

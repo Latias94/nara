@@ -62,7 +62,6 @@ pub(super) struct DesktopBuildRequest {
     project_root: PathBuf,
     manifest_path: PathBuf,
     lockfile_path: PathBuf,
-    target_directory: PathBuf,
     expected_revision: DesktopBuildInputRevision,
     tools: DesktopBuildTools,
 }
@@ -89,7 +88,6 @@ impl DesktopBuildRequest {
         Ok(Self {
             manifest_path: project_root.join("Cargo.toml"),
             lockfile_path: project_root.join("Cargo.lock"),
-            target_directory: project_root.join("target"),
             project_root,
             expected_revision,
             tools,
@@ -423,7 +421,6 @@ impl DesktopBuildAttempt {
         let request = DesktopBuildRequest {
             manifest_path: project_root.join("Cargo.toml"),
             lockfile_path: project_root.join("Cargo.lock"),
-            target_directory: project_root.join("target"),
             project_root,
             expected_revision: DesktopBuildInputRevision::new(
                 ContentDigest::of_bytes(b"manifest"),

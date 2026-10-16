@@ -94,7 +94,6 @@ fn cancellation_becomes_terminal_only_after_supervised_cleanup() {
     let request = DesktopBuildRequest {
         manifest_path: project_root.join("Cargo.toml"),
         lockfile_path: project_root.join("Cargo.lock"),
-        target_directory: project_root.join("target"),
         project_root,
         expected_revision: DesktopBuildInputRevision::new(
             ContentDigest::of_bytes(b"manifest"),

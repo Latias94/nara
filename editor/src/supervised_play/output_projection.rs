@@ -269,8 +269,15 @@ impl EditorExternalPlayOutputProjection {
                 .dropped_bytes
                 .saturating_add(usize_to_u64(evicted_bytes));
         }
-        let message = EditorExternalPlayMessage::new(sequence, kind, code, text, truncated)
-            .expect("the private output projection emits only bounded path-safe messages");
+        let Some(message) = EditorExternalPlayMessage::new(sequence, kind, code, text, truncated)
+        else {
+            self.dropped_messages = self.dropped_messages.saturating_add(1);
+            self.dropped_bytes = self
+                .dropped_bytes
+                .saturating_add(usize_to_u64(retained_bytes));
+            self.loss_observed = true;
+            return;
+        };
         self.retained_bytes = self.retained_bytes.saturating_add(retained_bytes);
         self.messages.push_back(message);
     }
@@ -499,9 +506,6 @@ fn replace_ascii_case_insensitive(input: String, needle: &str, replacement: &str
 }
 
 fn redact_locator_token(token: &str) -> &str {
-    if token == "[project-root]" || token.starts_with("[project-root]") {
-        return token;
-    }
     let candidate = token.trim_start_matches(|character: char| {
         matches!(character, '(' | '[' | '{' | '<' | '\'' | '"' | '`' | '=')
     });
@@ -596,6 +600,22 @@ mod tests {
         assert!(message.text().contains("[project-root]"));
         assert!(message.text().contains("[redacted-locator]"));
         assert!(message.text().contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn literal_project_root_prefix_does_not_bypass_locator_redaction() {
+        let mut ring = ProcessLogRing::new(log_limits(8, 4096));
+        ring.append(
+            ProcessOutputStream::Stdout,
+            b"[project-root]https://example.invalid [project-root]file://private",
+        )
+        .unwrap();
+        let mut projection = EditorExternalPlayOutputProjection::new();
+        projection.observe_product_logs(&ring, false, Path::new("C:/game"));
+        let output = projection.snapshot();
+        assert_eq!(output.messages().len(), 1);
+        assert!(!output.messages()[0].text().contains("://"));
+        assert!(output.messages()[0].text().contains("[redacted-locator]"));
     }
 
     #[test]

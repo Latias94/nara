@@ -164,7 +164,6 @@ pub(crate) fn metadata_command(request: &DesktopBuildRequest) -> SupervisedProce
         .argument("--manifest-path")
         .argument(request.manifest_path.as_os_str())
         .environment("CARGO_TERM_COLOR", "never")
-        .environment("CARGO_TARGET_DIR", request.target_directory.as_os_str())
         .environment("RUSTC", request.tools.rustc.as_os_str())
 }
 
