@@ -123,11 +123,23 @@ impl Default for EguiGameViewInput {
 pub struct EguiGameViewOutput {
     desired_size_points: Vec2,
     content_rect_points: Option<Rect>,
+    image_layer: egui::LayerId,
     capture_requested: bool,
+    image_has_focus: bool,
+    image_hovered: bool,
+    primary_pointer_pressed_outside_image: bool,
     requested_scale: DisplayScale,
 }
 
 impl EguiGameViewOutput {
+    /// Tests the actual topmost toolkit layer as well as the image's displayed rectangle.
+    #[must_use]
+    pub fn owns_pointer(self, context: &egui::Context, point: egui::Pos2) -> bool {
+        self.content_rect_points
+            .is_some_and(|rect| rect.contains(point))
+            && context.layer_id_at(point) == Some(self.image_layer)
+    }
+
     #[must_use]
     pub const fn desired_size_points(self) -> Vec2 {
         self.desired_size_points
@@ -141,6 +153,21 @@ impl EguiGameViewOutput {
     #[must_use]
     pub const fn capture_requested(self) -> bool {
         self.capture_requested
+    }
+
+    #[must_use]
+    pub const fn image_has_focus(self) -> bool {
+        self.image_has_focus
+    }
+
+    #[must_use]
+    pub const fn image_hovered(self) -> bool {
+        self.image_hovered
+    }
+
+    #[must_use]
+    pub const fn primary_pointer_pressed_outside_image(self) -> bool {
+        self.primary_pointer_pressed_outside_image
     }
 
     #[must_use]
@@ -214,6 +241,30 @@ impl EguiGameViewPanel {
                 .interact_pointer_pos()
                 .zip(content_rect_points)
                 .is_some_and(|(position, content)| content.contains(position));
+        if capture_requested {
+            response.request_focus();
+        }
+        let primary_pointer_pressed_outside_image = ui.input(|state| {
+            state.pointer.button_pressed(PointerButton::Primary)
+                && !state
+                    .pointer
+                    .interact_pos()
+                    .zip(content_rect_points)
+                    .is_some_and(|(position, content)| content.contains(position))
+        });
+        if primary_pointer_pressed_outside_image {
+            response.surrender_focus();
+        }
+        let image_has_focus =
+            content_rect_points.is_some() && !input.modal_active && response.has_focus();
+        let image_hovered = response.hovered()
+            && ui.input(|state| {
+                state
+                    .pointer
+                    .hover_pos()
+                    .zip(content_rect_points)
+                    .is_some_and(|(position, content)| content.contains(position))
+            });
 
         if !matches!(input.content, EguiGameViewContent::Presented { .. }) || input.notice.is_some()
         {
@@ -237,7 +288,11 @@ impl EguiGameViewPanel {
         EguiGameViewOutput {
             desired_size_points: outer_rect.size(),
             content_rect_points,
+            image_layer: ui.layer_id(),
             capture_requested,
+            image_has_focus,
+            image_hovered,
+            primary_pointer_pressed_outside_image,
             requested_scale: if integer_scaling {
                 DisplayScale::IntegerFit
             } else {
@@ -267,6 +322,49 @@ fn texture_facts(content: EguiGameViewContent) -> Option<(TextureId, [u32; 2])> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_floating_inspector_owns_hits_inside_the_game_image_rectangle() {
+        let context = egui::Context::default();
+        let mut panel = EguiGameViewPanel;
+        let mut text = String::new();
+        let mut facts = None;
+        for _ in 0..3 {
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(900.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let game_layer = ui.layer_id();
+                    let game = panel.show(
+                        ui,
+                        EguiGameViewInput::presented(TextureId::User(1), [320, 240]),
+                        Vec2::new(600.0, 400.0),
+                    );
+                    egui::Window::new("Floating Inspector")
+                        .fixed_pos(egui::pos2(250.0, 90.0))
+                        .fixed_size(Vec2::new(200.0, 150.0))
+                        .show(ui.ctx(), |ui| {
+                            let field = ui.text_edit_singleline(&mut text);
+                            facts = Some((game, game_layer, field.rect.center()));
+                        });
+                },
+            );
+            output.drop_without_applying_deltas();
+        }
+        let (game, layer, point) = facts.unwrap();
+        assert!(game.content_rect_points().unwrap().contains(point));
+        assert_ne!(context.layer_id_at(point), Some(layer));
+        assert!(!game.owns_pointer(&context, point));
+        assert!(game.owns_pointer(
+            &context,
+            game.content_rect_points().unwrap().min + Vec2::splat(10.0)
+        ));
+    }
 
     fn paint(
         context: &egui::Context,
@@ -345,5 +443,92 @@ mod tests {
         assert_eq!(scale.fract(), 0.0);
         assert_eq!(scale, content.height() * context.pixels_per_point() / 90.0);
         assert_eq!((content.min.x * context.pixels_per_point()).fract(), 0.0);
+    }
+
+    #[test]
+    fn game_image_focus_releases_to_an_inspector_text_field() {
+        fn draw(
+            context: &egui::Context,
+            panel: &mut EguiGameViewPanel,
+            text: &mut String,
+            events: Vec<egui::Event>,
+        ) -> (EguiGameViewOutput, Rect, bool) {
+            let mut result = None;
+            let output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(900.0, 700.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let mut game_ui =
+                        ui.new_child(egui::UiBuilder::new().id_salt("game-panel").max_rect(
+                            Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(600.0, 400.0)),
+                        ));
+                    let game = panel.show(
+                        &mut game_ui,
+                        EguiGameViewInput::presented(TextureId::User(1), [320, 240]),
+                        Vec2::new(600.0, 400.0),
+                    );
+                    let mut inspector =
+                        ui.new_child(egui::UiBuilder::new().id_salt("inspector-panel").max_rect(
+                            Rect::from_min_size(egui::pos2(650.0, 40.0), Vec2::new(200.0, 200.0)),
+                        ));
+                    let field = inspector.text_edit_singleline(text);
+                    result = Some((game, field.rect, field.has_focus()));
+                },
+            );
+            output.drop_without_applying_deltas();
+            result.unwrap()
+        }
+        fn pointer(position: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        }
+        let context = egui::Context::default();
+        let mut panel = EguiGameViewPanel;
+        let mut text = String::new();
+        let (initial, inspector, _) = draw(&context, &mut panel, &mut text, vec![]);
+        let game_position = initial.content_rect_points().unwrap().center();
+        let _ = draw(
+            &context,
+            &mut panel,
+            &mut text,
+            pointer(game_position, true),
+        );
+        let (captured, _, _) = draw(
+            &context,
+            &mut panel,
+            &mut text,
+            pointer(game_position, false),
+        );
+        assert!(captured.capture_requested());
+        assert!(captured.image_has_focus() && captured.image_hovered());
+
+        let (released, _, field_has_focus) = draw(
+            &context,
+            &mut panel,
+            &mut text,
+            pointer(inspector.center(), true),
+        );
+        assert!(released.primary_pointer_pressed_outside_image());
+        assert!(!released.image_has_focus() && !released.image_hovered());
+        assert!(field_has_focus);
+        let mut events = pointer(inspector.center(), false);
+        events.push(egui::Event::Text("Inspector".to_owned()));
+        let (game, _, field_has_focus) = draw(&context, &mut panel, &mut text, events);
+        assert_eq!(text, "Inspector");
+        assert!(field_has_focus);
+        assert!(!game.capture_requested() && !game.image_has_focus());
     }
 }

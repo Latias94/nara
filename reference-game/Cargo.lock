@@ -2163,6 +2163,8 @@ dependencies = [
  "egui-winit",
  "nara",
  "rustix 1.1.4",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
  "winit",

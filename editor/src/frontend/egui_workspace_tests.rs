@@ -231,12 +231,13 @@ fn accepted_begin_uses_its_batch_index_and_survives_a_later_batch_rejection() {
 }
 
 #[test]
-fn registered_authoring_view_tessellates_the_exact_presented_texture() {
+fn registered_scene_and_game_views_tessellate_both_presented_textures_in_one_frame() {
     use nara::tooling_egui::{
-        EguiCentralViewportInput, EguiEditorPanel, EguiEditorViewport, EguiGameViewInput,
+        EguiAuthoringViewportOutput, EguiCentralViewportInput, EguiEditorPanel, EguiGameViewInput,
         EguiSceneViewInput,
     };
-    let texture = egui::TextureId::User(77);
+    let scene_texture = egui::TextureId::User(77);
+    let game_texture = egui::TextureId::User(78);
     for size in [
         egui::vec2(720.0, 520.0),
         egui::vec2(800.0, 600.0),
@@ -247,6 +248,7 @@ fn registered_authoring_view_tessellates_the_exact_presented_texture() {
         let mut presentation = EguiPanelPresentation::default();
         let frame = empty_frame();
         let mut panel = EguiEditorPanel::new();
+        let mut views = None;
         let output = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -258,28 +260,178 @@ fn registered_authoring_view_tessellates_the_exact_presented_texture() {
                     presentation: &mut presentation,
                     active_gesture: None,
                 };
-                let _ = panel.show_with_layout(
-                    ui,
-                    &frame,
-                    None,
-                    EguiCentralViewportInput::new(
-                        EguiSceneViewInput::presented(texture, [640, 360]),
-                        EguiGameViewInput::unavailable(),
-                    ),
-                    EguiEditorViewport::Authoring,
-                    false,
-                    &mut layout,
+                views = Some(
+                    panel
+                        .show_with_layout(
+                            ui,
+                            &frame,
+                            None,
+                            EguiCentralViewportInput::new(
+                                EguiSceneViewInput::presented(scene_texture, [640, 360]),
+                                EguiGameViewInput::presented(game_texture, [320, 240]),
+                            ),
+                            false,
+                            &mut layout,
+                        )
+                        .into_parts()
+                        .2,
                 );
             },
         );
         let primitives = context.tessellate(output.shapes.clone(), output.pixels_per_point);
-        let samples_texture = primitives.iter().any(|primitive| matches!(&primitive.primitive, egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture));
+        let samples_scene = primitives.iter().any(|primitive| matches!(&primitive.primitive, egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == scene_texture));
+        let samples_game = primitives.iter().any(|primitive| matches!(&primitive.primitive, egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == game_texture));
         output.drop_without_applying_deltas();
         assert!(
-            samples_texture,
-            "the registered view must sample its exact texture at logical window size {size:?}"
+            samples_scene && samples_game,
+            "both registered views must sample their exact textures in one frame at logical window size {size:?}; scene={samples_scene}, game={samples_game}"
+        );
+        let views = views.unwrap();
+        let Some(EguiAuthoringViewportOutput::Scene(scene)) = views.authoring else {
+            panic!("the active Scene must retain its own output");
+        };
+        let scene_rect = scene.display_mapping().unwrap().content_rect();
+        let scene_rect = egui::Rect::from_min_max(
+            egui::Pos2::from(scene_rect.min),
+            egui::Pos2::from(scene_rect.max),
+        );
+        let game_rect = views.game.unwrap().content_rect_points().unwrap();
+        assert!(scene_rect.is_positive() && game_rect.is_positive());
+        assert!(
+            !scene_rect.intersects(game_rect),
+            "each view must retain its own displayed geometry"
         );
     }
+}
+
+#[test]
+fn closing_or_hiding_one_registered_view_leaves_the_other_texture_visible() {
+    use nara::tooling_egui::{EguiCentralViewportInput, EguiGameViewInput, EguiSceneViewInput};
+    let scene_texture = egui::TextureId::User(77);
+    let game_texture = egui::TextureId::User(78);
+    for (retired_kind, hidden) in [
+        ("nara.authoring-view", false),
+        ("nara.game-view", false),
+        ("nara.authoring-view", true),
+        ("nara.game-view", true),
+    ] {
+        let mut workspace = EditorPanelWorkspace::default();
+        let id = workspace
+            .layout()
+            .instances()
+            .iter()
+            .find(|panel| panel.kind() == retired_kind)
+            .unwrap()
+            .id();
+        if hidden {
+            workspace.layout_mut().set_visible(id, false);
+        } else {
+            workspace.layout_mut().close(id);
+        }
+        let context = egui::Context::default();
+        let mut presentation = EguiPanelPresentation::default();
+        let (views, textures) = draw_registered_views(
+            &context,
+            &mut workspace,
+            &mut presentation,
+            EguiCentralViewportInput::new(
+                EguiSceneViewInput::presented(scene_texture, [640, 360]),
+                EguiGameViewInput::presented(game_texture, [320, 240]),
+            ),
+        );
+        let scene_retired = retired_kind == "nara.authoring-view";
+        assert_eq!(views.authoring.is_none(), scene_retired);
+        assert_eq!(views.game.is_none(), !scene_retired);
+        assert_eq!(textures.contains(&scene_texture), !scene_retired);
+        assert_eq!(textures.contains(&game_texture), scene_retired);
+    }
+}
+
+#[test]
+fn changing_game_extent_does_not_replace_the_scene_display_mapping() {
+    use nara::tooling_egui::{EguiCentralViewportInput, EguiGameViewInput, EguiSceneViewInput};
+    let context = egui::Context::default();
+    let mut workspace = EditorPanelWorkspace::default();
+    let mut presentation = EguiPanelPresentation::default();
+    let scene = EguiSceneViewInput::presented(egui::TextureId::User(77), [640, 360]);
+    let game_texture = egui::TextureId::User(78);
+    let (before, _) = draw_registered_views(
+        &context,
+        &mut workspace,
+        &mut presentation,
+        EguiCentralViewportInput::new(
+            scene,
+            EguiGameViewInput::presented(game_texture, [320, 240]),
+        ),
+    );
+    let (after, textures) = draw_registered_views(
+        &context,
+        &mut workspace,
+        &mut presentation,
+        EguiCentralViewportInput::new(
+            scene,
+            EguiGameViewInput::presented(game_texture, [1280, 180]),
+        ),
+    );
+    assert_eq!(before.authoring, after.authoring);
+    assert_ne!(
+        before.game.unwrap().content_rect_points(),
+        after.game.unwrap().content_rect_points()
+    );
+    assert!(textures.contains(&game_texture));
+}
+
+fn draw_registered_views(
+    context: &egui::Context,
+    workspace: &mut EditorPanelWorkspace,
+    presentation: &mut EguiPanelPresentation,
+    viewport: nara::tooling_egui::EguiCentralViewportInput,
+) -> (
+    nara::tooling_egui::EguiCentralViewportOutput,
+    Vec<egui::TextureId>,
+) {
+    use nara::tooling_egui::{EguiEditorLayout, EguiEditorLayoutInput, EguiEditorPanel};
+    let frame = empty_frame();
+    let mut views = None;
+    let output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            views = Some(
+                RegisteredEguiLayout {
+                    workspace,
+                    presentation,
+                    active_gesture: None,
+                }
+                .show(
+                    ui,
+                    &mut EguiEditorPanel::new(),
+                    EguiEditorLayoutInput {
+                        frame: &frame,
+                        ui_authoring: None,
+                        viewport,
+                    },
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                ),
+            );
+        },
+    );
+    let textures = context
+        .tessellate(output.shapes.clone(), output.pixels_per_point)
+        .into_iter()
+        .filter_map(|primitive| match primitive.primitive {
+            egui::epaint::Primitive::Mesh(mesh) => Some(mesh.texture_id),
+            egui::epaint::Primitive::Callback(_) => None,
+        })
+        .collect();
+    output.drop_without_applying_deltas();
+    (views.unwrap(), textures)
 }
 
 fn field_baseline(
@@ -591,7 +743,6 @@ fn draw_ui(
                     frame,
                     ui_authoring: Some(&mut authoring),
                     viewport: EguiCentralViewportInput::unavailable(),
-                    selected_viewport: EguiEditorViewport::Authoring,
                 },
                 &mut actions,
                 &mut Vec::new(),

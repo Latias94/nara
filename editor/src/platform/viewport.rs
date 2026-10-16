@@ -17,7 +17,7 @@ use nara::{
     },
     render_wgpu::__private::{
         WgpuEditorCompositeReceipt, WgpuEditorExecution, WgpuEditorExecutionError,
-        WgpuEditorUiImageSubmission, WgpuEditorViewportIdentity,
+        WgpuEditorUiImageSubmission, WgpuEditorViewId, WgpuEditorViewportIdentity,
         WgpuEditorViewportTargetActivation, WgpuSubmittedImageReceipt,
     },
     scene::{SceneAuthoringRevision, SceneEntityId},
@@ -67,19 +67,23 @@ struct PreparedEditorViewportTarget {
     binding: EditorViewportTextureBinding,
 }
 
+#[derive(Default)]
 pub(super) struct EditorViewportSlot {
+    view_id: Option<WgpuEditorViewId>,
     texture_registration_generation: u64,
     binding: Option<EditorViewportTextureBinding>,
+    presented_image: Option<WgpuSubmittedImageReceipt>,
     game_display_scale: DisplayScale,
 }
 
 impl EditorViewportSlot {
-    pub(super) const fn new() -> Self {
-        Self {
-            texture_registration_generation: 0,
-            binding: None,
-            game_display_scale: DisplayScale::Fit,
-        }
+    pub(super) fn view_id(&self) -> Option<WgpuEditorViewId> {
+        self.view_id
+    }
+
+    pub(super) fn set_view_id(&mut self, view_id: Option<WgpuEditorViewId>) {
+        debug_assert!(self.binding.is_none());
+        self.view_id = view_id;
     }
 
     pub(super) fn has_binding(&self) -> bool {
@@ -114,6 +118,18 @@ impl EditorViewportSlot {
             binding.matches(prepared.image())
                 && binding.registration_generation == prepared.texture_registration_generation()
         })
+    }
+
+    pub(super) fn retained_image(&self) -> Option<(TextureId, WgpuSubmittedImageReceipt)> {
+        let binding = self.binding?;
+        let image = self.presented_image?;
+        binding
+            .matches(image)
+            .then_some((binding.texture_id, image))
+    }
+
+    pub(super) fn remember_presented(&mut self, receipt: WgpuEditorCompositeReceipt) {
+        self.presented_image = Some(receipt.image());
     }
 
     pub(super) fn is_game(&self) -> bool {
@@ -186,6 +202,9 @@ impl EditorViewportSlot {
         };
         let (reservation, texture_id) = gpu
             .reserve_viewport_target_with_texture(
+                self.view_id.ok_or_else(|| {
+                    EditorRunError::Platform("the render view is closed".to_owned())
+                })?,
                 editor_window,
                 source_generation,
                 target,
@@ -237,6 +256,7 @@ impl EditorViewportSlot {
             renderer.renderer.free_texture(&previous.texture_id);
         }
         self.texture_registration_generation = prepared.binding.registration_generation;
+        self.presented_image = None;
     }
 
     fn ensure_target(
@@ -254,7 +274,7 @@ impl EditorViewportSlot {
                     "the previous viewport source was not retired before replacement".to_owned(),
                 ));
             }
-            if gpu.viewport_target_matches(source_generation, target) {
+            if gpu.viewport_target_matches(binding.viewport.view_id(), source_generation, target) {
                 if binding.display_scale == self.display_scale(source) {
                     return Ok(binding);
                 }
@@ -291,6 +311,7 @@ impl EditorViewportSlot {
 
     pub(super) fn retire_gpu_binding(&mut self) {
         self.binding = None;
+        self.presented_image = None;
     }
 
     pub(super) fn retire_target(
@@ -298,11 +319,23 @@ impl EditorViewportSlot {
         gpu: &mut WgpuEditorExecution,
         renderer: &mut EditorEguiRenderer,
     ) {
+        self.presented_image = None;
         let Some(binding) = self.binding.take() else {
             return;
         };
-        gpu.retire_viewport_target();
+        gpu.retire_viewport_target(binding.viewport.view_id());
         renderer.renderer.free_texture(&binding.texture_id);
+    }
+
+    pub(super) fn retire_view(
+        &mut self,
+        gpu: &mut WgpuEditorExecution,
+        renderer: &mut EditorEguiRenderer,
+    ) {
+        self.retire_target(gpu, renderer);
+        if let Some(view_id) = self.view_id.take() {
+            gpu.retire_view(view_id);
+        }
     }
 }
 
@@ -629,7 +662,7 @@ impl EditorUiCanvasPresenter {
             EditorViewportSource::UiPrefab { document, revision },
         )?;
         let submission = gpu
-            .submit_authoring_ui_image(window, packet, paint_packet)
+            .submit_authoring_ui_image(binding.viewport.view_id(), window, packet, paint_packet)
             .map_err(platform_gpu_error)?;
         if !binding.matches(submission) {
             return Err(EditorRunError::Platform(
@@ -842,6 +875,14 @@ pub(super) struct EditorGamePresentedStamp {
 }
 
 impl EditorGamePresentedStamp {
+    pub(super) const fn view_id(self) -> WgpuEditorViewId {
+        self.receipt.image().view_id()
+    }
+
+    pub(super) const fn window_id(self) -> nara::window::WindowId {
+        self.receipt.window().window_id()
+    }
+
     pub(super) const fn identity(self) -> EditorGameViewCandidateIdentity {
         self.identity
     }
@@ -954,11 +995,9 @@ impl EditorGamePresenter {
         slot: &mut EditorViewportSlot,
         gpu: &mut WgpuEditorExecution,
         renderer: &mut EditorEguiRenderer,
-        scene: &mut EditorScenePresenter,
         prepared: PreparedEditorGameStart,
     ) {
         slot.commit_target(gpu, renderer, prepared.target);
-        scene.retire_presentation();
         application.commit_game_start_activation(prepared.application);
         self.state = EditorGamePresenterState::Empty;
     }
@@ -1052,7 +1091,13 @@ impl EditorGamePresenter {
 
         let submission = match (sprites, runtime_ui) {
             (Some(sprites), Some(runtime_ui)) => {
-                match gpu.submit_sprite_ui_image(editor_window, packet, sprites, runtime_ui) {
+                match gpu.submit_sprite_ui_image(
+                    binding.viewport.view_id(),
+                    editor_window,
+                    packet,
+                    sprites,
+                    runtime_ui,
+                ) {
                     Ok(submission) => EditorGameImageSubmission::RuntimeUi(submission),
                     Err(failure) => {
                         let (error, outcomes) = failure.complete();
@@ -1069,7 +1114,12 @@ impl EditorGamePresenter {
                 }
             }
             (Some(sprites), None) => {
-                match gpu.submit_sprite_image(editor_window, packet, sprites) {
+                match gpu.submit_sprite_image(
+                    binding.viewport.view_id(),
+                    editor_window,
+                    packet,
+                    sprites,
+                ) {
                     Ok(submission) => EditorGameImageSubmission::Plain(submission),
                     Err(error) => {
                         self.return_completion(
@@ -1081,7 +1131,12 @@ impl EditorGamePresenter {
                 }
             }
             (None, Some(runtime_ui)) => {
-                match gpu.submit_ui_image(editor_window, packet, runtime_ui) {
+                match gpu.submit_ui_image(
+                    binding.viewport.view_id(),
+                    editor_window,
+                    packet,
+                    runtime_ui,
+                ) {
                     Ok(submission) => EditorGameImageSubmission::RuntimeUi(submission),
                     Err(failure) => {
                         let (error, outcomes) = failure.complete();
@@ -1097,16 +1152,18 @@ impl EditorGamePresenter {
                     }
                 }
             }
-            (None, None) => match gpu.submit_image(editor_window, packet) {
-                Ok(submission) => EditorGameImageSubmission::Plain(submission),
-                Err(error) => {
-                    self.return_completion(
-                        application,
-                        plain_completion_for_error(identity, &error),
-                    )?;
-                    return classify_game_prepare_failure(error);
+            (None, None) => {
+                match gpu.submit_image(binding.viewport.view_id(), editor_window, packet) {
+                    Ok(submission) => EditorGameImageSubmission::Plain(submission),
+                    Err(error) => {
+                        self.return_completion(
+                            application,
+                            plain_completion_for_error(identity, &error),
+                        )?;
+                        return classify_game_prepare_failure(error);
+                    }
                 }
-            },
+            }
         };
         if !binding.matches(submission.image()) {
             let error = WgpuEditorExecutionError::StaleImageSubmission;
@@ -1383,7 +1440,7 @@ impl EditorScenePresenter {
             EditorViewportSource::Scene,
         )?;
         let submission = gpu
-            .submit_sprite_image(window, packet, sprite_batches)
+            .submit_sprite_image(binding.viewport.view_id(), window, packet, sprite_batches)
             .map_err(platform_gpu_error)?;
         if !binding.matches(submission) {
             return Err(EditorRunError::Platform(

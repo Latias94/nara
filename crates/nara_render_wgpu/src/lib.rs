@@ -103,9 +103,9 @@ pub mod __private {
     pub use crate::{
         editor_execution::{
             WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,
-            WgpuEditorFrameOutcome, WgpuEditorReservedViewportTexture, WgpuEditorViewportIdentity,
-            WgpuEditorViewportTargetActivation, WgpuEditorViewportTargetReservation,
-            WgpuEditorWindowFrame,
+            WgpuEditorFrameOutcome, WgpuEditorReservedViewportTexture, WgpuEditorViewId,
+            WgpuEditorViewportIdentity, WgpuEditorViewportTargetActivation,
+            WgpuEditorViewportTargetReservation, WgpuEditorWindowFrame,
         },
         presented::{
             WgpuEditorCompositeReceipt, WgpuEditorWindowPresentedReceipt,

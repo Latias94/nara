@@ -4,11 +4,11 @@ use nara::{
     tooling::EditorActionBatch,
     tooling_egui::{
         EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorOutput, EguiEditorPanel,
-        EguiEditorProjectAction, EguiEditorViewport, EguiEditorViewportIntent,
-        EguiProjectManagerInput, EguiProjectOpenDraft, EguiProjectOpeningInput,
-        EguiProjectRecoveryDiagnostic, EguiProjectRecoveryInput, EguiProjectShellAction,
-        EguiProjectShellInput, EguiProjectShellOutput, EguiProjectShellPanel,
-        EguiUiAuthoringImages, EguiUiAuthoringInput, EguiUiAuthoringMutations,
+        EguiEditorProjectAction, EguiProjectManagerInput, EguiProjectOpenDraft,
+        EguiProjectOpeningInput, EguiProjectRecoveryDiagnostic, EguiProjectRecoveryInput,
+        EguiProjectShellAction, EguiProjectShellInput, EguiProjectShellOutput,
+        EguiProjectShellPanel, EguiUiAuthoringImages, EguiUiAuthoringInput,
+        EguiUiAuthoringMutations,
     },
 };
 
@@ -37,15 +37,13 @@ impl EditorWorkspaceRenderOutput {
         EditorActionBatch,
         Option<EditorProjectAction>,
         EguiCentralViewportOutput,
-        Option<EguiEditorViewportIntent>,
         bool,
     ) {
-        let (actions, project_action, viewport, viewport_intent) = self.editor.into_parts();
+        let (actions, project_action, viewport) = self.editor.into_parts();
         (
             actions,
             project_action.map(lower_project_action),
             viewport,
-            viewport_intent,
             self.project_browser_local_changed,
         )
     }
@@ -116,13 +114,8 @@ impl EguiEditorFrontend {
         root: &mut egui::Ui,
         application: &mut EditorApplication,
     ) -> Option<EditorActionBatch> {
-        self.show_with_viewport(
-            root,
-            application,
-            EguiCentralViewportInput::unavailable(),
-            EguiEditorViewport::Authoring,
-        )
-        .map(EditorWorkspaceRenderOutput::into_action_batch)
+        self.show_with_viewport(root, application, EguiCentralViewportInput::unavailable())
+            .map(EditorWorkspaceRenderOutput::into_action_batch)
     }
 
     #[must_use]
@@ -131,7 +124,6 @@ impl EguiEditorFrontend {
         root: &mut egui::Ui,
         application: &mut EditorApplication,
         viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
     ) -> Option<EditorWorkspaceRenderOutput> {
         self.synchronize_workspace(application);
         let EditorApplicationSurface::Workspace {
@@ -217,7 +209,6 @@ impl EguiEditorFrontend {
                     &frame,
                     authoring,
                     viewport,
-                    selected_viewport,
                     read_only,
                     &mut layout,
                 )

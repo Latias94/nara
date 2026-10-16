@@ -406,6 +406,8 @@ pub struct WgpuRenderBackend {
 }
 
 pub(super) struct WgpuEditorDeviceNamespace {
+    pub(super) instance: wgpu::Instance,
+    pub(super) adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
     pub(super) surface_format: wgpu::TextureFormat,
@@ -685,6 +687,16 @@ impl WgpuRenderBackend {
         self.configure_surface_if_needed(window, size)?;
         let surface_format = self.surface_view_format(window.id)?;
         Ok(WgpuEditorDeviceNamespace {
+            instance: self
+                .instance
+                .as_ref()
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .clone(),
+            adapter: self
+                .adapter
+                .as_ref()
+                .ok_or(WgpuRenderError::BackendNotReady)?
+                .clone(),
             device: self
                 .device
                 .as_ref()
@@ -1043,23 +1055,18 @@ impl WgpuRenderBackend {
         Ok(())
     }
 
-    pub(super) const fn editor_source_generation(&self) -> Option<RenderFrameSourceGeneration> {
-        self.source_generation
-    }
-
-    pub(super) fn activate_editor_source(&mut self, generation: RenderFrameSourceGeneration) {
-        if self.source_generation == Some(generation) {
-            return;
-        }
-        self.source_generation = Some(generation);
-        self.last_frame_index = None;
-        self.presented_frame_this_transaction = None;
-        #[cfg(feature = "ui-submitter")]
-        self.clear_submitted_ui_facts();
+    pub(super) fn reject_editor_packet(&mut self) {
+        self.frame_transaction_stats.packet_rejections = self
+            .frame_transaction_stats
+            .packet_rejections
+            .saturating_add(1);
     }
 
     pub(super) fn record_editor_image_submission(&mut self) {
-        self.frame_transaction_stats.packet_admissions = 1;
+        self.frame_transaction_stats.packet_admissions = self
+            .frame_transaction_stats
+            .packet_admissions
+            .saturating_add(1);
         self.frame_transaction_stats.queue_submissions = self
             .frame_transaction_stats
             .queue_submissions

@@ -1020,6 +1020,13 @@ resizable = true
     let mut second =
         EditorProjectSession::open_trusted_compiled(project.root_capability(), intent()).unwrap();
 
+    let scene_extent = Extent2d::new(320, 180).unwrap();
+    first.configure_editor_preview(Some(scene_extent));
+    let initial_scene = first.take_editor_preview_candidate().unwrap();
+    let scene_document = initial_scene.document();
+    let scene_revision = initial_scene.revision();
+    let initial_scene_geometry = initial_scene.geometry_revision();
+
     for editor in [&mut first, &mut second] {
         assert_eq!(
             editor_driver::request_play(editor, EditorPlayCommand::Play),
@@ -1070,6 +1077,16 @@ resizable = true
         .expect("the active Play Runtime publishes one exact Game candidate");
     let candidate_identity = candidate.identity();
     assert_eq!(candidate_identity.start(), first_request);
+    let concurrent_scene = first
+        .take_editor_preview_candidate()
+        .expect("Scene authoring keeps producing while the independent Game runtime is running");
+    assert_eq!(concurrent_scene.document(), scene_document);
+    assert_eq!(concurrent_scene.revision(), scene_revision);
+    assert!(concurrent_scene.geometry_revision() > initial_scene_geometry);
+    assert!(matches!(
+        concurrent_scene.into_parts().3.target(),
+        nara::render::RenderFrameTarget::Image(target) if target.extent() == scene_extent
+    ));
     drop(candidate);
     first
         .complete_game_view_candidate(EditorGameViewCompletion::without_ui(candidate_identity))
@@ -1164,6 +1181,13 @@ resizable = true
         .unwrap()
         .expect("the resized logical Game window publishes one successor candidate");
     assert_eq!(resized_candidate.identity().start(), resized_request);
+    let scene_after_game_resize = first.take_editor_preview_candidate().unwrap();
+    assert_eq!(scene_after_game_resize.document(), scene_document);
+    assert_eq!(scene_after_game_resize.revision(), scene_revision);
+    assert!(matches!(
+        scene_after_game_resize.into_parts().3.target(),
+        nara::render::RenderFrameTarget::Image(target) if target.extent() == scene_extent
+    ));
     let resized_identity = resized_candidate.identity();
     first
         .complete_game_view_candidate(EditorGameViewCompletion::without_ui(resized_identity))
@@ -1171,9 +1195,11 @@ resizable = true
 
     first.drive_editor_frame(Duration::ZERO);
     first
-        .set_game_view_source_active(false, "the Scene viewport became active")
-        .expect("Scene handoff drains the buffered Game candidate exactly once");
+        .set_game_view_source_active(false, "the Game panel was hidden")
+        .expect("hiding the Game panel drains its buffered candidate exactly once");
     assert!(first.take_game_view_candidate().unwrap().is_none());
+    first.drive_editor_frame(Duration::ZERO);
+    assert!(first.take_editor_preview_candidate().is_some());
     assert_eq!(
         editor_driver::request_play(&mut first, EditorPlayCommand::Stop),
         EditorPlayRequestResult::Accepted

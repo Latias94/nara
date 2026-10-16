@@ -88,4 +88,30 @@ Closing an instance leaves document history intact and retires its local drafts;
 The originating instance is confirmed from the exact accepted batch outcome, so a rejected Begin cannot steal another instance's gesture.
 
 These changes establish semantic layout ownership and same-window floating panels.
-Actual independent render views, native detached windows and monitor restoration require the subsequent Host/backend units.
+Native detached windows and monitor restoration require the subsequent backend qualification.
+
+## Independent authoring and Game views
+
+The registered Authoring and Game panels can now paint together. The Authoring panel still chooses
+Scene or UI Canvas from the active document kind. A supervised external Play process keeps its own
+window and is never represented as an embedded texture.
+
+The Host allocates a new process-local render-view identity when a view is reopened or its workspace
+is replaced. Resizing preserves the view identity while replacing only that view's target and mapping.
+Closing or hiding Game releases its texture and input capture while its admitted Runtime continues;
+it does not pause Play or retire the Authoring view. Returning to the Project Manager retires both.
+
+Private GPU integrations pass an explicit `WgpuEditorViewId` to target and image operations, begin
+one Host transaction before submitting any view, and pass all actually sampled image receipts to
+window presentation. Each returned composite still proves exactly one image/window join.
+Final view retirement removes admission metadata; target retirement during resize preserves the
+producer clock. Toolkit renderers use the same scoped Instance/Adapter/Device/Queue lineage.
+
+The egui layout output now contains independent optional Authoring and Game results. Remove callers
+of the former selected-viewport and tab-intent interfaces. Input focus is separate from panel
+visibility: a floating Inspector takes pointer hits above Game, and a retained paused Game image
+can regain capture after editing without requiring a new Runtime frame.
+
+The Windows native canary covers concurrent rendering, closing/reopening Game, independent resize,
+paused refocus and physical shutdown. Detached windows and native Linux/macOS qualification are
+not established by that run.

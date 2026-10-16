@@ -26,9 +26,9 @@ mod project_shell_tests;
 mod tests;
 
 pub use editor::{
-    EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorLayout, EguiEditorLayoutInput,
-    EguiEditorOutput, EguiEditorPanel, EguiEditorProjectAction, EguiEditorViewport,
-    EguiEditorViewportIntent,
+    EguiAuthoringViewportOutput, EguiCentralViewportInput, EguiCentralViewportOutput,
+    EguiEditorLayout, EguiEditorLayoutInput, EguiEditorOutput, EguiEditorPanel,
+    EguiEditorProjectAction,
 };
 pub use game_view::{EguiGameViewInput, EguiGameViewOutput};
 pub use project_shell::{

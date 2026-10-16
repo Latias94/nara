@@ -2,6 +2,8 @@ use nara_app::RuntimeGeneration;
 use nara_render::{RenderFrameSourceGeneration, RenderImagePacket};
 use nara_window::WindowId;
 
+use crate::editor_execution::WgpuEditorViewId;
+
 /// Exact process-local facts for one WGPU surface submission and present call.
 ///
 /// The receipt proves that the backend submitted commands and invoked present for the surface
@@ -83,6 +85,7 @@ impl WgpuPresentedFrameReceipt {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuSubmittedImageReceipt {
+    view_id: WgpuEditorViewId,
     target: RenderImagePacket,
     target_generation: u64,
     source_generation: RenderFrameSourceGeneration,
@@ -94,6 +97,7 @@ pub struct WgpuSubmittedImageReceipt {
 
 impl WgpuSubmittedImageReceipt {
     pub(crate) const fn new(
+        view_id: WgpuEditorViewId,
         target: RenderImagePacket,
         target_generation: u64,
         source_generation: RenderFrameSourceGeneration,
@@ -103,6 +107,7 @@ impl WgpuSubmittedImageReceipt {
         render_transaction_frame_index: u64,
     ) -> Self {
         Self {
+            view_id,
             target,
             target_generation,
             source_generation,
@@ -111,6 +116,11 @@ impl WgpuSubmittedImageReceipt {
             device_epoch,
             render_transaction_frame_index,
         }
+    }
+
+    #[must_use]
+    pub const fn view_id(self) -> WgpuEditorViewId {
+        self.view_id
     }
 
     #[must_use]

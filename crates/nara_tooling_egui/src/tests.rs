@@ -29,15 +29,15 @@ use nara_tooling::{
 };
 
 use crate::{
-    EguiCentralViewportInput, EguiEditorOutput, EguiEditorPanel, EguiEditorProjectAction,
-    EguiEditorViewport, EguiEditorViewportIntent, EguiProjectOpenDraft, EguiUiAuthoringImages,
-    EguiUiAuthoringInput, EguiUiAuthoringMutations,
+    EguiAuthoringViewportOutput, EguiCentralViewportInput, EguiEditorOutput, EguiEditorPanel,
+    EguiEditorProjectAction, EguiProjectOpenDraft, EguiUiAuthoringImages, EguiUiAuthoringInput,
+    EguiUiAuthoringMutations,
     editor::{test_control_rect, test_diagnostic_codes, test_inline_field_feedback},
     fields::parse_editable_value,
 };
 
 #[test]
-fn scene_tab_emits_one_typed_shell_intent() {
+fn scene_and_game_views_publish_independent_outputs_without_switching_play_state() {
     let scene = scene_model(
         revision(),
         false,
@@ -48,18 +48,17 @@ fn scene_tab_emits_one_typed_shell_intent() {
     let mut panel = EguiEditorPanel::new();
     let context = egui::Context::default();
 
-    let output = click_viewport_control(
-        &context,
-        &mut panel,
-        &running,
-        EguiEditorViewport::Game,
-        "Authoring tab",
-    );
-    let (actions, project_action, _, intent) = output.into_parts();
+    let output =
+        render_editor_viewport_frame(&context, &mut panel, &running, egui::RawInput::default());
+    let (actions, project_action, viewport) = output.into_parts();
 
     assert!(actions.into_actions().is_empty());
     assert_eq!(project_action, None);
-    assert_eq!(intent, Some(EguiEditorViewportIntent::SelectAuthoring));
+    assert!(matches!(
+        viewport.authoring,
+        Some(EguiAuthoringViewportOutput::Scene(_))
+    ));
+    assert!(viewport.game.is_some());
 }
 
 #[test]
@@ -76,40 +75,20 @@ fn workspace_project_controls_emit_only_typed_product_actions() {
     let draft = EguiProjectOpenDraft::new("candidate", "desktop");
     panel.set_project_open_draft(draft.clone());
 
-    let opened = click_viewport_control(
-        &context,
-        &mut panel,
-        &frame,
-        EguiEditorViewport::Authoring,
-        "Open Project",
-    );
+    let opened = click_viewport_control(&context, &mut panel, &frame, "Open Project");
     assert_eq!(opened.into_parts().1, None);
-    let confirmed = click_viewport_control(
-        &context,
-        &mut panel,
-        &frame,
-        EguiEditorViewport::Authoring,
-        "Confirm Open Project",
-    );
-    let (actions, project_action, _, viewport_intent) = confirmed.into_parts();
+    let confirmed = click_viewport_control(&context, &mut panel, &frame, "Confirm Open Project");
+    let (actions, project_action, _) = confirmed.into_parts();
     assert!(actions.into_actions().is_empty());
     assert_eq!(
         project_action,
         Some(EguiEditorProjectAction::OpenProject(draft))
     );
-    assert_eq!(viewport_intent, None);
 
-    let closed = click_viewport_control(
-        &context,
-        &mut panel,
-        &frame,
-        EguiEditorViewport::Authoring,
-        "Close Project",
-    );
-    let (actions, project_action, _, viewport_intent) = closed.into_parts();
+    let closed = click_viewport_control(&context, &mut panel, &frame, "Close Project");
+    let (actions, project_action, _) = closed.into_parts();
     assert!(actions.into_actions().is_empty());
     assert_eq!(project_action, Some(EguiEditorProjectAction::CloseProject));
-    assert_eq!(viewport_intent, None);
 }
 
 #[test]
@@ -126,11 +105,10 @@ fn transition_lock_disables_ordinary_workspace_actions() {
     let frame = default_frame(Some(scene));
     let mut panel = EguiEditorPanel::new();
     let output = click_locked_control(&mut panel, &frame, "Undo");
-    let (actions, project_action, _, viewport_intent) = output.into_parts();
+    let (actions, project_action, _) = output.into_parts();
 
     assert!(actions.into_actions().is_empty());
     assert_eq!(project_action, None);
-    assert_eq!(viewport_intent, None);
 }
 
 #[test]
@@ -1104,7 +1082,7 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
     let frame = frame(Some(scene), project, DiagnosticReport::default());
     let mut panel = EguiEditorPanel::new();
     let output = click_locked_control(&mut panel, &frame, "Close Cancel");
-    let (batch, project_action, _, viewport_intent) = output.into_parts();
+    let (batch, project_action, _) = output.into_parts();
     assert_eq!(
         batch,
         EditorActionBatch::new(
@@ -1115,7 +1093,6 @@ fn dirty_close_dialog_returns_only_the_typed_decision_action() {
         )
     );
     assert_eq!(project_action, None);
-    assert_eq!(viewport_intent, None);
 }
 
 fn revision() -> nara_scene::SceneAuthoringRevision {
@@ -1676,11 +1653,10 @@ fn click_viewport_control(
     context: &egui::Context,
     panel: &mut EguiEditorPanel,
     frame: &EditorFrameModel,
-    selected: EguiEditorViewport,
     label: &str,
 ) -> EguiEditorOutput {
     click_recorded_control(label, |input| {
-        render_editor_viewport_frame(context, panel, frame, input, selected)
+        render_editor_viewport_frame(context, panel, frame, input)
     })
 }
 
@@ -1806,7 +1782,6 @@ fn render_ui_authoring_frame_with_structure_lowering(
                             .expect("egui renders the authoring frame exactly once"),
                     ),
                     EguiCentralViewportInput::unavailable(),
-                    EguiEditorViewport::Authoring,
                 )
                 .into_parts()
                 .0,
@@ -1821,7 +1796,6 @@ fn render_editor_viewport_frame(
     panel: &mut EguiEditorPanel,
     frame: &EditorFrameModel,
     mut input: egui::RawInput,
-    selected: EguiEditorViewport,
 ) -> EguiEditorOutput {
     input.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
@@ -1829,12 +1803,8 @@ fn render_editor_viewport_frame(
     ));
     let mut response = None;
     let output = context.run_ui(input, |ui| {
-        response = Some(panel.show_with_viewport(
-            ui,
-            frame,
-            EguiCentralViewportInput::unavailable(),
-            selected,
-        ));
+        response =
+            Some(panel.show_with_viewport(ui, frame, EguiCentralViewportInput::unavailable()));
     });
     output.drop_without_applying_deltas();
     response.expect("the Editor frame should render the fixed viewport panel")
@@ -1857,7 +1827,6 @@ fn render_locked_editor_frame(
             frame,
             None,
             EguiCentralViewportInput::unavailable(),
-            EguiEditorViewport::Authoring,
             true,
         ));
     });

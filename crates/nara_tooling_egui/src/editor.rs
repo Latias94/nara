@@ -79,21 +79,6 @@ enum EguiEditorSidebar {
     Project,
 }
 
-/// Toolkit-local selection for the fixed central Editor viewport.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum EguiEditorViewport {
-    #[default]
-    Authoring,
-    Game,
-}
-
-/// One transient central-viewport tab request emitted by the egui Adapter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EguiEditorViewportIntent {
-    SelectAuthoring,
-    SelectGame,
-}
-
 /// One product-level project lifecycle action emitted beside the workspace action batch.
 ///
 /// These actions belong to the private Editor product rather than `nara_tooling`: they change which
@@ -137,12 +122,18 @@ impl EguiCentralViewportInput {
     }
 }
 
-/// Transient output from the selected central viewport.
+/// Transient output from the active document's authoring view.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum EguiCentralViewportOutput {
+pub enum EguiAuthoringViewportOutput {
     Scene(EguiSceneViewOutput),
     UiCanvas(EguiUiCanvasOutput),
-    Game(EguiGameViewOutput),
+}
+
+/// Independent transient outputs from the visible authoring and Game panels.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct EguiCentralViewportOutput {
+    pub authoring: Option<EguiAuthoringViewportOutput>,
+    pub game: Option<EguiGameViewOutput>,
 }
 
 /// One ordered Editor action batch plus transient viewport interaction from the same redraw.
@@ -151,7 +142,6 @@ pub struct EguiEditorOutput {
     actions: EditorActionBatch,
     project_action: Option<EguiEditorProjectAction>,
     viewport: EguiCentralViewportOutput,
-    viewport_intent: Option<EguiEditorViewportIntent>,
     project_browser_local_actions: Vec<EditorProjectBrowserLocalAction>,
 }
 
@@ -161,7 +151,6 @@ pub struct EguiEditorLayoutInput<'frame, 'authoring> {
     pub frame: &'frame EditorFrameModel,
     pub ui_authoring: Option<&'frame mut EguiUiAuthoringInput<'authoring>>,
     pub viewport: EguiCentralViewportInput,
-    pub selected_viewport: EguiEditorViewport,
 }
 
 /// Frontend-only arrangement of the existing finite panel painters.
@@ -174,7 +163,7 @@ pub trait EguiEditorLayout {
         input: EguiEditorLayoutInput<'_, '_>,
         actions: &mut Vec<EditorAction>,
         browser_actions: &mut Vec<EditorProjectBrowserLocalAction>,
-    ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>);
+    ) -> EguiCentralViewportOutput;
 }
 
 struct FixedEditorLayout;
@@ -187,13 +176,12 @@ impl EguiEditorLayout for FixedEditorLayout {
         input: EguiEditorLayoutInput<'_, '_>,
         actions: &mut Vec<EditorAction>,
         browser_actions: &mut Vec<EditorProjectBrowserLocalAction>,
-    ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
+    ) -> EguiCentralViewportOutput {
         panels.render_authoring_content(
             ui,
             input.frame.workspace().active_scene.as_ref(),
             input.ui_authoring,
             input.viewport,
-            input.selected_viewport,
             input.frame,
             actions,
             browser_actions,
@@ -214,14 +202,8 @@ impl EguiEditorOutput {
         EditorActionBatch,
         Option<EguiEditorProjectAction>,
         EguiCentralViewportOutput,
-        Option<EguiEditorViewportIntent>,
     ) {
-        (
-            self.actions,
-            self.project_action,
-            self.viewport,
-            self.viewport_intent,
-        )
+        (self.actions, self.project_action, self.viewport)
     }
 }
 
@@ -249,13 +231,8 @@ impl EguiEditorPanel {
 
     #[must_use]
     pub fn show(&mut self, ui: &mut Ui, frame: &EditorFrameModel) -> EditorActionBatch {
-        self.show_with_viewport(
-            ui,
-            frame,
-            EguiCentralViewportInput::unavailable(),
-            EguiEditorViewport::Authoring,
-        )
-        .actions
+        self.show_with_viewport(ui, frame, EguiCentralViewportInput::unavailable())
+            .actions
     }
 
     #[must_use]
@@ -264,9 +241,8 @@ impl EguiEditorPanel {
         ui: &mut Ui,
         frame: &EditorFrameModel,
         viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
     ) -> EguiEditorOutput {
-        self.show_with_authoring(ui, frame, None, viewport, selected_viewport)
+        self.show_with_authoring(ui, frame, None, viewport)
     }
 
     /// Renders one exact UI authoring frame through the first-party egui Adapter.
@@ -278,16 +254,8 @@ impl EguiEditorPanel {
         frame: &EditorFrameModel,
         mut ui_authoring: Option<EguiUiAuthoringInput<'_>>,
         viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
     ) -> EguiEditorOutput {
-        self.show_with_authoring_lock(
-            ui,
-            frame,
-            ui_authoring.take(),
-            viewport,
-            selected_viewport,
-            false,
-        )
+        self.show_with_authoring_lock(ui, frame, ui_authoring.take(), viewport, false)
     }
 
     /// Renders one exact authoring frame while enforcing the product-owned transition lock.
@@ -299,7 +267,6 @@ impl EguiEditorPanel {
         frame: &EditorFrameModel,
         ui_authoring: Option<EguiUiAuthoringInput<'_>>,
         viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
         read_only: bool,
     ) -> EguiEditorOutput {
         self.show_with_layout(
@@ -307,7 +274,6 @@ impl EguiEditorPanel {
             frame,
             ui_authoring,
             viewport,
-            selected_viewport,
             read_only,
             &mut FixedEditorLayout,
         )
@@ -321,7 +287,6 @@ impl EguiEditorPanel {
         frame: &EditorFrameModel,
         mut ui_authoring: Option<EguiUiAuthoringInput<'_>>,
         viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
         read_only: bool,
         layout: &mut impl EguiEditorLayout,
     ) -> EguiEditorOutput {
@@ -354,12 +319,11 @@ impl EguiEditorPanel {
                 actions.push(EditorAction::Play(action));
             }
         }
-        let (viewport, mut viewport_intent) = ui
+        let viewport = ui
             .add_enabled_ui(!read_only, |ui| {
                 render_toolbar(
                     ui,
                     frame,
-                    selected_viewport,
                     &mut actions,
                     &mut project_action,
                     &mut open_project_requested,
@@ -373,7 +337,6 @@ impl EguiEditorPanel {
                         frame,
                         ui_authoring: ui_authoring.as_mut(),
                         viewport,
-                        selected_viewport,
                     },
                     &mut actions,
                     &mut project_browser_local_actions,
@@ -398,14 +361,12 @@ impl EguiEditorPanel {
         if project_action.is_some() {
             actions.clear();
             project_browser_local_actions.clear();
-            viewport_intent = None;
         }
 
         EguiEditorOutput {
             actions: EditorActionBatch::new(frame.revision(), actions),
             project_action,
             viewport,
-            viewport_intent,
             project_browser_local_actions,
         }
     }
@@ -438,7 +399,6 @@ impl EguiEditorPanel {
 fn render_toolbar(
     ui: &mut Ui,
     frame: &EditorFrameModel,
-    selected_viewport: EguiEditorViewport,
     actions: &mut Vec<EditorAction>,
     project_action: &mut Option<EguiEditorProjectAction>,
     open_project_requested: &mut bool,
@@ -475,17 +435,7 @@ fn render_toolbar(
         }
         nara_tooling::EditorReopenTarget::Unavailable => false,
     };
-    let mutation_available = active_document.is_some()
-        && ((external_supervised && selected_viewport == EguiEditorViewport::Authoring)
-            || matches!(
-                (play_state, selected_viewport),
-                (
-                    EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-                    EguiEditorViewport::Authoring
-                )
-            ))
-        && no_workspace_intent
-        && persistence_idle;
+    let mutation_available = active_document.is_some() && panel_editing_enabled(frame);
     let prefab_active =
         active_document.is_some_and(|document| document.kind == EditorDocumentKind::Prefab);
     let persistence_available = (external_supervised || play_idle || prefab_active)
@@ -826,13 +776,12 @@ impl EguiEditorPanel {
         ui: &mut Ui,
         frame: &EditorFrameModel,
         ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
-        selected: EguiEditorViewport,
         actions: &mut Vec<EditorAction>,
     ) {
         self.inspector
             .synchronize_scene(frame.workspace().active_scene.as_ref());
         self.ui_authoring.synchronize(ui_authoring.as_deref());
-        let editing = panel_editing_enabled(frame, selected);
+        let editing = panel_editing_enabled(frame);
         if let Some(authoring) = ui_authoring {
             self.ui_authoring
                 .show_hierarchy(ui, authoring, editing, actions);
@@ -852,13 +801,12 @@ impl EguiEditorPanel {
         ui: &mut Ui,
         frame: &EditorFrameModel,
         ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
-        selected: EguiEditorViewport,
         actions: &mut Vec<EditorAction>,
     ) {
         self.inspector
             .synchronize_scene(frame.workspace().active_scene.as_ref());
         self.ui_authoring.synchronize(ui_authoring.as_deref());
-        let editing = panel_editing_enabled(frame, selected);
+        let editing = panel_editing_enabled(frame);
         if let Some(authoring) = ui_authoring {
             self.ui_authoring
                 .show_inspector(ui, authoring, editing, actions);
@@ -908,46 +856,54 @@ impl EguiEditorPanel {
     }
 
     #[doc(hidden)]
-    pub fn show_viewport_panel(
+    pub fn show_authoring_view_panel(
+        &mut self,
+        ui: &mut Ui,
+        ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
+        viewport: EguiCentralViewportInput,
+        actions: &mut Vec<EditorAction>,
+    ) -> EguiAuthoringViewportOutput {
+        self.ui_canvas.synchronize(ui_authoring.as_deref());
+        let size = ui.available_size().max(Vec2::splat(1.0));
+        match ui_authoring {
+            Some(authoring) => EguiAuthoringViewportOutput::UiCanvas(self.ui_canvas.show(
+                ui,
+                viewport.ui_canvas,
+                authoring,
+                size,
+                actions,
+            )),
+            None => {
+                EguiAuthoringViewportOutput::Scene(self.scene_view.show(ui, viewport.scene, size))
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn show_game_view_panel(
         &mut self,
         ui: &mut Ui,
         frame: &EditorFrameModel,
-        ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
         viewport: EguiCentralViewportInput,
-        selected: EguiEditorViewport,
-        actions: &mut Vec<EditorAction>,
-    ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
-        self.ui_canvas.synchronize(ui_authoring.as_deref());
-        let intent = render_viewport_tabs(
-            ui,
-            frame.play().state(),
+    ) -> EguiGameViewOutput {
+        let input = if matches!(
             frame.runtime_availability(),
-            selected,
-        );
-        let size = ui.available_size().max(Vec2::splat(1.0));
-        let output = match selected {
-            EguiEditorViewport::Authoring => match ui_authoring {
-                Some(authoring) => EguiCentralViewportOutput::UiCanvas(self.ui_canvas.show(
-                    ui,
-                    viewport.ui_canvas,
-                    authoring,
-                    size,
-                    actions,
-                )),
-                None => {
-                    EguiCentralViewportOutput::Scene(self.scene_view.show(ui, viewport.scene, size))
-                }
-            },
-            EguiEditorViewport::Game => EguiCentralViewportOutput::Game(self.game_view.show(
-                ui,
-                viewport.game.with_modal_active(
-                    frame.workspace_intent().phase()
-                        == Some(EditorWorkspaceIntentPhase::AwaitingDecision),
-                ),
-                size,
-            )),
+            EditorRuntimeAvailability::ExternalSupervised
+        ) {
+            EguiGameViewInput::unavailable()
+                .with_notice("Game View is rendered in the supervised external window")
+        } else {
+            viewport.game
         };
-        (output, intent)
+        let size = ui.available_size().max(Vec2::splat(1.0));
+        self.game_view.show(
+            ui,
+            input.with_modal_active(
+                frame.workspace_intent().phase()
+                    == Some(EditorWorkspaceIntentPhase::AwaitingDecision),
+            ),
+            size,
+        )
     }
 
     #[doc(hidden)]
@@ -966,14 +922,13 @@ impl EguiEditorPanel {
         scene: Option<&nara_tooling::EditorSceneModel>,
         mut ui_authoring: Option<&mut EguiUiAuthoringInput<'_>>,
         viewport: EguiCentralViewportInput,
-        selected_viewport: EguiEditorViewport,
         frame: &EditorFrameModel,
         actions: &mut Vec<EditorAction>,
         project_browser_local_actions: &mut Vec<EditorProjectBrowserLocalAction>,
-    ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
+    ) -> EguiCentralViewportOutput {
         let reserved = DIAGNOSTICS_HEIGHT + ui.spacing().item_spacing.y * 2.0;
         let content_height = (ui.available_height() - reserved).max(MIN_CONTENT_HEIGHT);
-        let editing_enabled = panel_editing_enabled(frame, selected_viewport);
+        let editing_enabled = panel_editing_enabled(frame);
 
         let visible_width = (ui.ctx().viewport_rect().right() - ui.cursor().left()).max(1.0);
         let content_width = ui
@@ -1025,14 +980,29 @@ impl EguiEditorPanel {
         }
 
         let mut scene_ui = fixed_column(ui, "nara_editor_scene_view_column", scene_rect);
-        let (viewport, viewport_intent) = self.show_viewport_panel(
-            &mut scene_ui,
-            frame,
-            ui_authoring.as_deref_mut(),
-            viewport,
-            selected_viewport,
-            actions,
-        );
+        let view_height =
+            ((scene_ui.available_height() - scene_ui.spacing().item_spacing.y) * 0.5).max(1.0);
+        let authoring = scene_ui
+            .allocate_ui_with_layout(
+                Vec2::new(scene_rect.width(), view_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    self.show_authoring_view_panel(
+                        ui,
+                        ui_authoring.as_deref_mut(),
+                        viewport,
+                        actions,
+                    )
+                },
+            )
+            .inner;
+        let game = scene_ui
+            .allocate_ui_with_layout(
+                Vec2::new(scene_rect.width(), view_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| self.show_game_view_panel(ui, frame, viewport),
+            )
+            .inner;
 
         let mut inspector_ui = fixed_column(ui, "nara_editor_inspector_column", inspector_rect);
         ScrollArea::vertical()
@@ -1077,23 +1047,21 @@ impl EguiEditorPanel {
         );
         ui.separator();
         render_diagnostics(ui, frame, actions);
-        (viewport, viewport_intent)
+        EguiCentralViewportOutput {
+            authoring: Some(authoring),
+            game: Some(game),
+        }
     }
 }
 
-fn panel_editing_enabled(frame: &EditorFrameModel, selected: EguiEditorViewport) -> bool {
+fn panel_editing_enabled(frame: &EditorFrameModel) -> bool {
     (matches!(
         frame.runtime_availability(),
         EditorRuntimeAvailability::ExternalSupervised
-    ) && selected == EguiEditorViewport::Authoring
-        || matches!(
-            (frame.play().state(), selected),
-            (
-                EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted,
-                EguiEditorViewport::Authoring
-            )
-        ))
-        && frame.workspace_intent().intent().is_none()
+    ) || matches!(
+        frame.play().state(),
+        EditorPlayState::Empty | EditorPlayState::Paused | EditorPlayState::Faulted
+    )) && frame.workspace_intent().intent().is_none()
         && frame.persistence().operation() == EditorPersistenceOperation::Idle
 }
 
@@ -1114,44 +1082,6 @@ fn render_sidebar_tabs(ui: &mut Ui, selected: &mut EguiEditorSidebar) {
         }
     });
     ui.separator();
-}
-
-fn render_viewport_tabs(
-    ui: &mut Ui,
-    play_state: EditorPlayState,
-    runtime_availability: EditorRuntimeAvailability,
-    selected: EguiEditorViewport,
-) -> Option<EguiEditorViewportIntent> {
-    let mut intent = None;
-    ui.horizontal(|ui| {
-        let authoring =
-            ui.add(Button::new("Authoring").selected(selected == EguiEditorViewport::Authoring));
-        #[cfg(test)]
-        record_test_control("Authoring tab", authoring.rect);
-        if authoring.clicked() && selected != EguiEditorViewport::Authoring {
-            intent = Some(EguiEditorViewportIntent::SelectAuthoring);
-        }
-
-        let external_supervised = matches!(
-            runtime_availability,
-            EditorRuntimeAvailability::ExternalSupervised
-        );
-        let game_enabled = play_state != EditorPlayState::Empty && !external_supervised;
-        let game = ui.add_enabled(
-            game_enabled,
-            Button::new("Game").selected(selected == EguiEditorViewport::Game),
-        );
-        #[cfg(test)]
-        record_test_control("Game tab", game.rect);
-        if game.clicked() {
-            intent = Some(EguiEditorViewportIntent::SelectGame);
-        }
-        if external_supervised {
-            game.on_hover_text("Game View is rendered in the supervised external window");
-        }
-    });
-    ui.separator();
-    intent
 }
 
 fn fixed_column(parent: &mut Ui, id_salt: &'static str, rect: Rect) -> Ui {

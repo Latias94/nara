@@ -119,13 +119,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         || resized.extent() == paused.extent()
         || evidence.input_delta_x() <= f32::EPSILON
         || evidence.step_delta_x() <= f32::EPSILON
+        || evidence.concurrent_view_frames() < 3
+        || evidence.scene_view_id() == evidence.closed_game_view_id()
+        || evidence.scene_view_id() == evidence.reopened_game_view_id()
+        || evidence.closed_game_view_id() == evidence.reopened_game_view_id()
     {
         return Err("the native Game View canary evidence was incomplete".into());
     }
 
     println!(
         concat!(
-            "{{\"schema\":\"nara-reference-game.editor-game-view-v2\",",
+            "{{\"schema\":\"nara-reference-game.editor-game-view-v3\",",
             "\"ui_document\":{},\"ui_selected_frame\":{},",
             "\"ui_preview_frame\":{},\"ui_committed_frame\":{},",
             "\"ui_structured_frame\":{},\"ui_created_entity\":\"{}\",",
@@ -134,7 +138,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "\"input_frame\":{},\"paused_frame\":{},\"stepped_frame\":{},",
             "\"resized_geometry\":{},\"resized_extent\":[{},{}],",
             "\"sprite_instances\":{},\"runtime_ui\":true,",
-            "\"input_delta_x\":{},\"step_delta_x\":{}}}"
+            "\"input_delta_x\":{},\"step_delta_x\":{},",
+            "\"concurrent_view_frames\":{},\"scene_view_id\":{},",
+            "\"closed_game_view_id\":{},\"reopened_game_view_id\":{}}}"
         ),
         selected_ui.document().raw(),
         selected_ui.editor_frame_index(),
@@ -157,6 +163,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         resized.sprite_instances(),
         evidence.input_delta_x(),
         evidence.step_delta_x(),
+        evidence.concurrent_view_frames(),
+        evidence.scene_view_id(),
+        evidence.closed_game_view_id(),
+        evidence.reopened_game_view_id(),
     );
     println!("editor_game_view_canary: ok");
     Ok(())

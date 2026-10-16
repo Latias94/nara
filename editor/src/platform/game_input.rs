@@ -18,6 +18,8 @@ use super::viewport::EditorGamePresentedStamp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct EditorGameInputLease {
+    view_id: nara::render_wgpu::__private::WgpuEditorViewId,
+    window_id: nara::window::WindowId,
     runtime_generation: u64,
     source_handoff_generation: u64,
     target_generation: u64,
@@ -28,6 +30,8 @@ struct EditorGameInputLease {
 impl EditorGameInputLease {
     fn from_stamp(stamp: EditorGamePresentedStamp, route_generation: u64) -> Self {
         Self {
+            view_id: stamp.view_id(),
+            window_id: stamp.window_id(),
             runtime_generation: stamp.runtime_generation(),
             source_handoff_generation: stamp.source_handoff_generation(),
             target_generation: stamp.target_generation(),
@@ -37,7 +41,9 @@ impl EditorGameInputLease {
     }
 
     fn accepts(self, stamp: EditorGamePresentedStamp) -> bool {
-        self.runtime_generation == stamp.runtime_generation()
+        self.view_id == stamp.view_id()
+            && self.window_id == stamp.window_id()
+            && self.runtime_generation == stamp.runtime_generation()
             && self.source_handoff_generation == stamp.source_handoff_generation()
             && self.target_generation == stamp.target_generation()
             && self.geometry_generation == stamp.geometry_generation()
@@ -127,6 +133,10 @@ pub(super) struct EditorGameInputRouter {
 }
 
 impl EditorGameInputRouter {
+    pub(super) const fn cursor_position(&self) -> Option<PhysicalPosition<f64>> {
+        self.cursor_position
+    }
+
     pub(super) fn is_captured(&self) -> bool {
         matches!(self.capture, EditorGameCaptureState::Captured { .. })
     }
@@ -204,6 +214,11 @@ impl EditorGameInputRouter {
     pub(super) fn invalidate_after_control(&mut self, terminal: bool) {
         self.pending.clear();
         self.invalidate(terminal);
+    }
+
+    pub(super) fn release_to_editor(&mut self) {
+        self.release(false);
+        self.focus_restore_requested = false;
     }
 
     pub(super) fn capture_requested(&mut self) -> bool {
@@ -293,6 +308,15 @@ impl EditorGameInputRouter {
             }
             WindowEvent::MouseInput { state, button, .. } if self.is_captured() => {
                 let button = convert_mouse_button(*button);
+                let inside = self
+                    .presented
+                    .zip(self.cursor_position)
+                    .and_then(|(presented, position)| presented.transform.map(position))
+                    .is_some();
+                if *state == ElementState::Pressed && !inside {
+                    self.release_to_editor();
+                    return true;
+                }
                 if !self.input_enabled {
                     let was_held = matches!(
                         &self.capture,

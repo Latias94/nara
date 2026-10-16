@@ -9,15 +9,14 @@ use nara::{
     project_host::TrustedCompiledEditorProjectIntent,
     render::{Extent2d, RenderWindowPacket},
     render_wgpu::__private::{
-        WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,
+        WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorViewId,
     },
     tooling::{
         EditorAction, EditorActionBatch, EditorNavigationAction, EditorPlayAction, EditorPlayState,
-        EditorRuntimeAvailability,
     },
     tooling_egui::{
-        EguiCentralViewportInput, EguiCentralViewportOutput, EguiEditorViewport,
-        EguiEditorViewportIntent, EguiGameViewInput, EguiSceneViewInput, EguiUiCanvasInput,
+        EguiAuthoringViewportOutput, EguiCentralViewportInput, EguiGameViewInput,
+        EguiGameViewOutput, EguiSceneViewInput, EguiUiCanvasInput,
     },
     window::{
         PresentMode, WindowId as NaraWindowId, WindowResolution, backend::WindowHandleProvider,
@@ -48,6 +47,9 @@ mod image_import_canary;
 mod supervised_play_canary;
 mod ui_canary;
 mod viewport;
+mod views;
+
+use views::EditorViewInstances;
 
 pub use canary::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
@@ -310,12 +312,14 @@ struct NativeEditorHost {
     gpu: Option<WgpuEditorExecution>,
     renderer: Option<EditorEguiRenderer>,
     pending_textures: egui::TexturesDelta,
-    viewport_slot: EditorViewportSlot,
+    authoring_slot: EditorViewportSlot,
+    game_slot: EditorViewportSlot,
+    views: EditorViewInstances,
     scene_presenter: EditorScenePresenter,
     ui_canvas_presenter: EditorUiCanvasPresenter,
     game_presenter: EditorGamePresenter,
     game_input: EditorGameInputRouter,
-    viewport_selection: EditorViewportSelection,
+    game_pointer_target: Option<EguiGameViewOutput>,
     requested_scene_extent: Option<Extent2d>,
     authoring_view_notice: Option<&'static str>,
     game_view_notice: Option<&'static str>,
@@ -413,118 +417,6 @@ impl NativeEditorCanary {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EditorViewportSelection {
-    Authoring,
-    Game,
-    AwaitingPauseForAuthoring,
-}
-
-impl EditorViewportSelection {
-    const fn selected(self) -> EguiEditorViewport {
-        match self {
-            Self::Authoring => EguiEditorViewport::Authoring,
-            Self::Game | Self::AwaitingPauseForAuthoring => EguiEditorViewport::Game,
-        }
-    }
-
-    fn reconcile(
-        &mut self,
-        play_state: EditorPlayState,
-        runtime_availability: EditorRuntimeAvailability,
-    ) -> Option<EditorAction> {
-        if matches!(
-            runtime_availability,
-            EditorRuntimeAvailability::ExternalSupervised
-        ) {
-            *self = Self::Authoring;
-            return None;
-        }
-        match play_state {
-            EditorPlayState::Empty => *self = Self::Authoring,
-            EditorPlayState::PreparingPlay | EditorPlayState::Starting => {
-                if *self == Self::Authoring {
-                    *self = Self::Game;
-                }
-            }
-            EditorPlayState::Running => {
-                if *self == Self::Authoring {
-                    *self = Self::Game;
-                }
-                return (*self == Self::AwaitingPauseForAuthoring)
-                    .then_some(EditorAction::Play(EditorPlayAction::Pause));
-            }
-            EditorPlayState::Stepping => {
-                if *self == Self::Authoring {
-                    *self = Self::Game;
-                }
-            }
-            EditorPlayState::Paused
-            | EditorPlayState::Faulted
-            | EditorPlayState::CloseIncomplete
-                if *self == Self::AwaitingPauseForAuthoring =>
-            {
-                *self = Self::Authoring;
-            }
-            EditorPlayState::Paused
-            | EditorPlayState::Faulted
-            | EditorPlayState::RetiringPlay
-            | EditorPlayState::Stopping
-            | EditorPlayState::RetirementIncomplete
-            | EditorPlayState::CloseIncomplete => {}
-        }
-        None
-    }
-
-    fn apply_intent(
-        &mut self,
-        intent: EguiEditorViewportIntent,
-        play_state: EditorPlayState,
-        runtime_availability: EditorRuntimeAvailability,
-    ) -> Option<EditorAction> {
-        if matches!(
-            runtime_availability,
-            EditorRuntimeAvailability::ExternalSupervised
-        ) {
-            if intent == EguiEditorViewportIntent::SelectAuthoring {
-                *self = Self::Authoring;
-            }
-            return None;
-        }
-        match intent {
-            EguiEditorViewportIntent::SelectGame if play_state != EditorPlayState::Empty => {
-                *self = Self::Game;
-                None
-            }
-            EguiEditorViewportIntent::SelectAuthoring => match play_state {
-                EditorPlayState::Empty
-                | EditorPlayState::Paused
-                | EditorPlayState::Faulted
-                | EditorPlayState::CloseIncomplete => {
-                    *self = Self::Authoring;
-                    None
-                }
-                EditorPlayState::PreparingPlay | EditorPlayState::Starting => {
-                    *self = Self::AwaitingPauseForAuthoring;
-                    None
-                }
-                EditorPlayState::Stepping => {
-                    *self = Self::Authoring;
-                    None
-                }
-                EditorPlayState::Running => {
-                    *self = Self::AwaitingPauseForAuthoring;
-                    Some(EditorAction::Play(EditorPlayAction::Pause))
-                }
-                EditorPlayState::RetiringPlay
-                | EditorPlayState::Stopping
-                | EditorPlayState::RetirementIncomplete => None,
-            },
-            EguiEditorViewportIntent::SelectGame => None,
-        }
-    }
-}
-
 impl NativeEditorHost {
     fn new(
         application: EditorApplication,
@@ -543,12 +435,14 @@ impl NativeEditorHost {
             gpu: None,
             renderer: None,
             pending_textures: egui::TexturesDelta::default(),
-            viewport_slot: EditorViewportSlot::new(),
+            authoring_slot: EditorViewportSlot::default(),
+            game_slot: EditorViewportSlot::default(),
+            views: EditorViewInstances::default(),
             scene_presenter: EditorScenePresenter::new(),
             ui_canvas_presenter: EditorUiCanvasPresenter::new(capture_ui_image_facts),
             game_presenter: EditorGamePresenter::new(),
             game_input: EditorGameInputRouter::default(),
-            viewport_selection: EditorViewportSelection::Authoring,
+            game_pointer_target: None,
             requested_scene_extent: None,
             authoring_view_notice: None,
             game_view_notice: None,
@@ -665,17 +559,12 @@ impl NativeEditorHost {
     fn retire_gpu_execution(&mut self) {
         self.renderer = None;
         self.gpu = None;
-        self.viewport_slot.retire_gpu_binding();
+        self.authoring_slot.retire_gpu_binding();
+        self.game_slot.retire_gpu_binding();
         self.scene_presenter.retire_gpu_binding();
         self.ui_canvas_presenter.retire_gpu_binding();
         self.game_presenter.retire_gpu_binding();
         self.pending_textures.clear();
-    }
-
-    fn retire_all_viewport_presentations(&mut self) {
-        self.scene_presenter.retire_presentation();
-        self.ui_canvas_presenter.retire_presentation();
-        self.game_presenter.retire_presentation();
     }
 
     fn suspend_game_for_gpu_recovery(&mut self) -> Result<(), EditorRunError> {
@@ -847,6 +736,34 @@ impl NativeEditorHost {
             return Ok(());
         }
 
+        if self.game_input.is_captured()
+            && matches!(
+                event,
+                WindowEvent::CursorMoved { .. }
+                    | WindowEvent::MouseInput {
+                        state: ElementState::Pressed,
+                        ..
+                    }
+            )
+        {
+            let position = match &event {
+                WindowEvent::CursorMoved { position, .. } => Some(*position),
+                _ => self.game_input.cursor_position(),
+            };
+            let owns_pointer =
+                self.game_pointer_target
+                    .zip(position)
+                    .is_some_and(|(target, position)| {
+                        let scale = f64::from(self.context.pixels_per_point());
+                        target.owns_pointer(
+                            &self.context,
+                            egui::pos2((position.x / scale) as f32, (position.y / scale) as f32),
+                        )
+                    });
+            if !owns_pointer {
+                self.game_input.release_to_editor();
+            }
+        }
         let forward_to_egui = if self.application.ordinary_input_locked() {
             self.game_input.invalidate_after_control(true);
             true
@@ -880,15 +797,6 @@ impl NativeEditorHost {
             }
             WindowEvent::Resized(_) => {
                 self.flush_game_input()?;
-                if let (Some(gpu), Some(renderer)) = (self.gpu.as_mut(), self.renderer.as_mut()) {
-                    self.viewport_slot.retire_target(gpu, renderer);
-                    self.retire_all_viewport_presentations();
-                }
-                set_requested_scene_extent(
-                    &mut self.application,
-                    &mut self.requested_scene_extent,
-                    None,
-                );
                 window.request_redraw();
             }
             WindowEvent::KeyboardInput { event, .. } if explicit_gpu_retry_requested(&event) => {
@@ -904,7 +812,8 @@ impl NativeEditorHost {
             WindowEvent::RedrawRequested => self.redraw(event_loop)?,
             WindowEvent::Destroyed => {
                 self.flush_game_input()?;
-                self.viewport_slot.retire_gpu_binding();
+                self.authoring_slot.retire_gpu_binding();
+                self.game_slot.retire_gpu_binding();
                 self.scene_presenter.retire_gpu_binding();
                 self.ui_canvas_presenter.retire_gpu_binding();
                 self.game_presenter.retire_gpu_binding();
@@ -948,31 +857,19 @@ impl NativeEditorHost {
         let Some(request) = self.application.pending_game_start_request() else {
             return Ok(false);
         };
-        let prepared = {
-            let gpu = self
-                .gpu
-                .as_mut()
-                .expect("an installed native window has one Editor GPU owner");
-            let renderer = self
-                .renderer
-                .as_mut()
-                .expect("an installed native window has one egui renderer");
-            self.game_presenter.prepare_start(
-                &mut self.application,
-                &self.viewport_slot,
-                gpu,
-                renderer,
-                window,
-                request,
-            )
-        };
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                let _ = self.application.abort_pending_game_start(request);
-                return Err(error);
-            }
-        };
+        // Starting the Runtime does not depend on whether its panel is currently visible.
+        if self.game_slot.view_id().is_none() {
+            let prepared = self
+                .application
+                .prepare_game_start_activation(request)
+                .map_err(|error| {
+                    EditorRunError::Platform(format!(
+                        "the Game Runtime start reservation was rejected: {error}"
+                    ))
+                })?;
+            self.application.commit_game_start_activation(prepared);
+            return Ok(true);
+        }
         let gpu = self
             .gpu
             .as_mut()
@@ -981,19 +878,27 @@ impl NativeEditorHost {
             .renderer
             .as_mut()
             .expect("an installed native window has one egui renderer");
-        self.game_presenter.commit_start(
+        let prepared = self.game_presenter.prepare_start(
             &mut self.application,
-            &mut self.viewport_slot,
+            &self.game_slot,
             gpu,
             renderer,
-            &mut self.scene_presenter,
-            prepared,
+            window,
+            request,
         );
-        self.ui_canvas_presenter.retire_presentation();
-        set_requested_scene_extent(
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let _ = self.application.abort_pending_game_start(request);
+                return Err(error);
+            }
+        };
+        self.game_presenter.commit_start(
             &mut self.application,
-            &mut self.requested_scene_extent,
-            None,
+            &mut self.game_slot,
+            gpu,
+            renderer,
+            prepared,
         );
         self.game_view_notice = Some("Game View is starting");
         Ok(true)
@@ -1001,8 +906,6 @@ impl NativeEditorHost {
 
     fn reconcile_viewport_source(
         &mut self,
-        selected: EguiEditorViewport,
-        play_state: EditorPlayState,
         window: RenderWindowPacket,
         authoring_ui: Option<(
             nara::tooling::EditorDocumentId,
@@ -1010,132 +913,93 @@ impl NativeEditorHost {
         )>,
         has_authoring_scene: bool,
     ) -> Result<bool, EditorRunError> {
-        match selected {
-            EguiEditorViewport::Authoring if self.viewport_slot.is_game() => {
-                if !matches!(
-                    play_state,
-                    EditorPlayState::Empty
-                        | EditorPlayState::Paused
-                        | EditorPlayState::Faulted
-                        | EditorPlayState::CloseIncomplete
-                ) {
-                    return Err(EditorRunError::Platform(
-                        "Game View cannot hand off to Scene before Play reaches a safe state"
-                            .to_owned(),
-                    ));
-                }
-                self.game_input.invalidate(false);
-                self.flush_game_input()?;
-                self.application.cancel_game_step_presentation();
-                if play_state != EditorPlayState::Empty {
-                    self.application
-                        .set_game_view_source_active(false, "the Scene viewport became active")
-                        .map_err(|error| {
-                            EditorRunError::Platform(format!(
-                                "the Game View source could not retire before Scene handoff: {error}"
-                            ))
-                        })?;
-                }
-                let gpu = self
-                    .gpu
-                    .as_mut()
-                    .expect("an installed native window has one Editor GPU owner");
-                let renderer = self
-                    .renderer
-                    .as_mut()
-                    .expect("an installed native window has one egui renderer");
-                self.viewport_slot.retire_target(gpu, renderer);
-                self.retire_all_viewport_presentations();
-                Ok(true)
+        let generation = self.application.workspace_generation();
+        self.views
+            .synchronize(self.application.panel_workspace_mut(), generation)
+            .map_err(|message| EditorRunError::Platform(message.to_owned()))?;
+        let authoring_id = self.views.authoring().map(|id| WgpuEditorViewId::new(id.0));
+        let game_id = self.views.game().map(|id| WgpuEditorViewId::new(id.0));
+        let authoring_replaced = self.authoring_slot.view_id() != authoring_id;
+        let game_replaced = self.game_slot.view_id() != game_id;
+        let source_matches = authoring_ui.is_some_and(|(document, revision)| {
+            self.authoring_slot.is_ui_prefab(document, revision)
+        });
+        let authoring_source_changed = match authoring_ui {
+            Some(_) => self.authoring_slot.has_binding() && !source_matches,
+            None => {
+                self.authoring_slot.is_ui_prefab_binding()
+                    || (!has_authoring_scene && self.authoring_slot.is_scene())
             }
-            EguiEditorViewport::Authoring => {
-                let source_matches = authoring_ui.is_some_and(|(document, revision)| {
-                    self.viewport_slot.is_ui_prefab(document, revision)
-                });
-                let should_retire = match authoring_ui {
-                    Some(_) => self.viewport_slot.has_binding() && !source_matches,
-                    None => {
-                        self.viewport_slot.is_ui_prefab_binding()
-                            || (!has_authoring_scene && self.viewport_slot.is_scene())
-                    }
-                };
-                if !should_retire {
-                    return Ok(false);
-                }
-                let gpu = self
-                    .gpu
-                    .as_mut()
-                    .expect("an installed native window has one Editor GPU owner");
-                let renderer = self
-                    .renderer
-                    .as_mut()
-                    .expect("an installed native window has one egui renderer");
-                self.viewport_slot.retire_target(gpu, renderer);
-                self.scene_presenter.retire_presentation();
-                self.ui_canvas_presenter.retire_presentation();
-                Ok(true)
+        };
+        let mut changed = authoring_replaced || game_replaced || authoring_source_changed;
+        if authoring_replaced || authoring_source_changed {
+            let gpu = self.gpu.as_mut().expect("live Editor GPU");
+            let renderer = self.renderer.as_mut().expect("live egui renderer");
+            if authoring_replaced {
+                self.authoring_slot.retire_view(gpu, renderer);
+            } else {
+                self.authoring_slot.retire_target(gpu, renderer);
             }
-            EguiEditorViewport::Game if !self.viewport_slot.is_game() => {
-                let Some(request) = self.application.active_game_start_request() else {
-                    return Ok(false);
-                };
-                if self.viewport_slot.has_binding() {
-                    {
-                        let gpu = self
-                            .gpu
-                            .as_mut()
-                            .expect("an installed native window has one Editor GPU owner");
-                        let renderer = self
-                            .renderer
-                            .as_mut()
-                            .expect("an installed native window has one egui renderer");
-                        self.viewport_slot.retire_target(gpu, renderer);
-                    }
-                    self.retire_all_viewport_presentations();
-                }
-                self.application
-                    .set_game_view_source_active(true, "the Game viewport became active")
-                    .map_err(|error| {
-                        EditorRunError::Platform(format!(
-                            "the Game View source could not activate: {error}"
-                        ))
-                    })?;
-                let gpu = self
-                    .gpu
-                    .as_mut()
-                    .expect("an installed native window has one Editor GPU owner");
-                let renderer = self
-                    .renderer
-                    .as_mut()
-                    .expect("an installed native window has one egui renderer");
-                self.game_presenter.ensure_target(
-                    &mut self.viewport_slot,
-                    gpu,
-                    renderer,
-                    window,
-                    request,
-                )?;
-                Ok(true)
+            self.scene_presenter.retire_presentation();
+            self.ui_canvas_presenter.retire_presentation();
+            if authoring_replaced {
+                self.authoring_slot.set_view_id(authoring_id);
             }
-            EguiEditorViewport::Game if self.viewport_slot.game_display_scale_pending() => {
-                let Some(request) = self.application.active_game_start_request() else {
-                    return Ok(false);
-                };
-                self.game_presenter.ensure_target(
-                    &mut self.viewport_slot,
-                    self.gpu
-                        .as_mut()
-                        .expect("an installed native window has one Editor GPU owner"),
-                    self.renderer
-                        .as_mut()
-                        .expect("an installed native window has one egui renderer"),
-                    window,
-                    request,
-                )?;
-                Ok(true)
+            if authoring_id.is_none() {
+                set_requested_scene_extent(
+                    &mut self.application,
+                    &mut self.requested_scene_extent,
+                    None,
+                );
             }
-            EguiEditorViewport::Game => Ok(false),
         }
+        let request = self.application.active_game_start_request();
+        if game_replaced || (request.is_none() && self.game_slot.has_binding()) {
+            self.game_input.invalidate(false);
+            self.flush_game_input()?;
+            let gpu = self.gpu.as_mut().expect("live Editor GPU");
+            let renderer = self.renderer.as_mut().expect("live egui renderer");
+            if game_replaced {
+                self.game_slot.retire_view(gpu, renderer);
+            } else {
+                self.game_slot.retire_target(gpu, renderer);
+            }
+            self.game_presenter.retire_presentation();
+            if game_replaced {
+                self.game_slot.set_view_id(game_id);
+            }
+            changed = true;
+        }
+        if request.is_some() && game_id.is_none() {
+            self.application
+                .set_game_view_source_active(false, "the Game view was hidden")
+                .map_err(|error| {
+                    EditorRunError::Platform(format!(
+                        "the hidden Game View source could not retire: {error}"
+                    ))
+                })?;
+        }
+        if let Some(request) = request
+            && game_id.is_some()
+            && (!self.game_slot.is_game() || self.game_slot.game_display_scale_pending())
+        {
+            self.application
+                .set_game_view_source_active(true, "the Game view is visible")
+                .map_err(|error| {
+                    EditorRunError::Platform(format!(
+                        "the Game View source could not activate: {error}"
+                    ))
+                })?;
+            self.game_presenter.ensure_target(
+                &mut self.game_slot,
+                self.gpu.as_mut().expect("live Editor GPU"),
+                self.renderer.as_mut().expect("live egui renderer"),
+                window,
+                request,
+            )?;
+            changed = true;
+        }
+        Ok(changed)
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
@@ -1186,7 +1050,29 @@ impl NativeEditorHost {
         window_packet: RenderWindowPacket,
     ) -> Result<(), EditorRunError> {
         self.game_input.invalidate_after_control(true);
+        self.game_pointer_target = None;
         self.play_cadence.retire();
+        self.views
+            .synchronize(self.application.panel_workspace_mut(), None)
+            .map_err(|message| EditorRunError::Platform(message.to_owned()))?;
+        let gpu = self
+            .gpu
+            .as_mut()
+            .expect("an installed native window has one Editor GPU owner");
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("an installed native window has one egui renderer");
+        self.authoring_slot.retire_view(gpu, renderer);
+        self.game_slot.retire_view(gpu, renderer);
+        self.scene_presenter.retire_presentation();
+        self.ui_canvas_presenter.retire_presentation();
+        self.game_presenter.retire_presentation();
+        set_requested_scene_extent(
+            &mut self.application,
+            &mut self.requested_scene_extent,
+            None,
+        );
 
         let rendered_state = self.application.state();
         let mut shell_update = EditorApplicationUpdate::idle();
@@ -1225,13 +1111,15 @@ impl NativeEditorHost {
                 "the egui renderer does not belong to the live Editor GPU namespace".to_owned(),
             ));
         }
+        gpu.begin_editor_frame(window_packet, editor_frame_index)
+            .map_err(platform_gpu_error)?;
         let pending_textures = &mut self.pending_textures;
         let mut freed_textures = Vec::new();
         let presentation = gpu
             .present_window(
                 window_packet,
                 editor_frame_index,
-                None,
+                &[],
                 |frame| {
                     if renderer.surface_format != frame.surface_format() {
                         return Err(WgpuEditorExecutionError::toolkit_paint(
@@ -1294,7 +1182,7 @@ impl NativeEditorHost {
         for id in freed_textures {
             renderer.renderer.free_texture(&id);
         }
-        if presentation.composite().is_some() {
+        if !presentation.composites().is_empty() {
             return Err(EditorRunError::Platform(
                 "the Project Shell published a viewport receipt without a candidate".to_owned(),
             ));
@@ -1385,63 +1273,50 @@ impl NativeEditorHost {
                 )
             })
         });
-        let mut shell_action = self.viewport_selection.reconcile(
-            editor_frame.play().state(),
-            editor_frame.runtime_availability(),
-        );
-        let selected_viewport = self.viewport_selection.selected();
-        let gpu = self
-            .gpu
-            .as_ref()
-            .expect("an installed native window has one Editor GPU owner");
-        let renderer = self
-            .renderer
-            .as_ref()
-            .expect("an installed native window has one egui renderer");
-        if !renderer.matches(gpu) {
-            return Err(EditorRunError::Platform(
-                "the egui renderer does not belong to the live Editor GPU namespace".to_owned(),
-            ));
-        }
-        let source_changed = self.reconcile_viewport_source(
-            selected_viewport,
-            editor_frame.play().state(),
-            window_packet,
-            authoring_ui,
-            has_authoring_scene,
-        )?;
-        let mut pick_stamp = (selected_viewport == EguiEditorViewport::Authoring
-            && authoring_ui.is_none())
-        .then(|| {
-            self.scene_presenter.pick_stamp(
-                &self.viewport_slot,
-                &editor_frame,
-                self.requested_scene_extent,
-            )
-        })
-        .flatten();
-        let mut ui_pick_stamp = (selected_viewport == EguiEditorViewport::Authoring)
+        let editor_frame_index = self.next_editor_frame_index()?;
+        self.gpu
+            .as_mut()
+            .expect("live Editor GPU")
+            .begin_editor_frame(window_packet, editor_frame_index)
+            .map_err(platform_gpu_error)?;
+        let source_changed =
+            self.reconcile_viewport_source(window_packet, authoring_ui, has_authoring_scene)?;
+        let authoring_visible = self.authoring_slot.view_id().is_some();
+        let game_visible = self.game_slot.view_id().is_some();
+        let mut pick_stamp = (authoring_visible && has_authoring_scene && authoring_ui.is_none())
+            .then(|| {
+                self.scene_presenter.pick_stamp(
+                    &self.authoring_slot,
+                    &editor_frame,
+                    self.requested_scene_extent,
+                )
+            })
+            .flatten();
+        let mut ui_pick_stamp = authoring_visible
             .then(|| {
                 self.ui_canvas_presenter
-                    .pick_stamp(&self.viewport_slot, ui_authoring_identity)
+                    .pick_stamp(&self.authoring_slot, ui_authoring_identity)
             })
             .flatten();
         let mut viewport_retry_pending = false;
         let mut awaiting_game_frame = false;
         let mut game_input_invalidated = false;
-        let mut game_notice = None;
         let canary_sprite_sort_key = self
             .canary
             .as_ref()
             .and_then(NativeEditorCanary::tracked_sprite_sort_key);
-        let prepared_viewport = match selected_viewport {
-            EguiEditorViewport::Authoring if authoring_ui.is_some() => {
+        let prepared_authoring = match (
+            authoring_visible,
+            authoring_ui.is_some(),
+            has_authoring_scene,
+        ) {
+            (true, true, _) => {
                 if ui_pick_stamp.is_some() {
                     None
                 } else {
                     match self.application.take_editor_ui_preview_candidate() {
                         Some(candidate) => match self.ui_canvas_presenter.prepare(
-                            &mut self.viewport_slot,
+                            &mut self.authoring_slot,
                             self.gpu
                                 .as_mut()
                                 .expect("an installed native window has one Editor GPU owner"),
@@ -1463,129 +1338,117 @@ impl NativeEditorHost {
                     }
                 }
             }
-            EguiEditorViewport::Authoring if has_authoring_scene => {
-                match self.application.take_scene_preview_candidate() {
-                    Some(candidate) => match self.scene_presenter.prepare(
-                        &mut self.viewport_slot,
-                        self.gpu
-                            .as_mut()
-                            .expect("an installed native window has one Editor GPU owner"),
-                        self.renderer
-                            .as_mut()
-                            .expect("an installed native window has one egui renderer"),
-                        window_packet,
-                        candidate,
-                    ) {
-                        Ok(prepared) => Some(PreparedEditorViewportFrame::Scene(prepared)),
-                        Err(EditorRunError::Gpu(error)) if error.is_deferred() => {
-                            viewport_retry_pending = true;
-                            pick_stamp = None;
-                            None
-                        }
-                        Err(error) => return Err(error),
-                    },
-                    None => None,
-                }
-            }
-            EguiEditorViewport::Authoring => None,
-            EguiEditorViewport::Game
-                if self.viewport_slot.is_game()
-                    && matches!(
-                        editor_frame.play().state(),
-                        EditorPlayState::Running
-                            | EditorPlayState::Paused
-                            | EditorPlayState::Stepping
-                    ) =>
-            {
-                match self.application.take_game_view_candidate() {
-                    Ok(Some(candidate)) => match self.game_presenter.prepare_candidate(
-                        &mut self.application,
-                        &self.viewport_slot,
-                        self.gpu
-                            .as_mut()
-                            .expect("an installed native window has one Editor GPU owner"),
-                        window_packet,
-                        candidate,
-                        canary_sprite_sort_key,
-                    )? {
-                        EditorGamePrepareOutcome::Prepared(prepared) => {
-                            Some(PreparedEditorViewportFrame::Game(prepared))
-                        }
-                        EditorGamePrepareOutcome::Deferred => {
-                            viewport_retry_pending = true;
-                            game_input_invalidated = true;
-                            self.game_view_notice = Some("Game View presentation deferred");
-                            game_notice = Some("Game View presentation deferred");
-                            None
-                        }
-                        EditorGamePrepareOutcome::ContentRejected => {
-                            awaiting_game_frame = true;
-                            game_input_invalidated = true;
-                            self.game_view_notice = Some("Game View content was rejected");
-                            game_notice = Some("Game View content was rejected");
-                            None
-                        }
-                    },
-                    Ok(None) => {
-                        awaiting_game_frame = true;
+            (true, false, true) => match self.application.take_scene_preview_candidate() {
+                Some(candidate) => match self.scene_presenter.prepare(
+                    &mut self.authoring_slot,
+                    self.gpu
+                        .as_mut()
+                        .expect("an installed native window has one Editor GPU owner"),
+                    self.renderer
+                        .as_mut()
+                        .expect("an installed native window has one egui renderer"),
+                    window_packet,
+                    candidate,
+                ) {
+                    Ok(prepared) => Some(PreparedEditorViewportFrame::Scene(prepared)),
+                    Err(EditorRunError::Gpu(error)) if error.is_deferred() => {
+                        viewport_retry_pending = true;
+                        pick_stamp = None;
                         None
                     }
-                    Err(error) => {
-                        return Err(EditorRunError::Platform(format!(
-                            "the Game View bridge rejected candidate transfer: {error}"
-                        )));
+                    Err(error) => return Err(error),
+                },
+                None => None,
+            },
+            _ => None,
+        };
+        let prepared_game_frame = if self.game_slot.is_game()
+            && matches!(
+                editor_frame.play().state(),
+                EditorPlayState::Running | EditorPlayState::Paused | EditorPlayState::Stepping
+            ) {
+            match self.application.take_game_view_candidate() {
+                Ok(Some(candidate)) => match self.game_presenter.prepare_candidate(
+                    &mut self.application,
+                    &self.game_slot,
+                    self.gpu
+                        .as_mut()
+                        .expect("an installed native window has one Editor GPU owner"),
+                    window_packet,
+                    candidate,
+                    canary_sprite_sort_key,
+                )? {
+                    EditorGamePrepareOutcome::Prepared(prepared) => {
+                        Some(PreparedEditorViewportFrame::Game(prepared))
                     }
+                    EditorGamePrepareOutcome::Deferred => {
+                        viewport_retry_pending = true;
+                        game_input_invalidated = true;
+                        self.game_view_notice = Some("Game View presentation deferred");
+                        None
+                    }
+                    EditorGamePrepareOutcome::ContentRejected => {
+                        awaiting_game_frame = true;
+                        game_input_invalidated = true;
+                        self.game_view_notice = Some("Game View content was rejected");
+                        None
+                    }
+                },
+                Ok(None) => {
+                    awaiting_game_frame = true;
+                    None
+                }
+                Err(error) => {
+                    return Err(EditorRunError::Platform(format!(
+                        "the Game View bridge rejected candidate transfer: {error}"
+                    )));
                 }
             }
-            EguiEditorViewport::Game => {
-                awaiting_game_frame = true;
-                None
-            }
+        } else {
+            awaiting_game_frame = true;
+            None
         };
-        let prepared_scene = match prepared_viewport.as_ref() {
-            Some(PreparedEditorViewportFrame::Scene(scene)) => Some(scene),
-            Some(PreparedEditorViewportFrame::Game(_))
-            | Some(PreparedEditorViewportFrame::UiCanvas(_))
-            | None => None,
+        let prepared_viewports = [prepared_authoring, prepared_game_frame];
+        let prepared_scene = prepared_viewports
+            .iter()
+            .find_map(|prepared| match prepared {
+                Some(PreparedEditorViewportFrame::Scene(scene)) => Some(scene),
+                _ => None,
+            });
+        let prepared_ui = prepared_viewports
+            .iter()
+            .find_map(|prepared| match prepared {
+                Some(PreparedEditorViewportFrame::UiCanvas(ui)) => Some(ui),
+                _ => None,
+            });
+        let prepared_game = prepared_viewports
+            .iter()
+            .find_map(|prepared| match prepared {
+                Some(PreparedEditorViewportFrame::Game(game)) => Some(game),
+                _ => None,
+            });
+        let mut scene_view_input = if authoring_visible && has_authoring_scene {
+            self.scene_presenter.scene_view_input(
+                &self.authoring_slot,
+                &editor_frame,
+                self.requested_scene_extent,
+                prepared_scene,
+                pick_stamp,
+                viewport_retry_pending,
+            )
+        } else {
+            EguiSceneViewInput::unavailable()
         };
-        let prepared_ui = match prepared_viewport.as_ref() {
-            Some(PreparedEditorViewportFrame::UiCanvas(ui)) => Some(ui),
-            Some(PreparedEditorViewportFrame::Scene(_))
-            | Some(PreparedEditorViewportFrame::Game(_))
-            | None => None,
+        let mut ui_canvas_input = if authoring_visible && authoring_ui.is_some() {
+            self.ui_canvas_presenter.view_input(
+                &self.authoring_slot,
+                prepared_ui,
+                ui_authoring_identity,
+            )
+        } else {
+            EguiUiCanvasInput::unavailable()
         };
-        let prepared_game = match prepared_viewport.as_ref() {
-            Some(PreparedEditorViewportFrame::Game(game)) => Some(game),
-            Some(PreparedEditorViewportFrame::Scene(_))
-            | Some(PreparedEditorViewportFrame::UiCanvas(_))
-            | None => None,
-        };
-        let mut scene_view_input =
-            if selected_viewport == EguiEditorViewport::Authoring && has_authoring_scene {
-                self.scene_presenter.scene_view_input(
-                    &self.viewport_slot,
-                    &editor_frame,
-                    self.requested_scene_extent,
-                    prepared_scene,
-                    pick_stamp,
-                    viewport_retry_pending,
-                )
-            } else {
-                EguiSceneViewInput::unavailable()
-            };
-        let mut ui_canvas_input =
-            if selected_viewport == EguiEditorViewport::Authoring && authoring_ui.is_some() {
-                self.ui_canvas_presenter.view_input(
-                    &self.viewport_slot,
-                    prepared_ui,
-                    ui_authoring_identity,
-                )
-            } else {
-                EguiUiCanvasInput::unavailable()
-            };
-        if selected_viewport == EguiEditorViewport::Authoring
-            && let Some(notice) = self.authoring_view_notice.take()
-        {
+        if authoring_visible && let Some(notice) = self.authoring_view_notice.take() {
             if authoring_ui.is_some() {
                 ui_canvas_input = ui_canvas_input.with_notice(notice);
             } else {
@@ -1593,24 +1456,21 @@ impl NativeEditorHost {
             }
         }
         let workspace_modal_active = editor_frame.workspace_intent().phase().is_some();
-        let restore_game_focus = self.game_input.take_focus_restore_request(
-            selected_viewport == EguiEditorViewport::Game && !workspace_modal_active,
-        );
-        let mut game_view_input = if selected_viewport == EguiEditorViewport::Game {
+        let restore_game_focus = self
+            .game_input
+            .take_focus_restore_request(game_visible && !workspace_modal_active);
+        let mut game_view_input = if game_visible {
             self.game_presenter
-                .view_input(&self.viewport_slot, &editor_frame, prepared_game)
+                .view_input(&self.game_slot, &editor_frame, prepared_game)
                 .with_capture_active(self.game_input.is_captured())
                 .with_restore_focus(restore_game_focus)
                 .with_integer_scaling(
-                    self.viewport_slot.game_display_scale()
-                        == nara::render::DisplayScale::IntegerFit,
+                    self.game_slot.game_display_scale() == nara::render::DisplayScale::IntegerFit,
                 )
         } else {
             EguiGameViewInput::unavailable()
         };
-        if selected_viewport == EguiEditorViewport::Game
-            && let Some(notice) = game_notice.or(self.game_view_notice)
-        {
+        if game_visible && let Some(notice) = self.game_view_notice {
             game_view_input = game_view_input.with_notice(notice);
         }
         let mut panel_output = None;
@@ -1620,46 +1480,16 @@ impl NativeEditorHost {
                 &mut self.application,
                 EguiCentralViewportInput::new(scene_view_input, game_view_input)
                     .with_ui_canvas(ui_canvas_input),
-                selected_viewport,
             );
         });
         let panel_output = panel_output
             .expect("a matched workspace surface always returns one Editor panel output");
-        let (
-            mut batch,
-            project_action,
-            viewport_output,
-            viewport_intent,
-            project_browser_local_changed,
-        ) = panel_output.into_parts();
-        if project_action.is_none()
-            && let Some(intent) = viewport_intent
-        {
-            if intent == EguiEditorViewportIntent::SelectAuthoring
-                && editor_frame.play().state() == EditorPlayState::Stepping
-            {
-                self.application.cancel_game_step_presentation();
-            }
-            shell_action = self.viewport_selection.apply_intent(
-                intent,
-                editor_frame.play().state(),
-                editor_frame.runtime_availability(),
-            );
-        }
-        if project_action.is_none()
-            && let Some(action) = shell_action
-        {
-            batch = append_editor_action(batch, action);
-        }
-        let (
-            displayed_viewport,
-            desired_scene_extent,
-            mut desired_game_extent,
-            game_content_rect,
-            game_capture_requested,
-            camera_changed,
-        ) = match viewport_output {
-            EguiCentralViewportOutput::Scene(scene_view_output) => {
+        let (mut batch, project_action, viewport_output, project_browser_local_changed) =
+            panel_output.into_parts();
+        let mut desired_scene_extent = None;
+        let mut camera_changed = false;
+        match viewport_output.authoring {
+            Some(EguiAuthoringViewportOutput::Scene(scene_view_output)) => {
                 if let Some((point, mapping)) = scene_view_output
                     .pick_point()
                     .zip(scene_view_output.display_mapping())
@@ -1683,27 +1513,19 @@ impl NativeEditorHost {
                                     document,
                                     entity,
                                 }),
-                            );
+                            )
                         }
-                        Err(notice) => {
-                            self.authoring_view_notice = Some(notice);
-                        }
+                        Err(notice) => self.authoring_view_notice = Some(notice),
                     }
                 }
-                (
-                    EguiEditorViewport::Authoring,
-                    physical_viewport_extent(
-                        scene_view_output.desired_size_points(),
-                        output.pixels_per_point,
-                    )
-                    .filter(|_| has_authoring_scene),
-                    None,
-                    None,
-                    false,
-                    scene_view_output.camera_changed(),
+                desired_scene_extent = physical_viewport_extent(
+                    scene_view_output.desired_size_points(),
+                    output.pixels_per_point,
                 )
+                .filter(|_| has_authoring_scene);
+                camera_changed = scene_view_output.camera_changed();
             }
-            EguiCentralViewportOutput::UiCanvas(canvas_output) => {
+            Some(EguiAuthoringViewportOutput::UiCanvas(canvas_output)) => {
                 if let Some(uv) = canvas_output.pick_uv() {
                     let selection = ui_pick_stamp
                         .ok_or("UI Canvas input is unavailable")
@@ -1721,32 +1543,27 @@ impl NativeEditorHost {
                                     document,
                                     entity,
                                 }),
-                            );
+                            )
                         }
                         Err(notice) => self.authoring_view_notice = Some(notice),
                     }
                 }
-                (
-                    EguiEditorViewport::Authoring,
-                    None,
-                    None,
-                    None,
-                    false,
-                    false,
-                )
             }
-            EguiCentralViewportOutput::Game(game_view_output) => (
-                EguiEditorViewport::Game,
-                None,
-                physical_viewport_extent(
-                    game_view_output.desired_size_points(),
-                    output.pixels_per_point,
-                ),
-                game_view_output.content_rect_points(),
-                game_view_output.capture_requested(),
-                false,
-            ),
-        };
+            None => {}
+        }
+        let mut desired_game_extent = viewport_output.game.and_then(|game| {
+            physical_viewport_extent(game.desired_size_points(), output.pixels_per_point)
+        });
+        let game_content_rect = viewport_output
+            .game
+            .and_then(|game| game.content_rect_points());
+        let game_capture_requested = viewport_output
+            .game
+            .is_some_and(|game| game.capture_requested());
+        let game_focus_released = viewport_output.game.is_some_and(|game| {
+            game.primary_pointer_pressed_outside_image()
+                || (!game.image_has_focus() && self.context.egui_wants_keyboard_input())
+        });
         if let Some(canary_extent) = self
             .canary
             .as_ref()
@@ -1754,7 +1571,6 @@ impl NativeEditorHost {
         {
             desired_game_extent = Some(canary_extent);
         }
-        let selected_after_ui = self.viewport_selection.selected();
         let egui_repaint_delay = output
             .viewport_output
             .get(&ViewportId::ROOT)
@@ -1767,23 +1583,21 @@ impl NativeEditorHost {
             .context
             .tessellate(output.shapes, output.pixels_per_point);
         self.pending_textures.append(output.textures_delta);
-        let editor_frame_index = self.next_editor_frame_index()?;
         let game_resize_extent = (project_action.is_none()
-            && self.viewport_slot.game_display_scale() == nara::render::DisplayScale::Fit
-            && displayed_viewport == EguiEditorViewport::Game
-            && selected_after_ui == EguiEditorViewport::Game)
-            .then_some(desired_game_extent)
-            .flatten()
-            .filter(|extent| {
-                self.application
-                    .active_game_start_request()
-                    .is_some_and(|request| {
-                        let resolution = request.logical_window().resolution;
-                        request.resizable()
-                            && (resolution.physical_width != extent.width
-                                || resolution.physical_height != extent.height)
-                    })
-            });
+            && self.game_slot.game_display_scale() == nara::render::DisplayScale::Fit
+            && viewport_output.game.is_some())
+        .then_some(desired_game_extent)
+        .flatten()
+        .filter(|extent| {
+            self.application
+                .active_game_start_request()
+                .is_some_and(|request| {
+                    let resolution = request.logical_window().resolution;
+                    request.resizable()
+                        && (resolution.physical_width != extent.width
+                            || resolution.physical_height != extent.height)
+                })
+        });
         if game_resize_extent.is_some() {
             game_input_invalidated = true;
             self.game_input.invalidate(false);
@@ -1797,20 +1611,38 @@ impl NativeEditorHost {
             .renderer
             .as_mut()
             .expect("an installed native window has one egui renderer");
-        let sampled_viewport = prepared_viewport
-            .as_ref()
-            .is_some_and(|prepared| primitives_sample_texture(&primitives, prepared.texture_id()));
-        let registered_viewport_matches = prepared_viewport
-            .as_ref()
-            .is_some_and(|prepared| self.viewport_slot.matches_prepared(prepared));
+        let mut sampled_images = Vec::new();
+        for prepared in prepared_viewports.iter().flatten() {
+            if primitives_sample_texture(&primitives, prepared.texture_id()) {
+                let slot = if matches!(prepared, PreparedEditorViewportFrame::Game(_)) {
+                    &self.game_slot
+                } else {
+                    &self.authoring_slot
+                };
+                if !slot.matches_prepared(prepared) {
+                    return Err(EditorRunError::Platform(
+                        "egui sampled an unregistered Editor view texture".to_owned(),
+                    ));
+                }
+                sampled_images.push(prepared.image());
+            }
+        }
+        for slot in [&self.authoring_slot, &self.game_slot] {
+            if let Some((texture, image)) = slot.retained_image()
+                && !sampled_images
+                    .iter()
+                    .any(|sample| sample.view_id() == image.view_id())
+                && primitives_sample_texture(&primitives, texture)
+            {
+                sampled_images.push(image);
+            }
+        }
         let pending_textures = &mut self.pending_textures;
         let mut freed_textures = Vec::new();
         let presentation = gpu.present_window(
             window_packet,
             editor_frame_index,
-            prepared_viewport
-                .as_ref()
-                .map(PreparedEditorViewportFrame::image),
+            &sampled_images,
             |frame| {
                 if renderer.surface_format != frame.surface_format() {
                     return Err(WgpuEditorExecutionError::toolkit_paint(
@@ -1864,13 +1696,8 @@ impl NativeEditorHost {
                     command_buffers
                 });
                 frame.prepend_command_buffers(command_buffers);
-                if prepared_viewport.is_some() {
-                    if !sampled_viewport || !registered_viewport_matches {
-                        return Err(WgpuEditorExecutionError::toolkit_paint(
-                            "egui did not sample the exact Editor viewport texture",
-                        ));
-                    }
-                    frame.record_viewport_sample()?;
+                for image in &sampled_images {
+                    frame.record_viewport_sample(*image)?;
                 }
                 freed_textures.extend(pending_textures.free.drain());
                 Ok(())
@@ -1883,9 +1710,14 @@ impl NativeEditorHost {
         let presentation = match presentation {
             Ok(presentation) => presentation,
             Err(error) => {
-                if let Some(PreparedEditorViewportFrame::Game(prepared)) = prepared_viewport {
-                    self.game_presenter
-                        .fail_prepared(&mut self.application, prepared, &error)?;
+                for prepared in prepared_viewports.into_iter().flatten() {
+                    if let PreparedEditorViewportFrame::Game(prepared) = prepared {
+                        self.game_presenter.fail_prepared(
+                            &mut self.application,
+                            prepared,
+                            &error,
+                        )?;
+                    }
                 }
                 return Err(platform_gpu_error(error));
             }
@@ -1893,98 +1725,68 @@ impl NativeEditorHost {
         if presentation.window().is_some() {
             window.set_title(EDITOR_TITLE);
         }
-        if presentation.composite().is_some() {
+        if !presentation.composites().is_empty() {
             self.gpu_recovery.mark_presentation_ready();
         }
         let mut game_presentation_advanced = false;
-        match (prepared_viewport, presentation.composite()) {
-            (Some(PreparedEditorViewportFrame::Scene(prepared)), Some(receipt)) => {
-                let EguiCentralViewportOutput::Scene(scene_output) = viewport_output else {
-                    return Err(EditorRunError::Platform(
-                        "the Scene candidate was not displayed by the active viewport".to_owned(),
-                    ));
-                };
-                let mapping = scene_output.display_mapping().ok_or_else(|| {
-                    EditorRunError::Platform("the Scene image has no displayed mapping".to_owned())
-                })?;
-                self.scene_presenter.promote(prepared, receipt, mapping)?;
-            }
-            (Some(PreparedEditorViewportFrame::UiCanvas(prepared)), Some(receipt)) => {
-                self.ui_canvas_presenter.promote(prepared, receipt)?;
-            }
-            (Some(PreparedEditorViewportFrame::Game(prepared)), Some(receipt)) => {
-                self.game_presenter.promote(
-                    &mut self.application,
-                    &self.viewport_slot,
-                    prepared,
-                    receipt,
-                )?;
-                game_presentation_advanced = true;
-                self.game_view_notice = None;
-            }
-            (Some(PreparedEditorViewportFrame::Scene(_)), None)
-                if presentation.window().is_none() =>
-            {
-                viewport_retry_pending = true;
-                self.scene_presenter.retire_presentation();
-            }
-            (Some(PreparedEditorViewportFrame::UiCanvas(_)), None)
-                if presentation.window().is_none() =>
-            {
-                viewport_retry_pending = true;
-                self.ui_canvas_presenter.retire_presentation();
-            }
-            (Some(PreparedEditorViewportFrame::Game(prepared)), None)
-                if presentation.window().is_none() =>
-            {
-                viewport_retry_pending = true;
-                game_input_invalidated = true;
-                self.game_presenter.defer(
-                    &mut self.application,
-                    prepared,
-                    "the Editor window did not present the submitted Game image".to_owned(),
-                )?;
-                self.game_view_notice = Some("Game View presentation deferred");
-            }
-            (Some(PreparedEditorViewportFrame::Scene(_)), None) => {
-                return Err(EditorRunError::Platform(
-                    "the Editor window presented without the exact Scene sample".to_owned(),
-                ));
-            }
-            (Some(PreparedEditorViewportFrame::UiCanvas(_)), None) => {
-                return Err(EditorRunError::Platform(
-                    "the Editor window presented without the exact UI Canvas sample".to_owned(),
-                ));
-            }
-            (Some(PreparedEditorViewportFrame::Game(prepared)), None) => {
-                let error = WgpuEditorExecutionError::StaleImageSubmission;
-                self.game_presenter
-                    .fail_prepared(&mut self.application, prepared, &error)?;
-                return Err(EditorRunError::Platform(
-                    "the Editor window presented without the exact Game sample".to_owned(),
-                ));
-            }
-            (None, Some(_)) => {
-                return Err(EditorRunError::Platform(
-                    "the Editor GPU published a viewport receipt without a candidate".to_owned(),
-                ));
-            }
-            (None, None)
-                if displayed_viewport == EguiEditorViewport::Authoring
-                    && (viewport_retry_pending
-                        || if authoring_ui.is_some() {
-                            ui_pick_stamp.is_none()
-                        } else {
-                            pick_stamp.is_none()
-                        }) =>
-            {
-                if authoring_ui.is_some() {
-                    self.ui_canvas_presenter.retire_presentation();
-                } else {
+        for prepared in prepared_viewports.into_iter().flatten() {
+            let image = prepared.image();
+            let receipt = presentation
+                .composites()
+                .iter()
+                .find(|receipt| receipt.image() == image)
+                .copied();
+            match (prepared, receipt) {
+                (PreparedEditorViewportFrame::Scene(prepared), Some(receipt)) => {
+                    let Some(EguiAuthoringViewportOutput::Scene(scene_output)) =
+                        viewport_output.authoring
+                    else {
+                        return Err(EditorRunError::Platform(
+                            "the Scene candidate has no displayed panel".to_owned(),
+                        ));
+                    };
+                    let mapping = scene_output.display_mapping().ok_or_else(|| {
+                        EditorRunError::Platform(
+                            "the Scene image has no displayed mapping".to_owned(),
+                        )
+                    })?;
+                    self.scene_presenter.promote(prepared, receipt, mapping)?;
+                    self.authoring_slot.remember_presented(receipt);
+                }
+                (PreparedEditorViewportFrame::UiCanvas(prepared), Some(receipt)) => {
+                    self.ui_canvas_presenter.promote(prepared, receipt)?;
+                    self.authoring_slot.remember_presented(receipt);
+                }
+                (PreparedEditorViewportFrame::Game(prepared), Some(receipt)) => {
+                    self.game_presenter.promote(
+                        &mut self.application,
+                        &self.game_slot,
+                        prepared,
+                        receipt,
+                    )?;
+                    self.game_slot.remember_presented(receipt);
+                    game_presentation_advanced = true;
+                    self.game_view_notice = None;
+                }
+                (PreparedEditorViewportFrame::Scene(_), None) => {
+                    viewport_retry_pending |= authoring_visible;
                     self.scene_presenter.retire_presentation();
                 }
+                (PreparedEditorViewportFrame::UiCanvas(_), None) => {
+                    viewport_retry_pending |= authoring_visible;
+                    self.ui_canvas_presenter.retire_presentation();
+                }
+                (PreparedEditorViewportFrame::Game(prepared), None) => {
+                    viewport_retry_pending |= game_visible;
+                    game_input_invalidated = true;
+                    self.game_presenter.defer(
+                        &mut self.application,
+                        prepared,
+                        "the Editor window did not sample the submitted Game image".to_owned(),
+                    )?;
+                    self.game_view_notice = Some("Game View presentation deferred");
+                }
             }
-            (None, None) => {}
         }
 
         let mut native_canary_advanced = false;
@@ -2009,7 +1811,7 @@ impl NativeEditorHost {
                 Some(NativeEditorCanary::ImageImport(canary)) => {
                     let observation = self
                         .ui_canvas_presenter
-                        .presented_observation(&self.viewport_slot, ui_authoring_identity);
+                        .presented_observation(&self.authoring_slot, ui_authoring_identity);
                     let advance = canary.advance_workspace(
                         rendered_state,
                         &mut self.application,
@@ -2054,9 +1856,8 @@ impl NativeEditorHost {
             }
         }
 
-        if displayed_viewport == EguiEditorViewport::Game
-            && selected_after_ui == EguiEditorViewport::Game
-        {
+        self.game_pointer_target = viewport_output.game;
+        if viewport_output.game.is_some() {
             if game_input_invalidated {
                 self.game_input.invalidate(false);
             } else {
@@ -2067,11 +1868,14 @@ impl NativeEditorHost {
                     game_presentation_advanced,
                 );
             }
+            if game_focus_released {
+                self.game_input.release_to_editor();
+            }
             if editor_frame.workspace_intent().phase()
                 == Some(nara::tooling::EditorWorkspaceIntentPhase::AwaitingDecision)
             {
                 self.game_input.invalidate(false);
-            } else if game_capture_requested {
+            } else if game_capture_requested && !game_focus_released {
                 self.game_input.capture_requested();
             }
         } else {
@@ -2085,7 +1889,7 @@ impl NativeEditorHost {
             let canary_observation = self.game_presenter.presented_observation();
             let ui_canary_observation = self
                 .ui_canvas_presenter
-                .presented_observation(&self.viewport_slot, ui_authoring_identity);
+                .presented_observation(&self.authoring_slot, ui_authoring_identity);
             let active_start = self.application.active_game_start_request();
             let Some(NativeEditorCanary::GameView(canary)) = self.canary.as_mut() else {
                 unreachable!("the guarded Game View canary remains installed")
@@ -2101,6 +1905,16 @@ impl NativeEditorHost {
                     ui_authoring_frame: ui_authoring_frame.as_deref(),
                     ui_observation: ui_canary_observation.as_ref(),
                     ui_presenter: &self.ui_canvas_presenter,
+                    scene_receipt: presentation
+                        .composites()
+                        .iter()
+                        .find(|receipt| {
+                            Some(receipt.image().view_id()) == self.authoring_slot.view_id()
+                        })
+                        .copied(),
+                    workspace: self.application.panel_workspace_mut(),
+                    gpu,
+                    game_texture_registered: self.game_slot.has_binding(),
                 },
                 &mut self.game_input,
                 &window,
@@ -2120,11 +1934,11 @@ impl NativeEditorHost {
 
         if project_action.is_none()
             && !read_only
-            && displayed_viewport == EguiEditorViewport::Authoring
+            && viewport_output.authoring.is_some()
             && desired_scene_extent != self.requested_scene_extent
         {
-            if self.viewport_slot.is_scene() {
-                self.viewport_slot.retire_target(gpu, renderer);
+            if self.authoring_slot.is_scene() {
+                self.authoring_slot.retire_target(gpu, renderer);
                 self.scene_presenter.retire_presentation();
             }
             set_requested_scene_extent(
@@ -2133,23 +1947,13 @@ impl NativeEditorHost {
                 desired_scene_extent,
             );
             viewport_retry_pending = true;
-        } else if project_action.is_none()
-            && !read_only
-            && displayed_viewport == EguiEditorViewport::Game
-            && self.requested_scene_extent.is_some()
-        {
-            set_requested_scene_extent(
-                &mut self.application,
-                &mut self.requested_scene_extent,
-                None,
-            );
         }
         let mut game_resized = false;
         let game_scale_changed = if !read_only
             && project_action.is_none()
-            && let EguiCentralViewportOutput::Game(output) = viewport_output
+            && let Some(output) = viewport_output.game
         {
-            self.viewport_slot
+            self.game_slot
                 .request_game_display_scale(output.requested_scale())
         } else {
             false
@@ -2168,7 +1972,7 @@ impl NativeEditorHost {
                 ))
             })?;
             if game_resized {
-                self.viewport_slot.retire_target(gpu, renderer);
+                self.game_slot.retire_target(gpu, renderer);
                 self.game_presenter.retire_presentation();
                 self.game_view_notice = Some("Game View is resizing");
                 viewport_retry_pending = true;
@@ -2245,7 +2049,7 @@ impl NativeEditorHost {
             self.game_input.invalidate(true);
             self.flush_game_input()?;
         } else if drive_runtime
-            && selected_after_ui == EguiEditorViewport::Game
+            && game_visible
             && matches!(
                 play_state_after_update,
                 EditorPlayState::Running | EditorPlayState::Paused | EditorPlayState::Stepping
@@ -2254,9 +2058,9 @@ impl NativeEditorHost {
             self.game_input.mark_presented_stale();
         }
         self.play_cadence
-            .observe_after(now, play_state_after_update, selected_after_ui);
+            .observe_after(now, play_state_after_update);
         let game_wait_pending = game_view_wait_pending(
-            selected_after_ui,
+            game_visible,
             play_state_after_update,
             viewport_retry_pending,
             awaiting_game_frame,
@@ -2266,9 +2070,7 @@ impl NativeEditorHost {
         } else {
             egui_repaint_delay
         };
-        let cadence_deadline =
-            self.play_cadence
-                .deadline(now, play_state_after_update, selected_after_ui);
+        let cadence_deadline = self.play_cadence.deadline(now, play_state_after_update);
         let wake_deadline = earliest_deadline(
             earliest_deadline(
                 earliest_deadline(
@@ -2282,14 +2084,12 @@ impl NativeEditorHost {
                 self.application.session_close_retry_deadline(),
             ),
         );
-        let scene_retry_pending =
-            selected_after_ui == EguiEditorViewport::Authoring && viewport_retry_pending;
+        let scene_retry_pending = authoring_visible && viewport_retry_pending;
         if open_update.actions_observed()
             || update.actions_observed()
             || scene_retry_pending
             || game_started
             || source_changed
-            || selected_after_ui != displayed_viewport
             || camera_changed
             || project_browser_local_changed
             || native_canary_advanced
@@ -2360,7 +2160,6 @@ impl NativeEditorHost {
         self.flush_game_input()?;
 
         let now = Instant::now();
-        let selected = self.viewport_selection.selected();
         let state = frame.play().state();
         let image_import_was_pending = frame.image_import_work_pending();
         let drive_runtime = self.application.game_step_requires_runtime_drive()
@@ -2396,11 +2195,11 @@ impl NativeEditorHost {
             self.game_input.invalidate(true);
             self.flush_game_input()?;
         }
-        self.play_cadence.observe_after(now, state, selected);
+        self.play_cadence.observe_after(now, state);
         let deadline = earliest_deadline(
             earliest_deadline(
                 earliest_deadline(
-                    self.play_cadence.deadline(now, state, selected),
+                    self.play_cadence.deadline(now, state),
                     play_lifecycle_poll_deadline(now, state),
                 ),
                 image_import_poll_deadline(now, image_import_is_pending),
@@ -2556,7 +2355,8 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
         }
         self.renderer = None;
         self.gpu = None;
-        self.viewport_slot.retire_gpu_binding();
+        self.authoring_slot.retire_gpu_binding();
+        self.game_slot.retire_gpu_binding();
         self.scene_presenter.retire_gpu_binding();
         self.ui_canvas_presenter.retire_gpu_binding();
         self.game_presenter.retire_gpu_binding();
@@ -2619,27 +2419,16 @@ impl EditorPlayCadence {
         delta
     }
 
-    fn observe_after(
-        &mut self,
-        now: Instant,
-        play_state: EditorPlayState,
-        selected: EguiEditorViewport,
-    ) {
-        if play_state == EditorPlayState::Running && selected == EguiEditorViewport::Game {
+    fn observe_after(&mut self, now: Instant, play_state: EditorPlayState) {
+        if play_state == EditorPlayState::Running {
             self.last_drive.get_or_insert(now);
         } else {
             self.retire();
         }
     }
 
-    fn deadline(
-        &self,
-        now: Instant,
-        play_state: EditorPlayState,
-        selected: EguiEditorViewport,
-    ) -> Option<Instant> {
-        (play_state == EditorPlayState::Running && selected == EguiEditorViewport::Game)
-            .then_some(now + PLAY_DRIVE_CADENCE)
+    fn deadline(&self, now: Instant, play_state: EditorPlayState) -> Option<Instant> {
+        (play_state == EditorPlayState::Running).then_some(now + PLAY_DRIVE_CADENCE)
     }
 }
 
@@ -2703,12 +2492,12 @@ fn explicit_gpu_retry_requested(event: &KeyEvent) -> bool {
 }
 
 fn game_view_wait_pending(
-    selected: EguiEditorViewport,
+    visible: bool,
     play_state: EditorPlayState,
     retry_pending: bool,
     awaiting_successor: bool,
 ) -> bool {
-    selected == EguiEditorViewport::Game
+    visible
         && matches!(
             play_state,
             EditorPlayState::PreparingPlay
@@ -2794,14 +2583,11 @@ fn platform_gpu_error(error: WgpuEditorExecutionError) -> EditorRunError {
 mod tests {
     use std::time::{Duration, Instant};
 
-    use nara::{
-        tooling::{EditorAction, EditorPlayAction, EditorPlayState, EditorRuntimeAvailability},
-        tooling_egui::{EguiEditorViewport, EguiEditorViewportIntent},
-    };
+    use nara::tooling::EditorPlayState;
 
     use super::{
-        EditorApplicationDispatch, EditorGpuRecovery, EditorPlayCadence, EditorViewportSelection,
-        earliest_deadline, game_view_wait_pending, image_import_poll_deadline,
+        EditorApplicationDispatch, EditorGpuRecovery, EditorPlayCadence, earliest_deadline,
+        game_view_wait_pending, image_import_poll_deadline,
         image_import_terminal_successor_required, play_lifecycle_poll_deadline,
         play_lifecycle_requires_runtime_drive,
     };
@@ -2909,100 +2695,21 @@ mod tests {
     }
 
     #[test]
-    fn scene_tab_handoff_keeps_game_selected_until_pause_is_visible() {
-        let mut selection = EditorViewportSelection::Authoring;
-
-        assert_eq!(
-            selection.reconcile(
-                EditorPlayState::Starting,
-                EditorRuntimeAvailability::TrustedInProcess,
-            ),
-            None
-        );
-        assert_eq!(selection.selected(), EguiEditorViewport::Game);
-        assert_eq!(
-            selection.apply_intent(
-                EguiEditorViewportIntent::SelectAuthoring,
-                EditorPlayState::Running,
-                EditorRuntimeAvailability::TrustedInProcess,
-            ),
-            Some(EditorAction::Play(EditorPlayAction::Pause))
-        );
-        assert_eq!(selection.selected(), EguiEditorViewport::Game);
-
-        assert_eq!(
-            selection.reconcile(
-                EditorPlayState::Paused,
-                EditorRuntimeAvailability::TrustedInProcess,
-            ),
-            None
-        );
-        assert_eq!(selection.selected(), EguiEditorViewport::Authoring);
-    }
-
-    #[test]
-    fn selecting_game_cancels_a_synthesized_scene_pause_before_dispatch() {
-        let mut selection = EditorViewportSelection::Game;
-        assert_eq!(
-            selection.apply_intent(
-                EguiEditorViewportIntent::SelectAuthoring,
-                EditorPlayState::Running,
-                EditorRuntimeAvailability::TrustedInProcess,
-            ),
-            Some(EditorAction::Play(EditorPlayAction::Pause))
-        );
-        let mut pending = selection.reconcile(
-            EditorPlayState::Running,
-            EditorRuntimeAvailability::TrustedInProcess,
-        );
-        assert_eq!(pending, Some(EditorAction::Play(EditorPlayAction::Pause)));
-        pending = selection.apply_intent(
-            EguiEditorViewportIntent::SelectGame,
-            EditorPlayState::Running,
-            EditorRuntimeAvailability::TrustedInProcess,
-        );
-
-        assert_eq!(pending, None);
-        assert_eq!(selection.selected(), EguiEditorViewport::Game);
-    }
-
-    #[test]
-    fn external_supervised_play_keeps_authoring_selected_and_rejects_game_handoff() {
-        let mut selection = EditorViewportSelection::Game;
-        let availability = EditorRuntimeAvailability::ExternalSupervised;
-
-        assert_eq!(
-            selection.reconcile(EditorPlayState::Running, availability),
-            None
-        );
-        assert_eq!(selection.selected(), EguiEditorViewport::Authoring);
-        assert_eq!(
-            selection.apply_intent(
-                EguiEditorViewportIntent::SelectGame,
-                EditorPlayState::Running,
-                availability,
-            ),
-            None
-        );
-        assert_eq!(selection.selected(), EguiEditorViewport::Authoring);
-    }
-
-    #[test]
     fn paused_content_rejection_keeps_one_bounded_successor_wait() {
         assert!(game_view_wait_pending(
-            EguiEditorViewport::Game,
+            true,
             EditorPlayState::Paused,
             false,
             true,
         ));
         assert!(!game_view_wait_pending(
-            EguiEditorViewport::Game,
+            true,
             EditorPlayState::Running,
             false,
             false,
         ));
         assert!(!game_view_wait_pending(
-            EguiEditorViewport::Authoring,
+            false,
             EditorPlayState::Paused,
             false,
             true,
@@ -3013,7 +2720,7 @@ mod tests {
     fn running_cadence_starts_a_fresh_epoch_after_pause() {
         let start = Instant::now();
         let mut cadence = EditorPlayCadence::default();
-        cadence.observe_after(start, EditorPlayState::Running, EguiEditorViewport::Game);
+        cadence.observe_after(start, EditorPlayState::Running);
 
         assert_eq!(
             cadence.real_delta(
@@ -3025,11 +2732,7 @@ mod tests {
             Duration::from_millis(16)
         );
 
-        cadence.observe_after(
-            start + Duration::from_secs(1),
-            EditorPlayState::Paused,
-            EguiEditorViewport::Game,
-        );
+        cadence.observe_after(start + Duration::from_secs(1), EditorPlayState::Paused);
         assert_eq!(
             cadence.real_delta(
                 start + Duration::from_secs(30),

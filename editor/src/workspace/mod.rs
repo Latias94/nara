@@ -48,6 +48,13 @@ impl Default for EditorPanelWorkspace {
                 true,
             ),
             EditorPanelDescriptor::new(
+                "nara.game-view",
+                "Game",
+                EditorPanelMultiplicity::Single,
+                EditorPanelPlacement::Center,
+                true,
+            ),
+            EditorPanelDescriptor::new(
                 "nara.inspector",
                 "Inspector",
                 EditorPanelMultiplicity::Multiple,

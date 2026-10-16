@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::panels::{
     EditorNativeWindowId, EditorPanelInstance, EditorPanelInstanceId, EditorPanelMultiplicity,
     EditorPanelPlacement, EditorPanelRegistrationError, EditorPanelRegistry, EditorPanelTarget,
+    EditorRenderViewId,
 };
 
 const LAYOUT_VERSION: u32 = 1;
@@ -220,6 +221,13 @@ impl EditorWorkspaceLayout {
     }
     pub fn set_target(&mut self, id: EditorPanelInstanceId, target: EditorPanelTarget) -> bool {
         self.change(id, |panel| panel.target = target)
+    }
+    pub fn set_render_view(
+        &mut self,
+        id: EditorPanelInstanceId,
+        view: Option<EditorRenderViewId>,
+    ) -> bool {
+        self.change(id, |panel| panel.render_view = view)
     }
     pub fn place(&mut self, id: EditorPanelInstanceId, placement: EditorPanelPlacement) -> bool {
         self.change(id, |panel| panel.placement = placement)

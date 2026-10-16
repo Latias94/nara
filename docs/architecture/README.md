@@ -38,7 +38,10 @@ an index, not another source of architecture decisions.
    including the Windows authoring, external Play repair and strict export baseline.
    [U3/U4 verification](../knowledge/engineering/verification/2026-10/2026-10-16T084808Z-editor-u3-generic-composition-and-u4-trusted-panel-workspaces-pass-owner-and-native-regression-gates-25b42156b4834a40b67d01eb54671485.md)
    proves generic Scene/Prefab composition, complete unavailable placement preservation and trusted panel/workspace ownership.
-   U3 is committed at `293d98a`; independent render views and U5-U8 remain pending.
+   U3 is committed at `293d98a` and U4 at `527a135`.
+   [U5 evidence](../knowledge/engineering/verification/2026-10/2026-10-16T094118Z-editor-u5-independent-scene-and-game-views-pass-native-concurrent-presentation-close-reopen-and-paused-refocus-ad10a59ba57e4fe7b45a5176d3311a33.md)
+   establishes independent Authoring/Game view ownership with exact concurrent Windows presentation,
+   close/reopen, independent resize and paused input refocus. U6-U8 remain pending.
    Remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).

@@ -11,6 +11,7 @@ fn production_builtins_are_registered_contributions() {
         "nara.hierarchy",
         "nara.project-browser",
         "nara.authoring-view",
+        "nara.game-view",
         "nara.inspector",
         "nara.diagnostics",
     ] {

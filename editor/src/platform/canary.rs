@@ -4,6 +4,9 @@ use nara::{
     input::KeyCode,
     project_host::{EditorGameStartRequest, EditorUiAuthoringFrame},
     render::Extent2d,
+    render_wgpu::__private::{
+        WgpuEditorCompositeReceipt, WgpuEditorExecution, WgpuSubmittedImageReceipt,
+    },
     tooling::{
         EditorAction, EditorFrameModel, EditorPlayAction, EditorPlayOperation,
         EditorPlayOperationResult, EditorPlayState,
@@ -32,6 +35,10 @@ pub(super) struct EditorGameViewCanaryFrameInput<'a> {
     pub(super) ui_authoring_frame: Option<&'a EditorUiAuthoringFrame>,
     pub(super) ui_observation: Option<&'a EditorUiCanvasPresentedObservation<'a>>,
     pub(super) ui_presenter: &'a EditorUiCanvasPresenter,
+    pub(super) scene_receipt: Option<WgpuEditorCompositeReceipt>,
+    pub(super) workspace: &'a mut crate::workspace::EditorPanelWorkspace,
+    pub(super) gpu: &'a WgpuEditorExecution,
+    pub(super) game_texture_registered: bool,
 }
 
 /// Product-provided facts for one bounded first-party Game View native canary.
@@ -147,9 +154,33 @@ pub struct EditorGameViewCanaryEvidence {
     resized: EditorGameViewCanaryFrame,
     input_delta_x: f32,
     step_delta_x: f32,
+    concurrent_view_frames: u64,
+    scene_view_id: u64,
+    closed_game_view_id: u64,
+    reopened_game_view_id: u64,
 }
 
 impl EditorGameViewCanaryEvidence {
+    #[must_use]
+    pub const fn concurrent_view_frames(&self) -> u64 {
+        self.concurrent_view_frames
+    }
+
+    #[must_use]
+    pub const fn scene_view_id(&self) -> u64 {
+        self.scene_view_id
+    }
+
+    #[must_use]
+    pub const fn closed_game_view_id(&self) -> u64 {
+        self.closed_game_view_id
+    }
+
+    #[must_use]
+    pub const fn reopened_game_view_id(&self) -> u64 {
+        self.reopened_game_view_id
+    }
+
     #[must_use]
     pub const fn ui_authoring(&self) -> Option<&EditorUiAuthoringCanaryEvidence> {
         self.ui_authoring.as_ref()
@@ -191,12 +222,16 @@ impl EditorGameViewCanaryEvidence {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum EditorGameViewCanaryStage {
     Start,
     AwaitingInitial,
     AwaitingInputResponse,
+    AwaitingHidden { redraws: u8 },
+    AwaitingReopened,
+    AwaitingReopenedInputResponse { baseline_center_x: f32 },
     AwaitingPause,
+    AwaitingPausedRefocus,
     AwaitingStep,
     AwaitingResize { geometry_generation: u64 },
     AwaitingStopRequest,
@@ -219,6 +254,11 @@ pub(super) struct EditorGameViewCanaryHost {
     step_baseline_center_x: Option<f32>,
     input_delta_x: Option<f32>,
     step_delta_x: Option<f32>,
+    concurrent_view_frames: u64,
+    scene_view_id: Option<u64>,
+    closed_game_image: Option<WgpuSubmittedImageReceipt>,
+    reopened_game_view_id: Option<u64>,
+    scene_before_game_resize: Option<WgpuSubmittedImageReceipt>,
 }
 
 pub(super) struct EditorGameViewCanaryAdvance {
@@ -247,6 +287,11 @@ impl EditorGameViewCanaryHost {
             step_baseline_center_x: None,
             input_delta_x: None,
             step_delta_x: None,
+            concurrent_view_frames: 0,
+            scene_view_id: None,
+            closed_game_image: None,
+            reopened_game_view_id: None,
+            scene_before_game_resize: None,
         }
     }
 
@@ -263,6 +308,10 @@ impl EditorGameViewCanaryHost {
             ui_authoring_frame,
             ui_observation,
             ui_presenter,
+            scene_receipt,
+            workspace,
+            gpu,
+            game_texture_registered,
         } = frame_input;
         if Instant::now() >= self.deadline {
             return Err(self.timeout_error(observation, active_start));
@@ -287,6 +336,15 @@ impl EditorGameViewCanaryHost {
                     && let Some(observation) = observation
                 {
                     self.require_combined_product(observation)?;
+                    let Some(scene_receipt) = scene_receipt else {
+                        window.request_redraw();
+                        return Ok(EditorGameViewCanaryAdvance {
+                            actions,
+                            exit: false,
+                        });
+                    };
+                    self.require_concurrent_views(scene_receipt, observation.receipt())?;
+                    self.scene_view_id = Some(scene_receipt.image().view_id().get());
                     if observation.runtime_ui_blocks_unhandled_input() {
                         return Ok(EditorGameViewCanaryAdvance {
                             actions,
@@ -334,9 +392,94 @@ impl EditorGameViewCanaryHost {
                         self.input_response =
                             Some(EditorGameViewCanaryFrame::from_observation(observation));
                         self.input_delta_x = Some(delta_x);
-                        actions.push(EditorAction::Play(EditorPlayAction::Pause));
-                        self.stage = EditorGameViewCanaryStage::AwaitingPause;
+                        self.closed_game_image = Some(observation.receipt().image());
+                        let panel = game_panel_id(workspace)?;
+                        workspace.layout_mut().close(panel);
+                        input.release_to_editor();
+                        window.request_redraw();
+                        self.stage = EditorGameViewCanaryStage::AwaitingHidden { redraws: 0 };
                     }
+                }
+            }
+            EditorGameViewCanaryStage::AwaitingHidden { redraws } => {
+                let closed = self
+                    .closed_game_image
+                    .expect("the close stage retains its exact image");
+                if frame.play().state() != EditorPlayState::Running
+                    || input.is_captured()
+                    || game_texture_registered
+                    || gpu.viewport_target_matches(
+                        closed.view_id(),
+                        closed.source_generation(),
+                        closed.target(),
+                    )
+                {
+                    return Err(EditorRunError::Platform(
+                        "closing Game did not retire only its live texture and input while Play continued".to_owned(),
+                    ));
+                }
+                if let Some(scene) = scene_receipt {
+                    if Some(scene.image().view_id().get()) != self.scene_view_id {
+                        return Err(EditorRunError::Platform(
+                            "closing Game replaced the Scene view owner".to_owned(),
+                        ));
+                    }
+                    if redraws >= 2 {
+                        let panel = game_panel_id(workspace)?;
+                        workspace.layout_mut().reopen(panel);
+                        self.stage = EditorGameViewCanaryStage::AwaitingReopened;
+                    } else {
+                        self.stage = EditorGameViewCanaryStage::AwaitingHidden {
+                            redraws: redraws + 1,
+                        };
+                    }
+                }
+                window.request_redraw();
+            }
+            EditorGameViewCanaryStage::AwaitingReopened => {
+                if let Some(observation) = observation
+                    && let Some(scene) = scene_receipt
+                    && frame.play().state() == EditorPlayState::Running
+                {
+                    self.require_concurrent_views(scene, observation.receipt())?;
+                    let closed = self
+                        .closed_game_image
+                        .expect("the reopen stage retains the closed image");
+                    let reopened = observation.receipt().image();
+                    let previous = self
+                        .input_response
+                        .expect("reopening follows the input response");
+                    if reopened.view_id() == closed.view_id()
+                        || Some(scene.image().view_id().get()) != self.scene_view_id
+                        || observation.runtime_frame_index() <= previous.runtime_frame_index()
+                    {
+                        return Err(EditorRunError::Platform(
+                            "reopening Game reused a retired view, replaced Scene, or stopped the hidden Runtime clock".to_owned(),
+                        ));
+                    }
+                    self.reopened_game_view_id = Some(reopened.view_id().get());
+                    let baseline_center_x = self.require_tracked_center(observation)?.x;
+                    if !input.capture_and_press_key(self.request.input_key) {
+                        return Err(EditorRunError::Platform(
+                            "the reopened Game composite did not admit fresh captured input"
+                                .to_owned(),
+                        ));
+                    }
+                    window.request_redraw();
+                    self.stage = EditorGameViewCanaryStage::AwaitingReopenedInputResponse {
+                        baseline_center_x,
+                    };
+                }
+            }
+            EditorGameViewCanaryStage::AwaitingReopenedInputResponse { baseline_center_x } => {
+                if frame.play().state() == EditorPlayState::Running
+                    && let Some(observation) = observation
+                    && self.require_tracked_center(observation)?.x
+                        > baseline_center_x + f32::EPSILON
+                {
+                    self.require_combined_product(observation)?;
+                    actions.push(EditorAction::Play(EditorPlayAction::Pause));
+                    self.stage = EditorGameViewCanaryStage::AwaitingPause;
                 }
             }
             EditorGameViewCanaryStage::AwaitingPause => {
@@ -353,6 +496,23 @@ impl EditorGameViewCanaryHost {
                     self.require_tracked_center(observation)?;
                     let paused = EditorGameViewCanaryFrame::from_observation(observation);
                     self.paused = Some(paused);
+                    self.scene_before_game_resize = scene_receipt.map(|receipt| receipt.image());
+                    input.release_to_editor();
+                    window.request_redraw();
+                    self.stage = EditorGameViewCanaryStage::AwaitingPausedRefocus;
+                }
+            }
+            EditorGameViewCanaryStage::AwaitingPausedRefocus => {
+                if frame.play().state() == EditorPlayState::Paused
+                    && let Some(observation) = observation
+                {
+                    if !input.capture_and_press_key(self.request.input_key) {
+                        return Err(EditorRunError::Platform(
+                            "the retained paused Game image could not recapture input after editing"
+                                .to_owned(),
+                        ));
+                    }
+                    let paused = self.paused.expect("refocus follows a visible paused image");
                     let current = observation.stamp().logical_window().resolution;
                     let width = current.physical_width.checked_add(64).ok_or_else(|| {
                         EditorRunError::Platform(
@@ -423,6 +583,25 @@ impl EditorGameViewCanaryHost {
                 {
                     self.require_combined_product(observation)?;
                     let center = self.require_tracked_center(observation)?;
+                    let scene = scene_receipt.ok_or_else(|| {
+                        EditorRunError::Platform(
+                            "Game resize omitted the concurrent Scene composite".to_owned(),
+                        )
+                    })?;
+                    self.require_concurrent_views(scene, observation.receipt())?;
+                    let before = self.scene_before_game_resize.ok_or_else(|| {
+                        EditorRunError::Platform(
+                            "the native canary lost the Scene target before Game resize".to_owned(),
+                        )
+                    })?;
+                    if scene.image().view_id() != before.view_id()
+                        || scene.image().target() != before.target()
+                        || scene.image().target_generation() != before.target_generation()
+                    {
+                        return Err(EditorRunError::Platform(
+                            "resizing Game replaced or resized Scene".to_owned(),
+                        ));
+                    }
                     self.resized = Some(EditorGameViewCanaryFrame::from_observation(observation));
                     self.step_baseline_center_x = Some(center.x);
                     actions.push(EditorAction::Play(EditorPlayAction::StepFixedTick));
@@ -531,7 +710,33 @@ impl EditorGameViewCanaryHost {
             step_delta_x: self
                 .step_delta_x
                 .expect("a completed canary retains the visible Step response"),
+            concurrent_view_frames: self.concurrent_view_frames,
+            scene_view_id: self
+                .scene_view_id
+                .expect("completed concurrent views retain Scene identity"),
+            closed_game_view_id: self
+                .closed_game_image
+                .expect("completed close retains Game identity")
+                .view_id()
+                .get(),
+            reopened_game_view_id: self
+                .reopened_game_view_id
+                .expect("completed reopen retains the new identity"),
         })
+    }
+
+    fn require_concurrent_views(
+        &mut self,
+        scene: WgpuEditorCompositeReceipt,
+        game: WgpuEditorCompositeReceipt,
+    ) -> Result<(), EditorRunError> {
+        if scene.window() != game.window() || scene.image().view_id() == game.image().view_id() {
+            return Err(EditorRunError::Platform(
+                "Scene and Game did not sample independent exact textures in the same native window frame".to_owned(),
+            ));
+        }
+        self.concurrent_view_frames += 1;
+        Ok(())
     }
 
     fn require_combined_product(
@@ -558,4 +763,16 @@ impl EditorGameViewCanaryHost {
             ))
         })
     }
+}
+
+fn game_panel_id(
+    workspace: &crate::workspace::EditorPanelWorkspace,
+) -> Result<crate::workspace::EditorPanelInstanceId, EditorRunError> {
+    workspace
+        .layout()
+        .instances()
+        .iter()
+        .find(|panel| panel.kind() == "nara.game-view")
+        .map(|panel| panel.id())
+        .ok_or_else(|| EditorRunError::Platform("the native canary has no Game panel".to_owned()))
 }

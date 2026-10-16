@@ -8,7 +8,6 @@ use nara::{
     },
     tooling_egui::{
         EguiCentralViewportOutput, EguiEditorLayout, EguiEditorLayoutInput, EguiEditorPanel,
-        EguiEditorViewportIntent, EguiSceneViewOutput,
     },
 };
 
@@ -27,7 +26,7 @@ pub struct EguiEditorPanelContext<'scope, 'frame, 'authoring> {
     input: &'scope mut EguiEditorLayoutInput<'frame, 'authoring>,
     actions: &'scope mut Vec<EditorAction>,
     browser_actions: &'scope mut Vec<EditorProjectBrowserLocalAction>,
-    viewport: &'scope mut Option<(EguiCentralViewportOutput, Option<EguiEditorViewportIntent>)>,
+    viewport: &'scope mut EguiCentralViewportOutput,
     project_browser_selected: bool,
 }
 
@@ -67,10 +66,11 @@ pub(super) struct EguiPanelPresentation {
 
 impl Default for EguiPanelPresentation {
     fn default() -> Self {
-        let painters: [(&str, EguiEditorPanelPainter); 5] = [
+        let painters: [(&str, EguiEditorPanelPainter); 6] = [
             ("nara.hierarchy", paint_hierarchy),
             ("nara.project-browser", paint_project_browser),
-            ("nara.authoring-view", paint_viewport),
+            ("nara.authoring-view", paint_authoring_view),
+            ("nara.game-view", paint_game_view),
             ("nara.inspector", paint_inspector),
             ("nara.diagnostics", paint_diagnostics),
         ];
@@ -163,7 +163,7 @@ impl EguiEditorLayout for RegisteredEguiLayout<'_> {
         mut input: EguiEditorLayoutInput<'_, '_>,
         actions: &mut Vec<EditorAction>,
         browser_actions: &mut Vec<EditorProjectBrowserLocalAction>,
-    ) -> (EguiCentralViewportOutput, Option<EguiEditorViewportIntent>) {
+    ) -> EguiCentralViewportOutput {
         self.panel_menu(ui);
         if self.presentation.select_project_browser {
             self.presentation.select_project_browser = false;
@@ -221,7 +221,7 @@ impl EguiEditorLayout for RegisteredEguiLayout<'_> {
                 ),
             ),
         ];
-        let mut viewport = None;
+        let mut viewport = EguiCentralViewportOutput::default();
         for (placement, rect) in regions {
             let panels = instances
                 .iter()
@@ -255,12 +255,16 @@ impl EguiEditorLayout for RegisteredEguiLayout<'_> {
                 });
                 column.separator();
             }
-            let panel_height = (column.available_height() / panels.len() as f32).max(1.0);
+            let panel_gaps =
+                column.spacing().item_spacing.y * panels.len().saturating_sub(1) as f32;
+            let panel_height =
+                ((column.available_height() - panel_gaps) / panels.len() as f32).max(1.0);
             for panel in panels {
                 column.allocate_ui_with_layout(
                     egui::vec2(rect.width(), panel_height),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
                         self.paint(
                             ui,
                             panel,
@@ -312,6 +316,11 @@ impl EguiEditorLayout for RegisteredEguiLayout<'_> {
                 });
             if !open {
                 self.workspace.layout_mut().close(instance.id());
+                match instance.kind() {
+                    "nara.authoring-view" => viewport.authoring = None,
+                    "nara.game-view" => viewport.game = None,
+                    _ => {}
+                }
             }
         }
         self.presentation.widgets.retain(|id, _| {
@@ -320,10 +329,7 @@ impl EguiEditorLayout for RegisteredEguiLayout<'_> {
                 .instance(*id)
                 .is_some_and(|panel| panel.is_open())
         });
-        viewport.unwrap_or((
-            EguiCentralViewportOutput::Scene(EguiSceneViewOutput::unavailable()),
-            None,
-        ))
+        viewport
     }
 }
 
@@ -454,7 +460,7 @@ impl RegisteredEguiLayout<'_> {
         input: &mut EguiEditorLayoutInput<'_, '_>,
         actions: &mut Vec<EditorAction>,
         browser_actions: &mut Vec<EditorProjectBrowserLocalAction>,
-        viewport: &mut Option<(EguiCentralViewportOutput, Option<EguiEditorViewportIntent>)>,
+        viewport: &mut EguiCentralViewportOutput,
     ) {
         let Some(title) = self
             .workspace
@@ -542,7 +548,6 @@ fn paint_hierarchy(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '
                 ui,
                 context.input.frame,
                 context.input.ui_authoring.as_deref_mut(),
-                context.input.selected_viewport,
                 context.actions,
             );
         });
@@ -555,14 +560,19 @@ fn paint_project_browser(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext
         context.browser_actions,
     );
 }
-fn paint_viewport(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '_, '_>) {
-    *context.viewport = Some(context.widgets.show_viewport_panel(
+fn paint_authoring_view(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '_, '_>) {
+    context.viewport.authoring = Some(context.widgets.show_authoring_view_panel(
         ui,
-        context.input.frame,
         context.input.ui_authoring.as_deref_mut(),
         context.input.viewport,
-        context.input.selected_viewport,
         context.actions,
+    ));
+}
+fn paint_game_view(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '_, '_>) {
+    context.viewport.game = Some(context.widgets.show_game_view_panel(
+        ui,
+        context.input.frame,
+        context.input.viewport,
     ));
 }
 fn paint_inspector(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '_, '_>) {
@@ -581,7 +591,6 @@ fn paint_inspector(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '
                     ui,
                     context.input.frame,
                     context.input.ui_authoring.as_deref_mut(),
-                    context.input.selected_viewport,
                     context.actions,
                 );
             }
