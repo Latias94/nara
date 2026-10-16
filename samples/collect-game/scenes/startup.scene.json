@@ -121,13 +121,13 @@
         "children": [],
         "components": {
           "collect-game.Collectible": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
                 "radius": {
-                  "type": "u64",
-                  "value": 14
+                  "type": "f64",
+                  "value": 14.0
                 }
               }
             }
@@ -237,13 +237,13 @@
         "children": [],
         "components": {
           "collect-game.Collectible": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
                 "radius": {
-                  "type": "u64",
-                  "value": 14
+                  "type": "f64",
+                  "value": 14.0
                 }
               }
             }
@@ -353,13 +353,13 @@
         "children": [],
         "components": {
           "collect-game.Collectible": {
-            "version": 1,
+            "version": 2,
             "value": {
               "type": "map",
               "value": {
                 "radius": {
-                  "type": "u64",
-                  "value": 14
+                  "type": "f64",
+                  "value": 14.0
                 }
               }
             }

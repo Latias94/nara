@@ -18,7 +18,7 @@
               "aliases": [
                 "Collectible"
               ],
-              "version": 1,
+              "version": 2,
               "capabilities": [
                 "scene",
                 "inspect",
@@ -36,7 +36,8 @@
                       "value": "radius"
                     }
                   ],
-                  "value_kind": "u64",
+                  "value_kind": "f64",
+                  "numeric_domain": "f32",
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -52,7 +53,7 @@
               "aliases": [
                 "Player configuration"
               ],
-              "version": 1,
+              "version": 2,
               "capabilities": [
                 "scene",
                 "inspect",
@@ -70,7 +71,8 @@
                       "value": "speed"
                     }
                   ],
-                  "value_kind": "u64",
+                  "value_kind": "f64",
+                  "numeric_domain": "f32",
                   "required": true,
                   "capabilities": [
                     "scene",

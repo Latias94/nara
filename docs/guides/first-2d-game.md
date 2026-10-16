@@ -105,22 +105,36 @@ Open does not compile or execute the game's Rust. The Editor reads nara.toml, th
 declared schema bundle and project content. After changing Rust schema, run the
 explicit schema write command and reopen the project.
 
+`PersistentComponent` supports bool, String, f32/f64 and fixed-width integers up to
+64 bits. Narrow numeric domains travel with the schema, so an f32 field rejects a
+finite value outside its range before publishing an edit. The collection game's
+speed and radius use f32; their version-2 records use F64 wire values. Changing a
+field's wire kind requires an explicit schema version and authored-content update.
+
 1. Select `main-camera`. Change Camera2d's `viewport_height`, press Apply, then
    Undo and Redo. Save, close and reopen; the saved value must remain.
-2. Select `gem-left`. The custom Collectible record is identified but read-only
-   because the generic Editor has no installed exact native authoring adapter for
-   that crate. Saving built-in edits preserves this record. Change custom radius
-   or player speed in the source Scene/Prefab when needed.
+2. Select `gem-right`. Change the custom Collectible `radius` from 14.0 to 30.5,
+   Apply, Undo and Redo. Save and reopen; the accepted fractional value remains.
+   The generic Editor edits this declared scalar through its exact schema adapter.
+   Its first-party native preview omits custom configuration without a native
+   binding and keeps the source record intact. External Play uses the compiled
+   game and consumes the saved radius. Unsupported records remain protected.
 3. In the Project sidebar, select `textures/token.png` under assets. Import it
    with sRGB, then explicitly Reimport after changing its import recipe. Invalid
    image input reports failure while retaining the last accepted image.
 4. A Sprite image field accepts `textures/token.png` or `stable_id:<UUID>` and
    applies through the same document revision transaction. The initial player
    Prefab is supplied as source; this walkthrough does not require a visual Prefab
-   creator or assume custom components have editable Inspector fields.
+   creator.
 5. Save before Play. Play builds and starts a supervised external game window;
    Running requires the child's accepted first presentation. Focus that window
    and use WASD, collect all three gems, then press R. Stop closes the owned child.
+
+Run `nara check $game` after saving. A valid schema describes the supported data
+shape; strict Check and the compiled game still own runtime admission. The bounded
+headless demonstration reaches victory earlier with the larger right gem radius
+and reports a lower final player x. This gives an observable data-edit result
+without relying only on successful process startup.
 
 To change gameplay, Stop, edit `gameplay-plugin/src/lib.rs`, save and Play again.
 Restart deliberately reuses the current executable generation. A deliberate
@@ -188,14 +202,18 @@ save-to-visible-pixel interaction latency. The linked record includes exact
 source/lockfile identity, features, profile, export, review and platform limits.
 They are individual cached observations, not cold builds or percentile estimates.
 
-An explicit integration check is available for a **disposable external copy**. It
-changes the camera and temporarily injects a compiler error before restoring the
-source; it exercises the generic action path and real native game children:
+An explicit integration check is available for a **fresh disposable external copy**.
+It edits the custom radius and camera, assigns an imported image, rejects an
+out-of-f32-range edit, and exercises Undo/Redo, Save/Reopen and real native game
+children. It runs the strict compiled headless game before and after Save and
+requires the changed radius to alter its observed result. It also temporarily
+injects a compiler error before restoring the Rust source:
 
 ```powershell
 $env:NARA_AUTHOR_WORKFLOW_PROJECT = $game
 cargo nextest run -p nara-editor --test first_game_workflow --run-ignored only --test-threads 1 --nocapture
 ```
 
-This action-driven check proves editing, persistence, supervision and READY. It does
-not claim to click the native Editor controls or play the game through keyboard input.
+This action-driven check proves custom data editing, persistence, runtime agreement,
+supervision and READY. It does not claim to click the native Editor controls or play
+the game through keyboard input.

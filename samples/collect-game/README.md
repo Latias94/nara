@@ -59,16 +59,22 @@ must retain the dependency coordinate selected by its own `nara new` call;
 adjust the nested plugin's Nara coordinate to the same checkout. Do not copy
 these repository-relative paths unchanged into a different directory layout.
 
-The generic Editor reads the explicitly generated schema bundle. Custom records
-are KnownUnbound and remain read-only there; native gameplay uses their compiled
-binding. Edit custom speed/radius in the ordinary source files, refresh schema
-after Rust schema changes, and reopen. Built-in Camera, Transform and Sprite
-fields support the ordinary Inspector, Undo/Redo and Save workflow.
+The generic Editor reads the explicitly generated schema bundle. Select a gem to
+edit its fractional `Collectible.radius` through the ordinary Inspector, Undo/Redo
+and Save workflow. The player Prefab's `PlayerConfig.speed` is also an authored
+`f32`. These components use version 2 and F64 wire values; the earlier integer
+version is not accepted as the floating schema. Refresh schema after Rust schema
+changes, reopen, and run `nara check .` after saving content.
+
+The installed Editor handles supported declared scalar data without compiling or
+loading the game. Its first-party native preview omits custom configuration records
+with an explicit reason, while retaining them in source. The separately compiled
+game consumes their native bindings. Unsupported contracts stay protected.
 
 ## A lightweight content variant
 
 `variants/fast-player/player.prefab.json` is a normal replacement Prefab with
-speed 300 and an adjusted tint. Stop Play, copy it over `prefabs/player.prefab.json`,
+speed 300.5 and an adjusted tint. Stop Play, copy it over `prefabs/player.prefab.json`,
 reopen the document, check, and Play again. The game code and native plugin are
 unchanged. Keep the original file in version control to restore the default.
 This demonstrates explicit data replacement; it is not a dynamic plugin ABI,

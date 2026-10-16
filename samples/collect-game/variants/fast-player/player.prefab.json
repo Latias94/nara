@@ -10,8 +10,8 @@
       "children": [],
       "components": {
         "collect-game.PlayerConfig": {
-          "version": 1,
-          "value": { "type": "map", "value": { "speed": { "type": "u64", "value": 300 } } }
+          "version": 2,
+          "value": { "type": "map", "value": { "speed": { "type": "f64", "value": 300.5 } } }
         },
         "nara.transform.Transform2d": {
           "version": 1,

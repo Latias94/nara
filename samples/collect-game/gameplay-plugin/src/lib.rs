@@ -36,7 +36,7 @@ const PROVIDER_ID: PluginSchemaProviderId = PluginSchemaProviderId::new("collect
 const PROVIDER: ComponentSchemaProviderDefinition = ComponentSchemaProviderDefinition::new(
     ComponentSchemaOwnerId::new("collect-game"),
     PROVIDER_ID,
-    ComponentSchemaProviderBindingId::new("collect-game.native", 1),
+    ComponentSchemaProviderBindingId::new("collect-game.native", 2),
     catalog,
     register,
 );
@@ -56,28 +56,28 @@ const VICTORY: Color = Color::rgb(0.06, 0.30, 0.16);
 #[derive(Component, PersistentComponent, Debug, Clone)]
 #[nara(
     id = "collect-game.PlayerConfig",
-    version = 1,
+    version = 2,
     alias = "Player configuration",
     component_capabilities(scene, inspect, edit),
     field_capabilities(scene, inspect, edit)
 )]
 pub struct PlayerConfig {
     #[nara(id = "speed", alias = "Movement speed")]
-    pub speed: u64,
+    pub speed: f32,
 }
 
 /// Authored collection radius; collection progress is runtime-only.
 #[derive(Component, PersistentComponent, Debug, Clone)]
 #[nara(
     id = "collect-game.Collectible",
-    version = 1,
+    version = 2,
     alias = "Collectible",
     component_capabilities(scene, inspect, edit),
     field_capabilities(scene, inspect, edit)
 )]
 pub struct Collectible {
     #[nara(id = "radius", alias = "Collection radius")]
-    pub radius: u64,
+    pub radius: f32,
 }
 
 /// Observable game outcome, shared by desktop and bounded headless execution.
@@ -243,9 +243,8 @@ fn move_player(
     let [left, right, up, down] = state.held.map(|held| if held { 1.0 } else { 0.0 });
     let direction = Vec2::new(right - left, up - down).normalize_or_zero();
     for (config, mut transform) in &mut players {
-        let next = (transform.translation
-            + direction * config.speed as f32 * time.delta().as_secs_f32())
-        .clamp(Vec2::new(-280.0, -160.0), Vec2::new(280.0, 160.0));
+        let next = (transform.translation + direction * config.speed * time.delta().as_secs_f32())
+            .clamp(Vec2::new(-280.0, -160.0), Vec2::new(280.0, 160.0));
         if next != transform.translation {
             transform.translation = next;
         }
@@ -264,7 +263,7 @@ fn collect_targets(
     let total = targets.iter().count();
     for (entity, config, position, mut sprite) in &mut targets {
         if !state.collected.contains(&entity)
-            && player.translation().distance(position.translation()) <= config.radius as f32
+            && player.translation().distance(position.translation()) <= config.radius
         {
             state.collected.insert(entity);
             sprite.material.tint.a = 0.0;

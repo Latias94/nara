@@ -6,6 +6,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    process::Command,
     sync::Arc,
     thread,
     time::{Duration, Instant},
@@ -24,7 +25,7 @@ use nara::{
         EditorImageImportFreshness, EditorImageImportMetadataView, EditorImageImportSettings,
         EditorNavigationAction, EditorPersistenceAction, EditorPersistenceResult, EditorPlayAction,
         EditorPlayOperation, EditorPlayOperationResult, EditorRuntimeAvailability,
-        SceneInspectorCommand, SceneInspectorComponentView, SceneInspectorReadOnlyReason,
+        SceneInspectorCommand, SceneInspectorComponentView,
     },
 };
 use nara_editor::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
@@ -55,7 +56,9 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
         "use an external disposable project, not the maintained sample"
     );
     let scene_path = root.join("scenes/startup.scene.json");
-    let original_collectible = collectible_record(&scene_path);
+    let original_source = fs::read(&scene_path).unwrap();
+    let original_collectible = collectible_record(&scene_path, "gem-left");
+    let baseline_player_x = run_headless(&root);
     let mut application = open_application(&root);
     assert_eq!(
         current_frame(&application).runtime_availability(),
@@ -64,14 +67,51 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
     let unavailable = application
         .active_authoring_unavailable_record_manifest()
         .unwrap();
-    assert!(unavailable.total_count() > 0);
-    select(&mut application, "gem-left");
-    assert_eq!(
+    assert_eq!(unavailable.total_count(), 0);
+    select(&mut application, "gem-right");
+    assert!(
         selected_component(&current_frame(&application), COLLECTIBLE)
             .access
-            .read_only_reason(),
-        Some(SceneInspectorReadOnlyReason::KnownUnbound),
+            .is_editable(),
+        "the ordinary Editor must support the exact compiled scalar schema"
     );
+    let original_radius = collectible_radius(&current_frame(&application));
+    assert_eq!(
+        original_radius, 14.0,
+        "use a fresh copy of the maintained sample"
+    );
+    let edited_radius = 30.5;
+    edit_collectible_radius(&mut application, edited_radius);
+    assert_eq!(
+        collectible_radius(&current_frame(&application)),
+        edited_radius
+    );
+    let accepted = current_frame(&application);
+    let accepted_scene = accepted.workspace().active_scene.as_ref().unwrap();
+    edit_collectible_radius(&mut application, f64::MAX);
+    let rejected = current_frame(&application);
+    let rejected_scene = rejected.workspace().active_scene.as_ref().unwrap();
+    assert_eq!(rejected_scene.revision, accepted_scene.revision);
+    assert_eq!(rejected_scene.dirty, accepted_scene.dirty);
+    assert_eq!(collectible_radius(&rejected), edited_radius);
+    assert_eq!(fs::read(&scene_path).unwrap(), original_source);
+    let undone = dispatch(
+        &mut application,
+        EditorAction::Mutate(EditorDocumentMutation::Undo {
+            document: rejected_scene.document,
+            base_revision: rejected_scene.revision,
+        }),
+    );
+    assert_eq!(collectible_radius(&undone), original_radius);
+    let scene = undone.workspace().active_scene.as_ref().unwrap();
+    let redone = dispatch(
+        &mut application,
+        EditorAction::Mutate(EditorDocumentMutation::Redo {
+            document: scene.document,
+            base_revision: scene.revision,
+        }),
+    );
+    assert_eq!(collectible_radius(&redone), edited_radius);
     application = reimport_and_assign_image(application, &root);
     let assigned_image = sprite_image(&current_frame(&application)).clone();
     select(&mut application, "main-camera");
@@ -129,7 +169,14 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
     }) if document == scene.document && revision == scene.revision)
     );
     assert!(!saved.workspace().active_scene.as_ref().unwrap().dirty);
-    assert_eq!(collectible_record(&scene_path), original_collectible);
+    assert_eq!(
+        collectible_record(&scene_path, "gem-left"),
+        original_collectible
+    );
+    assert_eq!(
+        collectible_record(&scene_path, "gem-right")["value"]["value"]["radius"]["value"],
+        edited_radius
+    );
     assert_eq!(
         application.active_authoring_unavailable_record_manifest(),
         Some(unavailable.clone())
@@ -142,6 +189,16 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
     close_application(&mut application);
 
     let mut application = open_application(&root);
+    select(&mut application, "gem-right");
+    assert_eq!(
+        collectible_radius(&current_frame(&application)),
+        edited_radius
+    );
+    assert!(
+        selected_component(&current_frame(&application), COLLECTIBLE)
+            .access
+            .is_editable()
+    );
     select(&mut application, "gem-left");
     assert_eq!(sprite_image(&current_frame(&application)), &assigned_image);
     select(&mut application, "main-camera");
@@ -150,8 +207,22 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
         application.active_authoring_unavailable_record_manifest(),
         Some(unavailable)
     );
-    assert_eq!(collectible_record(&scene_path), original_collectible);
-    eprintln!("camera edit/undo/redo/save/reopen: {:?}", editing.elapsed());
+    assert_eq!(
+        collectible_record(&scene_path, "gem-left"),
+        original_collectible
+    );
+    eprintln!(
+        "custom radius and camera edit/undo/redo/save/reopen: {:?}",
+        editing.elapsed()
+    );
+    let edited_player_x = run_headless(&root);
+    assert!(
+        edited_player_x < baseline_player_x,
+        "the saved larger radius must make the compiled game win earlier: before={baseline_player_x}, after={edited_player_x}"
+    );
+    eprintln!(
+        "saved custom radius reached strict gameplay: player.x {baseline_player_x} -> {edited_player_x}"
+    );
 
     let playing = Instant::now();
     play(&mut application);
@@ -190,12 +261,15 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
     );
     assert!(external.last_good_available());
     assert!(external.generation().is_none());
-    select(&mut application, "gem-left");
-    assert_eq!(
+    select(&mut application, "gem-right");
+    assert!(
         selected_component(&current_frame(&application), COLLECTIBLE)
             .access
-            .read_only_reason(),
-        Some(SceneInspectorReadOnlyReason::KnownUnbound)
+            .is_editable()
+    );
+    assert_eq!(
+        collectible_radius(&current_frame(&application)),
+        edited_radius
     );
     eprintln!(
         "deliberate compiler failure through diagnostics: {:?}",
@@ -221,7 +295,59 @@ fn independent_game_edits_reopens_plays_and_recovers_from_compile_failure() {
     );
     stop(&mut application);
     close_application(&mut application);
-    assert_eq!(collectible_record(&scene_path), original_collectible);
+    assert_eq!(
+        collectible_record(&scene_path, "gem-left"),
+        original_collectible
+    );
+}
+
+fn run_headless(root: &Path) -> f64 {
+    let output = Command::new(env!("CARGO"))
+        .args(["run", "--locked", "--quiet", "--manifest-path"])
+        .arg(root.join("Cargo.toml"))
+        .args(["--bin", "headless"])
+        .current_dir(root)
+        .env("CARGO_BUILD_JOBS", "1")
+        .output()
+        .expect("run the disposable project's compiled headless game");
+    assert!(
+        output.status.success(),
+        "strict headless game failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("the game's outcome is UTF-8");
+    let outcome = stdout
+        .lines()
+        .find(|line| line.starts_with("collect_headless: ok "))
+        .expect("the compiled game must accept and report its gameplay outcome");
+    assert!(outcome.contains("collected=3 targets=3 won=true resets=0"));
+    outcome
+        .split_once("player=(")
+        .and_then(|(_, position)| position.split_once(','))
+        .expect("the observable game outcome includes player.x")
+        .0
+        .parse()
+        .expect("the observable player.x is a number")
+}
+
+fn edit_collectible_radius(application: &mut EditorApplication, radius: f64) {
+    let frame = current_frame(application);
+    let scene = frame.workspace().active_scene.as_ref().unwrap();
+    dispatch(
+        application,
+        EditorAction::Mutate(EditorDocumentMutation::ApplyInspectorCommand {
+            document: scene.document,
+            base_revision: scene.revision,
+            command: SceneInspectorCommand::SetField {
+                entity: SceneEntityId::new("gem-right").unwrap(),
+                component: ComponentTypeId::new(COLLECTIBLE),
+                component_version: selected_component(&frame, COLLECTIBLE).schema_version,
+                field: ComponentFieldId::new("radius"),
+                value: ComponentValue::f64(radius).unwrap(),
+            },
+        }),
+    );
 }
 
 fn reimport_and_assign_image(mut application: EditorApplication, root: &Path) -> EditorApplication {
@@ -453,30 +579,38 @@ fn selected_component<'a>(
 }
 
 fn camera_height(frame: &EditorFrameModel) -> f64 {
-    match selected_component(frame, CAMERA)
+    float_field(frame, CAMERA, "viewport_height")
+}
+
+fn collectible_radius(frame: &EditorFrameModel) -> f64 {
+    float_field(frame, COLLECTIBLE, "radius")
+}
+
+fn float_field(frame: &EditorFrameModel, component: &str, field: &str) -> f64 {
+    match selected_component(frame, component)
         .fields
         .iter()
-        .find(|field| field.id.as_str() == "viewport_height")
+        .find(|candidate| candidate.id.as_str() == field)
         .unwrap()
         .value
         .as_ref()
         .unwrap()
     {
         ComponentValue::F64(value) => value.get(),
-        value => panic!("camera viewport_height must remain an f64: {value:?}"),
+        value => panic!("{component}.{field} must remain an f64: {value:?}"),
     }
 }
 
-fn collectible_record(path: &Path) -> Value {
+fn collectible_record(path: &Path, entity_id: &str) -> Value {
     let scene: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
     scene["payload"]["entities"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|entity| entity["id"] == "gem-left")
+        .find(|entity| entity["id"] == entity_id)
         .unwrap()["components"]
         .get(COLLECTIBLE)
-        .expect("gem-left retains its authored Collectible record")
+        .expect("the entity retains its authored Collectible record")
         .clone()
 }
 
