@@ -20,7 +20,6 @@ use nara_ecs::{
 
 use crate::{
     ComponentFieldPath, ComponentFieldPathSegment, ComponentValue, PersistentComponentProvider,
-    asset_reference::is_asset_reference_value,
     codec::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         FnComponentCodec,
@@ -35,8 +34,8 @@ use crate::{
     },
     schema::{
         AliasError, CatalogFingerprint, ComponentCapability, ComponentFieldId,
-        ComponentFieldSchema, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValueKind, validate_alias,
+        ComponentFieldSchema, ComponentNumericDomain, ComponentSchema, ComponentSchemaCatalog,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValueKind, validate_alias,
     },
 };
 
@@ -146,6 +145,17 @@ pub enum ComponentRegistryError {
         path: ComponentFieldPath,
         expected: ComponentValueKind,
         actual: ComponentValueKind,
+    },
+    InvalidComponentFieldNumericDomain {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        numeric_domain: ComponentNumericDomain,
+        value_kind: ComponentValueKind,
+    },
+    ComponentFieldDefaultOutsideNumericDomain {
+        component_id: ComponentTypeId,
+        path: ComponentFieldPath,
+        numeric_domain: ComponentNumericDomain,
     },
     InvalidFieldCapability {
         component_id: ComponentTypeId,
@@ -385,6 +395,23 @@ impl Display for ComponentRegistryError {
             } => write!(
                 formatter,
                 "component ID '{component_id}' field '{path}' default has kind {actual:?}, expected {expected:?}"
+            ),
+            Self::InvalidComponentFieldNumericDomain {
+                component_id,
+                field_id,
+                numeric_domain,
+                value_kind,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field ID '{field_id}' numeric domain {numeric_domain:?} is incompatible with {value_kind:?}"
+            ),
+            Self::ComponentFieldDefaultOutsideNumericDomain {
+                component_id,
+                path,
+                numeric_domain,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field '{path}' default is outside numeric domain {numeric_domain:?}"
             ),
             Self::InvalidFieldCapability {
                 component_id,
@@ -2049,6 +2076,16 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
         }
         validate_aliases(&schema.id, Some(&field.id), &field.aliases)?;
         validate_field_capabilities(schema, field)?;
+        if let Some(numeric_domain) = field.numeric_domain {
+            if numeric_domain.value_kind() != field.value_kind {
+                return Err(ComponentRegistryError::InvalidComponentFieldNumericDomain {
+                    component_id: schema.id.clone(),
+                    field_id: field.id.clone(),
+                    numeric_domain,
+                    value_kind: field.value_kind,
+                });
+            }
+        }
         validate_component_field_default(&schema.id, field)?;
     }
     SchemaPathIndex::from_schema(schema).validate(schema)?;
@@ -2247,6 +2284,7 @@ fn same_versioned_schema_semantics(current: &ComponentSchema, previous: &Compone
             .is_some_and(|current_field| {
                 current_field.path == previous_field.path
                     && current_field.value_kind == previous_field.value_kind
+                    && current_field.numeric_domain == previous_field.numeric_domain
                     && current_field.required == previous_field.required
                     && current_field.capabilities == previous_field.capabilities
                     && current_field.default_value == previous_field.default_value
@@ -2298,11 +2336,19 @@ fn validate_component_field_default(
     let Some(default_value) = &field.default_value else {
         return Ok(());
     };
-    if !field.required && matches!(default_value, ComponentValue::Null) {
+    if field.accepts_value(default_value) {
         return Ok(());
     }
-    if component_value_matches_kind(default_value, field.value_kind) {
-        return Ok(());
+    if default_value.kind() == field.value_kind {
+        if let Some(numeric_domain) = field.numeric_domain {
+            return Err(
+                ComponentRegistryError::ComponentFieldDefaultOutsideNumericDomain {
+                    component_id: component_id.clone(),
+                    path: field.path.clone(),
+                    numeric_domain,
+                },
+            );
+        }
     }
     Err(ComponentRegistryError::InvalidComponentFieldDefault {
         component_id: component_id.clone(),
@@ -2312,11 +2358,16 @@ fn validate_component_field_default(
     })
 }
 
-fn component_value_matches_kind(value: &ComponentValue, expected: ComponentValueKind) -> bool {
-    match expected {
-        ComponentValueKind::AssetRef => is_asset_reference_value(value),
-        expected => value.kind() == expected,
-    }
+/// Validates canonical field coverage, required paths, wire kinds and numeric domains.
+///
+/// The schema must already have been admitted by its catalog owner. This performs no native
+/// codec calls or World operations; component-specific runtime invariants remain the native
+/// consumer's responsibility.
+pub fn validate_component_value(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+) -> Result<(), ComponentCodecError> {
+    validate_component_value_coverage(schema, &SchemaPathIndex::from_schema(schema), value)
 }
 
 fn validate_component_value_coverage(
@@ -2332,10 +2383,15 @@ fn validate_component_value_coverage(
     for field in &schema.fields {
         match value.get_path(&field.path) {
             Ok(value) => {
-                if !component_field_accepts_value(field, value) {
+                if !field.accepts_value(value) {
                     return Err(ComponentCodecError::invalid_field(
                         field.path.to_string(),
-                        format!("schema kind {:?}", field.value_kind),
+                        match field.numeric_domain {
+                            Some(domain) => {
+                                format!("schema kind {:?} within {domain:?}", field.value_kind)
+                            }
+                            None => format!("schema kind {:?}", field.value_kind),
+                        },
                     ));
                 }
             }
@@ -2356,13 +2412,6 @@ fn validate_component_value_coverage(
     }
 
     validate_value_node_coverage(schema, path_index, value, &mut Vec::new())
-}
-
-fn component_field_accepts_value(field: &ComponentFieldSchema, value: &ComponentValue) -> bool {
-    if !field.required && matches!(value, ComponentValue::Null) {
-        return true;
-    }
-    component_value_matches_kind(value, field.value_kind)
 }
 
 fn validate_value_node_coverage(

@@ -2,9 +2,10 @@ use nara_ecs::{Component, Resource, World, lifecycle::HookContext, world::Deferr
 use nara_identity::{EntityReference, SceneEntityId};
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
-    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-    ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, PersistentComponent, PersistentComponentProvider,
+    ComponentFieldSchema, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
+    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueKind, PersistentComponent,
+    PersistentComponentProvider, validate_component_value,
 };
 
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
@@ -29,6 +30,240 @@ struct GeneratedProbe {
         capabilities(scene, inspect, edit, entity_ref)
     )]
     target: EntityReference,
+}
+
+#[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]
+#[nara(
+    id = "nara.test.ScalarProbe",
+    version = 1,
+    alias = "Scalar probe",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit)
+)]
+struct ScalarProbe {
+    #[nara(id = "enabled", alias = "Enabled")]
+    enabled: bool,
+    #[nara(id = "label", alias = "Label")]
+    label: String,
+    #[nara(id = "speed", alias = "Speed")]
+    speed: f32,
+    #[nara(id = "distance", alias = "Distance")]
+    distance: f64,
+    #[nara(id = "signed8", alias = "Signed 8")]
+    signed8: i8,
+    #[nara(id = "signed16", alias = "Signed 16")]
+    signed16: i16,
+    #[nara(id = "signed32", alias = "Signed 32")]
+    signed32: i32,
+    #[nara(id = "signed64", alias = "Signed 64")]
+    signed64: i64,
+    #[nara(id = "unsigned8", alias = "Unsigned 8")]
+    unsigned8: u8,
+    #[nara(id = "unsigned16", alias = "Unsigned 16")]
+    unsigned16: u16,
+    #[nara(id = "unsigned32", alias = "Unsigned 32")]
+    unsigned32: u32,
+    #[nara(id = "unsigned64", alias = "Unsigned 64")]
+    unsigned64: u64,
+}
+
+fn scalar_probe() -> ScalarProbe {
+    ScalarProbe {
+        enabled: true,
+        label: "Player 配置".to_owned(),
+        speed: 200.25,
+        distance: f64::MAX,
+        signed8: i8::MIN,
+        signed16: i16::MAX,
+        signed32: i32::MIN,
+        signed64: i64::MAX,
+        unsigned8: u8::MAX,
+        unsigned16: u16::MAX,
+        unsigned32: u32::MAX,
+        unsigned64: u64::MAX,
+    }
+}
+
+#[test]
+fn generated_scalar_provider_round_trips_native_components_and_declares_numeric_domains() {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component::<ScalarProbe>()
+        .unwrap();
+    registry.freeze().unwrap();
+    let id = ComponentTypeId::new("nara.test.ScalarProbe");
+    let schema = registry.schema(&id).unwrap();
+    for (field_id, kind, domain) in [
+        ("enabled", ComponentValueKind::Bool, None),
+        ("label", ComponentValueKind::String, None),
+        (
+            "speed",
+            ComponentValueKind::F64,
+            Some(ComponentNumericDomain::F32),
+        ),
+        ("distance", ComponentValueKind::F64, None),
+        (
+            "signed8",
+            ComponentValueKind::I64,
+            Some(ComponentNumericDomain::I8),
+        ),
+        (
+            "signed16",
+            ComponentValueKind::I64,
+            Some(ComponentNumericDomain::I16),
+        ),
+        (
+            "signed32",
+            ComponentValueKind::I64,
+            Some(ComponentNumericDomain::I32),
+        ),
+        ("signed64", ComponentValueKind::I64, None),
+        (
+            "unsigned8",
+            ComponentValueKind::U64,
+            Some(ComponentNumericDomain::U8),
+        ),
+        (
+            "unsigned16",
+            ComponentValueKind::U64,
+            Some(ComponentNumericDomain::U16),
+        ),
+        (
+            "unsigned32",
+            ComponentValueKind::U64,
+            Some(ComponentNumericDomain::U32),
+        ),
+        ("unsigned64", ComponentValueKind::U64, None),
+    ] {
+        let field = schema
+            .fields()
+            .iter()
+            .find(|field| field.id().as_str() == field_id)
+            .unwrap();
+        assert_eq!(field.value_kind(), kind);
+        assert_eq!(field.numeric_domain(), domain);
+    }
+
+    let expected = scalar_probe();
+    let mut source = World::new();
+    let source_entity = source.spawn(expected.clone()).id();
+    let value = registry
+        .encode_component(&id, &source, source_entity)
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    validate_component_value(schema, &value).unwrap();
+    let mut target = World::new();
+    let target_entity = target.spawn_empty().id();
+    registry
+        .preflight_component(&id, &value)
+        .unwrap()
+        .unwrap()
+        .apply(&mut target, target_entity)
+        .unwrap();
+    assert_eq!(target.get::<ScalarProbe>(target_entity), Some(&expected));
+}
+
+#[test]
+fn generated_scalar_codecs_reject_wrong_kinds_and_narrowing_overflow() {
+    let original = scalar_probe().__encode_persistent_component().unwrap();
+    let schema = ScalarProbe::persistent_component_schema();
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component::<ScalarProbe>()
+        .unwrap();
+    registry.freeze().unwrap();
+    for (field, invalid) in [
+        ("enabled", ComponentValue::U64(1)),
+        ("label", ComponentValue::Bool(true)),
+        ("speed", ComponentValue::I64(200)),
+        ("speed", ComponentValue::f64(f64::MAX).unwrap()),
+        ("speed", ComponentValue::f64(f64::MIN).unwrap()),
+        ("distance", ComponentValue::I64(1)),
+        ("signed8", ComponentValue::I64(i64::from(i8::MIN) - 1)),
+        ("signed8", ComponentValue::I64(i64::from(i8::MAX) + 1)),
+        ("signed16", ComponentValue::I64(i64::from(i16::MIN) - 1)),
+        ("signed16", ComponentValue::I64(i64::from(i16::MAX) + 1)),
+        ("signed32", ComponentValue::I64(i64::from(i32::MIN) - 1)),
+        ("signed32", ComponentValue::I64(i64::from(i32::MAX) + 1)),
+        ("signed64", ComponentValue::U64(1)),
+        ("unsigned8", ComponentValue::U64(u64::from(u8::MAX) + 1)),
+        ("unsigned16", ComponentValue::U64(u64::from(u16::MAX) + 1)),
+        ("unsigned32", ComponentValue::U64(u64::from(u32::MAX) + 1)),
+        ("unsigned64", ComponentValue::I64(-1)),
+    ] {
+        let mut value = original.clone();
+        value
+            .replace_path(&ComponentFieldPath::from_fields([field]), invalid)
+            .unwrap();
+        assert!(
+            ScalarProbe::__decode_persistent_component(&value).is_err(),
+            "native codec accepted {field}: {value:?}"
+        );
+        assert!(
+            validate_component_value(&schema, &value).is_err(),
+            "data validator accepted {field}: {value:?}"
+        );
+        assert!(
+            registry
+                .preflight_component(schema.id(), &value)
+                .unwrap()
+                .is_err(),
+            "runtime preflight accepted {field}: {value:?}"
+        );
+    }
+}
+
+#[test]
+fn generated_numeric_codecs_accept_edges_and_normal_float_rounding() {
+    let mut value = scalar_probe().__encode_persistent_component().unwrap();
+    let schema = ScalarProbe::persistent_component_schema();
+    for (field, valid) in [
+        ("signed8", ComponentValue::I64(i64::from(i8::MAX))),
+        ("signed16", ComponentValue::I64(i64::from(i16::MIN))),
+        ("signed32", ComponentValue::I64(i64::from(i32::MAX))),
+        ("signed64", ComponentValue::I64(i64::MIN)),
+        ("unsigned8", ComponentValue::U64(0)),
+        ("unsigned16", ComponentValue::U64(0)),
+        ("unsigned32", ComponentValue::U64(0)),
+        ("unsigned64", ComponentValue::U64(0)),
+        ("speed", ComponentValue::f64(f64::from(f32::MIN)).unwrap()),
+        ("speed", ComponentValue::f64(f64::from(f32::MAX)).unwrap()),
+        ("speed", ComponentValue::f64(0.1).unwrap()),
+        ("speed", ComponentValue::f64(f64::MIN_POSITIVE).unwrap()),
+        ("distance", ComponentValue::f64(f64::MIN).unwrap()),
+    ] {
+        value
+            .replace_path(&ComponentFieldPath::from_fields([field]), valid)
+            .unwrap();
+        validate_component_value(&schema, &value).unwrap();
+        ScalarProbe::__decode_persistent_component(&value).unwrap();
+    }
+    value
+        .replace_path(
+            &ComponentFieldPath::from_fields(["speed"]),
+            ComponentValue::f64(0.1).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        ScalarProbe::__decode_persistent_component(&value)
+            .unwrap()
+            .speed,
+        0.1_f32
+    );
+}
+
+#[test]
+fn generated_float_codecs_reject_non_finite_encoding() {
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut probe = scalar_probe();
+        probe.distance = invalid;
+        assert!(probe.__encode_persistent_component().is_err());
+        probe = scalar_probe();
+        probe.speed = invalid as f32;
+        assert!(probe.__encode_persistent_component().is_err());
+        assert!(ComponentValue::f64(invalid).is_err());
+    }
 }
 
 #[derive(Component, PersistentComponent, Debug, Clone, PartialEq)]

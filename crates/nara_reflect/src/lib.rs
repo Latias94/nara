@@ -67,12 +67,13 @@ pub use provider::{
 };
 pub use registry::{
     ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
+    validate_component_value,
 };
 pub use schema::{
     AliasError, CatalogFingerprint, CatalogFingerprintParseError, ComponentCapability,
     ComponentCatalogGenerationError, ComponentFieldId, ComponentFieldIdError, ComponentFieldSchema,
-    ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-    ComponentTypeIdError, ComponentValueKind,
+    ComponentNumericDomain, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
+    ComponentTypeId, ComponentTypeIdError, ComponentValueKind,
 };
 pub use value::{ComponentFloat, ComponentValue, ComponentValueCost, ComponentValueError};
 
@@ -137,13 +138,14 @@ pub mod prelude {
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
-        ComponentMigrationError, ComponentRegistry, ComponentRegistryError, ComponentSchema,
-        ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-        ComponentValueError, ComponentValueKind, DeclaredAssetReference,
+        ComponentMigrationError, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
+        ComponentValue, ComponentValueError, ComponentValueKind, DeclaredAssetReference,
         DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
         MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
         PreparedComponent, PreparedComponentCandidate, collect_declared_asset_references,
         remap_declared_entity_references, rewrite_declared_entity_references,
+        validate_component_value,
     };
     pub use bevy_reflect::prelude::*;
 }

@@ -1,0 +1,5 @@
+error: unsupported persistent field type; use an admitted scalar, Vec2, or EntityReference
+  --> tests/ui/unsupported_pointer_sized.rs:14:12
+   |
+14 |     value: usize,
+   |            ^^^^^

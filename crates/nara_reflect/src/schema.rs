@@ -454,6 +454,11 @@ pub struct ComponentFieldSchema {
     pub aliases: Vec<String>,
     pub path: ComponentFieldPath,
     pub value_kind: ComponentValueKind,
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub numeric_domain: Option<ComponentNumericDomain>,
     pub required: bool,
     #[cfg_attr(feature = "serde", serde(default))]
     pub capabilities: BTreeSet<ComponentCapability>,
@@ -477,6 +482,7 @@ impl ComponentFieldSchema {
             aliases: vec![alias.into()],
             path,
             value_kind,
+            numeric_domain: None,
             required: true,
             capabilities: BTreeSet::new(),
             default_value: None,
@@ -495,6 +501,7 @@ impl ComponentFieldSchema {
             aliases: vec![alias.into()],
             path,
             value_kind,
+            numeric_domain: None,
             required: false,
             capabilities: BTreeSet::new(),
             default_value: None,
@@ -514,6 +521,7 @@ impl ComponentFieldSchema {
             aliases: vec![alias.into()],
             path,
             value_kind,
+            numeric_domain: None,
             required: false,
             capabilities: BTreeSet::new(),
             default_value: Some(default_value),
@@ -523,6 +531,15 @@ impl ComponentFieldSchema {
     #[must_use]
     pub fn with_aliases(mut self, aliases: impl IntoIterator<Item = impl Into<String>>) -> Self {
         self.aliases.extend(aliases.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn with_numeric_domain(
+        mut self,
+        domain: impl Into<Option<ComponentNumericDomain>>,
+    ) -> Self {
+        self.numeric_domain = domain.into();
         self
     }
 
@@ -559,6 +576,30 @@ impl ComponentFieldSchema {
     #[must_use]
     pub const fn value_kind(&self) -> ComponentValueKind {
         self.value_kind
+    }
+
+    #[must_use]
+    pub const fn numeric_domain(&self) -> Option<ComponentNumericDomain> {
+        self.numeric_domain
+    }
+
+    /// Checks the declared wire kind and finite numeric domain.
+    ///
+    /// Optional fields retain their explicit-null semantics. Native codecs may impose further
+    /// component-specific invariants that are not represented by this schema.
+    #[must_use]
+    pub fn accepts_value(&self, value: &ComponentValue) -> bool {
+        if !self.required && matches!(value, ComponentValue::Null) {
+            return true;
+        }
+        let matches_kind = match self.value_kind {
+            ComponentValueKind::AssetRef => crate::asset_reference::is_asset_reference_value(value),
+            expected => value.kind() == expected,
+        };
+        matches_kind
+            && self
+                .numeric_domain
+                .is_none_or(|domain| domain.accepts_value(value))
     }
 
     #[must_use]
@@ -606,6 +647,62 @@ pub enum ComponentValueKind {
     Map,
     AssetRef,
     EntityRef,
+}
+
+/// The admitted Rust numeric widths whose range is narrower than their wire kind.
+///
+/// An absent domain keeps the full I64/U64/F64 range. F32 accepts finite values within its
+/// range; ordinary rounding and underflow during f64-to-f32 conversion are permitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+pub enum ComponentNumericDomain {
+    I8,
+    I16,
+    I32,
+    U8,
+    U16,
+    U32,
+    F32,
+}
+
+impl ComponentNumericDomain {
+    #[must_use]
+    pub const fn value_kind(self) -> ComponentValueKind {
+        match self {
+            Self::I8 | Self::I16 | Self::I32 => ComponentValueKind::I64,
+            Self::U8 | Self::U16 | Self::U32 => ComponentValueKind::U64,
+            Self::F32 => ComponentValueKind::F64,
+        }
+    }
+
+    #[must_use]
+    pub fn accepts_value(self, value: &ComponentValue) -> bool {
+        match (self, value) {
+            (Self::I8, ComponentValue::I64(value)) => i8::try_from(*value).is_ok(),
+            (Self::I16, ComponentValue::I64(value)) => i16::try_from(*value).is_ok(),
+            (Self::I32, ComponentValue::I64(value)) => i32::try_from(*value).is_ok(),
+            (Self::U8, ComponentValue::U64(value)) => u8::try_from(*value).is_ok(),
+            (Self::U16, ComponentValue::U64(value)) => u16::try_from(*value).is_ok(),
+            (Self::U32, ComponentValue::U64(value)) => u32::try_from(*value).is_ok(),
+            (Self::F32, ComponentValue::F64(value)) => {
+                value.get() >= f64::from(f32::MIN) && value.get() <= f64::from(f32::MAX)
+            }
+            _ => false,
+        }
+    }
+
+    const fn fingerprint_tag(self) -> u8 {
+        match self {
+            Self::I8 => 0,
+            Self::I16 => 1,
+            Self::I32 => 2,
+            Self::U8 => 3,
+            Self::U16 => 4,
+            Self::U32 => 5,
+            Self::F32 => 6,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -713,6 +810,11 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
                 feed_value(hasher, value);
             }
             None => feed_bytes(hasher, &[0]),
+        }
+        // Omit absent metadata entirely to preserve existing catalog fingerprints.
+        if let Some(domain) = field.numeric_domain {
+            feed_bytes(hasher, b"numeric-domain");
+            feed_bytes(hasher, &[domain.fingerprint_tag()]);
         }
     }
     feed_len(hasher, schema.field_tombstones.len());

@@ -85,8 +85,7 @@ struct PersistentField {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PersistentFieldKind {
-    I64,
-    U64,
+    Scalar,
     Vec2,
     EntityReference,
 }
@@ -431,8 +430,8 @@ fn classify_field_type(ty: &Type) -> Result<PersistentFieldKind> {
         ));
     }
     match segment.ident.to_string().as_str() {
-        "i64" => Ok(PersistentFieldKind::I64),
-        "u64" => Ok(PersistentFieldKind::U64),
+        "bool" | "String" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32"
+        | "u64" => Ok(PersistentFieldKind::Scalar),
         "Vec2" => Ok(PersistentFieldKind::Vec2),
         "EntityReference" => Ok(PersistentFieldKind::EntityReference),
         _ => Err(Error::new_spanned(
@@ -458,6 +457,7 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
             #support::ComponentFieldPath::from_fields([#id]),
             <#ty as #support::PersistentFieldCodec>::VALUE_KIND,
         )
+        .with_numeric_domain(<#ty as #support::PersistentFieldCodec>::NUMERIC_DOMAIN)
         #additional_aliases
         .with_capabilities([#(#capability_tokens),*])
     }
