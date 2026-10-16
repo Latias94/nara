@@ -1929,6 +1929,35 @@ impl EditorProjectSession {
         }
     }
 
+    /// Requests a Host-owned recovery pause without resolving a pending document decision.
+    ///
+    /// The Host must first retire the Game source, then keep driving and retry after `Busy`.
+    /// Existing controls retain their exact tickets. A queued Step may create a presentation
+    /// wait during that drive, so retry once more before deciding that recovery is ready.
+    #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
+    #[doc(hidden)]
+    pub fn request_runtime_pause_for_gpu_recovery(&mut self) -> EditorPlayRequestResult {
+        self.cancel_game_step_presentation();
+        let Some(lane) = self.trusted_compiled() else {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeUnavailable(
+                EditorRuntimeUnavailableReason::SupervisedPlayUnavailable,
+            ));
+        };
+        if !matches!(lane.runtime_owner, EditorRuntimeOwnerState::Active { .. }) {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState);
+        }
+        if lane.pending_control.is_some() || lane.pending_apply_changes.is_some() {
+            return EditorPlayRequestResult::Rejected(EditorPlayRejection::Busy);
+        }
+        match lane.runtime_host.running_runtime_state() {
+            Some(RuntimeState::Paused) => EditorPlayRequestResult::Accepted,
+            Some(RuntimeState::Running) => {
+                self.request_active_control(EditorPlayOperation::Pause, RuntimeControl::Pause)
+            }
+            _ => EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState),
+        }
+    }
+
     #[cfg(any(feature = "presentation-2d", feature = "presentation-ui"))]
     #[doc(hidden)]
     #[must_use]
@@ -1954,7 +1983,7 @@ impl EditorProjectSession {
         if events.len() > EditorGameInputBatch::MAX_EVENTS {
             return Err(EditorGameViewBridgeFailure::InputBudgetExceeded);
         }
-        let Some(lane) = self.trusted_compiled_mut() else {
+        let Some(lane) = self.trusted_compiled() else {
             return Err(EditorGameViewBridgeFailure::RuntimeUnavailable);
         };
         let expected_start = match &lane.runtime_owner {
@@ -1977,6 +2006,27 @@ impl EditorProjectSession {
         {
             return Err(EditorGameViewBridgeFailure::InputRouteMismatch);
         }
+        if events.iter().any(|event| {
+            matches!(
+                event.event(),
+                EditorGameInputEvent::Focused(false) | EditorGameInputEvent::SurfaceRetired
+            )
+        }) {
+            if matches!(
+                &lane.runtime_owner,
+                EditorRuntimeOwnerState::Active { game: Some(game), .. }
+                    if game.in_flight.is_some()
+            ) {
+                return Err(EditorGameViewBridgeFailure::CandidateBusy);
+            }
+            if let Some(candidate) = self.take_game_view_candidate()? {
+                self.complete_game_view_candidate(candidate.interrupted())
+                    .map_err(|_| EditorGameViewBridgeFailure::CompletionAuthorityMismatch)?;
+            }
+        }
+        let lane = self
+            .trusted_compiled_mut()
+            .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?;
         let runtime = lane
             .runtime_host
             .running_runtime_mut()

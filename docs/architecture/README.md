@@ -41,7 +41,12 @@ an index, not another source of architecture decisions.
    U3 is committed at `293d98a` and U4 at `527a135`.
    [U5 evidence](../knowledge/engineering/verification/2026-10/2026-10-16T094118Z-editor-u5-independent-scene-and-game-views-pass-native-concurrent-presentation-close-reopen-and-paused-refocus-ad10a59ba57e4fe7b45a5176d3311a33.md)
    establishes independent Authoring/Game view ownership with exact concurrent Windows presentation,
-   close/reopen, independent resize and paused input refocus. U6-U8 remain pending.
+   close/reopen, independent resize and paused input refocus.
+   [U6 verification](../knowledge/engineering/verification/2026-10/2026-10-16T163933Z-editor-u6-qualifies-direct-dear-imgui-on-windows-with-explicit-backend-and-cleanup-limits-e42a0dbfec6643e380f6e9275f29b0d2.md)
+   qualifies the direct Dear ImGui slice on Windows, including actual secondary samples, native
+   input/text/layout, ordered shutdown and recovery. Its adoption decision permits U7 implementation;
+   U7 full frontend parity and U8 external acceptance/removal remain pending. The evidence distinguishes
+   the upstream Winit shutdown defect from the observed Vulkan implicit-layer environment limit.
    Remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).

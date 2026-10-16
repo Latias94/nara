@@ -875,6 +875,13 @@ pub(super) struct EditorGamePresentedStamp {
 }
 
 impl EditorGamePresentedStamp {
+    pub(super) const fn new(
+        identity: EditorGameViewCandidateIdentity,
+        receipt: WgpuEditorCompositeReceipt,
+    ) -> Self {
+        Self { identity, receipt }
+    }
+
     pub(super) const fn view_id(self) -> WgpuEditorViewId {
         self.receipt.image().view_id()
     }

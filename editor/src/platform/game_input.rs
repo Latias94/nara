@@ -1,6 +1,5 @@
 use std::collections::BTreeSet;
 
-use egui::Rect;
 use nara::{
     input::{ButtonDriverInput, KeyCode, MouseButton, PointerDriverInput},
     prelude::Vec2,
@@ -58,11 +57,11 @@ struct EditorGameContentTransform {
 
 impl EditorGameContentTransform {
     fn from_points(
-        rect: Rect,
+        rect: DisplayRect,
         pixels_per_point: f32,
         stamp: EditorGamePresentedStamp,
     ) -> Option<Self> {
-        if !rect.is_finite() || !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        if !rect.is_valid() || !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
             return None;
         }
         let window = stamp.logical_window();
@@ -74,15 +73,7 @@ impl EditorGameContentTransform {
             window.resolution.physical_width,
             window.resolution.physical_height,
         )?;
-        let mapping = DisplayMapping2d::fit(
-            target,
-            DisplayRect {
-                min: [rect.min.x, rect.min.y],
-                max: [rect.max.x, rect.max.y],
-            },
-            pixels_per_point,
-            DisplayScale::Fit,
-        )?;
+        let mapping = DisplayMapping2d::fit(target, rect, pixels_per_point, DisplayScale::Fit)?;
         Some(Self {
             mapping,
             logical_scale_factor: scale_factor,
@@ -144,7 +135,7 @@ impl EditorGameInputRouter {
     pub(super) fn update_presented(
         &mut self,
         stamp: Option<EditorGamePresentedStamp>,
-        content_rect_points: Option<Rect>,
+        content_rect_points: Option<DisplayRect>,
         pixels_per_point: f32,
         presentation_advanced: bool,
     ) {
@@ -280,7 +271,7 @@ impl EditorGameInputRouter {
         requested && game_panel_active
     }
 
-    /// Returns whether the event should continue to egui.
+    /// Returns whether the event should continue to the Editor frontend.
     pub(super) fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput { event, .. } if self.is_captured() => {

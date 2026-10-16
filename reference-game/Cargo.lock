@@ -770,9 +770,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.67"
+version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38"
+checksum = "6651c9ed80effdc7db0ff72512157f901af5e3549e341e24b1dd4887d836d838"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -946,6 +946,68 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
+
+[[package]]
+name = "dear-imgui-build-support"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bff148165e992f47c6bc3b2764bd055e2c6bf9ca4a18e305dd0fa5e91d2424c"
+dependencies = [
+ "cc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "dear-imgui-rs"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3ae4d9ce4f0db445356274388cf20a6b0e449898c6036ab13f64f96fcb170b2"
+dependencies = [
+ "bitflags 2.13.1",
+ "dear-imgui-sys",
+ "parking_lot",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "dear-imgui-sys"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cf94308fb2b8d19ee855e9548186ec92645ebd321354e78f9df926fc6ed3b0a"
+dependencies = [
+ "cc",
+ "dear-imgui-build-support",
+ "mint",
+]
+
+[[package]]
+name = "dear-imgui-wgpu"
+version = "0.20.0"
+dependencies = [
+ "bytemuck",
+ "dear-imgui-rs",
+ "dear-imgui-winit",
+ "thiserror 2.0.18",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "dear-imgui-winit"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5bf3e25567248f51020238bdaabd37dceb8abf6f4ae9847701096e6838dfd5ca"
+dependencies = [
+ "dear-imgui-rs",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "thiserror 2.0.18",
+ "web-sys",
+ "web-time",
+ "windows-sys 0.61.2",
+ "winit",
+]
 
 [[package]]
 name = "derive_more"
@@ -1272,9 +1334,9 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.9"
+version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+checksum = "aedcfb3409746eddb02b9e19ebda1c3394f759a152e48ee875a0844d1b955484"
 
 [[package]]
 name = "fixedbitset"
@@ -2059,6 +2121,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mint"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2158,10 +2226,14 @@ dependencies = [
 name = "nara-editor"
 version = "0.1.0"
 dependencies = [
+ "dear-imgui-rs",
+ "dear-imgui-wgpu",
+ "dear-imgui-winit",
  "egui",
  "egui-wgpu",
  "egui-winit",
  "nara",
+ "nara_render_wgpu",
  "rustix 1.1.4",
  "serde",
  "serde_json",
@@ -2403,6 +2475,8 @@ name = "nara_render_wgpu"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "dear-imgui-rs",
+ "dear-imgui-wgpu",
  "nara_app",
  "nara_ecs",
  "nara_image",
@@ -2414,6 +2488,7 @@ dependencies = [
  "pollster",
  "thiserror 2.0.18",
  "wgpu",
+ "winit",
 ]
 
 [[package]]
@@ -3895,7 +3970,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.52.0",

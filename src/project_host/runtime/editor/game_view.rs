@@ -442,6 +442,30 @@ impl EditorGameViewCandidate {
         }
     }
 
+    pub(super) fn interrupted(self) -> EditorGameViewCompletion {
+        EditorGameViewCompletion {
+            identity: self.identity,
+            disposition: EditorGameViewCompletionDisposition::Deferred,
+            #[cfg(feature = "presentation-ui")]
+            outcomes: self
+                .ui_frame
+                .map(|frame| {
+                    frame
+                        .into_parts()
+                        .1
+                        .into_iter()
+                        .map(|submission| {
+                            submission.aborted(
+                                "native input interrupted the buffered Game presentation"
+                                    .to_owned(),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        }
+    }
+
     #[must_use]
     pub fn content_rejected(self, message: impl Into<String>) -> EditorGameViewCompletion {
         let message = message.into();

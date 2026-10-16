@@ -11,6 +11,8 @@ pub use app::{
     EditorLaunchOptions, EditorProjectAction,
 };
 pub use frontend::{EguiEditorFrontend, EguiEditorPanelContext, EguiEditorPanelPainter};
+#[cfg(feature = "imgui-qualification")]
+pub use platform::run_imgui_qualification;
 pub use platform::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
     EditorRunError, EditorSupervisedPlayCanaryEvidence, EditorUiAuthoringCanaryEvidence,

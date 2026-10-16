@@ -6,6 +6,8 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+dear-imgui-rs = { workspace = true, optional = true }
+dear-imgui-wgpu = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_ecs.workspace = true
@@ -18,8 +20,10 @@ nara_window.workspace = true
 pollster.workspace = true
 thiserror.workspace = true
 wgpu.workspace = true
+winit = { workspace = true, optional = true }
 
 [dev-dependencies]
+dear-imgui-winit.workspace = true
 nara_asset.workspace = true
 nara_core.workspace = true
 nara_hierarchy.workspace = true
@@ -34,6 +38,7 @@ raw-window-handle.workspace = true
 
 [features]
 default = []
+editor-imgui = ["dep:dear-imgui-rs", "dep:dear-imgui-wgpu", "dep:winit"]
 sprite-submitter = [
     "dep:bytemuck",
     "dep:nara_image",

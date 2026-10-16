@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+#[cfg(feature = "editor-imgui")]
+mod imgui;
 #[cfg(feature = "ui-submitter")]
 use std::sync::Arc;
 
@@ -160,6 +162,7 @@ struct WgpuEditorViewportTarget {
     stamp: WgpuEditorViewportReservationStamp,
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
+    last_submitted_frame_index: Option<u64>,
 }
 
 impl WgpuEditorViewportTarget {
@@ -169,7 +172,8 @@ impl WgpuEditorViewportTarget {
     }
 
     fn matches_receipt(&self, receipt: WgpuSubmittedImageReceipt) -> bool {
-        WgpuEditorViewportIdentity { stamp: self.stamp }.matches_submission(receipt)
+        self.last_submitted_frame_index == Some(receipt.render_transaction_frame_index())
+            && WgpuEditorViewportIdentity { stamp: self.stamp }.matches_submission(receipt)
     }
 }
 
@@ -449,6 +453,8 @@ impl<'frame> WgpuEditorDeviceScope<'frame> {
     }
 
     #[must_use]
+    /// Returns the retained primary configuration extent, including while that surface is
+    /// suspended. This is a device-setup fact; presentation uses the acquired texture extent.
     pub const fn surface_extent(&self) -> Extent2d {
         self.surface_extent
     }
@@ -590,6 +596,8 @@ pub struct WgpuEditorWindowFrame<'frame> {
     surface_format: wgpu::TextureFormat,
     surface_extent: Extent2d,
     viewports: &'frame [WgpuSubmittedImageReceipt],
+    #[cfg(feature = "editor-imgui")]
+    viewport_textures: &'frame [(WgpuSubmittedImageReceipt, wgpu::TextureView)],
     leading_command_buffers: &'frame mut Vec<wgpu::CommandBuffer>,
     sampled_viewports: &'frame mut Vec<WgpuEditorViewportSample>,
 }
@@ -711,11 +719,15 @@ struct WgpuEditorView {
 /// borrowed only through scoped first-party callbacks.
 #[doc(hidden)]
 pub struct WgpuEditorExecution {
+    #[cfg(feature = "editor-imgui")]
+    primary_window_id: WindowId,
     backend: WgpuRenderBackend,
     handles: BackendWindowHandles,
     views: BTreeMap<WgpuEditorViewId, WgpuEditorView>,
     host_frame_index: Option<u64>,
     last_presentation_generation: u64,
+    #[cfg(feature = "editor-imgui")]
+    last_imgui_presentation_id: u64,
 }
 
 impl std::fmt::Debug for WgpuEditorExecution {
@@ -737,11 +749,15 @@ impl WgpuEditorExecution {
         let handles = BackendWindowHandles::default();
         handles.insert(window_id, provider)?;
         Ok(Self {
+            #[cfg(feature = "editor-imgui")]
+            primary_window_id: window_id,
             backend: WgpuRenderBackend::default(),
             handles,
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
+            #[cfg(feature = "editor-imgui")]
+            last_imgui_presentation_id: 0,
         })
     }
 
@@ -881,6 +897,7 @@ impl WgpuEditorExecution {
             stamp: reservation.stamp,
             _texture: reservation.texture,
             view: reservation.view,
+            last_submitted_frame_index: None,
         });
     }
 
@@ -1041,8 +1058,8 @@ impl WgpuEditorExecution {
         )?;
         let viewport_target = self
             .views
-            .get(&view_id)
-            .and_then(|view| view.target.as_ref())
+            .get_mut(&view_id)
+            .and_then(|view| view.target.as_mut())
             .expect("ensuring an Editor viewport target installs it");
         let mut encoder =
             namespace
@@ -1052,6 +1069,7 @@ impl WgpuEditorExecution {
                 });
         crate::encode_target_draw(&mut encoder, &viewport_target.view, &draw);
         namespace.queue.submit([encoder.finish()]);
+        viewport_target.last_submitted_frame_index = Some(packet.frame_index());
         self.backend.record_editor_image_submission();
         Ok(WgpuSubmittedImageReceipt::new(
             view_id,
@@ -1081,6 +1099,9 @@ impl WgpuEditorExecution {
         for &submission in viewport_submissions {
             self.validate_viewport_submission(&namespace, submission)?;
         }
+        if window.resolution.physical_width == 0 || window.resolution.physical_height == 0 {
+            return Ok(WgpuEditorFrameOutcome::default());
+        }
         let Some(acquired) = self.backend.acquire_editor_surface(window.id)? else {
             return Ok(WgpuEditorFrameOutcome::default());
         };
@@ -1102,6 +1123,17 @@ impl WgpuEditorExecution {
                 });
         let mut leading_command_buffers = Vec::new();
         let mut sampled_viewports = Vec::new();
+        #[cfg(feature = "editor-imgui")]
+        let viewport_textures = viewport_submissions
+            .iter()
+            .copied()
+            .filter_map(|image| {
+                self.views
+                    .get(&image.view_id())
+                    .and_then(|view| view.target.as_ref())
+                    .map(|target| (image, target.view.clone()))
+            })
+            .collect::<Vec<_>>();
         paint(&mut WgpuEditorWindowFrame {
             device: &namespace.device,
             queue: &namespace.queue,
@@ -1110,6 +1142,8 @@ impl WgpuEditorExecution {
             surface_format: format,
             surface_extent: extent,
             viewports: viewport_submissions,
+            #[cfg(feature = "editor-imgui")]
+            viewport_textures: &viewport_textures,
             leading_command_buffers: &mut leading_command_buffers,
             sampled_viewports: &mut sampled_viewports,
         })?;
@@ -1144,6 +1178,13 @@ impl WgpuEditorExecution {
         if let Some(view) = self.views.get_mut(&view_id) {
             view.target = None;
         }
+    }
+
+    /// Flushes pending uploads and drains work at the explicit native Host shutdown boundary.
+    pub fn wait_for_idle(&self) -> Result<(), WgpuEditorExecutionError> {
+        self.backend
+            .wait_for_editor_idle(std::time::Duration::from_secs(5))?;
+        Ok(())
     }
 
     /// Releases a final view lifetime. The Host never reuses its identity after this call.
@@ -1944,11 +1985,15 @@ mod tests {
 
     fn test_execution() -> WgpuEditorExecution {
         WgpuEditorExecution {
+            #[cfg(feature = "editor-imgui")]
+            primary_window_id: WindowId::PRIMARY,
             backend: WgpuRenderBackend::default(),
             handles: BackendWindowHandles::default(),
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
+            #[cfg(feature = "editor-imgui")]
+            last_imgui_presentation_id: 0,
         }
     }
 

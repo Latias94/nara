@@ -900,7 +900,7 @@ impl EditorApplication {
         batch: EditorGameInputBatch,
     ) -> Result<(), EditorGameViewBridgeFailure> {
         self.state
-            .workspace_mut()
+            .published_mut()
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?
             .session
             .apply_game_view_input_batch(batch)
@@ -908,13 +908,29 @@ impl EditorApplication {
 
     pub(crate) fn cancel_game_step_presentation(&mut self) -> bool {
         self.state
-            .workspace_mut()
+            .published_mut()
             .is_some_and(|project| project.session.cancel_game_step_presentation())
+    }
+
+    pub(crate) fn drive_gpu_recovery_pause(&mut self) -> EditorApplicationUpdate {
+        let Some(project) = self.state.published_mut() else {
+            return EditorApplicationUpdate::from_action(false, false);
+        };
+        let _ = project.session.request_runtime_pause_for_gpu_recovery();
+        project
+            .session
+            .drive_editor_frame_with_runtime(Duration::ZERO, true);
+        if project.session.cancel_game_step_presentation() {
+            project
+                .session
+                .drive_editor_frame_with_runtime(Duration::ZERO, false);
+        }
+        self.drive_editor_frame(Duration::ZERO, false, false)
     }
 
     pub(crate) fn game_step_requires_runtime_drive(&self) -> bool {
         self.state
-            .workspace()
+            .published()
             .is_some_and(|project| project.session.game_step_requires_runtime_drive())
     }
 
@@ -959,7 +975,7 @@ impl EditorApplication {
     #[must_use]
     pub fn active_game_start_request(&self) -> Option<EditorGameStartRequest> {
         self.state
-            .workspace()
+            .published()
             .and_then(|project| project.session.active_game_start_request())
     }
 
@@ -1023,7 +1039,7 @@ impl EditorApplication {
         retirement_message: &'static str,
     ) -> Result<(), EditorGameViewBridgeFailure> {
         self.state
-            .workspace_mut()
+            .published_mut()
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?
             .session
             .set_game_view_source_active(active, retirement_message)

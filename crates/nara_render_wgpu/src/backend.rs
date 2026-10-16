@@ -92,8 +92,8 @@ impl DeviceLossSignal {
         self.0.store(true, Ordering::Release);
     }
 
-    fn take_lost(&self) -> bool {
-        self.0.swap(false, Ordering::AcqRel)
+    fn is_lost(&self) -> bool {
+        self.0.load(Ordering::Acquire)
     }
 }
 
@@ -380,13 +380,14 @@ impl WgpuFrameTransactionStats {
 pub struct WgpuRenderBackend {
     instance_id: WgpuBackendInstanceId,
     state: WgpuBackendState,
+    // Rust drops fields in declaration order. Retire surfaces while their GPU owners are live.
+    surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
     instance: Option<wgpu::Instance>,
     adapter: Option<wgpu::Adapter>,
     device: Option<wgpu::Device>,
     queue: Option<wgpu::Queue>,
     device_loss_signal: Option<Arc<DeviceLossSignal>>,
     device_epoch: u64,
-    surfaces: BTreeMap<WindowId, WgpuSurfaceState>,
     source_generation: Option<RenderFrameSourceGeneration>,
     last_frame_index: Option<u64>,
     frame_transaction_stats: WgpuFrameTransactionStats,
@@ -600,6 +601,18 @@ impl WgpuRenderBackend {
             })
     }
 
+    pub(super) fn wait_for_editor_idle(&self, timeout: Duration) -> Result<(), WgpuRenderError> {
+        self.fail_if_device_lost()?;
+        let queue = self
+            .queue
+            .as_ref()
+            .ok_or(WgpuRenderError::BackendNotReady)?;
+        // Toolkit initialization can leave write_texture/write_buffer transfers pending before
+        // any rendered frame. Polling alone does not submit those transfers for completion.
+        queue.submit([]);
+        self.wait_for_telemetry_completions(timeout)
+    }
+
     pub(super) fn begin_frame_transaction(
         &mut self,
         render_transaction_frame_index: u64,
@@ -672,19 +685,22 @@ impl WgpuRenderBackend {
         let size = surface_extent(
             window.resolution.physical_width,
             window.resolution.physical_height,
-        )
-        .ok_or_else(|| WgpuRenderError::ContentRejected {
-            message: "the Editor window target has zero physical extent".to_owned(),
-        })?;
-        self.ensure_instance()?;
-        if !self.create_surface_if_missing(window, handles, size)? {
-            return Err(WgpuRenderError::SurfaceMissing {
-                window_id: window.id,
-            });
-        }
-        self.ensure_device(window.id)?;
-        self.fail_if_device_lost()?;
-        self.configure_surface_if_needed(window, size)?;
+        );
+        let size = if let Some(size) = size {
+            self.ensure_instance()?;
+            if !self.create_surface_if_missing(window, handles, size)? {
+                return Err(WgpuRenderError::SurfaceMissing {
+                    window_id: window.id,
+                });
+            }
+            self.ensure_device(window.id)?;
+            self.fail_if_device_lost()?;
+            self.configure_surface_if_needed(window, size)?;
+            size
+        } else {
+            self.configured_surface_extent(window.id)
+                .ok_or(WgpuRenderError::BackendNotReady)?
+        };
         let surface_format = self.surface_view_format(window.id)?;
         Ok(WgpuEditorDeviceNamespace {
             instance: self
@@ -733,7 +749,6 @@ impl WgpuRenderBackend {
             .as_ref()
             .ok_or(WgpuRenderError::SurfaceUnconfigured { window_id })?;
         let format = config.format.add_srgb_suffix();
-        let extent = surface.size;
         self.frame_transaction_stats.surface_acquire_attempts = self
             .frame_transaction_stats
             .surface_acquire_attempts
@@ -741,6 +756,11 @@ impl WgpuRenderBackend {
         let acquired = surface.surface(window_id)?.get_current_texture();
         match acquired {
             wgpu::CurrentSurfaceTexture::Success(texture) => {
+                let acquired_size = texture.texture.size();
+                let extent = Extent2d {
+                    width: acquired_size.width,
+                    height: acquired_size.height,
+                };
                 self.frame_transaction_stats.surface_acquires = self
                     .frame_transaction_stats
                     .surface_acquires
@@ -753,6 +773,11 @@ impl WgpuRenderBackend {
                 }))
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
+                let acquired_size = texture.texture.size();
+                let extent = Extent2d {
+                    width: acquired_size.width,
+                    height: acquired_size.height,
+                };
                 self.frame_transaction_stats.surface_acquires = self
                     .frame_transaction_stats
                     .surface_acquires
@@ -1156,14 +1181,23 @@ impl WgpuRenderBackend {
     }
 
     fn fail_if_device_lost(&self) -> Result<(), WgpuRenderError> {
+        // Device loss callbacks are delivered by polling. Observe them before admitting new
+        // allocations, including a destroyed device whose queue has no pending submissions.
+        let polled = self
+            .device
+            .as_ref()
+            .map(|device| device.poll(wgpu::PollType::Poll));
         if self
             .device_loss_signal
             .as_ref()
-            .is_some_and(|signal| signal.take_lost())
+            .is_some_and(|signal| signal.is_lost())
         {
             Err(WgpuRenderError::DeviceLost)
         } else {
-            Ok(())
+            polled
+                .transpose()
+                .map(|_| ())
+                .map_err(|_| WgpuRenderError::TelemetryCompletionPollFailed)
         }
     }
 
@@ -2133,6 +2167,24 @@ mod tests {
         assert!(!snapshot.surface_active);
         assert!(snapshot.provider_present);
         assert!(handles.is_surface_target_active(WindowId::PRIMARY));
+    }
+
+    #[test]
+    fn device_loss_remains_rejected_until_the_owner_is_retired() {
+        let signal = Arc::new(DeviceLossSignal::default());
+        signal.mark_lost();
+        let backend = WgpuRenderBackend {
+            device_loss_signal: Some(signal),
+            ..WgpuRenderBackend::default()
+        };
+        assert!(matches!(
+            backend.fail_if_device_lost(),
+            Err(WgpuRenderError::DeviceLost)
+        ));
+        assert!(matches!(
+            backend.fail_if_device_lost(),
+            Err(WgpuRenderError::DeviceLost)
+        ));
     }
 
     #[test]

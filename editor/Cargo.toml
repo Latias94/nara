@@ -6,11 +6,19 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = []
+imgui-qualification = ["dep:dear-imgui-rs", "dep:dear-imgui-wgpu", "dep:dear-imgui-winit", "dep:nara_render_wgpu"]
+
 [dependencies]
+dear-imgui-rs = { workspace = true, optional = true }
+dear-imgui-wgpu = { workspace = true, optional = true }
+dear-imgui-winit = { workspace = true, optional = true }
 egui.workspace = true
 egui-wgpu.workspace = true
 egui-winit.workspace = true
 nara = { path = "..", default-features = false, features = ["desktop-winit", "presentation-2d", "presentation-ui", "project-workflow-cargo-facts", "render-wgpu", "runtime-ui", "tooling-egui"] }
+nara_render_wgpu = { workspace = true, optional = true, features = ["editor-imgui"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 thiserror.workspace = true

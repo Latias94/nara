@@ -11,9 +11,7 @@ use nara::{
     render_wgpu::__private::{
         WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorViewId,
     },
-    tooling::{
-        EditorAction, EditorActionBatch, EditorNavigationAction, EditorPlayAction, EditorPlayState,
-    },
+    tooling::{EditorAction, EditorNavigationAction, EditorPlayState},
     tooling_egui::{
         EguiAuthoringViewportOutput, EguiCentralViewportInput, EguiGameViewInput,
         EguiGameViewOutput, EguiSceneViewInput, EguiUiCanvasInput,
@@ -44,12 +42,19 @@ mod canary;
 mod game_input;
 mod generic_open_canary;
 mod image_import_canary;
+#[cfg(feature = "imgui-qualification")]
+mod imgui;
+#[cfg(feature = "imgui-qualification")]
+mod qualification_metrics;
 mod supervised_play_canary;
 mod ui_canary;
 mod viewport;
 mod views;
 
 use views::EditorViewInstances;
+
+#[cfg(feature = "imgui-qualification")]
+pub use imgui::run_imgui_qualification;
 
 pub use canary::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,
@@ -329,6 +334,10 @@ struct NativeEditorHost {
     repaint_deadline: Option<Instant>,
     terminal_error: Option<EditorRunError>,
     canary: Option<NativeEditorCanary>,
+    #[cfg(feature = "imgui-qualification")]
+    metrics: Option<qualification_metrics::FrontendMetrics>,
+    #[cfg(feature = "imgui-qualification")]
+    last_frame_presented: bool,
 }
 
 enum NativeEditorCanary {
@@ -452,6 +461,10 @@ impl NativeEditorHost {
             repaint_deadline: None,
             terminal_error: None,
             canary,
+            #[cfg(feature = "imgui-qualification")]
+            metrics: qualification_metrics::FrontendMetrics::requested("egui"),
+            #[cfg(feature = "imgui-qualification")]
+            last_frame_presented: false,
         })
     }
 
@@ -600,7 +613,7 @@ impl NativeEditorHost {
             self.fail(event_loop, error);
             return;
         }
-        let mut play_state = match self.application.surface() {
+        let play_state = match self.application.surface() {
             EditorApplicationSurface::Workspace { frame, .. } => frame.play().state(),
             EditorApplicationSurface::ProjectShell => {
                 if self.gpu_recovery.begin_automatic_replacement() {
@@ -613,25 +626,11 @@ impl NativeEditorHost {
                 return;
             }
         };
-        if play_state == EditorPlayState::Stepping {
-            self.application.cancel_game_step_presentation();
-            let frame = self
-                .application
-                .current_frame()
-                .expect("the matched workspace remains published during GPU recovery");
-            let batch = EditorActionBatch::new(frame.revision(), []);
-            let _ = self.application.submit_and_drive(batch, Duration::ZERO);
-            play_state = self
-                .application
-                .current_frame()
-                .expect("the matched workspace remains published during GPU recovery")
-                .play()
-                .state();
-        }
         if matches!(
             play_state,
             EditorPlayState::Running | EditorPlayState::Stepping
-        ) {
+        ) && self.application.active_game_start_request().is_some()
+        {
             if !self.gpu_recovery.begin_runtime_pause() {
                 self.await_explicit_gpu_retry(&error);
                 return;
@@ -641,17 +640,6 @@ impl NativeEditorHost {
                 return;
             }
             self.retire_gpu_execution();
-            if play_state == EditorPlayState::Running {
-                let frame = self
-                    .application
-                    .current_frame()
-                    .expect("the matched workspace remains published while pausing Play");
-                let batch = EditorActionBatch::new(
-                    frame.revision(),
-                    [EditorAction::Play(EditorPlayAction::Pause)],
-                );
-                let _ = self.application.submit_and_drive(batch, Duration::ZERO);
-            }
             if let Err(recovery_error) = self.advance_gpu_recovery_pause(event_loop) {
                 self.fail(event_loop, recovery_error);
             }
@@ -675,6 +663,10 @@ impl NativeEditorHost {
         if self.gpu_recovery != EditorGpuRecovery::AwaitingRuntimePause {
             return Ok(());
         }
+        if self.application.drive_gpu_recovery_pause().exit_ready() {
+            event_loop.exit();
+            return Ok(());
+        }
         let play_state = match self.application.surface() {
             EditorApplicationSurface::Workspace { frame, .. } => frame.play().state(),
             EditorApplicationSurface::ProjectShell => {
@@ -685,23 +677,6 @@ impl NativeEditorHost {
                 return Ok(());
             }
         };
-        if matches!(
-            play_state,
-            EditorPlayState::Running | EditorPlayState::Stepping
-        ) {
-            let frame = self
-                .application
-                .current_frame()
-                .expect("the matched workspace remains published while GPU recovery advances");
-            let batch = EditorActionBatch::new(frame.revision(), []);
-            let _ = self.application.submit_and_drive(batch, Duration::ZERO);
-        }
-        let play_state = self
-            .application
-            .current_frame()
-            .expect("the matched workspace remains published while GPU recovery advances")
-            .play()
-            .state();
         if matches!(
             play_state,
             EditorPlayState::Paused
@@ -1188,6 +1163,10 @@ impl NativeEditorHost {
             ));
         }
         let presentation_deferred = presentation.window().is_none();
+        #[cfg(feature = "imgui-qualification")]
+        {
+            self.last_frame_presented = !presentation_deferred;
+        }
         if !presentation_deferred {
             window.set_title(EDITOR_TITLE);
             self.gpu_recovery.mark_presentation_ready();
@@ -1723,6 +1702,10 @@ impl NativeEditorHost {
             }
         };
         if presentation.window().is_some() {
+            #[cfg(feature = "imgui-qualification")]
+            {
+                self.last_frame_presented = true;
+            }
             window.set_title(EDITOR_TITLE);
         }
         if !presentation.composites().is_empty() {
@@ -1863,7 +1846,10 @@ impl NativeEditorHost {
             } else {
                 self.game_input.update_presented(
                     self.game_presenter.input_stamp(),
-                    game_content_rect,
+                    game_content_rect.map(|rect| nara::render::DisplayRect {
+                        min: [rect.min.x, rect.min.y],
+                        max: [rect.max.x, rect.max.y],
+                    }),
                     output.pixels_per_point,
                     game_presentation_advanced,
                 );
@@ -2376,12 +2362,34 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        #[cfg(feature = "imgui-qualification")]
+        let measurement = matches!(event, WindowEvent::RedrawRequested).then(Instant::now);
+        #[cfg(feature = "imgui-qualification")]
+        {
+            self.last_frame_presented = false;
+        }
         if let Err(error) = self.handle_window_event(event_loop, window_id, event) {
             self.handle_gpu_failure(event_loop, error);
         }
+        #[cfg(feature = "imgui-qualification")]
+        if let Some(started) = measurement
+            && let Some(metrics) = &mut self.metrics
+        {
+            metrics.observe(started, self.last_frame_presented);
+        }
     }
 
-    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {}
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        #[cfg(feature = "imgui-qualification")]
+        if let Some(metrics) = self.metrics.take() {
+            metrics.finish(
+                self.gpu
+                    .as_mut()
+                    .zip(self.window.as_ref())
+                    .map(|(gpu, window)| (gpu, editor_window_packet(window))),
+            );
+        }
+    }
 }
 
 #[derive(Debug, Default)]

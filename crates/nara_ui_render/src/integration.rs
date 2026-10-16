@@ -276,6 +276,19 @@ impl UiBackendSubmission {
         &self.submission
     }
 
+    /// Cancels an admitted attempt before it is bound to a concrete backend generation.
+    #[must_use]
+    pub fn aborted(self, message: String) -> UiCompletedBackendOutcome {
+        let Self { submission, permit } = self;
+        UiCompletedBackendOutcome {
+            permit,
+            outcome: UiPresentationOutcome::Aborted {
+                attempt: submission.into_attempt(),
+                message,
+            },
+        }
+    }
+
     #[must_use]
     pub fn content_rejected(self, message: String) -> UiCompletedBackendOutcome {
         let Self { submission, permit } = self;

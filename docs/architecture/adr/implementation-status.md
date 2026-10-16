@@ -36,7 +36,15 @@ plan and [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) 
 Its research and planning are complete; goal-backed implementation continues in lane `nara-editor-foundation-implementation-codex-root`.
 U9 and U1-U5 are verified: the dependency cohort is migrated, application state is frontend-neutral, catalogs publish complete data-only creation templates, generic Scene/Prefab composition preserves unavailable data, trusted panels share workspace registration and independent Authoring/Game views retain their own presentation/input lifetimes.
 [U5 native evidence](../../knowledge/engineering/verification/2026-10/2026-10-16T094118Z-editor-u5-independent-scene-and-game-views-pass-native-concurrent-presentation-close-reopen-and-paused-refocus-ad10a59ba57e4fe7b45a5176d3311a33.md) covers exact concurrent Windows frames, independent resize, close/reopen, paused refocus and physical shutdown.
-Delegated native windows and Dear ImGui qualification remain pending their own gates.
+U6's direct Dear ImGui integration passes the bounded Windows adoption gate under
+[verification `e42a0dbfec6643e380f6e9275f29b0d2`](../../knowledge/engineering/verification/2026-10/2026-10-16T163933Z-editor-u6-qualifies-direct-dear-imgui-on-windows-with-explicit-backend-and-cleanup-limits-e42a0dbfec6643e380f6e9275f29b0d2.md).
+One engine-created device supports exact concurrent primary/secondary Scene/Game samples, real
+docking and DPI 144/120 detachment, Chinese IME/clipboard/navigation, layout restore, independent
+view retirement and device-loss recovery. Final cleanup evidence names Windows/DX12; a bare-GPU
+control isolates this machine's Vulkan implicit-layer teardown interaction. The upstream Winit
+0.20.0 combined-shutdown borrow defect is avoided through explicit renderer/viewport/platform
+retirement. U7 full frontend parity and U8 clean external acceptance/removal remain pending;
+production remains egui until parity, and native Linux/macOS release support is not inferred.
 Existing authoring, persistence and execution evidence above remains the baseline, not proof of the proposed frontend or multi-window work.
 
 The final acceptance record

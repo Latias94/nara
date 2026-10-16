@@ -349,6 +349,18 @@ impl EditorProductState {
         self.workspace().or_else(|| self.replacement_workspace())
     }
 
+    pub(super) fn published_mut(&mut self) -> Option<&mut PublishedEditorProject> {
+        match self {
+            Self::AuthoringReady(project) | Self::AuthoringDegraded(project) => Some(project),
+            Self::OpeningReplacement(OpeningReplacementState::Preparing { retained, .. })
+            | Self::OpeningReplacement(OpeningReplacementState::Refreshing { retained, .. })
+            | Self::OpeningReplacement(OpeningReplacementState::Closing { retained, .. }) => {
+                Some(retained)
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn workspace(&self) -> Option<&PublishedEditorProject> {
         match self {
             Self::AuthoringReady(project) | Self::AuthoringDegraded(project) => Some(project),
