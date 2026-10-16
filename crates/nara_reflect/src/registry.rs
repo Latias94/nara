@@ -157,6 +157,10 @@ pub enum ComponentRegistryError {
         path: ComponentFieldPath,
         numeric_domain: ComponentNumericDomain,
     },
+    InvalidComponentAuthoringInitialValue {
+        component_id: ComponentTypeId,
+        source: ComponentCodecError,
+    },
     InvalidFieldCapability {
         component_id: ComponentTypeId,
         field_id: ComponentFieldId,
@@ -413,6 +417,13 @@ impl Display for ComponentRegistryError {
                 formatter,
                 "component ID '{component_id}' field '{path}' default is outside numeric domain {numeric_domain:?}"
             ),
+            Self::InvalidComponentAuthoringInitialValue {
+                component_id,
+                source,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' authoring initial value is invalid: {source}"
+            ),
             Self::InvalidFieldCapability {
                 component_id,
                 field_id,
@@ -504,7 +515,14 @@ impl Display for ComponentRegistryError {
     }
 }
 
-impl Error for ComponentRegistryError {}
+impl Error for ComponentRegistryError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::InvalidComponentAuthoringInitialValue { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentProjectionError {
@@ -2088,7 +2106,8 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
         }
         validate_component_field_default(&schema.id, field)?;
     }
-    SchemaPathIndex::from_schema(schema).validate(schema)?;
+    let path_index = SchemaPathIndex::from_schema(schema);
+    path_index.validate(schema)?;
 
     let mut tombstones = BTreeSet::new();
     for tombstone in &schema.field_tombstones {
@@ -2110,6 +2129,14 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
                 field_id: tombstone.clone(),
             });
         }
+    }
+    if let Some(value) = &schema.authoring_initial_value {
+        validate_component_value_coverage_with_presence(schema, &path_index, value, true).map_err(
+            |source| ComponentRegistryError::InvalidComponentAuthoringInitialValue {
+                component_id: schema.id.clone(),
+                source,
+            },
+        )?;
     }
     Ok(())
 }
@@ -2268,6 +2295,7 @@ fn validate_field_lineage(
 }
 
 fn same_versioned_schema_semantics(current: &ComponentSchema, previous: &ComponentSchema) -> bool {
+    // Creation-only templates affect catalog identity, not stored component decoding.
     if current.capabilities != previous.capabilities
         || current.fields.len() != previous.fields.len()
     {
@@ -2375,6 +2403,15 @@ fn validate_component_value_coverage(
     path_index: &SchemaPathIndex,
     value: &ComponentValue,
 ) -> Result<(), ComponentCodecError> {
+    validate_component_value_coverage_with_presence(schema, path_index, value, false)
+}
+
+fn validate_component_value_coverage_with_presence(
+    schema: &ComponentSchema,
+    path_index: &SchemaPathIndex,
+    value: &ComponentValue,
+    require_all_fields: bool,
+) -> Result<(), ComponentCodecError> {
     if schema.fields.is_empty() && matches!(value, ComponentValue::Map(fields) if fields.is_empty())
     {
         return Ok(());
@@ -2395,7 +2432,9 @@ fn validate_component_value_coverage(
                     ));
                 }
             }
-            Err(error) if !field.required || field.default_value.is_some() => {
+            Err(error)
+                if !require_all_fields && (!field.required || field.default_value.is_some()) =>
+            {
                 if !matches!(
                     error,
                     crate::ComponentFieldPathError::MissingField { .. }

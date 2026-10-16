@@ -237,6 +237,13 @@ pub struct ComponentSchema {
     pub fields: Vec<ComponentFieldSchema>,
     #[cfg_attr(feature = "serde", serde(default))]
     pub field_tombstones: Vec<ComponentFieldId>,
+    /// Complete data copied by an explicit authoring creation transaction.
+    /// This does not supply missing fields when decoding stored components.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub authoring_initial_value: Option<ComponentValue>,
 }
 
 impl ComponentSchema {
@@ -253,6 +260,7 @@ impl ComponentSchema {
             capabilities: BTreeSet::new(),
             fields: Vec::new(),
             field_tombstones: Vec::new(),
+            authoring_initial_value: None,
         }
     }
 
@@ -284,6 +292,18 @@ impl ComponentSchema {
     ) -> Self {
         self.field_tombstones.extend(tombstones);
         self
+    }
+
+    /// Declares a complete creation template, validated when the catalog is admitted.
+    #[must_use]
+    pub fn with_authoring_initial_value(mut self, value: ComponentValue) -> Self {
+        self.authoring_initial_value = Some(value);
+        self
+    }
+
+    #[must_use]
+    pub const fn authoring_initial_value(&self) -> Option<&ComponentValue> {
+        self.authoring_initial_value.as_ref()
     }
 
     #[must_use]
@@ -821,6 +841,11 @@ fn feed_schema(hasher: &mut blake3::Hasher, schema: &ComponentSchema) {
     for tombstone in &schema.field_tombstones {
         feed_bytes(hasher, b"field-tombstone");
         feed_str(hasher, tombstone.as_str());
+    }
+    // Creation metadata changes authoring identity, while absent metadata preserves v1 hashes.
+    if let Some(value) = &schema.authoring_initial_value {
+        feed_bytes(hasher, b"authoring-initial-value");
+        feed_value(hasher, value);
     }
 }
 

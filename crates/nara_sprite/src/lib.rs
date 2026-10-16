@@ -243,7 +243,8 @@ pub const SPRITE_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefinitio
         sprite_schema_catalog,
         validate_sprite_components,
         register_sprite_components,
-    );
+    )
+    .with_predecessor(sprite_schema_predecessor_catalog);
 const SPRITE_PRODUCT_REQUIREMENTS: &[nara_app::PluginProductCapability] =
     &[nara_app::PluginProductCapability::new("runtime-2d")];
 pub const SPRITE_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
@@ -388,13 +389,50 @@ pub fn register_sprite_components(
 
 fn sprite_schema_catalog()
 -> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    let predecessor = sprite_schema_predecessor_catalog()?;
+    let mut current = nara_reflect::ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the fixed generation-one Sprite catalog has a successor");
+    current.components.push(sprite_schema());
+    Ok(current)
+}
+
+fn sprite_schema_predecessor_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
     Ok(nara_reflect::ComponentSchemaCatalog {
-        components: vec![sprite_schema()],
+        components: vec![sprite_schema_predecessor()],
         ..nara_reflect::ComponentSchemaCatalog::default()
     })
 }
 
 fn sprite_schema() -> ComponentSchema {
+    sprite_schema_predecessor().with_authoring_initial_value(ComponentValue::map([
+        (
+            "size",
+            vec2_value(Vec2::new(16.0, 16.0)).expect("initial sprite size is finite"),
+        ),
+        (
+            "anchor",
+            vec2_value(Vec2::ZERO).expect("center anchor is finite"),
+        ),
+        (
+            "material",
+            material_value(
+                ComponentValue::Null,
+                SamplerDescriptor::LINEAR_CLAMP,
+                AlphaMode2d::Blend,
+                Color::WHITE,
+            )
+            .expect("initial untextured sprite material is finite"),
+        ),
+        ("layer", ComponentValue::I64(0)),
+        ("sort_key", ComponentValue::I64(0)),
+        ("y_sort_anchor", ComponentValue::Null),
+        ("texture_region", ComponentValue::Null),
+    ]))
+}
+
+// Generation-one wire contract retained as owner-local catalog lineage data.
+fn sprite_schema_predecessor() -> ComponentSchema {
     ComponentSchema::new(
         ComponentTypeId::new("nara.sprite.Sprite"),
         "Sprite",
@@ -1046,6 +1084,42 @@ mod tests {
         register_sprite_components(&mut registry).expect("component registration should succeed");
         registry.freeze().expect("component registry should freeze");
         registry
+    }
+
+    #[test]
+    fn creation_template_covers_optional_fields_and_decodes_without_asset_resources() {
+        let predecessor = sprite_schema_predecessor_catalog().unwrap();
+        let current = sprite_schema_catalog().unwrap();
+        assert_eq!(predecessor.generation(), 1);
+        assert_eq!(current.generation(), 2);
+        assert_eq!(current.predecessor(), Some(&predecessor.fingerprint()));
+        assert!(
+            predecessor.components[0]
+                .authoring_initial_value()
+                .is_none()
+        );
+        assert_eq!(current.components[0].version(), ComponentSchemaVersion::ONE);
+        let registry = frozen_sprite_registry();
+        let schema = registry
+            .schema(&ComponentTypeId::new("nara.sprite.Sprite"))
+            .unwrap();
+        let value = schema.authoring_initial_value().unwrap();
+        for field in schema.fields() {
+            value.get_path(field.path()).unwrap();
+        }
+        let mut world = World::new();
+        let entity = world.spawn_empty().id();
+        registry
+            .preflight_component(schema.id(), value)
+            .unwrap()
+            .unwrap()
+            .apply(&mut world, entity)
+            .unwrap();
+        assert_eq!(
+            world.get::<Sprite>(entity),
+            Some(&Sprite::from_color(Vec2::new(16.0, 16.0), Color::WHITE))
+        );
+        nara_reflect::__private::resolve_schema_provider(SPRITE_SCHEMA_PROVIDER).unwrap();
     }
 
     #[test]

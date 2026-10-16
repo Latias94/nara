@@ -1,0 +1,5 @@
+error: initial must be a scalar literal or negative numeric literal
+  --> tests/ui/initial_expression.rs:14:53
+   |
+14 |     #[nara(id = "value", alias = "Value", initial = default_value())]
+   |                                                     ^^^^^^^^^^^^^^^

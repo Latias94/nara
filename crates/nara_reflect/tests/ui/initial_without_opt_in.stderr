@@ -1,0 +1,5 @@
+error: field `initial` requires component `authoring_initial`
+  --> tests/ui/initial_without_opt_in.rs:13:53
+   |
+13 |     #[nara(id = "value", alias = "Value", initial = 1)]
+   |                                                     ^

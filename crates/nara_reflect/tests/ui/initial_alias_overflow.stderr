@@ -1,0 +1,13 @@
+error[E0080]: evaluation panicked: authoring initial float must be finite for its field type
+  --> tests/ui/initial_alias_overflow.rs:11:21
+   |
+11 | #[derive(Component, PersistentComponent)]
+   |                     ^^^^^^^^^^^^^^^^^^^ evaluation of `<InitialAliasOverflow as nara_reflect::PersistentComponentProvider>::persistent_component_schema::{constant#0}` failed here
+
+note: erroneous constant encountered
+  --> tests/ui/initial_alias_overflow.rs:11:21
+   |
+11 | #[derive(Component, PersistentComponent)]
+   |                     ^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this note originates in the derive macro `PersistentComponent` (in Nightly builds, run with -Z macro-backtrace for more info)

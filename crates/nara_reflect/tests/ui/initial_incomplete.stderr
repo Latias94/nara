@@ -1,0 +1,5 @@
+error: authoring_initial requires an explicit `initial` literal on every field
+  --> tests/ui/initial_incomplete.rs:15:5
+   |
+15 |     value: i64,
+   |     ^^^^^

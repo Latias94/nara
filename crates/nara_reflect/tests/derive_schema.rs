@@ -84,6 +84,99 @@ fn scalar_probe() -> ScalarProbe {
     }
 }
 
+#[derive(Component, PersistentComponent, Debug, PartialEq)]
+#[nara(
+    id = "nara.test.CreationProbe",
+    version = 1,
+    alias = "Creation probe",
+    component_capabilities(scene, inspect, edit),
+    field_capabilities(scene, inspect, edit),
+    authoring_initial
+)]
+struct CreationProbe {
+    #[nara(id = "enabled", alias = "Enabled", initial = true)]
+    enabled: bool,
+    #[nara(id = "label", alias = "Label", initial = "New player")]
+    label: String,
+    #[nara(id = "speed", alias = "Speed", initial = 200.25)]
+    speed: f32,
+    #[nara(id = "health", alias = "Health", initial = -10)]
+    health: i8,
+    #[nara(id = "score", alias = "Score", initial = 0)]
+    score: u64,
+}
+
+mod wide_float_alias {
+    #[allow(non_camel_case_types)]
+    pub type f32 = std::primitive::f64;
+}
+
+#[derive(Component, PersistentComponent)]
+#[nara(
+    id = "nara.test.CreationFloatAlias",
+    version = 1,
+    alias = "Creation float alias",
+    component_capabilities(scene),
+    field_capabilities(scene),
+    authoring_initial
+)]
+struct CreationFloatAlias {
+    #[nara(id = "value", alias = "Value", initial = 1e100)]
+    value: wide_float_alias::f32,
+}
+
+#[test]
+fn creation_float_finiteness_uses_the_actual_rust_type_instead_of_its_alias_name() {
+    let schema = CreationFloatAlias::persistent_component_schema();
+    let value = schema.authoring_initial_value().unwrap();
+    assert_eq!(value.field("value").unwrap().as_f64(), Some(1e100));
+    CreationFloatAlias::__decode_persistent_component(value).unwrap();
+}
+
+#[test]
+fn generated_scalar_creation_template_is_typed_complete_data_and_not_decode_defaults() {
+    let schema = CreationProbe::persistent_component_schema();
+    let value = schema.authoring_initial_value().unwrap();
+    validate_component_value(&schema, value).unwrap();
+    assert_eq!(
+        CreationProbe::__decode_persistent_component(value).unwrap(),
+        CreationProbe {
+            enabled: true,
+            label: "New player".into(),
+            speed: 200.25,
+            health: -10,
+            score: 0,
+        }
+    );
+    assert!(
+        schema
+            .fields()
+            .iter()
+            .all(|field| field.default_value.is_none())
+    );
+    assert!(
+        CreationProbe::__decode_persistent_component(&ComponentValue::map([(
+            "enabled",
+            ComponentValue::Bool(true)
+        )]))
+        .is_err()
+    );
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component::<CreationProbe>()
+        .unwrap();
+    registry.freeze().unwrap();
+    let mut catalog = ComponentSchemaCatalog {
+        components: vec![schema],
+        ..ComponentSchemaCatalog::default()
+    };
+    catalog.canonicalize();
+    assert_eq!(
+        registry.schema(catalog.components[0].id()),
+        Some(&catalog.components[0])
+    );
+}
+
 #[test]
 fn generated_scalar_provider_round_trips_native_components_and_declares_numeric_domains() {
     let mut registry = ComponentRegistry::new();

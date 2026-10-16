@@ -11,6 +11,79 @@
       {
         "owner": "nara.scene.hierarchy.components",
         "current": {
+          "generation": 2,
+          "predecessor": "2144b2bfe6109d7b8dd590aa7bef764902794d05ae2ab85c68c91ce4d48b39e6",
+          "components": [
+            {
+              "id": "nara.scene.Name",
+              "aliases": [
+                "Name"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "value",
+                  "aliases": [
+                    "Name"
+                  ],
+                  "path": [],
+                  "value_kind": "string",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "string",
+                "value": "Entity"
+              }
+            },
+            {
+              "id": "nara.scene.Visibility",
+              "aliases": [
+                "Visibility"
+              ],
+              "version": 1,
+              "capabilities": [
+                "scene",
+                "inspect",
+                "edit"
+              ],
+              "fields": [
+                {
+                  "id": "value",
+                  "aliases": [
+                    "Visibility"
+                  ],
+                  "path": [],
+                  "value_kind": "string",
+                  "required": true,
+                  "capabilities": [
+                    "scene",
+                    "inspect",
+                    "edit"
+                  ]
+                }
+              ],
+              "field_tombstones": [],
+              "authoring_initial_value": {
+                "type": "string",
+                "value": "visible"
+              }
+            }
+          ],
+          "type_tombstones": []
+        },
+        "predecessor": {
           "generation": 1,
           "components": [
             {

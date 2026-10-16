@@ -3,12 +3,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote};
+use quote::{format_ident, quote, quote_spanned};
 use syn::{
-    Attribute, Data, DeriveInput, Error, Field, Fields, Ident, LitInt, LitStr, Path, Result, Type,
-    parse_macro_input, spanned::Spanned,
+    Attribute, Data, DeriveInput, Error, Expr, Field, Fields, Ident, Lit, LitInt, LitStr, Path,
+    Result, Type, parse_macro_input, spanned::Spanned,
 };
 
+/// Derives a persistent schema and its sealed field codecs.
+///
+/// Component-level `#[nara(authoring_initial)]` opts into data-only creation. Every field
+/// then requires `#[nara(initial = <literal>)]`; supported values are boolean, string,
+/// integer and finite float literals, including negative numeric literals. Rust checks
+/// each literal against its field type. Expressions, callbacks and aggregate values are
+/// intentionally unsupported. Creation metadata never supplies missing decode fields.
 #[proc_macro_derive(PersistentComponent, attributes(nara))]
 pub fn derive_persistent_component(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -66,6 +73,7 @@ struct ComponentArgs {
     field_capabilities: Option<Vec<Capability>>,
     tombstones: Vec<LitStr>,
     crate_path: Option<Path>,
+    authoring_initial: Option<Span>,
 }
 
 #[derive(Default)]
@@ -73,6 +81,7 @@ struct FieldArgs {
     id: Option<LitStr>,
     aliases: Vec<LitStr>,
     capabilities: Option<Vec<Capability>>,
+    initial: Option<Expr>,
 }
 
 struct PersistentField {
@@ -81,6 +90,7 @@ struct PersistentField {
     id: LitStr,
     aliases: Vec<LitStr>,
     capabilities: Vec<Capability>,
+    initial: Option<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +171,24 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
         persistent_fields.push(persistent);
     }
 
+    for field in &persistent_fields {
+        match (args.authoring_initial, &field.initial) {
+            (Some(_), None) => {
+                return Err(Error::new(
+                    field.ident.span(),
+                    "authoring_initial requires an explicit `initial` literal on every field",
+                ));
+            }
+            (None, Some(initial)) => {
+                return Err(Error::new_spanned(
+                    initial,
+                    "field `initial` requires component `authoring_initial`",
+                ));
+            }
+            _ => {}
+        }
+    }
+
     let mut tombstones = BTreeSet::new();
     for tombstone in &args.tombstones {
         if !tombstones.insert(tombstone.value()) {
@@ -185,6 +213,46 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
     let field_schemas = persistent_fields
         .iter()
         .map(|field| field_schema(field, &support));
+    let authoring_initial = if args.authoring_initial.is_some() {
+        let values = persistent_fields.iter().map(|field| {
+            let id = &field.id;
+            let ty = &field.ty;
+            let initial = field.initial.as_ref().expect("creation fields were validated");
+            let value = match initial {
+                Expr::Lit(literal) if matches!(literal.lit, Lit::Str(_)) => {
+                    quote!(::std::string::String::from(#initial))
+                }
+                _ if matches!(initial_scalar_literal(initial), Ok(literal) if is_float_literal(literal)) => {
+                    quote! {
+                        const {
+                            let initial_value: #ty = #initial;
+                            assert!(
+                                initial_value.is_finite(),
+                                "authoring initial float must be finite for its field type"
+                            );
+                            initial_value
+                        }
+                    }
+                }
+                _ => quote!(#initial),
+            };
+            quote_spanned!(initial.span()=> (#id, {
+                let initial_value: #ty = #value;
+                #support::encode_persistent_field(&initial_value)
+                    .expect("PersistentComponent validates finite scalar creation literals")
+            }))
+        });
+        let value = if persistent_fields.is_empty() {
+            quote!(#support::ComponentValue::map(::core::iter::empty::<(
+                &'static str, #support::ComponentValue,
+            )>()))
+        } else {
+            quote!(#support::ComponentValue::map([#(#values),*]))
+        };
+        quote!(.with_authoring_initial_value(#value))
+    } else {
+        TokenStream2::new()
+    };
     let component_encoder = if persistent_fields.is_empty() {
         quote!(#support::ComponentValue::map(::core::iter::empty::<(
             &'static str,
@@ -220,6 +288,7 @@ fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
                 .with_field_tombstones([
                     #(#support::ComponentFieldId::new(#tombstone_values)),*
                 ])
+                #authoring_initial
             }
 
             fn __decode_persistent_component(
@@ -279,6 +348,13 @@ fn parse_component_args(attributes: &[Attribute]) -> Result<ComponentArgs> {
                 let literal: LitStr = meta.value()?.parse()?;
                 let path = literal.parse()?;
                 set_once(&mut args.crate_path, path, literal.span(), "crate")
+            } else if meta.path.is_ident("authoring_initial") {
+                set_once(
+                    &mut args.authoring_initial,
+                    meta.path.span(),
+                    meta.path.span(),
+                    "authoring_initial",
+                )
             } else {
                 Err(meta.error("unsupported PersistentComponent attribute"))
             }
@@ -326,6 +402,13 @@ fn parse_field(
                     attribute.span(),
                     "capabilities",
                 )
+            } else if meta.path.is_ident("initial") {
+                set_once(
+                    &mut args.initial,
+                    meta.value()?.parse()?,
+                    meta.path.span(),
+                    "initial",
+                )
             } else {
                 Err(meta.error("unsupported persistent field attribute"))
             }
@@ -340,13 +423,67 @@ fn parse_field(
         .unwrap_or_else(|| default_capabilities.to_vec());
     validate_field_subset(&capabilities, component_capabilities, ident.span())?;
     validate_type_capabilities(&field.ty, kind, &capabilities)?;
+    if let Some(initial) = &args.initial {
+        if kind != PersistentFieldKind::Scalar {
+            return Err(Error::new_spanned(
+                initial,
+                "creation literals support scalar fields only",
+            ));
+        }
+        validate_initial_literal(initial)?;
+    }
     Ok(PersistentField {
         ident,
         ty: field.ty,
         id,
         aliases: args.aliases,
         capabilities,
+        initial: args.initial,
     })
+}
+
+fn initial_scalar_literal(initial: &Expr) -> Result<&Lit> {
+    let literal = match initial {
+        Expr::Lit(literal) => &literal.lit,
+        Expr::Unary(unary) if matches!(unary.op, syn::UnOp::Neg(_)) => match unary.expr.as_ref() {
+            Expr::Lit(literal) if matches!(literal.lit, Lit::Int(_) | Lit::Float(_)) => {
+                &literal.lit
+            }
+            _ => {
+                return Err(Error::new_spanned(
+                    initial,
+                    "initial must be a scalar literal or negative numeric literal",
+                ));
+            }
+        },
+        _ => {
+            return Err(Error::new_spanned(
+                initial,
+                "initial must be a scalar literal or negative numeric literal",
+            ));
+        }
+    };
+    Ok(literal)
+}
+
+fn validate_initial_literal(initial: &Expr) -> Result<()> {
+    let literal = initial_scalar_literal(initial)?;
+    match literal {
+        Lit::Bool(_) | Lit::Str(_) | Lit::Int(_) | Lit::Float(_) => Ok(()),
+        _ => Err(Error::new_spanned(
+            initial,
+            "initial must be a scalar literal or negative numeric literal",
+        )),
+    }
+}
+
+fn is_float_literal(literal: &Lit) -> bool {
+    match literal {
+        Lit::Float(_) => true,
+        // Rust permits integer-shaped float literals; syn preserves their lexical shape.
+        Lit::Int(literal) => matches!(literal.suffix(), "f32" | "f64"),
+        _ => false,
+    }
 }
 
 fn parse_capabilities(meta: syn::meta::ParseNestedMeta<'_>) -> Result<Vec<Capability>> {

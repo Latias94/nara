@@ -149,7 +149,8 @@ pub const TRANSFORM_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProviderDefini
         transform_schema_catalog,
         validate_transform_components,
         register_transform_components,
-    );
+    )
+    .with_predecessor(transform_schema_predecessor_catalog);
 const TRANSFORM_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] = &[
     nara_reflect::COMPONENT_REGISTRY_PLUGIN_ID,
     nara_hierarchy::HIERARCHY_PLUGIN_ID,
@@ -223,13 +224,40 @@ pub fn register_transform_components(
 
 fn transform_schema_catalog()
 -> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    let predecessor = transform_schema_predecessor_catalog()?;
+    let mut current = nara_reflect::ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the fixed generation-one Transform catalog has a successor");
+    current.components.push(transform_schema());
+    Ok(current)
+}
+
+fn transform_schema_predecessor_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
     Ok(nara_reflect::ComponentSchemaCatalog {
-        components: vec![transform_schema()],
+        components: vec![transform_schema_predecessor()],
         ..nara_reflect::ComponentSchemaCatalog::default()
     })
 }
 
 fn transform_schema() -> ComponentSchema {
+    transform_schema_predecessor().with_authoring_initial_value(ComponentValue::map([
+        (
+            "translation",
+            vec2_value(Vec2::ZERO).expect("zero translation is finite"),
+        ),
+        (
+            "rotation",
+            ComponentValue::f64(0.0).expect("zero rotation is finite"),
+        ),
+        (
+            "scale",
+            vec2_value(Vec2::ONE).expect("unit scale is finite"),
+        ),
+    ]))
+}
+
+// Generation-one wire contract retained as owner-local catalog lineage data.
+fn transform_schema_predecessor() -> ComponentSchema {
     ComponentSchema::new(
         ComponentTypeId::new("nara.transform.Transform2d"),
         "Transform 2D",
@@ -333,6 +361,40 @@ mod tests {
     };
     use nara_reflect::ComponentRegistryPlugin;
 
+    #[test]
+    fn creation_template_preserves_wire_lineage_and_decodes_to_identity_transform() {
+        let predecessor = transform_schema_predecessor_catalog().unwrap();
+        let current = transform_schema_catalog().unwrap();
+        assert_eq!(predecessor.generation(), 1);
+        assert_eq!(current.generation(), 2);
+        assert_eq!(current.predecessor(), Some(&predecessor.fingerprint()));
+        assert!(
+            predecessor.components[0]
+                .authoring_initial_value()
+                .is_none()
+        );
+        assert_eq!(current.components[0].version(), ComponentSchemaVersion::ONE);
+        let mut registry = ComponentRegistry::new();
+        register_transform_components(&mut registry).unwrap();
+        registry.freeze().unwrap();
+        let schema = registry
+            .schema(&ComponentTypeId::new("nara.transform.Transform2d"))
+            .unwrap();
+        let mut world = nara_ecs::World::new();
+        let entity = world.spawn_empty().id();
+        registry
+            .preflight_component(schema.id(), schema.authoring_initial_value().unwrap())
+            .unwrap()
+            .unwrap()
+            .apply(&mut world, entity)
+            .unwrap();
+        assert_eq!(
+            world.get::<Transform2d>(entity),
+            Some(&Transform2d::default())
+        );
+        nara_reflect::__private::resolve_schema_provider(TRANSFORM_SCHEMA_PROVIDER).unwrap();
+    }
+
     const CONFLICTING_TRANSFORM_PLUGIN_ID: PluginId = PluginId::new("nara.test.transform-conflict");
     const CONFLICTING_TRANSFORM_PROVIDER_ID: nara_app::PluginSchemaProviderId =
         nara_app::PluginSchemaProviderId::new("nara.test.transform-conflict.components");
@@ -347,7 +409,8 @@ mod tests {
             transform_schema_catalog,
             validate_transform_components,
             register_transform_components,
-        );
+        )
+        .with_predecessor(transform_schema_predecessor_catalog);
     const CONFLICTING_TRANSFORM_DECLARATION: PluginDeclaration =
         PluginDeclaration::new(CONFLICTING_TRANSFORM_PLUGIN_ID, PluginCategory::Runtime)
             .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)

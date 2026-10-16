@@ -51,7 +51,8 @@ pub const SCENE_COMPONENTS_SCHEMA_PROVIDER: nara_reflect::ComponentSchemaProvide
         scene_components_schema_catalog,
         validate_scene_components,
         register_scene_components,
-    );
+    )
+    .with_predecessor(scene_components_schema_predecessor_catalog);
 pub const SCENE_COMPONENTS_PLUGIN_DECLARATION: nara_app::PluginDeclaration =
     nara_app::PluginDeclaration::new(SCENE_COMPONENTS_PLUGIN_ID, nara_app::PluginCategory::Core)
         .requires_plugins(nara_reflect::COMPONENT_REGISTRY_PLUGIN_REQUIREMENT)
@@ -143,13 +144,28 @@ fn register_visibility_component(
 
 fn scene_components_schema_catalog()
 -> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
+    let predecessor = scene_components_schema_predecessor_catalog()?;
+    let mut current = nara_reflect::ComponentSchemaCatalog::successor_of(&predecessor)
+        .expect("the fixed generation-one Scene components catalog has a successor");
+    current.components = vec![name_schema(), visibility_schema()];
+    Ok(current)
+}
+
+fn scene_components_schema_predecessor_catalog()
+-> Result<nara_reflect::ComponentSchemaCatalog, nara_reflect::ComponentSchemaProviderSourceError> {
     Ok(nara_reflect::ComponentSchemaCatalog {
-        components: vec![name_schema(), visibility_schema()],
+        components: vec![name_schema_predecessor(), visibility_schema_predecessor()],
         ..nara_reflect::ComponentSchemaCatalog::default()
     })
 }
 
 fn name_schema() -> ComponentSchema {
+    name_schema_predecessor()
+        .with_authoring_initial_value(ComponentValue::String("Entity".to_owned()))
+}
+
+// Generation-one wire contract retained as owner-local catalog lineage data.
+fn name_schema_predecessor() -> ComponentSchema {
     ComponentSchema::new(
         ComponentTypeId::new("nara.scene.Name"),
         "Name",
@@ -166,6 +182,11 @@ fn name_schema() -> ComponentSchema {
 }
 
 fn visibility_schema() -> ComponentSchema {
+    visibility_schema_predecessor()
+        .with_authoring_initial_value(ComponentValue::String("visible".to_owned()))
+}
+
+fn visibility_schema_predecessor() -> ComponentSchema {
     ComponentSchema::new(
         ComponentTypeId::new("nara.scene.Visibility"),
         "Visibility",
@@ -179,4 +200,42 @@ fn visibility_schema() -> ComponentSchema {
         ComponentValueKind::String,
     )
     .with_capabilities(ComponentCapability::SCENE_AUTHORING)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creation_templates_preserve_scalar_wire_contracts_and_owner_lineage() {
+        let predecessor = scene_components_schema_predecessor_catalog().unwrap();
+        let current = scene_components_schema_catalog().unwrap();
+        assert_eq!(predecessor.generation(), 1);
+        assert_eq!(current.generation(), 2);
+        assert_eq!(current.predecessor(), Some(&predecessor.fingerprint()));
+        assert!(
+            predecessor
+                .components
+                .iter()
+                .all(|schema| schema.authoring_initial_value().is_none())
+        );
+        let mut registry = ComponentRegistry::new();
+        register_scene_components(&mut registry).unwrap();
+        registry.freeze().unwrap();
+        let mut world = nara_ecs::World::new();
+        let entity = world.spawn_empty().id();
+        for schema in &current.components {
+            assert_eq!(schema.version(), ComponentSchemaVersion::ONE);
+            assert_eq!(registry.schema(schema.id()), Some(schema));
+            registry
+                .preflight_component(schema.id(), schema.authoring_initial_value().unwrap())
+                .unwrap()
+                .unwrap()
+                .apply(&mut world, entity)
+                .unwrap();
+        }
+        assert_eq!(world.get::<Name>(entity), Some(&Name::new("Entity")));
+        assert_eq!(world.get::<Visibility>(entity), Some(&Visibility::Visible));
+        nara_reflect::__private::resolve_schema_provider(SCENE_COMPONENTS_SCHEMA_PROVIDER).unwrap();
+    }
 }
