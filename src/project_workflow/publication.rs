@@ -665,7 +665,7 @@ mod tests {
 
     use super::*;
     use crate::project_workflow::{
-        LocalDependencyParent, NaraDependencySource, ProjectCreationRequest, ProjectSlug,
+        LocalDependencyRelation, NaraDependencySource, ProjectCreationRequest, ProjectSlug,
         prepare_desktop_2d_project,
     };
 
@@ -934,10 +934,11 @@ mod tests {
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
             publication_parent,
             ProjectSlug::new("moved-after-publication").unwrap(),
-            NaraDependencySource::local(
+            NaraDependencySource::local(LocalDependencyRelation::new(
                 checkout_capability,
-                LocalDependencyParent::Descendant(RelativePath::new("projects").unwrap()),
-            ),
+                None,
+                Some(RelativePath::new("projects").unwrap()),
+            )),
         ))
         .unwrap();
         let outside = TestRoot::new();
@@ -963,6 +964,48 @@ mod tests {
             ProjectCreationAdmissionErrorKind::DependencyRelation
         );
         assert!(moved_parent.join("moved-after-publication").is_dir());
+    }
+
+    #[test]
+    fn selected_checkout_replacement_after_publication_prevents_creation_success() {
+        let root = TestRoot::new();
+        fs::create_dir(root.path.join("engine")).unwrap();
+        fs::create_dir(root.path.join("games")).unwrap();
+        let ancestor = root.capability();
+        let parent = ancestor
+            .open_directory(&RelativePath::new("games").unwrap())
+            .unwrap();
+        let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+            parent,
+            ProjectSlug::new("changed-checkout").unwrap(),
+            NaraDependencySource::local(LocalDependencyRelation::new(
+                ancestor,
+                Some(RelativePath::new("engine").unwrap()),
+                Some(RelativePath::new("games").unwrap()),
+            )),
+        ))
+        .unwrap();
+
+        let outcome = publish_prepared_with(prepared, |parent, publication, plan, dependency| {
+            fs::rename(root.path.join("engine"), root.path.join("previous-engine")).unwrap();
+            fs::create_dir(root.path.join("engine")).unwrap();
+            admit_published(parent, publication, plan, dependency)
+        });
+        if publication_is_unavailable_and_clean(
+            &outcome,
+            &root.path.join("games"),
+            "changed-checkout",
+        ) {
+            return;
+        }
+        let ProjectCreationOutcome::PublishedButUnadmitted(outcome) = outcome else {
+            panic!("expected checkout replacement to reject admission: {outcome:?}");
+        };
+        assert_eq!(
+            outcome.error().kind(),
+            ProjectCreationAdmissionErrorKind::DependencyRelation
+        );
+        assert!(root.path.join("games/changed-checkout").is_dir());
     }
 
     #[test]

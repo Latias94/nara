@@ -62,17 +62,23 @@ impl std::fmt::Debug for PreparedProjectCreation {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectCreationPlanErrorKind {
+    LocalCheckoutUnavailable,
     LocalParentUnavailable,
     LocalParentMismatch,
+    NonUtf8LocalCoordinate,
     StarterContract,
 }
 
 #[derive(Debug, Error)]
 pub enum ProjectCreationPlanError {
+    #[error("local dependency checkout could not be resolved through the common ancestor")]
+    LocalCheckoutUnavailable(#[source] nara_fs::FsError),
     #[error("local dependency destination parent could not be resolved")]
     LocalParentUnavailable(#[source] nara_fs::FsError),
-    #[error("local dependency destination parent is outside the authorized checkout relation")]
+    #[error("local dependency destination parent does not match the common-ancestor relation")]
     LocalParentMismatch,
+    #[error("local dependency coordinate is not UTF-8 and cannot be represented in Cargo.toml")]
+    NonUtf8LocalCoordinate,
     #[error("desktop-2d/v1 starter contract is invalid: {0}")]
     StarterContract(&'static str),
 }
@@ -81,8 +87,12 @@ impl ProjectCreationPlanError {
     #[must_use]
     pub const fn kind(&self) -> ProjectCreationPlanErrorKind {
         match self {
+            Self::LocalCheckoutUnavailable(_) => {
+                ProjectCreationPlanErrorKind::LocalCheckoutUnavailable
+            }
             Self::LocalParentUnavailable(_) => ProjectCreationPlanErrorKind::LocalParentUnavailable,
             Self::LocalParentMismatch => ProjectCreationPlanErrorKind::LocalParentMismatch,
+            Self::NonUtf8LocalCoordinate => ProjectCreationPlanErrorKind::NonUtf8LocalCoordinate,
             Self::StarterContract(_) => ProjectCreationPlanErrorKind::StarterContract,
         }
     }
@@ -99,11 +109,17 @@ pub fn prepare_desktop_2d_project(
     let destination = slug.destination_component();
     let dependency =
         prepare_dependency(dependency, &publication_parent).map_err(|error| match error {
+            DependencyPreparationError::LocalCheckoutUnavailable(error) => {
+                ProjectCreationPlanError::LocalCheckoutUnavailable(error)
+            }
             DependencyPreparationError::LocalParentUnavailable(error) => {
                 ProjectCreationPlanError::LocalParentUnavailable(error)
             }
             DependencyPreparationError::LocalParentMismatch => {
                 ProjectCreationPlanError::LocalParentMismatch
+            }
+            DependencyPreparationError::NonUtf8LocalCoordinate => {
+                ProjectCreationPlanError::NonUtf8LocalCoordinate
             }
         })?;
     let PreparedDependency {

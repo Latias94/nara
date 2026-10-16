@@ -6,7 +6,7 @@ use std::{
 use nara::{
     fs::{DirectoryCapability, PathValidationError, RelativeComponent, RelativePath},
     project_workflow::{
-        LocalDependencyParent, NaraDependencySource, NaraDependencySourceError,
+        LocalDependencyRelation, NaraDependencySource, NaraDependencySourceError,
         ProjectCreationOutcome, ProjectCreationPlanError, ProjectCreationRequest, ProjectSlug,
         ProjectSlugError, prepare_desktop_2d_project,
     },
@@ -24,10 +24,14 @@ pub(crate) enum NewCommandError {
     ResolveCheckout(#[source] io::Error),
     #[error("failed to resolve the project parent directory")]
     ResolveParent(#[source] io::Error),
-    #[error("the project parent is outside the selected Nara checkout")]
-    ParentOutsideCheckout,
-    #[error("the project parent relation is not a valid capability-relative path")]
-    InvalidParentRelation(#[source] PathValidationError),
+    #[error(
+        "local creation requires a shared filesystem ancestor; cross-volume roots are unsupported"
+    )]
+    NoCommonAncestor,
+    #[error("the local checkout relation is not a valid capability-relative path")]
+    InvalidLocalRelation(#[source] PathValidationError),
+    #[error("the shared local ancestor cannot authorize checkout and project-parent access")]
+    CommonAncestorUnavailable(#[source] HostDirectoryError),
     #[error(transparent)]
     HostDirectory(#[from] HostDirectoryError),
     #[error(transparent)]
@@ -66,25 +70,47 @@ fn prepare_local_dependency(
 ) -> Result<(DirectoryCapability, NaraDependencySource), NewCommandError> {
     let checkout_path = fs::canonicalize(checkout).map_err(NewCommandError::ResolveCheckout)?;
     let parent_path = fs::canonicalize(parent).map_err(NewCommandError::ResolveParent)?;
-    let relative_parent = parent_path
-        .strip_prefix(&checkout_path)
-        .map_err(|_| NewCommandError::ParentOutsideCheckout)?;
-    let checkout = host_fs::writable_directory(&checkout_path)?;
-    let (publication_parent, relation) = if relative_parent.as_os_str().is_empty() {
-        (checkout.share(), LocalDependencyParent::CheckoutRoot)
-    } else {
-        let relative_parent = logical_relative_path(relative_parent)
-            .map_err(NewCommandError::InvalidParentRelation)?;
-        let publication_parent = checkout
-            .open_directory(&relative_parent)
-            .map_err(HostDirectoryError::Capability)?;
-        (
-            publication_parent,
-            LocalDependencyParent::Descendant(relative_parent),
+    let ancestor_path = checkout_path
+        .ancestors()
+        .find(|ancestor| parent_path.starts_with(ancestor))
+        .ok_or(NewCommandError::NoCommonAncestor)?;
+    let checkout_relation = endpoint_coordinate(&checkout_path, ancestor_path)?;
+    let parent_relation = endpoint_coordinate(&parent_path, ancestor_path)?;
+    let ancestor = host_fs::writable_directory(ancestor_path)
+        .map_err(NewCommandError::CommonAncestorUnavailable)?;
+    let publication_parent = parent_relation
+        .as_ref()
+        .map_or_else(
+            || Ok(ancestor.share()),
+            |path| {
+                ancestor
+                    .open_directory(path)
+                    .map_err(HostDirectoryError::Capability)
+            },
         )
-    };
-    let dependency = NaraDependencySource::local(checkout, relation);
+        .map_err(NewCommandError::CommonAncestorUnavailable)?;
+    let dependency = NaraDependencySource::local(LocalDependencyRelation::new(
+        ancestor,
+        checkout_relation,
+        parent_relation,
+    ));
     Ok((publication_parent, dependency))
+}
+
+fn endpoint_coordinate(
+    path: &Path,
+    ancestor: &Path,
+) -> Result<Option<RelativePath>, NewCommandError> {
+    let relative = path
+        .strip_prefix(ancestor)
+        .map_err(|_| NewCommandError::NoCommonAncestor)?;
+    if relative.as_os_str().is_empty() {
+        Ok(None)
+    } else {
+        logical_relative_path(relative)
+            .map(Some)
+            .map_err(NewCommandError::InvalidLocalRelation)
+    }
 }
 
 fn logical_relative_path(path: &Path) -> Result<RelativePath, PathValidationError> {

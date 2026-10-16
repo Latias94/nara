@@ -11,7 +11,7 @@ use std::fs::OpenOptions;
 use nara::{
     fs::{CapabilityRights, DirectoryCapability, HostCapabilityOptions, RelativePath, TrustMode},
     project_workflow::{
-        LocalDependencyParent, NaraDependencySource, ProjectCreationOutcome,
+        LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
         ProjectCreationRequest, ProjectSlug, prepare_desktop_2d_project,
     },
 };
@@ -56,10 +56,11 @@ impl CleanRoomSupervisedPlayProject {
         let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
             publication_parent,
             ProjectSlug::new(PROJECT_SLUG).expect("the clean-room slug is valid"),
-            NaraDependencySource::local(
+            NaraDependencySource::local(LocalDependencyRelation::new(
                 checkout_capability,
-                LocalDependencyParent::Descendant(parent_relation),
-            ),
+                None,
+                Some(parent_relation),
+            )),
         ))
         .expect("the canonical desktop starter is valid");
         let ProjectCreationOutcome::Created(receipt) = prepared.publish() else {

@@ -27,7 +27,7 @@ use nara::{
         TrustedCompiledEditorProjectIntent,
     },
     project_workflow::{
-        LocalDependencyParent, NaraDependencySource, ProjectCheckRequest, ProjectCreationOutcome,
+        LocalDependencyRelation, NaraDependencySource, ProjectCheckRequest, ProjectCreationOutcome,
         ProjectCreationRequest, ProjectSlug, StartupContentMemberKind, check_project,
         prepare_desktop_2d_project,
     },
@@ -636,10 +636,11 @@ fn create_project(root: &TrajectoryRoot) -> PathBuf {
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
         publication_parent,
         ProjectSlug::new(PROJECT_SLUG).unwrap(),
-        NaraDependencySource::local(
+        NaraDependencySource::local(LocalDependencyRelation::new(
             checkout,
-            LocalDependencyParent::Descendant(root.project_parent_relation().clone()),
-        ),
+            None,
+            Some(root.project_parent_relation().clone()),
+        )),
     ))
     .unwrap();
     let ProjectCreationOutcome::Created(receipt) = prepared.publish() else {

@@ -128,7 +128,9 @@ impl RelativePath {
         self.components.is_empty()
     }
 
-    pub(crate) fn components(&self) -> &[RelativeComponent] {
+    /// Returns the validated descendant components without native path resolution.
+    #[must_use]
+    pub fn components(&self) -> &[RelativeComponent] {
         &self.components
     }
 }

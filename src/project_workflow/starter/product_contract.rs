@@ -328,11 +328,7 @@ fn validate_cargo_manifest(
     }
     match dependency.kind() {
         NaraDependencySourceKind::LocalCheckout => {
-            let expected_path =
-                std::iter::repeat_n("..", dependency.local_descendant_depth().unwrap() + 1)
-                    .collect::<Vec<_>>()
-                    .join("/");
-            if dependency_table.get("path").and_then(Value::as_str) != Some(expected_path.as_str())
+            if dependency_table.get("path").and_then(Value::as_str) != dependency.local_cargo_path()
                 || dependency_table.contains_key("git")
                 || dependency_table.contains_key("rev")
                 || dependency_table.len() != 3

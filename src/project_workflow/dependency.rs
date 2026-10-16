@@ -3,17 +3,28 @@ use std::fmt::{self, Debug, Formatter};
 use nara_fs::{ContentDigest, DirectoryCapability, FileIdentity, FsError, RelativePath};
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum LocalDependencyParent {
-    CheckoutRoot,
-    Descendant(RelativePath),
+/// The selected checkout and publication parent, relative to one shared authority.
+///
+/// Each `None` coordinate denotes the common ancestor itself. Both endpoints are
+/// resolved through this capability session; independently opened native handles
+/// cannot establish the relation.
+pub struct LocalDependencyRelation {
+    common_ancestor: DirectoryCapability,
+    checkout: Option<RelativePath>,
+    destination_parent: Option<RelativePath>,
 }
 
-impl LocalDependencyParent {
-    pub(crate) fn depth(&self) -> usize {
-        match self {
-            Self::CheckoutRoot => 0,
-            Self::Descendant(path) => path.len(),
+impl LocalDependencyRelation {
+    #[must_use]
+    pub fn new(
+        common_ancestor: DirectoryCapability,
+        checkout: Option<RelativePath>,
+        destination_parent: Option<RelativePath>,
+    ) -> Self {
+        Self {
+            common_ancestor,
+            checkout,
+            destination_parent,
         }
     }
 }
@@ -29,10 +40,7 @@ pub struct NaraDependencySource {
 }
 
 enum NaraDependencySourceInner {
-    LocalCheckout {
-        checkout: DirectoryCapability,
-        destination_parent: LocalDependencyParent,
-    },
+    LocalCheckout(LocalDependencyRelation),
     ImmutableGit {
         repository: String,
         revision: String,
@@ -41,12 +49,9 @@ enum NaraDependencySourceInner {
 
 impl NaraDependencySource {
     #[must_use]
-    pub fn local(checkout: DirectoryCapability, destination_parent: LocalDependencyParent) -> Self {
+    pub fn local(relation: LocalDependencyRelation) -> Self {
         Self {
-            inner: NaraDependencySourceInner::LocalCheckout {
-                checkout,
-                destination_parent,
-            },
+            inner: NaraDependencySourceInner::LocalCheckout(relation),
         }
     }
 
@@ -69,9 +74,7 @@ impl NaraDependencySource {
     #[must_use]
     pub const fn kind(&self) -> NaraDependencySourceKind {
         match &self.inner {
-            NaraDependencySourceInner::LocalCheckout { .. } => {
-                NaraDependencySourceKind::LocalCheckout
-            }
+            NaraDependencySourceInner::LocalCheckout(_) => NaraDependencySourceKind::LocalCheckout,
             NaraDependencySourceInner::ImmutableGit { .. } => {
                 NaraDependencySourceKind::ImmutableGit
             }
@@ -98,7 +101,7 @@ enum NaraDependencyReceiptInner {
     LocalCheckout {
         checkout_identity: FileIdentity,
         destination_parent_identity: FileIdentity,
-        descendant_depth: usize,
+        cargo_path: String,
     },
     ImmutableGit {
         repository_digest: ContentDigest,
@@ -149,11 +152,9 @@ impl NaraDependencyReceipt {
     }
 
     #[must_use]
-    pub const fn local_descendant_depth(&self) -> Option<usize> {
+    pub(crate) fn local_cargo_path(&self) -> Option<&str> {
         match &self.inner {
-            NaraDependencyReceiptInner::LocalCheckout {
-                descendant_depth, ..
-            } => Some(*descendant_depth),
+            NaraDependencyReceiptInner::LocalCheckout { cargo_path, .. } => Some(cargo_path),
             NaraDependencyReceiptInner::ImmutableGit { .. } => None,
         }
     }
@@ -197,8 +198,8 @@ pub(crate) struct PreparedDependency {
 
 pub(crate) enum PreparedDependencyRevalidation {
     LocalCheckout {
-        checkout: DirectoryCapability,
-        destination_parent: LocalDependencyParent,
+        relation: LocalDependencyRelation,
+        checkout_identity: FileIdentity,
         destination_parent_identity: FileIdentity,
     },
     ImmutableGit,
@@ -210,19 +211,23 @@ impl PreparedDependencyRevalidation {
         publication_parent: &DirectoryCapability,
     ) -> Result<(), DependencyRevalidationError> {
         let Self::LocalCheckout {
-            checkout,
-            destination_parent,
+            relation,
+            checkout_identity,
             destination_parent_identity,
         } = self
         else {
             return Ok(());
         };
-        let authorized_parent = match destination_parent {
-            LocalDependencyParent::CheckoutRoot => checkout.share(),
-            LocalDependencyParent::Descendant(path) => checkout
-                .open_directory(path)
-                .map_err(DependencyRevalidationError::LocalParentUnavailable)?,
-        };
+        let checkout = resolve_endpoint(&relation.common_ancestor, relation.checkout.as_ref())
+            .map_err(DependencyRevalidationError::LocalCheckoutUnavailable)?;
+        if checkout.identity() != *checkout_identity {
+            return Err(DependencyRevalidationError::LocalCheckoutMismatch);
+        }
+        let authorized_parent = resolve_endpoint(
+            &relation.common_ancestor,
+            relation.destination_parent.as_ref(),
+        )
+        .map_err(DependencyRevalidationError::LocalParentUnavailable)?;
         if authorized_parent.identity() != *destination_parent_identity
             || publication_parent.identity() != *destination_parent_identity
         {
@@ -234,19 +239,25 @@ impl PreparedDependencyRevalidation {
 
 #[derive(Debug, Error)]
 pub(crate) enum DependencyPreparationError {
+    #[error("local dependency checkout could not be resolved through the common ancestor")]
+    LocalCheckoutUnavailable(#[source] FsError),
     #[error("local dependency destination parent could not be resolved")]
     LocalParentUnavailable(#[source] FsError),
-    #[error("local dependency destination parent is outside the authorized checkout relation")]
+    #[error("local dependency destination parent does not match the common-ancestor relation")]
     LocalParentMismatch,
+    #[error("local dependency coordinate is not UTF-8 and cannot be represented in Cargo.toml")]
+    NonUtf8LocalCoordinate,
 }
 
 #[derive(Debug, Error)]
 pub(crate) enum DependencyRevalidationError {
+    #[error("local dependency checkout could not be reopened through the common ancestor")]
+    LocalCheckoutUnavailable(#[source] FsError),
+    #[error("local dependency checkout no longer matches the prepared relation")]
+    LocalCheckoutMismatch,
     #[error("local dependency destination parent could not be reopened")]
     LocalParentUnavailable(#[source] FsError),
-    #[error(
-        "local dependency destination parent no longer matches the authorized checkout relation"
-    )]
+    #[error("local dependency destination parent no longer matches the common-ancestor relation")]
     LocalParentMismatch,
 }
 
@@ -255,44 +266,53 @@ pub(crate) fn prepare_dependency(
     publication_parent: &DirectoryCapability,
 ) -> Result<PreparedDependency, DependencyPreparationError> {
     match source.inner {
-        NaraDependencySourceInner::LocalCheckout {
-            checkout,
-            destination_parent,
-        } => {
-            let authorized_parent = match &destination_parent {
-                LocalDependencyParent::CheckoutRoot => checkout.share(),
-                LocalDependencyParent::Descendant(path) => checkout
-                    .open_directory(path)
-                    .map_err(DependencyPreparationError::LocalParentUnavailable)?,
-            };
+        NaraDependencySourceInner::LocalCheckout(relation) => {
+            let checkout = resolve_endpoint(&relation.common_ancestor, relation.checkout.as_ref())
+                .map_err(DependencyPreparationError::LocalCheckoutUnavailable)?;
+            let authorized_parent = resolve_endpoint(
+                &relation.common_ancestor,
+                relation.destination_parent.as_ref(),
+            )
+            .map_err(DependencyPreparationError::LocalParentUnavailable)?;
             if authorized_parent.identity() != publication_parent.identity() {
                 return Err(DependencyPreparationError::LocalParentMismatch);
             }
 
-            let parent_jumps = destination_parent.depth().saturating_add(1);
-            let cargo_path = std::iter::repeat_n("..", parent_jumps)
-                .collect::<Vec<_>>()
-                .join("/");
-            let author_checkout = match destination_parent.depth() {
-                0 => ".".to_owned(),
-                depth => std::iter::repeat_n("..", depth)
-                    .collect::<Vec<_>>()
-                    .join("/"),
-            };
+            let parent_depth = relation
+                .destination_parent
+                .as_ref()
+                .map_or(0, RelativePath::len);
+            let checkout_components = relation
+                .checkout
+                .as_ref()
+                .map(|path| path.components())
+                .unwrap_or(&[])
+                .iter()
+                .map(|component| {
+                    component
+                        .to_str()
+                        .ok_or(DependencyPreparationError::NonUtf8LocalCoordinate)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let cargo_path = relative_checkout_coordinate(parent_depth + 1, &checkout_components);
+            let author_checkout = relative_checkout_coordinate(parent_depth, &checkout_components);
             Ok(PreparedDependency {
-                manifest_fragment: format!("path = \"{cargo_path}\""),
-                creation_command_arguments: format!("--local-checkout {author_checkout}"),
+                manifest_fragment: format!("path = {}", toml::Value::String(cargo_path.clone())),
+                creation_command_arguments: format!(
+                    "--local-checkout '{}'",
+                    author_checkout.replace('\'', "''")
+                ),
                 receipt: NaraDependencyReceipt {
                     inner: NaraDependencyReceiptInner::LocalCheckout {
                         checkout_identity: checkout.identity(),
                         destination_parent_identity: publication_parent.identity(),
-                        descendant_depth: destination_parent.depth(),
+                        cargo_path,
                     },
                 },
                 revalidation: PreparedDependencyRevalidation::LocalCheckout {
                     destination_parent_identity: publication_parent.identity(),
-                    checkout,
-                    destination_parent,
+                    checkout_identity: checkout.identity(),
+                    relation,
                 },
             })
         }
@@ -310,6 +330,28 @@ pub(crate) fn prepare_dependency(
             },
             revalidation: PreparedDependencyRevalidation::ImmutableGit,
         }),
+    }
+}
+
+fn resolve_endpoint(
+    common_ancestor: &DirectoryCapability,
+    coordinate: Option<&RelativePath>,
+) -> Result<DirectoryCapability, FsError> {
+    coordinate.map_or_else(
+        || Ok(common_ancestor.share()),
+        |path| common_ancestor.open_directory(path),
+    )
+}
+
+fn relative_checkout_coordinate(parent_jumps: usize, checkout_components: &[&str]) -> String {
+    let coordinate = std::iter::repeat_n("..", parent_jumps)
+        .chain(checkout_components.iter().copied())
+        .collect::<Vec<_>>()
+        .join("/");
+    if coordinate.is_empty() {
+        ".".to_owned()
+    } else {
+        coordinate
     }
 }
 

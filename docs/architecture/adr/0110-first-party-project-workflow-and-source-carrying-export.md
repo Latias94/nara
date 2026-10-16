@@ -5,6 +5,7 @@
 **Amended**: 2026-08-14 by the FPER implementation-readiness review for profile-bound runtime
 lineages, capability-derived local dependency relations, parent-owned cross-process evidence,
 creation terminality, build-input freshness and startup-closure ownership
+**Amended**: 2026-10-16 by the First 2D Author Workflow for repository-external local projects
 **Owner**: root product workflow, `nara_project`, `nara_fs`, project content and Runtime Hosts
 **Refines**: [ADR 0020](0020-project-layout-and-package-format.md),
 [ADR 0035](0035-project-manifest-and-runtime-settings-authority.md),
@@ -67,12 +68,15 @@ flowchart LR
   The starter CLI exposes no per-layer override surface.
 - Existing direct-App and advanced product-composition Interfaces remain independent code-first
   authorities and are not narrowed by project creation.
-- Dependency distribution is a separate typed fact. Version one accepts either an authorized local
-  Nara checkout whose destination parent is proven as a descendant of that checkout capability, or
-  an immutable Git URL plus exact revision. The workflow Module derives the Cargo path from the
-  capability-relative descendant relation and future child name; it never accepts a caller-supplied
-  native or Cargo path as proof. Absolute checkout paths, branch heads and implicit network fallback
-  are forbidden. A local-path project is explicitly location-bound.
+- Dependency distribution is a separate typed fact. Local creation names the selected Nara checkout
+  and destination parent relative to one authorized common-ancestor directory capability. Both
+  endpoints are derived in that same capability session and revalidated before staging and after
+  publication. The workflow derives the relative Cargo path from these coordinates and the future
+  child, rather than accepting a caller-supplied native or Cargo path as proof. The CLI resolves its
+  explicit native arguments to this relation; cross-volume roots or an inaccessible common ancestor
+  fail before publication without an absolute dependency fallback. An immutable Git URL plus exact
+  revision remains the portable alternative. Branch heads and implicit network fallback are
+  forbidden. A local-path project is explicitly location-bound.
 - Starter version, manifest schema version, Scene envelope version and Nara dependency identity are
   distinct receipt facts.
 
@@ -203,9 +207,9 @@ Registries, erased providers and callbacks would freeze speculation instead of h
   Runtime Host, ECS, Scene/Prefab or UI ownership.
 - The root facade gains one cohesive project-workflow Module. CLI, Cargo and process details remain
   private Adapters; `nara_project` and `nara_fs` stay lower-level owners.
-- Local-path starters are useful for descendant source-checkout development but intentionally
-  location-bound. Immutable Git sources cover portable creation without inventing a package
-  registry.
+- Local-path starters support sibling and descendant development projects on a usable shared
+  filesystem, but remain location-bound. Immutable Git sources cover portable creation without
+  inventing a package registry.
 - Version-one export is intentionally narrower than complete project packaging. Dynamic content or
   full project inventory must create new evidence before broadening the claim.
 - Manifest repair may canonically reformat modeled TOML and rejects unknown fields. Lossless opaque
@@ -230,7 +234,7 @@ Registries, erased providers and callbacks would freeze speculation instead of h
   typed outcomes in one deep Module; prove a minimal non-CLI consumer and keep process/toolkit types
   private.
 - **Risk: dependency selection becomes a package manager or trusts an ambient path.** Admit only a
-  capability-proven descendant local relation or immutable Git source with one closed value type;
+  capability-proven common-ancestor local relation or immutable Git source with one closed value type;
   add no resolver/provider registry and accept no caller-authored local Cargo path.
 - **Risk: startup closure is mistaken for full export.** Use the precise product name, member receipt
   and negative dynamic/unreferenced-content tests; ADR 0088 remains Proposed.

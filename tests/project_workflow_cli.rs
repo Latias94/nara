@@ -288,20 +288,23 @@ fn legacy_tool_entry_and_failed_bootstrap_never_launch_or_publish() {
 
 #[test]
 fn new_command_creates_and_admits_a_local_project_from_an_unrelated_cwd() {
-    let checkout = TestRoot::new("local-checkout");
+    let root = TestRoot::new("local-siblings");
+    let checkout = root.path().join("engine checkout");
+    let parent = root.path().join("games with spaces");
+    fs::create_dir(&checkout).unwrap();
+    fs::create_dir(&parent).unwrap();
     let unrelated = TestRoot::new("unrelated-cwd");
-    fs::create_dir(checkout.path().join("projects")).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_nara"))
         .current_dir(unrelated.path())
         .args(["new", "desktop-2d/v1", "cli-created", "--parent"])
-        .arg(checkout.path().join("projects"))
+        .arg(&parent)
         .arg("--local-checkout")
-        .arg(checkout.path())
+        .arg(&checkout)
         .output()
         .unwrap();
 
-    let project = checkout.path().join("projects/cli-created");
+    let project = parent.join("cli-created");
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
@@ -315,17 +318,13 @@ fn new_command_creates_and_admits_a_local_project_from_an_unrelated_cwd() {
             "unexpected pre-staging rejection: {stderr}"
         );
         assert!(!project.exists());
-        assert!(
-            fs::read_dir(checkout.path().join("projects"))
+        assert!(fs::read_dir(&parent).unwrap().all(|entry| {
+            !entry
                 .unwrap()
-                .all(|entry| {
-                    !entry
-                        .unwrap()
-                        .file_name()
-                        .to_string_lossy()
-                        .starts_with(".nara-stage-")
-                })
-        );
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".nara-stage-")
+        }));
         return;
     }
     assert!(
@@ -342,8 +341,36 @@ fn new_command_creates_and_admits_a_local_project_from_an_unrelated_cwd() {
     assert!(project.join("nara.toml").is_file());
     assert!(project.join("scenes/startup.scene.json").is_file());
     let cargo_manifest = fs::read_to_string(project.join("Cargo.toml")).unwrap();
-    assert!(cargo_manifest.contains("path = \"../..\""));
+    let cargo: toml::Value = toml::from_str(&cargo_manifest).unwrap();
+    let dependency = cargo["dependencies"]["nara"]["path"].as_str().unwrap();
+    assert_eq!(dependency, "../../engine checkout");
+    assert_eq!(
+        fs::canonicalize(project.join(dependency)).unwrap(),
+        fs::canonicalize(&checkout).unwrap()
+    );
     assert!(cargo_manifest.contains("[workspace]\nresolver = \"3\""));
+}
+
+#[test]
+#[cfg(windows)]
+fn new_command_rejects_cross_volume_local_creation_before_publication() {
+    let checkout = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let parent = TestRoot::new("cross-volume-parent");
+    let parent_path = fs::canonicalize(parent.path()).unwrap();
+    if checkout.components().next() == parent_path.components().next() {
+        // This host has no second test volume; the same-volume cases run elsewhere.
+        return;
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_nara"))
+        .args(["new", "desktop-2d/v1", "cross-volume-game", "--parent"])
+        .arg(parent.path())
+        .arg("--local-checkout")
+        .arg(&checkout)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cross-volume roots are unsupported"));
+    assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 0);
 }
 
 #[test]
@@ -391,7 +418,7 @@ fn generated_project_is_an_independent_cargo_product() {
     let checkout = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let sequence = NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed);
     let parent = TestRoot::at(checkout.join(format!(
-        "target/nara-project-workflow-cli-cargo-{}-{sequence}",
+        "../nara-project-workflow-cli-cargo-{}-{sequence}",
         std::process::id()
     )));
 

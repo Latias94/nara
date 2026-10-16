@@ -411,7 +411,7 @@ fn render_author_guide(
     creation_command_arguments: &str,
 ) -> String {
     format!(
-        "# {} author guide\n\n## Pinned identity\n\n- Starter: `desktop-2d/v1`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n## Creation command\n\nRun this command from the authorized destination parent:\n\n```text\nnara new desktop-2d/v1 {} --parent . {creation_command_arguments}\n```\n\n{body}",
+        "# {} author guide\n\n## Pinned identity\n\n- Starter: `desktop-2d/v1`\n- Nara dependency: `{dependency_manifest_fragment}`\n\n## Creation command\n\nRun this PowerShell command from the authorized destination parent. Local paths use literal quoting:\n\n```powershell\nnara new desktop-2d/v1 {} --parent . {creation_command_arguments}\n```\n\n{body}",
         slug.as_str(),
         slug.as_str(),
         body = AUTHOR_GUIDE_BODY,

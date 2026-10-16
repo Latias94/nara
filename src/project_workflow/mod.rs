@@ -25,8 +25,8 @@ pub use creation::{
     ProjectCreationRequest, prepare_desktop_2d_project,
 };
 pub use dependency::{
-    LocalDependencyParent, NaraDependencyReceipt, NaraDependencySource, NaraDependencySourceError,
-    NaraDependencySourceErrorKind, NaraDependencySourceKind,
+    LocalDependencyRelation, NaraDependencyReceipt, NaraDependencySource,
+    NaraDependencySourceError, NaraDependencySourceErrorKind, NaraDependencySourceKind,
 };
 pub use export::{
     PreparedProjectExport, ProjectExportBinaryTarget, ProjectExportBuildError,

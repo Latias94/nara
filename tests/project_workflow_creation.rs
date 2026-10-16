@@ -13,7 +13,7 @@ use nara::{
         TrustMode,
     },
     project_workflow::{
-        LocalDependencyParent, NaraDependencySource, ProjectCreationOutcome,
+        LocalDependencyRelation, NaraDependencySource, ProjectCreationOutcome,
         ProjectCreationPlanErrorKind, ProjectCreationRejectionKind, ProjectCreationRequest,
         ProjectDirectory, ProjectMember, ProjectSlug, prepare_desktop_2d_project,
     },
@@ -252,10 +252,11 @@ fn local_source_derives_the_cargo_path_from_the_authorized_parent_relation() {
         .open_directory(&RelativePath::new("projects").unwrap())
         .unwrap();
     let parent_identity = parent.identity();
-    let source = NaraDependencySource::local(
+    let source = NaraDependencySource::local(LocalDependencyRelation::new(
         checkout_capability,
-        LocalDependencyParent::Descendant(RelativePath::new("projects").unwrap()),
-    );
+        None,
+        Some(RelativePath::new("projects").unwrap()),
+    ));
     let request =
         ProjectCreationRequest::new(parent, ProjectSlug::new("local-game").unwrap(), source);
 
@@ -282,20 +283,74 @@ fn local_source_derives_the_cargo_path_from_the_authorized_parent_relation() {
             .local_destination_parent_identity(),
         Some(parent_identity)
     );
-    assert_eq!(
-        prepared.plan().dependency().local_descendant_depth(),
-        Some(1)
+    assert!(
+        std::str::from_utf8(
+            prepared
+                .plan()
+                .member(ProjectMember::AuthorGuide)
+                .unwrap()
+                .bytes()
+        )
+        .unwrap()
+        .contains("--local-checkout '..'")
     );
 }
 
 #[test]
-fn local_source_rejects_a_parent_outside_the_checkout_relation() {
+fn local_source_supports_sibling_paths_with_spaces_and_literal_quotes() {
+    let root = TestRoot::new("sibling-source");
+    fs::create_dir(root.path().join("engine's checkout")).unwrap();
+    fs::create_dir(root.path().join("games with spaces")).unwrap();
+    let ancestor = root.writable_capability();
+    let checkout = RelativePath::new("engine's checkout").unwrap();
+    let parent = RelativePath::new("games with spaces").unwrap();
+    let checkout_identity = ancestor.open_directory(&checkout).unwrap().identity();
+    let publication_parent = ancestor.open_directory(&parent).unwrap();
+    let parent_identity = publication_parent.identity();
+    let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        publication_parent,
+        ProjectSlug::new("sibling-game").unwrap(),
+        NaraDependencySource::local(LocalDependencyRelation::new(
+            ancestor,
+            Some(checkout),
+            Some(parent),
+        )),
+    ))
+    .unwrap();
+    let cargo = prepared
+        .plan()
+        .member(ProjectMember::CargoManifest)
+        .unwrap();
+    let cargo: toml::Value = toml::from_str(std::str::from_utf8(cargo.bytes()).unwrap()).unwrap();
+    assert_eq!(
+        cargo["dependencies"]["nara"]["path"].as_str(),
+        Some("../../engine's checkout")
+    );
+    assert_eq!(
+        prepared.plan().dependency().local_checkout_identity(),
+        Some(checkout_identity)
+    );
+    assert_eq!(
+        prepared
+            .plan()
+            .dependency()
+            .local_destination_parent_identity(),
+        Some(parent_identity)
+    );
+    let guide = prepared.plan().member(ProjectMember::AuthorGuide).unwrap();
+    let guide = std::str::from_utf8(guide.bytes()).unwrap();
+    assert!(guide.contains("--local-checkout '../engine''s checkout'"));
+}
+
+#[test]
+fn local_source_rejects_a_parent_outside_the_claimed_common_ancestor_relation() {
     let checkout = TestRoot::new("mismatched-checkout");
     let destination = TestRoot::new("mismatched-parent");
-    let source = NaraDependencySource::local(
+    let source = NaraDependencySource::local(LocalDependencyRelation::new(
         checkout.writable_capability(),
-        LocalDependencyParent::CheckoutRoot,
-    );
+        None,
+        None,
+    ));
     let request = ProjectCreationRequest::new(
         destination.writable_capability(),
         ProjectSlug::new("outside-game").unwrap(),
@@ -325,10 +380,11 @@ fn local_source_revalidates_the_checkout_relation_before_staging() {
     let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
         publication_parent,
         ProjectSlug::new("drifted-game").unwrap(),
-        NaraDependencySource::local(
+        NaraDependencySource::local(LocalDependencyRelation::new(
             checkout_capability,
-            LocalDependencyParent::Descendant(RelativePath::new("projects").unwrap()),
-        ),
+            None,
+            Some(RelativePath::new("projects").unwrap()),
+        )),
     ))
     .unwrap();
     let outside = TestRoot::new("relation-drift-outside");
@@ -352,6 +408,48 @@ fn local_source_revalidates_the_checkout_relation_before_staging() {
             .to_string_lossy()
             .starts_with(".nara-stage-")
     }));
+}
+
+#[cfg(any(
+    all(target_os = "windows", target_arch = "x86_64"),
+    all(target_os = "linux", target_arch = "x86_64")
+))]
+#[test]
+fn local_source_revalidates_the_selected_checkout_before_staging() {
+    let root = TestRoot::new("checkout-drift");
+    fs::create_dir(root.path().join("engine")).unwrap();
+    fs::create_dir(root.path().join("games")).unwrap();
+    let ancestor = root.writable_capability();
+    let parent = ancestor
+        .open_directory(&RelativePath::new("games").unwrap())
+        .unwrap();
+    let prepared = prepare_desktop_2d_project(ProjectCreationRequest::new(
+        parent,
+        ProjectSlug::new("drifted-game").unwrap(),
+        NaraDependencySource::local(LocalDependencyRelation::new(
+            ancestor,
+            Some(RelativePath::new("engine").unwrap()),
+            Some(RelativePath::new("games").unwrap()),
+        )),
+    ))
+    .unwrap();
+    fs::rename(
+        root.path().join("engine"),
+        root.path().join("previous-engine"),
+    )
+    .unwrap();
+    fs::create_dir(root.path().join("engine")).unwrap();
+
+    let outcome = prepared.publish();
+    let ProjectCreationOutcome::Rejected(rejection) = outcome else {
+        panic!("expected checkout replacement rejection: {outcome:?}");
+    };
+    assert_eq!(
+        rejection.kind(),
+        ProjectCreationRejectionKind::DependencyRelation
+    );
+    assert!(!root.path().join("games/drifted-game").exists());
+    assert_eq!(fs::read_dir(root.path().join("games")).unwrap().count(), 0);
 }
 
 #[cfg(any(
