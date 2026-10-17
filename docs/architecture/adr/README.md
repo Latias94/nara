@@ -17,13 +17,15 @@ ADR decision status is one of:
 - `Superseded`: replaced by a named ADR; its number is never reused.
 - `Rejected`: evaluated and deliberately not selected.
 
-New ADRs use the next unassigned monotonic number; IDs reserved by an active accepted plan are not reused for a different decision. ADRs must contain Context, Decision, at least two Alternatives Considered, Consequences, Success Metrics, and Risks and Mitigations. Cross-domain or stateful decisions include a Mermaid flow or state diagram. Refinement and supersession links must be bidirectional.
+Write or revise an ADR when changing a durable architecture choice, important ownership boundary,
+public contract, or persistent format. Implementing or repairing an existing decision does not
+require an ADR edit. New ADRs use the next unassigned monotonic number; IDs already reserved for a
+named decision are not reused for a different decision.
 
-Some early Accepted ADRs predate this complete template and still lack a standalone
-`Consequences` section. That is documentation debt, not permission for new ADRs to omit it and not
-a reason to fabricate empty boilerplate. The next semantic revision of an affected ADR must add
-concrete costs and ownership effects; RGF closure records any remainder in the architecture
-handoff. Decision authority remains governed by status and supersession meanwhile.
+Explain the context, selected decision, relevant alternatives and consequences. Include risks,
+diagrams and measurable criteria when they help assess that decision; avoid empty template
+sections or invented alternatives. Refinement and supersession links must be reciprocal.
+Existing decisions retain their authority without being retrofitted to a uniform template.
 
 Mutually dependent proposals may declare an atomic admission group. Every member remains
 non-authoritative until one review accepts the complete group; partial promotion is invalid. Use
@@ -39,13 +41,16 @@ The implementation ledger uses these states:
 - `implemented`: at least one existing code/configuration anchor and one existing verification anchor prove the complete decision.
 - `superseded`: implementation evidence is owned by the replacement decision.
 
-Each implementation unit updates its ADR and ledger row before code, then records final code and verification anchors after the unit passes. Historical classification outside an active implementation slice is non-blocking and belongs to the final integration unit.
+Update the affected ledger entry when a change alters a decision's implementation status,
+coverage, remaining gap or supporting evidence. Keep a concise current summary with code and
+verification links; execution chronology belongs in the linked records. A local repair that does
+not change those claims needs no ledger edit.
 
 Architecture authority is reviewed directly at the affected boundary: ADR, catalogue, and ledger
-membership must agree; plan supersession and ADR refinement links must be reciprocal; and claimed
-anchors must exist. Engineering-memory validation proves the active work lane. Architecture prose
-is not parsed by a custom executable and unrelated historical prose is not an implementation or
-release prerequisite.
+membership must agree; changed refinement and supersession links must be reciprocal; and claimed
+anchors must exist. Engineering-memory validation checks the record bundle, not authorization or
+product correctness. Review affected contracts and references directly; unrelated historical
+prose is not an implementation or release prerequisite.
 
 ## Pre-1.0 Replacement Policy
 
@@ -54,7 +59,9 @@ nara is unreleased. When a contract is wrong, remove it and make the corrected d
 - Do not keep compatibility wrappers, deprecated aliases, or parallel `V1`/`V2` Rust APIs.
 - Use the canonical unsuffixed Rust name for the replacement.
 - Superseded draft persistent shapes and fixtures are deleted; the corrected shape becomes canonical `format_version = 1` after every in-repository source and fixture is updated.
-- Add a migration-guide entry describing the intentional break, source rewrite, and cache rebuild/quarantine action. Runtime loading never silently rewrites source files.
+- Add migration instructions when supported consumers or persisted projects need an intentional
+  source rewrite, cache rebuild or quarantine action. In-repository-only API refactors need no
+  placeholder migration entry. Runtime loading never silently rewrites source files.
 - Preserve a compatibility reader or migration chain only when a new ADR names a real compatibility window and its owner.
 
 See [the July 2026 migration guide](../../migrations/2026-07-engine-foundation.md).

@@ -2,7 +2,11 @@
 
 This is the manual Windows/DX12 qualification gate for the selected Dear frontend.
 Ordinary workspace tests exclude these ignored cases and do not establish native acceptance.
-Run this gate before a release claim or a change to native view/input, device replacement, frame cadence, or supervised lifecycle ownership.
+For a Windows/DX12 release qualification, run the three critical trajectories and the additional
+groups required by the claimed capabilities. For development changes to native view/input, device
+replacement, frame cadence or supervised lifecycle ownership, select the trajectories covering
+the affected behavior. A focused result establishes only that tested scope.
+Documentation-only changes do not require another native qualification run.
 
 ## Environment
 
@@ -29,7 +33,9 @@ $env:WGPU_BACKEND='dx12'
 cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_resume_redraw_rebases_paused_idle_before_the_owner_drive) | test(native_game_input_reopen_paused_refocus_resize_and_step_reach_presented_runtime) | test(native_views_detach_minimize_reopen_recover_and_retire_with_exact_receipts)' --test-threads=1
 ```
 
-All three tests must execute and pass; an empty selection is not acceptance.
+For the critical qualification group, all three tests must execute and pass; an empty selection
+is not acceptance. A narrower development selection must identify the affected behavior and
+the tests actually executed, without claiming the complete group passed.
 They cover same-output Game resize and authoring input, pause/resume cadence, exact Game input and Step, independent view close/reopen, detachment/minimization, device recovery, and retirement.
 The ordinary non-native Editor suite separately protects cadence policy and source-diverged Restart admission.
 

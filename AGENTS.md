@@ -9,15 +9,16 @@ release authority belong in their dedicated sources.
 Before editing:
 
 1. Run `git status --short --branch` and preserve concurrent changes.
-2. Read `STRATEGY.md` for product scope and non-goals.
-3. Read `docs/architecture/README.md` for the authority order.
-4. Locate the plan whose frontmatter and engineering-memory registration are both active.
-5. Read the active unit, its referenced requirements, relevant Accepted ADRs,
-   `docs/architecture/adr/implementation-status.md`, and the affected source and tests.
+2. Read `STRATEGY.md` and `docs/architecture/README.md` when establishing product and architecture
+   context. Follow the relevant Accepted ADRs, source, tests, and current guides for the task.
+3. Read a supplied or relevant ongoing plan. Use a short plan for multi-stage work or significant
+   design uncertainty; local fixes and documentation changes can proceed directly.
+4. On resume or handoff, use `docs/knowledge/engineering/index.md` to find the relevant memory
+   records. Registration tracks continuity; it does not grant permission or reserve files.
 
-If these sources disagree, stop only the affected path and reconcile them first. Treat
-`docs/knowledge/engineering/current-state.md` as a derived index. Proposed ADRs, open questions,
-design drafts, `repo-ref/`, and inactive plans are evidence, not implementation authority.
+Reconcile conflicts in the affected contract before changing it. User instructions define the
+task's scope; a missing or stale memory registration does not block authorized work. Proposed ADRs,
+open questions, design drafts, `repo-ref/`, and historical plans are background evidence.
 
 ## Work
 
@@ -25,9 +26,11 @@ design drafts, `repo-ref/`, and inactive plans are evidence, not implementation 
   abstractions to make the architecture look complete.
 - Nara is pre-1.0. Prefer a correct fearless refactor, including removal of obsolete code, over a
   compatibility layer unless an Accepted ADR or migration contract requires compatibility.
-- Respect module ownership and dependency direction. Put durable decisions in ADRs and progress in
-  the implementation ledger or verification evidence, never in this file.
+- Respect module ownership and dependency direction. Update ADRs when durable decisions change,
+  and the implementation ledger when their implementation status or evidence changes.
 - Fix the owning contract when a local workaround would preserve a known structural problem.
+- Keep acceptance within the requested scope. Record adjacent gaps with their triggers; discuss
+  material architecture or design changes with the user before implementing them.
 - Keep code, API documentation, technical documents, and user guides in English. Communicate with
   the user in Chinese.
 
@@ -47,8 +50,11 @@ design drafts, `repo-ref/`, and inactive plans are evidence, not implementation 
 - Never run Cargo commands concurrently in this checkout. Reuse `target`, set
   `CARGO_BUILD_JOBS=1` for substantial work, prefer focused `cargo nextest run`, and use
   `cargo fmt --all` for Rust formatting.
-- Match verification to risk and to the active unit's gates. Documentation-only changes do not
-  require a workspace build; shared runtime, persistence, and public API changes do.
+- Match verification to affected behavior and risk. Documentation-only changes need document
+  checks; shared runtime, persistence, and public API changes need relevant build and test coverage.
+  Use `docs/verification/native-editor-qualification.md` for native Editor changes and release claims.
+- Record actual results and limits. Rerun checks when subsequent changes affect their coverage;
+  documentation closure alone does not require another product acceptance cycle.
 - Review the final diff, verify the claimed scope, and create precise Conventional Commits.
 - Do not copy detailed architecture rules, an active plan, a roadmap, a release protocol, or an
   implementation status table into this file. Link to the owning source instead.

@@ -3,31 +3,27 @@
 This index identifies each document's owner and authority. It does not duplicate decisions,
 implementation progress, or execution history.
 
-## Authority Order
+## Document Responsibilities
 
-1. [Strategy](../../STRATEGY.md) owns product scope and non-goals.
-2. [Accepted ADRs](adr/README.md) own durable architecture decisions.
-3. [ADR implementation status](adr/implementation-status.md) owns current evidence and remaining gaps.
-4. A plan whose frontmatter and engineering-memory registration are both active owns the current
-   implementation sequence and its verification gates.
-5. [Open questions](open-questions.md) own unresolved, trigger-gated decisions.
-6. Design harnesses, appendices, research, and guides are non-normative. They yield to Accepted
-   ADRs and cannot authorize implementation by themselves.
+User instructions define the authorized task. Within that scope:
+
+- [Strategy](../../STRATEGY.md) defines product scope and non-goals.
+- [Accepted ADRs](adr/README.md) define durable architecture contracts. Reconcile a conflicting
+  contract before changing the affected boundary.
+- [ADR implementation status](adr/implementation-status.md) summarizes implementation evidence and
+  remaining gaps. It does not introduce new architecture decisions or task requirements.
+- A selected plan organizes multi-stage work and its relevant verification. Local fixes do not
+  require a plan, and plan or registration metadata does not grant execution authority.
+- [Open questions](open-questions.md), draft designs and research describe unresolved choices or
+  background evidence. Current guides explain supported workflows and yield to Accepted ADRs.
 
 ## Execution and Evidence Navigation
 
-The completed [Foundation Correctness Closure plan](../plans/2026-10-17-1856-fix-foundation-correctness-closure-plan.md)
-is closed by [registration `94169fb22505473c89504d4b41cab1de`](../knowledge/engineering/registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md)
-and [verification `4490cc23b14742749a37e7a9cb1c7cbf`](../knowledge/engineering/verification/2026-10/2026-10-17T115334Z-foundation-correctness-closure-u1-u5-verification-4490cc23b14742749a37e7a9cb1c7cbf.md).
-The [Dear ImGui 0.21 upgrade](../plans/2026-10-17-dear-imgui-021-upgrade-plan.md) is completed under
-[registration `c8d8fd35d7b34ca2845220d1113df8e7`](../knowledge/engineering/registry/2026-10/2026-10-17T135355Z-dear-imgui-021-upgrade-codex-root-c8d8fd35d7b34ca2845220d1113df8e7.md)
-and [acceptance `5cf11eaec8ea42a986d4953c4a4a00b8`](../knowledge/engineering/verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md).
-No successor is active; a new plan requires explicit activation in both sources.
-
-Use the [derived engineering index](../knowledge/engineering/current-state.md) to find current
-registration heads, then read their immutable source records. Completed plans and their
-verification retain the original source, toolkit, and platform scope. A successor never starts
-automatically, and later path changes do not extend predecessor evidence.
+Use [engineering memory](../knowledge/engineering/index.md) to resume work or recover its reasoning,
+verification and handoff context. Registration is continuity evidence, not a lock or an approval
+gate. Read records relevant to the task rather than treating the whole bundle as required context.
+Historical plans and verification retain their original source, toolkit and platform scope;
+their completion conditions do not automatically apply to later tasks.
 
 | Subject | Owning sources |
 |---|---|
@@ -58,11 +54,14 @@ automatically, and later path changes do not extend predecessor evidence.
 A harness is a subject's scenario workbench. An appendix specializes that workbench, and a guide
 explains the current model. Their examples may remain useful after their file maps or names age.
 
-## Rebaseline Rules
+## Maintaining These Documents
 
 - Before reusing a design workbench, bind it to landed owners and symbols, current ADR statuses,
   relevant open questions, and observed consumer pressure.
-- Put progress and platform qualification in the ledger or verification record, rather than this
-  index. Preserve historical records instead of rewriting their scope.
-- A draft may propose names and scenarios. Only an Accepted ADR selects a durable invariant, and
-  only an active plan orders its implementation.
+- Update the current contract and direct navigation affected by a change. Keep implementation
+  status concise and link to verification for execution details.
+- Retain historical reasoning and evidence within their original scope. Obsolete drafts and
+  duplicated process artifacts may be retired after checking their consumers and references;
+  unrelated history does not need to be rewritten for an implementation change.
+- A draft may propose names and scenarios. A durable invariant needs an Accepted ADR; unresolved
+  proposals and historical acceptance checklists do not expand the current task.
