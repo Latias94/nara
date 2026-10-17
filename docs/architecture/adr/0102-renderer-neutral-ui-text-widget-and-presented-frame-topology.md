@@ -157,7 +157,7 @@ flowchart LR
   other technical phases remain private or doc-hidden engine-integration details.
 - Shared UI interfaces are proven before product integration by three thin neutral conformance
   executables plus one independent public consumer: a kernel layout/frame gallery, an ECS/Scene
-  runtime interaction lab, a root-facade presentation gallery, and `ui-module-consumer`. The kernel
+  runtime interaction lab, a root-facade presentation gallery, and [`ui-module-consumer`](../../../tests/fixtures/ui-module-consumer/). The kernel
   gallery and independent consumer use only ordinary public modules. The runtime and presentation
   galleries isolate non-forgeable prepare/submit/commit authority in local first-party presenter
   glue that may use doc-hidden implementation seams; those seams are excluded from the frozen

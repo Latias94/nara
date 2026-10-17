@@ -7,4 +7,4 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-nara = { path = "../..", default-features = false, features = ["project-workflow"] }
+nara = { path = "../../../..", default-features = false, features = ["project-workflow"] }

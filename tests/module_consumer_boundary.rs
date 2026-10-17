@@ -30,9 +30,9 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
     let repository = repository_root();
     let consumer = module_consumer_root();
     let source = fs::read_to_string(consumer.join("Cargo.toml"))
-        .expect("RGF-U18 requires module-consumer/Cargo.toml");
+        .expect("RGF-U18 requires tests/fixtures/module-consumer/Cargo.toml");
     let manifest = toml::from_str::<TomlValue>(&source)
-        .expect("module-consumer/Cargo.toml must be valid TOML");
+        .expect("tests/fixtures/module-consumer/Cargo.toml must be valid TOML");
 
     assert_manifest_boundary(&manifest).unwrap();
     assert!(consumer.join("Cargo.lock").is_file());
@@ -75,12 +75,12 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
     assert!(
         excluded
             .iter()
-            .any(|entry| entry.as_str() == Some("module-consumer")),
+            .any(|entry| entry.as_str() == Some("tests/fixtures/module-consumer")),
         "the independent consumer must be excluded from the root workspace"
     );
 
-    assert_path_dependency(&manifest, "nara_scene", "../crates/nara_scene");
-    assert_path_dependency(&manifest, "nara_reflect", "../crates/nara_reflect");
+    assert_path_dependency(&manifest, "nara_scene", "../../../crates/nara_scene");
+    assert_path_dependency(&manifest, "nara_reflect", "../../../crates/nara_reflect");
     let scene = &manifest["dependencies"]["nara_scene"];
     assert_eq!(
         scene.get("default-features").and_then(TomlValue::as_bool),
@@ -100,7 +100,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
     let filesystem = toml::from_str::<TomlValue>(&filesystem_source)
         .expect("filesystem consumer manifest must be valid TOML");
     assert_filesystem_manifest_boundary(&filesystem).unwrap();
-    assert_path_dependency(&filesystem, "nara_fs", "../../crates/nara_fs");
+    assert_path_dependency(&filesystem, "nara_fs", "../../../../crates/nara_fs");
 
     let project_workflow_source =
         fs::read_to_string(consumer.join("project-workflow-consumer/Cargo.toml"))
@@ -108,7 +108,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
     let project_workflow = toml::from_str::<TomlValue>(&project_workflow_source)
         .expect("project-workflow consumer manifest must be valid TOML");
     assert_project_workflow_manifest_boundary(&project_workflow).unwrap();
-    assert_path_dependency(&project_workflow, "nara", "../..");
+    assert_path_dependency(&project_workflow, "nara", "../../../..");
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn manifest_boundary_rejects_product_and_workspace_shortcuts() {
         "engine".to_owned(),
         dependency_table([
             ("package", TomlValue::String("nara".to_owned())),
-            ("path", TomlValue::String("..".to_owned())),
+            ("path", TomlValue::String("../../..".to_owned())),
         ]),
     );
     assert!(assert_manifest_boundary(&root_facade).is_err());
@@ -209,7 +209,10 @@ fn manifest_boundary_rejects_product_and_workspace_shortcuts() {
             "engine_ecs".to_owned(),
             dependency_table([
                 ("package", TomlValue::String("nara_ecs".to_owned())),
-                ("path", TomlValue::String("../crates/nara_ecs".to_owned())),
+                (
+                    "path",
+                    TomlValue::String("../../../crates/nara_ecs".to_owned()),
+                ),
             ]),
         );
     assert!(assert_manifest_boundary(&private_crate).is_err());
@@ -226,7 +229,7 @@ fn filesystem_manifest_boundary_rejects_facade_workspace_and_private_shortcuts()
         "engine".to_owned(),
         dependency_table([
             ("package", TomlValue::String("nara".to_owned())),
-            ("path", TomlValue::String("../..".to_owned())),
+            ("path", TomlValue::String("../../../..".to_owned())),
         ]),
     );
     assert!(assert_filesystem_manifest_boundary(&root_facade).is_err());
@@ -244,7 +247,7 @@ fn filesystem_manifest_boundary_rejects_facade_workspace_and_private_shortcuts()
             "nara_project".to_owned(),
             dependency_table([(
                 "path",
-                TomlValue::String("../../crates/nara_project".to_owned()),
+                TomlValue::String("../../../../crates/nara_project".to_owned()),
             )]),
         );
     assert!(assert_filesystem_manifest_boundary(&private_crate).is_err());
@@ -277,7 +280,7 @@ fn project_workflow_manifest_boundary_rejects_extra_features_and_private_shortcu
             "nara_project".to_owned(),
             dependency_table([(
                 "path",
-                TomlValue::String("../../crates/nara_project".to_owned()),
+                TomlValue::String("../../../../crates/nara_project".to_owned()),
             )]),
         );
     assert!(assert_project_workflow_manifest_boundary(&private_crate).is_err());
@@ -379,7 +382,7 @@ fn filesystem_module_documentation_names_the_bounded_public_contract() {
         "fixed names are suitable only for fixtures",
         "DirectoryPublicationTransaction::publish",
         "recoverable orphan",
-        "module-consumer/fs-consumer",
+        "tests/fixtures/module-consumer/fs-consumer",
     ] {
         assert!(readme.contains(required), "README is missing {required:?}");
     }
@@ -550,7 +553,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn module_consumer_root() -> PathBuf {
-    repository_root().join("module-consumer")
+    repository_root().join("tests/fixtures/module-consumer")
 }
 
 struct TemporaryDirectory {

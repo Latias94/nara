@@ -36,5 +36,5 @@ identity and durability progress as separate facts. A compile target alone never
 filesystem tier. Unsupported or unproven combinations fail closed; there is no check-then-rename,
 overwrite, ambient-path or recursive-delete fallback.
 
-See `module-consumer/fs-consumer` for a direct public consumer that stages, publishes and reopens a
-bounded nested tree without importing the root facade or any private Nara crate.
+See `tests/fixtures/module-consumer/fs-consumer` for a direct public consumer that stages, publishes
+and reopens a bounded nested tree without importing the root facade or any private Nara crate.

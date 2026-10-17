@@ -85,7 +85,7 @@ actions.
 ### Conformance visibility
 
 The frozen public inventory and the first-party conformance implementation are not identical.
-`layout_gallery` and `ui-module-consumer` use only ordinary public Interfaces. Headless runtime and
+`layout_gallery` and [`ui-module-consumer`](../../tests/fixtures/ui-module-consumer/) use only ordinary public Interfaces. Headless runtime and
 presentation conformance must also prove the Host-only acceptance path, so their local presenter
 glue may use doc-hidden first-party seams that can stage and consume non-forgeable authority. Those
 seams are not product Interface: they are never re-exported, never imported by Reference Game code,

@@ -142,7 +142,7 @@ fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegi
 
 The same registration and a frozen-registry decode, guarded apply, and native-value encode round
 trip compile in the independent
-[`manual_component_codec` consumer](../../module-consumer/tests/manual_component_codec.rs).
+[`manual_component_codec` consumer](../../tests/fixtures/module-consumer/tests/manual_component_codec.rs).
 Production composition places this registration in the provider callback described above.
 
 For fallible delayed preparation, use `register_persistent_component_codec` or its

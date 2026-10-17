@@ -16,7 +16,7 @@ The repository currently includes:
 - headless and Winit/wgpu desktop product Hosts;
 - a deterministic 2D reference game with sprites, input, HUD, Save/Play authoring evidence, and
   bounded diagnostics;
-- independent `reference-game` and `module-consumer` workspaces that use public APIs.
+- an independent `reference-game` workspace and public-API consumer fixtures under `tests/fixtures/`.
 
 The engine is not yet a complete Godot- or Unity-level game-development product. Packaging,
 hosted cross-platform evidence, editor delivery, and additional real games are still active work.
@@ -56,7 +56,7 @@ and standalone candidate layout.
 - `crates/`: engine modules and native adapters
 - `src/`: the integrated product facade and Project Host
 - `reference-game/`: the first complete headless and desktop game tracer
-- `module-consumer/`: a direct public-module consumer
+- `tests/fixtures/`: test data and independent consumer projects; see the [fixture guide](tests/fixtures/README.md)
 - `docs/architecture/`: architecture decisions, implementation status, and open questions
 - `docs/plans/`: execution plans and verification contracts
 

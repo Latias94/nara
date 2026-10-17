@@ -4,6 +4,19 @@ This workspace exercises public Nara modules without importing engine-private im
 details. `tests/domain_reconciliation.rs` is a small native-effect plugin consumer; its support
 module contains the complete domain implementation.
 
+It owns its manifest and lockfile independently of the engine workspace. This catches missing
+direct dependencies, accidental workspace inheritance and unsupported facade shortcuts.
+The filesystem, project-workflow, material and editor-panel members exercise their own declared
+public surfaces; only the project-workflow member uses the root facade for that workflow.
+
+Run from the repository root, using the shared `target` directory through `CARGO_TARGET_DIR`:
+
+```text
+cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --test-threads=1
+```
+
+Run Cargo commands serially. See the [fixture guide](../README.md) for isolation and platform scope.
+
 `editor-panel-consumer/` independently compiles a trusted selection-summary panel.
 It installs a semantic descriptor and a Dear ImGui painter through the same paths as built-ins,
 reads selection and emits existing navigation actions without mutable document or GPU access.

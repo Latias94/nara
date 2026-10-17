@@ -8,7 +8,12 @@ description = "An open-source game engine written in Rust."
 
 [workspace]
 resolver = "3"
-exclude = ["reference-game", "module-consumer", "ui-module-consumer", "samples/collect-game"]
+exclude = [
+    "reference-game",
+    "tests/fixtures/module-consumer",
+    "tests/fixtures/ui-module-consumer",
+    "samples/collect-game",
+]
 members = [
     "crates/nara_app",
     "crates/nara_asset",

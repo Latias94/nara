@@ -3,13 +3,13 @@
 `nara_scene` can be used directly for the supported scene parse, validation, and spawn slice. The
 consumer owns its registry and ECS world; it does not need the integrated root `nara` facade.
 
-The checked-in `module-consumer/Cargo.toml` uses these exact paths from its location at the
-repository root:
+The checked-in `tests/fixtures/module-consumer/Cargo.toml` uses these paths relative to its
+fixture directory:
 
 ```toml
 [dependencies]
-nara_reflect = { path = "../crates/nara_reflect" }
-nara_scene = { path = "../crates/nara_scene", default-features = false, features = ["serde"] }
+nara_reflect = { path = "../../../crates/nara_reflect" }
+nara_scene = { path = "../../../crates/nara_scene", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 bevy_ecs = "0.20"
@@ -24,7 +24,7 @@ bevy_ecs = "0.20"
 
 An external project should select the corresponding published, Git, or local package locations;
 the package names, `nara_scene/serde` feature, and direct prerequisite roles remain the same. The
-checked-in [`module-consumer`](../../module-consumer/) workspace is the executable contract. It uses
+checked-in [`module-consumer`](../../tests/fixtures/module-consumer/) workspace is the executable contract. It uses
 its own manifest and lockfile, parses a committed RON scene, validates it against a frozen registry,
 and spawns it into a fresh world.
 

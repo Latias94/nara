@@ -510,7 +510,7 @@ second real adapter or stronger isolation pressure.
   managed runtime owner; App only configures the game.
 - `WgpuRenderBackend` is registered through the ECS resource derive rather than a hand-written
   marker, so the backend and its render resources are queryable before the first native frame.
-- A locked independent `module-consumer` workspace depends directly on `nara_scene`,
+- A locked independent [`module-consumer`](../../tests/fixtures/module-consumer/) workspace depends directly on `nara_scene`,
   `nara_reflect`, and `bevy_ecs`, with no root facade, workspace inheritance, patch override, or
   private Nara crate. It parses, publishes, validates, and spawns a committed canonical-v1 scene
   while preserving stable `SceneEntityId` values and component data. This proves only the

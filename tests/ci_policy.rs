@@ -37,8 +37,8 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
     for lockfile in [
         "Cargo.lock",
         "reference-game/Cargo.lock",
-        "module-consumer/Cargo.lock",
-        "ui-module-consumer/Cargo.lock",
+        "tests/fixtures/module-consumer/Cargo.lock",
+        "tests/fixtures/ui-module-consumer/Cargo.lock",
     ] {
         assert!(
             repository_root().join(lockfile).is_file(),
@@ -133,16 +133,16 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         &module_script,
         &[
             "if [[ \"$RUNNER_OS\" == \"Windows\" ]]; then",
-            "cargo fmt --manifest-path module-consumer/Cargo.toml --all -- --check",
-            "cargo check --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets",
-            "cargo clippy --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings",
-            "cargo fmt --manifest-path ui-module-consumer/Cargo.toml --all -- --check",
-            "cargo check --manifest-path ui-module-consumer/Cargo.toml --locked --all-targets",
-            "cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1",
-            "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1",
+            "cargo fmt --manifest-path tests/fixtures/module-consumer/Cargo.toml --all -- --check",
+            "cargo check --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --all-targets",
+            "cargo clippy --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings",
+            "cargo fmt --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --all -- --check",
+            "cargo check --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --all-targets",
+            "cargo nextest run --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --test-threads=1",
+            "cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --test-threads=1",
             "else",
-            "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1",
-            "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1",
+            "cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1",
+            "cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1",
             "fi",
         ],
         "module-consumer CI",
@@ -151,14 +151,14 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         .find("if [[ \"$RUNNER_OS\" == \"Windows\" ]]; then")
         .expect("module consumer CI must branch on the hosted operating system");
     let workspace_test = module_script
-        .find("cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1")
+        .find("cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --test-threads=1")
         .expect("Windows must run the complete module-consumer workspace");
     let linux_branch = module_script[windows_test..]
         .find("else")
         .map(|offset| windows_test + offset)
         .expect("module consumer CI must have a non-Windows branch");
     let scene_test = module_script
-        .find("cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1")
+        .find("cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1")
         .expect("non-Windows CI must run the platform-neutral scene and material consumers");
     assert!(windows_test < workspace_test && workspace_test < linux_branch);
     assert!(linux_branch < scene_test);
@@ -336,7 +336,7 @@ fn assert_external_manifest_boundaries() {
     );
     assert_no_workspace_dependencies(&reference, "reference-game");
 
-    let module = parse_manifest("module-consumer/Cargo.toml");
+    let module = parse_manifest("tests/fixtures/module-consumer/Cargo.toml");
     assert!(
         module.get("patch").is_none(),
         "module-consumer must not patch dependencies"
@@ -358,7 +358,7 @@ fn assert_external_manifest_boundaries() {
     );
     assert_no_workspace_dependencies(&module, "module-consumer");
 
-    let filesystem = parse_manifest("module-consumer/fs-consumer/Cargo.toml");
+    let filesystem = parse_manifest("tests/fixtures/module-consumer/fs-consumer/Cargo.toml");
     assert!(
         filesystem.get("patch").is_none(),
         "filesystem module consumer must not patch dependencies"
@@ -370,7 +370,8 @@ fn assert_external_manifest_boundaries() {
     );
     assert_no_workspace_dependencies(&filesystem, "filesystem module consumer");
 
-    let project_workflow = parse_manifest("module-consumer/project-workflow-consumer/Cargo.toml");
+    let project_workflow =
+        parse_manifest("tests/fixtures/module-consumer/project-workflow-consumer/Cargo.toml");
     assert!(
         project_workflow.get("patch").is_none(),
         "project-workflow consumer must not patch dependencies"

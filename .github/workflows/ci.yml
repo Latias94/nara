@@ -156,6 +156,8 @@ jobs:
     name: "Module consumer (${{ matrix.os }})"
     runs-on: "${{ matrix.os }}"
     timeout-minutes: 45
+    env:
+      CARGO_TARGET_DIR: "${{ github.workspace }}/target"
     strategy:
       fail-fast: false
       matrix:
@@ -178,23 +180,23 @@ jobs:
           tool: nextest@0.9.138
           fallback: none
       - name: Check module consumer formatting
-        run: cargo fmt --manifest-path module-consumer/Cargo.toml --all -- --check
+        run: cargo fmt --manifest-path tests/fixtures/module-consumer/Cargo.toml --all -- --check
       - name: Check module consumer
-        run: cargo check --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets
+        run: cargo check --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --all-targets
       - name: Lint module consumer
-        run: cargo clippy --manifest-path module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings
+        run: cargo clippy --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --all-targets -- -D warnings
       - name: Check UI module consumer formatting
-        run: cargo fmt --manifest-path ui-module-consumer/Cargo.toml --all -- --check
+        run: cargo fmt --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --all -- --check
       - name: Check UI module consumer
-        run: cargo check --manifest-path ui-module-consumer/Cargo.toml --locked --all-targets
+        run: cargo check --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --all-targets
       - name: Test UI module consumer
-        run: cargo nextest run --manifest-path ui-module-consumer/Cargo.toml --locked --test-threads=1
+        run: cargo nextest run --manifest-path tests/fixtures/ui-module-consumer/Cargo.toml --locked --test-threads=1
       - name: Test direct module surfaces
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1
+            cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked --workspace --test-threads=1
           else
-            cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1
-            cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
+            cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1
+            cargo nextest run --manifest-path tests/fixtures/module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
           fi

@@ -29,8 +29,7 @@ fn clear_selected_from_companion(
 
 #[test]
 fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selection_or_history() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/generic-editor/known-unbound");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../generic-editor/known-unbound");
     let mut application =
         EditorApplication::new(EditorLaunchOptions::new(root).with_profile("desktop"));
     application.native_shell_ready();
