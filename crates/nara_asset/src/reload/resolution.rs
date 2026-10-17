@@ -223,6 +223,10 @@ impl AssetReloadResolutionContext<'_> {
             }
         };
         let generation = self.generations.begin_request(asset_id);
+        if change_kind == AssetSourceChangeKind::Removed {
+            // Source removal revokes derivation authority before optional cleanup is admitted.
+            self.states.invalidate_publication(asset_id);
+        }
         let image_authority = match (record.source_kind(), self.image_registration) {
             (AssetSourceKind::Image, Some(registration)) => Arc::clone(&registration.authority),
             _ => {

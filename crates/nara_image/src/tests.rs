@@ -1728,6 +1728,142 @@ fn revoked_publication_removes_prepared_resources_and_cannot_prepare_retained_pi
 }
 
 #[test]
+fn rejected_removal_revokes_prepared_image_and_retires_obsolete_completion() {
+    let record = image_record("textures/player.png");
+    let mut app = app_with_image_plugin(Path::new("."), record.clone());
+    let (handle, request, last_good_hash) =
+        reserve_loaded_image_request(&mut app, &record, &[255, 0, 0, 255]);
+    let replacement = imported_image_for_request(
+        app.world(),
+        &ImageImporter::default(),
+        &record,
+        &request,
+        &[0, 255, 0, 255],
+    );
+    let task = accepted_image_handle(app.world().resource::<TaskPools>().spawn(
+        TaskPoolKind::Io,
+        TaskSpawnRequest::new(1, IMAGE_RELOAD_TASK_DOMAIN),
+        move |_| Ok(replacement),
+    ));
+    track_image_task(&mut app, request, task);
+    app.insert_resource(nara_asset::AssetReloadRequests::with_limits(
+        nara_asset::AssetReloadRequestLimits::new(ItemLimit::ONE, ByteLimit::ONE),
+    ))
+    .unwrap();
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(Duration::ZERO).unwrap();
+    assert!(
+        runtime
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .is_some()
+    );
+    assert_eq!(runtime.world().resource::<ImageReloadStats>().pending, 1);
+
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::SourceChange {
+            path: record.path().clone(),
+            kind: AssetSourceChangeKind::Removed,
+        },
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+
+    assert!(matches!(
+        runtime.world().resource::<AssetStates>().state(handle.id()).unwrap().load_state(),
+        LoadState::Failed { message } if message == "asset.reload-request-byte-limit-exceeded"
+    ));
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        None
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .is_none()
+    );
+
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<TaskPools>()
+            .run_pending_for_tests()
+            .executed,
+        1
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+
+    let stats = runtime.world().resource::<ImageReloadStats>();
+    assert_eq!(stats.applied, 0);
+    assert_eq!(stats.stale, 1);
+    assert_eq!(stats.pending, 0);
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<Assets<ImageAsset>>()
+            .get(handle)
+            .unwrap()
+            .source()
+            .source_hash(),
+        last_good_hash
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        None
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .is_none()
+    );
+
+    edit_image_pipeline(
+        &mut runtime,
+        ImagePipelineEdit::Reimport {
+            record,
+            handle,
+            settings: ImageImportSettings::default(),
+        },
+    );
+    runtime.drive(Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        Some(AssetVersion::from_raw(2))
+    );
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<PreparedRenderResources<PreparedImageResource>>()
+            .get_ready(image_resource_key(handle))
+            .unwrap()
+            .pixels(),
+        &[0, 0, 255, 255]
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
 fn accepted_replacement_prepares_when_its_next_attempt_already_failed() {
     let (app, handle) = app_with_loaded_image(ImageImporter::default());
     let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();

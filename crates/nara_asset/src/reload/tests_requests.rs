@@ -1,5 +1,221 @@
 use super::*;
 
+fn publish_reload_test_asset(app: &mut App, record: &AssetRecord) -> crate::Handle<String> {
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ProjectAssetDatabase>()
+        .insert(record.clone())
+        .unwrap();
+    let handle = app
+        .world_mut()
+        .unwrap()
+        .resource_mut::<AssetServer>()
+        .reserve_record::<String>(record)
+        .unwrap();
+    let mut assets = Assets::<String>::default();
+    assets.insert(handle, String::from("last-good"));
+    app.insert_resource(assets).unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetStates>()
+        .set_loaded_at(handle.id(), AssetVersion::from_raw(1), None, None);
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetLoadGenerations>()
+        .begin_request(handle.id());
+    handle
+}
+
+fn assert_rejected_removal_revokes_publication(mut app: App, diagnostic_code: &str) {
+    let record = image_record("textures/b.png", dependent_stable_id());
+    let handle = publish_reload_test_asset(&mut app, &record);
+    let obsolete_generation = app
+        .world()
+        .resource::<AssetLoadGenerations>()
+        .current(handle.id());
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .removed(record.path().clone())
+        .unwrap();
+
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    let state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .unwrap();
+    assert!(
+        matches!(state.load_state(), LoadState::Failed { message } if message == diagnostic_code)
+    );
+    assert_eq!(state.usable_version(), None);
+    assert!(
+        !runtime
+            .world()
+            .resource::<AssetLoadGenerations>()
+            .is_current(handle.id(), obsolete_generation)
+    );
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<Assets<String>>()
+            .get(handle)
+            .map(String::as_str),
+        Some("last-good")
+    );
+    assert!(runtime.world().resource::<AssetReloadRequests>().is_empty());
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetEvents>()
+            .iter()
+            .any(|event| {
+                event.id() == handle.id() && event.kind() == AssetEventKind::ReloadRejected
+            })
+    );
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetReloadDiagnostics>()
+            .iter()
+            .any(|diagnostic| { diagnostic.code().as_str() == diagnostic_code })
+    );
+
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        None
+    );
+    assert!(runtime.world().resource::<AssetReloadRequests>().is_empty());
+    assert!(
+        runtime
+            .world()
+            .resource::<AssetReloadDiagnostics>()
+            .is_empty()
+    );
+    runtime.finish().unwrap();
+}
+
+#[test]
+fn removed_publication_is_revoked_when_item_admission_is_full() {
+    let mut app = App::new();
+    app.insert_resource(AssetReloadRequests::with_limits(
+        AssetReloadRequestLimits::new(ItemLimit::ONE, ByteLimit::new(4 * 1024).unwrap()),
+    ))
+    .unwrap();
+    install_asset_plugin(&mut app);
+    install_test_reload_consumer(&mut app);
+    let accepted = image_record("textures/a.png", stable_id());
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ProjectAssetDatabase>()
+        .insert(accepted.clone())
+        .unwrap();
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<AssetSourceChanges>()
+        .modified(accepted.path().clone())
+        .unwrap();
+
+    assert_rejected_removal_revokes_publication(app, "asset.reload-request-item-limit-exceeded");
+}
+
+#[test]
+fn removed_publication_is_revoked_when_byte_admission_is_full() {
+    let mut app = App::new();
+    app.insert_resource(AssetReloadRequests::with_limits(
+        AssetReloadRequestLimits::new(ItemLimit::new(8).unwrap(), ByteLimit::ONE),
+    ))
+    .unwrap();
+    install_asset_plugin(&mut app);
+    install_test_reload_consumer(&mut app);
+
+    assert_rejected_removal_revokes_publication(app, "asset.reload-request-byte-limit-exceeded");
+}
+
+#[test]
+fn removed_publication_is_revoked_without_a_consumer() {
+    let mut app = App::new();
+    install_asset_plugin(&mut app);
+
+    assert_rejected_removal_revokes_publication(app, "asset.reload-source-consumer-missing");
+}
+
+#[test]
+fn removed_publication_is_revoked_when_the_consumer_does_not_claim() {
+    let mut app = App::new();
+    install_asset_plugin(&mut app);
+    let _consumer = register_image_reload_consumer(&mut app).unwrap();
+
+    assert_rejected_removal_revokes_publication(app, "asset.reload-consumer-did-not-claim");
+}
+
+#[test]
+fn modified_publication_survives_request_admission_failure() {
+    let mut app = App::new();
+    app.insert_resource(AssetReloadRequests::with_limits(
+        AssetReloadRequestLimits::new(ItemLimit::ONE, ByteLimit::new(4 * 1024).unwrap()),
+    ))
+    .unwrap();
+    install_asset_plugin(&mut app);
+    install_test_reload_consumer(&mut app);
+    let accepted = image_record("textures/a.png", stable_id());
+    app.world_mut()
+        .unwrap()
+        .resource_mut::<ProjectAssetDatabase>()
+        .insert(accepted.clone())
+        .unwrap();
+    let record = image_record("textures/b.png", dependent_stable_id());
+    let handle = publish_reload_test_asset(&mut app, &record);
+    {
+        let mut changes = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetSourceChanges>();
+        changes.modified(accepted.path().clone()).unwrap();
+        changes.modified(record.path().clone()).unwrap();
+    }
+
+    let mut runtime = nara_app::RuntimeInstance::start(app).unwrap();
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+
+    let state = runtime
+        .world()
+        .resource::<AssetStates>()
+        .state(handle.id())
+        .unwrap();
+    assert!(matches!(state.load_state(), LoadState::Failed { message }
+        if message == "asset.reload-request-item-limit-exceeded"));
+    assert_eq!(state.usable_version(), Some(AssetVersion::from_raw(1)));
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<Assets<String>>()
+            .get(handle)
+            .map(String::as_str),
+        Some("last-good")
+    );
+    runtime.drive(std::time::Duration::ZERO).unwrap();
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<AssetStates>()
+            .state(handle.id())
+            .unwrap()
+            .usable_version(),
+        Some(AssetVersion::from_raw(1))
+    );
+    runtime.finish().unwrap();
+}
+
 #[test]
 fn registered_reload_consumer_must_claim_requests_in_the_same_frame() {
     let mut app = App::new();
