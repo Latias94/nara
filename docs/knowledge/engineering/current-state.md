@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "a2583ad2af4e7b615f35bdf4c78230b0eba72db0fbe1c5379b9d1f2ceb86dd0c"
+source_fingerprint: "34f394f3b0640cad7b07f41f8c5c8266fcfff19ea32f6aaa3af3415fc37cf93b"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "a2583ad2af4e7b615f35bdf4c78230b0eba72db0fbe1c5379b9d1f2ceb8
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `a2583ad2af4e7b615f35bdf4c78230b0eba72db0fbe1c5379b9d1f2ceb86dd0c`
-- Immutable records: 709
-- Active lane heads: 0
+- Source fingerprint: `34f394f3b0640cad7b07f41f8c5c8266fcfff19ea32f6aaa3af3415fc37cf93b`
+- Immutable records: 711
+- Active lane heads: 1
 
 # Active Registrations
 
@@ -27,6 +27,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
+- [Foundation correctness closure](registry/2026-10/2026-10-17T110007Z-foundation-correctness-closure-codex-root-20261017-3e42da51b9ce4a41b8fecd3d179b6362.md): `active` (foundation-correctness-closure-codex-root-20261017; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
@@ -45,6 +46,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Memory Event**: [Verification: Foundation correctness plan review complete: feasibility, coherence, design, sco](logs/2026-10/2026-10-17T110059Z-verification-foundation-correctness-plan-review-complete-feasibility-coherence-design-sco-19e1cf997e7d44dea12d26614ccbb357.md) - Foundation correctness plan review complete: feasibility, coherence, design, scope and adversarial lenses across three read-only Codex conte
 - **Memory Event**: [Completion: Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4](logs/2026-10/2026-10-17T102708Z-completion-original-editor-foundation-full-u9-u1-u8-finite-acceptance-achieved-at-source-f4-5670eb0ad1fc4fba9d29b6cef0eff2f4.md) - Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4ffdd18, final evidence b68c3a9f938a49b7ba63779f2849d0d9. Exa
 - **Verification Evidence**: [Editor foundation U9 and U1-U8 close with selected Dear frontend and exact external products](verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md) - R1-R11 and AE1-AE6 accepted through reviewed single-owner boundaries, complete frontend migration and exact committed-source external authoring Play Check Export on Windows DX12.
 - **Memory Event**: [Verification: Exact archive saved game public default and desktop Check pass with6members (18.](logs/2026-10/2026-10-17T100917Z-verification-exact-archive-saved-game-public-default-and-desktop-check-pass-with6members-18-54bc52f9f959417a84f7f11464f89a0c.md) - Exact archive saved game public default and desktop Check pass with6members (18.467s/244.910s). Public Export passes785.812s including first
@@ -56,7 +58,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: U8 review #1 App/Input owner run125bee6b-0f67-4a17-8b6f-4264c21d3b95 passes145/1](logs/2026-10/2026-10-17T085829Z-verification-u8-review-1-app-input-owner-run125bee6b-0f67-4a17-8b6f-4264c21d3b95-passes145-1-c0ac56108e3646ea840b9dce3e53e950.md) - U8 review #1 App/Input owner run125bee6b-0f67-4a17-8b6f-4264c21d3b95 passes145/1450skip8.563s and an independent bounded correctness reviewe
 - **Memory Event**: [Verification: U8 full independent ce-code-review run20261017-081030-69c43aff is actually compl](logs/2026-10/2026-10-17T085021Z-verification-u8-full-independent-ce-code-review-run20261017-081030-69c43aff-is-actually-compl-3d7cd091472b43d599054aa929faacef.md) - U8 full independent ce-code-review run20261017-081030-69c43aff is actually complete: nine reviewer lenses, two confirmed P2, Ready with fixe
 - **Memory Event**: [Progress: User asks additional Dear issues and meaning of incompleteIME. Sourceconfirmed p](logs/2026-10/2026-10-17T083221Z-progress-user-asks-additional-dear-issues-and-meaning-of-incompleteime-sourceconfirmed-p-0307888e92ed409e98a492e36c01594b.md) - User asks additional Dear issues and meaning of incompleteIME. Sourceconfirmed pinned0.20 WinitignoresPreedit but CommitUnicodeworks; Nara p
-- **Memory Event**: [Verification: U8 final cleaned-source Editor294e4917 passes166 selected tests170.540s includin](logs/2026-10/2026-10-17T081412Z-verification-u8-final-cleaned-source-editor294e4917-passes166-selected-tests170-540s-includin-e35581845c8a401c9c2a92211714e211.md) - U8 final cleaned-source Editor294e4917 passes166 selected tests170.540s including all11native; exactly two externalignored separateacceptanc
 
 # Integration Notes
 
