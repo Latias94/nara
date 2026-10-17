@@ -4159,19 +4159,54 @@ logical_height = 540
         assert_eq!(candidate.revision(), ui_frame.revision());
         assert_eq!(candidate.geometry_generation(), initial_canvas_generation);
         assert_eq!(candidate.canvas(), canvas);
+        let (_, _, _, _, initial_render, _, consumed_canvas) = candidate.into_parts();
 
-        let recovery_frame = editor.drive_editor_frame(Duration::ZERO);
+        let idle_frame = editor.drive_editor_frame(Duration::ZERO);
+        let idle_ui = editor.current_ui_authoring_frame().unwrap();
+        assert_eq!(
+            idle_ui.canvas_generation(),
+            Some(initial_canvas_generation),
+            "consuming a candidate must not invalidate unchanged Canvas geometry"
+        );
+        assert_eq!(
+            idle_ui.projection().unwrap().canvas(),
+            &nara_ui::__private::UiAuthoringCanvasProjection::Ready(consumed_canvas.clone())
+        );
+        assert_eq!(idle_ui.editor_frame(), idle_frame.revision());
+
+        assert!(editor.take_editor_ui_preview_candidate().is_none());
+        let _ = editor.drive_editor_frame(Duration::ZERO);
         let recovered_ui = editor.current_ui_authoring_frame().unwrap();
-        let recovered_generation = recovered_ui.canvas_generation().unwrap();
-        assert!(recovered_generation > initial_canvas_generation);
+        assert_eq!(
+            recovered_ui.canvas_generation(),
+            Some(initial_canvas_generation),
+            "GPU recovery must not change unchanged Canvas geometry"
+        );
+        let recovered_candidate = editor.take_editor_ui_preview_candidate().unwrap();
+        assert_eq!(recovered_candidate.document(), prefab_document);
+        assert_eq!(recovered_candidate.revision(), ui_frame.revision());
+        assert_eq!(
+            recovered_candidate.geometry_generation(),
+            initial_canvas_generation
+        );
+        assert_eq!(recovered_candidate.canvas(), &consumed_canvas);
+        let (_, _, _, _, recovered_render, _, _) = recovered_candidate.into_parts();
+        assert_eq!(
+            recovered_render.source_generation(),
+            initial_render.source_generation()
+        );
+        assert!(recovered_render.frame_index() > initial_render.frame_index());
+        assert_eq!(recovered_render.target(), initial_render.target());
+
+        let settled_frame = editor.drive_editor_frame(Duration::ZERO);
         assert_eq!(
             editor
-                .take_editor_ui_preview_candidate()
+                .current_ui_authoring_frame()
                 .unwrap()
-                .geometry_generation(),
-            recovered_generation
+                .canvas_generation(),
+            Some(initial_canvas_generation)
         );
-        frame = recovery_frame;
+        frame = settled_frame;
     }
     let button_node = projection
         .hierarchy()

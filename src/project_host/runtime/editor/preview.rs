@@ -13,8 +13,8 @@ use nara_render::{
     __private::{
         EditorRenderGeneration, build_editor_render_frame_packet, editor_viewport_image_target,
     },
-    Camera2d, Color, Extent2d, ExtractedViews, RenderFrame, RenderFramePacket, RenderImage2d,
-    RenderTarget, ViewportRect,
+    Camera2d, Color, Extent2d, ExtractedViews, RenderFrame, RenderFramePacket,
+    RenderFrameSourceGeneration, RenderImage2d, RenderTarget, ViewportRect,
 };
 use nara_scene::{
     __private::AuthoringPreviewOmission, SceneAuthoringRevision, SceneAuthoringSession,
@@ -70,6 +70,17 @@ impl EditorPreviewHit {
     }
 }
 
+/// Opaque content identity for reusable Scene preview pixels, independent from frame geometry.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorPreviewContentStamp {
+    source: RenderFrameSourceGeneration,
+    document: EditorDocumentId,
+    revision: SceneAuthoringRevision,
+    extent: Extent2d,
+    image_publication_revision: u64,
+}
+
 /// One exact renderer-neutral Scene preview captured from the accepted Editor document.
 ///
 /// The private Editor process may submit this candidate once. It does not become input authority
@@ -80,6 +91,7 @@ pub struct EditorPreviewCandidate {
     document: EditorDocumentId,
     revision: SceneAuthoringRevision,
     geometry_revision: u64,
+    content_stamp: EditorPreviewContentStamp,
     packet: RenderFramePacket,
     sprite_batches: SpriteBatches,
     hits: Vec<EditorPreviewHit>,
@@ -100,6 +112,12 @@ impl EditorPreviewCandidate {
     #[must_use]
     pub const fn geometry_revision(&self) -> u64 {
         self.geometry_revision
+    }
+
+    /// Compares retained pixels without conflating their content with per-drive geometry identity.
+    #[must_use]
+    pub const fn content_stamp(&self) -> EditorPreviewContentStamp {
+        self.content_stamp
     }
 
     #[must_use]
@@ -349,8 +367,9 @@ impl EditorPreviewSession {
         &mut self,
         runtime: &mut RuntimeInstance,
         source: Option<EditorPreviewSource>,
+        image_publication_revision: u64,
     ) -> Option<DiagnosticReport> {
-        match self.try_drive(runtime, source) {
+        match self.try_drive(runtime, source, image_publication_revision) {
             Ok(()) => {
                 self.last_failure = None;
                 None
@@ -367,6 +386,7 @@ impl EditorPreviewSession {
         &mut self,
         runtime: &mut RuntimeInstance,
         source: Option<EditorPreviewSource>,
+        image_publication_revision: u64,
     ) -> Result<(), DiagnosticReport> {
         self.candidate = None;
         let Some(extent) = self.extent else {
@@ -446,6 +466,13 @@ impl EditorPreviewSession {
             document: source.document,
             revision: source.revision,
             geometry_revision,
+            content_stamp: EditorPreviewContentStamp {
+                source: packet.source_generation(),
+                document: source.document,
+                revision: source.revision,
+                extent,
+                image_publication_revision,
+            },
             packet,
             sprite_batches: runtime.world().resource::<SpriteBatches>().clone(),
             hits,

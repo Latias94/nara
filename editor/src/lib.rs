@@ -12,6 +12,8 @@ pub use app::{
 };
 pub use frontend::{EguiEditorFrontend, EguiEditorPanelContext, EguiEditorPanelPainter};
 #[cfg(feature = "imgui-qualification")]
+pub use frontend::{ImguiEditorFrontend, ImguiEditorPanelContext, ImguiEditorPanelPainter};
+#[cfg(feature = "imgui-qualification")]
 pub use platform::run_imgui_qualification;
 pub use platform::{
     EditorGameViewCanaryEvidence, EditorGameViewCanaryFrame, EditorGameViewCanaryRequest,

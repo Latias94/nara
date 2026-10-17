@@ -664,7 +664,11 @@ fn render_play_controls(
             ui,
             scene,
             frame,
-            content_ready,
+            !frame
+                .workspace()
+                .documents
+                .iter()
+                .any(|document| document.dirty),
             can_request,
             play_pending,
             actions,

@@ -162,7 +162,8 @@ impl EditorUiPreviewSession {
             image_generation: images.generation(),
             profile,
         };
-        if self.key == Some(key) && !self.rebuild_requested {
+        let unchanged_source = self.key == Some(key);
+        if unchanged_source && !self.rebuild_requested {
             return self.projection.clone();
         }
         self.key = Some(key);
@@ -176,7 +177,12 @@ impl EditorUiPreviewSession {
             return self.projection.clone();
         };
 
-        match self.try_prepare(document, revision, gesture, projection, images, profile) {
+        let candidate = if unchanged_source {
+            self.try_rebuild(key, profile)
+        } else {
+            self.try_prepare(key, projection, images, profile)
+        };
+        match candidate {
             Ok(candidate) => {
                 let canvas = candidate.canvas().clone();
                 self.geometry_generation = Some(candidate.geometry_generation());
@@ -196,9 +202,7 @@ impl EditorUiPreviewSession {
 
     fn try_prepare(
         &mut self,
-        document: EditorDocumentId,
-        revision: SceneAuthoringRevision,
-        gesture: Option<EditorGestureStamp>,
+        key: EditorUiPreviewKey,
         projection: &UiAuthoringProjection,
         images: &EditorAuthoringImageCatalogReceipt,
         profile: AcceptedPrimaryUiSurfaceProfile,
@@ -206,7 +210,6 @@ impl EditorUiPreviewSession {
         let transform = profile
             .direct_transform()
             .ok_or(UiPreviewError::InvalidProfile)?;
-        let logical_size = transform.authored_logical_size();
         let compile_generation = self
             .next_compile_generation
             .checked_add(1)
@@ -218,15 +221,63 @@ impl EditorUiPreviewSession {
             .compile(projection, compile_generation, request)
             .map_err(UiPreviewError::Compile)?;
 
-        let (logical_width, logical_height) = profile.logical_extent();
-        let extent =
-            Extent2d::new(logical_width, logical_height).ok_or(UiPreviewError::InvalidProfile)?;
         let target = RenderTarget::Image(self.target);
         let paint_packet = self.planner.plan(
             Arc::clone(canvas_candidate.frame()),
             target,
             images.prepared_images(),
         )?;
+        self.try_render_candidate(
+            key,
+            compile_generation,
+            canvas_candidate.canvas().clone(),
+            paint_packet,
+            profile,
+        )
+    }
+
+    fn try_rebuild(
+        &mut self,
+        key: EditorUiPreviewKey,
+        profile: AcceptedPrimaryUiSurfaceProfile,
+    ) -> Result<EditorUiPreviewCandidate, UiPreviewError> {
+        let (
+            Some(geometry_generation),
+            UiAuthoringCanvasProjection::Ready(canvas),
+            Some(paint_packet),
+        ) = (
+            self.geometry_generation,
+            &self.projection,
+            self.planner.planned(RenderTarget::Image(self.target)),
+        )
+        else {
+            return Err(UiPreviewError::PreparedCanvasMissing);
+        };
+        self.try_render_candidate(
+            key,
+            geometry_generation,
+            canvas.clone(),
+            paint_packet,
+            profile,
+        )
+    }
+
+    fn try_render_candidate(
+        &mut self,
+        key: EditorUiPreviewKey,
+        geometry_generation: u64,
+        canvas: UiAuthoringCanvasReady,
+        paint_packet: Arc<UiPaintPacket>,
+        profile: AcceptedPrimaryUiSurfaceProfile,
+    ) -> Result<EditorUiPreviewCandidate, UiPreviewError> {
+        let logical_size = profile
+            .direct_transform()
+            .ok_or(UiPreviewError::InvalidProfile)?
+            .authored_logical_size();
+        let (logical_width, logical_height) = profile.logical_extent();
+        let extent =
+            Extent2d::new(logical_width, logical_height).ok_or(UiPreviewError::InvalidProfile)?;
+        let target = RenderTarget::Image(self.target);
         let viewport = ViewportRect::from_extent(extent).ok_or(UiPreviewError::InvalidProfile)?;
         let mut views = ExtractedViews::default();
         views.push(ExtractedView {
@@ -251,19 +302,21 @@ impl EditorUiPreviewSession {
         .ok_or(UiPreviewError::RenderViewMissing)?;
         self.next_frame_index = frame_index;
         Ok(EditorUiPreviewCandidate {
-            document,
-            revision,
-            gesture,
-            geometry_generation: compile_generation,
+            document: key.document,
+            revision: key.revision,
+            gesture: key.gesture,
+            geometry_generation,
             render_packet,
             paint_packet,
-            canvas: canvas_candidate.canvas().clone(),
+            canvas,
         })
     }
 
     pub(super) fn take_candidate(&mut self) -> Option<EditorUiPreviewCandidate> {
         let candidate = self.candidate.take();
-        if matches!(&self.projection, UiAuthoringCanvasProjection::Ready(_)) {
+        // An empty take requests another render transaction without editing the source geometry.
+        if candidate.is_none() && matches!(&self.projection, UiAuthoringCanvasProjection::Ready(_))
+        {
             self.rebuild_requested = true;
         }
         candidate
@@ -303,4 +356,6 @@ pub(super) enum UiPreviewError {
     InvalidProfile,
     #[error("the Editor UI render view was not published")]
     RenderViewMissing,
+    #[error("the Editor UI Canvas has no retained preparation to rebuild")]
+    PreparedCanvasMissing,
 }

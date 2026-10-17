@@ -5,7 +5,11 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+[features]
+imgui = ["dep:dear-imgui-rs", "nara-editor/imgui-qualification"]
+
 [dependencies]
+dear-imgui-rs = { version = "=0.20.0", optional = true }
 egui = "0.36.2"
 nara-editor = { path = "../../editor" }
 nara_tooling = { path = "../../crates/nara_tooling" }

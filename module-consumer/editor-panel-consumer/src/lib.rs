@@ -25,6 +25,26 @@ pub fn install_egui(frontend: &mut EguiEditorFrontend) {
     frontend.register_panel_painter(PANEL_KIND, paint);
 }
 
+#[cfg(feature = "imgui")]
+pub fn install_imgui(frontend: &mut nara_editor::ImguiEditorFrontend) {
+    frontend.register_panel_painter(PANEL_KIND, paint_imgui);
+}
+
+#[cfg(feature = "imgui")]
+fn paint_imgui(ui: &dear_imgui_rs::Ui, context: &mut nara_editor::ImguiEditorPanelContext<'_, '_>) {
+    ui.text(format!(
+        "Selected entities: {}",
+        selected_count(context.model())
+    ));
+    let action = clear_selection(context.model());
+    let _disabled = ui.begin_disabled_with_cond(action.is_none());
+    if ui.button("Clear selection")
+        && let Some(action) = action
+    {
+        context.emit(action);
+    }
+}
+
 /// Uses the ordinary navigation vocabulary; the contribution never mutates a session.
 #[must_use]
 pub fn clear_selection(model: EditorPanelModel<'_>) -> Option<EditorAction> {

@@ -58,7 +58,7 @@ pub use presentation::{
     EditorPreviewPresentation,
 };
 #[cfg(feature = "presentation-2d")]
-pub use preview::{EditorPreviewCandidate, EditorPreviewHit};
+pub use preview::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 #[cfg(feature = "runtime-ui")]
 use ui_authoring::EditorUiAuthoringProjectionCache;
 #[cfg(feature = "runtime-ui")]

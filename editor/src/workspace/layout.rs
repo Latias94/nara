@@ -229,6 +229,13 @@ impl EditorWorkspaceLayout {
     ) -> bool {
         self.change(id, |panel| panel.render_view = view)
     }
+    pub fn set_native_window(
+        &mut self,
+        id: EditorPanelInstanceId,
+        window: EditorNativeWindowId,
+    ) -> bool {
+        self.change(id, |panel| panel.window = window)
+    }
     pub fn place(&mut self, id: EditorPanelInstanceId, placement: EditorPanelPlacement) -> bool {
         self.change(id, |panel| panel.placement = placement)
     }

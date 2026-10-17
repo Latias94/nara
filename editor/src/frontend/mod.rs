@@ -7,3 +7,5 @@ pub(crate) mod imgui;
 
 pub use egui::EguiEditorFrontend;
 pub use egui_workspace::{EguiEditorPanelContext, EguiEditorPanelPainter};
+#[cfg(feature = "imgui-qualification")]
+pub use imgui::{ImguiEditorFrontend, ImguiEditorPanelContext, ImguiEditorPanelPainter};

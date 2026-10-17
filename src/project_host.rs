@@ -121,7 +121,7 @@ pub use runtime::{
     feature = "tooling",
     feature = "presentation-2d"
 ))]
-pub use runtime::{EditorPreviewCandidate, EditorPreviewHit};
+pub use runtime::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 #[cfg(all(feature = "runtime-2d", feature = "serde", feature = "tooling"))]
 #[doc(hidden)]
 pub use runtime::{

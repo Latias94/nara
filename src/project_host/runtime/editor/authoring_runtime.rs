@@ -166,6 +166,8 @@ pub(super) struct EditorAuthoringRuntime {
     runtime: RuntimeInstance,
     #[cfg(feature = "presentation-2d")]
     preview: EditorPreviewSession,
+    #[cfg(feature = "presentation-2d")]
+    image_publication_revision: u64,
     #[cfg(test)]
     next_image_import_gate: Option<EditorImageImportTestGate>,
 }
@@ -201,6 +203,8 @@ impl EditorAuthoringRuntime {
             runtime,
             #[cfg(feature = "presentation-2d")]
             preview,
+            #[cfg(feature = "presentation-2d")]
+            image_publication_revision: 0,
             #[cfg(test)]
             next_image_import_gate: None,
         })
@@ -227,6 +231,8 @@ impl EditorAuthoringRuntime {
             runtime,
             #[cfg(feature = "presentation-2d")]
             preview,
+            #[cfg(feature = "presentation-2d")]
+            image_publication_revision: 0,
             #[cfg(test)]
             next_image_import_gate: None,
         })
@@ -267,7 +273,8 @@ impl EditorAuthoringRuntime {
         &mut self,
         source: Option<EditorPreviewSource>,
     ) -> Option<DiagnosticReport> {
-        self.preview.drive(&mut self.runtime, source)
+        self.preview
+            .drive(&mut self.runtime, source, self.image_publication_revision)
     }
 
     #[cfg(feature = "presentation-2d")]
@@ -334,10 +341,21 @@ impl EditorAuthoringRuntime {
         &mut self,
         imported: ImageImportedAsset,
     ) -> Result<AssetVersion, EditorImageRuntimeFailure> {
-        self.runtime
+        #[cfg(feature = "presentation-2d")]
+        let successor = self
+            .image_publication_revision
+            .checked_add(1)
+            .ok_or(EditorImageRuntimeFailure::Publication)?;
+        let version = self
+            .runtime
             .with_driver_scope(|scope| scope.__apply_port::<EditorImagePublicationPort>(imported))
             .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
-            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)?
+            .map_err(|_| EditorImageRuntimeFailure::RuntimeUnavailable)??;
+        #[cfg(feature = "presentation-2d")]
+        {
+            self.image_publication_revision = successor;
+        }
+        Ok(version)
     }
 
     #[must_use]
@@ -707,4 +725,182 @@ fn publish_authoring_image_records(
 
 fn runtime_error(code: &'static str) -> DiagnosticReport {
     single_error(code, "Editor Scene preview could not publish a candidate")
+}
+
+#[cfg(all(test, feature = "presentation-2d"))]
+mod preview_content_tests {
+    use std::sync::Arc;
+
+    use nara_asset::{AssetPath, ProjectAssetDatabase, StableAssetId};
+    use nara_image::ImageBytesImportRequest;
+    use nara_render::Extent2d;
+    use nara_scene::{SceneAuthoringSession, SceneDocument};
+
+    use super::*;
+    use crate::project_host::runtime::editor::{
+        authoring_preview::EditorAuthoringPreviewOmissions, preview::EditorPreviewProjection,
+    };
+
+    fn authoring_runtime() -> (EditorAuthoringRuntime, AssetRecord, Handle<ImageAsset>) {
+        let registry = crate::project_host::authoring::first_party_authoring_preview_registry(
+            crate::project_host::composition::built_in_schema_providers(),
+        )
+        .unwrap();
+        let record = AssetRecord::new(
+            StableAssetId::parse_str("0438d605-f4a0-4b18-a30a-6587413dd63e").unwrap(),
+            AssetPath::new("textures/player.png").unwrap(),
+            AssetSourceKind::Image,
+        );
+        let mut database = ProjectAssetDatabase::default();
+        database.insert(record.clone()).unwrap();
+        let mut app = build_authoring_app().unwrap();
+        let preview =
+            EditorPreviewSession::install_authoring(&mut app, &registry, Arc::new(database))
+                .unwrap();
+        let handle = app
+            .world_mut()
+            .unwrap()
+            .resource_mut::<AssetServer>()
+            .reserve_record::<ImageAsset>(&record)
+            .unwrap();
+        (
+            EditorAuthoringRuntime {
+                runtime: RuntimeInstance::start(app).unwrap(),
+                preview,
+                image_publication_revision: 0,
+                next_image_import_gate: None,
+            },
+            record,
+            handle,
+        )
+    }
+
+    fn imported_image(
+        runtime: &EditorAuthoringRuntime,
+        record: &AssetRecord,
+        handle: Handle<ImageAsset>,
+    ) -> ImageImportedAsset {
+        let world = runtime.runtime.world();
+        let states = world.resource::<AssetStates>();
+        world
+            .resource::<ImageImporter>()
+            .import_image(
+                ImageBytesImportRequest::new(
+                    record.clone(),
+                    include_bytes!("../../../../tests/fixtures/images/valid-rgba-1x1.png").to_vec(),
+                    ImageImportSettings::default(),
+                ),
+                handle,
+                states.version(handle.id()).unwrap_or(AssetVersion::ZERO),
+                world.resource::<AssetServer>(),
+                world.resource::<Assets<ImageAsset>>(),
+                states,
+            )
+            .unwrap()
+    }
+
+    fn preview(
+        runtime: &mut EditorAuthoringRuntime,
+        source: &SceneAuthoringSession,
+    ) -> EditorPreviewCandidate {
+        let document = EditorDocumentId::from_raw(1);
+        let revision = source.revision();
+        let projection = runtime
+            .preview_requires_source_projection(document, revision)
+            .then(|| {
+                EditorPreviewProjection::new(
+                    source.document().clone(),
+                    EditorAuthoringPreviewOmissions::empty(document, revision),
+                )
+            });
+        assert!(
+            runtime
+                .drive_preview(Some(EditorPreviewSource {
+                    document,
+                    revision,
+                    projection,
+                }))
+                .is_none()
+        );
+        runtime.take_preview_candidate().unwrap()
+    }
+
+    fn retire(runtime: &mut EditorAuthoringRuntime) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !matches!(
+            runtime.shutdown_tasks(),
+            EditorAuthoringRuntimeCloseProgress::Complete(_)
+        ) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the authoring Runtime must retire"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn preview_content_reuses_unchanged_drives_and_tracks_real_image_publications() {
+        let (mut runtime, record, handle) = authoring_runtime();
+        runtime.set_preview_extent(Extent2d::new(320, 240));
+        let source = SceneAuthoringSession::new(SceneDocument::default());
+        let before = preview(&mut runtime, &source);
+        let unchanged = preview(&mut runtime, &source);
+        let imported = imported_image(&runtime, &record, handle);
+        let version = runtime.commit_image_import(imported).unwrap();
+        let published = preview(&mut runtime, &source);
+        let repainted = preview(&mut runtime, &source);
+        let actual_pixels = runtime
+            .image_import_asset(handle, version)
+            .unwrap()
+            .pixels()
+            .to_vec();
+        let stale = imported_image(&runtime, &record, handle);
+        let accepted = imported_image(&runtime, &record, handle);
+        runtime.commit_image_import(accepted).unwrap();
+        let successor = preview(&mut runtime, &source);
+        let rejected = runtime.commit_image_import(stale);
+        let after_rejection = preview(&mut runtime, &source);
+        retire(&mut runtime);
+
+        assert_eq!(before.content_stamp(), unchanged.content_stamp());
+        assert!(unchanged.geometry_revision() > before.geometry_revision());
+        assert_ne!(published.content_stamp(), unchanged.content_stamp());
+        assert_eq!(published.content_stamp(), repainted.content_stamp());
+        assert_eq!(actual_pixels, [24, 120, 220, 255]);
+        assert!(rejected.is_err());
+        assert_eq!(successor.content_stamp(), after_rejection.content_stamp());
+        assert_eq!(before.revision(), after_rejection.revision());
+    }
+
+    #[test]
+    fn replacement_preview_runtime_cannot_reuse_a_predecessors_content_stamp() {
+        let source = SceneAuthoringSession::new(SceneDocument::default());
+        let (mut predecessor, _, _) = authoring_runtime();
+        predecessor.set_preview_extent(Extent2d::new(320, 240));
+        let before = preview(&mut predecessor, &source);
+        retire(&mut predecessor);
+        let (mut replacement, _, _) = authoring_runtime();
+        replacement.set_preview_extent(Extent2d::new(320, 240));
+        let after = preview(&mut replacement, &source);
+        retire(&mut replacement);
+        assert_eq!(before.document(), after.document());
+        assert_eq!(before.revision(), after.revision());
+        assert_ne!(before.content_stamp(), after.content_stamp());
+    }
+
+    #[test]
+    fn exhausted_image_publication_identity_rejects_before_mutating_the_asset_store() {
+        let (mut runtime, record, handle) = authoring_runtime();
+        let imported = imported_image(&runtime, &record, handle);
+        runtime.image_publication_revision = u64::MAX;
+        let result = runtime.commit_image_import(imported);
+        let world = runtime.runtime.world();
+        let image_was_written = world.resource::<Assets<ImageAsset>>().get(handle).is_some();
+        let version = world.resource::<AssetStates>().version(handle.id());
+        retire(&mut runtime);
+        assert_eq!(result, Err(EditorImageRuntimeFailure::Publication));
+        assert!(!image_was_written);
+        assert!(version.is_none_or(|version| version == AssetVersion::ZERO));
+    }
 }

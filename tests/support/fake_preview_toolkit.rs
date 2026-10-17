@@ -367,3 +367,171 @@ fn fake_toolkit_revokes_old_geometry_for_independent_context_changes() {
         resume_unwind(error);
     }
 }
+
+#[test]
+fn fake_toolkit_redisplay_rebinds_the_same_completed_image_to_its_new_uv_mapping() {
+    let project = TestProject::new("fake-toolkit-redisplay");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let extent = Extent2d::new(320, 180).unwrap();
+        editor.configure_editor_preview(Some(extent));
+        let (_, entity) = add_sprite(&mut editor);
+        let mut toolkit = FakeToolkit::new();
+        let initial_mapping = mapping(extent);
+        let command = toolkit.submit(candidate(&mut editor), initial_mapping);
+        let token = toolkit.finish(command);
+        let (document, revision, image, _) = toolkit.displayed.unwrap();
+        let pixels = toolkit.displayed_pixels.clone();
+        let geometry = toolkit.presentation.geometry_revision(token);
+        assert_eq!(
+            toolkit.presentation.pick(token, [260.0, 170.0]).unwrap(),
+            Some(entity.clone())
+        );
+        let pending = toolkit.submit(candidate(&mut editor), initial_mapping);
+
+        let redisplayed_mapping = initial_mapping
+            .with_uv(DisplayRect {
+                min: [0.4, 0.3],
+                max: [0.9, 0.8],
+            })
+            .unwrap();
+        toolkit.displayed = Some((document, revision, image, redisplayed_mapping));
+        let next = toolkit
+            .presentation
+            .redisplay(token, image, redisplayed_mapping)
+            .expect("redisplaying an unchanged completed image must bind its actual new mapping");
+        assert_ne!(next, token);
+        assert!(toolkit.presentation.pick(token, [260.0, 170.0]).is_err());
+        let displayed_center = redisplayed_mapping.uv_to_panel([0.5, 0.5]).unwrap();
+        assert_eq!(
+            toolkit.presentation.pick(next, displayed_center).unwrap(),
+            Some(entity)
+        );
+        assert_eq!(toolkit.current_token(), Some(next));
+        assert_eq!(toolkit.displayed_pixels, pixels);
+        assert_eq!(toolkit.presentation.document(next), Some(document));
+        assert_eq!(toolkit.presentation.geometry_revision(next), geometry);
+        let successor = toolkit.finish(pending);
+        assert_eq!(toolkit.current_token(), Some(successor));
+        assert!(toolkit.presentation.pick(next, displayed_center).is_err());
+        assert!(
+            toolkit
+                .presentation
+                .pick(successor, [260.0, 170.0])
+                .unwrap()
+                .is_some()
+        );
+    }));
+    close_editor(&mut editor);
+    if let Err(error) = outcome {
+        resume_unwind(error);
+    }
+}
+
+#[test]
+fn fake_toolkit_redisplay_rejects_foreign_stale_or_changed_image_authority() {
+    let project = TestProject::new("fake-toolkit-redisplay-rejection");
+    let mut editor = EditorProjectSession::open_trusted_compiled(
+        project.capability(),
+        TrustedCompiledEditorProjectIntent::new(),
+    )
+    .unwrap();
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let extent = Extent2d::new(320, 180).unwrap();
+        editor.configure_editor_preview(Some(extent));
+        let (_, entity) = add_sprite(&mut editor);
+        let mut toolkit = FakeToolkit::new();
+        let initial_mapping = mapping(extent);
+        let command = toolkit.submit(candidate(&mut editor), initial_mapping);
+        let token = toolkit.finish(command);
+        let (document, revision, image, _) = toolkit.displayed.unwrap();
+        let mut foreign = FakeToolkit::new();
+        let foreign_command = foreign.submit(candidate(&mut editor), initial_mapping);
+        let foreign_token = foreign.finish(foreign_command);
+        assert_eq!(
+            toolkit
+                .presentation
+                .redisplay(foreign_token, image, initial_mapping),
+            Err(EditorPresentationError::StaleToken)
+        );
+        for change in 0..5 {
+            let mut changed = image;
+            match change {
+                0 => changed.frame_index += 1,
+                1 => changed.target_generation += 1,
+                2 => changed.source_handoff_generation += 1,
+                3 => changed.device_epoch += 1,
+                4 => changed.backend_instance_id += 1,
+                _ => unreachable!(),
+            }
+            assert_eq!(
+                toolkit
+                    .presentation
+                    .redisplay(token, changed, initial_mapping),
+                Err(EditorPresentationError::ImageMismatch)
+            );
+        }
+        let resized_mapping = mapping(Extent2d::new(160, 90).unwrap());
+        assert_eq!(
+            toolkit
+                .presentation
+                .redisplay(token, image, resized_mapping),
+            Err(EditorPresentationError::ImageMismatch)
+        );
+        assert_eq!(toolkit.current_token(), Some(token));
+        assert_eq!(
+            toolkit.presentation.pick(token, [260.0, 170.0]).unwrap(),
+            Some(entity.clone())
+        );
+
+        let next_mapping = initial_mapping
+            .with_uv(DisplayRect {
+                min: [0.25, 0.25],
+                max: [0.75, 0.75],
+            })
+            .unwrap();
+        let next = toolkit
+            .presentation
+            .redisplay(token, image, next_mapping)
+            .unwrap();
+        toolkit.displayed = Some((document, revision, image, next_mapping));
+        assert_eq!(
+            toolkit
+                .presentation
+                .redisplay(token, image, initial_mapping),
+            Err(EditorPresentationError::StaleToken)
+        );
+        assert_eq!(toolkit.current_token(), Some(next));
+        assert_eq!(
+            toolkit.presentation.pick(next, [260.0, 170.0]).unwrap(),
+            Some(entity)
+        );
+
+        let mut wrong_image = image;
+        wrong_image.frame_index += 1;
+        assert!(
+            toolkit
+                .presentation
+                .token(document, revision, wrong_image, next_mapping)
+                .is_none()
+        );
+        assert_eq!(
+            toolkit.presentation.redisplay(next, image, next_mapping),
+            Err(EditorPresentationError::StaleToken),
+            "redisplay cannot revive an authority invalidated by another image"
+        );
+        toolkit.presentation.retire();
+        assert_eq!(
+            toolkit.presentation.redisplay(next, image, next_mapping),
+            Err(EditorPresentationError::StaleToken)
+        );
+    }));
+    close_editor(&mut editor);
+    if let Err(error) = outcome {
+        resume_unwind(error);
+    }
+}

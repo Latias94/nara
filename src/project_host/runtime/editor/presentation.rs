@@ -69,6 +69,7 @@ impl EditorAcceptedPreview {
 
 struct PresentedPreview {
     content: EditorAcceptedPreview,
+    token: EditorPresentedToken,
     image: EditorPresentationImage,
     mapping: DisplayMapping2d,
     valid: bool,
@@ -152,10 +153,41 @@ impl EditorPreviewPresentation {
         let token = accepted.token;
         self.presented = Some(PresentedPreview {
             content: accepted,
+            token,
             image,
             mapping,
             valid: true,
         });
+        Ok(token)
+    }
+
+    /// Rebinds an already presented image after the adapter displays it with a new mapping.
+    ///
+    /// This does not accept new image content or revive invalidated geometry. The adapter must
+    /// first confirm another actual display of the exact image, then replace its old token with
+    /// the returned token. Previously accepted content retains its original ordering identity.
+    pub fn redisplay(
+        &mut self,
+        token: EditorPresentedToken,
+        image: EditorPresentationImage,
+        mapping: DisplayMapping2d,
+    ) -> Result<EditorPresentedToken, EditorPresentationError> {
+        let current = self
+            .presented
+            .as_mut()
+            .filter(|current| current.valid && current.token == token)
+            .ok_or(EditorPresentationError::StaleToken)?;
+        if current.image != image || mapping.target() != image.target.extent() {
+            return Err(EditorPresentationError::ImageMismatch);
+        }
+        let id = NEXT_PRESENTATION_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| EditorPresentationError::IdentityExhausted)?;
+        let token = EditorPresentedToken(id);
+        current.token = token;
+        current.mapping = mapping;
         Ok(token)
     }
 
@@ -173,14 +205,14 @@ impl EditorPreviewPresentation {
             && current.content.revision == revision
             && current.image == image
             && current.mapping == mapping;
-        current.valid.then_some(current.content.token)
+        current.valid.then_some(current.token)
     }
 
     #[must_use]
     pub fn document(&self, token: EditorPresentedToken) -> Option<EditorDocumentId> {
         self.presented
             .as_ref()
-            .filter(|current| current.content.token == token)
+            .filter(|current| current.token == token)
             .map(|current| current.content.document)
     }
 
@@ -188,7 +220,7 @@ impl EditorPreviewPresentation {
     pub fn geometry_revision(&self, token: EditorPresentedToken) -> Option<u64> {
         self.presented
             .as_ref()
-            .filter(|current| current.content.token == token)
+            .filter(|current| current.token == token)
             .map(|current| current.content.geometry_revision)
     }
 
@@ -200,7 +232,7 @@ impl EditorPreviewPresentation {
         let current = self
             .presented
             .as_ref()
-            .filter(|current| current.valid && current.content.token == token)
+            .filter(|current| current.valid && current.token == token)
             .ok_or(EditorPresentationError::StaleToken)?;
         let uv = current
             .mapping

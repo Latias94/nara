@@ -71,7 +71,7 @@ pub use editor::{
     EditorGameViewCompletionDisposition,
 };
 #[cfg(all(feature = "tooling", feature = "presentation-2d"))]
-pub use editor::{EditorPreviewCandidate, EditorPreviewHit};
+pub use editor::{EditorPreviewCandidate, EditorPreviewContentStamp, EditorPreviewHit};
 #[cfg(feature = "tooling")]
 #[doc(hidden)]
 pub use editor::{
