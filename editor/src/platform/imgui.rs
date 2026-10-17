@@ -24,7 +24,7 @@ use nara::{
         WgpuEditorUiImageSubmission, WgpuEditorViewId, WgpuEditorViewportIdentity,
         WgpuEditorWindowFrame, WgpuSubmittedImageReceipt,
     },
-    tooling::{EditorActionBatch, EditorPlayState},
+    tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
 };
 use winit::{
@@ -55,6 +55,8 @@ mod canvas_reopen_tests;
 mod canvas_tests;
 #[cfg(all(test, target_os = "windows"))]
 mod canvas_workflow_tests;
+#[cfg(all(test, target_os = "windows"))]
+mod external_cadence_tests;
 mod input;
 #[cfg(all(test, target_os = "windows"))]
 mod manager_workflow_tests;
@@ -1051,32 +1053,38 @@ impl NativeImgui {
                     .and_then(|size| Extent2d::new(size[0].round() as u32, size[1].round() as u32)),
             )
             .flatten();
-        if extent != self.scene_extent {
-            self.scene_extent = extent;
-            application.set_scene_preview_extent(extent);
-            self.window.request_redraw();
-        }
-        if self.frontend.game_open(application.panel_workspace())
-            && let Some(start) = application.active_game_start_request()
-            && start.resizable()
-            && let Some(extent) = output
-                .game_extent
-                .and_then(|size| Extent2d::new(size[0].round() as u32, size[1].round() as u32))
-            && (start.logical_window().resolution.physical_width != extent.width
-                || start.logical_window().resolution.physical_height != extent.height)
-        {
+        let game_extent = output
+            .game_extent
+            .and_then(|size| Extent2d::new(size[0].round() as u32, size[1].round() as u32))
+            .filter(|extent| {
+                self.frontend.game_open(application.panel_workspace())
+                    && application
+                        .active_game_start_request()
+                        .is_some_and(|start| {
+                            start.resizable()
+                                && (start.logical_window().resolution.physical_width
+                                    != extent.width
+                                    || start.logical_window().resolution.physical_height
+                                        != extent.height)
+                        })
+            });
+        if game_extent.is_some() {
             // Release the captured route while its exact presented geometry still belongs to
             // the Runtime. Resizing first would reject this old stamp on the next input flush.
             self.input.invalidate(false);
             self.input.flush(application)?;
-            if application.resize_game_view(extent).map_err(imgui_error)? {
-                self.game_candidate = None;
-                self.game.submitted = None;
-                application.drive_editor_frame(Duration::ZERO, false, true);
-                self.window.request_redraw();
-            }
         }
         let mut local_changed = false;
+        let dispatch = output.actions.map(|actions| {
+            let dispatch = application.dispatch_editor_actions(actions);
+            self.frontend.observe_dispatch(&dispatch);
+            if dispatch.invalidates_game_input() {
+                self.input
+                    .invalidate_after_control(application.active_game_start_request());
+                self.game_candidate = None;
+            }
+            dispatch
+        });
         for action in output.browser_actions {
             local_changed |= application.apply_project_browser_local_action(action);
         }
@@ -1094,18 +1102,36 @@ impl NativeImgui {
             }
             local_changed |= update.actions_observed();
         }
-        if let Some(actions) = output.actions {
-            let dispatch = application.dispatch_editor_actions(actions);
-            self.frontend.observe_dispatch(&dispatch);
-            if dispatch.invalidates_game_input() {
-                self.input
-                    .invalidate_after_control(application.active_game_start_request());
+        if extent != self.scene_extent {
+            self.scene_extent = extent;
+            application.set_scene_preview_extent(extent);
+            self.window.request_redraw();
+        }
+        let resized = if let Some(extent) = game_extent
+            && application.active_game_start_request().is_some()
+        {
+            let resized = application.resize_game_view(extent).map_err(imgui_error)?;
+            if resized {
                 self.game_candidate = None;
+                self.game.submitted = None;
+                self.window.request_redraw();
             }
+            resized
+        } else {
+            false
+        };
+        if dispatch.is_some() || resized {
+            let actions_observed = dispatch
+                .as_ref()
+                .is_some_and(|dispatch| dispatch.actions_observed());
+            let drive_runtime = resized
+                || dispatch.as_ref().is_some_and(|dispatch| {
+                    dispatch.requires_runtime_drive() || dispatch.requests_step()
+                });
             let update = application.drive_editor_frame(
                 Duration::ZERO,
-                dispatch.actions_observed() || local_changed,
-                dispatch.requires_runtime_drive() || dispatch.requests_step(),
+                actions_observed || local_changed,
+                drive_runtime,
             );
             if update.actions_observed() {
                 self.window.request_redraw();
@@ -1631,10 +1657,9 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                 }
             }
             WindowEvent::RedrawRequested if is_primary => {
-                let play_before = self
-                    .application
-                    .current_frame()
-                    .map(|frame| frame.play().state());
+                let running_before = self.application.current_frame().is_some_and(|frame| {
+                    imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running
+                });
                 match native.redraw(event_loop, &mut self.application) {
                     Ok(true) => event_loop.exit(),
                     Ok(false) => {
@@ -1649,17 +1674,13 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                         }
                     }
                 }
-                let play_after = self
-                    .application
-                    .current_frame()
-                    .map(|frame| frame.play().state());
-                if play_before != Some(EditorPlayState::Running)
-                    || play_after != Some(EditorPlayState::Running)
-                {
+                let running_after = self.application.current_frame().is_some_and(|frame| {
+                    imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running
+                });
+                if !running_before || !running_after {
                     // A repaint can accept Resume before the next about_to_wait callback.
                     // Only a continuous Running interval belongs to the simulation clock.
-                    self.last_drive =
-                        (play_after == Some(EditorPlayState::Running)).then(Instant::now);
+                    self.last_drive = running_after.then(Instant::now);
                 }
             }
             _ => native.window.request_redraw(),
@@ -1677,7 +1698,12 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             .application
             .current_frame()
             .map(|frame| frame.play().state());
-        let delta = if play_before == Some(EditorPlayState::Running) {
+        let cadence = self
+            .application
+            .current_frame()
+            .map(|frame| imgui_play_cadence(frame.play().state(), frame.runtime_availability()))
+            .unwrap_or_default();
+        let delta = if cadence.running {
             self.last_drive
                 .replace(now)
                 .map_or(Duration::ZERO, |last| now.saturating_duration_since(last))
@@ -1685,17 +1711,7 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             self.last_drive = None;
             Duration::ZERO
         };
-        let running = play_before.is_some_and(|state| {
-            matches!(
-                state,
-                EditorPlayState::Running
-                    | EditorPlayState::Starting
-                    | EditorPlayState::Stepping
-                    | EditorPlayState::Stopping
-                    | EditorPlayState::RetiringPlay
-                    | EditorPlayState::PreparingPlay
-            )
-        });
+        let running = cadence.drive_runtime || self.application.game_step_requires_runtime_drive();
         if running && let Some(native) = &mut self.native {
             native.input.mark_presented_stale();
         }
@@ -1711,7 +1727,9 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             .application
             .current_frame()
             .map(|frame| frame.play().state());
-        if play_after == Some(EditorPlayState::Running) {
+        if self.application.current_frame().is_some_and(|frame| {
+            imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running
+        }) {
             self.last_drive.get_or_insert_with(Instant::now);
         } else {
             self.last_drive = None;
@@ -1732,7 +1750,8 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             native.window.request_redraw();
             event_loop.set_control_flow(ControlFlow::Wait);
         } else if let Some(deadline) = deadline {
-            self.repaint_deadline = Some(deadline);
+            self.repaint_deadline =
+                imgui_next_presentation_deadline(&self.application, self.native.as_ref(), now);
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
         } else {
             self.repaint_deadline = None;
@@ -1746,7 +1765,10 @@ fn imgui_next_deadline(
     native: Option<&NativeImgui>,
     now: Instant,
 ) -> Option<Instant> {
-    let mut deadline = application.next_supervised_play_deadline();
+    let mut deadline = earliest_deadline(
+        application.next_supervised_play_deadline(),
+        imgui_next_presentation_deadline(application, native, now),
+    );
     if matches!(
         application.state(),
         crate::EditorApplicationState::OpeningInitial
@@ -1759,10 +1781,22 @@ fn imgui_next_deadline(
             deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
         }
         let state = frame.play().state();
-        if state == EditorPlayState::Running {
-            deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
-        }
         deadline = earliest_deadline(deadline, play_lifecycle_poll_deadline(now, state));
+    }
+    deadline = earliest_deadline(deadline, application.session_close_retry_deadline());
+    deadline
+}
+
+fn imgui_next_presentation_deadline(
+    application: &EditorApplication,
+    native: Option<&NativeImgui>,
+    now: Instant,
+) -> Option<Instant> {
+    let mut deadline = None;
+    if let Some(frame) = application.current_frame() {
+        if imgui_play_cadence(frame.play().state(), frame.runtime_availability()).running {
+            deadline = Some(now + Duration::from_millis(16));
+        }
         deadline = earliest_deadline(
             deadline,
             image_import_poll_deadline(now, frame.image_import_work_pending()),
@@ -1771,7 +1805,6 @@ fn imgui_next_deadline(
     if application.game_step_requires_runtime_drive() {
         deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
     }
-    deadline = earliest_deadline(deadline, application.session_close_retry_deadline());
     let Some(native) = native else {
         return deadline;
     };
@@ -1787,6 +1820,32 @@ fn imgui_next_deadline(
         );
     }
     deadline
+}
+
+#[derive(Default)]
+struct ImguiPlayCadence {
+    running: bool,
+    drive_runtime: bool,
+}
+
+fn imgui_play_cadence(
+    state: EditorPlayState,
+    availability: EditorRuntimeAvailability,
+) -> ImguiPlayCadence {
+    let embedded = availability == EditorRuntimeAvailability::TrustedInProcess;
+    ImguiPlayCadence {
+        running: embedded && state == EditorPlayState::Running,
+        drive_runtime: embedded
+            && matches!(
+                state,
+                EditorPlayState::Running
+                    | EditorPlayState::Starting
+                    | EditorPlayState::Stepping
+                    | EditorPlayState::Stopping
+                    | EditorPlayState::RetiringPlay
+                    | EditorPlayState::PreparingPlay
+            ),
+    }
 }
 
 fn restore_workspace_layout(
@@ -1806,6 +1865,41 @@ mod opening_tests {
     use super::*;
     use crate::EditorLaunchOptions;
     use nara::tooling::EditorAction;
+
+    #[test]
+    fn external_running_observation_does_not_drive_embedded_runtime_or_animation() {
+        let cadence = imgui_play_cadence(
+            EditorPlayState::Running,
+            EditorRuntimeAvailability::ExternalSupervised,
+        );
+        assert!(
+            !cadence.running,
+            "external Play has its own presentation owner"
+        );
+        assert!(!cadence.drive_runtime);
+    }
+
+    #[test]
+    fn embedded_run_and_step_keep_their_runtime_drive() {
+        let running = imgui_play_cadence(
+            EditorPlayState::Running,
+            EditorRuntimeAvailability::TrustedInProcess,
+        );
+        assert!(running.running);
+        assert!(running.drive_runtime);
+        let stepping = imgui_play_cadence(
+            EditorPlayState::Stepping,
+            EditorRuntimeAvailability::TrustedInProcess,
+        );
+        assert!(!stepping.running);
+        assert!(stepping.drive_runtime);
+        let paused = imgui_play_cadence(
+            EditorPlayState::Paused,
+            EditorRuntimeAvailability::TrustedInProcess,
+        );
+        assert!(!paused.running);
+        assert!(!paused.drive_runtime);
+    }
 
     #[test]
     fn restore_layout_recovers_saved_panel_instances_and_visibility_with_the_ini() {
@@ -1905,6 +1999,8 @@ mod opening_tests {
         let frame = application.current_frame().unwrap();
         assert!(frame.project_browser().has_pending_work());
         let pending_deadline = imgui_next_deadline(&application, None, now);
+        let pending_presentation_deadline =
+            imgui_next_presentation_deadline(&application, None, now);
         for _ in 0..128 {
             let frame = application.current_frame().unwrap();
             if !frame.project_browser().has_pending_work() {
@@ -1940,6 +2036,10 @@ mod opening_tests {
             }
         }
         assert_eq!(pending_deadline, Some(now + Duration::from_millis(16)));
+        assert_eq!(
+            pending_presentation_deadline, None,
+            "a maintenance wake observes work; unchanged work does not request presentation"
+        );
         assert!(
             settled_deadline.is_none() || other_work,
             "the browser must release its wake after settling"

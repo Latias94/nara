@@ -13,13 +13,13 @@ const MAX_SOURCE_BYTES: u64 = 512 * 1024 * 1024;
 
 static NEXT_TEMP_ROOT: AtomicU64 = AtomicU64::new(1);
 
-pub(super) struct GuardedSupervisedPlayProject {
+pub(in crate::platform::imgui) struct GuardedSupervisedPlayProject {
     root: PathBuf,
     desktop_source_backup: Option<Vec<u8>>,
 }
 
 impl GuardedSupervisedPlayProject {
-    pub(super) fn prepare(source_root: &Path) -> io::Result<Self> {
+    pub(in crate::platform::imgui) fn prepare(source_root: &Path) -> io::Result<Self> {
         let source_root = fs::canonicalize(source_root)?;
         if !fs::metadata(&source_root)?.is_dir() {
             return Err(io::Error::other(
@@ -41,7 +41,7 @@ impl GuardedSupervisedPlayProject {
         })
     }
 
-    pub(super) fn root(&self) -> &Path {
+    pub(in crate::platform::imgui) fn root(&self) -> &Path {
         &self.root
     }
 

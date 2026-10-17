@@ -81,6 +81,11 @@ fn native_resume_redraw_rebases_paused_idle_before_the_owner_drive() {
         .result
         .expect("the real native cadence trajectory must run")
         .unwrap();
+    assert!(observed.resize_changed_geometry);
+    assert!(
+        observed.resize_selected_entity,
+        "a real Hierarchy click collected with Game resize must survive the same native output"
+    );
     assert!(observed.resumed);
     assert!(
         observed.baseline_age < Duration::from_secs(1),
@@ -127,6 +132,8 @@ fn native_resume_redraw_rebases_paused_idle_before_the_owner_drive() {
 }
 
 struct CadenceObservation {
+    resize_changed_geometry: bool,
+    resize_selected_entity: bool,
     resumed: bool,
     baseline_age: Duration,
     resumed_frame: RuntimeFrameStatus,
@@ -238,6 +245,20 @@ fn run_native_cadence(
         let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
         flags.remove(ConfigFlags::VIEWPORTS_ENABLE);
         native.context.io_mut().set_config_flags(flags);
+        native.frontend.place_test_game(false);
+        let game_panel = host
+            .application
+            .panel_workspace()
+            .layout()
+            .instances()
+            .iter()
+            .find(|panel| panel.kind() == "nara.game-view")
+            .ok_or("the Game panel is unavailable")?
+            .id();
+        host.application
+            .panel_workspace_mut()
+            .layout_mut()
+            .place(game_panel, crate::workspace::EditorPanelPlacement::Floating);
         let frame = host
             .application
             .current_frame()
@@ -275,6 +296,57 @@ fn run_native_cadence(
         {
             return Err("the real Runtime did not reach Paused".into());
         }
+        let entity = control_rect("entity:image-source")
+            .ok_or("the real Hierarchy entity control was not painted")?;
+        let pointer = [
+            (entity.min[0] + entity.max[0]) * 0.5,
+            (entity.min[1] + entity.max[1]) * 0.5,
+        ];
+        redraw(&mut host, event_loop, pointer, None)?;
+        redraw(&mut host, event_loop, pointer, Some(true))?;
+        let geometry_before = host
+            .application
+            .active_game_start_request()
+            .ok_or("the paused Game has no geometry")?
+            .geometry_generation();
+        let game_rect = control_rect("embedded:Game window")
+            .ok_or("the real Game window geometry was not painted")?;
+        let game_name = std::ffi::CString::new(format!("Game###nara-panel-{}", game_panel.0))
+            .map_err(|error| error.to_string())?;
+        host.native
+            .as_mut()
+            .unwrap()
+            .context
+            .binding()
+            .with_bound_context(|| {
+                // SAFETY: this hidden test Context owns the already-created floating Game
+                // window. Stage only its size between frames, as native layout restoration does.
+                unsafe {
+                    dear_imgui_rs::sys::igSetWindowSize_Str(
+                        game_name.as_ptr(),
+                        dear_imgui_rs::sys::ImVec2 {
+                            x: game_rect.max[0] - game_rect.min[0] + 64.0,
+                            y: game_rect.max[1] - game_rect.min[1] + 48.0,
+                        },
+                        0,
+                    );
+                }
+            });
+        // Release the real entity widget in the same production RedrawRequested that observes
+        // the new Game extent. Neither the action batch nor the application is driven here.
+        redraw(&mut host, event_loop, pointer, Some(false))?;
+        let resize_changed_geometry = host
+            .application
+            .active_game_start_request()
+            .is_some_and(|start| start.geometry_generation() > geometry_before);
+        let resize_selected_entity = host.application.current_frame().is_some_and(|frame| {
+            frame
+                .workspace()
+                .active_scene
+                .as_ref()
+                .and_then(|scene| scene.editor.inspector.selected_entity.as_ref())
+                .is_some_and(|entity| entity.as_str() == "image-source")
+        });
         let button =
             control_rect("embedded:Resume").ok_or("the actual Resume control was not painted")?;
         let pointer = [
@@ -308,6 +380,8 @@ fn run_native_cadence(
             .ok_or("the owner drive did not publish an actual Runtime frame")?;
         let fixed_after = FIXED_TICKS.load(Ordering::Relaxed);
         Ok(CadenceObservation {
+            resize_changed_geometry,
+            resize_selected_entity,
             resumed,
             baseline_age,
             resumed_frame,

@@ -61,7 +61,7 @@ impl SupervisedPlayTestAdvance {
     }
 }
 
-mod fixture;
+pub(super) mod fixture;
 
 use fixture::GuardedSupervisedPlayProject;
 
