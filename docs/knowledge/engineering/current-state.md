@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "34f394f3b0640cad7b07f41f8c5c8266fcfff19ea32f6aaa3af3415fc37cf93b"
+source_fingerprint: "b4addc489039489814ed6a33612d000e80ac400d7ddb3f7acddda5b91e6fec0c"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "34f394f3b0640cad7b07f41f8c5c8266fcfff19ea32f6aaa3af3415fc37
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `34f394f3b0640cad7b07f41f8c5c8266fcfff19ea32f6aaa3af3415fc37cf93b`
-- Immutable records: 711
-- Active lane heads: 1
+- Source fingerprint: `b4addc489039489814ed6a33612d000e80ac400d7ddb3f7acddda5b91e6fec0c`
+- Immutable records: 715
+- Active lane heads: 0
 
 # Active Registrations
 
@@ -27,7 +27,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Editor UI Prefab Authoring and Canvas v1 complete; no successor active](registry/2026-08/2026-08-17T233146Z-editor-ui-prefab-authoring-canvas-v1-codex-root-fcbd471b11774b599cd190ead6827654.md): `completed` (editor-ui-prefab-authoring-canvas-v1-codex-root; producer `codex-root`)
 - [Editor UI Prefab Structural Composition v1 complete; no successor active](registry/2026-08/2026-08-18T072656Z-editor-ui-prefab-structural-composition-v1-codex-root-5edbf5a02be34aa8bdf7f88e45981dab.md): `completed` (editor-ui-prefab-structural-composition-v1-codex-root; producer `codex-root`)
 - [Runtime UI Product Slice complete; no successor active](registry/2026-08/2026-08-13T155955Z-engine-foundation-contract-completion-codex-root-17d8583618e9477aa99c9e7118f27e7d.md): `completed` (engine-foundation-contract-completion-codex-root; producer `codex-root`)
-- [Foundation correctness closure](registry/2026-10/2026-10-17T110007Z-foundation-correctness-closure-codex-root-20261017-3e42da51b9ce4a41b8fecd3d179b6362.md): `active` (foundation-correctness-closure-codex-root-20261017; producer `codex-root`)
+- [Foundation correctness closure](registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md): `completed` (foundation-correctness-closure-codex-root-20261017; producer `codex-root`)
 - [Fresh Project workflow: FPER-U3 complete; no successor active](registry/2026-08/2026-08-15T110500Z-fresh-project-export-repair-codex-root-be2dd60d831d43a782707e8be9c1bc0c.md): `completed` (fresh-project-export-repair-codex-root; producer `codex-root`)
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
@@ -46,6 +46,8 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Foundation correctness closure U1-U5 verification](verification/2026-10/2026-10-17T115334Z-foundation-correctness-closure-u1-u5-verification-4490cc23b14742749a37e7a9cb1c7cbf.md) - Observed U1-U5 behavior regressions, exact renderer cohort and native Windows/DX12 acceptance, with serial checks and bounded platform claims.
+- **Memory Event**: [Progress: Foundation closure U1 committed187abda after red0eeafccb (Modified control pass,](logs/2026-10/2026-10-17T112422Z-progress-foundation-closure-u1-committed187abda-after-red0eeafccb-modified-control-pass-6844535470db48a787a8caa68c76a546.md) - Foundation closure U1 committed187abda after red0eeafccb (Modified control pass, Removed byte limit failed Some1vsNone) and Image redb1e1a33
 - **Memory Event**: [Verification: Foundation correctness plan review complete: feasibility, coherence, design, sco](logs/2026-10/2026-10-17T110059Z-verification-foundation-correctness-plan-review-complete-feasibility-coherence-design-sco-19e1cf997e7d44dea12d26614ccbb357.md) - Foundation correctness plan review complete: feasibility, coherence, design, scope and adversarial lenses across three read-only Codex conte
 - **Memory Event**: [Completion: Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4](logs/2026-10/2026-10-17T102708Z-completion-original-editor-foundation-full-u9-u1-u8-finite-acceptance-achieved-at-source-f4-5670eb0ad1fc4fba9d29b6cef0eff2f4.md) - Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4ffdd18, final evidence b68c3a9f938a49b7ba63779f2849d0d9. Exa
 - **Verification Evidence**: [Editor foundation U9 and U1-U8 close with selected Dear frontend and exact external products](verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md) - R1-R11 and AE1-AE6 accepted through reviewed single-owner boundaries, complete frontend migration and exact committed-source external authoring Play Check Export on Windows DX12.
@@ -56,8 +58,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: External samegame creation preflight13886166 failed at fullJSON Sceneexpected as](logs/2026-10/2026-10-17T091642Z-verification-external-samegame-creation-preflight13886166-failed-at-fulljson-sceneexpected-as-d7a942b570054885bca1fb21ef3cc95e.md) - External samegame creation preflight13886166 failed at fullJSON Sceneexpected assertion88.294s, before strictcreation108 measurement. Expect
 - **Memory Event**: [Verification: After actual U8 review closures, native f08098e2 passes3/3 incl realResume1.350s](logs/2026-10/2026-10-17T091222Z-verification-after-actual-u8-review-closures-native-f08098e2-passes3-3-incl-realresume1-350s-98e636b9cf414866b8d5b2e5e57d252b.md) - After actual U8 review closures, native f08098e2 passes3/3 incl realResume1.350s, originalGameinput3.046s and viewlifecycle2.703s. CompleteE
 - **Memory Event**: [Verification: U8 review #1 App/Input owner run125bee6b-0f67-4a17-8b6f-4264c21d3b95 passes145/1](logs/2026-10/2026-10-17T085829Z-verification-u8-review-1-app-input-owner-run125bee6b-0f67-4a17-8b6f-4264c21d3b95-passes145-1-c0ac56108e3646ea840b9dce3e53e950.md) - U8 review #1 App/Input owner run125bee6b-0f67-4a17-8b6f-4264c21d3b95 passes145/1450skip8.563s and an independent bounded correctness reviewe
-- **Memory Event**: [Verification: U8 full independent ce-code-review run20261017-081030-69c43aff is actually compl](logs/2026-10/2026-10-17T085021Z-verification-u8-full-independent-ce-code-review-run20261017-081030-69c43aff-is-actually-compl-3d7cd091472b43d599054aa929faacef.md) - U8 full independent ce-code-review run20261017-081030-69c43aff is actually complete: nine reviewer lenses, two confirmed P2, Ready with fixe
-- **Memory Event**: [Progress: User asks additional Dear issues and meaning of incompleteIME. Sourceconfirmed p](logs/2026-10/2026-10-17T083221Z-progress-user-asks-additional-dear-issues-and-meaning-of-incompleteime-sourceconfirmed-p-0307888e92ed409e98a492e36c01594b.md) - User asks additional Dear issues and meaning of incompleteIME. Sourceconfirmed pinned0.20 WinitignoresPreedit but CommitUnicodeworks; Nara p
 
 # Integration Notes
 

@@ -16,9 +16,10 @@ implementation progress, or execution history.
 
 ## Execution and Evidence Navigation
 
-The active [Foundation Correctness Closure plan](../plans/2026-10-17-1856-fix-foundation-correctness-closure-plan.md)
-is registered by [record `3e42da51b9ce4a41b8fecd3d179b6362`](../knowledge/engineering/registry/2026-10/2026-10-17T110007Z-foundation-correctness-closure-codex-root-20261017-3e42da51b9ce4a41b8fecd3d179b6362.md).
-Follow its latest registration and verification records for progress; activation is not completion evidence.
+The completed [Foundation Correctness Closure plan](../plans/2026-10-17-1856-fix-foundation-correctness-closure-plan.md)
+is closed by [registration `94169fb22505473c89504d4b41cab1de`](../knowledge/engineering/registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md)
+and [verification `4490cc23b14742749a37e7a9cb1c7cbf`](../knowledge/engineering/verification/2026-10/2026-10-17T115334Z-foundation-correctness-closure-u1-u5-verification-4490cc23b14742749a37e7a9cb1c7cbf.md).
+No successor is active; a new plan requires explicit activation in both sources.
 
 Use the [derived engineering index](../knowledge/engineering/current-state.md) to find current
 registration heads, then read their immutable source records. Completed plans and their

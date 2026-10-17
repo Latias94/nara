@@ -2,7 +2,7 @@
 title: Foundation Correctness Closure - Plan
 date: 2026-10-17
 type: fix
-status: active
+status: completed
 artifact_contract: ce-unified-plan/v1
 product_contract_source: reviewed-foundation-audit
 execution: code

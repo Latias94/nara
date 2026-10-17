@@ -8,7 +8,9 @@ Run this gate before a release claim or a change to native view/input, device re
 
 Use Windows with an interactive desktop, Rust 1.95.0 and an actual DX12-capable adapter.
 Run Cargo serially in the checkout with its existing target directory.
-The tests use hidden native windows and owned Context input; they submit and present through production paths without moving the user's pointer or activating a visible window.
+The three critical trajectories below use hidden native windows and owned Context input;
+they submit and present through production paths without moving the user's pointer or activating a visible window.
+The separate external-process trajectory uses a visible, initially inactive Editor window as specified below.
 They do not establish monitor scanout, accessibility parity, or Linux/macOS qualification.
 
 An unavailable adapter/desktop is a failed qualification prerequisite, not a passing skipped test.
