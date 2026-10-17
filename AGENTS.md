@@ -29,8 +29,8 @@ open questions, design drafts, `repo-ref/`, and historical plans are background 
 - Respect module ownership and dependency direction. Update ADRs when durable decisions change,
   and the implementation ledger when their implementation status or evidence changes.
 - Fix the owning contract when a local workaround would preserve a known structural problem.
-- Keep acceptance within the requested scope. Record adjacent gaps with their triggers; discuss
-  material architecture or design changes with the user before implementing them.
+- Keep acceptance within the requested scope. Report material adjacent gaps separately; resolve
+  significant new design choices with the user when the task leaves them open.
 - Keep code, API documentation, technical documents, and user guides in English. Communicate with
   the user in Chinese.
 

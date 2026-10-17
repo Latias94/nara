@@ -1,60 +1,30 @@
-# Nara UI Program Roadmap
+# UI Plan History and Current Entry Points
 
-This page is a navigation index, not an execution authority or an implementation ledger. The
-active plan is the only plan allowed to order work. UI Foundation, the Runtime UI Product Slice,
-and Editor Authoring Loop v1 are complete. No successor is active.
+This page retains navigation for earlier UI plans. Their completion conditions and toolkit
+assumptions describe their original scope; they do not schedule later work.
 
-```text
-UI Foundation Correction (complete)
-        +-----------------------------+
-        |                             |
-        v                             v
-Runtime UI Product Slice      Editor Authoring Loop v1
-         (complete)                   (complete)
-        |                             |
-        +-------------+---------------+
-                      v
-             Nara UI Inspector Parity
-                    (inactive)
-```
+## Current Entry Points
 
-## 1. UI Foundation Correction
+- [ADR 0118](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md) owns
+  Editor workspace, panel, frontend and creation-template boundaries. The selected frontend is
+  Dear ImGui; the earlier single-window egui implementation is historical.
+- [Architecture map](../architecture/README.md) and
+  [implementation status](../architecture/adr/implementation-status.md) locate current contracts,
+  evidence and bounded remaining gaps.
+- [Native Editor qualification](../verification/native-editor-qualification.md) describes actual
+  Windows/DX12 checks and the limits of their platform/input claims.
+- [Rust Product Recipes](../guides/rust-product-recipes.md) and
+  [persistent components](../guides/persistent-components.md) explain current author workflows.
 
-Plan: [2026-08-08 UI Foundation Correction](../plans/2026-08-08-001-refactor-ui-foundation-correction-plan.md)
+## Earlier Plans
 
-Closes the shared contracts before product expansion:
+| Plan | Historical role |
+|---|---|
+| [UI Foundation Correction](2026-08-08-001-refactor-ui-foundation-correction-plan.md) | Shared UI interaction, compilation and presentation baseline. |
+| [Runtime UI Product Slice](2026-08-08-002-feat-runtime-ui-product-slice-plan.md) | First runtime HUD and terminal consumer of that baseline. |
+| [Editor Authoring Loop v1](2026-08-08-003-feat-editor-foundation-workflow-plan.md) | First egui editing, persistence and external-product authoring loop. |
 
-- atomic presented-session interaction;
-- root-local validation and last-good order rebinding;
-- frame-global resource budgets and backend capability closure;
-- Host-owned surface/session identity and bounded accessibility ingress;
-- neutral conformance examples and a versioned Foundation Conformance Baseline.
-
-## 2. Runtime UI Product Slice
-
-Plan: [Runtime UI Product Slice](../plans/2026-08-08-002-feat-runtime-ui-product-slice-plan.md)
-
-Consumes a pinned Foundation Conformance Baseline to prove the data-authored HUD, terminal, Retry
-and headless / desktop package workflow. It may expose a missing shared capability, but cannot
-change a shared Interface without a focused successor baseline and explicit rebase.
-
-## 3. Editor Authoring Loop v1
-
-Plan: [Editor Authoring Loop v1](../plans/2026-08-08-003-feat-editor-foundation-workflow-plan.md)
-
-Builds the first single-window egui Editor flow: open, canonical Scene Tree, Inspector, exact
-revision-bound edit, stale rejection, Undo/Redo, Save, Close/Reopen/Close, diagnostics, and handoff
-of the same source change to check, generated-product run, and source-carrying export. Viewport,
-in-Editor Play placement, docking, detached windows, IME/accessibility completion, and convergence
-on Nara UI remain evidence-gated successors.
-
-Runtime UI and Editor are independent technical successors. Only one becomes active at a time; the
-choice is product priority, not a fabricated dependency. Both first product slices are now
-complete. The later Nara UI Inspector parity gate, not the egui Inspector, is the heterogeneous
-consumer for shared widget/convergence decisions and requires a new reviewed plan before work.
-
-## Admission rule
-
-Open-GPUI, Dear ImGui, Godot, Bevy and Unity are comparative sources. A shared Nara module needs
-an owner, a named invariant, a neutral assertion and either independent comparative pressure or a
-second heterogeneous consumer. A product-specific need alone stays in its adapter or data model.
+These plans are complete. Later Scene/Game views, supervised Play, image authoring, docking,
+detached windows and the selected Dear frontend have their own contracts and evidence. Consult
+the current owners above before treating an old successor list as unfinished work. New tasks are
+chosen from user goals and observed product needs, not automatically from this history.

@@ -14,9 +14,15 @@ future Host integrators who need Nara's internal extension architecture vocabula
 
 **Document Role**: Explanatory guide; it introduces no decisions or implementation order.
 
-**Canonical Vocabulary**: [Nara Engine Architecture Language](../../CONTEXT.md)
+**Historical Vocabulary**: [Architecture context and earlier terminology](../../CONTEXT.md)
 
 **Detailed Designs**: [Source Extension Package Interface Design](source-extension-package-interface-design.md), [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md), [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md), [Render Extension Capability Interface Design](render-extension-capability-interface-design.md)
+
+This historical guide combines proposed package concepts with implementation snapshots from its
+original research. Its "what exists today" sections are not maintained as current status. Use
+[Rust Product Recipes](../guides/rust-product-recipes.md) for current compiled composition and the
+[architecture map](README.md) for selected ownership contracts. Retired runtime/kernel sketches
+are available through the history notes linked above.
 
 ## Reader Route
 
@@ -26,8 +32,8 @@ package authors; the first rows below tell those readers where to stop.
 
 | Audience | Normal Interface | Internal model required for normal work? |
 |---|---|---|
-| Project user | Package Manager, `nara.toml`, compiled product/profile selection, Editor/CLI Run and Play, status, and diagnostics; Product Package selection remains an OQ-031 target | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
-| Game code author | `Plugin`, ECS data/systems, assets, scenes, and optional code-first `App` | No; use the [runtime caller journeys](runtime-composition-interface-design.md#caller-journeys) |
+| Project user | Package Manager, `nara.toml`, compiled product/profile selection, Editor/CLI Run and Play, status, and diagnostics; Product Package selection remains an OQ-031 target | No; use [Rust Product Recipes](../guides/rust-product-recipes.md) |
+| Game code author | `Plugin`, ECS data/systems, assets, scenes, and optional code-first `App` | No; use [Rust Product Recipes](../guides/rust-product-recipes.md) |
 | Small runtime plugin/group author | `Plugin`, `PluginGroup`, and domain helpers | No |
 | Reusable package author | Leading OQ-045 trial: one `package(config)` function returning an opaque root contribution; broader multi-role package machinery remains deferred | No |
 | Importer, Inspector, or other provider author | One narrow domain trait/context with typed settings, errors, and outputs | No |
@@ -768,7 +774,7 @@ Tooling roles instead of giving one callback every authority. Today this remains
 custom schedule and type-directed group ergonomics have landed as trials but still need an
 independent package-author fixture; the shared Import Host, separate render capability gates,
 native-service retirement, and second-toolkit integration remain unimplemented evidence. The
-detailed classification lives in [Runtime Composition Interface Design](runtime-composition-interface-design.md#bevy-trade-off-budget).
+detailed classification belongs to the original workbench linked from [runtime design history](runtime-composition-interface-design.md).
 
 ### What Nara Takes From Godot
 

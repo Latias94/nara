@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "8e007be43f3fd32ea917e37db63d48bb7a18646dc11f1f7615aacb619d2ae7f9"
+source_fingerprint: "086c085803428c4d396f58a5b8a00fd5e94b2f5d30f6eaa13270d1801f7ce1a9"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "8e007be43f3fd32ea917e37db63d48bb7a18646dc11f1f7615aacb619d2
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `8e007be43f3fd32ea917e37db63d48bb7a18646dc11f1f7615aacb619d2ae7f9`
-- Immutable records: 724
+- Source fingerprint: `086c085803428c4d396f58a5b8a00fd5e94b2f5d30f6eaa13270d1801f7ce1a9`
+- Immutable records: 725
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Decision**: [Agent workflow and design cleanup](decisions/2026-10/2026-10-17T152243Z-agent-workflow-and-design-cleanup-c85f611fef834769b7488de6e5ffcc15.md) - Keep engineering continuity while removing registration gates and retiring stale design entrances.
 - **Verification Evidence**: [Dear ImGui 0.21 published backend acceptance](verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md) - Published registry cohort, owned renderer mapping, native IME and Windows DX12 product qualification with bounded text-intent cadence.
 - **Memory Event**: [Verification: Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourte](logs/2026-10/2026-10-17T135008Z-verification-green-editor-run8d5467b0-passes132-132-with-bounded-text-intent-followup-fourte-01d5279ca83145e497911729d884cfef.md) - Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourteen native cases remain outside ordinary suite. Independent i
 - **Memory Event**: [Verification: Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repain](logs/2026-10/2026-10-17T134739Z-verification-red-run755cd0d8-proves-real-on-demand-ime-defect-programmatic-text-focus-repain-30e2165bd7c841b582bd1ad12cdcdaf9.md) - Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repaints_until_ime_intent_catches_up_then_becomes_idle fails IO.wa
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Progress: Foundation closure U1 committed187abda after red0eeafccb (Modified control pass,](logs/2026-10/2026-10-17T112422Z-progress-foundation-closure-u1-committed187abda-after-red0eeafccb-modified-control-pass-6844535470db48a787a8caa68c76a546.md) - Foundation closure U1 committed187abda after red0eeafccb (Modified control pass, Removed byte limit failed Some1vsNone) and Image redb1e1a33
 - **Memory Event**: [Verification: Foundation correctness plan review complete: feasibility, coherence, design, sco](logs/2026-10/2026-10-17T110059Z-verification-foundation-correctness-plan-review-complete-feasibility-coherence-design-sco-19e1cf997e7d44dea12d26614ccbb357.md) - Foundation correctness plan review complete: feasibility, coherence, design, scope and adversarial lenses across three read-only Codex conte
 - **Memory Event**: [Completion: Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4](logs/2026-10/2026-10-17T102708Z-completion-original-editor-foundation-full-u9-u1-u8-finite-acceptance-achieved-at-source-f4-5670eb0ad1fc4fba9d29b6cef0eff2f4.md) - Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4ffdd18, final evidence b68c3a9f938a49b7ba63779f2849d0d9. Exa
-- **Verification Evidence**: [Editor foundation U9 and U1-U8 close with selected Dear frontend and exact external products](verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md) - R1-R11 and AE1-AE6 accepted through reviewed single-owner boundaries, complete frontend migration and exact committed-source external authoring Play Check Export on Windows DX12.
 
 # Integration Notes
 

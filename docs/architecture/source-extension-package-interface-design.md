@@ -5,7 +5,7 @@
 **Last Updated**: 2026-07-20
 **Owner**: Source extension packages, contribution catalogs, product/build hosts, and domain owners
 **Authority**: Non-normative design harness. Accepted ADRs remain authoritative on conflict.
-**Document Role**: Canonical source-package harness; tracer-gated and not implementation authority.
+**Document Role**: Inactive source-package workbench; historical research, not implementation authority.
 **Related Question**: [OQ-031: Product Package, Contribution, and Trust Topology](open-questions.md#oq-031-product-package-contribution-and-trust-topology)
 **Validation Harness**: [Multi-Role Extension Package Tracer Interface Design](multi-role-extension-package-tracer-design.md)
 **Focused Interfaces**: [Extension Contract Kernel Interface Design](extension-contract-kernel-interface-design.md), [Asset Import Host Interface Design](asset-import-host-interface-design.md)
@@ -24,6 +24,11 @@
 **Product Contract**: [Nara Package and Extension Product Contract](../plans/2026-07-20-001-feat-package-extension-product-contract-plan.md)
 
 ## Purpose
+
+Implementation snapshots below retain their original research scope. Use
+[Rust Product Recipes](../guides/rust-product-recipes.md) for current compiled composition and
+[OQ-031](open-questions.md#oq-031-product-package-contribution-and-trust-topology) for the wider
+package investigation's trigger. This draft does not require implementing a package kernel.
 
 This document is a scenario-driven workbench for Nara's future source extension package Interface.
 It asks how one installed third-party package can coherently contribute runtime behavior, editor
