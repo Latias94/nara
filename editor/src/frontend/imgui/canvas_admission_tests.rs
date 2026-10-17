@@ -171,7 +171,6 @@ impl CanvasAdmission {
                 false,
                 true,
                 "CPU Canvas admission regression",
-                "",
                 None,
             )
             .unwrap();

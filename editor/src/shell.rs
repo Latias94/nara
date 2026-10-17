@@ -1,11 +1,11 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 
 use nara::{
     project_host::{
         EditorProjectOpenAttempt, EditorProjectOpenFailure, EditorProjectOpenPhase,
         EditorProjectSession,
     },
-    tooling::{EditorAuthoringReadiness, EditorFrameModel},
+    tooling::EditorAuthoringReadiness,
 };
 
 use crate::supervised_play::{SupervisedDesktopPlayOwner, SupervisedPlayWake};
@@ -413,15 +413,6 @@ impl std::fmt::Debug for EditorProductState {
             )
             .finish_non_exhaustive()
     }
-}
-
-pub(crate) enum EditorApplicationSurface {
-    ProjectShell,
-    Workspace {
-        frame: Arc<EditorFrameModel>,
-        ui_authoring: Option<Arc<nara::project_host::EditorUiAuthoringFrame>>,
-        read_only: bool,
-    },
 }
 
 /// Read-only project lifecycle facts; editable form buffers belong to a frontend.

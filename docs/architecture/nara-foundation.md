@@ -106,7 +106,7 @@ flowchart TD
     App --> Window[nara_window: normalized window data]
     Window --> WinitAdapter[nara_winit adapter]
     App -->|models and observations| Tooling[nara_tooling: commands, views, inspector, and transitional Play model]
-    Tooling --> EguiTooling[nara_tooling_egui: egui editor/debug adapter]
+    Tooling --> EditorFrontend[Private Editor: Dear ImGui adapter]
     Scene --> Identity
     Scene --> Hierarchy
     Transform --> Hierarchy
@@ -164,7 +164,7 @@ or private. ADR 0089 remains Proposed; the implementation ledger is the authorit
 | `nara_winit` | `WinitRunner` and desktop event-loop integration | Top-level-selected desktop driver over `RuntimeInstance` that owns native windows, updates normalized input/window state through short driver scopes, invokes scoped renderer retirement only for its targets, joins registered runtime close with provider/native teardown, and preserves distinct primary-runner and teardown failures |
 | `nara_render_wgpu` | `WgpuRenderPlugin`, `WgpuRenderBackend`, `WgpuFrameTransactionStats`, surface policy helpers, `WgpuRenderTextureCacheStats` | wgpu device/surface lifecycle, safe owning surface creation, main-thread native execution, scoped surface-retirement driver, owned topology and sprite/UI batch capture, pre-acquire generation/topology rejection, at-most-once acquire/submit/present, clamped UI scissor, private opaque/blend pipelines, generation-aware image texture caches, material/sampler bind groups, grace-frame cache eviction, and `RenderBackendStatus` updates |
 | `nara_tooling` | `EditorFrameModel`, `EditorActionBatch`, `EditorDocumentMutation`, `EditorNavigationAction`, `EditorPersistenceAction`, `EditorWorkspaceIntentAction`, `EditorWorkspace`, `EditorDocumentId`, `SceneInspectorModel` | UI-neutral Host-owned Editor frame, ordered action, workspace, Inspector, query, and result models; stable document/revision identity, canonical Scene Tree projection, bounded clean-aware history, selection, persistence, Play, and diagnostics remain outside toolkit authority; no egui, `App`, filesystem capability, native window, or GPU ownership |
-| `nara_tooling_egui` | `EguiEditorPanel` | egui-only Authoring Adapter that renders one immutable `EditorFrameModel` plus an optional exact UI-authoring view and returns one revision-bound `EditorActionBatch`; it owns only transient toolkit interaction and exact document/revision-bound field drafts, with no document, selection, history, persistence, Play, window, GPU, authoring-session, or World authority |
+| Private Editor frontend | `ImguiEditorFrontend`, source-built panel painting companions | Dear ImGui adapter over immutable semantic frames and exact authoring views; returns revision-bound actions and owns transient widget state. Document, history, persistence, Play and GPU authority remain in their existing owners. The former `nara_tooling_egui` crate is removed by ADR 0118. |
 
 ## Accepted Runtime Debugging Direction
 
@@ -526,7 +526,8 @@ second real adapter or stronger isolation pressure.
   one Play owner. It owns the paired workspace persistence authority, actual filesystem capability,
   receipt-backed Save/Reopen, dirty-close intent, recipe preparation,
   `RuntimeStartAttempt`, `RuntimeInstance`, control tickets, close evidence, and retirement.
-  `nara_tooling` and egui retain only commands, views, observations, and Apply Changes models.
+  `nara_tooling` and the selected frontend retain only commands, views, observations, and
+  Apply Changes models.
 - Document commands commit against a live document revision and share the same bounded patch and
   undo history through native or programmatic callers. Geometry input instead retains one opaque
   displayed token issued by the preview presentation owner. Content, image target, backend/device
@@ -542,7 +543,9 @@ second real adapter or stronger isolation pressure.
   prefab-expanded entities, and failed patch validation. One-shot runtime edits never become
   persistent unless this explicit flow succeeds.
 - `nara_tooling::EditorWorkspace` is the UI-agnostic editor document authority. It owns open scene slots, active document, selection sets, dirty/saved revisions, external reload pending/conflict state, per-document undo/redo, and workspace command reports. Saved state advances only through its matching non-cloneable `EditorPersistenceAuthority` after a consumed `nara_fs::ReplaceReceipt` proves prior/candidate identity, required durability, and matching post-publication content; ordinary workspace/UI code cannot forge the transition. The current policy remains `DetectOnly`, so a non-cooperative write after receipt observation is handled by external-change detection and explicit Reopen rather than a strong CAS claim.
-- `nara_tooling_egui` is the first concrete debug/editor UI adapter. It renders `SceneEditorModel` and `SceneInspectorModel`, returns `EditorWorkspaceCommand` values, and keeps egui out of `nara_tooling` and runtime-facing crates.
+- The private Editor's Dear ImGui frontend renders semantic authoring models and emits existing
+  actions. Its registered painting companions keep toolkit types out of `nara_tooling` and
+  runtime-facing crates. ADR 0118 supersedes the former egui adapter.
 - Prefab overrides use the same patch transaction model as scene edits. The old whole-component override API was removed before 1.0.
 - `PrefabSourceResolver` and `InMemoryPrefabSourceResolver` expand nested prefab instances before
   spawn. Expanded IDs are opaque, document-local projections. Structured provenance records the

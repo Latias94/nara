@@ -18,10 +18,7 @@ desktop = [
     "nara/render-wgpu",
 ]
 desktop-accessibility-probe = ["desktop", "dep:windows"]
-editor = ["nara/tooling"]
-editor-game-view-canary = ["desktop", "editor", "dep:nara-editor"]
-editor-imgui-qualification = ["desktop", "editor", "dep:nara-editor", "nara-editor/imgui-qualification"]
-editor-supervised-play-canary = ["desktop", "editor", "dep:nara-editor"]
+editor = ["desktop", "nara/tooling", "dep:nara-editor"]
 host-parity = ["desktop", "editor"]
 
 [workspace]
@@ -42,7 +39,6 @@ windows = { version = "0.62.2", optional = true, features = [
 
 [dev-dependencies]
 accesskit = "0.24.1"
-nara-editor = { path = "../editor" }
 nara_render = { path = "../crates/nara_render" }
 nara_ui = { path = "../crates/nara_ui" }
 nara_ui_kernel = { path = "../crates/nara_ui_kernel" }
@@ -69,21 +65,6 @@ required-features = ["desktop-accessibility-probe"]
 name = "host_parity_probe"
 path = "src/bin/host_parity_probe.rs"
 required-features = ["host-parity"]
-
-[[bin]]
-name = "editor_game_view_canary"
-path = "src/bin/editor_game_view_canary.rs"
-required-features = ["editor-game-view-canary"]
-
-[[bin]]
-name = "editor_supervised_play_canary"
-path = "src/bin/editor_supervised_play_canary.rs"
-required-features = ["editor-supervised-play-canary"]
-
-[[bin]]
-name = "editor_imgui_qualification"
-path = "src/bin/editor_imgui_qualification.rs"
-required-features = ["editor-imgui-qualification"]
 
 [[bin]]
 name = "authoring_bundle"

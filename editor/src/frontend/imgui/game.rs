@@ -20,11 +20,6 @@ impl ImguiGameView {
         captured: bool,
     ) -> (Option<[f32; 2]>, Option<ImguiImageInteraction>) {
         ui.checkbox("Integer scaling", &mut self.integer_scaling);
-        if play.is_out_of_date() {
-            ui.text_wrapped("Game View is out of date; save and refresh content before Restart");
-        } else if play.state() == EditorPlayState::Paused {
-            ui.text_wrapped("Play is paused; Scene authoring remains isolated from this Runtime");
-        }
 
         let min = ui.cursor_screen_pos();
         let available = ui.content_region_avail();
@@ -81,6 +76,41 @@ impl ImguiGameView {
             ui.text("Start an admitted embedded Game View");
             None
         };
+        if play.is_out_of_date() || play.state() == EditorPlayState::Paused {
+            // Feedback overlays the established image rectangle. Transient Play state must not
+            // resize the Runtime target or revoke the input route while a fixed Step presents.
+            ui.set_cursor_screen_pos(panel.min);
+            ui.child_window("game_notice_overlay")
+                .size(size)
+                .flags(
+                    dear_imgui_rs::WindowFlags::NO_INPUTS
+                        | dear_imgui_rs::WindowFlags::NO_NAV_FOCUS
+                        | dear_imgui_rs::WindowFlags::NO_FOCUS_ON_APPEARING
+                        | dear_imgui_rs::WindowFlags::NO_BACKGROUND
+                        | dear_imgui_rs::WindowFlags::NO_SCROLLBAR
+                        | dear_imgui_rs::WindowFlags::NO_SCROLL_WITH_MOUSE,
+                )
+                .build(ui, || {
+                    ui.set_cursor_screen_pos([
+                        panel.min[0] + 8.0,
+                        panel.min[1]
+                            + if captured {
+                                ui.text_line_height_with_spacing() + 8.0
+                            } else {
+                                8.0
+                            },
+                    ]);
+                    if play.is_out_of_date() {
+                        ui.text_wrapped(
+                            "Game View is out of date; save and refresh content before Restart",
+                        );
+                    } else {
+                        ui.text_wrapped(
+                            "Play is paused; Scene authoring remains isolated from this Runtime",
+                        );
+                    }
+                });
+        }
         ui.set_cursor_screen_pos([panel.min[0], panel.max[1]]);
         ui.dummy([0.0, 0.0]);
         (requested_extent, interaction)
@@ -364,6 +394,37 @@ mod tests {
                 .contains("Play is paused; Scene authoring remains isolated from this Runtime")
         );
         assert!(!log.borrow().contains("out of date"));
+        let paused = draw(
+            &mut context,
+            &mut game,
+            &play(EditorPlayState::Paused, false),
+            false,
+            false,
+        );
+        for state in [
+            EditorPlayState::Stepping,
+            EditorPlayState::Running,
+            EditorPlayState::Paused,
+        ] {
+            let rendered = draw(&mut context, &mut game, &play(state, false), false, false);
+            assert_eq!(
+                rendered.requested_extent, paused.requested_extent,
+                "transient Play feedback must not resize the Runtime canvas"
+            );
+            assert_eq!(
+                rendered.image.rect, paused.image.rect,
+                "transient Play feedback must keep the same presented image mapping"
+            );
+        }
+        let stale = draw(
+            &mut context,
+            &mut game,
+            &play(EditorPlayState::Paused, true),
+            false,
+            false,
+        );
+        assert_eq!(stale.requested_extent, paused.requested_extent);
+        assert_eq!(stale.image.rect, paused.image.rect);
     }
 
     #[test]

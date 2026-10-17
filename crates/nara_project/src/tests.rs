@@ -639,7 +639,7 @@ plugin_plan = "runtime-2d"
 
 #[test]
 fn runtime_tooling_capabilities_are_rejected_by_manifest() {
-    for capability in ["tooling", "tooling-egui"] {
+    for capability in ["tooling", "editor"] {
         let load = ProjectManifest::parse_toml_str(&format!(
             r#"
 schema_version = 1

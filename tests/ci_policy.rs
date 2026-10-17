@@ -106,7 +106,6 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         "asset-watch",
         "desktop-winit",
         "render-wgpu",
-        "tooling-egui",
         "serde",
         "project-tooling",
     ] {
@@ -142,6 +141,7 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1",
             "else",
             "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1",
+            "cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1",
             "fi",
         ],
         "module-consumer CI",
@@ -314,7 +314,7 @@ fn assert_external_manifest_boundaries() {
             .filter(|dependency| !dependency.starts_with("target."))
             .map(str::to_owned)
             .collect(),
-        "gameplay uses the root facade while explicit native Editor canaries and component probes use their declared dependencies"
+        "gameplay uses the root facade while explicit trusted Editor embedding and component probes use their declared dependencies"
     );
     assert_eq!(
         reference["dependencies"]["nara-editor"]["optional"].as_bool(),

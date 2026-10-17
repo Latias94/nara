@@ -69,7 +69,6 @@ jobs:
           cargo check -p nara --locked --no-default-features --features asset-watch --lib
           cargo check -p nara --locked --no-default-features --features desktop-winit --lib
           cargo check -p nara --locked --no-default-features --features render-wgpu --lib
-          cargo check -p nara --locked --no-default-features --features tooling-egui --lib
           cargo check -p nara --locked --no-default-features --features serde --lib
           cargo check -p nara --locked --no-default-features --features project-tooling --lib
           cargo check -p nara --locked --no-default-features --features runtime-core,serde --lib
@@ -186,4 +185,5 @@ jobs:
             cargo nextest run --manifest-path module-consumer/Cargo.toml --locked --workspace --test-threads=1
           else
             cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-scene-module-consumer -p nara-material-module-consumer --test-threads=1
+            cargo nextest run --manifest-path module-consumer/Cargo.toml --locked -p nara-editor-panel-module-consumer --test-threads=1
           fi

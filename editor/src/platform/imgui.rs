@@ -14,7 +14,6 @@ use nara::{
     asset::{AssetId, Handle},
     project_host::{
         EditorGameStartRequest, EditorGameViewCandidateIdentity, EditorGameViewCompletion,
-        TrustedCompiledEditorProjectIntent,
     },
     render::{
         __private::{editor_viewport_image_target, map_editor_game_view_packet},
@@ -25,7 +24,7 @@ use nara::{
         WgpuEditorUiImageSubmission, WgpuEditorViewId, WgpuEditorViewportIdentity,
         WgpuEditorWindowFrame, WgpuSubmittedImageReceipt,
     },
-    tooling::{EditorAction, EditorActionBatch, EditorPlayAction, EditorPlayState},
+    tooling::{EditorActionBatch, EditorPlayState},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
 };
 use winit::{
@@ -37,7 +36,7 @@ use winit::{
 };
 
 use crate::frontend::imgui::{ImguiEditorFrontend, ImguiViewImage};
-use crate::{EditorApplication, EditorLaunchOptions};
+use crate::{EditorApplication, supervised_play::SupervisedPlayWake};
 
 use super::{
     EditorGpuRecovery, EditorRunError, earliest_deadline, editor_window_packet,
@@ -47,6 +46,8 @@ use super::{
 
 #[cfg(all(test, target_os = "windows"))]
 mod authoring_workflow_tests;
+#[cfg(all(test, target_os = "windows"))]
+mod cadence_tests;
 mod canvas;
 #[cfg(all(test, target_os = "windows"))]
 mod canvas_reopen_tests;
@@ -59,60 +60,62 @@ mod input;
 mod manager_workflow_tests;
 mod repaint;
 use canvas::ImguiUiCanvasPresenter;
+#[cfg(all(test, target_os = "windows"))]
+mod game_input_tests;
+#[cfg(all(test, target_os = "windows"))]
+mod lifecycle_tests;
 mod scene;
 #[cfg(all(test, target_os = "windows"))]
 mod scene_image_tests;
 #[cfg(all(test, target_os = "windows"))]
+mod supervised_play_support;
+#[cfg(all(test, target_os = "windows"))]
 mod supervised_play_tests;
-use super::viewport::EditorGamePresentedStamp;
+use super::game_input::EditorGamePresentedStamp;
 use input::ImguiInput;
 use scene::ImguiScenePresenter;
 
 const GAME_TARGET_ID: u64 = 2;
 
-/// Runs the explicitly selected qualification slice without changing the production frontend.
-#[doc(hidden)]
-pub fn run_imgui_qualification(
-    options: EditorLaunchOptions,
-    intent: Option<TrustedCompiledEditorProjectIntent>,
-) -> Result<(), EditorRunError> {
-    let mut application = match intent {
-        Some(intent) => EditorApplication::open_trusted_compiled(options, intent)?,
-        None => EditorApplication::new(options),
-    };
-    if std::env::var_os("NARA_IMGUI_QUALIFICATION_CANARY").is_none()
-        && let Some(preferences) = crate::workspace::EditorWorkspacePreferences::user_default()
-    {
+pub(super) fn run_application(mut application: EditorApplication) -> Result<(), EditorRunError> {
+    if let Some(preferences) = crate::workspace::EditorWorkspacePreferences::user_default() {
         application
             .panel_workspace_mut()
             .set_preferences(preferences);
     }
-    let event_loop =
-        EventLoop::new().map_err(|error| EditorRunError::EventLoop(error.to_string()))?;
+    let event_loop = EventLoop::<EditorUserEvent>::with_user_event()
+        .build()
+        .map_err(|error| EditorRunError::EventLoop(error.to_string()))?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut host = ImguiQualificationHost {
+    let proxy = event_loop.create_proxy();
+    let supervised_play_wake = SupervisedPlayWake::new(move || {
+        proxy
+            .send_event(EditorUserEvent::SupervisedPlayWake)
+            .is_ok()
+    });
+    application.install_supervised_play_wake(supervised_play_wake.clone());
+    let mut host = NativeEditorHost {
         application,
+        supervised_play_wake,
         native: None,
         window: None,
         retained: None,
         gpu_recovery: EditorGpuRecovery::Ready,
         error: None,
-        last_drive: Instant::now(),
+        last_drive: None,
         repaint_deadline: None,
-        metrics: super::qualification_metrics::FrontendMetrics::requested("dear-imgui"),
     };
     if let Err(error) = event_loop.run_app(&mut host) {
         host.error
             .get_or_insert_with(|| EditorRunError::EventLoop(error.to_string()));
     }
-    let failed = host.error.is_some();
-    let shutdown = host.native.as_mut().map_or(Ok(()), |native| {
-        if failed {
-            native.shutdown_graphics()
-        } else {
-            native.shutdown()
-        }
-    });
+    let shutdown = host
+        .native
+        .as_mut()
+        .map_or(Ok(()), NativeImgui::shutdown_graphics);
+    if let Some(native) = &host.native {
+        native.publish_render_views(host.application.panel_workspace_mut());
+    }
     if let Some(error) = host.error {
         if let Err(shutdown) = shutdown {
             return Err(imgui_error(format!(
@@ -124,23 +127,27 @@ pub fn run_imgui_qualification(
     shutdown
 }
 
-struct ImguiQualificationHost {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorUserEvent {
+    SupervisedPlayWake,
+}
+
+struct NativeEditorHost {
     application: EditorApplication,
+    supervised_play_wake: SupervisedPlayWake,
     native: Option<NativeImgui>,
     window: Option<Arc<Window>>,
     retained: Option<ImguiRetainedState>,
     gpu_recovery: EditorGpuRecovery,
     error: Option<EditorRunError>,
-    last_drive: Instant,
+    last_drive: Option<Instant>,
     repaint_deadline: Option<Instant>,
-    metrics: Option<super::qualification_metrics::FrontendMetrics>,
 }
 
 struct ImguiRetainedState {
     frontend: ImguiEditorFrontend,
     layout: String,
     saved_layout: Option<crate::workspace::EditorWorkspaceLayout>,
-    canary: Option<ImguiNativeCanary>,
     frame_index: u64,
     next_view: u64,
 }
@@ -159,7 +166,6 @@ struct NativeImgui {
     workspace_generation: Option<u64>,
     frame_index: u64,
     last_frame: Instant,
-    status: String,
     detachment: &'static str,
     layout: Option<crate::workspace::EditorWorkspaceLayout>,
     next_view: u64,
@@ -170,75 +176,13 @@ struct NativeImgui {
     input: ImguiInput,
     game_candidate: Option<EditorGameViewCandidateIdentity>,
     game_source_active: bool,
-    canary: Option<ImguiNativeCanary>,
     layout_loaded: bool,
     presented: bool,
     ui_followup: bool,
-    text_trace: bool,
-    traced_text: String,
-    traced_probe_rect: Option<nara::render::DisplayRect>,
-    traced_game: Option<serde_json::Value>,
-}
-
-struct ImguiNativeCanary {
-    started: Instant,
-    fail_after_first_present: bool,
-    phase: ImguiCanaryPhase,
-    primary_frames: u32,
-    secondary_frames: u32,
-    minimized_secondary_frames: u32,
-    returned_frames: u32,
-    game_closed_frames: u32,
-    scene_closed_frames: u32,
-    reopened_frames: u32,
-    recovered_frames: u32,
-    retired_backend: Option<u64>,
-    first_present_ms: Option<u128>,
-    stale_receipt_rejected: bool,
-    last_game: Option<WgpuSubmittedImageReceipt>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ImguiCanaryPhase {
-    Primary,
-    Detached,
-    Minimized,
-    RestoringPrimary,
-    Returned,
-    GameClosed,
-    GameReopening,
-    SceneClosed,
-    Reopened,
-    Recovering,
-    Recovered,
-    Stopping,
-    Complete,
-}
-
-impl ImguiNativeCanary {
-    fn requested() -> Option<Self> {
-        let mode = std::env::var("NARA_IMGUI_QUALIFICATION_CANARY").ok()?;
-        match mode.as_str() {
-            "1" | "fail-after-present" => Some(Self {
-                started: Instant::now(),
-                fail_after_first_present: mode == "fail-after-present",
-                phase: ImguiCanaryPhase::Primary,
-                primary_frames: 0,
-                secondary_frames: 0,
-                minimized_secondary_frames: 0,
-                returned_frames: 0,
-                game_closed_frames: 0,
-                scene_closed_frames: 0,
-                reopened_frames: 0,
-                recovered_frames: 0,
-                retired_backend: None,
-                first_present_ms: None,
-                stale_receipt_rejected: false,
-                last_game: None,
-            }),
-            _ => None,
-        }
-    }
+    #[cfg(test)]
+    lifecycle_frame: Option<(WgpuEditorFrameOutcome, Vec<WgpuEditorFrameOutcome>)>,
+    #[cfg(all(test, target_os = "windows"))]
+    submitted_game_observation: Option<game_input_tests::SubmittedGameObservation>,
 }
 
 enum ImguiRenderer {
@@ -516,12 +460,6 @@ impl NativeImgui {
             context.io_mut().set_config_dpi_scale_fonts(true);
             context.io_mut().set_config_dpi_scale_viewports(true);
         }
-        let construction_probe = std::env::var("NARA_IMGUI_QUALIFICATION_CANARY").ok();
-        if construction_probe.as_deref() == Some("fail-after-platform") {
-            return Err(imgui_error(
-                "requested qualification failure after platform attachment",
-            ));
-        }
         let renderer = gpu
             .with_device(editor_window_packet(&window), |scope| {
                 WgpuRenderer::new(
@@ -550,15 +488,6 @@ impl NativeImgui {
                 return Err(error);
             }
         };
-        if construction_probe.as_deref() == Some("fail-after-renderer") {
-            return Err(retire_failed_imgui_renderer(
-                imgui_error("requested qualification failure after renderer creation"),
-                &gpu,
-                &mut renderer,
-                &mut platform,
-                &mut context,
-            ));
-        }
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
         let renderer = if native_detachment {
             match WinitViewportRoute::attach(&mut context, &platform, renderer) {
@@ -591,9 +520,8 @@ impl NativeImgui {
             workspace_generation: None,
             frame_index: 0,
             last_frame: Instant::now(),
-            status: "Qualification has not established frontend parity".to_owned(),
             detachment: if native_detachment {
-                "Native detachment: experimental; exact secondary-image proof pending"
+                "Native detachment: experimental"
             } else {
                 "Native detachment unavailable on this profile; in-window docking remains enabled"
             },
@@ -606,14 +534,13 @@ impl NativeImgui {
             input: ImguiInput::default(),
             game_candidate: None,
             game_source_active: false,
-            canary: ImguiNativeCanary::requested(),
             layout_loaded: false,
             presented: false,
             ui_followup: true,
-            text_trace: std::env::var_os("NARA_IMGUI_TEXT_TRACE").is_some(),
-            traced_text: String::new(),
-            traced_probe_rect: None,
-            traced_game: None,
+            #[cfg(test)]
+            lifecycle_frame: None,
+            #[cfg(all(test, target_os = "windows"))]
+            submitted_game_observation: None,
         })
     }
 
@@ -622,12 +549,14 @@ impl NativeImgui {
         event_loop: &ActiveEventLoop,
         application: &mut EditorApplication,
     ) -> Result<bool, EditorRunError> {
-        self.redraw_frame(
+        let result = self.redraw_frame(
             event_loop,
             application,
             #[cfg(test)]
             |_| {},
-        )
+        );
+        self.publish_render_views(application.panel_workspace_mut());
+        result
     }
 
     #[cfg(test)]
@@ -637,7 +566,32 @@ impl NativeImgui {
         application: &mut EditorApplication,
         before_new_frame: impl FnOnce(&mut Context),
     ) -> Result<bool, EditorRunError> {
-        self.redraw_frame(event_loop, application, before_new_frame)
+        let result = self.redraw_frame(event_loop, application, before_new_frame);
+        self.publish_render_views(application.panel_workspace_mut());
+        result
+    }
+
+    fn publish_render_views(&self, workspace: &mut crate::workspace::EditorPanelWorkspace) {
+        let bindings = workspace
+            .layout()
+            .instances()
+            .iter()
+            .filter_map(|panel| {
+                let target = match panel.kind() {
+                    "nara.authoring-view" => &self.scene,
+                    "nara.game-view" => &self.game,
+                    _ => return None,
+                };
+                let view = target
+                    .view
+                    .filter(|_| panel.is_visible() && target.identity.is_some())
+                    .map(|view| crate::workspace::EditorRenderViewId(view.get()));
+                Some((panel.id(), view))
+            })
+            .collect::<Vec<_>>();
+        for (panel, view) in bindings {
+            workspace.layout_mut().set_render_view(panel, view);
+        }
     }
 
     fn redraw_frame(
@@ -647,6 +601,10 @@ impl NativeImgui {
         #[cfg(test)] before_new_frame: impl FnOnce(&mut Context),
     ) -> Result<bool, EditorRunError> {
         self.presented = false;
+        #[cfg(test)]
+        {
+            self.lifecycle_frame = None;
+        }
         let generation = application.workspace_generation();
         if self.workspace_generation != generation {
             self.input.invalidate(true);
@@ -734,36 +692,6 @@ impl NativeImgui {
         self.prepare_game_start(application, window_packet)?;
         let pending_game = self.submit_game(application, window_packet)?;
         let pending_identity = pending_game.as_ref().map(|pending| pending.identity);
-        if let Some(canary) = &mut self.canary {
-            if let Some(old) = canary.last_game.filter(|old| {
-                self.game.submitted.is_some_and(|new| new != *old)
-                    && self
-                        .game
-                        .identity
-                        .is_some_and(|target| target.matches_submission(*old))
-            }) {
-                let stale = self.gpu.present_window(
-                    window_packet,
-                    self.frame_index,
-                    &[old],
-                    |_| panic!("a stale image receipt reached paint"),
-                    || {},
-                );
-                if !matches!(stale, Err(WgpuEditorExecutionError::StaleImageSubmission)) {
-                    if let Some(pending) = pending_game {
-                        self.return_game_completion(
-                            application,
-                            pending.fail(&imgui_error("old image receipt was accepted")),
-                        )?;
-                    }
-                    return Err(imgui_error(
-                        "a repeated image allocation accepted a superseded receipt",
-                    ));
-                }
-                canary.stale_receipt_rejected = true;
-            }
-            canary.last_game = self.game.submitted;
-        }
         let mut secondary_outcomes = Vec::new();
         let mut secondary_windows = Vec::new();
         let canvas_presented = if let Some(frame) = application.current_ui_authoring_frame() {
@@ -793,7 +721,6 @@ impl NativeImgui {
                         self.input.is_captured(),
                         canvas_presented,
                         self.detachment,
-                        &self.status,
                         self.input.preedit(),
                     )
                     .map_err(imgui_error)?,
@@ -939,21 +866,6 @@ impl NativeImgui {
                     || viewport.platform_request_close()
                     || !viewport.platform_window_created()
             });
-        if self.text_trace {
-            if self.traced_probe_rect != output.text_probe_rect {
-                self.traced_probe_rect = output.text_probe_rect;
-                if let Some(rect) = output.text_probe_rect {
-                    println!(
-                        "{}",
-                        serde_json::json!({"probe_rect": {"min": rect.min, "max": rect.max}, "probe_window_rect": output.text_probe_window_rect.map(|rect| (rect.min, rect.max)), "window_scale": self.window.scale_factor()})
-                    );
-                }
-            }
-            if self.traced_text != self.frontend.text_probe() {
-                self.traced_text = self.frontend.text_probe().to_owned();
-                println!("{}", serde_json::json!({"probe_text": self.traced_text}));
-            }
-        }
         if let Some(owner) = output.text_owner {
             let active = self
                 .context
@@ -1017,220 +929,12 @@ impl NativeImgui {
             &secondary_windows,
             game_receipt.is_some(),
             application.ordinary_input_locked(),
+            application.active_game_start_request(),
         );
         self.input.flush(application)?;
-        if self.text_trace {
-            let facts = serde_json::json!({
-                "play": application.current_frame().map(|frame| format!("{:?}", frame.play().state())),
-                "play_rect": output.play_rect.map(|rect| (rect.min, rect.max)),
-                "stop_rect": output.stop_rect.map(|rect| (rect.min, rect.max)),
-                "game_panel_rect": output.game_panel_rect.map(|rect| (rect.min, rect.max)),
-                "scene_panel_rect": output.scene_panel_rect.map(|rect| (rect.min, rect.max)),
-                "scene_image_extent": self.scene.image().map(|image| image.extent),
-                "scene_view": self.scene.view.map(|view| format!("{view:?}")),
-                "scene_presented": outcome.composites().iter().chain(
-                    secondary_outcomes.iter().flat_map(WgpuEditorFrameOutcome::composites)
-                ).any(|receipt| Some(receipt.image()) == self.scene.submitted),
-                "image_rect": output.game_image.map(|image| (
-                    [image.rect.min[0] + image.viewport_origin[0], image.rect.min[1] + image.viewport_origin[1]],
-                    [image.rect.max[0] + image.viewport_origin[0], image.rect.max[1] + image.viewport_origin[1]],
-                )),
-                "captured": self.input.is_captured(),
-                "dear_mouse_down": self.context.io().mouse_down(dear_imgui_rs::MouseButton::Left),
-                "presented": game_receipt.is_some(),
-                "game_window": game_receipt.map(|receipt| receipt.window().window_id().get()),
-            });
-            if self.traced_game.as_ref() != Some(&facts) {
-                println!("{}", serde_json::json!({"game_input_probe": facts}));
-                self.traced_game = Some(facts);
-            }
-        }
-        self.status = format!(
-            "Frame {} | primary presented: {} | exact images: {} | secondary presents: {} (characterization)",
-            self.frame_index,
-            outcome.window().is_some(),
-            outcome.composites().len(),
-            secondary_outcomes.len()
-        );
-        let mut canary_action = None;
-        if let Some(canary) = &mut self.canary {
-            if canary.started.elapsed() > Duration::from_secs(60) {
-                return Err(imgui_error(format!(
-                    "native ImGui qualification timed out at phase {:?}: Scene {:?}, Game {:?}, Play {:?}, backend {} (retired {:?})",
-                    canary.phase,
-                    self.scene.submitted,
-                    self.game.submitted,
-                    application
-                        .current_frame()
-                        .map(|frame| frame.play().state()),
-                    self.gpu.backend_instance_id(),
-                    canary.retired_backend,
-                )));
-            }
-            if outcome.window().is_some() && canary.first_present_ms.is_none() {
-                canary.first_present_ms = Some(canary.started.elapsed().as_millis());
-                if canary.fail_after_first_present {
-                    return Err(imgui_error(
-                        "qualification requested failure after the first native presentation",
-                    ));
-                }
-            }
-            let scene = self.scene.submitted;
-            let game = self.game.submitted;
-            let primary_scene = outcome
-                .composites()
-                .iter()
-                .any(|receipt| Some(receipt.image()) == scene);
-            let primary_game = outcome
-                .composites()
-                .iter()
-                .any(|receipt| Some(receipt.image()) == game);
-            let secondary_game = secondary_outcomes
-                .iter()
-                .flat_map(WgpuEditorFrameOutcome::composites)
-                .any(|receipt| Some(receipt.image()) == game);
-            if let Some(frame) = application.current_frame() {
-                if frame.play().state() == EditorPlayState::Empty
-                    && canary.phase == ImguiCanaryPhase::Primary
-                {
-                    if let Some(scene) = &frame.workspace().active_scene {
-                        canary_action = Some(EditorAction::Play(EditorPlayAction::Play {
-                            document: scene.document,
-                            base_revision: scene.revision,
-                        }));
-                    }
-                }
-            }
-            match canary.phase {
-                ImguiCanaryPhase::Primary if primary_scene && primary_game => {
-                    canary.primary_frames += 1;
-                    if canary.primary_frames >= 4 {
-                        self.frontend.place_qualification_game(true);
-                        canary.phase = ImguiCanaryPhase::Detached;
-                    }
-                }
-                ImguiCanaryPhase::Detached if primary_scene && secondary_game => {
-                    canary.secondary_frames += 1;
-                    if canary.secondary_frames >= 4 {
-                        self.window.set_minimized(true);
-                        canary.phase = ImguiCanaryPhase::Minimized;
-                    }
-                }
-                ImguiCanaryPhase::Minimized
-                    if secondary_game && self.window.is_minimized() == Some(true) =>
-                {
-                    canary.minimized_secondary_frames += 1;
-                    if canary.minimized_secondary_frames >= 4 {
-                        self.window.set_minimized(false);
-                        canary.phase = ImguiCanaryPhase::RestoringPrimary;
-                    }
-                }
-                ImguiCanaryPhase::RestoringPrimary
-                    if primary_scene
-                        && secondary_game
-                        && self.window.is_minimized() == Some(false) =>
-                {
-                    self.frontend.place_qualification_game(false);
-                    canary.phase = ImguiCanaryPhase::Returned;
-                }
-                ImguiCanaryPhase::Returned if primary_scene && primary_game => {
-                    canary.returned_frames += 1;
-                    if canary.returned_frames >= 4 {
-                        if !canary.stale_receipt_rejected {
-                            return Err(imgui_error(
-                                "the native qualification did not reject an overwritten image receipt",
-                            ));
-                        }
-                        canary.phase = ImguiCanaryPhase::GameClosed;
-                        self.frontend
-                            .set_qualification_game_open(false, application.panel_workspace_mut());
-                    }
-                }
-                ImguiCanaryPhase::GameClosed
-                    if primary_scene
-                        && self.game.view.is_none()
-                        && self.game_candidate.is_none() =>
-                {
-                    if !application
-                        .current_frame()
-                        .is_some_and(|frame| frame.play().state() == EditorPlayState::Running)
-                    {
-                        return Err(imgui_error("closing Game stopped its Runtime"));
-                    }
-                    canary.game_closed_frames += 1;
-                    if canary.game_closed_frames >= 4 {
-                        self.frontend
-                            .set_qualification_game_open(true, application.panel_workspace_mut());
-                        canary.phase = ImguiCanaryPhase::GameReopening;
-                    }
-                }
-                ImguiCanaryPhase::GameReopening if primary_scene && primary_game => {
-                    self.frontend
-                        .set_qualification_scene_open(false, application.panel_workspace_mut());
-                    canary.phase = ImguiCanaryPhase::SceneClosed;
-                }
-                ImguiCanaryPhase::SceneClosed if primary_game && self.scene.view.is_none() => {
-                    canary.scene_closed_frames += 1;
-                    if canary.scene_closed_frames >= 4 {
-                        self.frontend
-                            .set_qualification_scene_open(true, application.panel_workspace_mut());
-                        canary.phase = ImguiCanaryPhase::Reopened;
-                    }
-                }
-                ImguiCanaryPhase::Reopened if primary_scene && primary_game => {
-                    canary.reopened_frames += 1;
-                    if canary.reopened_frames >= 4 {
-                        canary.phase = ImguiCanaryPhase::Recovering;
-                        canary.retired_backend =
-                            self.game.submitted.map(|image| image.backend_instance_id());
-                        self.gpu.wait_for_idle().map_err(platform_gpu_error)?;
-                        self.gpu
-                            .with_device(window_packet, |scope| scope.device().destroy())
-                            .map_err(platform_gpu_error)?;
-                    }
-                }
-                ImguiCanaryPhase::Recovering
-                    if primary_scene
-                        && primary_game
-                        && self.game.submitted.is_some_and(|image| {
-                            Some(image.backend_instance_id()) != canary.retired_backend
-                        }) =>
-                {
-                    if !application
-                        .current_frame()
-                        .is_some_and(|frame| frame.play().state() == EditorPlayState::Paused)
-                    {
-                        return Err(imgui_error(
-                            "GPU replacement did not pause the active Runtime",
-                        ));
-                    }
-                    canary.phase = ImguiCanaryPhase::Recovered;
-                    canary_action = Some(EditorAction::Play(EditorPlayAction::Resume));
-                }
-                ImguiCanaryPhase::Recovered if primary_scene && primary_game => {
-                    canary.recovered_frames += 1;
-                    if canary.recovered_frames >= 4 {
-                        canary.phase = ImguiCanaryPhase::Stopping;
-                        canary_action = Some(EditorAction::Play(EditorPlayAction::Stop));
-                    }
-                }
-                ImguiCanaryPhase::Stopping
-                    if application.active_game_start_request().is_none()
-                        && application.pending_game_start_request().is_none() =>
-                {
-                    if self.game.submitted.is_some()
-                        || self.game_candidate.is_some()
-                        || self.game.identity.is_some()
-                    {
-                        return Err(imgui_error(
-                            "Stop retained an interactive Game image lifetime",
-                        ));
-                    }
-                    canary.phase = ImguiCanaryPhase::Complete;
-                    return Ok(application.request_exit().exit_ready());
-                }
-                _ => {}
-            }
+        #[cfg(test)]
+        {
+            self.lifecycle_frame = Some((outcome, secondary_outcomes));
         }
         if output.save_layout {
             let mut layout = String::new();
@@ -1353,17 +1057,24 @@ impl NativeImgui {
             self.window.request_redraw();
         }
         if self.frontend.game_open(application.panel_workspace())
-            && application.active_game_start_request().is_some()
+            && let Some(start) = application.active_game_start_request()
+            && start.resizable()
             && let Some(extent) = output
                 .game_extent
                 .and_then(|size| Extent2d::new(size[0].round() as u32, size[1].round() as u32))
-            && application.resize_game_view(extent).map_err(imgui_error)?
+            && (start.logical_window().resolution.physical_width != extent.width
+                || start.logical_window().resolution.physical_height != extent.height)
         {
-            self.input.invalidate_after_control(false);
-            self.game_candidate = None;
-            self.game.submitted = None;
-            application.drive_editor_frame(Duration::ZERO, false, true);
-            self.window.request_redraw();
+            // Release the captured route while its exact presented geometry still belongs to
+            // the Runtime. Resizing first would reject this old stamp on the next input flush.
+            self.input.invalidate(false);
+            self.input.flush(application)?;
+            if application.resize_game_view(extent).map_err(imgui_error)? {
+                self.game_candidate = None;
+                self.game.submitted = None;
+                application.drive_editor_frame(Duration::ZERO, false, true);
+                self.window.request_redraw();
+            }
         }
         let mut local_changed = false;
         for action in output.browser_actions {
@@ -1383,33 +1094,12 @@ impl NativeImgui {
             }
             local_changed |= update.actions_observed();
         }
-        let actions = if let Some(action) = canary_action {
-            application
-                .current_frame()
-                .map(|frame| EditorActionBatch::new(frame.revision(), vec![action]))
-        } else {
-            output.actions
-        };
-        if let Some(actions) = actions {
+        if let Some(actions) = output.actions {
             let dispatch = application.dispatch_editor_actions(actions);
             self.frontend.observe_dispatch(&dispatch);
-            if self.text_trace
-                && let Some(feedback) = dispatch.feedback()
-            {
-                match feedback {
-                    Ok(report) if !report.outcomes().is_empty() => println!(
-                        "{}",
-                        serde_json::json!({"action_feedback": format!("{:?}", report.outcomes())})
-                    ),
-                    Err(rejection) => println!(
-                        "{}",
-                        serde_json::json!({"action_rejection": format!("{rejection:?}")})
-                    ),
-                    _ => {}
-                }
-            }
             if dispatch.invalidates_game_input() {
-                self.input.invalidate_after_control(true);
+                self.input
+                    .invalidate_after_control(application.active_game_start_request());
                 self.game_candidate = None;
             }
             let update = application.drive_editor_frame(
@@ -1467,7 +1157,8 @@ impl NativeImgui {
         {
             self.game_source_active = false;
             if self.game.view.is_some() || self.game_candidate.is_some() {
-                self.input.invalidate_after_control(true);
+                self.input
+                    .invalidate_after_control(application.active_game_start_request());
                 self.game_candidate = None;
                 self.game.retire(&mut self.gpu, &mut self.renderer)?;
             }
@@ -1546,6 +1237,11 @@ impl NativeImgui {
         };
         let (identity, packet, sprites, runtime_ui) =
             candidate.into_parts().into_submission_parts();
+        #[cfg(all(test, target_os = "windows"))]
+        let content = game_input_tests::GameCandidateContent::new(
+            sprites.as_ref(),
+            runtime_ui.as_ref().is_some_and(|frame| frame.has_packets()),
+        );
         let Some((view, target)) = self.game.view.zip(self.game.target) else {
             let completion = match runtime_ui {
                 Some(ui) => EditorGameViewCompletion::with_ui_failed(
@@ -1609,6 +1305,14 @@ impl NativeImgui {
             }
         };
         self.game.submitted = Some(image);
+        #[cfg(all(test, target_os = "windows"))]
+        {
+            self.submitted_game_observation = Some(game_input_tests::SubmittedGameObservation {
+                image,
+                identity,
+                content,
+            });
+        }
         Ok(Some(PendingGameImage {
             identity,
             image,
@@ -1628,30 +1332,6 @@ impl NativeImgui {
             ));
             self.rejected_completion = Some(completion);
             return Err(error);
-        }
-        Ok(())
-    }
-
-    fn shutdown(&mut self) -> Result<(), EditorRunError> {
-        self.shutdown_graphics()?;
-        if let Some(canary) = &self.canary {
-            if canary.phase != ImguiCanaryPhase::Complete {
-                return Err(imgui_error(
-                    "the native qualification closed before its presentation trajectory completed",
-                ));
-            }
-            println!(
-                "{{\"schema\":\"nara.editor-imgui-qualification-v1\",\"primary_frames\":{},\"secondary_frames\":{},\"minimized_secondary_frames\":{},\"returned_frames\":{},\"game_closed_frames\":{},\"scene_closed_frames\":{},\"reopened_frames\":{},\"recovered_frames\":{},\"first_present_ms\":{},\"stale_receipt_rejected\":true,\"renderer_then_platform_shutdown\":true,\"native_ime\":\"unverified\"}}",
-                canary.primary_frames,
-                canary.secondary_frames,
-                canary.minimized_secondary_frames,
-                canary.returned_frames,
-                canary.game_closed_frames,
-                canary.scene_closed_frames,
-                canary.reopened_frames,
-                canary.recovered_frames,
-                canary.first_present_ms.unwrap_or(0)
-            );
         }
         Ok(())
     }
@@ -1698,7 +1378,7 @@ impl NativeImgui {
     }
 }
 
-impl ImguiQualificationHost {
+impl NativeEditorHost {
     fn install_native(&mut self, event_loop: &ActiveEventLoop) -> Result<(), EditorRunError> {
         let window = self
             .window
@@ -1710,17 +1390,14 @@ impl ImguiQualificationHost {
             native.context.load_ini_settings(&retained.layout);
             native.frontend = retained.frontend;
             native.layout = retained.saved_layout;
-            native.canary = retained.canary;
             native.frame_index = retained.frame_index;
             native.next_view = retained.next_view;
             native.layout_loaded = true;
         }
-        native
-            .window
-            .set_title("Nara Editor - Dear ImGui qualification");
+        native.window.set_title(super::EDITOR_TITLE);
         native.window.request_redraw();
         self.native = Some(native);
-        self.last_drive = Instant::now();
+        self.last_drive = None;
         self.repaint_deadline = None;
         Ok(())
     }
@@ -1733,11 +1410,11 @@ impl ImguiQualificationHost {
             if let Err(error) = native.shutdown_graphics() {
                 eprintln!("Nara Editor GPU retirement: {error}");
             }
+            native.publish_render_views(self.application.panel_workspace_mut());
             self.retained = Some(ImguiRetainedState {
                 frontend: std::mem::take(&mut native.frontend),
                 layout,
                 saved_layout: native.layout.take(),
-                canary: native.canary.take(),
                 frame_index: native.frame_index,
                 next_view: native.next_view,
             });
@@ -1835,7 +1512,37 @@ impl ImguiQualificationHost {
     }
 }
 
-impl ApplicationHandler for ImguiQualificationHost {
+impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: EditorUserEvent) {
+        match event {
+            EditorUserEvent::SupervisedPlayWake => {
+                self.supervised_play_wake.acknowledge();
+                let update = self
+                    .application
+                    .drive_supervised_play_effects(Instant::now());
+                if update.exit_ready() {
+                    event_loop.exit();
+                    return;
+                }
+                if update.actions_observed()
+                    && let Some(window) = &self.window
+                {
+                    window.request_redraw();
+                    self.repaint_deadline = None;
+                    event_loop.set_control_flow(ControlFlow::Wait);
+                    return;
+                }
+                match earliest_deadline(
+                    self.repaint_deadline,
+                    imgui_next_deadline(&self.application, self.native.as_ref(), Instant::now()),
+                ) {
+                    Some(deadline) => event_loop.set_control_flow(ControlFlow::WaitUntil(deadline)),
+                    None => event_loop.set_control_flow(ControlFlow::Wait),
+                }
+            }
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.native.is_some() {
             return;
@@ -1843,7 +1550,7 @@ impl ApplicationHandler for ImguiQualificationHost {
         if self.window.is_none() {
             match event_loop.create_window(
                 Window::default_attributes()
-                    .with_title("Nara Editor - Dear ImGui qualification")
+                    .with_title(super::EDITOR_TITLE)
                     .with_inner_size(LogicalSize::new(1200.0, 800.0)),
             ) {
                 Ok(window) => self.window = Some(Arc::new(window)),
@@ -1898,14 +1605,6 @@ impl ApplicationHandler for ImguiQualificationHost {
             window_id,
             event: event.clone(),
         };
-        if native.text_trace
-            && let WindowEvent::Ime(ime) = &event
-        {
-            println!(
-                "{}",
-                serde_json::json!({"native_ime_event": format!("{ime:?}"), "primary": is_primary})
-            );
-        }
         if native
             .input
             .handle_event(window_id, &event, &native.context)
@@ -1932,7 +1631,10 @@ impl ApplicationHandler for ImguiQualificationHost {
                 }
             }
             WindowEvent::RedrawRequested if is_primary => {
-                let started = Instant::now();
+                let play_before = self
+                    .application
+                    .current_frame()
+                    .map(|frame| frame.play().state());
                 match native.redraw(event_loop, &mut self.application) {
                     Ok(true) => event_loop.exit(),
                     Ok(false) => {
@@ -1947,11 +1649,17 @@ impl ApplicationHandler for ImguiQualificationHost {
                         }
                     }
                 }
-                if let Some(metrics) = &mut self.metrics {
-                    metrics.observe(
-                        started,
-                        self.native.as_ref().is_some_and(|native| native.presented),
-                    );
+                let play_after = self
+                    .application
+                    .current_frame()
+                    .map(|frame| frame.play().state());
+                if play_before != Some(EditorPlayState::Running)
+                    || play_after != Some(EditorPlayState::Running)
+                {
+                    // A repaint can accept Resume before the next about_to_wait callback.
+                    // Only a continuous Running interval belongs to the simulation clock.
+                    self.last_drive =
+                        (play_after == Some(EditorPlayState::Running)).then(Instant::now);
                 }
             }
             _ => native.window.request_redraw(),
@@ -1960,8 +1668,6 @@ impl ApplicationHandler for ImguiQualificationHost {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let delta = now.saturating_duration_since(self.last_drive);
-        self.last_drive = now;
         let open_update = self.application.advance_project_open();
         if open_update.exit_ready() {
             event_loop.exit();
@@ -1971,6 +1677,14 @@ impl ApplicationHandler for ImguiQualificationHost {
             .application
             .current_frame()
             .map(|frame| frame.play().state());
+        let delta = if play_before == Some(EditorPlayState::Running) {
+            self.last_drive
+                .replace(now)
+                .map_or(Duration::ZERO, |last| now.saturating_duration_since(last))
+        } else {
+            self.last_drive = None;
+            Duration::ZERO
+        };
         let running = play_before.is_some_and(|state| {
             matches!(
                 state,
@@ -1993,11 +1707,16 @@ impl ApplicationHandler for ImguiQualificationHost {
             return;
         }
         self.advance_recovery(event_loop);
-        let play_changed = play_before
-            != self
-                .application
-                .current_frame()
-                .map(|frame| frame.play().state());
+        let play_after = self
+            .application
+            .current_frame()
+            .map(|frame| frame.play().state());
+        if play_after == Some(EditorPlayState::Running) {
+            self.last_drive.get_or_insert_with(Instant::now);
+        } else {
+            self.last_drive = None;
+        }
+        let play_changed = play_before != play_after;
         let deadline = imgui_next_deadline(&self.application, self.native.as_ref(), now);
         let wake_due = self
             .repaint_deadline
@@ -2018,16 +1737,6 @@ impl ApplicationHandler for ImguiQualificationHost {
         } else {
             self.repaint_deadline = None;
             event_loop.set_control_flow(ControlFlow::Wait);
-        }
-    }
-
-    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(metrics) = self.metrics.take() {
-            metrics.finish(
-                self.native
-                    .as_mut()
-                    .map(|native| (&mut native.gpu, editor_window_packet(&native.window))),
-            );
         }
     }
 }
@@ -2066,9 +1775,6 @@ fn imgui_next_deadline(
     let Some(native) = native else {
         return deadline;
     };
-    if native.canary.is_some() {
-        deadline = earliest_deadline(deadline, Some(now + Duration::from_millis(16)));
-    }
     if native.ui_followup {
         deadline = earliest_deadline(
             deadline,
@@ -2098,6 +1804,8 @@ fn restore_workspace_layout(
 #[cfg(test)]
 mod opening_tests {
     use super::*;
+    use crate::EditorLaunchOptions;
+    use nara::tooling::EditorAction;
 
     #[test]
     fn restore_layout_recovers_saved_panel_instances_and_visibility_with_the_ini() {

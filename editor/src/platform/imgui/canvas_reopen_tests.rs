@@ -192,7 +192,6 @@ fn run_with_observer<T>(
     flags.insert(ConfigFlags::NO_MOUSE_CURSOR_CHANGE);
     native.context.io_mut().set_config_flags(flags);
     native.layout_loaded = true;
-    native.canary = None;
     let opened = EditorApplication::open_trusted_compiled(
         EditorLaunchOptions::new(project).with_profile("desktop"),
         TrustedCompiledEditorProjectIntent::new(),

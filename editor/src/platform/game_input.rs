@@ -3,7 +3,9 @@ use std::collections::BTreeSet;
 use nara::{
     input::{ButtonDriverInput, KeyCode, MouseButton, PointerDriverInput},
     prelude::Vec2,
-    project_host::{EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent},
+    project_host::{
+        EditorGameInputBatch, EditorGameInputEnvelope, EditorGameInputEvent, EditorGameStartRequest,
+    },
     render::{DisplayMapping2d, DisplayRect, DisplayScale, Extent2d},
     winit::{convert_mouse_button, convert_physical_key},
 };
@@ -13,7 +15,58 @@ use winit::{
     keyboard::{KeyCode as WinitKeyCode, PhysicalKey},
 };
 
-use super::viewport::EditorGamePresentedStamp;
+use nara::{
+    project_host::EditorGameViewCandidateIdentity,
+    render::RenderWindowPacket,
+    render_wgpu::__private::{WgpuEditorCompositeReceipt, WgpuEditorViewId},
+};
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct EditorGamePresentedStamp {
+    identity: EditorGameViewCandidateIdentity,
+    receipt: WgpuEditorCompositeReceipt,
+}
+
+impl EditorGamePresentedStamp {
+    pub(super) const fn new(
+        identity: EditorGameViewCandidateIdentity,
+        receipt: WgpuEditorCompositeReceipt,
+    ) -> Self {
+        Self { identity, receipt }
+    }
+
+    pub(super) const fn view_id(self) -> WgpuEditorViewId {
+        self.receipt.image().view_id()
+    }
+
+    pub(super) const fn window_id(self) -> nara::window::WindowId {
+        self.receipt.window().window_id()
+    }
+
+    pub(super) const fn identity(self) -> EditorGameViewCandidateIdentity {
+        self.identity
+    }
+
+    pub(super) const fn logical_window(self) -> RenderWindowPacket {
+        self.identity.start().logical_window()
+    }
+
+    pub(super) const fn runtime_generation(self) -> u64 {
+        self.identity.runtime_generation().get()
+    }
+
+    pub(super) const fn source_handoff_generation(self) -> u64 {
+        self.receipt.image().source_handoff_generation()
+    }
+
+    pub(super) const fn target_generation(self) -> u64 {
+        self.receipt.image().target_generation()
+    }
+
+    pub(super) const fn geometry_generation(self) -> u64 {
+        self.identity.start().geometry_generation()
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct EditorGameInputLease {
@@ -120,14 +173,9 @@ pub(super) struct EditorGameInputRouter {
     cursor_position: Option<PhysicalPosition<f64>>,
     pending: Vec<EditorGameInputEnvelope>,
     next_route_generation: u64,
-    focus_restore_requested: bool,
 }
 
 impl EditorGameInputRouter {
-    pub(super) const fn cursor_position(&self) -> Option<PhysicalPosition<f64>> {
-        self.cursor_position
-    }
-
     pub(super) fn is_captured(&self) -> bool {
         matches!(self.capture, EditorGameCaptureState::Captured { .. })
     }
@@ -202,14 +250,39 @@ impl EditorGameInputRouter {
         self.release(terminal);
     }
 
-    pub(super) fn invalidate_after_control(&mut self, terminal: bool) {
-        self.pending.clear();
-        self.invalidate(terminal);
+    pub(super) fn forget_retired_route(&mut self, active: Option<EditorGameStartRequest>) {
+        let captured = match &self.capture {
+            EditorGameCaptureState::Captured { stamp, .. } => Some(stamp.identity().start()),
+            EditorGameCaptureState::Released => None,
+        };
+        if captured.is_some_and(|start| Some(start) != active)
+            || self
+                .presented
+                .is_some_and(|presented| Some(presented.stamp.identity().start()) != active)
+            || self
+                .pending
+                .iter()
+                .any(|event| Some(event.identity().start()) != active)
+        {
+            // The owner has already revoked this exact Runtime/geometry. Local retirement must
+            // not send an old route's cleanup event to an absent or replacement Runtime.
+            self.injection_failed();
+        }
+    }
+
+    pub(super) fn invalidate_after_control(&mut self, active: Option<EditorGameStartRequest>) {
+        self.forget_retired_route(active);
+        if self.is_captured() {
+            self.pending.clear();
+        }
+        // A rejected control can leave the same Runtime alive. Release its held input normally;
+        // this control did not retire the logical surface. A repeated locked-frame invalidation
+        // preserves the release already queued by the previous invalidation.
+        self.invalidate(false);
     }
 
     pub(super) fn release_to_editor(&mut self) {
         self.release(false);
-        self.focus_restore_requested = false;
     }
 
     pub(super) fn capture_requested(&mut self) -> bool {
@@ -231,7 +304,6 @@ impl EditorGameInputRouter {
             held_keys: BTreeSet::new(),
             held_mouse_buttons: BTreeSet::new(),
         };
-        self.focus_restore_requested = false;
         self.push(
             presented.stamp,
             presented.lease,
@@ -245,57 +317,43 @@ impl EditorGameInputRouter {
         true
     }
 
-    pub(super) fn capture_and_press_key(&mut self, key: KeyCode) -> bool {
-        let Some(presented) = self.presented else {
-            return false;
-        };
-        let center = presented
-            .transform
-            .mapping
-            .uv_to_panel([0.5, 0.5])
-            .expect("the full Game image contains its center");
-        let physical = presented.transform.mapping.pixels_per_point();
-        self.cursor_position = Some(PhysicalPosition::new(
-            f64::from(center[0] * physical),
-            f64::from(center[1] * physical),
-        ));
-        if !self.capture_requested() || !self.input_enabled {
+    pub(super) fn handle_key(
+        &mut self,
+        physical_key: PhysicalKey,
+        state: ElementState,
+        repeat: bool,
+    ) -> bool {
+        if !self.is_captured() {
+            return true;
+        }
+        if physical_key == PhysicalKey::Code(WinitKeyCode::Escape)
+            && state == ElementState::Pressed
+            && !repeat
+        {
+            self.release(false);
             return false;
         }
-        self.apply_captured_key_transition(key, ElementState::Pressed);
-        true
-    }
-
-    pub(super) fn take_focus_restore_request(&mut self, game_panel_active: bool) -> bool {
-        let requested = std::mem::take(&mut self.focus_restore_requested);
-        requested && game_panel_active
+        let Some(key) = convert_physical_key(physical_key) else {
+            return false;
+        };
+        if repeat {
+            return false;
+        }
+        if !self.input_enabled {
+            if state == ElementState::Released && self.captured_key_is_held(key) {
+                self.apply_captured_key_transition(key, state);
+            }
+            return false;
+        }
+        self.apply_captured_key_transition(key, state);
+        false
     }
 
     /// Returns whether the event should continue to the Editor frontend.
     pub(super) fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
-            WindowEvent::KeyboardInput { event, .. } if self.is_captured() => {
-                if event.physical_key == PhysicalKey::Code(WinitKeyCode::Escape)
-                    && event.state == ElementState::Pressed
-                    && !event.repeat
-                {
-                    self.release(false);
-                    return false;
-                }
-                let Some(key) = convert_physical_key(event.physical_key) else {
-                    return false;
-                };
-                if event.repeat {
-                    return false;
-                }
-                if !self.input_enabled {
-                    if event.state == ElementState::Released && self.captured_key_is_held(key) {
-                        self.apply_captured_key_transition(key, event.state);
-                    }
-                    return false;
-                }
-                self.apply_captured_key_transition(key, event.state);
-                false
+            WindowEvent::KeyboardInput { event, .. } => {
+                self.handle_key(event.physical_key, event.state, event.repeat)
             }
             WindowEvent::MouseInput { state, button, .. } if self.is_captured() => {
                 let button = convert_mouse_button(*button);
@@ -435,7 +493,6 @@ impl EditorGameInputRouter {
         self.presented = None;
         self.input_enabled = false;
         self.capture = EditorGameCaptureState::Released;
-        self.focus_restore_requested = false;
     }
 
     fn push_captured(&mut self, event: EditorGameInputEvent) -> bool {
@@ -457,9 +514,7 @@ impl EditorGameInputRouter {
             self.pending.clear();
             self.presented = None;
             self.input_enabled = false;
-            let was_captured = self.is_captured();
             self.capture = EditorGameCaptureState::Released;
-            self.focus_restore_requested |= was_captured;
             let cleanup = if matches!(event, EditorGameInputEvent::SurfaceRetired) {
                 EditorGameInputEvent::SurfaceRetired
             } else {
@@ -513,7 +568,6 @@ impl EditorGameInputRouter {
         let EditorGameCaptureState::Captured { stamp, lease, .. } = previous else {
             return;
         };
-        self.focus_restore_requested = true;
         self.push(
             stamp,
             lease,

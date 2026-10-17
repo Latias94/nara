@@ -2,7 +2,7 @@
 
 **Status**: Explanatory Guide
 **Date**: 2026-07-16
-**Last Revised**: 2026-10-16
+**Last Revised**: 2026-10-17
 **Normative Authority**: ADR 0015, ADR 0025, ADR 0041, ADR 0047, ADR 0078, ADR 0094, ADR 0114, ADR 0117 and [ADR 0118](adr/0118-editor-workspaces-frontends-and-creation-templates.md)
 **Host Foundations**: Accepted ADRs 0082 and 0084, with their later focused refinements
 **Related Open Questions**: OQ-001, OQ-003, OQ-004, OQ-010, OQ-022, and OQ-031
@@ -10,7 +10,10 @@
 
 This guide explains separate game/editor products and selective service reuse.
 The [Editor Foundation and Frontends plan](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md) now owns the finite editor successor under ADR 0118.
-It evaluates direct dear-imgui-rs 0.20.0 integration before a full replacement; neither that implementation nor a custom frontend is claimed complete.
+The direct dear-imgui-rs 0.20.0 integration and candidate frontend have passed the recorded
+Windows adoption and parity gates. The normal-entry migration and removal of the superseded
+frontend are tracked in [U8 progress](../research/2026-10-16-editor-foundation/u8-migration-progress.md).
+A future custom frontend remains unbuilt and is not an acceptance claim of that work.
 
 ## Purpose
 
@@ -28,7 +31,7 @@ The direction is:
 
 1. keep game UI and editor UI as separate product layers;
 2. share only narrow services or pure algorithms after their semantics are proven equal;
-3. retain the current egui product while qualifying the Dear ImGui candidate, then remove the superseded frontend after complete parity;
+3. qualify Dear ImGui through actual Editor parity, then keep one production frontend and remove the superseded adapter;
 4. let Nara UI dogfood one complete editor panel only after the runtime UI is ready;
 5. use Open GPUI, egui, and Dear ImGui as evidence and selective implementation sources, not as
    authorities over Nara documents, Hosts, or render backends;
@@ -69,7 +72,7 @@ flowchart TB
   subgraph Editor[Editor UI Product]
     Tooling[Tooling models, commands, transactions, and undo]
     Contributions[Inspector, panel, asset tool, gizmo, and viewport contributions]
-    Adapter[Current egui / qualified Dear ImGui candidate / future custom UI]
+    Adapter[Selected Dear ImGui frontend / future custom UI]
     Shell[Docking, panel catalog, layout restore, and native-window policy]
     Tooling --> Contributions --> Adapter
     Shell --> Adapter

@@ -1,4 +1,4 @@
-#![cfg(all(feature = "imgui", any(target_os = "windows", target_os = "linux")))]
+#![cfg(any(target_os = "windows", target_os = "linux"))]
 
 use std::{path::Path, time::Duration};
 
@@ -7,9 +7,12 @@ use nara::{
     scene::{AuthoringFieldEdit, SceneEntityId},
 };
 use nara_editor::{
-    EditorApplication, EditorLaunchOptions, ImguiEditorFrontend, ImguiEditorPanelContext,
+    EditorApplication, EditorApplicationState, EditorLaunchOptions, ImguiEditorFrontend,
+    ImguiEditorPanelContext, workspace::EditorPanelTarget,
 };
-use nara_editor_panel_module_consumer::{PANEL_KIND, clear_selection, install, install_imgui};
+use nara_editor_panel_module_consumer::{
+    PANEL_KIND, clear_selection, install, install_imgui, selected_count,
+};
 use nara_tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorDocumentMutation,
     EditorNavigationAction, EditorWorkspaceIntentAction,
@@ -20,7 +23,7 @@ fn clear_selected_from_companion(
     context: &mut ImguiEditorPanelContext<'_, '_>,
 ) {
     assert_eq!(context.model().instance().kind(), PANEL_KIND);
-    assert_eq!(context.model().selection().unwrap().len(), 1);
+    assert_eq!(selected_count(context.model()), 1);
     context.emit(clear_selection(context.model()).unwrap());
 }
 
@@ -37,6 +40,10 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         }
         application.advance_project_open();
     }
+    assert_eq!(
+        application.state(),
+        EditorApplicationState::AuthoringDegraded
+    );
     install(application.panel_workspace_mut()).unwrap();
     let instance_id = application
         .panel_workspace()
@@ -175,7 +182,23 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
         .unwrap()
         .selection
         .is_empty();
-    let document_unchanged = after.workspace().document(document) == Some(&before);
+    let duplicate = application
+        .panel_workspace_mut()
+        .open(PANEL_KIND, EditorPanelTarget::ActiveDocument)
+        .unwrap();
+    let document_unchanged = application
+        .current_frame()
+        .unwrap()
+        .workspace()
+        .document(document)
+        == Some(&before);
+    let duplicate_target_unchanged = application
+        .panel_workspace()
+        .layout()
+        .instance(duplicate)
+        .unwrap()
+        .target()
+        == &target;
     let mut closed = application.request_exit().exit_ready();
     if !closed && let Some(frame) = application.current_frame() {
         closed = application
@@ -213,4 +236,6 @@ fn a_separately_compiled_imgui_companion_reopens_without_owning_document_selecti
     assert!(painting_preserved_selection);
     assert!(selection_cleared);
     assert!(document_unchanged);
+    assert_ne!(instance_id, duplicate);
+    assert!(duplicate_target_unchanged);
 }

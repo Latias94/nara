@@ -51,6 +51,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
             TomlValue::String("fs-consumer".to_owned()),
             TomlValue::String("project-workflow-consumer".to_owned()),
             TomlValue::String("material-consumer".to_owned()),
+            TomlValue::String("editor-panel-consumer".to_owned()),
         ])
     );
     assert_eq!(
@@ -62,6 +63,7 @@ fn module_consumer_workspace_preserves_direct_modules_and_one_workflow_facade() 
             TomlValue::String("fs-consumer".to_owned()),
             TomlValue::String("project-workflow-consumer".to_owned()),
             TomlValue::String("material-consumer".to_owned()),
+            TomlValue::String("editor-panel-consumer".to_owned()),
         ])
     );
 
@@ -153,6 +155,7 @@ fn locked_metadata_keeps_direct_modules_separate_from_the_project_workflow_facad
         "nara-fs-module-consumer",
         "nara-project-workflow-consumer",
         "nara-material-module-consumer",
+        "nara-editor-panel-module-consumer",
     ] {
         let package = packages
             .iter()

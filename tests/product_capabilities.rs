@@ -80,7 +80,6 @@ fn root_manifest_exposes_only_coarse_product_capabilities() {
         "runtime-ui",
         "serde",
         "tooling",
-        "tooling-egui",
     ];
     assert_eq!(
         features.keys().map(String::as_str).collect::<Vec<_>>(),
@@ -364,22 +363,6 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             with_packages(&runtime_core, &["nara_render", "nara_render_wgpu"]),
         ),
         (
-            "tooling-egui",
-            vec!["--no-default-features", "--features", "tooling-egui"],
-            with_packages(
-                &runtime_core,
-                &[
-                    "nara_render",
-                    "nara_text",
-                    "nara_tooling",
-                    "nara_tooling_egui",
-                    "nara_ui",
-                    "nara_ui_kernel",
-                    "nara_ui_widgets",
-                ],
-            ),
-        ),
-        (
             "all-features",
             vec!["--all-features"],
             with_packages(
@@ -395,7 +378,6 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
                     "nara_tilemap",
                     "nara_text",
                     "nara_tooling",
-                    "nara_tooling_egui",
                     "nara_ui",
                     "nara_ui_kernel",
                     "nara_ui_render",
@@ -413,6 +395,18 @@ fn locked_dependency_trees_match_the_coarse_feature_contract() {
             expected,
             "unexpected internal package graph for {name}\n{tree}"
         );
+        for editor_package in [
+            "nara-editor",
+            "dear-imgui-rs",
+            "dear-imgui-wgpu",
+            "dear-imgui-winit",
+        ] {
+            assert_not_present(&tree, editor_package);
+        }
+        if !matches!(name, "desktop-winit" | "render-wgpu" | "all-features") {
+            assert_not_present(&tree, "winit");
+            assert_not_present(&tree, "wgpu");
+        }
     }
 }
 

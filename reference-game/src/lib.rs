@@ -413,12 +413,8 @@ pub fn wave_editor_intent() -> TrustedCompiledEditorProjectIntent {
     TrustedCompiledEditorProjectIntent::new().with_recipe(wave_recipe_or_panic())
 }
 
-/// Creates the focused compiled-product intent used by the private native Game View canary.
-#[cfg(any(
-    feature = "editor-game-view-canary",
-    feature = "editor-imgui-qualification"
-))]
-#[doc(hidden)]
+/// Creates the compiled Editor intent with an embedded desktop Game View.
+#[cfg(feature = "editor")]
 #[must_use]
 pub fn wave_game_view_intent() -> TrustedCompiledEditorProjectIntent {
     TrustedCompiledEditorProjectIntent::new()

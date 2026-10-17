@@ -43,8 +43,11 @@ use nara::{
 };
 use nara_editor::{
     EditorApplication, EditorApplicationState, EditorLaunchOptions, EditorProjectAction,
-    EguiEditorFrontend,
+    ImguiEditorFrontend,
 };
+
+#[path = "support/imgui.rs"]
+mod imgui;
 
 const NARA_GIT_REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(1);
@@ -761,23 +764,35 @@ fn replacement_cancel_restores_the_exact_retained_workspace() {
     let before = current_frame(&application);
 
     assert!(application.request_project_replacement(replacement.root(), None));
-    let context = egui::Context::default();
-    let mut frontend = EguiEditorFrontend::new();
-    render_application(
-        &context,
-        &mut frontend,
-        &mut application,
-        egui::RawInput::default(),
-    );
-    let mut cancel = egui::RawInput::default();
-    cancel.events.push(egui::Event::Key {
-        key: egui::Key::Enter,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers::default(),
+    let mut context = imgui::context();
+    let mut frontend = ImguiEditorFrontend::new();
+    for _ in 0..3 {
+        let _ = imgui::draw(&mut context, &mut frontend, &mut application);
+    }
+    context.binding().with_bound_context(|| {
+        // SAFETY: this Context owns the Project window and its live button identity. The
+        // navigation focus is local to this test; Enter below activates the real Cancel widget.
+        unsafe {
+            let window = dear_imgui_rs::sys::igFindWindowByName(c"Project".as_ptr());
+            assert!(!window.is_null());
+            let id = dear_imgui_rs::sys::ImGuiWindow_GetID_Str(
+                window,
+                c"Cancel".as_ptr(),
+                std::ptr::null(),
+            );
+            dear_imgui_rs::sys::igFocusWindow(window, 0);
+            dear_imgui_rs::sys::igSetFocusID(id, window);
+            dear_imgui_rs::sys::igSetNavCursorVisible(true);
+        }
     });
-    render_application(&context, &mut frontend, &mut application, cancel);
+    context
+        .io_mut()
+        .add_key_event(dear_imgui_rs::Key::Enter, true);
+    let _ = imgui::draw(&mut context, &mut frontend, &mut application);
+    context
+        .io_mut()
+        .add_key_event(dear_imgui_rs::Key::Enter, false);
+    let _ = imgui::draw(&mut context, &mut frontend, &mut application);
 
     assert_eq!(application.state(), EditorApplicationState::AuthoringReady);
     assert!(Arc::ptr_eq(&before, &current_frame(&application)));
@@ -938,32 +953,12 @@ fn ordinary_play_reports_typed_supervised_play_contract_missing() {
 }
 
 fn render_once(application: &mut EditorApplication) -> EditorActionBatch {
-    let context = egui::Context::default();
-    render_application(
-        &context,
-        &mut EguiEditorFrontend::new(),
+    imgui::draw(
+        &mut imgui::context(),
+        &mut ImguiEditorFrontend::new(),
         application,
-        egui::RawInput::default(),
     )
     .expect("the fixed Editor panel returns one workspace result")
-}
-
-fn render_application(
-    context: &egui::Context,
-    frontend: &mut EguiEditorFrontend,
-    application: &mut EditorApplication,
-    mut input: egui::RawInput,
-) -> Option<EditorActionBatch> {
-    input.screen_rect = Some(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        egui::vec2(1200.0, 800.0),
-    ));
-    let mut batch = None;
-    let output = context.run_ui(input, |ui| {
-        batch = Some(frontend.show(ui, application));
-    });
-    output.drop_without_applying_deltas();
-    batch.expect("the Editor application should render exactly one surface")
 }
 
 fn current_frame(application: &EditorApplication) -> Arc<nara::tooling::EditorFrameModel> {

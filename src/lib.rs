@@ -70,8 +70,6 @@ pub use nara_tasks as tasks;
 pub use nara_tilemap as tilemap;
 #[cfg(feature = "tooling")]
 pub use nara_tooling as tooling;
-#[cfg(feature = "tooling-egui")]
-pub use nara_tooling_egui as tooling_egui;
 #[cfg(feature = "runtime-core")]
 pub use nara_transform as transform;
 #[cfg(feature = "runtime-ui")]
@@ -418,8 +416,6 @@ pub mod tooling_prelude {
         SceneInspectorEntityView, SceneInspectorFieldState, SceneInspectorFieldView,
         SceneInspectorModel, SceneInspectorState, WorldIdentitySnapshot,
     };
-    #[cfg(feature = "tooling-egui")]
-    pub use nara_tooling_egui::EguiEditorPanel;
 }
 
 #[cfg(feature = "runtime-core")]

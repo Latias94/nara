@@ -45,7 +45,8 @@ an index, not another source of architecture decisions.
    [U6 verification](../knowledge/engineering/verification/2026-10/2026-10-16T163933Z-editor-u6-qualifies-direct-dear-imgui-on-windows-with-explicit-backend-and-cleanup-limits-e42a0dbfec6643e380f6e9275f29b0d2.md)
    qualifies the direct Dear ImGui slice on Windows, including actual secondary samples, native
    input/text/layout, ordered shutdown and recovery. Its adoption decision permits U7 implementation;
-   U7 full frontend parity and U8 external acceptance/removal remain pending. The evidence distinguishes
+   U7 candidate parity is committed; production selection and U8 external acceptance/removal are
+   [being verified](../research/2026-10-16-editor-foundation/u8-migration-progress.md). The evidence distinguishes
    the upstream Winit shutdown defect from the observed Vulkan implicit-layer environment limit.
    Remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)

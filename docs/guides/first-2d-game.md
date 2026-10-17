@@ -9,6 +9,12 @@ The commands below use PowerShell on Windows. The Rust sources and Cargo workspa
 are portable; Unix shells use their own environment assignment and executable
 spelling. Native platform acceptance is recorded separately from compilation.
 
+The ordinary Editor uses Dear ImGui with the same data-only Open, document history,
+saved-source Play and export owners. Use Workspace to manage docked panels; native
+detachment is enabled only by a supported backend profile. Windows/DX12 has native
+workflow evidence; Linux/X11 and macOS release support remain unverified, and Wayland
+uses in-window docking. Full native accessibility is not yet provided.
+
 ## Build the tools and create a project
 
 From the engine checkout:
@@ -203,11 +209,14 @@ source/lockfile identity, features, profile, export, review and platform limits.
 They are individual cached observations, not cold builds or percentile estimates.
 
 An explicit integration check is available for a **fresh disposable external copy**.
-It edits the custom radius and camera, assigns an imported image, rejects an
-out-of-f32-range edit, and exercises Undo/Redo, Save/Reopen and real native game
-children. It runs the strict compiled headless game before and after Save and
-requires the changed radius to alter its observed result. It also temporarily
-injects a compiler error before restoring the Rust source:
+It first creates empty Scene and Prefab entities, adds/edits/removes a custom
+component, and verifies Undo/Redo and Save/Reopen through the ordinary document
+owners. It restores these disposable source fixtures after closing that proof.
+It then edits the Player Prefab speed, custom radius and camera, assigns an
+imported image, rejects an out-of-f32-range edit, and exercises Undo/Redo,
+Save/Reopen and real native game children. Strict compiled gameplay observes the
+saved speed and radius changes. It also temporarily injects a compiler error
+before restoring the Rust source:
 
 ```powershell
 $env:NARA_AUTHOR_WORKFLOW_PROJECT = $game

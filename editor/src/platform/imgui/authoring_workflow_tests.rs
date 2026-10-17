@@ -137,7 +137,6 @@ fn run_authoring(
     );
     let mut native =
         NativeImgui::new(event_loop, Arc::clone(&window)).map_err(|error| error.to_string())?;
-    native.canary = None;
     native.layout_loaded = true;
     let mut flags = native.context.io().config_flags() | ConfigFlags::NO_MOUSE_CURSOR_CHANGE;
     flags.remove(ConfigFlags::VIEWPORTS_ENABLE);

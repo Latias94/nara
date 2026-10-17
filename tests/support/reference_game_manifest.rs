@@ -1,8 +1,7 @@
-pub const REFERENCE_GAME_MANIFEST_DEPENDENCIES: [&str; 11] = [
+pub const REFERENCE_GAME_MANIFEST_DEPENDENCIES: [&str; 10] = [
     "dependencies.nara",
     "dependencies.nara-editor",
     "dev-dependencies.accesskit",
-    "dev-dependencies.nara-editor",
     "dev-dependencies.nara_render",
     "dev-dependencies.nara_ui",
     "dev-dependencies.nara_ui_kernel",

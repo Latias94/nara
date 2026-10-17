@@ -193,7 +193,7 @@ schema_version = 1
 name = "Unavailable Tooling"
 
 [capabilities]
-requested = ["tooling-egui"]
+requested = ["tooling"]
 "#,
     );
 

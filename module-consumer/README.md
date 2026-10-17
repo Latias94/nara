@@ -5,10 +5,12 @@ details. `tests/domain_reconciliation.rs` is a small native-effect plugin consum
 module contains the complete domain implementation.
 
 `editor-panel-consumer/` independently compiles a trusted selection-summary panel.
-It installs a semantic descriptor and an optional egui painter through the same paths as built-ins,
+It installs a semantic descriptor and a Dear ImGui painter through the same paths as built-ins,
 reads selection and emits existing navigation actions without mutable document or GPU access.
-Its integration test preserves the source document and history across panel close, reopen and duplication.
-This is source composition, not a dynamic plugin ABI or project-time code loader.
+Its default integration test emits an action through the frontend and preserves the dirty source
+document, selection and history across panel close and reopen, with independent duplicate instances.
+This is static trusted source composition, not a dynamic plugin ABI or project-time code loader.
+Only this Editor consumer selects GUI dependencies; runtime and headless module consumers do not.
 
 ## Persistent configuration and native reconciliation
 

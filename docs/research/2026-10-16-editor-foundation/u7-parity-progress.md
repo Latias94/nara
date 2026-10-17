@@ -1,6 +1,10 @@
 # Dear ImGui frontend parity progress
 
-Status: **U7 in progress; production remains egui. U8 has not started.**
+Status: **U7 candidate committed at `26be74f`; production selection and U8 removal in progress.**
+
+The current source migration is tracked in [U8 progress](u8-migration-progress.md).
+The candidate evidence below remains tied to the recorded versions and commits; it does
+not certify the still-integrating removal or its external acceptance.
 
 This record supplements the historical [U6 adoption evidence](adoption-evidence.md).
 It is not a replacement acceptance contract. The [active plan](../../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md)

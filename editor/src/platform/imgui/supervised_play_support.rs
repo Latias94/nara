@@ -1,8 +1,4 @@
-use std::{
-    env,
-    ffi::OsStr,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use nara::{
     identity::SceneEntityId,
@@ -18,19 +14,63 @@ use winit::window::WindowId;
 
 use crate::{EditorApplication, EditorApplicationState, EditorLaunchOptions};
 
-use super::{EditorRunError, NativeEditorCanaryAdvance};
+use crate::platform::EditorRunError;
+
+pub(super) struct SupervisedPlayTestAdvance {
+    pub(super) action: Option<EditorAction>,
+    pub(super) redraw: bool,
+    pub(super) request_exit: bool,
+    pub(super) exit: bool,
+}
+
+impl SupervisedPlayTestAdvance {
+    const fn idle() -> Self {
+        Self {
+            action: None,
+            redraw: false,
+            request_exit: false,
+            exit: false,
+        }
+    }
+
+    const fn redraw() -> Self {
+        Self {
+            action: None,
+            redraw: true,
+            request_exit: false,
+            exit: false,
+        }
+    }
+
+    fn action(action: EditorAction) -> Self {
+        Self {
+            action: Some(action),
+            redraw: true,
+            request_exit: false,
+            exit: false,
+        }
+    }
+
+    const fn request_exit() -> Self {
+        Self {
+            action: None,
+            redraw: true,
+            request_exit: true,
+            exit: false,
+        }
+    }
+}
 
 mod fixture;
 
 use fixture::GuardedSupervisedPlayProject;
 
-const SUPERVISED_PLAY_CANARY_ENV: &str = "NARA_EDITOR_SUPERVISED_PLAY_CANARY";
 const SUPERVISED_PLAY_CANARY_DEADLINE: Duration = Duration::from_secs(600);
 const FIRST_EDITED_WEAPON_X: f64 = 2.75;
 const SUCCESSOR_EDITED_WEAPON_X: f64 = 3.25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SupervisedPlayCanaryStage {
+enum SupervisedPlayTestStage {
     ProjectManager,
     AwaitingOpen,
     AwaitingFirstEdit,
@@ -54,9 +94,8 @@ enum SupervisedPlayCanaryStage {
 }
 
 /// Bounded evidence from one real external-window supervised Play trajectory.
-#[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EditorSupervisedPlayCanaryEvidence {
+pub(super) struct SupervisedPlayTestEvidence {
     first_saved_revision: u64,
     successor_saved_revision: u64,
     first_generation: u64,
@@ -68,60 +107,56 @@ pub struct EditorSupervisedPlayCanaryEvidence {
     successor_output_truncated: bool,
 }
 
-impl EditorSupervisedPlayCanaryEvidence {
+impl SupervisedPlayTestEvidence {
     #[must_use]
-    pub const fn first_saved_revision(self) -> u64 {
+    pub(super) const fn first_saved_revision(self) -> u64 {
         self.first_saved_revision
     }
 
     #[must_use]
-    pub const fn successor_saved_revision(self) -> u64 {
+    pub(super) const fn successor_saved_revision(self) -> u64 {
         self.successor_saved_revision
     }
 
     #[must_use]
-    pub const fn first_generation(self) -> u64 {
+    pub(super) const fn first_generation(self) -> u64 {
         self.first_generation
     }
 
     #[must_use]
-    pub const fn successor_generation(self) -> u64 {
+    pub(super) const fn successor_generation(self) -> u64 {
         self.successor_generation
     }
 
     #[must_use]
-    pub const fn last_good_generation(self) -> u64 {
+    pub(super) const fn last_good_generation(self) -> u64 {
         self.last_good_generation
     }
 
     #[must_use]
-    pub const fn first_output_sequence(self) -> u64 {
+    pub(super) const fn first_output_sequence(self) -> u64 {
         self.first_output_sequence
     }
 
     #[must_use]
-    pub const fn successor_output_sequence(self) -> u64 {
+    pub(super) const fn successor_output_sequence(self) -> u64 {
         self.successor_output_sequence
     }
 
     #[must_use]
-    pub const fn first_output_truncated(self) -> bool {
+    pub(super) const fn first_output_truncated(self) -> bool {
         self.first_output_truncated
     }
 
     #[must_use]
-    pub const fn successor_output_truncated(self) -> bool {
+    pub(super) const fn successor_output_truncated(self) -> bool {
         self.successor_output_truncated
     }
 }
 
-pub(super) fn requested() -> bool {
-    env::var_os(SUPERVISED_PLAY_CANARY_ENV).as_deref() == Some(OsStr::new("1"))
-}
-
-pub(super) struct SupervisedPlayCanaryHost {
+pub(super) struct SupervisedPlayTestFixture {
     project: GuardedSupervisedPlayProject,
-    stage: SupervisedPlayCanaryStage,
+    stage: SupervisedPlayTestStage,
     deadline: Instant,
     document: Option<EditorDocumentId>,
     first_saved_revision: Option<u64>,
@@ -135,14 +170,12 @@ pub(super) struct SupervisedPlayCanaryHost {
     successor_output_truncated: bool,
 }
 
-impl SupervisedPlayCanaryHost {
+impl SupervisedPlayTestFixture {
     pub(super) fn new(
         options: EditorLaunchOptions,
     ) -> Result<(EditorApplication, Self), EditorRunError> {
         let source_root = options.project_root().ok_or_else(|| {
-            EditorRunError::usage(format!(
-                "{SUPERVISED_PLAY_CANARY_ENV}=1 requires one source project root"
-            ))
+            EditorRunError::usage("the supervised Play test requires one source project root")
         })?;
         let project = GuardedSupervisedPlayProject::prepare(source_root).map_err(|error| {
             EditorRunError::Platform(format!(
@@ -155,7 +188,7 @@ impl SupervisedPlayCanaryHost {
             EditorApplication::new(launch),
             Self {
                 project,
-                stage: SupervisedPlayCanaryStage::ProjectManager,
+                stage: SupervisedPlayTestStage::ProjectManager,
                 deadline: Instant::now() + SUPERVISED_PLAY_CANARY_DEADLINE,
                 document: None,
                 first_saved_revision: None,
@@ -175,7 +208,7 @@ impl SupervisedPlayCanaryHost {
         self.deadline
     }
 
-    fn transition(&mut self, next: SupervisedPlayCanaryStage) {
+    fn transition(&mut self, next: SupervisedPlayTestStage) {
         self.stage = next;
     }
 
@@ -187,7 +220,7 @@ impl SupervisedPlayCanaryHost {
     ) -> Result<bool, EditorRunError> {
         self.require_before_deadline(application)?;
         match self.stage {
-            SupervisedPlayCanaryStage::ProjectManager => {
+            SupervisedPlayTestStage::ProjectManager => {
                 if rendered_state != EditorApplicationState::ProjectManager {
                     return Err(
                         self.state_error(application.state(), "Project Manager was skipped")
@@ -202,10 +235,10 @@ impl SupervisedPlayCanaryHost {
                         "the initial project request was not armed",
                     ));
                 }
-                self.transition(SupervisedPlayCanaryStage::AwaitingOpen);
+                self.transition(SupervisedPlayTestStage::AwaitingOpen);
                 Ok(true)
             }
-            SupervisedPlayCanaryStage::AwaitingOpen => Ok(false),
+            SupervisedPlayTestStage::AwaitingOpen => Ok(false),
             _ => Err(self.state_error(
                 application.state(),
                 "the supervised Play canary returned to the project shell",
@@ -217,7 +250,7 @@ impl SupervisedPlayCanaryHost {
         &mut self,
         application: &mut EditorApplication,
         _window_id: WindowId,
-    ) -> Result<NativeEditorCanaryAdvance, EditorRunError> {
+    ) -> Result<SupervisedPlayTestAdvance, EditorRunError> {
         self.require_before_deadline(application)?;
         let Some(frame) = application.current_frame() else {
             return Err(self.state_error(
@@ -241,19 +274,19 @@ impl SupervisedPlayCanaryHost {
             )
         })?;
         match self.stage {
-            SupervisedPlayCanaryStage::AwaitingOpen => {
+            SupervisedPlayTestStage::AwaitingOpen => {
                 if matches!(
                     application.state(),
                     EditorApplicationState::AuthoringReady
                         | EditorApplicationState::AuthoringDegraded
                 ) {
-                    self.transition(SupervisedPlayCanaryStage::AwaitingFirstEdit);
-                    Ok(NativeEditorCanaryAdvance::redraw())
+                    self.transition(SupervisedPlayTestStage::AwaitingFirstEdit);
+                    Ok(SupervisedPlayTestAdvance::redraw())
                 } else {
-                    Ok(NativeEditorCanaryAdvance::idle())
+                    Ok(SupervisedPlayTestAdvance::idle())
                 }
             }
-            SupervisedPlayCanaryStage::AwaitingFirstEdit => {
+            SupervisedPlayTestStage::AwaitingFirstEdit => {
                 let (document, action) = edit_action(
                     &frame,
                     FIRST_EDITED_WEAPON_X,
@@ -261,10 +294,10 @@ impl SupervisedPlayCanaryHost {
                     "the first saved edit",
                 )?;
                 self.document = Some(document);
-                self.transition(SupervisedPlayCanaryStage::AwaitingFirstSave);
-                Ok(NativeEditorCanaryAdvance::action(action))
+                self.transition(SupervisedPlayTestStage::AwaitingFirstSave);
+                Ok(SupervisedPlayTestAdvance::action(action))
             }
-            SupervisedPlayCanaryStage::AwaitingFirstSave => {
+            SupervisedPlayTestStage::AwaitingFirstSave => {
                 let document = self.require_document(application.state())?;
                 let action = save_action(
                     &frame,
@@ -272,10 +305,10 @@ impl SupervisedPlayCanaryHost {
                     application.state(),
                     "the first saved edit",
                 )?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingFirstSaveReceipt);
-                Ok(NativeEditorCanaryAdvance::action(action))
+                self.transition(SupervisedPlayTestStage::AwaitingFirstSaveReceipt);
+                Ok(SupervisedPlayTestAdvance::action(action))
             }
-            SupervisedPlayCanaryStage::AwaitingFirstSaveReceipt => {
+            SupervisedPlayTestStage::AwaitingFirstSaveReceipt => {
                 let document = self.require_document(application.state())?;
                 let Some(revision) = observe_saved_revision(
                     &frame,
@@ -284,34 +317,34 @@ impl SupervisedPlayCanaryHost {
                     "the first saved edit",
                 )?
                 else {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 };
                 self.first_saved_revision = Some(revision);
-                self.transition(SupervisedPlayCanaryStage::AwaitingFirstSaveAcknowledgement);
-                Ok(NativeEditorCanaryAdvance::action(
+                self.transition(SupervisedPlayTestStage::AwaitingFirstSaveAcknowledgement);
+                Ok(SupervisedPlayTestAdvance::action(
                     EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
                 ))
             }
-            SupervisedPlayCanaryStage::AwaitingFirstSaveAcknowledgement => {
+            SupervisedPlayTestStage::AwaitingFirstSaveAcknowledgement => {
                 if frame.persistence().result().is_some() {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
-                self.transition(SupervisedPlayCanaryStage::AwaitingPlay);
-                Ok(NativeEditorCanaryAdvance::redraw())
+                self.transition(SupervisedPlayTestStage::AwaitingPlay);
+                Ok(SupervisedPlayTestAdvance::redraw())
             }
-            SupervisedPlayCanaryStage::AwaitingPlay => {
+            SupervisedPlayTestStage::AwaitingPlay => {
                 let scene = frame.workspace().active_scene.as_ref().ok_or_else(|| {
                     self.state_error(application.state(), "the project has no startup Scene")
                 })?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingReady);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingReady);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::Play {
                         document: scene.document,
                         base_revision: scene.revision,
                     },
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingReady => {
+            SupervisedPlayTestStage::AwaitingReady => {
                 if let Some(result) = frame.play().result()
                     && !is_accepted(result, EditorPlayOperation::Play)
                 {
@@ -328,7 +361,7 @@ impl SupervisedPlayCanaryHost {
                     ));
                 }
                 if external.state() != EditorExternalPlayState::Running {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 let generation = external.generation().ok_or_else(|| {
                     self.state_error(application.state(), "READY did not publish a generation")
@@ -336,17 +369,17 @@ impl SupervisedPlayCanaryHost {
                 self.first_generation = Some(generation);
                 self.first_output_sequence = external.output_sequence();
                 self.first_output_truncated = external.output_truncated();
-                self.transition(SupervisedPlayCanaryStage::AwaitingStop);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingStop);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::Stop,
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingStop => {
+            SupervisedPlayTestStage::AwaitingStop => {
                 if external.state() != EditorExternalPlayState::Idle {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 if !is_applied(frame.play().result(), EditorPlayOperation::Stop) {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 self.project
                     .inject_desktop_build_failure()
@@ -361,15 +394,15 @@ impl SupervisedPlayCanaryHost {
                         "the Scene disappeared before the injected build failure",
                     )
                 })?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingBuildFailure);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingBuildFailure);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::Play {
                         document: scene.document,
                         base_revision: scene.revision,
                     },
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingBuildFailure => {
+            SupervisedPlayTestStage::AwaitingBuildFailure => {
                 if external.state() == EditorExternalPlayState::Running {
                     return Err(self.state_error(
                         application.state(),
@@ -377,7 +410,7 @@ impl SupervisedPlayCanaryHost {
                     ));
                 }
                 if external.state() != EditorExternalPlayState::Faulted {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 if !matches!(
                     frame.play().result(),
@@ -398,12 +431,12 @@ impl SupervisedPlayCanaryHost {
                         "supervised Play canary: could not restore the guarded desktop source: {error}"
                     ))
                 })?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingLastGoodReady);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingLastGoodReady);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::RunLastGood,
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingLastGoodReady => {
+            SupervisedPlayTestStage::AwaitingLastGoodReady => {
                 if matches!(
                     frame.play().result(),
                     Some(
@@ -424,7 +457,7 @@ impl SupervisedPlayCanaryHost {
                     ));
                 }
                 if external.state() != EditorExternalPlayState::Running {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 let generation = external.generation().ok_or_else(|| {
                     self.state_error(
@@ -439,22 +472,22 @@ impl SupervisedPlayCanaryHost {
                     ));
                 }
                 self.last_good_generation = Some(generation);
-                self.transition(SupervisedPlayCanaryStage::AwaitingLastGoodStop);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingLastGoodStop);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::Stop,
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingLastGoodStop => {
+            SupervisedPlayTestStage::AwaitingLastGoodStop => {
                 if external.state() != EditorExternalPlayState::Idle {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 if !is_applied(frame.play().result(), EditorPlayOperation::Stop) {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
-                self.transition(SupervisedPlayCanaryStage::AwaitingSuccessorEdit);
-                Ok(NativeEditorCanaryAdvance::redraw())
+                self.transition(SupervisedPlayTestStage::AwaitingSuccessorEdit);
+                Ok(SupervisedPlayTestAdvance::redraw())
             }
-            SupervisedPlayCanaryStage::AwaitingSuccessorEdit => {
+            SupervisedPlayTestStage::AwaitingSuccessorEdit => {
                 let document = self.require_document(application.state())?;
                 let scene = frame.workspace().active_scene.as_ref().ok_or_else(|| {
                     self.state_error(application.state(), "the Scene disappeared after Stop")
@@ -471,10 +504,10 @@ impl SupervisedPlayCanaryHost {
                     application.state(),
                     "the successor saved edit",
                 )?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingSuccessorSave);
-                Ok(NativeEditorCanaryAdvance::action(action))
+                self.transition(SupervisedPlayTestStage::AwaitingSuccessorSave);
+                Ok(SupervisedPlayTestAdvance::action(action))
             }
-            SupervisedPlayCanaryStage::AwaitingSuccessorSave => {
+            SupervisedPlayTestStage::AwaitingSuccessorSave => {
                 let document = self.require_document(application.state())?;
                 let action = save_action(
                     &frame,
@@ -482,10 +515,10 @@ impl SupervisedPlayCanaryHost {
                     application.state(),
                     "the successor saved edit",
                 )?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingSuccessorSaveReceipt);
-                Ok(NativeEditorCanaryAdvance::action(action))
+                self.transition(SupervisedPlayTestStage::AwaitingSuccessorSaveReceipt);
+                Ok(SupervisedPlayTestAdvance::action(action))
             }
-            SupervisedPlayCanaryStage::AwaitingSuccessorSaveReceipt => {
+            SupervisedPlayTestStage::AwaitingSuccessorSaveReceipt => {
                 let document = self.require_document(application.state())?;
                 let Some(revision) = observe_saved_revision(
                     &frame,
@@ -494,7 +527,7 @@ impl SupervisedPlayCanaryHost {
                     "the successor saved edit",
                 )?
                 else {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 };
                 if self
                     .first_saved_revision
@@ -506,14 +539,14 @@ impl SupervisedPlayCanaryHost {
                     ));
                 }
                 self.successor_saved_revision = Some(revision);
-                self.transition(SupervisedPlayCanaryStage::AwaitingSuccessorSaveAcknowledgement);
-                Ok(NativeEditorCanaryAdvance::action(
+                self.transition(SupervisedPlayTestStage::AwaitingSuccessorSaveAcknowledgement);
+                Ok(SupervisedPlayTestAdvance::action(
                     EditorAction::Persistence(EditorPersistenceAction::AcknowledgeResult),
                 ))
             }
-            SupervisedPlayCanaryStage::AwaitingSuccessorSaveAcknowledgement => {
+            SupervisedPlayTestStage::AwaitingSuccessorSaveAcknowledgement => {
                 if frame.persistence().result().is_some() {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 let scene = frame.workspace().active_scene.as_ref().ok_or_else(|| {
                     self.state_error(
@@ -521,18 +554,18 @@ impl SupervisedPlayCanaryHost {
                         "the Scene disappeared before successor Play",
                     )
                 })?;
-                self.transition(SupervisedPlayCanaryStage::AwaitingSuccessorPlay);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingSuccessorPlay);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::Play {
                         document: scene.document,
                         base_revision: scene.revision,
                     },
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingSuccessorPlay => match frame.play().result() {
+            SupervisedPlayTestStage::AwaitingSuccessorPlay => match frame.play().result() {
                 Some(result) if is_accepted(result, EditorPlayOperation::Play) => {
-                    self.transition(SupervisedPlayCanaryStage::AwaitingSuccessorReady);
-                    Ok(NativeEditorCanaryAdvance::redraw())
+                    self.transition(SupervisedPlayTestStage::AwaitingSuccessorReady);
+                    Ok(SupervisedPlayTestAdvance::redraw())
                 }
                 Some(EditorPlayOperationResult::Rejected { operation, .. })
                 | Some(EditorPlayOperationResult::Failed { operation, .. })
@@ -544,9 +577,9 @@ impl SupervisedPlayCanaryHost {
                         "the successor external Play request was not accepted",
                     ))
                 }
-                _ => Ok(NativeEditorCanaryAdvance::idle()),
+                _ => Ok(SupervisedPlayTestAdvance::idle()),
             },
-            SupervisedPlayCanaryStage::AwaitingSuccessorReady => {
+            SupervisedPlayTestStage::AwaitingSuccessorReady => {
                 if external.state() == EditorExternalPlayState::Faulted {
                     return Err(self.state_error(
                         application.state(),
@@ -554,7 +587,7 @@ impl SupervisedPlayCanaryHost {
                     ));
                 }
                 if external.state() != EditorExternalPlayState::Running {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 let generation = external.generation().ok_or_else(|| {
                     self.state_error(
@@ -571,37 +604,37 @@ impl SupervisedPlayCanaryHost {
                 self.successor_generation = Some(generation);
                 self.successor_output_sequence = external.output_sequence();
                 self.successor_output_truncated = external.output_truncated();
-                self.transition(SupervisedPlayCanaryStage::AwaitingFinalStop);
-                Ok(NativeEditorCanaryAdvance::action(EditorAction::Play(
+                self.transition(SupervisedPlayTestStage::AwaitingFinalStop);
+                Ok(SupervisedPlayTestAdvance::action(EditorAction::Play(
                     EditorPlayAction::Stop,
                 )))
             }
-            SupervisedPlayCanaryStage::AwaitingFinalStop => {
+            SupervisedPlayTestStage::AwaitingFinalStop => {
                 if external.state() != EditorExternalPlayState::Idle {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
                 if !is_applied(frame.play().result(), EditorPlayOperation::Stop) {
-                    return Ok(NativeEditorCanaryAdvance::idle());
+                    return Ok(SupervisedPlayTestAdvance::idle());
                 }
-                self.transition(SupervisedPlayCanaryStage::Complete);
-                Ok(NativeEditorCanaryAdvance::request_exit())
+                self.transition(SupervisedPlayTestStage::Complete);
+                Ok(SupervisedPlayTestAdvance::request_exit())
             }
-            SupervisedPlayCanaryStage::Complete => Ok(NativeEditorCanaryAdvance::idle()),
-            SupervisedPlayCanaryStage::ProjectManager => Err(self.state_error(
+            SupervisedPlayTestStage::Complete => Ok(SupervisedPlayTestAdvance::idle()),
+            SupervisedPlayTestStage::ProjectManager => Err(self.state_error(
                 application.state(),
                 "the supervised Play canary reached an invalid workspace stage",
             )),
         }
     }
 
-    pub(super) fn finish(self) -> Result<EditorSupervisedPlayCanaryEvidence, EditorRunError> {
-        if self.stage != SupervisedPlayCanaryStage::Complete {
+    pub(super) fn finish(self) -> Result<SupervisedPlayTestEvidence, EditorRunError> {
+        if self.stage != SupervisedPlayTestStage::Complete {
             return Err(self.state_error(
                 EditorApplicationState::ProjectManager,
                 "the native supervised Play trajectory did not reach clean close",
             ));
         }
-        Ok(EditorSupervisedPlayCanaryEvidence {
+        Ok(SupervisedPlayTestEvidence {
             first_saved_revision: self.first_saved_revision.ok_or_else(|| {
                 self.state_error(
                     EditorApplicationState::ProjectManager,

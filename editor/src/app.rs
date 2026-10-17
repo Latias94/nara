@@ -37,7 +37,6 @@ mod shell;
 
 use crate::supervised_play::SupervisedPlayWake;
 pub use shell::EditorApplicationState;
-pub(crate) use shell::EditorApplicationSurface;
 use shell::{
     EditorProductState, EditorProjectRequest, OpeningProjectState, OpeningProjectStep,
     OpeningReplacementState, ProjectManagerState, PublishedEditorProject, RecoveryState,
@@ -168,8 +167,6 @@ impl EditorApplicationUpdate {
 pub(crate) struct EditorApplicationDispatch {
     actions_observed: bool,
     invalidates_game_input: bool,
-    retires_cadence: bool,
-    starts_cadence: bool,
     requests_step: bool,
     requires_runtime_drive: bool,
     feedback: Option<Result<EditorActionBatchReport, EditorActionRejection>>,
@@ -182,14 +179,6 @@ impl EditorApplicationDispatch {
 
     pub(crate) const fn invalidates_game_input(&self) -> bool {
         self.invalidates_game_input
-    }
-
-    pub(crate) const fn retires_cadence(&self) -> bool {
-        self.retires_cadence
-    }
-
-    pub(crate) const fn starts_cadence(&self) -> bool {
-        self.starts_cadence
     }
 
     pub(crate) const fn requests_step(&self) -> bool {
@@ -312,18 +301,6 @@ impl EditorApplication {
 
     pub fn panel_workspace_mut(&mut self) -> &mut crate::workspace::EditorPanelWorkspace {
         &mut self.panel_workspace
-    }
-
-    #[must_use]
-    pub(crate) fn surface(&self) -> EditorApplicationSurface {
-        match self.state.published() {
-            Some(project) => EditorApplicationSurface::Workspace {
-                frame: project.session.current_frame(),
-                ui_authoring: project.session.current_ui_authoring_frame(),
-                read_only: self.ordinary_input_locked(),
-            },
-            None => EditorApplicationSurface::ProjectShell,
-        }
     }
 
     pub(crate) fn install_supervised_play_wake(&mut self, wake: SupervisedPlayWake) {
@@ -904,12 +881,6 @@ impl EditorApplication {
             .ok_or(EditorGameViewBridgeFailure::RuntimeUnavailable)?
             .session
             .apply_game_view_input_batch(batch)
-    }
-
-    pub(crate) fn cancel_game_step_presentation(&mut self) -> bool {
-        self.state
-            .published_mut()
-            .is_some_and(|project| project.session.cancel_game_step_presentation())
     }
 
     pub(crate) fn drive_gpu_recovery_pause(&mut self) -> EditorApplicationUpdate {
@@ -1630,17 +1601,6 @@ impl EditorApplication {
         self.session_close_retry_at
     }
 
-    pub(crate) fn session_close_pending(&self) -> bool {
-        self.session_retirement.is_some()
-            || matches!(
-                self.state,
-                EditorProductState::OpeningReplacement(OpeningReplacementState::Closing {
-                    close_started: true,
-                    ..
-                })
-            )
-    }
-
     fn defer_session_close_retry(&mut self) {
         self.session_close_retry_at = Some(Instant::now() + EDITOR_SESSION_CLOSE_RETRY_DELAY);
     }
@@ -1689,21 +1649,17 @@ fn dispatch_project_actions(
             | EditorAction::Play(EditorPlayAction::RetryClose)
             | EditorAction::WorkspaceIntent(_) => {
                 dispatch.invalidates_game_input = true;
-                dispatch.retires_cadence = true;
                 dispatch.requires_runtime_drive = true;
             }
             EditorAction::Play(EditorPlayAction::Pause) => {
-                dispatch.retires_cadence = true;
                 dispatch.requires_runtime_drive = true;
             }
             EditorAction::Play(EditorPlayAction::Resume)
             | EditorAction::Play(EditorPlayAction::Play { .. })
             | EditorAction::Play(EditorPlayAction::RunLastGood) => {
-                dispatch.starts_cadence = true;
                 dispatch.requires_runtime_drive = true;
             }
             EditorAction::Play(EditorPlayAction::StepFixedTick) => {
-                dispatch.retires_cadence = true;
                 dispatch.requests_step = true;
                 dispatch.requires_runtime_drive = true;
             }
@@ -2014,24 +1970,24 @@ mod tests {
             }
             let _ = application.advance_project_open();
         }
-        let mut frontend = crate::EguiEditorFrontend::new();
-        let context = egui::Context::default();
-        let mut rendered_revision = None;
-        let output = context.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1200.0, 800.0),
-                )),
-                ..Default::default()
-            },
-            |ui| {
-                rendered_revision = frontend
-                    .show(ui, &mut application)
-                    .map(|batch| batch.frame_revision());
-            },
-        );
-        output.drop_without_applying_deltas();
+        let mut frontend = crate::ImguiEditorFrontend::new();
+        let mut context = dear_imgui_rs::Context::create();
+        context.set_ini_filename::<PathBuf>(None).unwrap();
+        context
+            .io_mut()
+            .set_config_flags(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
+        context.io_mut().set_display_size([1200.0, 800.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let rendered_revision = frontend
+            .show(context.frame(), &mut application)
+            .expect("the ordinary Dear ImGui frontend must render")
+            .map(|batch| batch.frame_revision());
+        let _ = context.render_legacy();
         let first_revision = rendered_revision.expect("the authoring workspace was rendered");
         let frame = application.current_frame().unwrap();
         let scene = frame.workspace().active_scene.as_ref().unwrap();

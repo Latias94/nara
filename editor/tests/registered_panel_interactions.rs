@@ -8,10 +8,16 @@ use std::{fs, path::Path, time::Duration};
 use nara::tooling::{
     EditorAction, EditorActionBatch, EditorCloseDecision, EditorWorkspaceIntentAction,
 };
-use nara_editor::{EditorApplication, EditorLaunchOptions, EguiEditorFrontend};
+use nara_editor::{
+    EditorApplication, EditorLaunchOptions, ImguiEditorFrontend,
+    workspace::{EditorPanelPlacement, EditorPanelTarget},
+};
+
+#[path = "support/imgui.rs"]
+mod imgui;
 
 #[test]
-fn registered_hierarchy_scrolls_to_entities_below_the_visible_column() {
+fn registered_panels_scroll_and_keep_independent_inspector_instances() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../tests/fixtures/generic-editor/known-unbound");
     let unique = std::time::SystemTime::now()
@@ -48,26 +54,84 @@ fn registered_hierarchy_scrolls_to_entities_below_the_visible_column() {
         }
         application.advance_project_open();
     }
-    let mut frontend = EguiEditorFrontend::new();
-    let context = egui::Context::default();
-    let before = draw(&context, &mut frontend, &mut application, Vec::new());
-    let mut after = before;
-    for _ in 0..10 {
-        after = draw(
-            &context,
-            &mut frontend,
-            &mut application,
-            vec![
-                egui::Event::PointerMoved(egui::pos2(100.0, 430.0)),
-                egui::Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Point,
-                    delta: egui::vec2(0.0, -180.0),
-                    phase: egui::TouchPhase::Move,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-        );
+    let original = application.current_frame().unwrap();
+    let original_scene = original.workspace().active_scene.as_ref().unwrap();
+    let mut frontend = ImguiEditorFrontend::new();
+    let mut context = imgui::context();
+    for _ in 0..4 {
+        let _ = imgui::draw(&mut context, &mut frontend, &mut application);
     }
+    let before = panel_windows(&context, "Hierarchy###nara-panel-").remove(0);
+    assert!(
+        before.drawn,
+        "the registered hierarchy must contribute real draw commands"
+    );
+    assert_eq!(
+        before.scroll_y, 0.0,
+        "the first hierarchy row must initially be visible"
+    );
+    for _ in 0..10 {
+        context.io_mut().add_mouse_pos_event(before.center);
+        context.io_mut().add_mouse_wheel_event([0.0, -6.0]);
+        let _ = imgui::draw(&mut context, &mut frontend, &mut application);
+    }
+    let after = panel_windows(&context, "Hierarchy###nara-panel-").remove(0);
+    assert!(after.drawn);
+    assert!(
+        after.scroll_y > before.scroll_y + 50.0,
+        "wheel input must move the registered hierarchy contents"
+    );
+
+    let first = application
+        .panel_workspace()
+        .layout()
+        .instances()
+        .iter()
+        .find(|panel| panel.kind() == "nara.inspector")
+        .unwrap()
+        .id();
+    let second = application
+        .panel_workspace_mut()
+        .open("nara.inspector", EditorPanelTarget::Workspace)
+        .unwrap();
+    for instance in [first, second] {
+        application
+            .panel_workspace_mut()
+            .layout_mut()
+            .place(instance, EditorPanelPlacement::Floating);
+    }
+    for _ in 0..4 {
+        let _ = imgui::draw(&mut context, &mut frontend, &mut application);
+    }
+    let inspectors = panel_windows(&context, "Inspector###nara-panel-");
+    assert_eq!(inspectors.iter().filter(|panel| panel.drawn).count(), 2);
+    assert_ne!(inspectors[0].id, inspectors[1].id);
+    application.panel_workspace_mut().layout_mut().close(first);
+    let _ = imgui::draw(&mut context, &mut frontend, &mut application);
+    let retained = panel_windows(&context, "Inspector###nara-panel-");
+    assert_eq!(retained.iter().filter(|panel| panel.drawn).count(), 1);
+    assert!(
+        application
+            .panel_workspace()
+            .layout()
+            .instance(second)
+            .unwrap()
+            .is_visible()
+    );
+    assert_eq!(
+        application
+            .panel_workspace()
+            .layout()
+            .instance(second)
+            .unwrap()
+            .target(),
+        &EditorPanelTarget::Workspace
+    );
+    let current = application.current_frame().unwrap();
+    let current_scene = current.workspace().active_scene.as_ref().unwrap();
+    assert_eq!(current_scene.document, original_scene.document);
+    assert_eq!(current_scene.revision, original_scene.revision);
+    assert_eq!(current_scene.dirty, original_scene.dirty);
     application.request_exit();
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
@@ -108,38 +172,48 @@ fn registered_hierarchy_scrolls_to_entities_below_the_visible_column() {
             .starts_with("nara-registered-panel-scroll-")
     );
     fs::remove_dir_all(&owned_root).unwrap();
-    assert!(before.is_some(), "the first hierarchy row must be painted");
-    assert!(
-        after.is_none_or(|position| position < before.unwrap() - 50.0),
-        "scroll input must move the registered hierarchy contents"
-    );
 }
 
-fn draw(
-    context: &egui::Context,
-    frontend: &mut EguiEditorFrontend,
-    application: &mut EditorApplication,
-    events: Vec<egui::Event>,
-) -> Option<f32> {
-    let mut input = egui::RawInput::default();
-    input.screen_rect = Some(egui::Rect::from_min_size(
-        egui::Pos2::ZERO,
-        egui::vec2(1200.0, 800.0),
-    ));
-    input.events = events;
-    let output = context.run_ui(input, |ui| {
-        let _ = frontend.show(ui, application);
-    });
-    let position = output.shapes.iter().find_map(|shape| match &shape.shape {
-        egui::epaint::Shape::Text(text)
-            if text.galley.job.text.starts_with("scroll-probe-000 (") =>
-        {
-            Some(text.pos.y)
+struct PanelWindow {
+    id: u32,
+    center: [f32; 2],
+    scroll_y: f32,
+    drawn: bool,
+}
+
+fn panel_windows(context: &dear_imgui_rs::Context, prefix: &str) -> Vec<PanelWindow> {
+    context.binding().with_bound_context(|| {
+        // SAFETY: the bound Context owns all windows and the completed draw data. Only copied
+        // identities, scroll offsets, geometry and draw-presence facts leave this scope.
+        unsafe {
+            let current = &*dear_imgui_rs::sys::igGetCurrentContext();
+            let draw_data = &*dear_imgui_rs::sys::igGetDrawData();
+            (0..current.Windows.Size)
+                .filter_map(|index| {
+                    let window = &**current.Windows.Data.add(index as usize);
+                    if !std::ffi::CStr::from_ptr(window.Name)
+                        .to_string_lossy()
+                        .starts_with(prefix)
+                    {
+                        return None;
+                    }
+                    Some(PanelWindow {
+                        id: window.ID,
+                        center: [
+                            (window.InnerRect.Min.x + window.InnerRect.Max.x) * 0.5,
+                            (window.InnerRect.Min.y + window.InnerRect.Max.y) * 0.5,
+                        ],
+                        scroll_y: window.Scroll.y,
+                        drawn: window.Active
+                            && !window.Hidden
+                            && (0..draw_data.CmdLists.Size).any(|index| {
+                                *draw_data.CmdLists.Data.add(index as usize) == window.DrawList
+                            }),
+                    })
+                })
+                .collect()
         }
-        _ => None,
-    });
-    output.drop_without_applying_deltas();
-    position
+    })
 }
 
 fn copy_project(source: &Path, destination: &Path) {

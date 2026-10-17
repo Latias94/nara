@@ -1,4 +1,4 @@
-#![cfg(feature = "editor-game-view-canary")]
+#![cfg(feature = "editor")]
 
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;

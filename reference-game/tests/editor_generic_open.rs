@@ -1,3 +1,5 @@
+#![cfg(feature = "editor")]
+
 use std::path::Path;
 
 use nara::tooling::{

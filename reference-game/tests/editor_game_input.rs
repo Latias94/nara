@@ -1,4 +1,4 @@
-#![cfg(feature = "editor-imgui-qualification")]
+#![cfg(feature = "editor")]
 
 #[path = "support/reference_project_copy.rs"]
 mod reference_project_copy;
@@ -101,7 +101,7 @@ fn start(editor: &mut EditorProjectSession) -> EditorGameViewCandidate {
 }
 
 // This CPU contract fixture completes exact UI permits through a fake backend. Native GPU
-// presentation is qualified separately by the Editor canary.
+// presentation is verified separately through the ordinary native Editor.
 fn complete_fake_presentation(
     editor: &mut EditorProjectSession,
     candidate: EditorGameViewCandidate,

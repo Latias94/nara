@@ -43,15 +43,21 @@ docking and DPI 144/120 detachment, Chinese IME/clipboard/navigation, layout res
 view retirement and device-loss recovery. Final cleanup evidence names Windows/DX12; a bare-GPU
 control isolates this machine's Vulkan implicit-layer teardown interaction. The upstream Winit
 0.20.0 combined-shutdown borrow defect is avoided through explicit renderer/viewport/platform
-retirement. U7 full frontend parity and U8 clean external acceptance/removal remain pending;
-production remains egui until parity, and native Linux/macOS release support is not inferred.
+retirement. Native Linux/macOS release support is not inferred from this Windows gate.
 The U7 candidate checkpoint now ports the ordinary authoring and project workflows and passes
 149 Editor library tests, including all nine native Windows/DX12 tests, plus 207 root-owner
 tests. The actual nine-persona review and its independent targeted follow-up close the Scene
 image-publication, Canvas redisplay/rollback and menu-reopen wake defects. Its
 [progress record](../../research/2026-10-16-editor-foundation/u7-parity-progress.md) preserves
-the exact red/green and platform limits. Production selection and U8 external acceptance/removal
-are still pending, so this does not mark the whole U7 unit or ADR implemented.
+the exact red/green and platform limits. That candidate is committed at `26be74f`.
+The [U8 migration](../../research/2026-10-16-editor-foundation/u8-migration-progress.md)
+selects Dear ImGui for the ordinary entry and removes egui, qualification APIs and duplicate
+Hosts. Its current source passes 167 selected Editor tests, including twelve Windows/DX12 native
+tests, and the independent default panel consumer. Full independent U8 review
+`20261017-081030-69c43aff` identifies two P2 defects; the exact-step input/frame cleanup and
+Paused-to-Running Host cadence repairs pass bounded independent follow-up and actual regressions.
+The input owner fix is committed at `2b26f96`; selected frontend removal and final clean
+committed-source external acceptance remain in progress. This does not mark U7/U8 or the ADR implemented.
 Existing authoring, persistence and execution evidence above remains the baseline, not proof of the proposed frontend or multi-window work.
 
 The final acceptance record

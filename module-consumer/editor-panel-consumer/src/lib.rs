@@ -1,7 +1,7 @@
 //! A trusted source-built Editor contribution, independently compiled from the product module.
 
 use nara_editor::{
-    EguiEditorFrontend, EguiEditorPanelContext,
+    ImguiEditorFrontend, ImguiEditorPanelContext,
     workspace::{
         EditorPanelDescriptor, EditorPanelModel, EditorPanelMultiplicity, EditorPanelPlacement,
         EditorPanelRegistrationError, EditorPanelWorkspace,
@@ -21,17 +21,11 @@ pub fn install(workspace: &mut EditorPanelWorkspace) -> Result<(), EditorPanelRe
     ))
 }
 
-pub fn install_egui(frontend: &mut EguiEditorFrontend) {
+pub fn install_imgui(frontend: &mut ImguiEditorFrontend) {
     frontend.register_panel_painter(PANEL_KIND, paint);
 }
 
-#[cfg(feature = "imgui")]
-pub fn install_imgui(frontend: &mut nara_editor::ImguiEditorFrontend) {
-    frontend.register_panel_painter(PANEL_KIND, paint_imgui);
-}
-
-#[cfg(feature = "imgui")]
-fn paint_imgui(ui: &dear_imgui_rs::Ui, context: &mut nara_editor::ImguiEditorPanelContext<'_, '_>) {
+fn paint(ui: &dear_imgui_rs::Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
     ui.text(format!(
         "Selected entities: {}",
         selected_count(context.model())
@@ -60,19 +54,4 @@ pub fn clear_selection(model: EditorPanelModel<'_>) -> Option<EditorAction> {
 #[must_use]
 pub fn selected_count(model: EditorPanelModel<'_>) -> usize {
     model.selection().map_or(0, |selection| selection.len())
-}
-
-fn paint(ui: &mut egui::Ui, context: &mut EguiEditorPanelContext<'_, '_, '_>) {
-    ui.label(format!(
-        "Selected entities: {}",
-        selected_count(context.model())
-    ));
-    let action = clear_selection(context.model());
-    if ui
-        .add_enabled(action.is_some(), egui::Button::new("Clear selection"))
-        .clicked()
-        && let Some(action) = action
-    {
-        context.emit(action);
-    }
 }

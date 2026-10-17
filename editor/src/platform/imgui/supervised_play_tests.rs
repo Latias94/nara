@@ -22,7 +22,7 @@ use winit::{
 };
 
 use super::NativeImgui;
-use crate::platform::supervised_play_canary::SupervisedPlayCanaryHost;
+use super::supervised_play_support::SupervisedPlayTestFixture;
 use crate::{
     EditorApplication, EditorLaunchOptions,
     frontend::imgui::{clear_controls, control_clip, control_rect, control_visible},
@@ -36,7 +36,7 @@ fn native_imgui_supervised_play_preserves_last_good_and_successor_generations() 
             .with_profile("desktop");
     // The existing canary owns its guarded project copy and document edits. Play controls use
     // synthetic input on the actual widgets; no OS input or focus request is injected.
-    let (application, canary) = SupervisedPlayCanaryHost::new(options).unwrap();
+    let (application, canary) = SupervisedPlayTestFixture::new(options).unwrap();
     let mut host = SupervisedPlayTestHost {
         application,
         canary: Some(canary),
@@ -138,7 +138,7 @@ fn native_imgui_supervised_play_preserves_last_good_and_successor_generations() 
 
 struct SupervisedPlayTestHost {
     application: EditorApplication,
-    canary: Option<SupervisedPlayCanaryHost>,
+    canary: Option<SupervisedPlayTestFixture>,
     native: Option<NativeImgui>,
     failure: Option<String>,
     primary_present_count: u64,
@@ -505,9 +505,6 @@ impl ApplicationHandler for SupervisedPlayTestHost {
             );
             let mut native =
                 NativeImgui::new(event_loop, window).map_err(|error| error.to_string())?;
-            // The dedicated external Play canary owns this trajectory, independently of the
-            // optional in-process Game View qualification environment used by another test.
-            native.canary = None;
             native.layout_loaded = true;
             let mut flags = native.context.io().config_flags();
             flags.remove(ConfigFlags::VIEWPORTS_ENABLE);

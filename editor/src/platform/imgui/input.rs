@@ -1,8 +1,9 @@
 use dear_imgui_rs::{Context, Id};
-use nara::window::WindowId as NaraWindowId;
+use nara::{project_host::EditorGameStartRequest, window::WindowId as NaraWindowId};
 use winit::{
     dpi::PhysicalPosition,
     event::{ElementState, Ime, WindowEvent},
+    keyboard::PhysicalKey,
     window::WindowId,
 };
 
@@ -12,7 +13,8 @@ use crate::{
 };
 
 use super::super::{
-    EditorRunError, game_input::EditorGameInputRouter, viewport::EditorGamePresentedStamp,
+    EditorRunError,
+    game_input::{EditorGameInputRouter, EditorGamePresentedStamp},
 };
 
 #[derive(Default)]
@@ -28,6 +30,11 @@ pub(super) struct ImguiInput {
 }
 
 impl ImguiInput {
+    #[cfg(test)]
+    pub(super) fn text_owner_item(&self) -> Option<u32> {
+        self.text_owner.map(|owner| owner.item.raw())
+    }
+
     pub(super) fn is_captured(&self) -> bool {
         self.router.is_captured()
     }
@@ -83,12 +90,8 @@ impl ImguiInput {
             return true;
         }
         match event {
-            WindowEvent::KeyboardInput { event: key, .. }
-                if key.state == ElementState::Released =>
-            {
-                self.router.handle_window_event(event);
-                // A key may have been pressed in the Editor before Game capture began.
-                true
+            WindowEvent::KeyboardInput { event: key, .. } => {
+                self.handle_key(window, key.physical_key, key.state, key.repeat)
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = Some(*position);
@@ -132,13 +135,29 @@ impl ImguiInput {
         }
     }
 
+    pub(super) fn handle_key(
+        &mut self,
+        window: WindowId,
+        physical_key: PhysicalKey,
+        state: ElementState,
+        repeat: bool,
+    ) -> bool {
+        if self.game_window != Some(window) {
+            return true;
+        }
+        let route_to_editor = self.router.handle_key(physical_key, state, repeat);
+        // Dear must balance a key pressed before Game capture, including a captured release.
+        state == ElementState::Released || route_to_editor
+    }
+
     pub(super) fn flush(
         &mut self,
         application: &mut EditorApplication,
     ) -> Result<(), EditorRunError> {
+        let active = application.active_game_start_request();
+        self.router.forget_retired_route(active);
         if application.ordinary_input_locked() {
-            self.invalidate_after_control(true);
-            return Ok(());
+            self.invalidate_after_control(active);
         }
         let Some(batch) = self.router.take_batch() else {
             return Ok(());
@@ -166,6 +185,7 @@ impl ImguiInput {
         secondary_windows: &[(Id, WindowId, NaraWindowId)],
         presentation_advanced: bool,
         ordinary_input_locked: bool,
+        active: Option<EditorGameStartRequest>,
     ) {
         let text_window = text_owner.and_then(|owner| {
             native_window(
@@ -182,7 +202,7 @@ impl ImguiInput {
         self.text_owner = text_owner;
         self.text_window = text_window;
         if ordinary_input_locked {
-            self.invalidate_after_control(true);
+            self.invalidate_after_control(active);
             return;
         }
 
@@ -242,8 +262,8 @@ impl ImguiInput {
         self.router.mark_presented_stale();
     }
 
-    pub(super) fn invalidate_after_control(&mut self, terminal: bool) {
-        self.router.invalidate_after_control(terminal);
+    pub(super) fn invalidate_after_control(&mut self, active: Option<EditorGameStartRequest>) {
+        self.router.invalidate_after_control(active);
         self.game_window = None;
         self.game_image = None;
         self.cursor = None;

@@ -55,13 +55,7 @@ pub(crate) struct ImguiFrontendOutput {
     pub(crate) scene_extent: Option<[f32; 2]>,
     pub(crate) game_extent: Option<[f32; 2]>,
     pub(crate) game_image: Option<ImguiImageInteraction>,
-    pub(crate) scene_panel_rect: Option<nara::render::DisplayRect>,
-    pub(crate) game_panel_rect: Option<nara::render::DisplayRect>,
     pub(crate) text_owner: Option<ImguiTextOwner>,
-    pub(crate) text_probe_rect: Option<nara::render::DisplayRect>,
-    pub(crate) text_probe_window_rect: Option<nara::render::DisplayRect>,
-    pub(crate) play_rect: Option<nara::render::DisplayRect>,
-    pub(crate) stop_rect: Option<nara::render::DisplayRect>,
     pub(crate) save_layout: bool,
     pub(crate) reset_layout: bool,
     pub(crate) restore_layout: bool,
@@ -176,8 +170,8 @@ pub struct ImguiEditorFrontend {
     project: project::ImguiProjectPanels,
     toolbar: authoring::ImguiAuthoringPanels,
     workspace_generation: Option<u64>,
-    text_probe: String,
-    qualification_game_detached: Option<bool>,
+    #[cfg(test)]
+    test_game_detached: Option<bool>,
     reset_windows: bool,
 }
 
@@ -282,7 +276,6 @@ impl ImguiEditorFrontend {
             false,
             false,
             "Native detachment is owned by the product Host",
-            "",
             None,
         )?;
         self.finish_canvas_presentation(
@@ -323,10 +316,6 @@ impl ImguiEditorFrontend {
         }
     }
 
-    pub(crate) fn text_probe(&self) -> &str {
-        &self.text_probe
-    }
-
     pub(crate) fn reset_layout(&mut self) {
         self.retire_panel_widgets();
         self.reset_windows = true;
@@ -334,27 +323,15 @@ impl ImguiEditorFrontend {
 
     pub(crate) fn retire_panel_widgets(&mut self) {
         self.presentation.reset_widgets();
-        self.qualification_game_detached = None;
+        #[cfg(test)]
+        {
+            self.test_game_detached = None;
+        }
     }
 
-    pub(crate) fn place_qualification_game(&mut self, detached: bool) {
-        self.qualification_game_detached = Some(detached);
-    }
-
-    pub(crate) fn set_qualification_game_open(
-        &mut self,
-        open: bool,
-        workspace: &mut crate::workspace::EditorPanelWorkspace,
-    ) {
-        set_panel_open(workspace, "nara.game-view", open);
-    }
-
-    pub(crate) fn set_qualification_scene_open(
-        &mut self,
-        open: bool,
-        workspace: &mut crate::workspace::EditorPanelWorkspace,
-    ) {
-        set_panel_open(workspace, "nara.authoring-view", open);
+    #[cfg(test)]
+    pub(crate) fn place_test_game(&mut self, detached: bool) {
+        self.test_game_detached = Some(detached);
     }
 
     pub(crate) fn scene_open(&self, workspace: &crate::workspace::EditorPanelWorkspace) -> bool {
@@ -374,7 +351,6 @@ impl ImguiEditorFrontend {
         game_captured: bool,
         canvas_presented: bool,
         detachment: &str,
-        status: &str,
         preedit: Option<&ImguiPreedit>,
     ) -> Result<ImguiFrontendOutput, String> {
         let generation = application.workspace_generation();
@@ -421,27 +397,6 @@ impl ImguiEditorFrontend {
             ui_interaction_tests::record_control(ui, "Workspace menu");
             ui.text(detachment);
         });
-
-        if std::env::var_os("NARA_IMGUI_QUALIFICATION_CANARY").is_some()
-            || std::env::var_os("NARA_IMGUI_TEXT_TRACE").is_some()
-        {
-            ui.window("Qualification")
-                .size([700.0, 140.0], condition)
-                .build(|| {
-                    ui.text(status);
-                    output.save_layout |= ui.button("Save layout");
-                    ui.same_line();
-                    output.restore_layout |= ui.button("Restore layout");
-                    ui.same_line();
-                    output.reset_layout |= ui.button("Reset layout");
-                    ui.input_text("IME / clipboard", &mut self.text_probe)
-                        .build();
-                    let (min, max) = ui.item_rect();
-                    output.text_probe_rect = Some(nara::render::DisplayRect { min, max });
-                    output.text_probe_window_rect = Some(panel_rect(ui));
-                    observe_text_owner(ui, &mut output.text_owner, preedit);
-                });
-        }
 
         if let Some(model) = application.project_shell_model() {
             ui.window("Project")
@@ -528,15 +483,18 @@ impl ImguiEditorFrontend {
             let index = placements.entry(instance.placement()).or_insert(0);
             let (position, size) = default_panel_rect(instance.placement(), *index);
             *index += 1;
-            let mut position = [
+            let position = [
                 origin[0] + position[0] * scale,
                 origin[1] + position[1] * scale,
             ];
-            let mut position_condition = condition;
-            let mut floating =
-                instance.placement() == crate::workspace::EditorPanelPlacement::Floating;
+            let position_condition = condition;
+            let floating = instance.placement() == crate::workspace::EditorPanelPlacement::Floating;
+            #[cfg(test)]
+            let (mut position, mut position_condition, mut floating) =
+                (position, position_condition, floating);
+            #[cfg(test)]
             if instance.kind() == "nara.game-view" {
-                match self.qualification_game_detached {
+                match self.test_game_detached {
                     Some(true) => {
                         floating = true;
                         ui.set_next_window_dock_id(0.into());
@@ -548,6 +506,7 @@ impl ImguiEditorFrontend {
                     }
                     Some(false) => {
                         floating = true;
+                        ui.set_next_window_dock_id(0.into());
                         ui.set_next_window_viewport(ui.main_viewport().id());
                         position_condition = Condition::Always;
                     }
@@ -557,10 +516,18 @@ impl ImguiEditorFrontend {
             if !floating && let Some(dock) = placement_docks.get(&instance.placement()) {
                 ui.set_next_window_dock_id_with_cond(*dock, Condition::FirstUseEver);
             }
+            #[cfg(test)]
+            ui.set_next_window_class(
+                &dear_imgui_rs::WindowClass::default().viewport_flags_override_set(
+                    dear_imgui_rs::WindowClassViewportFlags::NO_FOCUS_ON_APPEARING,
+                ),
+            );
             let window = ui
                 .window(window_name)
                 .opened(&mut open)
                 .size([size[0] * scale, size[1] * scale], condition);
+            #[cfg(test)]
+            let window = window.flags(dear_imgui_rs::WindowFlags::NO_FOCUS_ON_APPEARING);
             let window = if floating {
                 window.position(position, position_condition)
             } else {
@@ -734,23 +701,6 @@ fn panel_visible(workspace: &crate::workspace::EditorPanelWorkspace, kind: &str)
         .any(|instance| instance.kind() == kind && instance.is_visible())
 }
 
-fn set_panel_open(workspace: &mut crate::workspace::EditorPanelWorkspace, kind: &str, open: bool) {
-    if open {
-        let _ = workspace.open(kind, crate::workspace::EditorPanelTarget::ActiveDocument);
-    } else {
-        let ids = workspace
-            .layout()
-            .instances()
-            .iter()
-            .filter(|instance| instance.kind() == kind)
-            .map(|instance| instance.id())
-            .collect::<Vec<_>>();
-        for id in ids {
-            workspace.layout_mut().close(id);
-        }
-    }
-}
-
 fn default_panel_rect(
     placement: crate::workspace::EditorPanelPlacement,
     index: usize,
@@ -903,7 +853,6 @@ fn paint_authoring_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) 
         context.output.scene_pick_point = scene.pick_point;
         context.output.scene_camera_changed = scene.camera_changed;
     }
-    context.output.scene_panel_rect = Some(panel_rect(ui));
 }
 
 fn paint_game_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
@@ -946,7 +895,6 @@ fn paint_game_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         );
         project::show_play_result(ui, frame);
         ui.text_wrapped("Play runs in its supervised native window.");
-        context.output.game_panel_rect = Some(panel_rect(ui));
         return;
     }
     let controls: Vec<(&str, bool, EditorPlayAction)> = match state {
@@ -994,45 +942,67 @@ fn paint_game_view(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         }
         EditorPlayState::RetiringPlay | EditorPlayState::Stopping => Vec::new(),
     };
-    for (label, enabled, action) in controls {
-        let cleanup = matches!(
-            action,
-            EditorPlayAction::RetryClose | EditorPlayAction::RetryRetirement
-        );
-        let while_pending = matches!(action, EditorPlayAction::Cancel | EditorPlayAction::Stop);
-        let clicked = ui.with_disabled_if(
-            !enabled || (!can_request && !cleanup) || (pending && !while_pending),
-            || ui.button(label),
-        );
-        let (min, max) = ui.item_rect();
-        let rect = Some(nara::render::DisplayRect { min, max });
-        if matches!(
-            action,
-            EditorPlayAction::Play { .. } | EditorPlayAction::Pause | EditorPlayAction::Resume
-        ) {
-            context.output.play_rect = rect;
-        }
-        if matches!(action, EditorPlayAction::Stop) {
-            context.output.stop_rect = rect;
-        }
-        if clicked {
-            context.actions.push(EditorAction::Play(action));
-        }
-        ui.same_line();
-    }
-    ui.new_line();
-    ui.text(format!("{state:?}"));
-    project::show_play_result(ui, frame);
-    if let EditorRuntimeAvailability::Unavailable(reason) = frame.runtime_availability() {
-        project::show_runtime_unavailable(ui, reason);
-    }
+    // Keep button/status/result feedback in one stable region. Its own overflow can scroll;
+    // appearing or wrapping messages never change the Game render target's geometry.
+    ui.child_window("embedded_game_controls")
+        .size([
+            0.0,
+            ui.frame_height_with_spacing() + ui.text_line_height_with_spacing() * 2.0,
+        ])
+        .build(ui, || {
+            for (label, enabled, action) in controls {
+                let cleanup = matches!(
+                    action,
+                    EditorPlayAction::RetryClose | EditorPlayAction::RetryRetirement
+                );
+                let while_pending =
+                    matches!(action, EditorPlayAction::Cancel | EditorPlayAction::Stop);
+                let clicked = ui.with_disabled_if(
+                    !enabled || (!can_request && !cleanup) || (pending && !while_pending),
+                    || ui.button(label),
+                );
+                #[cfg(test)]
+                ui_interaction_tests::record_control(ui, format!("embedded:{label}"));
+                if clicked {
+                    context.actions.push(EditorAction::Play(action));
+                }
+                ui.same_line();
+            }
+            ui.new_line();
+            ui.text(format!("{state:?}"));
+            project::show_play_result(ui, frame);
+            if let EditorRuntimeAvailability::Unavailable(reason) = frame.runtime_availability() {
+                project::show_runtime_unavailable(ui, reason);
+            }
+        });
     (context.output.game_extent, context.output.game_image) = context.widgets.game_view.show(
         ui,
         context.input.game,
         frame.play(),
         context.input.game_captured,
     );
-    context.output.game_panel_rect = Some(panel_rect(ui));
+    #[cfg(test)]
+    {
+        let min = ui.window_pos();
+        let size = ui.window_size();
+        ui_interaction_tests::record_rect(
+            "embedded:Game window",
+            nara::render::DisplayRect {
+                min,
+                max: [min[0] + size[0], min[1] + size[1]],
+            },
+        );
+        if let Some(image) = context.output.game_image {
+            let origin = image.viewport_origin;
+            ui_interaction_tests::record_rect(
+                "embedded:Game image",
+                nara::render::DisplayRect {
+                    min: [image.rect.min[0] + origin[0], image.rect.min[1] + origin[1]],
+                    max: [image.rect.max[0] + origin[0], image.rect.max[1] + origin[1]],
+                },
+            );
+        }
+    }
 }
 
 fn paint_diagnostics(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
@@ -1059,15 +1029,6 @@ fn paint_diagnostics(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
         }
     }
     project::show_external_play_output(ui, frame);
-}
-
-fn panel_rect(ui: &Ui) -> nara::render::DisplayRect {
-    let min = ui.window_pos();
-    let size = ui.window_size();
-    nara::render::DisplayRect {
-        min,
-        max: [min[0] + size[0], min[1] + size[1]],
-    }
 }
 
 fn show_image(

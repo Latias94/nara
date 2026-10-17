@@ -2,7 +2,8 @@
 
 ## Dependency cohort
 
-The editor foundation moves the Bevy ECS/reflection/macro family from 0.19 to 0.20, WGPU from 30.0.0 to 30.0.1, and the retained egui frontend from 0.36.1 to 0.36.2.
+The editor foundation moves the Bevy ECS/reflection/macro family from 0.19 to 0.20 and WGPU from 30.0.0 to 30.0.1.
+The selected Editor uses the coherent Dear ImGui 0.20.0 core, Winit and WGPU backend family.
 Winit remains on the supported stable 0.30.13 backend route.
 This does not adopt Bevy App, rendering or asset ownership.
 The locked WGPU HAL implementation also moves to 30.0.1: its Vulkan acquire-fence and Metal color-space repairs are not supplied by updating the public WGPU package alone.
@@ -26,14 +27,25 @@ The declared minimum compiler remains Rust 1.95 and must be verified against the
 ## Editor frontend boundaries
 
 [ADR 0118](../architecture/adr/0118-editor-workspaces-frontends-and-creation-templates.md) and the [implementation plan](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md) own subsequent application/frontend, creation-template and window/view changes.
-Dependency migration alone does not establish Dear ImGui adoption or multi-window product support.
+Dependency migration alone did not establish Dear ImGui adoption or multi-window product support.
+The subsequent Windows integration and frontend parity evidence is recorded in the
+[adoption record](../research/2026-10-16-editor-foundation/adoption-evidence.md) and
+[parity progress](../research/2026-10-16-editor-foundation/u7-parity-progress.md).
 
 `EditorApplication` owns project opening, replacement, recovery, document actions and Play without toolkit state.
-Move egui drawing calls from `EditorApplication::show` to a separately owned `EguiEditorFrontend::show(ui, &mut application)`.
-Interactive egui consumers submit their returned batch through `EguiEditorFrontend::submit_and_drive`; it observes that exact dispatch result before advancing the application.
+Move drawing calls from `EditorApplication::show` to a separately owned `ImguiEditorFrontend::show(ui, &mut application)`.
+Interactive consumers submit their returned batch through `ImguiEditorFrontend::submit_and_drive`; it observes that exact dispatch result before advancing the application.
 Native integration likewise delivers the returned dispatch feedback immediately.
 The neutral `EditorApplication::submit_and_drive` remains available for consumers without widget feedback.
 Recreating a frontend resets only local widgets and drafts; it does not replace the project session, accepted document changes, history or Play owner.
+
+The private Editor's Dear ImGui dependencies are ordinary dependencies. Remove the temporary
+`imgui-qualification` feature and public qualification/canary launch APIs from consumers.
+The normal `run` and `run_trusted_compiled` entries select the same native Host.
+Remove the root `tooling-egui` feature, `tooling_egui` alias and `EguiEditorPanel` re-export;
+there is no replacement root GUI feature. Runtime/headless consumers continue to select
+semantic tooling only when needed. The source-built panel consumer uses its Dear ImGui
+painting companion through the same semantic registration as the built-ins.
 
 ## Component creation metadata
 
@@ -80,15 +92,17 @@ Each frontend owns its painting companions and per-instance widgets; callbacks r
 The independently compiled `module-consumer/editor-panel-consumer` installs through the same registration and callback path as the built-ins.
 Ordinary project opening does not load that contribution from project data or execute project Rust.
 
-Use the Panels menu to open, hide or reset instances and explicitly save the workspace layout.
-The native product stores preferences in the user's configuration directory, outside Scene and Prefab source; headless consumers and canaries opt in separately.
+Use the Workspace menu to open, hide or reset instances and explicitly save the workspace layout.
+The native product stores preferences in the user's configuration directory, outside Scene and Prefab source; headless consumers opt in separately.
 Source-targeted instances retain stable source kind/locator rather than persisting process-local document IDs.
 Missing contributions and incompatible toolkit data restore a usable layout with a reason.
 Closing an instance leaves document history intact and retires its local drafts; an accepted continuous gesture is cancelled through the existing Host action.
 The originating instance is confirmed from the exact accepted batch outcome, so a rejected Begin cannot steal another instance's gesture.
 
-These changes establish semantic layout ownership and same-window floating panels.
-Native detached windows and monitor restoration require the subsequent backend qualification.
+Semantic layout ownership and same-window docking remain separate from native detachment.
+Windows/DX12 native qualification covers detachment, DPI changes, redocking and cleanup.
+Linux/X11 and macOS remain unverified; Wayland retains in-window docking with detachment
+unavailable. Full native accessibility is not claimed by this migration.
 
 ## Independent authoring and Game views
 
@@ -107,11 +121,18 @@ window presentation. Each returned composite still proves exactly one image/wind
 Final view retirement removes admission metadata; target retirement during resize preserves the
 producer clock. Toolkit renderers use the same scoped Instance/Adapter/Device/Queue lineage.
 
-The egui layout output now contains independent optional Authoring and Game results. Remove callers
+The frontend output contains independent optional Authoring and Game results. Remove callers
 of the former selected-viewport and tab-intent interfaces. Input focus is separate from panel
 visibility: a floating Inspector takes pointer hits above Game, and a retained paused Game image
 can regain capture after editing without requiring a new Runtime frame.
 
-The Windows native canary covers concurrent rendering, closing/reopening Game, independent resize,
-paused refocus and physical shutdown. Detached windows and native Linux/macOS qualification are
-not established by that run.
+Native regression coverage preserves concurrent rendering, closing/reopening Game, independent
+resize, paused refocus and physical shutdown. The separate Windows adoption evidence covers
+detachment. Neither establishes native Linux/macOS release support.
+
+Exact fixed steps project newly admitted physical input before simulation. Frame observations
+retire after the complete App frame or exact-step transaction; they remain visible through all
+fixed observers and all ticks of an ordinary catch-up frame. Held buttons and input retained for
+later UI/action consumers remain independent from that frame observation lifetime.
+The native Editor starts a fresh elapsed-time baseline when Play resumes, so idle paused wall time
+does not enter the next Running simulation drive.

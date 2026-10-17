@@ -36,7 +36,6 @@ members = [
     "crates/nara_tasks",
     "crates/nara_text",
     "crates/nara_tooling",
-    "crates/nara_tooling_egui",
     "crates/nara_transform",
     "crates/nara_ui_kernel",
     "crates/nara_ui_widgets",
@@ -82,7 +81,6 @@ nara_tilemap = { path = "crates/nara_tilemap" }
 nara_tasks = { path = "crates/nara_tasks" }
 nara_text = { path = "crates/nara_text" }
 nara_tooling = { path = "crates/nara_tooling" }
-nara_tooling_egui = { path = "crates/nara_tooling_egui" }
 nara_transform = { path = "crates/nara_transform" }
 nara_ui_kernel = { path = "crates/nara_ui_kernel" }
 nara_ui_widgets = { path = "crates/nara_ui_widgets" }
@@ -100,10 +98,6 @@ bytemuck = { version = "1", features = ["derive"] }
 dear-imgui-rs = { version = "=0.20.0", features = ["multi-viewport"] }
 dear-imgui-wgpu = { version = "=0.20.0", path = "vendor/dear-imgui-wgpu", default-features = false, features = ["wgpu-30", "multi-viewport-winit"] }
 dear-imgui-winit = { version = "=0.20.0", features = ["multi-viewport"] }
-egui = "0.36.2"
-egui_kittest = "0.36.2"
-egui-wgpu = "0.36.2"
-egui-winit = "0.36.2"
 glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"
@@ -161,7 +155,6 @@ nara_sprite_render = { workspace = true, optional = true }
 nara_tilemap = { workspace = true, optional = true }
 nara_tasks = { workspace = true, optional = true }
 nara_tooling = { workspace = true, optional = true }
-nara_tooling_egui = { workspace = true, optional = true }
 nara_transform = { workspace = true, optional = true }
 nara_ui = { workspace = true, optional = true }
 nara_ui_render = { workspace = true, optional = true }
@@ -253,7 +246,6 @@ tooling = ["runtime-core", "dep:nara_tooling"]
 asset-watch = ["runtime-core", "dep:nara_asset_watch"]
 desktop-winit = ["runtime-core", "dep:nara_winit"]
 render-wgpu = ["runtime-core", "dep:nara_render", "dep:nara_render_wgpu"]
-tooling-egui = ["tooling", "dep:nara_tooling_egui"]
 serde = [
     "nara_asset?/serde",
     "nara_core?/serde",

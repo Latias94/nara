@@ -14,8 +14,6 @@ use std::{
 #[cfg(windows)]
 use std::fs::OpenOptions;
 
-use egui::{Key, Modifiers, accesskit::Role};
-use egui_kittest::{Harness, kittest::Queryable as _};
 use nara::{
     ProductRecipe,
     fs::{
@@ -41,11 +39,15 @@ use nara::{
         EditorAction, EditorActionBatch, EditorDocumentMutation, EditorFieldFeedbackReason,
         EditorNavigationAction, EditorPersistenceAction, EditorPersistenceResult, EditorPlayAction,
         EditorPlayOperation, EditorPlayOperationResult, EditorPlayState, EditorWorkspaceIntent,
-        EditorWorkspaceIntentAction, EditorWorkspaceIntentResult, SceneInspectorCommand,
+        EditorWorkspaceIntentAction, EditorWorkspaceIntentResult, SceneCompositionCommand,
+        SceneCompositionEntityKind, SceneInspectorCommand,
     },
 };
-use nara_editor::{EditorApplication, EditorLaunchOptions, EguiEditorFrontend};
+use nara_editor::{EditorApplication, EditorLaunchOptions, ImguiEditorFrontend};
 use serde_json::Value;
+
+#[path = "support/imgui.rs"]
+mod imgui;
 
 const PROJECT_SLUG: &str = "editor-authoring-loop";
 const CREATED_ENTITY: &str = "editor_entity_1";
@@ -248,9 +250,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
         PAUSED_TRANSLATION_X
     );
 
-    let harness = editor_harness(application);
-    let _ = harness.get_by_label_contains("Game View is out of date");
-    application = harness.into_state();
+    assert_frontend_notice(&mut application, "Game View is out of date");
 
     dispatch(
         &mut application,
@@ -350,7 +350,7 @@ fn starter_game_view_preserves_unsaved_source_and_explicit_play_lifecycle() {
 
 #[test]
 #[ignore = "runs one nested Cargo build, generated product, and real Winit/WGPU export acceptance"]
-fn starter_edit_crosses_editor_check_generated_product_and_export() {
+fn starter_semantic_edit_crosses_editor_check_generated_product_and_export() {
     let root = TrajectoryRoot::new();
     let project = create_project(&root);
     let scene_path = project.join("scenes/startup.scene.json");
@@ -371,10 +371,19 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     let initial_revision = opened_scene.revision;
     assert!(!opened_scene.dirty);
 
-    let mut harness = editor_harness(application);
-    harness.get_by_label("+ Root").click();
-    harness.run();
-    let composed = current_frame(harness.state());
+    // This integration trajectory drives application actions and verifies the saved products.
+    // Real composition/scalar/history/Save/Reopen widgets are covered by the frontend unit tests.
+    let composed = dispatch(
+        &mut application,
+        [EditorAction::Mutate(EditorDocumentMutation::ComposeScene {
+            document,
+            base_revision: initial_revision,
+            command: SceneCompositionCommand::CreateEntity {
+                kind: SceneCompositionEntityKind::ColoredSprite,
+                placement: ScenePlacement::last(ScenePlacementOwner::Root),
+            },
+        })],
+    );
     let composed_scene = composed.workspace().active_scene.as_ref().unwrap();
     let composed_revision = composed_scene.revision;
     let created_entity = SceneEntityId::new(CREATED_ENTITY).unwrap();
@@ -386,20 +395,23 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     assert!(composed_scene.dirty);
     assert_eq!(transform_x_field(&composed).value, 0.0);
 
-    harness
-        .get_by_role_and_label(Role::TextInput, TRANSLATION_X_FIELD)
-        .focus();
-    harness.run();
-    harness.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    harness.run();
-    harness
-        .get_by_role_and_label(Role::TextInput, TRANSLATION_X_FIELD)
-        .type_text("128");
-    harness.run();
-    harness.key_press(Key::Enter);
-    harness.run();
-
-    let edited = current_frame(harness.state());
+    let field = transform_x_field(&composed);
+    let edited = dispatch(
+        &mut application,
+        [EditorAction::Mutate(
+            EditorDocumentMutation::ApplyInspectorCommand {
+                document,
+                base_revision: composed_revision,
+                command: SceneInspectorCommand::SetField {
+                    entity: created_entity.clone(),
+                    component: ComponentTypeId::new(TRANSFORM_COMPONENT),
+                    component_version: field.component_version,
+                    field: ComponentFieldId::new(TRANSLATION_X_FIELD),
+                    value: ComponentValue::f64(EDITED_TRANSLATION_X).unwrap(),
+                },
+            },
+        )],
+    );
     let edited_scene = edited.workspace().active_scene.as_ref().unwrap();
     let edited_revision = edited_scene.revision;
     let field = transform_x_field(&edited);
@@ -407,8 +419,7 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     assert!(edited_scene.dirty);
     assert_eq!(field.value, EDITED_TRANSLATION_X);
 
-    let candidate = harness
-        .state_mut()
+    let candidate = application
         .take_scene_preview_candidate()
         .expect("the accepted Transform edit publishes one preview candidate");
     assert_eq!(candidate.document(), document);
@@ -419,8 +430,6 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         .find(|hit| hit.entity() == &created_entity)
         .expect("the composed visible entity contributes one preview hit");
     assert!(hit.contains_clip_point([0.2, 0.0]));
-
-    let mut application = harness.into_state();
 
     let stale = dispatch(
         &mut application,
@@ -449,24 +458,35 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     );
     assert!(has_diagnostic(&stale, "editor.action.stale-document"));
 
-    let mut harness = editor_harness(application);
-    harness.get_by_label("Undo").click();
-    harness.run();
-    let undone = current_frame(harness.state());
+    let undone = dispatch(
+        &mut application,
+        [EditorAction::Mutate(EditorDocumentMutation::Undo {
+            document,
+            base_revision: edited_revision,
+        })],
+    );
     let undone_scene = undone.workspace().active_scene.as_ref().unwrap();
     assert!(undone_scene.dirty);
     assert_eq!(transform_x_field(&undone).value, 0.0);
 
-    harness.get_by_label("Redo").click();
-    harness.run();
-    let redone = current_frame(harness.state());
+    let redone = dispatch(
+        &mut application,
+        [EditorAction::Mutate(EditorDocumentMutation::Redo {
+            document,
+            base_revision: undone_scene.revision,
+        })],
+    );
     let redone_scene = redone.workspace().active_scene.as_ref().unwrap();
     assert!(redone_scene.dirty);
     assert_eq!(transform_x_field(&redone).value, EDITED_TRANSLATION_X);
 
-    harness.get_by_label("Save").click();
-    harness.run();
-    let saved = current_frame(harness.state());
+    let saved = dispatch(
+        &mut application,
+        [EditorAction::Persistence(EditorPersistenceAction::Save {
+            document,
+            base_revision: redone_scene.revision,
+        })],
+    );
     assert!(matches!(
         saved.persistence().result(),
         Some(EditorPersistenceResult::Saved {
@@ -477,8 +497,6 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
     ));
     assert!(!saved.workspace().active_scene.as_ref().unwrap().dirty);
     let saved_scene_digest = ContentDigest::of_bytes(&fs::read(&scene_path).unwrap());
-    let mut application = harness.into_state();
-
     let acknowledged_save = dispatch(
         &mut application,
         [EditorAction::Persistence(
@@ -523,10 +541,8 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         .workspace()
         .active_document
         .unwrap();
-    let mut harness = editor_harness(application);
-    harness.get_by_label_contains(CREATED_ENTITY).click();
-    harness.run();
-    let reopened = current_frame(harness.state());
+    select_entity(&mut application, reopened_document, CREATED_ENTITY);
+    let reopened = current_frame(&application);
     assert!(!reopened.workspace().active_scene.as_ref().unwrap().dirty);
     assert_eq!(transform_x_field(&reopened).value, EDITED_TRANSLATION_X);
     let reopened_scene = reopened.workspace().active_scene.as_ref().unwrap();
@@ -538,8 +554,6 @@ fn starter_edit_crosses_editor_check_generated_product_and_export() {
         .find(|row| row.id == created_entity)
         .expect("reopen reconstructs the composed entity in the canonical tree");
     assert!(created_row.parent.is_none());
-
-    let mut application = harness.into_state();
 
     dispatch(
         &mut application,
@@ -682,18 +696,40 @@ fn create_project(root: &TrajectoryRoot) -> PathBuf {
     project
 }
 
-fn editor_harness(application: EditorApplication) -> Harness<'static, EditorApplication> {
-    let mut frontend = EguiEditorFrontend::new();
-    Harness::builder()
-        .with_size(egui::vec2(1280.0, 800.0))
-        .build_ui_state(
-            move |ui, application| {
-                if let Some(batch) = frontend.show(ui, application) {
-                    frontend.submit_and_drive(application, batch, Duration::ZERO);
-                }
-            },
-            application,
-        )
+fn assert_frontend_notice(application: &mut EditorApplication, expected: &str) {
+    use std::{cell::RefCell, rc::Rc};
+
+    struct RenderedText(Rc<RefCell<String>>);
+
+    impl dear_imgui_rs::ClipboardBackend for RenderedText {
+        fn get(&mut self) -> Option<String> {
+            Some(self.0.borrow().clone())
+        }
+
+        fn set(&mut self, value: &str) {
+            value.clone_into(&mut self.0.borrow_mut());
+        }
+    }
+
+    let text = Rc::new(RefCell::new(String::new()));
+    let mut context = imgui::context();
+    context.set_clipboard_backend(RenderedText(Rc::clone(&text)));
+    let mut frontend = ImguiEditorFrontend::new();
+    let _ = imgui::draw(&mut context, &mut frontend, application);
+    for _ in 0..3 {
+        let ui = context.frame();
+        ui.log_to_clipboard(0_u32);
+        let batch = frontend.show(ui, application).unwrap();
+        ui.log_finish();
+        let _ = context.render_legacy();
+        if let Some(batch) = batch {
+            frontend.submit_and_drive(application, batch, Duration::ZERO);
+        }
+    }
+    assert!(
+        text.borrow().contains(expected),
+        "the real frontend must display {expected:?}"
+    );
 }
 
 fn current_frame(
