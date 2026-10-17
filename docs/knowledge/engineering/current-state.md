@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "304f93bb86e8874bc073e065509bca0bc27ddda227470d0688f18b610a5b82b7"
+source_fingerprint: "8e007be43f3fd32ea917e37db63d48bb7a18646dc11f1f7615aacb619d2ae7f9"
 ---
 
 # Current State
@@ -12,14 +12,14 @@ source_fingerprint: "304f93bb86e8874bc073e065509bca0bc27ddda227470d0688f18b610a5
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `304f93bb86e8874bc073e065509bca0bc27ddda227470d0688f18b610a5b82b7`
-- Immutable records: 722
-- Active lane heads: 1
+- Source fingerprint: `8e007be43f3fd32ea917e37db63d48bb7a18646dc11f1f7615aacb619d2ae7f9`
+- Immutable records: 724
+- Active lane heads: 0
 
 # Active Registrations
 
 - [Asset render resource seam implementation](registry/asset-render-resource-seam-implementation-asset-render-resource-seam-codex-root.md): `completed` (asset-render-resource-seam-codex-root; producer `codex-root`)
-- [Dear ImGui 0.21 upgrade](registry/2026-10/2026-10-17T130522Z-dear-imgui-021-upgrade-codex-root-ef15d6f0cfa9468aab4207cdb2ff34f5.md): `active` (dear-imgui-021-upgrade-codex-root; producer `codex-root`)
+- [Dear ImGui 0.21 upgrade complete](registry/2026-10/2026-10-17T135355Z-dear-imgui-021-upgrade-codex-root-c8d8fd35d7b34ca2845220d1113df8e7.md): `completed` (dear-imgui-021-upgrade-codex-root; producer `codex-root`)
 - [Editor Authoring Loop v1 complete; no successor active](registry/2026-08/2026-08-15T233100Z-editor-authoring-loop-v1-codex-root-055fa3f07b8640e6b91a90e8de5eb00e.md): `completed` (editor-authoring-loop-v1-codex-root; producer `codex-root`)
 - [Editor Game View v1 complete; no successor active](registry/2026-08/2026-08-17T100939Z-editor-game-view-v1-codex-root-84ab40a2fd9b425a9d9827fd9a62e142.md): `completed` (editor-game-view-v1-codex-root; producer `codex-root`)
 - [Editor Image Import and Reimport v1 complete](registry/2026-08/2026-08-21T025159Z-editor-image-import-reimport-v1-codex-root-6a48e230cc9c4e2eb1faf8121a85d9ea.md): `completed` (editor-image-import-reimport-v1-codex-root; producer `codex-root`)
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Dear ImGui 0.21 published backend acceptance](verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md) - Published registry cohort, owned renderer mapping, native IME and Windows DX12 product qualification with bounded text-intent cadence.
 - **Memory Event**: [Verification: Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourte](logs/2026-10/2026-10-17T135008Z-verification-green-editor-run8d5467b0-passes132-132-with-bounded-text-intent-followup-fourte-01d5279ca83145e497911729d884cfef.md) - Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourteen native cases remain outside ordinary suite. Independent i
 - **Memory Event**: [Verification: Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repain](logs/2026-10/2026-10-17T134739Z-verification-red-run755cd0d8-proves-real-on-demand-ime-defect-programmatic-text-focus-repain-30e2165bd7c841b582bd1ad12cdcdaf9.md) - Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repaints_until_ime_intent_catches_up_then_becomes_idle fails IO.wa
 - **Memory Event**: [Progress: IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO li](logs/2026-10/2026-10-17T134542Z-progress-ime-fixture08ba267d-passes-after-ordinary-prepare-frame-and-complete-focus-io-li-59c93b32eace43bd8a9eb90b13b3dcb7.md) - IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO lifecycle; GPU rejected-frame fixture now completes update_pla
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: Foundation correctness plan review complete: feasibility, coherence, design, sco](logs/2026-10/2026-10-17T110059Z-verification-foundation-correctness-plan-review-complete-feasibility-coherence-design-sco-19e1cf997e7d44dea12d26614ccbb357.md) - Foundation correctness plan review complete: feasibility, coherence, design, scope and adversarial lenses across three read-only Codex conte
 - **Memory Event**: [Completion: Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4](logs/2026-10/2026-10-17T102708Z-completion-original-editor-foundation-full-u9-u1-u8-finite-acceptance-achieved-at-source-f4-5670eb0ad1fc4fba9d29b6cef0eff2f4.md) - Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4ffdd18, final evidence b68c3a9f938a49b7ba63779f2849d0d9. Exa
 - **Verification Evidence**: [Editor foundation U9 and U1-U8 close with selected Dear frontend and exact external products](verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md) - R1-R11 and AE1-AE6 accepted through reviewed single-owner boundaries, complete frontend migration and exact committed-source external authoring Play Check Export on Windows DX12.
-- **Memory Event**: [Verification: Exact archive saved game public default and desktop Check pass with6members (18.](logs/2026-10/2026-10-17T100917Z-verification-exact-archive-saved-game-public-default-and-desktop-check-pass-with6members-18-54bc52f9f959417a84f7f11464f89a0c.md) - Exact archive saved game public default and desktop Check pass with6members (18.467s/244.910s). Public Export passes785.812s including first
 
 # Integration Notes
 

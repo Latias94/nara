@@ -1,7 +1,9 @@
 # ADR Implementation Status
 
 **Status**: Active ledger
-**Last Verified Implementation**: 2026-10-17 @ correctness closure `4589b5a`, U1-U5 acceptance `4490cc23b14742749a37e7a9cb1c7cbf`; selected Editor `f4ffdd18`, full U9/U1-U8 acceptance `b68c3a9f938a49b7ba63779f2849d0d9`; App/Input frame-boundary fix `2b26f96`; U7 candidate `26be74f`; U6 Windows adoption evidence `e42a0dbfec6643e380f6e9275f29b0d2`; custom-authoring source `25f5c8b`, acceptance `27663c95797a48c58c16188165a86f97`; first-author-workflow source `78faa7c`, acceptance `7a2024c6678b43a48a069406d6eb729d`; foundation checkpoint `ca3d803`, acceptance `b09676d3fa354aa899a795a5dfe9d2ba`; research archive `652b2eb`.
+**Last Verified Implementation**: 2026-10-17 @ Dear ImGui 0.21 source `6a89a77`, acceptance `5cf11eaec8ea42a986d4953c4a4a00b8`.
+
+**Earlier Foundation Evidence**: 2026-10-17 @ correctness closure `4589b5a`, U1-U5 acceptance `4490cc23b14742749a37e7a9cb1c7cbf`; selected Editor `f4ffdd18`, full U9/U1-U8 acceptance `b68c3a9f938a49b7ba63779f2849d0d9`; App/Input frame-boundary fix `2b26f96`; U7 candidate `26be74f`; U6 Windows adoption evidence `e42a0dbfec6643e380f6e9275f29b0d2`; custom-authoring source `25f5c8b`, acceptance `27663c95797a48c58c16188165a86f97`; first-author-workflow source `78faa7c`, acceptance `7a2024c6678b43a48a069406d6eb729d`; foundation checkpoint `ca3d803`, acceptance `b09676d3fa354aa899a795a5dfe9d2ba`; research archive `652b2eb`.
 
 The [Foundation Correctness Closure plan](../../plans/2026-10-17-1856-fix-foundation-correctness-closure-plan.md)
 is completed under [registration `94169fb22505473c89504d4b41cab1de`](../../knowledge/engineering/registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md).
@@ -9,10 +11,18 @@ Its [U1-U5 acceptance](../../knowledge/engineering/verification/2026-10/2026-10-
 closes the [audit's](../../verification/2026-10-17-foundation-and-extension-audit.md)
 F01-F09 corrections at `4589b5a`, including the real quiet external maintenance/exit trajectory.
 The measured-map successor is proposed but not activated.
-The [Dear ImGui 0.21 upgrade](../../plans/2026-10-17-dear-imgui-021-upgrade-plan.md) is active under
-[registration `ef15d6f0cfa9468aab4207cdb2ff34f5`](../../knowledge/engineering/registry/2026-10/2026-10-17T130522Z-dear-imgui-021-upgrade-codex-root-ef15d6f0cfa9468aab4207cdb2ff34f5.md).
-Published dependencies replace the renderer fork; affected native and composition capabilities
-require fresh acceptance before their current platform claims advance.
+The [Dear ImGui 0.21 upgrade](../../plans/2026-10-17-dear-imgui-021-upgrade-plan.md) is completed under
+[registration `c8d8fd35d7b34ca2845220d1113df8e7`](../../knowledge/engineering/registry/2026-10/2026-10-17T135355Z-dear-imgui-021-upgrade-codex-root-c8d8fd35d7b34ca2845220d1113df8e7.md).
+[Acceptance `5cf11eaec8ea42a986d4953c4a4a00b8`](../../knowledge/engineering/verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md)
+qualifies published 0.21.0 core/sys/build-support/Winit/WGPU packages at `6a89a77`: the owning
+adapter replaces the renderer fork, exact binding/image/native-registration mapping passes the
+seven selected Windows/DX12 trajectories, and upstream core IME handles Nara fields. A red/green
+bounded followup fixes delayed IME intent under on-demand repaint. Editor tests pass 132/132,
+adapter-required tests 57/57, independent consumers 18/18 and CI policy 2/2; final workspace
+all-feature/all-target check and formatting pass. Delegated receipts do not invent internal
+surface configuration or acquired extents. Actual OS candidate-window/manual cross-window IME,
+Linux/macOS native release support and accessibility still require their own observed evidence.
+No successor is active. Earlier 0.20 evidence below retains its historical source and scope.
 The implementation evidence below retains each completed predecessor's actual source and scope.
 
 This ledger separates accepted decisions from implementation and platform evidence. The finite

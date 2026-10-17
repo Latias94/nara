@@ -2,7 +2,7 @@
 title: Dear ImGui 0.21 Upgrade
 date: 2026-10-17
 type: refactor
-status: active
+status: completed
 execution: code
 ---
 

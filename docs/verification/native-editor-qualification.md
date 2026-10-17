@@ -91,3 +91,11 @@ cargo +1.95.0 nextest run -p nara_render_wgpu --locked --features editor-imgui -
 
 This gate tests Nara's integration with the production WGPU 30 dependency resolution.
 Its offscreen tests do not replace the actual native trajectories above.
+For renderer identity/binding changes, also execute the real delegated-window bridge:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor -p nara_render_wgpu --features nara_render_wgpu/editor-imgui --lib --locked --run-ignored only -E 'test(secondary_bridge_rejects_foreign_replay_stale_and_unsampled_images)' --test-threads=1
+```
+
+It verifies actual secondary presentation before primary acquisition, exact native registration,
+foreign device/queue rejection, report replay, binding replacement and stale image-content receipts.
