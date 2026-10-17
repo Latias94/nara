@@ -68,9 +68,10 @@ pub fn package(settings: AgentSettings) -> Result<SchemaContribution<AgentPlugin
 `SchemaContribution::configured`. The contribution owns those provider definitions in both paths:
 direct `App` composition installs them before the schema-owning plugin builds, while the product
 Host uses the same definitions to construct and freeze its schema registry before runtime
-publication. A plugin may still validate the same provider during installation, but a different
-receipt is rejected before the App or runtime is published. A raw plugin installed outside a recipe
-remains responsible for its own schema registration.
+publication. Keep registration in the contribution's provider callback, not a second runtime
+`build` path. A plugin that explicitly validates an installed provider must agree with the same
+receipt; a mismatch rejects App or runtime publication. Advanced raw-plugin installation outside a
+recipe remains responsible for its own schema registration.
 
 A game adds and reconfigures the contribution through the recipe:
 

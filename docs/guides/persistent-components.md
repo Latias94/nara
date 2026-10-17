@@ -71,11 +71,11 @@ fn register_player_components(
 }
 ```
 
-The plugin declaration lists `PLAYER_SCHEMA_PROVIDER_ID` in `provides_schema`. Its `preflight` and
-`build` methods call `PLAYER_SCHEMA_PROVIDER.preflight(registry)` and
-`PLAYER_SCHEMA_PROVIDER.register_or_validate_into(registry)` respectively. A file-backed product
-recipe also supplies the same definition in its complete trusted `known_providers` set, including
-definitions that the selected recipe leaves inactive.
+Expose this definition through the component-owning crate's `SchemaContribution`. The plugin
+declaration lists `PLAYER_SCHEMA_PROVIDER_ID` in `provides_schema`; its runtime `build` method owns
+runtime behavior rather than registering that provider again. Follow
+[Rust Product Recipes](rust-product-recipes.md#persistent-schema-contributions) for the single
+composition path shared by runtime Hosts and strict project tools.
 
 Product composition loads and validates every trusted owner source before it runs selected native
 callbacks. Each selected validation and registration callback runs once against a private
@@ -88,22 +88,66 @@ schema, native binding, and stable identity are fixed.
 
 ## Manual Codecs and Apply Preparation
 
-Use the derive for supported Rust field types. A domain that needs a hand-written codec returns a
-`PreparedComponentCandidate`; it never constructs `PreparedComponent` directly:
+Use the derive for supported Rust field types. When a domain needs a hand-written codec,
+`register_persistent_component_with_codec` takes a decoder returning the native component and an
+encoder borrowing that component:
 
 ```rust
-registry.register_persistent_component_with_codec::<Health, _, _>(
-    schema,
-    |value| {
-        let current = value.field_i64("current")?;
-        Ok(PreparedComponentCandidate::insert(Health { current }))
-    },
-    |health| Ok(ComponentValue::map([
-        ("current", ComponentValue::I64(health.current)),
-    ])),
-)?;
+use nara::prelude::Component;
+use nara::reflect::{
+    ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentRegistry, ComponentRegistryError, ComponentSchema,
+    ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+};
+
+#[derive(Component)]
+struct Health {
+    current: i64,
+}
+
+fn register_health(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {
+    let schema = ComponentSchema::new(
+        ComponentTypeId::new("example.Health"),
+        "Health",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("current"),
+        "Current",
+        ComponentFieldPath::from_fields(["current"]),
+        ComponentValueKind::I64,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING)]);
+
+    registry.register_persistent_component_with_codec::<Health, _, _>(
+        schema,
+        |value| {
+            let current = value
+                .get("current")
+                .and_then(ComponentValue::as_i64)
+                .ok_or_else(|| ComponentCodecError::invalid_field("current", "i64"))?;
+            Ok(Health { current })
+        },
+        |health| {
+            Ok(ComponentValue::map([(
+                "current",
+                ComponentValue::I64(health.current),
+            )]))
+        },
+    )?;
+    Ok(())
+}
 ```
 
+The same registration and a frozen-registry decode, guarded apply, and native-value encode round
+trip compile in the independent
+[`manual_component_codec` consumer](../../module-consumer/tests/manual_component_codec.rs).
+Production composition places this registration in the provider callback described above.
+
+For fallible delayed preparation, use `register_persistent_component_codec` or its
+`_with_context` variant instead. These lower-level APIs return a `PreparedComponentCandidate`
+from preflight and encode from a `World` and entity (plus codec context for `_with_context`).
 Choose the candidate constructor by the work it can perform:
 
 - `insert(value)` for a fully decoded component;
@@ -113,7 +157,8 @@ Choose the candidate constructor by the work it can perform:
 
 The distinction is enforced by the closure signature. Do not use the asset-server constructor for
 an asset-free value: fresh-scene admission must know every resource insertion that may occur before
-it allocates targets.
+it allocates targets. A candidate becomes a `PreparedComponent` only through a frozen registry;
+game code never constructs the bound apply value directly.
 
 Persistent components describe the complete stored component set. They may not declare Bevy
 `#[require]` metadata or intrinsic component hooks. A target `World` that later registers required
@@ -158,14 +203,27 @@ domain-owned contracts and are not inferred from these capabilities.
 
 The current native Rust authoring slice supports:
 
-- `i64`;
-- `u64`;
+- `bool` and owned `String`;
+- `i8`, `i16`, `i32`, and `i64`;
+- `u8`, `u16`, `u32`, and `u64`;
+- finite `f32` and `f64`;
 - `Vec2`;
 - `EntityReference`, with the `entity_ref` field capability.
+
+Narrow integer codecs check their declared range before conversion. Float codecs reject non-finite
+values and `f32` overflow; ordinary finite `f32` rounding is allowed. Integer wire kinds remain
+`I64` and `U64`, and both float types use the finite `F64` wire kind.
 
 Generic fields, collections, enums, tuple structs, `asset_ref`, and arbitrary nested Rust types are
 rejected with compile-time diagnostics until a production consumer admits their schema and codec
 contract.
+
+Data-only Add Component creation is an explicit opt-in, separate from decoding existing data.
+Add `authoring_initial` to the component's `#[nara(...)]` declaration and an
+`initial = <literal>` to every field. The current derive admits scalar boolean, string, integer,
+and finite float literals (including negative numeric literals), not `Vec2`, entity references,
+callbacks, or aggregate expressions. Missing fields in a stored component still fail decoding;
+creation metadata does not supply decode defaults.
 
 ## Runtime-Only Components
 
@@ -198,6 +256,6 @@ select a predecessor, synthesize migrations, allocate tombstones, or implement d
 storage. Those responsibilities remain explicit in `ComponentRegistry` and the owning project or
 plugin workflow.
 
-See [`reference-game/src/components.rs`](../../reference-game/src/components.rs) for four
+See [`reference-game/src/components.rs`](../../reference-game/src/components.rs) for
 production-shaped declarations and [`reference-game/tests/authoring.rs`](../../reference-game/tests/authoring.rs)
 for registry, canonical scene, stable patch, and live-world round trips.

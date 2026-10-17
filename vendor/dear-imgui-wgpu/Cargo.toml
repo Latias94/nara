@@ -37,7 +37,6 @@ categories = [
 ]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Latias94/dear-imgui-rs"
-resolver = "2"
 
 [features]
 default = ["wgpu-30"]

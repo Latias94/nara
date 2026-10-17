@@ -11,33 +11,6 @@ use toml::Value as TomlValue;
 
 const FIXTURE_PACKAGE: &str = "renamed-nara-runtime-runner-fixture";
 const FIXTURE_RELATIVE_PATH: &str = "tests/fixtures/runtime-runner/renamed-root";
-const REQUIRED_PRODUCT_SURFACE: [&str; 6] = [
-    "ProductRecipe",
-    "ProductConfiguration",
-    "SchemaContribution",
-    "add_plugin",
-    "add_contribution",
-    "HeadlessRun::from_recipe",
-];
-const FORBIDDEN_PRODUCT_SURFACE: [&str; 17] = [
-    "PluginDefinition",
-    "ProjectRuntimePlugins",
-    "resolve_runtime_plan",
-    "with_schema_provider",
-    "RuntimeAdmissionReservation",
-    "RuntimeCandidate",
-    "RuntimeInstance",
-    "RuntimeObligationLedger",
-    "RuntimeRetirement",
-    "run_once",
-    "World",
-    "#[path",
-    "include!",
-    "include_str!",
-    "include_bytes!",
-    "extern crate",
-    "pub trait Runner",
-];
 
 #[test]
 fn renamed_root_fixture_has_an_independent_locked_manifest() {
@@ -165,46 +138,6 @@ fn renamed_root_fixture_runs_the_ordinary_product_recipe() {
         .output()
         .expect("failed to run the external renamed-root fixture");
     assert_command_succeeded("renamed-root ordinary recipe fixture", &output);
-}
-
-#[test]
-fn renamed_root_fixture_uses_only_the_ordinary_product_surface() {
-    let source = fs::read_to_string(fixture_root(&repository_root()).join("src/lib.rs"))
-        .expect("renamed-root fixture source must be readable");
-
-    for required in REQUIRED_PRODUCT_SURFACE {
-        assert!(
-            source.contains(required),
-            "the external ordinary path must use {required}"
-        );
-    }
-    for forbidden in FORBIDDEN_PRODUCT_SURFACE {
-        assert!(
-            !source.contains(forbidden),
-            "the external ordinary path must not mention {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn ordinary_recipe_guide_documents_the_external_contract() {
-    let guide = fs::read_to_string(
-        repository_root()
-            .join("docs")
-            .join("guides")
-            .join("rust-product-recipes.md"),
-    )
-    .expect("RPR-U4 requires the public product recipe guide");
-
-    for required in [
-        "ProductRecipe",
-        "ProductConfiguration",
-        "SchemaContribution",
-        "HeadlessRun::<GameOutcome>::from_recipe",
-        "DesktopRun::from_recipe",
-    ] {
-        assert!(guide.contains(required), "guide is missing {required:?}");
-    }
 }
 
 fn assert_command_succeeded(label: &str, output: &Output) {

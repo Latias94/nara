@@ -82,9 +82,10 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         &[
             "cargo fmt --all -- --check",
             "cargo check --workspace --locked --all-targets",
-            "cargo check --workspace --locked --all-features --all-targets",
-            "cargo nextest run --workspace --locked --test-threads=1",
-            "cargo nextest run --workspace --locked --all-features --test-threads=1",
+            "cargo check --workspace --exclude dear-imgui-wgpu --locked --all-features --all-targets",
+            "cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --test-threads=1",
+            "cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --all-features --test-threads=1",
+            "cargo nextest run -p dear-imgui-wgpu --locked --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test --test-threads=1",
             "--features desktop-winit,render-wgpu --example windowed_clear",
             "--features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites",
             "--features presentation-2d,desktop-winit,render-wgpu --example palette_material",
@@ -169,7 +170,22 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
             "CI Linux profile is missing {package}"
         );
     }
-    for forbidden in ["--exclude", "--no-run", "continue-on-error"] {
+    assert!(
+        !root_script
+            .replace("--exclude dear-imgui-wgpu ", "")
+            .contains("--exclude"),
+        "root CI may exclude only the separately tested renderer cohort"
+    );
+    for (name, script) in [
+        ("reference-game", &reference_script),
+        ("module-consumer", &module_script),
+    ] {
+        assert!(
+            !script.contains("--exclude"),
+            "{name} CI must not exclude packages"
+        );
+    }
+    for forbidden in ["--no-run", "continue-on-error"] {
         assert!(
             !source.contains(forbidden),
             "CI contains forbidden shortcut {forbidden}"

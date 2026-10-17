@@ -80,25 +80,24 @@ shutdown ordering.
 
 ## Verification ownership
 
-Only Nara's coordinating agent runs Cargo and formatting to avoid concurrent builds. At this
-patch handoff, these added tests have **not** been compiled or run by the vendor worker. Native
-detachment, resize, redocking, secondary close and shutdown still require Nara's actual Windows
-qualification; source tests do not establish native support.
+Nara's coordinating execution owner runs Cargo and formatting serially.
+The renderer is a root workspace member so its tests use the same `Cargo.lock` as the production Editor.
+CI explicitly tests Nara's WGPU 30 cohort with an adapter required; dependency compilation alone does not execute these patch tests.
+Native detachment, resize, redocking, secondary close and shutdown also require the
+[native Editor qualification](../../docs/verification/native-editor-qualification.md); renderer tests do not establish native support.
 
 Run from the Nara root, serially, reusing its target directory:
 
 ```powershell
 $env:CARGO_BUILD_JOBS = '1'
-$env:CARGO_TARGET_DIR = (Join-Path (Get-Location) 'target')
-cargo fmt --manifest-path vendor/dear-imgui-wgpu/Cargo.toml
+cargo +1.95.0 fmt --all
 $env:DEAR_IMGUI_REQUIRE_WGPU_ADAPTER = '1'
-cargo nextest run --manifest-path vendor/dear-imgui-wgpu/Cargo.toml --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test
-cargo check --manifest-path vendor/dear-imgui-wgpu/Cargo.toml --no-default-features --features wgpu-30
-cargo check --manifest-path vendor/dear-imgui-wgpu/Cargo.toml --no-default-features --features wgpu-29,multi-viewport-winit
-cargo check --manifest-path vendor/dear-imgui-wgpu/Cargo.toml --no-default-features --features wgpu-28,multi-viewport-winit
-cargo check --manifest-path vendor/dear-imgui-wgpu/Cargo.toml --no-default-features --features wgpu-27,multi-viewport-winit
+cargo +1.95.0 nextest run -p dear-imgui-wgpu --locked --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test --test-threads=1
+cargo +1.95.0 check --workspace --exclude dear-imgui-wgpu --locked --all-features --all-targets
 ```
 
-Do not use `--all-features`: upstream intentionally rejects combined WGPU/backend cohorts.
-The coordinating agent records completed verification in Nara's U6 evidence; this patch note
-does not imply those gates passed.
+Do not enable this package's `--all-features`: upstream intentionally rejects combined WGPU/backend cohorts.
+Nara's blanket all-feature commands exclude this package; the explicit production-cohort test above covers it instead.
+Other upstream cohorts remain outside Nara's continuous support claim.
+An old standalone lockfile beside this manifest is not the production resolution and is not used by workspace commands.
+Execution results belong in Nara's verification evidence, including historical U6 qualification.
