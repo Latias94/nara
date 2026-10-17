@@ -208,6 +208,17 @@ save-to-visible-pixel interaction latency. The linked record includes exact
 source/lockfile identity, features, profile, export, review and platform limits.
 They are individual cached observations, not cold builds or percentile estimates.
 
+The subsequent [Dear Editor committed-source acceptance](../knowledge/engineering/verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md)
+uses source `f4ffdd18`, Rust 1.95.0, Windows/DX12 and one job with the shared cache.
+The same publicly created game passes Scene/Prefab creation/composition, compiler
+failure/repair and exported-product execution. Its saved speed edit changes the
+final player x `108 -> 110.4`; after restoring speed, its radius edit yields
+`108 -> 92`. First/repaired Play READY take 113.829s/17.331s.
+The first explicit Windows release cohort takes 12m49s to build; public Export
+including both product acceptances takes 785.812s. These are separate cached
+observations, not directly comparable cold-build timings or percentiles. The
+record names the exact lock, features, platform and limitations.
+
 An explicit integration check is available for a **fresh disposable external copy**.
 It first creates empty Scene and Prefab entities, adds/edits/removes a custom
 component, and verifies Undo/Redo and Save/Reopen through the ordinary document

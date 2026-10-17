@@ -1,12 +1,24 @@
 # Selected frontend and superseded-path removal
 
-Status: **U7 production selection and U8 implementation in progress.**
+Status: **Complete: U9 and U1-U8 accepted at committed source `f4ffdd18`.**
+
+[Final acceptance](../../knowledge/engineering/verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md)
+closes the exact committed-source external Editor/Play/Check/Export gate, the
+independent panel and Reference Game consumers, and the selected frontend removal.
+The final archive tests pass 7 native controls and all 9 affected Reference Game
+cases; the same game's public Export accepts both products, whose actual runs
+confirm saved `player.x=92` and desktop first presentation. Default/headless normal
+graphs exclude Editor/Dear/Winit/WGPU. Windows/DX12 is the native profile.
+
+The chronology below preserves intermediate pending/red/green checkpoints.
+Those earlier pending statements are superseded by this final result; they are
+not current remaining work. No successor implementation lane starts automatically.
 
 The reviewed U7 candidate is committed at `26be74f493fcff04d677de83d16b0ef1286931d8`.
 Its 149 Editor tests include nine Windows/DX12 native tests; the root owner suite passes
 207 tests with one separate native test skipped. The actual nine-persona review and
 bounded independent finding closure are recorded in [U7 progress](u7-parity-progress.md).
-These are the characterization baseline for removal, not acceptance of the unfinished U8.
+These are the earlier characterization baseline for removal; U8 was still unfinished at that checkpoint.
 
 ## Source migration
 
@@ -29,10 +41,19 @@ These are the characterization baseline for removal, not acceptance of the unfin
   Game Editor support is explicit; default runtime and headless dependency trees must
   exclude the Editor and selected GUI packages.
 
-## Delivery gates
+## Delivery-gate chronology
 
-Source edits above are still being integrated. No U8 check, review or external acceptance
+At the first checkpoint, source edits above were still being integrated. No U8 check, review or external acceptance
 is claimed complete merely because the old files are absent.
+
+The complete selected frontend/removal source is now committed at
+`f4ffdd18d5dfca70ae204a6b26803ee4962a4523`, after the review and verification
+results recorded below. Exact clean-source acceptance starts from its `git archive`
+ZIP (SHA-256 `4c2d5b1bdd6188081c7646fe85a62be86f06fe47a4098ae57e336f328fbb9ef0`).
+The separate engine directory contains that archive's source; its ignored target
+is a junction to the existing shared cache. This is not a cold-build measurement.
+The public CLI is being built from the archived engine before creating the new
+external game. The accepted outcome is still pending.
 
 The root all-feature/all-target check passes after removal. Root nextest run
 `fec584d7-06ec-42f6-b762-7101cfbafc4c` passes 234 tests in 70.280 seconds across
@@ -343,6 +364,9 @@ locked/offline check then passes in 4 minutes 8 seconds, and `cargo fmt --all --
 --check` passes. Independent review findings #1 and #2 have no unresolved source
 or targeted-test work; exact committed-source external acceptance remains the
 separate completion gate.
+
+The following delivery checklist is complete, with final commands/results in the
+acceptance record above. It is retained as the original execution scope.
 
 1. Compile and test the selected default Editor, root feature contracts, independent panel
    and Reference Game consumers after lockfile refresh. Run Cargo serially with Rust 1.95,

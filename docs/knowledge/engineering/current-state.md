@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "a8b0786bfb7637188c07b502cecaaa81ebde510f3b9b5f2ccc5fbbac53efe1af"
+source_fingerprint: "a2583ad2af4e7b615f35bdf4c78230b0eba72db0fbe1c5379b9d1f2ceb86dd0c"
 ---
 
 # Current State
@@ -12,9 +12,9 @@ source_fingerprint: "a8b0786bfb7637188c07b502cecaaa81ebde510f3b9b5f2ccc5fbbac53e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `a8b0786bfb7637188c07b502cecaaa81ebde510f3b9b5f2ccc5fbbac53efe1af`
-- Immutable records: 701
-- Active lane heads: 1
+- Source fingerprint: `a2583ad2af4e7b615f35bdf4c78230b0eba72db0fbe1c5379b9d1f2ceb86dd0c`
+- Immutable records: 709
+- Active lane heads: 0
 
 # Active Registrations
 
@@ -31,7 +31,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - [Foundation implementation committed with research archived](registry/2026-10/2026-10-16T011329Z-nara-2d-foundation-contracts-codex-root-13092df230454afc89ade9c8814ad3f6.md): `complete` (nara-2d-foundation-contracts-codex-root; producer `codex-root`)
 - [Custom component authoring complete with committed-source acceptance](registry/2026-10/2026-10-16T040919Z-nara-custom-component-authoring-codex-root-6aa104b8188c4f5285a0b6683a4d4672.md): `completed` (nara-custom-component-authoring-codex-root; producer `codex-root`)
 - [Nara deep module architecture exploration closed](registry/2026-08/2026-08-04T092714Z-nara-deep-module-architecture-exploration-codex-root-79d2b2d4433640e0ae79c53a5062de03.md): `closed` (nara-deep-module-architecture-exploration-codex-root; producer `codex-root`)
-- [U8 independent findings repaired and exact input boundary committed](registry/2026-10/2026-10-17T090309Z-nara-editor-foundation-implementation-codex-root-6acf8bbbb71f463f9f02144ab8383ed5.md): `active` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
+- [Editor foundation U9 and U1-U8 complete with exact-source external acceptance](registry/2026-10/2026-10-17T102710Z-nara-editor-foundation-implementation-codex-root-76fa1ccb656c4ebd8c2b5f77f83287f7.md): `completed` (nara-editor-foundation-implementation-codex-root; producer `codex-root`)
 - [Editor foundation research and refactor planning complete](registry/2026-10/2026-10-16T044159Z-nara-editor-foundation-planning-codex-root-d0e8f37adfd54751b67d7ae647f06d83.md): `completed` (nara-editor-foundation-planning-codex-root; producer `codex-root`)
 - [First 2D author workflow complete with clean committed-source acceptance](registry/2026-10/2026-10-16T025148Z-nara-first-2d-author-workflow-codex-root-fe7312236c5d4906b8e950d366111171.md): `completed` (nara-first-2d-author-workflow-codex-root; producer `codex-root`)
 - [Reference-game runtime authority and delivery: RGD-U8 hosted CI complete](registry/2026-07/2026-07-25T115529Z-reference-game-foundation-rgf-u15-codex-root-f91cd78da7f743858f974f447bec2ad2.md): `completed` (reference-game-foundation-rgf-u15-codex-root; producer `codex-root`)
@@ -45,6 +45,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Memory Event**: [Completion: Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4](logs/2026-10/2026-10-17T102708Z-completion-original-editor-foundation-full-u9-u1-u8-finite-acceptance-achieved-at-source-f4-5670eb0ad1fc4fba9d29b6cef0eff2f4.md) - Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4ffdd18, final evidence b68c3a9f938a49b7ba63779f2849d0d9. Exa
+- **Verification Evidence**: [Editor foundation U9 and U1-U8 close with selected Dear frontend and exact external products](verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md) - R1-R11 and AE1-AE6 accepted through reviewed single-owner boundaries, complete frontend migration and exact committed-source external authoring Play Check Export on Windows DX12.
+- **Memory Event**: [Verification: Exact archive saved game public default and desktop Check pass with6members (18.](logs/2026-10/2026-10-17T100917Z-verification-exact-archive-saved-game-public-default-and-desktop-check-pass-with6members-18-54bc52f9f959417a84f7f11464f89a0c.md) - Exact archive saved game public default and desktop Check pass with6members (18.467s/244.910s). Public Export passes785.812s including first
+- **Memory Event**: [Verification: Exact archive f4ffdd18 external Collect Game workflow passes ac2b5517-1b61-457f-](logs/2026-10/2026-10-17T095313Z-verification-exact-archive-f4ffdd18-external-collect-game-workflow-passes-ac2b5517-1b61-457f-063f5ae22f4b464f954c7fc828801334.md) - Exact archive f4ffdd18 external Collect Game workflow passes ac2b5517-1b61-457f-891f-b050c84c715d in 183.758s: Scene and Prefab creation/com
 - **Memory Event**: [Verification: U8 precommit gates pass: fullEditor b2f68604167/167 incl12native; AppInput145; R](logs/2026-10/2026-10-17T093230Z-verification-u8-precommit-gates-pass-fulleditor-b2f68604167-167-incl12native-appinput145-r-f26a03415f9a40a994f68a121217d158.md) - U8 precommit gates pass: fullEditor b2f68604167/167 incl12native; AppInput145; Runtime83; affectedUIgameplaytransform134; freshsameexternalg
 - **Memory Event**: [Verification: Fresh external samegame preflight bc206f2a-9f68-4f87-8e22-e19851dfb91b passes1/1](logs/2026-10/2026-10-17T092605Z-verification-fresh-external-samegame-preflight-bc206f2a-9f68-4f87-8e22-e19851dfb91b-passes1-1-63f16bcb848543e08690a76fe0838888.md) - Fresh external samegame preflight bc206f2a-9f68-4f87-8e22-e19851dfb91b passes1/1selected251.041s after canonicalfixture+resultAck correction
 - **Memory Event**: [Verification: External samegame creation preflight13886166 failed at fullJSON Sceneexpected as](logs/2026-10/2026-10-17T091642Z-verification-external-samegame-creation-preflight13886166-failed-at-fulljson-sceneexpected-as-d7a942b570054885bca1fb21ef3cc95e.md) - External samegame creation preflight13886166 failed at fullJSON Sceneexpected assertion88.294s, before strictcreation108 measurement. Expect
@@ -53,10 +57,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: U8 full independent ce-code-review run20261017-081030-69c43aff is actually compl](logs/2026-10/2026-10-17T085021Z-verification-u8-full-independent-ce-code-review-run20261017-081030-69c43aff-is-actually-compl-3d7cd091472b43d599054aa929faacef.md) - U8 full independent ce-code-review run20261017-081030-69c43aff is actually complete: nine reviewer lenses, two confirmed P2, Ready with fixe
 - **Memory Event**: [Progress: User asks additional Dear issues and meaning of incompleteIME. Sourceconfirmed p](logs/2026-10/2026-10-17T083221Z-progress-user-asks-additional-dear-issues-and-meaning-of-incompleteime-sourceconfirmed-p-0307888e92ed409e98a492e36c01594b.md) - User asks additional Dear issues and meaning of incompleteIME. Sourceconfirmed pinned0.20 WinitignoresPreedit but CommitUnicodeworks; Nara p
 - **Memory Event**: [Verification: U8 final cleaned-source Editor294e4917 passes166 selected tests170.540s includin](logs/2026-10/2026-10-17T081412Z-verification-u8-final-cleaned-source-editor294e4917-passes166-selected-tests170-540s-includin-e35581845c8a401c9c2a92211714e211.md) - U8 final cleaned-source Editor294e4917 passes166 selected tests170.540s including all11native; exactly two externalignored separateacceptanc
-- **Memory Event**: [Verification: U8 native input targeted red-to-green: ca507e4a-6543-4e3b-8e77-938432129bb3 pass](logs/2026-10/2026-10-17T075937Z-verification-u8-native-input-targeted-red-to-green-ca507e4a-6543-4e3b-8e77-938432129bb3-pass-84a73ab1054c40a1b84c72a1796374ba.md) - U8 native input targeted red-to-green: ca507e4a-6543-4e3b-8e77-938432129bb3 passes4/4, complete actual Windows/DX12 Gameinput proof2.995s in
-- **Memory Event**: [Progress: U8 follow-up makes concrete progress rather than completion: Step red e71d9038 i](logs/2026-10/2026-10-17T074703Z-progress-u8-follow-up-makes-concrete-progress-rather-than-completion-step-red-e71d9038-i-e977067757e246c1bc794f790b173554.md) - U8 follow-up makes concrete progress rather than completion: Step red e71d9038 isolates transient feedback layout; stable region gives three
-- **Memory Event**: [Verification: U8 Step diagnostic e71d9038 remains red and confirms Nara frontend layout owners](logs/2026-10/2026-10-17T073210Z-verification-u8-step-diagnostic-e71d9038-remains-red-and-confirms-nara-frontend-layout-owners-02af6caaed25404a8b34bbd1258865d9.md) - U8 Step diagnostic e71d9038 remains red and confirms Nara frontend layout ownership: D delivered on geometry5/648x306 with capture and input
-- **Memory Event**: [Verification: U8 verification progress, not completion: root c348aa48 passes235 selected tests](logs/2026-10/2026-10-17T065949Z-verification-u8-verification-progress-not-completion-root-c348aa48-passes235-selected-tests-9e6f549fe2f74a6a85e85a039ed9e413.md) - U8 verification progress, not completion: root c348aa48 passes235 selected tests2skip; expensive prelude6832fcca previouslygreen; project380
 
 # Integration Notes
 

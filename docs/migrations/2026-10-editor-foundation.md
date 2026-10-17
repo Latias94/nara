@@ -103,6 +103,9 @@ Semantic layout ownership and same-window docking remain separate from native de
 Windows/DX12 native qualification covers detachment, DPI changes, redocking and cleanup.
 Linux/X11 and macOS remain unverified; Wayland retains in-window docking with detachment
 unavailable. Full native accessibility is not claimed by this migration.
+Committed Chinese text input is verified in the historical Windows adoption run.
+Preedit uses Nara's transient active-input/viewport-scoped composition and caret
+overlay; complete inline composition is not provided by this integration.
 
 ## Independent authoring and Game views
 
@@ -136,3 +139,13 @@ fixed observers and all ticks of an ordinary catch-up frame. Held buttons and in
 later UI/action consumers remain independent from that frame observation lifetime.
 The native Editor starts a fresh elapsed-time baseline when Play resumes, so idle paused wall time
 does not enter the next Running simulation drive.
+
+## Committed result
+
+The selected frontend and removal are committed at `f4ffdd18`; the App/Input
+frame-boundary repair is `2b26f96`. The
+[final U9/U1-U8 acceptance](../knowledge/engineering/verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md)
+records exact-source external creation/editing/import/Play repair, public Check,
+two-product Export, independent consumers and Windows/DX12 native limits.
+Future custom widgets and native platform qualification remain separate finite
+workflows; this migration does not provide a universal widget abstraction.

@@ -44,10 +44,18 @@ an index, not another source of architecture decisions.
    close/reopen, independent resize and paused input refocus.
    [U6 verification](../knowledge/engineering/verification/2026-10/2026-10-16T163933Z-editor-u6-qualifies-direct-dear-imgui-on-windows-with-explicit-backend-and-cleanup-limits-e42a0dbfec6643e380f6e9275f29b0d2.md)
    qualifies the direct Dear ImGui slice on Windows, including actual secondary samples, native
-   input/text/layout, ordered shutdown and recovery. Its adoption decision permits U7 implementation;
-   U7 candidate parity is committed; production selection and U8 external acceptance/removal are
-   [being verified](../research/2026-10-16-editor-foundation/u8-migration-progress.md). The evidence distinguishes
-   the upstream Winit shutdown defect from the observed Vulkan implicit-layer environment limit.
+   input/text/layout, ordered shutdown and recovery. U7 candidate parity is committed at `26be74f`.
+   The selected Dear ImGui frontend, egui removal and Host cadence repair are committed at
+   `f4ffdd18d5dfca70ae204a6b26803ee4962a4523`; the App/Input frame-boundary repair is
+   committed at `2b26f96`. The complete independent U8 review and bounded follow-ups close
+   both confirmed findings. Final
+   [exact-source acceptance](../knowledge/engineering/verification/2026-10/2026-10-17T102351Z-editor-foundation-u9-and-u1-u8-close-with-selected-dear-frontend-and-exact-external-products-b68c3a9f938a49b7ba63779f2849d0d9.md)
+   closes U9 and U1-U8 / R1-R11 / AE1-AE6: the same external game's saved data,
+   Play repair, public Check and two accepted exported products pass, together
+   with independent consumers and the selected native controls. ADR 0118 is
+   implemented for the finite Windows/DX12 scope. No successor implementation
+   lane is automatically active. The evidence distinguishes
+   the upstream `dear-imgui-winit` 0.20.0 shutdown defect from the observed Vulkan implicit-layer environment limit.
    Remaining native platform limitations are recorded in the implementation ledger.
    The previous [Standalone Supervised Play v1](../plans/2026-08-21-001-feat-standalone-supervised-play-v1-plan.md)
    lane was transferred by [record `d7cca2f42c6d4e07b762475aced7eb44`](../knowledge/engineering/registry/2026-10/2026-10-15T091614Z-standalone-supervised-play-v1-codex-root-d7cca2f42c6d4e07b762475aced7eb44.md).
