@@ -2914,6 +2914,7 @@ impl RuntimeOwnerState {
         for stage in CoreStage::ALL {
             schedules.insert(Schedule::new(stage));
         }
+        schedules.insert(Schedule::new(crate::__private::FrameCleanup));
         schedules
             .get_mut(CoreStage::FixedUpdate)
             .expect("the fixed-update schedule is created above")

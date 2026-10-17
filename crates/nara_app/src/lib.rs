@@ -43,6 +43,16 @@ pub use plugin::{
 };
 pub use runtime::*;
 
+#[doc(hidden)]
+pub mod __private {
+    use nara_ecs::schedule::ScheduleLabel;
+
+    /// Engine-owned transient retirement after all frame or exact-step observers have completed.
+    /// This is not a public gameplay ordering anchor.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ScheduleLabel)]
+    pub struct FrameCleanup;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, ScheduleLabel)]
 pub enum StartupStage {
     Core,
@@ -131,6 +141,7 @@ fn is_built_in_schedule(schedule: InternedScheduleLabel) -> bool {
         || CoreStage::ALL
             .into_iter()
             .any(|stage| stage.intern() == schedule)
+        || __private::FrameCleanup.intern() == schedule
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, SystemSet)]
@@ -1917,6 +1928,7 @@ impl runtime::RuntimeOwnerState {
 
         let status = frame_status.expect("the fixed-update stage always exists");
         *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+        self.run_managed_schedule(__private::FrameCleanup)?;
         let exit = self.world.resource_mut::<AppExitRequests>().take();
         self.world.clear_trackers();
         Ok(AppFrameOutcome { exit, status })
@@ -1975,6 +1987,7 @@ impl runtime::RuntimeOwnerState {
             fixed_discarded: Duration::ZERO,
         };
         *self.world.resource_mut::<RuntimeFrameStatus>() = status;
+        self.run_managed_schedule(__private::FrameCleanup)?;
         let exit = self.world.resource_mut::<AppExitRequests>().take();
         self.world.clear_trackers();
         Ok(AppFrameOutcome { exit, status })

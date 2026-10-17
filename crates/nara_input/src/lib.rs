@@ -8,7 +8,7 @@ use std::{
 };
 
 use nara_app::{
-    __RuntimeDriverPort, App, CoreStage, Plugin, PluginError, RuntimeDriverScope,
+    __RuntimeDriverPort, App, CoreStage, FixedUpdateSet, Plugin, PluginError, RuntimeDriverScope,
     RuntimeWorldAccessError,
 };
 use nara_core::Vec2;
@@ -884,9 +884,9 @@ pub struct ActionOutcome {
 /// Producer: `resolve_action_outcomes` in `InputSet::ResolveActions`.
 /// Consumers: gameplay command mapping and gameplay systems that need local
 /// action observations before replay/server boundaries. Retention is one app
-/// frame; `InputPlugin` owns cleanup in `CoreStage::Last`. Replay and
-/// diagnostics should capture these outcomes before cleanup when they need
-/// local physical-input provenance.
+/// frame; `InputPlugin` owns cleanup after all ordinary or exact-step frame observers finish.
+/// Replay and diagnostics should capture these outcomes before cleanup when they need local
+/// physical-input provenance.
 #[derive(Debug, Default, Clone, PartialEq, Resource)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionOutcomes {
@@ -962,6 +962,12 @@ impl Plugin for InputPlugin {
             project_timeline_input.in_set(InputSet::ProjectTimeline),
         )?
         .add_systems(
+            CoreStage::FixedUpdate,
+            // Exact stepping can admit input without an intervening ordinary First stage.
+            // The timeline's projection cursor makes this a no-op for already projected edges.
+            project_timeline_input.in_set(FixedUpdateSet::Prepare),
+        )?
+        .add_systems(
             CoreStage::First,
             publish_timeline_observations.in_set(InputSet::PublishObservations),
         )?
@@ -973,7 +979,7 @@ impl Plugin for InputPlugin {
             CoreStage::PreUpdate,
             resolve_action_outcomes.in_set(InputSet::ResolveActions),
         )?
-        .add_systems(CoreStage::Last, clear_input_transitions)?;
+        .add_systems(nara_app::__private::FrameCleanup, clear_input_transitions)?;
         Ok(())
     }
 }
