@@ -10,7 +10,6 @@ description = "An open-source game engine written in Rust."
 resolver = "3"
 exclude = ["reference-game", "module-consumer", "ui-module-consumer", "samples/collect-game"]
 members = [
-    "vendor/dear-imgui-wgpu",
     "crates/nara_app",
     "crates/nara_asset",
     "crates/nara_asset_watch",
@@ -96,9 +95,9 @@ bevy_macro_utils = "0.20"
 bevy_reflect = { version = "0.20", features = ["glam"] }
 blake3 = "1"
 bytemuck = { version = "1", features = ["derive"] }
-dear-imgui-rs = { version = "=0.20.0", features = ["multi-viewport"] }
-dear-imgui-wgpu = { version = "=0.20.0", path = "vendor/dear-imgui-wgpu", default-features = false, features = ["wgpu-30", "multi-viewport-winit"] }
-dear-imgui-winit = { version = "=0.20.0", features = ["multi-viewport"] }
+dear-imgui-rs = { version = "=0.21.0", features = ["multi-viewport"] }
+dear-imgui-wgpu = { version = "=0.21.0", default-features = false, features = ["wgpu-30", "multi-viewport-winit"] }
+dear-imgui-winit = { version = "=0.21.0", features = ["multi-viewport"] }
 glam = { version = "0.33", features = ["serde"] }
 getrandom = { version = "0.3.4", features = ["std"] }
 guillotiere = "=0.7.0"

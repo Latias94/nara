@@ -1,6 +1,11 @@
 use dear_imgui_rs::Context;
 
 pub(super) fn needs_followup(context: &Context) -> bool {
+    // EndFrame publishes the active text widget's IME intent for the next NewFrame. Finish that
+    // handoff so the platform can enable or disable IME even when no further input arrives.
+    if context.text_input_viewport().is_some() != context.io().want_text_input() {
+        return true;
+    }
     context.binding().with_bound_context(|| {
         // SAFETY: the live Context is bound on its UI thread after EndFrame. Its window and
         // viewport vectors and pointees remain owned by Dear ImGui; only scalars leave here.
@@ -96,6 +101,64 @@ mod tests {
             // SAFETY: only the scalar navigation identity leaves the bound live Context.
             unsafe { (*sys::igGetCurrentContext()).NavId }
         })
+    }
+
+    #[test]
+    fn programmatic_text_focus_repaints_until_ime_intent_catches_up_then_becomes_idle() {
+        fn render_text(context: &mut Context, text: &mut String, focus: bool) {
+            let ui = context.frame();
+            ui.window("Text focus")
+                .position([20.0, 20.0], Condition::Always)
+                .size([360.0, 300.0], Condition::Always)
+                .build(|| {
+                    if focus {
+                        ui.set_keyboard_focus_here();
+                    }
+                    ui.input_text("Path", text).build();
+                });
+            let _ = context.render_legacy();
+        }
+
+        let mut context = Context::create();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        context.io_mut().set_display_size([800.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        let mut text = "original".to_owned();
+        for _ in 0..4 {
+            render_text(&mut context, &mut text, false);
+        }
+        assert!(!needs_followup(&context));
+        assert!(!context.io().want_text_input());
+
+        render_text(&mut context, &mut text, true);
+        let mut followup_frames = 0;
+        while needs_followup(&context) && followup_frames < 4 {
+            render_text(&mut context, &mut text, false);
+            followup_frames += 1;
+        }
+        assert!(
+            context.text_input_viewport().is_some(),
+            "the real InputText must receive focus"
+        );
+        assert!(
+            context.io().want_text_input(),
+            "on-demand repaint must carry the focused field's IME intent into IO without another input event"
+        );
+        assert!(followup_frames > 0 && followup_frames < 4);
+        assert!(
+            !needs_followup(&context),
+            "stable text focus must not cause continuous redraw"
+        );
+        render_text(&mut context, &mut text, false);
+        assert!(!needs_followup(&context));
+        assert_eq!(text, "original");
     }
 
     #[test]

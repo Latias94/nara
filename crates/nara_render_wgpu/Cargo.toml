@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 dear-imgui-rs = { workspace = true, optional = true }
 dear-imgui-wgpu = { workspace = true, optional = true }
+dear-imgui-winit = { workspace = true, optional = true }
 bytemuck = { workspace = true, optional = true }
 nara_app.workspace = true
 nara_ecs.workspace = true
@@ -38,7 +39,7 @@ raw-window-handle.workspace = true
 
 [features]
 default = []
-editor-imgui = ["dep:dear-imgui-rs", "dep:dear-imgui-wgpu", "dep:winit"]
+editor-imgui = ["dep:dear-imgui-rs", "dep:dear-imgui-wgpu", "dep:dear-imgui-winit", "dep:winit"]
 sprite-submitter = [
     "dep:bytemuck",
     "dep:nara_image",

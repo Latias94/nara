@@ -100,6 +100,8 @@ pub use crate::texture::WgpuTextureCacheStats as WgpuRenderTextureCacheStats;
 
 #[doc(hidden)]
 pub mod __private {
+    #[cfg(feature = "editor-imgui")]
+    pub use crate::editor_execution::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer};
     pub use crate::{
         editor_execution::{
             WgpuEditorDeviceScope, WgpuEditorExecution, WgpuEditorExecutionError,

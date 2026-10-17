@@ -18,7 +18,7 @@ use nara::{
     },
 };
 
-use super::{ImguiPreedit, ImguiTextOwner, observe_text_owner};
+use super::{ImguiTextOwner, observe_text_owner};
 
 #[derive(Default)]
 pub(super) struct ImguiAuthoringPanels {
@@ -416,7 +416,6 @@ impl ImguiAuthoringPanels {
         frame: &EditorFrameModel,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         self.synchronize(frame.workspace().active_scene.as_ref());
         let Some(scene) = frame.workspace().active_scene.as_ref() else {
@@ -479,7 +478,7 @@ impl ImguiAuthoringPanels {
         }
         for component in &entity.components {
             self.show_component(
-                ui, frame, scene, &entity.id, component, editing, actions, text_owner, preedit,
+                ui, frame, scene, &entity.id, component, editing, actions, text_owner,
             );
         }
         if entity.components.is_empty() {
@@ -498,7 +497,6 @@ impl ImguiAuthoringPanels {
         editing: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         let component_id = format!(
             "{}:{:?}",
@@ -545,9 +543,7 @@ impl ImguiAuthoringPanels {
             let editable = editing
                 && component.access.is_editable()
                 && field.capabilities.contains(&ComponentCapability::Edit);
-            self.show_field(
-                ui, frame, target, field, editable, actions, text_owner, preedit,
-            );
+            self.show_field(ui, frame, target, field, editable, actions, text_owner);
         }
         if component.fields.is_empty() {
             ui.text_disabled("No inspectable fields");
@@ -564,7 +560,6 @@ impl ImguiAuthoringPanels {
         editable: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         let _id = ui.push_id(field.id.as_str());
         ui.text(format!(
@@ -600,7 +595,7 @@ impl ImguiAuthoringPanels {
             | ComponentValueKind::F64
             | ComponentValueKind::String
             | ComponentValueKind::AssetRef => {
-                self.show_text_field(ui, &target, field, editable, actions, text_owner, preedit);
+                self.show_text_field(ui, &target, field, editable, actions, text_owner);
             }
             ComponentValueKind::Null
             | ComponentValueKind::List
@@ -656,7 +651,6 @@ impl ImguiAuthoringPanels {
         editable: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         let mut text = self
             .drafts
@@ -677,7 +671,7 @@ impl ImguiAuthoringPanels {
                 target.field().as_str()
             ),
         );
-        observe_text_owner(ui, text_owner, preedit);
+        observe_text_owner(ui, text_owner);
         let cancel = ui.is_item_active() && ui.is_key_pressed(Key::Escape);
         if cancel {
             self.drafts.remove(target);

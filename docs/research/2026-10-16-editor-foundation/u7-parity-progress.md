@@ -146,7 +146,7 @@ structural UI edits there remain read-only by the existing document owner.
 These frontend defects belong to Nara's integration. The separately reproduced
 `dear-imgui-winit` 0.20.0 shutdown borrow conflict is a backend defect, documented in
 [U6 evidence](adoption-evidence.md#confirmed-upstream-shutdown-defect). The
-[local WGPU patch](../../../vendor/dear-imgui-wgpu/NARA_PATCH.md) supplies missing presentation
+[local WGPU patch](renderer-020-patch.md) supplies missing presentation
 observations; it does not establish an upstream rendering defect. The Vulkan implicit-layer
 failure also reproduces without any Dear Context and must not be attributed to ImGui.
 

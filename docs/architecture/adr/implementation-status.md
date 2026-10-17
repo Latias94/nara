@@ -9,6 +9,10 @@ Its [U1-U5 acceptance](../../knowledge/engineering/verification/2026-10/2026-10-
 closes the [audit's](../../verification/2026-10-17-foundation-and-extension-audit.md)
 F01-F09 corrections at `4589b5a`, including the real quiet external maintenance/exit trajectory.
 The measured-map successor is proposed but not activated.
+The [Dear ImGui 0.21 upgrade](../../plans/2026-10-17-dear-imgui-021-upgrade-plan.md) is active under
+[registration `ef15d6f0cfa9468aab4207cdb2ff34f5`](../../knowledge/engineering/registry/2026-10/2026-10-17T130522Z-dear-imgui-021-upgrade-codex-root-ef15d6f0cfa9468aab4207cdb2ff34f5.md).
+Published dependencies replace the renderer fork; affected native and composition capabilities
+require fresh acceptance before their current platform claims advance.
 The implementation evidence below retains each completed predecessor's actual source and scope.
 
 This ledger separates accepted decisions from implementation and platform evidence. The finite

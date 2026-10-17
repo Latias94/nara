@@ -24,7 +24,7 @@ use nara::{
     },
 };
 
-use super::{ImguiPreedit, ImguiTextOwner, ImguiViewImage, observe_text_owner, show_image};
+use super::{ImguiTextOwner, ImguiViewImage, observe_text_owner, show_image};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Scope {
@@ -212,7 +212,6 @@ impl ImguiUiAuthoringPanels {
         editing: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         let Ok(projection) = frame.projection() else {
             ui.text("The UI source projection is unavailable");
@@ -300,7 +299,7 @@ impl ImguiUiAuthoringPanels {
         {
             ui.text_disabled(format!("Structure is read-only: {reason:?}"));
         }
-        self.show_structure(ui, frame, enabled, actions, text_owner, preedit);
+        self.show_structure(ui, frame, enabled, actions, text_owner);
         ui.separator();
         for node in projection.hierarchy() {
             let _id = ui.push_id(node.entity().as_str());
@@ -349,7 +348,6 @@ impl ImguiUiAuthoringPanels {
         enabled: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         let Some(mut dialog) = self.structure.take() else {
             if let Some(error) = &self.structure_error {
@@ -398,7 +396,7 @@ impl ImguiUiAuthoringPanels {
                     UiCatalogNodeKind::Container => Some(UiCreateParameters::Container),
                     UiCatalogNodeKind::Text => {
                         ui.input_text("Text", text).build();
-                        observe_text_owner(ui, text_owner, preedit);
+                        observe_text_owner(ui, text_owner);
                         Some(UiCreateParameters::Text {
                             content: text.clone(),
                         })
@@ -433,9 +431,9 @@ impl ImguiUiAuthoringPanels {
                     }
                     UiCatalogNodeKind::Button => {
                         ui.input_text("Label", label).build();
-                        observe_text_owner(ui, text_owner, preedit);
+                        observe_text_owner(ui, text_owner);
                         ui.input_text("Action", action).build();
-                        observe_text_owner(ui, text_owner, preedit);
+                        observe_text_owner(ui, text_owner);
                         match UiActionId::new(action.trim().to_owned()) {
                             Ok(action) => Some(UiCreateParameters::Button {
                                 label: label.clone(),
@@ -523,7 +521,6 @@ impl ImguiUiAuthoringPanels {
         editing: bool,
         actions: &mut Vec<EditorAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         let Ok(projection) = frame.projection() else {
             ui.text("The UI authoring projection was rejected");
@@ -563,7 +560,7 @@ impl ImguiUiAuthoringPanels {
                 });
             let _disabled = ui.begin_disabled_with_cond(!editable);
             ui.text(field.label());
-            let response = field_control(ui, frame, field, &mut draft.value, text_owner, preedit);
+            let response = field_control(ui, frame, field, &mut draft.value, text_owner);
             draft.dirty |= response.changed;
             if let UiAuthoringEditability::ReadOnly(reason) = field.editability() {
                 ui.text_disabled(format!("Read-only: {reason:?}"));
@@ -954,7 +951,6 @@ fn field_control(
     field: &UiAuthoringFieldDescriptor,
     value: &mut UiAuthoringFieldValue,
     text_owner: &mut Option<ImguiTextOwner>,
-    preedit: Option<&ImguiPreedit>,
 ) -> ControlResponse {
     let before = value.clone();
     let mut commit = false;
@@ -1104,7 +1100,7 @@ fn field_control(
         );
     }
     if text {
-        observe_text_owner(ui, text_owner, preedit);
+        observe_text_owner(ui, text_owner);
     }
     commit |= ui.is_item_deactivated_after_edit();
     let changed = *value != before;
@@ -1221,6 +1217,7 @@ fn paint_canvas_selection(
     super::ui_interaction_tests::record_rect("canvas-selection", rect);
     draw.with_clip_rect(image.min, image.max, || {
         draw.add_rect(rect.min, rect.max, color)
+            .flags(dear_imgui_rs::DrawFlags::STROKE_CENTER)
             .thickness(1.5)
             .build();
         if resize {
@@ -1466,7 +1463,7 @@ mod tests {
                 let origin = ui.cursor_screen_pos();
                 center = [origin[0] + 100.0, origin[1] + ui.frame_height() * 0.5];
                 let control = ui.get_id("##value");
-                response = field_control(ui, frame, field, value, &mut None, None);
+                response = field_control(ui, frame, field, value, &mut None);
                 active = ui.with_bound_context(|| {
                     // SAFETY: the live Context is bound while its scalar control is inspected.
                     unsafe { dear_imgui_rs::sys::igGetActiveID() == control.raw() }

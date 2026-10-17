@@ -15,7 +15,7 @@ use nara::tooling::{
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{Event, WindowEvent},
+    event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     platform::windows::EventLoopBuilderExtWindows,
     window::{Window, WindowId},
@@ -529,10 +529,6 @@ impl ApplicationHandler for SupervisedPlayTestHost {
             return;
         };
         let primary = native.window.id() == window_id;
-        let full: Event<()> = Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
         let routed = (|| {
             if native
                 .input
@@ -540,7 +536,7 @@ impl ApplicationHandler for SupervisedPlayTestHost {
             {
                 native
                     .platform
-                    .handle_event(&mut native.context, &native.window, &full)
+                    .handle_window_event(&mut native.context, window_id, &event)
                     .map_err(|error| error.to_string())?;
             }
             native

@@ -82,10 +82,10 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         &[
             "cargo fmt --all -- --check",
             "cargo check --workspace --locked --all-targets",
-            "cargo check --workspace --exclude dear-imgui-wgpu --locked --all-features --all-targets",
-            "cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --test-threads=1",
-            "cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --all-features --test-threads=1",
-            "cargo nextest run -p dear-imgui-wgpu --locked --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test --test-threads=1",
+            "cargo check --workspace --locked --all-features --all-targets",
+            "cargo nextest run --workspace --locked --test-threads=1",
+            "cargo nextest run --workspace --locked --all-features --test-threads=1",
+            "cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1",
             "--features desktop-winit,render-wgpu --example windowed_clear",
             "--features presentation-2d,desktop-winit,render-wgpu --example windowed_sprites",
             "--features presentation-2d,desktop-winit,render-wgpu --example palette_material",
@@ -171,10 +171,8 @@ fn hosted_ci_runs_complete_locked_suites_on_supported_platforms() {
         );
     }
     assert!(
-        !root_script
-            .replace("--exclude dear-imgui-wgpu ", "")
-            .contains("--exclude"),
-        "root CI may exclude only the separately tested renderer cohort"
+        !root_script.contains("--exclude"),
+        "root CI must test every first-party workspace member"
     );
     for (name, script) in [
         ("reference-game", &reference_script),

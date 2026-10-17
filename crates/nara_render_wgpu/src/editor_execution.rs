@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 #[cfg(feature = "editor-imgui")]
 mod imgui;
+#[cfg(feature = "editor-imgui")]
+pub use imgui::{WgpuEditorImguiFrame, WgpuEditorImguiRenderer};
 #[cfg(feature = "ui-submitter")]
 use std::sync::Arc;
 
@@ -726,8 +728,6 @@ pub struct WgpuEditorExecution {
     views: BTreeMap<WgpuEditorViewId, WgpuEditorView>,
     host_frame_index: Option<u64>,
     last_presentation_generation: u64,
-    #[cfg(feature = "editor-imgui")]
-    last_imgui_presentation_id: u64,
 }
 
 impl std::fmt::Debug for WgpuEditorExecution {
@@ -756,8 +756,6 @@ impl WgpuEditorExecution {
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
-            #[cfg(feature = "editor-imgui")]
-            last_imgui_presentation_id: 0,
         })
     }
 
@@ -1992,8 +1990,6 @@ mod tests {
             views: BTreeMap::new(),
             host_frame_index: None,
             last_presentation_generation: 0,
-            #[cfg(feature = "editor-imgui")]
-            last_imgui_presentation_id: 0,
         }
     }
 

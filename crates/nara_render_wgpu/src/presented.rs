@@ -159,12 +159,25 @@ impl WgpuSubmittedImageReceipt {
     }
 }
 
-/// Exact Editor-window surface submission and present facts.
+/// Target identity whose presentation API was called by its owning backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WgpuEditorWindowPresentationTarget {
+    HostSurface {
+        generation: u64,
+    },
+    /// Process-unique Dear ImGui native registration, not a surface configuration generation.
+    #[cfg(feature = "editor-imgui")]
+    DelegatedNativeWindow {
+        instance: u64,
+    },
+}
+
+/// Exact Editor-window submission and presentation-request facts.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WgpuEditorWindowPresentedReceipt {
     window_id: WindowId,
-    surface_generation: u64,
+    target: WgpuEditorWindowPresentationTarget,
     backend_instance_id: u64,
     device_epoch: u64,
     editor_frame_index: u64,
@@ -180,7 +193,9 @@ impl WgpuEditorWindowPresentedReceipt {
     ) -> Self {
         Self {
             window_id,
-            surface_generation,
+            target: WgpuEditorWindowPresentationTarget::HostSurface {
+                generation: surface_generation,
+            },
             backend_instance_id,
             device_epoch,
             editor_frame_index,
@@ -193,8 +208,40 @@ impl WgpuEditorWindowPresentedReceipt {
     }
 
     #[must_use]
-    pub const fn surface_generation(self) -> u64 {
-        self.surface_generation
+    pub const fn surface_generation(self) -> Option<u64> {
+        match self.target {
+            WgpuEditorWindowPresentationTarget::HostSurface { generation } => Some(generation),
+            #[cfg(feature = "editor-imgui")]
+            WgpuEditorWindowPresentationTarget::DelegatedNativeWindow { .. } => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn delegated_native_instance(self) -> Option<u64> {
+        match self.target {
+            #[cfg(feature = "editor-imgui")]
+            WgpuEditorWindowPresentationTarget::DelegatedNativeWindow { instance } => {
+                Some(instance)
+            }
+            WgpuEditorWindowPresentationTarget::HostSurface { .. } => None,
+        }
+    }
+
+    #[cfg(feature = "editor-imgui")]
+    pub(crate) const fn delegated(
+        window_id: WindowId,
+        instance: u64,
+        backend_instance_id: u64,
+        device_epoch: u64,
+        editor_frame_index: u64,
+    ) -> Self {
+        Self {
+            window_id,
+            target: WgpuEditorWindowPresentationTarget::DelegatedNativeWindow { instance },
+            backend_instance_id,
+            device_epoch,
+            editor_frame_index,
+        }
     }
 
     #[must_use]

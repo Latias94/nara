@@ -83,25 +83,26 @@ jobs:
           cargo run -p nara --locked --no-default-features --features presentation-ui,desktop-winit,render-wgpu --example ui_presentation_gallery
           CARGO_TARGET_DIR=target cargo check --manifest-path tests/fixtures/product-slices/presentation-2d/Cargo.toml --locked
           CARGO_TARGET_DIR=target cargo check --manifest-path tests/fixtures/product-slices/presentation-ui/Cargo.toml --locked
-          cargo check --workspace --exclude dear-imgui-wgpu --locked --all-features --all-targets
+          cargo check --workspace --locked --all-features --all-targets
       - name: Test root workspace
         shell: bash
         run: |
-          cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --test-threads=1
+          cargo nextest run --workspace --locked --test-threads=1
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --all-features --test-threads=1
+            NARA_WGPU_FORCE_FALLBACK=1 xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run --workspace --locked --all-features --test-threads=1
           else
-            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --exclude dear-imgui-wgpu --locked --all-features --test-threads=1
+            NARA_WGPU_FORCE_FALLBACK=1 cargo nextest run --workspace --locked --all-features --test-threads=1
           fi
-      - name: Test production renderer patch cohort
+      - name: Test production Dear renderer adapter
         shell: bash
         env:
           DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
+          NARA_WGPU_FORCE_FALLBACK: "1"
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run -p dear-imgui-wgpu --locked --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test --test-threads=1
+            xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1
           else
-            cargo nextest run -p dear-imgui-wgpu --locked --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test --test-threads=1
+            cargo nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1
           fi
 
   reference-game:

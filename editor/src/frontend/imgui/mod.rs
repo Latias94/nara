@@ -145,19 +145,12 @@ pub(crate) struct ImguiTextOwner {
     pub(crate) viewport: dear_imgui_rs::Id,
 }
 
-pub(crate) struct ImguiPreedit {
-    pub(crate) owner: ImguiTextOwner,
-    pub(crate) text: String,
-    pub(crate) cursor: Option<(usize, usize)>,
-}
-
 struct ImguiPanelInput<'frame> {
     frame: &'frame EditorFrameModel,
     ui_authoring: Option<&'frame nara::project_host::EditorUiAuthoringFrame>,
     scene: Option<ImguiViewImage>,
     game: Option<ImguiViewImage>,
     game_captured: bool,
-    preedit: Option<&'frame ImguiPreedit>,
     read_only: bool,
     canvas_presented: bool,
 }
@@ -276,7 +269,6 @@ impl ImguiEditorFrontend {
             false,
             false,
             "Native detachment is owned by the product Host",
-            None,
         )?;
         self.finish_canvas_presentation(
             &mut output,
@@ -351,7 +343,6 @@ impl ImguiEditorFrontend {
         game_captured: bool,
         canvas_presented: bool,
         detachment: &str,
-        preedit: Option<&ImguiPreedit>,
     ) -> Result<ImguiFrontendOutput, String> {
         let generation = application.workspace_generation();
         if self.workspace_generation != generation {
@@ -403,8 +394,7 @@ impl ImguiEditorFrontend {
                 .size([720.0, 460.0], Condition::FirstUseEver)
                 .build(|| {
                     output.shell_action =
-                        self.project
-                            .show_shell(ui, model, &mut output.text_owner, preedit);
+                        self.project.show_shell(ui, model, &mut output.text_owner);
                 });
         }
         let Some(frame) = application.current_frame() else {
@@ -436,12 +426,9 @@ impl ImguiEditorFrontend {
             )
             .flags(dear_imgui_rs::WindowFlags::ALWAYS_AUTO_RESIZE)
             .build(|| {
-                output.project_action = self.project.show_project_actions(
-                    ui,
-                    !read_only,
-                    &mut output.text_owner,
-                    preedit,
-                );
+                output.project_action =
+                    self.project
+                        .show_project_actions(ui, !read_only, &mut output.text_owner);
                 self.toolbar.set_read_only(read_only);
                 self.toolbar
                     .show_document_controls(ui, &frame, &mut actions);
@@ -455,7 +442,6 @@ impl ImguiEditorFrontend {
             scene,
             game,
             game_captured,
-            preedit,
             read_only,
             canvas_presented,
         };
@@ -732,7 +718,6 @@ fn paint_hierarchy(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             !context.input.read_only,
             context.actions,
             &mut context.output.text_owner,
-            context.input.preedit,
         );
     } else {
         context
@@ -750,7 +735,6 @@ fn paint_project_browser(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>)
         context.actions,
         &mut context.output.browser_actions,
         &mut context.output.text_owner,
-        context.input.preedit,
     );
 }
 
@@ -803,7 +787,6 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             !context.input.read_only,
             context.actions,
             &mut context.output.text_owner,
-            context.input.preedit,
         );
     } else {
         context.widgets.authoring.show_inspector(
@@ -811,7 +794,6 @@ fn paint_inspector(ui: &Ui, context: &mut ImguiEditorPanelContext<'_, '_>) {
             context.input.frame,
             context.actions,
             &mut context.output.text_owner,
-            context.input.preedit,
         );
     }
 }
@@ -1078,16 +1060,10 @@ fn image_interaction(ui: &Ui) -> ImguiImageInteraction {
 }
 
 fn framebuffer_scale(ui: &Ui) -> [f32; 2] {
-    let scale = ui.window_viewport().framebuffer_scale();
-    // Dear ImGui uses zero to leave per-viewport density unset in a single-window profile.
-    if scale[0] != 0.0 {
-        scale
-    } else {
-        ui.io().display_framebuffer_scale()
-    }
+    ui.window_viewport().framebuffer_scale()
 }
 
-fn observe_text_owner(ui: &Ui, owner: &mut Option<ImguiTextOwner>, preedit: Option<&ImguiPreedit>) {
+fn observe_text_owner(ui: &Ui, owner: &mut Option<ImguiTextOwner>) {
     if !ui.is_item_active() {
         return;
     }
@@ -1096,65 +1072,4 @@ fn observe_text_owner(ui: &Ui, owner: &mut Option<ImguiTextOwner>, preedit: Opti
         viewport: ui.window_viewport().id(),
     };
     *owner = Some(current);
-    let Some(preedit) =
-        preedit.filter(|preedit| preedit.owner == current && !preedit.text.is_empty())
-    else {
-        return;
-    };
-    let (min, max) = ui.item_rect();
-    let position = ui.with_bound_context(|| {
-        // SAFETY: copy only the current frame's caret facts from the bound live Context. Dear
-        // fills these after the active InputText, using the same coordinates as its IME callback.
-        let data = unsafe { (*dear_imgui_rs::sys::igGetCurrentContext()).PlatformImeData };
-        if data.WantVisible && data.ViewportId == current.viewport.raw() {
-            [data.InputPos.x, data.InputPos.y]
-        } else {
-            [min[0], max[1] + 3.0]
-        }
-    });
-    let size = ui.calc_text_size(&preedit.text);
-    let draw = ui.with_bound_context(|| {
-        // SAFETY: this live window's viewport and foreground list belong to the borrowed Ui
-        // frame. The wrapper stays local and is the only mutable borrow of this list.
-        unsafe {
-            let viewport = dear_imgui_rs::sys::igGetWindowViewport();
-            let list = dear_imgui_rs::sys::igGetForegroundDrawList_ViewportPtr(viewport);
-            dear_imgui_rs::DrawListMut::from_raw_mut(ui, list)
-        }
-    });
-    draw.add_rect(
-        [position[0] - 3.0, position[1] - 2.0],
-        [position[0] + size[0] + 3.0, position[1] + size[1] + 3.0],
-        [0.08, 0.09, 0.12, 1.0],
-    )
-    .filled(true)
-    .build();
-    draw.add_text(position, [1.0, 1.0, 1.0, 1.0], &preedit.text);
-    draw.add_line(
-        [position[0], position[1] + size[1] + 1.0],
-        [position[0] + size[0], position[1] + size[1] + 1.0],
-        [0.5, 0.75, 1.0, 1.0],
-    )
-    .build();
-    if let Some((start, end)) = preedit.cursor {
-        if let (Some(before), Some(active)) =
-            (preedit.text.get(..start), preedit.text.get(start..end))
-        {
-            let left = position[0] + ui.calc_text_size(before)[0];
-            let right = left + ui.calc_text_size(active)[0];
-            draw.add_line(
-                [left, position[1]],
-                [left, position[1] + size[1]],
-                [1.0, 0.8, 0.25, 1.0],
-            )
-            .build();
-            draw.add_line(
-                [left, position[1] + size[1]],
-                [right, position[1] + size[1]],
-                [1.0, 0.8, 0.25, 1.0],
-            )
-            .thickness(2.0)
-            .build();
-        }
-    }
 }

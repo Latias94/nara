@@ -9,11 +9,13 @@
 **Document Role**: UI boundary guide; Accepted ADRs own decisions and the implementation ledger owns evidence.
 
 This guide explains separate game/editor products and selective service reuse.
-The [Editor Foundation and Frontends plan](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md) now owns the finite editor successor under ADR 0118.
-The direct dear-imgui-rs 0.20.0 integration and candidate frontend have passed the recorded
+The completed [Editor Foundation and Frontends plan](../plans/2026-10-16-1229-refactor-editor-foundation-and-frontends-plan.md) owns the original finite editor migration under ADR 0118.
+The original direct dear-imgui-rs 0.20.0 integration and candidate frontend passed the recorded
 Windows adoption and parity gates. The normal-entry migration and removal of the superseded
 frontend are tracked in [U8 progress](../research/2026-10-16-editor-foundation/u8-migration-progress.md).
 A future custom frontend remains unbuilt and is not an acceptance claim of that work.
+The [0.21 upgrade plan](../plans/2026-10-17-dear-imgui-021-upgrade-plan.md) owns the published-backend
+migration; its fresh verification is recorded in the implementation ledger.
 
 ## Purpose
 

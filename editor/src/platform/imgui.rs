@@ -4,12 +4,8 @@ use std::{
 };
 
 use dear_imgui_rs::{Context, FontConfig, FontSource, StbTrueTypeFontData};
-use dear_imgui_wgpu::{
-    ExternalTextureId, WgpuInitInfo, WgpuRenderer,
-    multi_viewport::{WgpuPreparedViewportFrame, WinitViewportRoute},
-    wgpu,
-};
-use dear_imgui_winit::{HiDpiMode, WinitPlatform};
+use dear_imgui_wgpu::{ExternalTextureId, wgpu};
+use dear_imgui_winit::{HiDpiMode, WinitPlatform, WinitPlatformAction};
 use nara::{
     asset::{AssetId, Handle},
     project_host::{
@@ -21,8 +17,9 @@ use nara::{
     },
     render_wgpu::__private::{
         WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorFrameOutcome,
-        WgpuEditorUiImageSubmission, WgpuEditorViewId, WgpuEditorViewportIdentity,
-        WgpuEditorWindowFrame, WgpuSubmittedImageReceipt,
+        WgpuEditorImguiFrame, WgpuEditorImguiRenderer, WgpuEditorUiImageSubmission,
+        WgpuEditorViewId, WgpuEditorViewportIdentity, WgpuEditorWindowFrame,
+        WgpuSubmittedImageReceipt,
     },
     tooling::{EditorActionBatch, EditorPlayState, EditorRuntimeAvailability},
     window::{WindowId as NaraWindowId, backend::WindowHandleProvider},
@@ -30,7 +27,7 @@ use nara::{
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{Event, WindowEvent},
+    event::WindowEvent,
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
@@ -187,35 +184,19 @@ struct NativeImgui {
     submitted_game_observation: Option<game_input_tests::SubmittedGameObservation>,
 }
 
-enum ImguiRenderer {
-    Docked(WgpuRenderer),
-    Native(WinitViewportRoute),
-}
-
-enum ImguiPreparedFrame<'frame> {
-    Docked(dear_imgui_rs::render::ReconciledFrame<'frame>),
-    Native(WgpuPreparedViewportFrame<'frame>),
-}
+struct ImguiRenderer(WgpuEditorImguiRenderer);
 
 impl ImguiRenderer {
     fn register(&mut self, view: &wgpu::TextureView) -> Result<ExternalTextureId, EditorRunError> {
-        match self {
-            Self::Docked(renderer) => renderer
-                .register_external_texture(view)
-                .map_err(imgui_error),
-            Self::Native(route) => route.register_external_texture(view).map_err(imgui_error),
-        }
+        self.0
+            .register_external_texture(view)
+            .map_err(platform_gpu_error)
     }
 
     fn unregister(&mut self, texture: ExternalTextureId) -> Result<(), EditorRunError> {
-        match self {
-            Self::Docked(renderer) => renderer
-                .unregister_external_texture(texture)
-                .map_err(imgui_error),
-            Self::Native(route) => route
-                .unregister_external_texture(texture)
-                .map_err(imgui_error),
-        }
+        self.0
+            .unregister_external_texture(texture)
+            .map_err(platform_gpu_error)
     }
 
     fn prepare<'frame>(
@@ -225,28 +206,22 @@ impl ImguiRenderer {
         event_loop: &ActiveEventLoop,
         frame: dear_imgui_rs::FrameToken<'frame>,
         submissions: &[WgpuSubmittedImageReceipt],
-    ) -> Result<(ImguiPreparedFrame<'frame>, Vec<WgpuEditorFrameOutcome>), EditorRunError> {
-        match self {
-            Self::Docked(renderer) => {
-                let consumer = renderer.renderer_consumer().map_err(imgui_error)?;
-                let pending = frame.try_render(consumer).map_err(imgui_error)?;
-                Ok((
-                    ImguiPreparedFrame::Docked(
-                        renderer.reconcile_frame(pending).map_err(imgui_error)?,
-                    ),
-                    Vec::new(),
-                ))
-            }
-            Self::Native(route) => gpu
-                .prepare_imgui_viewports(window, route, event_loop, frame, submissions)
-                .map(|(frame, secondary)| (ImguiPreparedFrame::Native(frame), secondary))
-                .map_err(platform_gpu_error),
-        }
+        outcomes: &mut Vec<WgpuEditorFrameOutcome>,
+    ) -> Result<WgpuEditorImguiFrame<'frame>, EditorRunError> {
+        gpu.prepare_imgui_frame(
+            window,
+            &mut self.0,
+            event_loop,
+            frame,
+            submissions,
+            outcomes,
+        )
+        .map_err(platform_gpu_error)
     }
 
     fn paint(
         &mut self,
-        prepared: ImguiPreparedFrame<'_>,
+        prepared: WgpuEditorImguiFrame<'_>,
         frame: &mut WgpuEditorWindowFrame<'_>,
     ) -> Result<(), WgpuEditorExecutionError> {
         let clear = wgpu::Color {
@@ -255,24 +230,11 @@ impl ImguiRenderer {
             b: 0.075,
             a: 1.0,
         };
-        match (self, prepared) {
-            (Self::Docked(renderer), ImguiPreparedFrame::Docked(prepared)) => {
-                frame.paint_imgui_docked(renderer, prepared, clear)
-            }
-            (Self::Native(route), ImguiPreparedFrame::Native(prepared)) => {
-                frame.paint_imgui_main(route, prepared, clear)
-            }
-            _ => Err(WgpuEditorExecutionError::toolkit_paint(
-                "prepared frame belongs to another route",
-            )),
-        }
+        self.0.paint(prepared, frame, clear)
     }
 
     fn shutdown(&mut self, context: &mut Context) -> Result<(), EditorRunError> {
-        match self {
-            Self::Docked(renderer) => renderer.shutdown(context).map_err(imgui_error),
-            Self::Native(route) => route.shutdown(context).map_err(imgui_error),
-        }
+        self.0.shutdown(context).map_err(platform_gpu_error)
     }
 }
 
@@ -464,21 +426,12 @@ impl NativeImgui {
         }
         let renderer = gpu
             .with_device(editor_window_packet(&window), |scope| {
-                WgpuRenderer::new(
-                    WgpuInitInfo::new(
-                        scope.device().clone(),
-                        scope.queue().clone(),
-                        scope.surface_format(),
-                    )
-                    .with_instance(scope.instance().clone())
-                    .with_adapter(scope.adapter().clone()),
-                    &mut context,
-                )
+                scope.create_imgui_renderer(&mut context, native_detachment.then_some(&platform))
             })
             .map_err(platform_gpu_error)
-            .and_then(|renderer| renderer.map_err(imgui_error));
-        let mut renderer = match renderer {
-            Ok(renderer) => renderer,
+            .and_then(|renderer| renderer.map_err(platform_gpu_error));
+        let renderer = match renderer {
+            Ok(renderer) => ImguiRenderer(renderer),
             Err(error) => {
                 // Renderer construction may submit initialization work before its first frame.
                 // Drain it before Context teardown releases any deferred renderer resources.
@@ -489,24 +442,6 @@ impl NativeImgui {
                 }
                 return Err(error);
             }
-        };
-        renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
-        let renderer = if native_detachment {
-            match WinitViewportRoute::attach(&mut context, &platform, renderer) {
-                Ok(route) => ImguiRenderer::Native(route),
-                Err(failure) => {
-                    let (error, mut renderer) = failure.into_parts();
-                    return Err(retire_failed_imgui_renderer(
-                        imgui_error(error),
-                        &gpu,
-                        &mut renderer,
-                        &mut platform,
-                        &mut context,
-                    ));
-                }
-            }
-        } else {
-            ImguiRenderer::Docked(renderer)
         };
         Ok(Self {
             window,
@@ -723,7 +658,6 @@ impl NativeImgui {
                         self.input.is_captured(),
                         canvas_presented,
                         self.detachment,
-                        self.input.preedit(),
                     )
                     .map_err(imgui_error)?,
             );
@@ -734,28 +668,26 @@ impl NativeImgui {
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>();
-            let (prepared, secondary) = self.renderer.prepare(
+            let prepared = self.renderer.prepare(
                 &mut self.gpu,
                 window_packet,
                 event_loop,
                 frame,
                 &submissions,
-            )?;
-            if let ImguiPreparedFrame::Native(prepared) = &prepared {
-                secondary_windows.extend(
-                    prepared
-                        .secondary_report()
-                        .presented_frames()
-                        .iter()
-                        .zip(&secondary)
-                        .filter_map(|(native, outcome)| {
-                            outcome.window().map(|window| {
-                                (native.viewport_id(), native.window_id(), window.window_id())
-                            })
-                        }),
-                );
+                &mut secondary_outcomes,
+            );
+            let snapshots = self.platform.window_snapshots().map_err(imgui_error)?;
+            for snapshot in snapshots
+                .into_iter()
+                .filter(|snapshot| !snapshot.target.is_main)
+            {
+                let window = self
+                    .gpu
+                    .imgui_window_id(snapshot.target.instance_id)
+                    .map_err(platform_gpu_error)?;
+                secondary_windows.push((snapshot.target.viewport_id, snapshot.window_id, window));
             }
-            secondary_outcomes = secondary;
+            let prepared = prepared?;
             let renderer = &mut self.renderer;
             let outcome = self
                 .gpu
@@ -769,9 +701,13 @@ impl NativeImgui {
                 .map_err(platform_gpu_error)?;
             Ok(outcome)
         })();
+        self.presented = secondary_outcomes
+            .iter()
+            .any(|outcome| outcome.window().is_some());
         let outcome = match rendered {
             Ok(rendered) => rendered,
             Err(error) => {
+                self.input.invalidate(false);
                 if let Some(output) = frontend_output.take() {
                     let authoring = application.current_ui_authoring_frame();
                     if let Some(batch) = self
@@ -794,6 +730,7 @@ impl NativeImgui {
                     };
                     self.return_game_completion(application, completion)?;
                 }
+                self.input.flush(application)?;
                 return Err(error);
             }
         };
@@ -1627,24 +1564,46 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
             return;
         };
         let is_primary = native.window.id() == window_id;
-        let full: Event<()> = Event::WindowEvent {
-            window_id,
-            event: event.clone(),
-        };
-        if native
-            .input
-            .handle_event(window_id, &event, &native.context)
-        {
-            if let Err(error) =
-                native
-                    .platform
-                    .handle_event(&mut native.context, &native.window, &full)
-            {
+        let owned = match native.platform.window_snapshots() {
+            Ok(snapshots) => snapshots
+                .iter()
+                .any(|snapshot| snapshot.window_id == window_id),
+            Err(error) => {
                 self.error = Some(imgui_error(error));
                 event_loop.exit();
                 return;
             }
+        };
+        if !owned {
+            return;
         }
+        let forward_to_toolkit = native
+            .input
+            .handle_event(window_id, &event, &native.context);
+        let needs_frame = if forward_to_toolkit {
+            match native
+                .platform
+                .handle_window_event(&mut native.context, window_id, &event)
+            {
+                Ok(outcome) => {
+                    outcome.is_owned()
+                        && (outcome.needs_frame
+                            || matches!(
+                                outcome.platform_action,
+                                WinitPlatformAction::ViewportCloseRequested
+                                    | WinitPlatformAction::GeometryChanged
+                                    | WinitPlatformAction::NativeDestroyed
+                            ))
+                }
+                Err(error) => {
+                    self.error = Some(imgui_error(error));
+                    event_loop.exit();
+                    return;
+                }
+            }
+        } else {
+            true
+        };
         if let Err(error) = native.input.flush(&mut self.application) {
             self.error = Some(error);
             event_loop.exit();
@@ -1683,7 +1642,8 @@ impl ApplicationHandler<EditorUserEvent> for NativeEditorHost {
                     self.last_drive = running_after.then(Instant::now);
                 }
             }
-            _ => native.window.request_redraw(),
+            _ if needs_frame => native.window.request_redraw(),
+            _ => {}
         }
     }
 
@@ -2065,33 +2025,6 @@ fn game_target(
 
 fn imgui_error(error: impl std::fmt::Display) -> EditorRunError {
     EditorRunError::Platform(error.to_string())
-}
-
-fn retire_failed_imgui_renderer(
-    error: EditorRunError,
-    gpu: &WgpuEditorExecution,
-    renderer: &mut WgpuRenderer,
-    platform: &mut WinitPlatform,
-    context: &mut Context,
-) -> EditorRunError {
-    let mut cleanup = gpu.wait_for_idle().map_err(platform_gpu_error).err();
-    if let Err(failure) = renderer.shutdown(context).map_err(imgui_error) {
-        cleanup.get_or_insert(failure);
-    }
-    if platform.viewports_enabled()
-        && let Err(failure) = platform.disable_viewports(context).map_err(imgui_error)
-    {
-        cleanup.get_or_insert(failure);
-    }
-    if let Err(failure) = platform.shutdown(context).map_err(imgui_error) {
-        cleanup.get_or_insert(failure);
-    }
-    match cleanup {
-        Some(cleanup) => imgui_error(format!(
-            "{error}; initialization cleanup also failed: {cleanup}"
-        )),
-        None => error,
-    }
 }
 
 fn native_detachment_supported(event_loop: &ActiveEventLoop) -> bool {

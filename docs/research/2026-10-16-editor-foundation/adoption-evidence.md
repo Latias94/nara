@@ -20,7 +20,7 @@ production filter were changed. See the
 - A bounded Inspector, hierarchy, diagnostics and real Scene/Game images use the existing
   application, revision-bound actions, document history and Runtime completion owners.
 - The released WGPU report exposed only viewport ID sets. The local, opt-in
-  [presentation observability patch](../../../vendor/dear-imgui-wgpu/NARA_PATCH.md) retains exact
+  [presentation observability patch](renderer-020-patch.md) retains exact
   sampled `TextureView` handles and backend-constructed secondary present records. Nara joins
   them synchronously to the latest successful image submission on the same device and queue.
   The delegated route continues to submit and present secondary surfaces once; Nara owns the

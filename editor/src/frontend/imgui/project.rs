@@ -19,11 +19,15 @@ use nara::tooling::{
     EditorWorkspaceIntentAction, EditorWorkspaceIntentResult,
 };
 
-use super::{ImguiPreedit, ImguiTextOwner, observe_text_owner};
+use super::{ImguiTextOwner, observe_text_owner};
 use crate::{
     EditorProjectAction,
     app::{EditorProjectShellAction, EditorProjectShellModel},
 };
+
+#[cfg(all(test, target_os = "windows"))]
+#[path = "ime_tests.rs"]
+mod ime_tests;
 
 #[derive(Debug, Default)]
 pub(super) struct ImguiProjectPanels {
@@ -53,7 +57,6 @@ impl ImguiProjectPanels {
         ui: &Ui,
         model: EditorProjectShellModel<'_>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) -> Option<EditorProjectShellAction> {
         match model {
             EditorProjectShellModel::ProjectManager {
@@ -70,7 +73,7 @@ impl ImguiProjectPanels {
                 );
                 ui.text("Project Manager");
                 ui.text_wrapped("Open an existing Nara project without loading project code.");
-                self.show_open_fields(ui, focus, text_owner, preedit);
+                self.show_open_fields(ui, focus, text_owner);
                 if shell_button(ui, "Open Project") {
                     return Some(EditorProjectShellAction::OpenProject {
                         project_root: PathBuf::from(self.project_path.trim()),
@@ -156,7 +159,6 @@ impl ImguiProjectPanels {
         ui: &Ui,
         enabled: bool,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) -> Option<EditorProjectAction> {
         let _disabled = ui.begin_disabled_with_cond(!enabled);
         if shell_button(ui, "Open Project...") {
@@ -166,7 +168,7 @@ impl ImguiProjectPanels {
         let mut action =
             shell_button(ui, "Close Project").then_some(EditorProjectAction::CloseProject);
         if let Some(_popup) = ui.begin_popup("open_project") {
-            self.show_open_fields(ui, false, text_owner, preedit);
+            self.show_open_fields(ui, false, text_owner);
             if shell_button(ui, "Open Project") {
                 action = Some(EditorProjectAction::OpenProject {
                     project_root: PathBuf::from(self.project_path.trim()),
@@ -197,7 +199,6 @@ impl ImguiProjectPanels {
         ui: &Ui,
         focus_path: bool,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         if focus_path {
             ui.set_keyboard_focus_here();
@@ -207,14 +208,14 @@ impl ImguiProjectPanels {
             .build();
         #[cfg(test)]
         super::interaction_tests::record_control(ui, "Project path");
-        observe_text_owner(ui, text_owner, preedit);
+        observe_text_owner(ui, text_owner);
         ui.set_next_item_width(ui.content_region_avail()[0].min(520.0));
         ui.input_text("Profile", &mut self.profile)
             .hint("desktop")
             .build();
         #[cfg(test)]
         super::interaction_tests::record_control(ui, "Profile");
-        observe_text_owner(ui, text_owner, preedit);
+        observe_text_owner(ui, text_owner);
     }
 
     pub(super) fn show_browser(
@@ -225,7 +226,6 @@ impl ImguiProjectPanels {
         actions: &mut Vec<EditorAction>,
         local_actions: &mut Vec<EditorProjectBrowserLocalAction>,
         text_owner: &mut Option<ImguiTextOwner>,
-        preedit: Option<&ImguiPreedit>,
     ) {
         ui.text(browser_status(view.status()));
         ui.same_line();
@@ -264,7 +264,7 @@ impl ImguiProjectPanels {
             });
         }
         self.filter_active = ui.is_item_active();
-        observe_text_owner(ui, text_owner, preedit);
+        observe_text_owner(ui, text_owner);
         let filters = [
             EditorProjectBrowserKindFilter::All,
             EditorProjectBrowserKindFilter::Documents,

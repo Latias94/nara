@@ -84,7 +84,6 @@ impl ImguiGameView {
                 .size(size)
                 .flags(
                     dear_imgui_rs::WindowFlags::NO_INPUTS
-                        | dear_imgui_rs::WindowFlags::NO_NAV_FOCUS
                         | dear_imgui_rs::WindowFlags::NO_FOCUS_ON_APPEARING
                         | dear_imgui_rs::WindowFlags::NO_BACKGROUND
                         | dear_imgui_rs::WindowFlags::NO_SCROLLBAR
@@ -131,6 +130,36 @@ mod tests {
 
     const GAME_TEXTURE: TextureId = TextureId::new(71);
     const FOLLOWING_TEXTURE: TextureId = TextureId::new(72);
+
+    #[test]
+    fn captured_game_window_flags_match_native_input_and_navigation_bits() {
+        assert_eq!(
+            WindowFlags::NO_INPUTS.bits(),
+            sys::ImGuiWindowFlags_NoInputs as i32
+        );
+        assert_eq!(
+            WindowFlags::NO_INPUTS,
+            WindowFlags::NO_MOUSE_INPUTS | WindowFlags::NO_NAV_INPUTS | WindowFlags::NO_NAV_FOCUS
+        );
+        let mut context = context();
+        let ui = context.frame();
+        let mut native_flags = None;
+        ui.window("Captured Game input flags")
+            .flags(WindowFlags::NO_INPUTS)
+            .build(|| {
+                native_flags = Some(ui.with_bound_context(|| {
+                    // SAFETY: this live window is borrowed only within its Ui frame.
+                    unsafe { (*sys::igGetCurrentWindow()).Flags }
+                }));
+            });
+        let _ = context.render_legacy();
+        let native_flags =
+            native_flags.expect("the captured Game policy must reach a native window");
+        assert_eq!(
+            native_flags & WindowFlags::NO_INPUTS.bits(),
+            WindowFlags::NO_INPUTS.bits()
+        );
+    }
 
     struct RenderedText(Rc<RefCell<String>>);
 

@@ -47,6 +47,11 @@ This decision establishes no stable plugin ABI or dynamic hot-unload policy.
 The native Host retains one event loop, device-creation authority and accountable close/recovery lifecycle.
 It may delegate secondary window/surface ownership to the selected platform/renderer adapter with explicit shutdown ordering.
 The adapter uses the engine-created GPU lineage rather than a second device/runtime.
+The private toolkit adapter must own the renderer and external texture registrations it certifies;
+caller-supplied observation metadata alone cannot grant Nara presentation authority.
+Delegated presentation receipts identify the exact native registration and UI attempt observed by
+that owner. They do not invent internal surface configuration generations that the backend does
+not expose. Host-owned primary surfaces retain their own acquisition/configuration identity.
 Independent Nara view instances retain their own targets, displayed mappings, input capture and resource retirement.
 An external Play process is not an embedded shared-device render view.
 
@@ -110,7 +115,9 @@ An unreleased/beta route needs a concrete stable-release blocker, not merely a n
 Docking within a window, native detached windows and multiple Nara render views are separate capabilities.
 The pinned native multi-viewport backend is experimental, supports Windows/macOS/X11 routes and rejects Wayland.
 In-window docking remains the baseline where detachment is unavailable.
-IME commits are implemented but preedit is ignored; system accessibility parity is not established by this research.
+At the initial 0.20.0 research baseline, IME commits are implemented but preedit is ignored;
+system accessibility parity is not established by that research. Newer composition support is
+qualified separately in the implementation ledger.
 
 The replacement becomes the default only after the plan's actual Nara texture, authoring, input, lifecycle and feature-parity gates pass.
 If a mandatory capability fails, retain the current production frontend and resolve the concrete blocker before porting the rest.

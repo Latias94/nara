@@ -2,14 +2,14 @@ use dear_imgui_rs::{Context, Id};
 use nara::{project_host::EditorGameStartRequest, window::WindowId as NaraWindowId};
 use winit::{
     dpi::PhysicalPosition,
-    event::{ElementState, Ime, WindowEvent},
+    event::{ElementState, WindowEvent},
     keyboard::PhysicalKey,
     window::WindowId,
 };
 
 use crate::{
     EditorApplication,
-    frontend::imgui::{ImguiImageInteraction, ImguiPreedit, ImguiTextOwner},
+    frontend::imgui::{ImguiImageInteraction, ImguiTextOwner},
 };
 
 use super::super::{
@@ -26,7 +26,6 @@ pub(super) struct ImguiInput {
     last_cursor_event: Option<(WindowId, WindowEvent)>,
     text_owner: Option<ImguiTextOwner>,
     text_window: Option<WindowId>,
-    preedit: Option<ImguiPreedit>,
 }
 
 impl ImguiInput {
@@ -38,19 +37,12 @@ impl ImguiInput {
     pub(super) fn is_captured(&self) -> bool {
         self.router.is_captured()
     }
-    pub(super) fn preedit(&self) -> Option<&ImguiPreedit> {
-        self.preedit.as_ref()
-    }
-
     pub(super) fn handle_event(
         &mut self,
         window: WindowId,
         event: &WindowEvent,
         context: &Context,
     ) -> bool {
-        if matches!(event, WindowEvent::Ime(Ime::Commit(_))) && self.text_window != Some(window) {
-            return false;
-        }
         match event {
             WindowEvent::CursorMoved { .. } => {
                 self.last_cursor_event = Some((window, event.clone()))
@@ -69,17 +61,6 @@ impl ImguiInput {
         }
         if self.text_window == Some(window) {
             match event {
-                WindowEvent::Ime(Ime::Preedit(text, cursor)) => {
-                    self.preedit =
-                        self.text_owner
-                            .filter(|_| !text.is_empty())
-                            .map(|owner| ImguiPreedit {
-                                owner,
-                                text: text.clone(),
-                                cursor: *cursor,
-                            });
-                }
-                WindowEvent::Ime(Ime::Commit(_) | Ime::Disabled) => self.preedit = None,
                 WindowEvent::Focused(false)
                 | WindowEvent::CloseRequested
                 | WindowEvent::Destroyed => self.clear_text_owner(),
@@ -196,9 +177,6 @@ impl ImguiInput {
             )
             .map(|(window, _)| window)
         });
-        if self.text_owner != text_owner || self.text_window != text_window {
-            self.preedit = None;
-        }
         self.text_owner = text_owner;
         self.text_window = text_window;
         if ordinary_input_locked {
@@ -296,7 +274,6 @@ impl ImguiInput {
     fn clear_text_owner(&mut self) {
         self.text_owner = None;
         self.text_window = None;
-        self.preedit = None;
     }
 }
 
@@ -317,9 +294,10 @@ pub(super) fn native_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use winit::event::Ime;
 
     #[test]
-    fn preedit_is_scoped_to_the_active_native_text_owner_and_never_committed() {
+    fn ime_events_reach_the_native_backend_without_presented_text_owner_filtering() {
         let window = WindowId::from(11);
         let other = WindowId::from(12);
         let owner = ImguiTextOwner {
@@ -327,39 +305,39 @@ mod tests {
             viewport: Id::from(20),
         };
         let mut input = ImguiInput {
+            game_window: Some(window),
             text_owner: Some(owner),
             text_window: Some(window),
             ..Default::default()
         };
 
         let context = Context::create();
+        for event in [Ime::Enabled, Ime::Disabled] {
+            assert!(input.handle_event(window, &WindowEvent::Ime(event), &context));
+        }
         assert!(input.handle_event(
             other,
             &WindowEvent::Ime(Ime::Preedit("wrong".into(), None)),
             &context
         ));
-        assert!(input.preedit().is_none());
-        input.handle_event(
+        assert!(input.handle_event(
             window,
             &WindowEvent::Ime(Ime::Preedit("中文".into(), Some((0, 3)))),
             &context,
-        );
-        assert_eq!(input.preedit().unwrap().text, "中文");
-        input.handle_event(
+        ));
+        assert!(input.handle_event(
             window,
             &WindowEvent::Ime(Ime::Commit("中".into())),
             &context,
-        );
-        assert!(input.preedit().is_none());
+        ));
         assert!(input.router.take_batch().is_none());
-        input.handle_event(
-            window,
-            &WindowEvent::Ime(Ime::Preedit("文".into(), None)),
-            &context,
-        );
         input.handle_event(window, &WindowEvent::Focused(false), &context);
-        assert!(input.preedit().is_none());
         assert!(input.text_owner.is_none());
+        assert!(input.handle_event(
+            window,
+            &WindowEvent::Ime(Ime::Commit("文".into())),
+            &context,
+        ));
     }
 
     #[test]

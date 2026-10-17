@@ -19,7 +19,9 @@ implementation progress, or execution history.
 The completed [Foundation Correctness Closure plan](../plans/2026-10-17-1856-fix-foundation-correctness-closure-plan.md)
 is closed by [registration `94169fb22505473c89504d4b41cab1de`](../knowledge/engineering/registry/2026-10/2026-10-17T123810Z-foundation-correctness-closure-codex-root-20261017-94169fb22505473c89504d4b41cab1de.md)
 and [verification `4490cc23b14742749a37e7a9cb1c7cbf`](../knowledge/engineering/verification/2026-10/2026-10-17T115334Z-foundation-correctness-closure-u1-u5-verification-4490cc23b14742749a37e7a9cb1c7cbf.md).
-No successor is active; a new plan requires explicit activation in both sources.
+The active successor is the [Dear ImGui 0.21 upgrade](../plans/2026-10-17-dear-imgui-021-upgrade-plan.md),
+registered in engineering memory. It requalifies the dependency upgrade without reopening the
+completed foundation work.
 
 Use the [derived engineering index](../knowledge/engineering/current-state.md) to find current
 registration heads, then read their immutable source records. Completed plans and their

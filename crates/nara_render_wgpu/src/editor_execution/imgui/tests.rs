@@ -13,6 +13,175 @@ fn secondary_identity_mapping_excludes_any_primary_without_reusing_surfaces() {
     assert!(delegated_window_id(WindowId::PRIMARY, u64::MAX).is_none());
 }
 
+#[test]
+fn owned_renderer_records_exact_external_binding_revisions_and_excludes_clipped_images() {
+    use super::{RendererOwner, WgpuEditorDeviceScope};
+    use dear_imgui_rs::{Context, FontSource};
+    use dear_imgui_wgpu::{FramebufferExtent, WgpuDrawDependencies};
+
+    let instance =
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+    let force_fallback_adapter = match std::env::var("NARA_WGPU_FORCE_FALLBACK").as_deref() {
+        Ok("1") => true,
+        Ok("0") | Err(std::env::VarError::NotPresent) => false,
+        value => panic!("invalid NARA_WGPU_FORCE_FALLBACK: {value:?}"),
+    };
+    let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::LowPower,
+        compatible_surface: None,
+        force_fallback_adapter,
+        ..Default::default()
+    })) {
+        Ok(adapter) => adapter,
+        Err(error) if std::env::var("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").as_deref() != Ok("1") => {
+            eprintln!("skipping renderer binding test without a WGPU adapter: {error}");
+            return;
+        }
+        Err(error) => panic!("the required WGPU adapter is unavailable: {error}"),
+    };
+    let (device, queue) =
+        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+    let mut context = Context::create();
+    context
+        .set_ini_filename(None::<std::path::PathBuf>)
+        .unwrap();
+    context
+        .font_atlas()
+        .add_font(&[FontSource::default_font_with_size(16.0)]);
+    context.io_mut().set_display_size([128.0, 128.0]);
+    let scope = WgpuEditorDeviceScope {
+        instance: &instance,
+        adapter: &adapter,
+        device: &device,
+        queue: &queue,
+        surface_format: wgpu::TextureFormat::Rgba8Unorm,
+        surface_extent: nara_render::Extent2d::new(128, 128).unwrap(),
+        backend_instance_id: 1,
+        device_epoch: 1,
+    };
+    let mut renderer = scope.create_imgui_renderer(&mut context, None).unwrap();
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("nara_imgui_binding_test"),
+        size: wgpu::Extent3d {
+            width: 128,
+            height: 128,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let canonical = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let alias = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let output = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("nara_imgui_binding_output"),
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        ..wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 128,
+                height: 128,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::empty(),
+            view_formats: &[],
+        }
+    });
+    let output_view = output.create_view(&wgpu::TextureViewDescriptor::default());
+    let id = renderer.register_external_texture(&canonical).unwrap();
+    let first_binding = renderer.external_binding(id).unwrap();
+    let render = |context: &mut Context,
+                  renderer: &mut super::WgpuEditorImguiRenderer,
+                  clipped: bool|
+     -> WgpuDrawDependencies {
+        let frame = context.begin_frame();
+        {
+            let draw_list = frame.ui().get_foreground_draw_list();
+            let draw_image = || {
+                draw_list.add_image(
+                    id.texture_id(),
+                    [8.0, 8.0],
+                    [40.0, 40.0],
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            };
+            if clipped {
+                draw_list.with_clip_rect([160.0, 160.0], [180.0, 180.0], draw_image);
+            } else {
+                draw_image();
+            }
+        }
+        let RendererOwner::Docked(inner) = &mut renderer.owner else {
+            unreachable!()
+        };
+        let consumer = inner.renderer_consumer().unwrap();
+        let pending = frame.try_render(consumer).unwrap();
+        let prepared = inner.reconcile_frame(pending).unwrap();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let recorded = {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &output_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            inner
+                .render_reconciled(prepared, &mut pass, FramebufferExtent::new(128, 128))
+                .unwrap()
+        };
+        queue.submit([encoder.finish()]);
+        recorded.dependencies
+    };
+    let initial = render(&mut context, &mut renderer, false);
+    assert_eq!(initial.external_bindings, vec![first_binding]);
+    assert!(renderer.samples(&initial, &canonical));
+    assert!(!renderer.samples(&initial, &alias));
+    renderer.update_external_texture(id, &alias).unwrap();
+    let replacement = renderer.external_binding(id).unwrap();
+    assert_eq!(replacement.texture, first_binding.texture);
+    assert!(replacement.revision > first_binding.revision);
+    assert!(!renderer.samples(&initial, &canonical));
+    assert!(
+        !renderer.samples(&initial, &alias),
+        "old mapping evidence cannot certify a replacement"
+    );
+    let updated = render(&mut context, &mut renderer, false);
+    assert_eq!(updated.external_bindings, vec![replacement]);
+    assert!(renderer.samples(&updated, &alias));
+    assert!(!renderer.samples(&updated, &canonical));
+    let clipped = render(&mut context, &mut renderer, true);
+    assert!(clipped.external_bindings.is_empty());
+    assert!(!renderer.samples(&clipped, &alias));
+    renderer.unregister_external_texture(id).unwrap();
+    assert!(!renderer.samples(&updated, &alias));
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(std::time::Duration::from_secs(10)),
+        })
+        .unwrap();
+    renderer.shutdown(&mut context).unwrap();
+}
+
 #[cfg(target_os = "windows")]
 mod bare_primary {
     use std::sync::Arc;
@@ -118,7 +287,7 @@ mod native {
     };
 
     use dear_imgui_rs::{Condition, Context, FontSource, Ui};
-    use dear_imgui_wgpu::{ExternalTextureId, WgpuInitInfo, WgpuRenderer};
+    use dear_imgui_wgpu::{ExternalTextureId, WgpuFrameStage};
     use dear_imgui_winit::{HiDpiMode, WinitPlatform};
     use nara_asset::{AssetId, Handle};
     use nara_ecs::Entity;
@@ -140,8 +309,8 @@ mod native {
     };
 
     use super::super::{
-        WgpuEditorDeviceNamespace, WgpuEditorExecution, WgpuEditorExecutionError,
-        WgpuSubmittedImageReceipt, WinitViewportRoute,
+        PreparedFrame, WgpuEditorExecution, WgpuEditorExecutionError, WgpuEditorImguiRenderer,
+        WgpuSubmittedImageReceipt,
     };
     use crate::editor_execution::WgpuEditorViewId;
 
@@ -249,9 +418,8 @@ mod native {
     struct NativeFixture {
         window: Arc<Window>,
         platform: WinitPlatform,
-        route: WinitViewportRoute,
+        renderer: WgpuEditorImguiRenderer,
         execution: WgpuEditorExecution,
-        namespace: WgpuEditorDeviceNamespace,
         foreign_device: wgpu::Device,
         foreign_queue: wgpu::Queue,
         texture: ExternalTextureId,
@@ -307,18 +475,13 @@ mod native {
                 .backend
                 .prepare_editor_window(&execution.handles, packet)
                 .unwrap();
-            let renderer = WgpuRenderer::new(
-                WgpuInitInfo::new(
-                    namespace.device.clone(),
-                    namespace.queue.clone(),
-                    namespace.surface_format,
-                )
-                .with_instance(namespace.instance.clone())
-                .with_adapter(namespace.adapter.clone()),
-                &mut context,
-            )
-            .unwrap();
-            let route = WinitViewportRoute::attach(&mut context, &platform, renderer).unwrap();
+            let mut renderer = execution
+                .with_device(packet, |scope| {
+                    scope
+                        .create_imgui_renderer(&mut context, Some(&platform))
+                        .unwrap()
+                })
+                .unwrap();
             let (foreign_device, foreign_queue) = pollster::block_on(
                 namespace
                     .adapter
@@ -352,14 +515,13 @@ mod native {
                 ._texture
                 .create_view(&wgpu::TextureViewDescriptor::default());
             assert_ne!(alias, canonical);
-            let texture = route.register_external_texture(&canonical).unwrap();
+            let texture = renderer.register_external_texture(&canonical).unwrap();
             Self {
                 window,
                 context,
                 platform,
-                route,
+                renderer,
                 execution,
-                namespace,
                 foreign_device,
                 foreign_queue,
                 texture,
@@ -387,17 +549,52 @@ mod native {
             self.platform
                 .prepare_render(frame.ui(), &self.window)
                 .unwrap();
-            let (prepared, outcomes) = self
+            let mut outcomes = Vec::new();
+            let prepared = self
                 .execution
-                .prepare_imgui_viewports(packet, &self.route, event_loop, frame, &[self.image])
+                .prepare_imgui_frame(
+                    packet,
+                    &mut self.renderer,
+                    event_loop,
+                    frame,
+                    &[self.image],
+                    &mut outcomes,
+                )
                 .unwrap();
-            let report = prepared.secondary_report();
-            if report.presented_frames().is_empty() {
+            let report = match &prepared.0 {
+                PreparedFrame::Native(main) => main.secondary_report().clone(),
+                PreparedFrame::Docked(_) => panic!("the fixture must own a native route"),
+            };
+            let presented = report
+                .observations()
+                .iter()
+                .filter(|observed| observed.stage == WgpuFrameStage::PresentationRequested)
+                .collect::<Vec<_>>();
+            if presented.is_empty() {
                 return false;
             }
-            assert_eq!(report.presented_frames().len(), 1);
+            assert_eq!(presented.len(), 1);
             assert_eq!(outcomes.len(), 1);
-            assert!(outcomes[0].window.is_some());
+            let window = outcomes[0].window().unwrap();
+            assert_eq!(window.surface_generation(), None);
+            assert_eq!(
+                window.delegated_native_instance(),
+                Some(presented[0].target.instance_id.get().get())
+            );
+            let snapshot = self
+                .platform
+                .window_snapshots()
+                .unwrap()
+                .into_iter()
+                .find(|snapshot| snapshot.target.instance_id == presented[0].target.instance_id)
+                .unwrap();
+            assert_ne!(snapshot.window_id, self.window.id());
+            assert_eq!(
+                self.execution
+                    .imgui_window_id(snapshot.target.instance_id)
+                    .unwrap(),
+                window.window_id()
+            );
             assert_eq!(
                 self.execution
                     .frame_transaction_stats()
@@ -405,75 +602,82 @@ mod native {
                 0
             );
             assert_eq!(self.execution.frame_transaction_stats().presents(), 1);
-            let presented = &report.presented_frames()[0];
-            assert_ne!(presented.window_id(), self.window.id());
-            if !presented.sampled_texture_views().contains(&self.canonical)
-                && !presented.sampled_texture_views().contains(&self.alias)
+            let dependencies = &presented[0].dependencies;
+            if !self.renderer.samples(dependencies, &self.canonical)
+                && !self.renderer.samples(dependencies, &self.alias)
             {
                 assert!(outcomes[0].composites.is_empty());
                 return false;
             }
             match self.phase {
                 Phase::Exact => {
-                    assert!(presented.sampled_texture_views().contains(&self.canonical));
+                    assert!(self.renderer.samples(dependencies, &self.canonical));
                     assert_eq!(outcomes[0].composites.len(), 1);
                     assert_eq!(outcomes[0].composites[0].image(), self.image);
                     let accepted = (
-                        self.execution.last_imgui_presentation_id,
                         self.execution.last_presentation_generation,
                         self.execution.frame_transaction_stats(),
                     );
-                    let matching_device = self.namespace.device.clone();
-                    self.namespace.device = self.foreign_device.clone();
+                    let mut replayed = Vec::new();
                     assert_toolkit_rejection(
                         self.execution.join_imgui_secondary_presentations(
-                            &self.namespace,
+                            &mut self.renderer,
                             self.frame_index,
                             report,
                             &[self.image],
-                        ),
-                        "another GPU device or queue",
-                    );
-                    self.namespace.device = matching_device;
-                    let matching_queue = self.namespace.queue.clone();
-                    self.namespace.queue = self.foreign_queue.clone();
-                    assert_toolkit_rejection(
-                        self.execution.join_imgui_secondary_presentations(
-                            &self.namespace,
-                            self.frame_index,
-                            report,
-                            &[self.image],
-                        ),
-                        "another GPU device or queue",
-                    );
-                    self.namespace.queue = matching_queue;
-                    assert_toolkit_rejection(
-                        self.execution.join_imgui_secondary_presentations(
-                            &self.namespace,
-                            self.frame_index,
-                            report,
-                            &[self.image],
+                            &mut replayed,
                         ),
                         "already consumed",
                     );
+                    assert!(replayed.is_empty());
                     assert_eq!(
                         (
-                            self.execution.last_imgui_presentation_id,
                             self.execution.last_presentation_generation,
-                            self.execution.frame_transaction_stats(),
+                            self.execution.frame_transaction_stats()
                         ),
-                        accepted,
-                        "rejected reports must not advance presentation authority or counters"
+                        accepted
                     );
                     drop(prepared);
-                    self.route
+                    // Reject an actual foreign device/queue before any toolkit frame is rendered.
+                    for foreign_queue in [false, true] {
+                        self.platform
+                            .prepare_frame(&mut self.context, &self.window)
+                            .unwrap();
+                        let frame = self.context.begin_frame();
+                        let device = self.renderer.device.clone();
+                        let queue = self.renderer.queue.clone();
+                        if foreign_queue {
+                            self.renderer.queue = self.foreign_queue.clone();
+                        } else {
+                            self.renderer.device = self.foreign_device.clone();
+                        }
+                        let mut rejected = Vec::new();
+                        let result = self.execution.prepare_imgui_frame(
+                            packet,
+                            &mut self.renderer,
+                            event_loop,
+                            frame,
+                            &[self.image],
+                            &mut rejected,
+                        );
+                        assert!(
+                            matches!(&result, Err(WgpuEditorExecutionError::ToolkitPaint { message })
+                            if message.contains("another GPU device or queue"))
+                        );
+                        drop(result);
+                        assert!(rejected.is_empty());
+                        self.renderer.device = device;
+                        self.renderer.queue = queue;
+                        self.complete_rejected_frame(event_loop);
+                    }
+                    self.renderer
                         .update_external_texture(self.texture, &self.alias)
                         .unwrap();
                     self.phase = Phase::Alias;
                 }
                 Phase::Alias => {
-                    assert!(presented.sampled_texture_views().contains(&self.alias));
-                    assert!(!presented.sampled_texture_views().contains(&self.canonical));
+                    assert!(self.renderer.samples(dependencies, &self.alias));
+                    assert!(!self.renderer.samples(dependencies, &self.canonical));
                     assert!(outcomes[0].composites.is_empty());
                     drop(prepared);
                     let old = self.image;
@@ -490,31 +694,25 @@ mod native {
                         old.render_transaction_frame_index(),
                         self.image.render_transaction_frame_index()
                     );
-                    let accepted = self.execution.last_imgui_presentation_id;
                     self.platform
                         .prepare_frame(&mut self.context, &self.window)
                         .unwrap();
-                    let stale_frame = self.context.begin_frame();
-                    draw_secondary_image(stale_frame.ui(), self.texture);
+                    let frame = self.context.begin_frame();
+                    let mut rejected = Vec::new();
                     assert!(matches!(
-                        self.execution.prepare_imgui_viewports(
+                        self.execution.prepare_imgui_frame(
                             packet,
-                            &self.route,
+                            &mut self.renderer,
                             event_loop,
-                            stale_frame,
+                            frame,
                             &[old],
+                            &mut rejected
                         ),
                         Err(WgpuEditorExecutionError::StaleImageSubmission)
                     ));
-                    assert_eq!(self.execution.last_imgui_presentation_id, accepted);
-                    let (updated, faults) = self
-                        .platform
-                        .with_event_loop(event_loop, |_| self.context.update_platform_windows())
-                        .into_parts();
-                    assert_eq!(updated, Some(()));
-                    assert!(faults.is_empty(), "aborted frame update failed: {faults:?}");
-                    assert_eq!(self.execution.last_imgui_presentation_id, accepted);
-                    self.route
+                    assert!(rejected.is_empty());
+                    self.complete_rejected_frame(event_loop);
+                    self.renderer
                         .update_external_texture(self.texture, &self.canonical)
                         .unwrap();
                     self.phase = Phase::Overwritten;
@@ -528,10 +726,25 @@ mod native {
             false
         }
 
+        /// A rejected renderer admission consumes no route preparation, so the native platform
+        /// watermark still needs the normal update step before another multi-viewport frame.
+        fn complete_rejected_frame(&mut self, event_loop: &ActiveEventLoop) {
+            self.context.end_frame();
+            let (updated, faults) = self
+                .platform
+                .with_event_loop(event_loop, |_| self.context.update_platform_windows())
+                .into_parts();
+            assert_eq!(updated, Some(()));
+            assert!(
+                faults.is_empty(),
+                "rejected frame platform update failed: {faults:?}"
+            );
+        }
+
         fn shutdown(&mut self) -> Result<(), String> {
             self.context.end_frame();
             let idle = self.execution.wait_for_idle();
-            let renderer = self.route.shutdown(&mut self.context);
+            let renderer = self.renderer.shutdown(&mut self.context);
             let viewports = if self.platform.viewports_enabled() {
                 self.platform.disable_viewports(&mut self.context)
             } else {
@@ -545,10 +758,7 @@ mod native {
         }
     }
 
-    fn assert_toolkit_rejection(
-        result: Result<Vec<super::super::WgpuEditorFrameOutcome>, WgpuEditorExecutionError>,
-        expected: &str,
-    ) {
+    fn assert_toolkit_rejection(result: Result<(), WgpuEditorExecutionError>, expected: &str) {
         assert!(matches!(
             result,
             Err(WgpuEditorExecutionError::ToolkitPaint { message }) if message.contains(expected)

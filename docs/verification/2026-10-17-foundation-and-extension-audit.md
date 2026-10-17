@@ -192,7 +192,8 @@ compiles that dependency but does not run its unit/integration tests. The curren
 [CI](../../.github/workflows/ci.yml) has no vendor-manifest test invocation. The recorded 100 patch
 tests therefore do not automatically protect the native execution/presentation bridge.
 
-The standalone command in [NARA_PATCH.md](../../vendor/dear-imgui-wgpu/NARA_PATCH.md):95 also lacks
+The standalone command preserved by [the archived patch provenance](../research/2026-10-16-editor-foundation/renderer-020-patch.md)
+(original `NARA_PATCH.md:95`) also lacks
 `--locked`; the vendor's untracked lockfile is separate from the root consumer's resolution.
 Running it independently can verify a different compatible Dear/WGPU graph.
 

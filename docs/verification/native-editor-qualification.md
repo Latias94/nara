@@ -33,6 +33,17 @@ All three tests must execute and pass; an empty selection is not acceptance.
 They cover same-output Game resize and authoring input, pause/resume cadence, exact Game input and Step, independent view close/reopen, detachment/minimization, device recovery, and retirement.
 The ordinary non-native Editor suite separately protects cadence policy and source-diverged Restart admission.
 
+For toolkit/input upgrades, also exercise the real Nara Project path/Profile fields through the
+registered native backend and core IME composition:
+
+```powershell
+cargo +1.95.0 nextest run -p nara-editor --lib --locked --run-ignored only -E 'test(native_project_fields_use_upstream_ime_composition_and_reject_stale_owner_commit)' --test-threads=1
+```
+
+This proves preedit/draft isolation, one commit and rejection of a late commit after the active
+field changes. It constructs Winit events directly and does not qualify OS candidate-window
+placement, actual input-method event delivery, or manual cross-window typing.
+
 ## External Process Scheduling
 
 For changes to external Play cadence, maintenance wake or child-exit presentation, also run:
@@ -70,12 +81,13 @@ Record the exact tested source revision, dirty-file scope if any, Rust version, 
 Bind the final release claim to committed source; a passing test of another worktree or a differently resolved dependency graph is insufficient.
 Keep this document as the stable procedure and put execution results in evidence records.
 
-The renderer patch has a separate adapter-required gate using the root workspace lock:
+The first-party Dear renderer adapter has an additional adapter-required gate using the root
+workspace lock and the published 0.21.0 backend:
 
 ```powershell
 $env:DEAR_IMGUI_REQUIRE_WGPU_ADAPTER='1'
-cargo +1.95.0 nextest run -p dear-imgui-wgpu --locked --no-default-features --features wgpu-30,multi-viewport-winit --lib --test integration_test --test-threads=1
+cargo +1.95.0 nextest run -p nara_render_wgpu --locked --features editor-imgui --lib --test-threads=1
 ```
 
-The renderer's mutually exclusive backend features are not tested with `--all-features`.
-Its unit tests alone do not replace the actual native trajectories above.
+This gate tests Nara's integration with the production WGPU 30 dependency resolution.
+Its offscreen tests do not replace the actual native trajectories above.
