@@ -627,7 +627,7 @@ pub(super) fn show_play_result(ui: &Ui, frame: &EditorFrameModel) {
             | EditorPlayOperation::RetryRetirement
             | EditorPlayOperation::RetryClose => "Play updated.",
         },
-        EditorPlayOperationResult::Rejected { reason, .. } => match reason {
+        EditorPlayOperationResult::Rejected { operation, reason } => match reason {
             EditorPlayRejection::Busy => "Play rejected: another operation is still running.",
             EditorPlayRejection::NoActiveDocument => {
                 "Play rejected: open a Scene document before starting Play."
@@ -640,6 +640,12 @@ pub(super) fn show_play_result(ui: &Ui, frame: &EditorFrameModel) {
             }
             EditorPlayRejection::StaleDocument => {
                 "Play rejected: the document changed. Try again from its current state."
+            }
+            EditorPlayRejection::RuntimeOutOfDate
+                if operation == EditorPlayOperation::Restart
+                    && frame.play().external().is_some() =>
+            {
+                "Restart rejected: saved source changed or is unavailable. The game is still running; use Stop then Play."
             }
             EditorPlayRejection::RuntimeOutOfDate => {
                 "Play rejected: save changes and refresh project content before starting Play."
@@ -721,7 +727,12 @@ pub(super) fn show_external_play_controls(
         EditorExternalPlayState::Starting => push("Stop", true, true, EditorPlayAction::Stop),
         EditorExternalPlayState::Running => {
             push("Stop", true, false, EditorPlayAction::Stop);
-            push("Restart", true, false, EditorPlayAction::Restart);
+            push(
+                "Restart",
+                !frame.play().is_out_of_date(),
+                false,
+                EditorPlayAction::Restart,
+            );
         }
         EditorExternalPlayState::Stopping => {}
         EditorExternalPlayState::Faulted => {
@@ -771,7 +782,7 @@ pub(super) fn show_external_play_controls(
         }
     }
     if frame.play().is_out_of_date() {
-        ui.text_wrapped("Saved source changed; Restart keeps the admitted generation, while Stop then Play builds saved changes");
+        ui.text_wrapped("Saved source changed; Stop then Play builds saved changes.");
     }
 }
 
@@ -1009,6 +1020,197 @@ fn external_state(state: EditorExternalPlayState) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64")
+    ))]
+    fn source_diverged_restart_disables_the_widget_and_keeps_stop_available() {
+        use std::{cell::RefCell, fs, rc::Rc, time::Duration};
+
+        use dear_imgui_rs::{ClipboardBackend, Condition, Context, MouseButton};
+        use nara::{
+            fs::ContentDigest,
+            project_host::{
+                EditorProjectOpenHost, EditorProjectOpenProgress, EditorProjectSession,
+            },
+            tooling::{
+                EditorActionBatch, EditorActionOutcome, EditorExternalPlayObservation,
+                EditorExternalPlayOutput, EditorPlayOperation, EditorPlayOperationResult,
+                EditorPlayRejection, EditorPlayRequestResult,
+            },
+        };
+
+        struct RenderedText(Rc<RefCell<String>>);
+        impl ClipboardBackend for RenderedText {
+            fn get(&mut self) -> Option<String> {
+                Some(self.0.borrow().clone())
+            }
+            fn set(&mut self, value: &str) {
+                value.clone_into(&mut self.0.borrow_mut());
+            }
+        }
+
+        fn request(
+            editor: &mut EditorProjectSession,
+            action: EditorPlayAction,
+        ) -> EditorPlayRequestResult {
+            let frame = editor.current_frame();
+            let report = editor
+                .dispatch_editor_actions(EditorActionBatch::new(
+                    frame.revision(),
+                    [EditorAction::Play(action)],
+                ))
+                .unwrap();
+            let mut outcomes = report.into_outcomes().into_iter();
+            let Some(EditorActionOutcome::Play(result)) = outcomes.next() else {
+                panic!("the Play action must reach its owner");
+            };
+            assert!(outcomes.next().is_none());
+            result
+        }
+
+        fn paint(context: &mut Context, frame: &EditorFrameModel) -> Vec<EditorAction> {
+            let ui = context.frame();
+            let mut actions = Vec::new();
+            ui.window("External Play")
+                .position([20.0, 20.0], Condition::Always)
+                .size([900.0, 260.0], Condition::Always)
+                .build(|| {
+                    ui.log_to_clipboard(0_u32);
+                    show_external_play_controls(ui, None, frame, true, true, false, &mut actions);
+                    show_play_result(ui, frame);
+                    ui.log_finish();
+                });
+            let _ = context.render_legacy();
+            actions
+        }
+
+        let project = super::super::ui_interaction_tests::UiProject::new();
+        let manifest = project.0.join("nara.toml");
+        let source = fs::read_to_string(&manifest).unwrap();
+        fs::write(
+            manifest,
+            format!("{source}\n[profiles.desktop.execution]\ncontract = \"desktop-supervised-play/v1\"\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.0.join("Cargo.toml"),
+            "[package]\nname = \"restart-widget\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(project.0.join("Cargo.lock"), "version = 4\n").unwrap();
+        let mut host = EditorProjectOpenHost::new();
+        let mut attempt = host.begin(
+            crate::app::open_project_root(&project.0).unwrap(),
+            Some("desktop".to_owned()),
+        );
+        let mut editor = loop {
+            match host.advance(attempt) {
+                EditorProjectOpenProgress::Pending(next) => attempt = next,
+                EditorProjectOpenProgress::Opened(session) => break session,
+                EditorProjectOpenProgress::Rejected(failure) => {
+                    panic!(
+                        "supervised fixture did not open: {:?}",
+                        failure.diagnostics()
+                    )
+                }
+            }
+        };
+        let frame = editor.current_frame();
+        let scene = frame.workspace().active_scene.as_ref().unwrap();
+        assert_eq!(
+            request(
+                &mut editor,
+                EditorPlayAction::Play {
+                    document: scene.document,
+                    base_revision: scene.revision,
+                }
+            ),
+            EditorPlayRequestResult::Accepted
+        );
+        let play = editor.take_external_play_request().unwrap();
+        let digest = ContentDigest::of_bytes(play.source_receipt().unwrap());
+        assert!(
+            editor.apply_external_play_observation(
+                EditorExternalPlayObservation::new(
+                    play.attempt(),
+                    EditorExternalPlayState::Running,
+                    Some(1),
+                    true,
+                    Some(digest),
+                    EditorExternalPlayOutput::default(),
+                    None,
+                )
+                .unwrap(),
+            )
+        );
+        let scene_path = project.0.join("scenes/startup.scene.json");
+        let mut changed = fs::read(&scene_path).unwrap();
+        changed.push(b'\n');
+        fs::write(scene_path, changed).unwrap();
+        assert_eq!(
+            request(&mut editor, EditorPlayAction::Restart),
+            EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate),
+        );
+        assert!(editor.take_external_play_request().is_none());
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        assert!(frame.play().is_out_of_date());
+        assert!(matches!(
+            frame.play().result(),
+            Some(EditorPlayOperationResult::Rejected {
+                operation: EditorPlayOperation::Restart,
+                reason: EditorPlayRejection::RuntimeOutOfDate,
+            })
+        ));
+
+        let log = Rc::new(RefCell::new(String::new()));
+        let mut context = Context::create();
+        context
+            .set_ini_filename::<std::path::PathBuf>(None)
+            .unwrap();
+        context.set_clipboard_backend(RenderedText(Rc::clone(&log)));
+        context.io_mut().set_display_size([1000.0, 600.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .font_atlas()
+            .try_claim_legacy_renderer()
+            .unwrap()
+            .build();
+        for _ in 0..3 {
+            paint(&mut context, &frame);
+        }
+        assert!(
+            log.borrow()
+                .contains("Saved source changed; Stop then Play builds saved changes.")
+        );
+        assert!(log.borrow().contains("Restart rejected: saved source changed or is unavailable. The game is still running; use Stop then Play."));
+        for (label, expected) in [("Restart", false), ("Stop", true)] {
+            let rect =
+                super::super::ui_interaction_tests::control_rect(&format!("project:{label}"))
+                    .unwrap();
+            context.io_mut().add_mouse_pos_event([
+                (rect.min[0] + rect.max[0]) * 0.5,
+                (rect.min[1] + rect.max[1]) * 0.5,
+            ]);
+            paint(&mut context, &frame);
+            context
+                .io_mut()
+                .add_mouse_button_event(MouseButton::Left, true);
+            paint(&mut context, &frame);
+            context
+                .io_mut()
+                .add_mouse_button_event(MouseButton::Left, false);
+            let actions = paint(&mut context, &frame);
+            let expected = if expected {
+                vec![EditorAction::Play(EditorPlayAction::Stop)]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(actions, expected, "{label}");
+        }
+    }
 
     #[test]
     #[cfg(any(

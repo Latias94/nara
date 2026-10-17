@@ -36,8 +36,11 @@ Records without an installed exact authoring adapter remain visible but read-onl
 preserve their exact owner, version, value, placement, and reference facts in canonical project
 source. Projects declaring `desktop-supervised-play/v1` support ordinary Play through an
 Editor-owned external process. Save before Play. After changing Rust, use Stop then Play to build
-the current source; Restart reuses the same executable generation. Compiler errors leave authoring
-available, and Stop or Editor exit retires the owned child. Opening a project still does not compile
+the current source. Restart reuses the same executable generation only while its admitted saved
+source still matches disk. Changed or unavailable saved source rejects Restart and keeps the game
+running; use Stop then Play for saved changes. Unsaved edits do not redefine the saved source used
+by Restart. Compiler errors leave authoring available, and Stop or Editor exit retires the owned
+child. Opening a project still does not compile
 or execute its Rust code. Pause and Step belong to the separate trusted embedded runtime lane.
 
 ## Import a PNG image

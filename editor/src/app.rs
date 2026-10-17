@@ -1858,7 +1858,9 @@ fn root_error_summary(error: &EditorApplicationOpenError) -> &'static str {
     }
 }
 
-fn open_project_root(path: &Path) -> Result<DirectoryCapability, EditorApplicationOpenError> {
+pub(crate) fn open_project_root(
+    path: &Path,
+) -> Result<DirectoryCapability, EditorApplicationOpenError> {
     let file =
         open_directory(path).map_err(|source| EditorApplicationOpenError::ProjectRootOpen {
             path: path.to_path_buf(),

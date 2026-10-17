@@ -532,6 +532,16 @@ impl EditorProjectSession {
         if command == EditorPlayCommand::RunLastGood && !current.last_good_available() {
             return EditorPlayRequestResult::Rejected(EditorPlayRejection::InvalidState);
         }
+        if command == EditorPlayCommand::Restart {
+            self.refresh_current_saved_source_digest();
+            if !self.external_source_matches_bound_generation() {
+                self.play_result = Some(EditorPlayOperationResult::Rejected {
+                    operation,
+                    reason: EditorPlayRejection::RuntimeOutOfDate,
+                });
+                return EditorPlayRequestResult::Rejected(EditorPlayRejection::RuntimeOutOfDate);
+            }
+        }
         if matches!(
             command,
             EditorPlayCommand::Play | EditorPlayCommand::RunLastGood

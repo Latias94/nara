@@ -102,10 +102,12 @@ digest is the runtime byte authority for version one; this decision does not cla
 reproducible closure of every Rust module, build-script input, environment input, or procedural
 macro.
 
-The immutable generation excludes the per-launch nonce. Restart launches the exact same generation
-under a fresh nonce after complete cleanup. A new successful Play build publishes a successor
-generation and cannot mutate an active one. Build completion alone does not make a generation
-last-good.
+The immutable generation excludes the per-launch nonce. Restart first readmits the current saved
+source closure and compares it with the running generation's source receipt. Divergence or failed
+source admission rejects Restart before requesting cleanup, preserving the running child. When the
+receipts match, Restart launches the exact same generation under a fresh nonce after complete
+cleanup. A new successful Play build publishes a successor generation and cannot mutate an active
+one. Build completion alone does not make a generation last-good.
 
 After the child publishes its strict Runtime, it arms one value-only activation observer. The
 observer emits exactly one bounded READY attestation only after the primary window and surface
@@ -133,8 +135,11 @@ stopping, retirement-incomplete, and close-incomplete outcomes. Pause, Resume, S
 Game View are unavailable with typed external-placement reasons.
 
 Authoring remains available while the external child runs. Saved-source divergence marks the
-running generation out of date but does not mutate it. Restart relaunches that exact admitted
-generation; Stop followed by Play targets current saved source. A failed current Play may expose
+running generation out of date but does not mutate it. Restart is unavailable after observed
+divergence and rechecks actual saved files when requested, even if the published availability is
+stale. Unsaved edits do not redefine saved-source identity. Stop followed by Play targets current
+saved source; this decision adds no old-source snapshot mechanism. The child's strict receipt and
+READY checks still reject a source race after Host admission. A failed current Play may expose
 `Run Last Good` only when the current source receipt exactly equals the generation's accepted
 source receipt. That choice is explicit and never restores old project data.
 

@@ -2903,6 +2903,119 @@ fn generic_editor_imported_image_can_be_selected_by_path_and_stable_id_in_scene_
 
 #[cfg(feature = "tooling")]
 #[test]
+fn external_play_restart_rechecks_saved_files_before_requesting_child_retirement() {
+    for (name, relative_path, remove) in [
+        ("scene", "scenes/startup.scene.json", false),
+        ("prefab", "prefabs/actor.prefab.json", false),
+        ("cargo", "Cargo.toml", false),
+        ("unavailable", "scenes/startup.scene.json", true),
+    ] {
+        let project = TestProject::new(&format!("external-restart-{name}"));
+        project.configure_supervised_play(&format!("external-restart-{name}"));
+        if name == "prefab" {
+            fs::write(
+                project.root.join(relative_path),
+                editable_authoring_prefab("prefab member")
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+            let mut anchor =
+                SceneEntityRecord::new(nara_identity::SceneEntityId::new("prefab-anchor").unwrap());
+            anchor.prefab = Some(nara_scene::PrefabInstance {
+                source: AssetRef::path("actor.prefab.json").unwrap(),
+                overrides: ScenePatchDocument::default(),
+            });
+            fs::write(
+                project.root.join("scenes/startup.scene.json"),
+                SceneDocument::from_ordered_roots([editable_name_entity("initial"), anchor])
+                    .to_json_string()
+                    .unwrap(),
+            )
+            .unwrap();
+        }
+        let mut host = super::editor::EditorProjectOpenHost::new();
+        let mut attempt = host.begin(project.writable_capability(), Some("desktop".to_owned()));
+        let mut editor = loop {
+            match host.advance(attempt) {
+                super::editor::EditorProjectOpenProgress::Pending(next) => attempt = next,
+                super::editor::EditorProjectOpenProgress::Opened(session) => break session,
+                super::editor::EditorProjectOpenProgress::Rejected(failure) => {
+                    panic!(
+                        "supervised project did not open: {:?}",
+                        failure.diagnostics()
+                    )
+                }
+            }
+        };
+        assert_eq!(
+            editor.request_play(nara_tooling::EditorPlayCommand::Play),
+            nara_tooling::EditorPlayRequestResult::Accepted,
+        );
+        let play = editor.take_external_play_request().unwrap();
+        let source_digest = nara_fs::ContentDigest::of_bytes(play.source_receipt().unwrap());
+        assert!(
+            editor.apply_external_play_observation(
+                nara_tooling::EditorExternalPlayObservation::new(
+                    play.attempt(),
+                    nara_tooling::EditorExternalPlayState::Running,
+                    Some(1),
+                    true,
+                    Some(source_digest),
+                    nara_tooling::EditorExternalPlayOutput::default(),
+                    Some(nara_tooling::EditorPlayOperationResult::Applied {
+                        operation: nara_tooling::EditorPlayOperation::Play,
+                        generation: Some(1),
+                    }),
+                )
+                .unwrap(),
+            )
+        );
+        assert!(
+            !editor
+                .drive_editor_frame(Duration::ZERO)
+                .play()
+                .is_out_of_date()
+        );
+
+        let path = project.root.join(relative_path);
+        if remove {
+            fs::remove_file(path).unwrap();
+        } else {
+            let mut bytes = fs::read(&path).unwrap();
+            bytes.push(b'\n');
+            fs::write(path, bytes).unwrap();
+        }
+        assert!(
+            !editor.current_frame().play().is_out_of_date(),
+            "external disk changes deliberately leave the published source flag stale"
+        );
+        assert_eq!(
+            editor.request_play(nara_tooling::EditorPlayCommand::Restart),
+            nara_tooling::EditorPlayRequestResult::Rejected(
+                nara_tooling::EditorPlayRejection::RuntimeOutOfDate,
+            ),
+            "{name}: admission must inspect saved files before issuing retirement"
+        );
+        assert!(editor.take_external_play_request().is_none(), "{name}");
+        let frame = editor.drive_editor_frame(Duration::ZERO);
+        assert!(frame.play().is_out_of_date(), "{name}");
+        assert_eq!(frame.play().state(), nara_tooling::EditorPlayState::Running);
+        assert_eq!(frame.play().external().unwrap().generation(), Some(1));
+        assert_eq!(
+            editor.request_play(nara_tooling::EditorPlayCommand::Stop),
+            nara_tooling::EditorPlayRequestResult::Accepted,
+            "{name}: source admission failure must not block Stop"
+        );
+        assert_eq!(
+            editor.take_external_play_request().unwrap().operation(),
+            nara_tooling::EditorPlayOperation::Stop,
+        );
+    }
+}
+
+#[cfg(feature = "tooling")]
+#[test]
 fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successor_play() {
     let project = TestProject::new("external-play-saved-source-receipt");
     project.configure_supervised_play("external-play-saved-source-receipt");
@@ -3071,6 +3184,30 @@ fn external_play_tracks_exact_saved_source_across_edit_save_restart_and_successo
     ));
     assert!(saved.play().is_out_of_date());
     assert!(!editor.external_play_view().unwrap().last_good_available());
+
+    assert_eq!(
+        editor.request_play(nara_tooling::EditorPlayCommand::Restart),
+        nara_tooling::EditorPlayRequestResult::Rejected(
+            nara_tooling::EditorPlayRejection::RuntimeOutOfDate,
+        ),
+        "changed saved source must reject Restart before retiring the running child"
+    );
+    assert!(editor.take_external_play_request().is_none());
+    let rejected = editor.drive_editor_frame(Duration::ZERO);
+    let external = rejected.play().external().unwrap();
+    assert_eq!(
+        external.state(),
+        nara_tooling::EditorExternalPlayState::Running
+    );
+    assert_eq!(external.generation(), Some(1));
+    assert_eq!(external.output(), &restart_output);
+    assert_eq!(
+        rejected.play().result(),
+        Some(nara_tooling::EditorPlayOperationResult::Rejected {
+            operation: nara_tooling::EditorPlayOperation::Restart,
+            reason: nara_tooling::EditorPlayRejection::RuntimeOutOfDate,
+        }),
+    );
 
     assert!(
         editor.apply_external_play_observation(
