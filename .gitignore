@@ -5,3 +5,4 @@ repo-ref/
 .nara/import-cache/
 __pycache__/
 docs/reviews/
+.codex-research/
