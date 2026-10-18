@@ -63,6 +63,7 @@ fn sprite_stable_asset_id_resolves_before_world_spawn_and_exports_by_policy() {
         &registry,
         SceneExportOptions {
             asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
+            ..Default::default()
         },
     );
     assert!(!stable_export.diagnostics.has_errors());

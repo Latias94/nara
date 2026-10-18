@@ -86,6 +86,32 @@ budget. Shape validation walks declared structure, leaves opaque payloads to the
 and bounds undeclared-path recursion. Direct in-memory callers own allocation/work admission under
 ADR 0049; reference visitors still scan complete values under explicit traversal limits.
 
+### Effective Values
+
+Missing declared defaults are materialized by one schema-only Reflect owner. Validation, native
+preflight, whole-component asset collection and Inspector projection consume that effective value;
+entity remap plans describe the retained effective tree supplied by their caller. Migration precedes
+default interpretation. The primitive only fills defaults: full required-field/shape validation,
+capability checks, target resolution and native effects remain separate consumers.
+
+Authored omissions remain omitted. Explicit values, including nullable Null, are never replaced;
+an optional field without a default remains absent. Missing Map ancestors may be constructed to
+host declared defaults. Fixed List locators may append a contiguous suffix, but cannot synthesize
+Null padding for sparse indexes. Explicit incompatible ancestors reject instead of being replaced.
+Record members have no independent default metadata, and creation templates are not decode defaults.
+
+Materialization uses explicit finite logical-value node, byte and depth limits. If nothing is
+inserted, the borrowed input remains borrowed and an owned input is moved without scanning opaque
+payloads. When insertion is needed, combined raw values, defaults, shared ancestors and key bytes
+are admitted before cloning or mutation. Schema-description limits, materialization limits and
+reference-path work limits measure different resources. Scene file publication retains its selected
+policy through canonicalization; Prefab, patch and fresh Export owners retain their aggregate
+accounting. A per-value bound alone does not establish a bounded aggregate product.
+
+Inspector distinguishes Defaulted from Present and Missing while edits and inverse history address
+the authored value. A complete published derived Prefab or runtime Export may retain explicit
+effective values; runtime Export remains a bake, not an omission-preserving source round trip.
+
 ## Canonical Version-1 Vocabulary
 
 | Capability | Scope | Meaning |

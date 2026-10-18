@@ -8,6 +8,7 @@ mod authoring;
 #[cfg(feature = "serde")]
 mod authoring_bundle;
 mod codec;
+mod effective;
 mod entity_reference;
 #[cfg(feature = "serde")]
 mod format;
@@ -23,7 +24,9 @@ mod value;
 pub(crate) use asset_reference::decode_asset_reference_value;
 pub use asset_reference::{
     DeclaredAssetReference, DeclaredAssetReferenceError, collect_declared_asset_references,
-    collect_declared_asset_references_from_schema, collect_declared_field_asset_references,
+    collect_declared_asset_references_from_schema,
+    collect_declared_asset_references_from_schema_with_limits,
+    collect_declared_asset_references_with_limits, collect_declared_field_asset_references,
 };
 pub use authoring::PersistentComponentProvider;
 #[cfg(feature = "serde")]
@@ -33,6 +36,9 @@ pub use authoring_bundle::{
 };
 pub use codec::{
     ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
+};
+pub use effective::{
+    ComponentValueMaterializationLimits, effective_component_value, effective_component_value_owned,
 };
 pub use entity_reference::{
     ComponentEntityReferenceRewriteError, EntityReferenceTraversalLimits,
@@ -68,7 +74,7 @@ pub use provider::{
 };
 pub use registry::{
     ComponentProjectionError, ComponentRegistry, ComponentRegistryError, ComponentRegistrySnapshot,
-    validate_component_value,
+    validate_component_value, validate_component_value_with_limits,
 };
 pub use schema::{
     AliasError, CatalogFingerprint, CatalogFingerprintParseError, ComponentCapability,

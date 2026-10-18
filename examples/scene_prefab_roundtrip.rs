@@ -117,6 +117,7 @@ fn main() {
         &registry,
         SceneExportOptions {
             asset_ref_export_policy: AssetRefExportPolicy::StableIdWhenKnown,
+            ..Default::default()
         },
     );
     assert!(!stable_export.diagnostics.has_errors());

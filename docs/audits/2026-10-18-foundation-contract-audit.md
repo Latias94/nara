@@ -118,12 +118,18 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F04 — Flat field paths cannot describe references inside variable containers
 
-**P1 · Structural contract risk · Proposed · High confidence**
+**P1 · Structural contract risk · Fixed · Consumer verified**
 
 - **Evidence:** [`nara_reflect/src/schema.rs:472`](../../crates/nara_reflect/src/schema.rs#L472)
   and [`registry.rs:2462`](../../crates/nara_reflect/src/registry.rs#L2462) expose flat fields with
   opaque Map/List kinds. [`entity_reference.rs:191`](../../crates/nara_reflect/src/entity_reference.rs#L191)
   constructs absolute declared reference paths and checks the complete value tree against them.
+- **Resolution:** U2 introduces one bounded recursive shape, finite Rust container codecs and
+  schema/value reference traversal with concrete paths and stable root IDs. Catalog and bundle
+  envelopes move to v2, while 14 migrated artifacts retain component versions, tombstones,
+  defaults and owner history. A separately compiled nested component passes the published
+  Inspector edit/Undo/Redo, save/reopen, repeated Prefab remap, spawn and export workflow.
+  U3 now owns default materialization and cross-entry target closure.
 - **Counterexample:** deriving a component with a variable `Vec<EntityRef>` cannot declare every
   runtime element through fixed absolute schema paths. Adding derive syntax alone cannot close
   serialization, reference remapping, migration, and Inspector access.
@@ -140,7 +146,7 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F05 — Reference validity differs across spawn, export, prefab, and defaults
 
-**P1 · Structural contract risk · Proposed · High confidence**
+**P1 · Structural contract risk · Fixed for effective-value closure · Consumer verified**
 
 - **Evidence:** baseline [`nara_scene/src/tests.rs:3718`](../../crates/nara_scene/src/tests.rs#L3718)
   admits a missing scene-local reference that later fails export; prefab coverage at
@@ -154,13 +160,19 @@ These are independent work lanes, not one mandatory linear rewrite.
 - **Direction:** define required presence separately from target existence; distinguish local,
   durable, unloaded, and deleted targets. Normalize one effective value, including defaults, and
   use one visitor/closure contract at all admission and export boundaries.
-- **Migration:** reflect default normalization and reference visitors, scene spawn/export, prefab
-  expansion, patch validation, and Editor diagnostics. Do not solve this with entry-point exceptions.
-- **Prerequisite:** F04 shares the value model; F06 supplies durable/runtime resolution semantics.
-  Close existing scalar inconsistencies before waiting for every recursive-schema feature.
+- **Resolution:** U3 adds one bounded effective-value owner with explicit materialization limits;
+  native Scene validation, Prefab expansion, Export, asset collection and Inspector consume it.
+  Scene-local closure checks the complete current namespace before spawn; Prefab validates source
+  references before remap; Export budgets the final remapped aggregate. Public patch final validation
+  keeps closure while Prefab source patching uses a private source-namespace seam.
+- **Evidence:** Reflect 174 tests, Scene/Prefab/Export 129 tests, tooling 47 tests and root Inspector
+  10 tests pass. Exact Export aggregate limits, canonical SceneFileLimits propagation, default asset
+  closure, repeated Prefab remap and omitted-default Export are covered. Durable unloaded/deleted
+  residency policy remains U13, and final patch asset closure remains U4.
 - **Acceptance:** a matrix of explicit/default, required/optional, present/missing/local/external
   references produces consistent outcomes through spawn, export, prefab, and patches. Unloaded
-  durable references remain distinct from invalid local references.
+  durable references remain structurally distinct from invalid local references; U13 owns live
+  residency outcomes.
 
 ### F06 — Permanent identity claims couple durable identity to one runtime incarnation
 
@@ -468,6 +480,13 @@ executed results below. Proposed acceptance bullets above are not execution evid
 | F01 regression before repair | Failed, then repaired-owner and consumer suites passed | Red run `cc35e95f-47ee-4663-b933-4f0b15d5255d`; green run `f6bfd071-3de4-4453-9d91-34aeaa9b2e3a`. Root startup and real project Retry results are recorded below. |
 | F02 regression before repair | Failed, then focused repaired suite passed | Red run `e9caedac-3687-400d-8d49-56b32162015f`; same green run as F01. GPU scope recorded separately below. |
 | F03 coupled-field transaction | Reproduced, repaired; 3 focused tests passed | Both Scene and Prefab regressions rejected operation 0 before repair. Green run `319662ab-c409-4b28-ab4f-9a32b8172113` covers either field order, invalid-final atomicity, Undo, private candidate application and invalid intermediate shape rejection. |
+| U2 recursive schema owning suites | 388 passed | Run `bbbf2fd1-cb3a-44ea-8f98-40d62ca28c8b`: core, reflect, scene and tooling with serde, including real trybuild compilation, JSON/RON v2, lineage, deep-input guards, retained-path budgets, existing 17K-element Prefab and exact logical-byte boundaries. U3's six separately recorded red tests are excluded, not counted as passing. |
+| U2 separately compiled nested consumer | Passed | Run `396fc9b7-b997-482d-861d-20c88b2524b4`: published Inspector field command, out-of-range atomic rejection, Undo/Redo, JSON reopen, two Prefab instances, nested asset/entity references, spawn and RON export. |
+| U2 catalog migration | 14 artifacts; 55 catalog positions; 21 fingerprint mappings; 24 predecessor edges | The [retained lineage receipt](data/2026-10-18-schema-v2-lineage.json) records the old/new identities. A temporary Rust helper uses the original fingerprint implementation, validates all mapped edges through the public format owner and compares non-shape metadata. Canonical helper run `6ea790a5-a050-4817-bb0c-0db7aa4598d9` passed; all artifacts have LF bytes. The temporary helper is removed from the repository; no compatibility reader is added. |
+| U2 UI authoring and bundle rejection | 82 UI tests plus 2 focused checks passed | UI run `c67d4ef5-0ead-4af8-ba47-ce0d43fe42ee` reports 82 passed with one nextest leaked-output-handle observation. Serial focused run `5a2ca1ce-59e5-4c05-a42d-b8d27611130d` passes that case without the observation and verifies explicit bundle v1/future-version rejection. This is not native Editor qualification. |
+| U2 reference-game and generated bundle | 28 passed; provider-source bundle matches | Run `327b7fc8-4ac4-42fb-b28c-44c0a445e9ed`: authoring lineage and first_wave. The actual `authoring_bundle --check` command confirms that the migrated bundle equals current trusted Rust providers byte-for-byte. |
+| U2 final diagnostic privacy review | Repaired; 123 Scene and 32 root consumer tests passed | Independent review found dynamic Map keys entering public diagnostic paths. `1a96a25` classifies paths without schema provenance as Sensitive, preserving static reasons, depth and numeric bounds. Canary tests exercise real nested validation and reference rewrite through Debug/JSON output. Root consumer run `ecb3081c-dca9-4ec5-bcf1-cbf7c9361ecc` passes; the Scene run is retained in the engineering record. |
+| U3 effective-value and reference closure | 174 Reflect, 129 Scene/Prefab/Export, 47 tooling and 10 root Inspector tests passed | Reflect run `793660df-70bb-4946-80d8-0c6fb79ed420` covers bounded defaults, Null/presence, ancestor/List planning, opaque payloads, native preflight and partial asset records. Scene run `87625d56-60c0-4a9b-b566-48f6ee94da39` covers the 129-test matrix, including exact Export aggregate boundary and canonical file-limit propagation. Tooling run `6033f4db-1173-437f-9991-3a39349025d7` and root Inspector run `fe494c67-d19c-4b9e-a29e-1f3563441c09` cover Defaulted projection with raw omission and undo. U4 still owns final patch asset closure; U13 owns durable residency outcomes. |
 | F09 RuntimeInstance Send trait probe | Confirmed | `rustc 1.99.0 --edition=2024 --emit=metadata` against the current `target/deps` nara_app rlib compiled `assert_send::<RuntimeInstance>()`, exit 0. Cross-thread NonSend failure was not executed. |
 | F09 owner-thread repair | Compile-time and runtime regressions passed | Eleven executable owner/failure types failed the new non-Send assertions before repair and pass afterward. Run `c1a0572d-ee1f-4df6-9f4b-1f560fd77dd4`: 3 tests prove transportable metadata, independent owner-thread construction/destruction, and NonSend quarantine draining. No native audio SDK is claimed. |
 | U1/U6 owning packages | 269 passed | Run `4eb263a3-5fba-4eb1-be23-65f4a513ca70`; `nara_app` plus `nara_scene` with `nara_scene/serde`, serial. The initial featureless full-suite invocation failed to compile existing serde-only integration targets; the supported feature-enabled suite passed. |

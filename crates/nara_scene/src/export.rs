@@ -9,7 +9,8 @@ use nara_identity::{
     WorldIdentityDomain, WorldIdentityDomainId,
 };
 use nara_reflect::{
-    ComponentCapability, ComponentEncodeContext, ComponentRegistry, EntityReferenceTraversalLimits,
+    ComponentCapability, ComponentEncodeContext, ComponentRegistry, ComponentValue,
+    ComponentValueMaterializationLimits, effective_component_value_owned,
     rewrite_declared_entity_references,
 };
 
@@ -17,8 +18,9 @@ use crate::{
     SceneComponentRecord, SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, with_codec_error, with_entity_reference_rewrite_error,
-        with_public_locator,
+        with_public_locator, with_public_u64,
     },
+    validation::reference_traversal_limits,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,9 +83,20 @@ impl SceneExportReport {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SceneExportOptions {
     pub asset_ref_export_policy: AssetRefExportPolicy,
+    /// Bounds the aggregate logical value retained by one export and each value's depth.
+    pub value_limits: ComponentValueMaterializationLimits,
+}
+
+impl Default for SceneExportOptions {
+    fn default() -> Self {
+        Self {
+            asset_ref_export_policy: AssetRefExportPolicy::Path,
+            value_limits: ComponentValueMaterializationLimits::default(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,6 +130,8 @@ pub fn export_scene_with_options(
     options: SceneExportOptions,
 ) -> SceneExportReport {
     let mut diagnostics = DiagnosticReport::default();
+    let mut exported_value_nodes = 0_usize;
+    let mut exported_value_bytes = 0_usize;
     let schemas = match registry.schemas() {
         Ok(schemas) => schemas
             .filter(|schema| schema.has_capability(ComponentCapability::Scene))
@@ -295,10 +310,35 @@ pub fn export_scene_with_options(
             };
             match encoded {
                 Ok(Some(value)) => {
+                    let value = match effective_component_value_owned(
+                        schema,
+                        value,
+                        options.value_limits,
+                    ) {
+                        Ok(value) => value,
+                        Err(error) => {
+                            diagnostics.push(with_codec_error(
+                                with_public_locator(
+                                    with_public_locator(
+                                        diagnostic_error(
+                                            "scene.export-value-budget-exceeded",
+                                            "Scene export component value exceeded its admitted interpretation budget",
+                                        ),
+                                        "entity-id",
+                                        id.as_str(),
+                                    ),
+                                    "component-id",
+                                    schema.id.as_str(),
+                                ),
+                                &error,
+                            ));
+                            continue;
+                        }
+                    };
                     let rewritten = rewrite_declared_entity_references(
                         schema,
                         &value,
-                        EntityReferenceTraversalLimits::default(),
+                        reference_traversal_limits(options.value_limits),
                         |_path, reference| {
                             rewrite_export_reference(
                                 world,
@@ -311,6 +351,52 @@ pub fn export_scene_with_options(
                     );
                     match rewritten {
                         Ok(value) => {
+                            let output_cost = value.cost();
+                            let output_depth = value_depth(&value);
+                            let Some(output_nodes) =
+                                exported_value_nodes.checked_add(output_cost.nodes())
+                            else {
+                                diagnostics.push(export_value_budget_diagnostic(
+                                    usize::MAX,
+                                    options.value_limits.nodes().get(),
+                                    id.as_str(),
+                                    schema.id.as_str(),
+                                ));
+                                continue;
+                            };
+                            let Some(output_bytes) =
+                                exported_value_bytes.checked_add(output_cost.logical_bytes())
+                            else {
+                                diagnostics.push(export_value_budget_diagnostic(
+                                    usize::MAX,
+                                    options.value_limits.bytes().get(),
+                                    id.as_str(),
+                                    schema.id.as_str(),
+                                ));
+                                continue;
+                            };
+                            if output_nodes > options.value_limits.nodes().get()
+                                || output_bytes > options.value_limits.bytes().get()
+                                || output_depth > options.value_limits.depth().get()
+                            {
+                                let (observed, maximum) =
+                                    if output_nodes > options.value_limits.nodes().get() {
+                                        (output_nodes, options.value_limits.nodes().get())
+                                    } else if output_bytes > options.value_limits.bytes().get() {
+                                        (output_bytes, options.value_limits.bytes().get())
+                                    } else {
+                                        (output_depth, options.value_limits.depth().get())
+                                    };
+                                diagnostics.push(export_value_budget_diagnostic(
+                                    observed,
+                                    maximum,
+                                    id.as_str(),
+                                    schema.id.as_str(),
+                                ));
+                                continue;
+                            }
+                            exported_value_nodes = output_nodes;
+                            exported_value_bytes = output_bytes;
                             components.insert(
                                 schema.id.clone(),
                                 SceneComponentRecord::new(schema.version, value),
@@ -381,6 +467,56 @@ pub fn export_scene_with_options(
         output,
         diagnostics,
     }
+}
+
+fn export_value_budget_diagnostic(
+    observed: usize,
+    maximum: usize,
+    entity: &str,
+    component: &str,
+) -> nara_diagnostic::Diagnostic {
+    with_public_u64(
+        with_public_u64(
+            with_public_locator(
+                with_public_locator(
+                    diagnostic_error(
+                        "scene.export-value-budget-exceeded",
+                        "Scene export value budget was exceeded",
+                    ),
+                    "entity-id",
+                    entity,
+                ),
+                "component-id",
+                component,
+            ),
+            "observed",
+            observed as u64,
+        ),
+        "maximum",
+        maximum as u64,
+    )
+}
+
+fn value_depth(value: &ComponentValue) -> usize {
+    let mut maximum = 1_usize;
+    let mut pending = vec![(value, 1_usize)];
+    while let Some((value, depth)) = pending.pop() {
+        maximum = maximum.max(depth);
+        match value {
+            ComponentValue::List(values) => {
+                pending.extend(values.iter().map(|value| (value, depth.saturating_add(1))));
+            }
+            ComponentValue::Map(values) => {
+                pending.extend(
+                    values
+                        .values()
+                        .map(|value| (value, depth.saturating_add(1))),
+                );
+            }
+            _ => {}
+        }
+    }
+    maximum
 }
 
 const fn export_reference_resolution_error_name(

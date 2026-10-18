@@ -251,7 +251,10 @@ fn component_field_paths_redact_unproven_content_and_keep_depth() {
         "field-path-depth",
         &root,
     );
-    assert!(diagnostic_has_redacted_field(&root_diagnostic, "field-path"));
+    assert!(diagnostic_has_redacted_field(
+        &root_diagnostic,
+        "field-path"
+    ));
     assert!(diagnostic_has_field_class(
         &root_diagnostic,
         "field-path",
@@ -276,7 +279,10 @@ fn component_field_paths_redact_unproven_content_and_keep_depth() {
         "field-path-depth",
         &indexed,
     );
-    assert!(diagnostic_has_redacted_field(&indexed_diagnostic, "field-path"));
+    assert!(diagnostic_has_redacted_field(
+        &indexed_diagnostic,
+        "field-path"
+    ));
     assert!(diagnostic_has_field_class(
         &indexed_diagnostic,
         "field-path",
@@ -352,7 +358,10 @@ fn component_field_path_errors_publish_stable_reason_and_numeric_bounds() {
         "path-error-kind",
         "index-out-of-bounds",
     ));
-    assert!(diagnostic_has_redacted_field(&diagnostic, "error-field-path"));
+    assert!(diagnostic_has_redacted_field(
+        &diagnostic,
+        "error-field-path"
+    ));
     assert!(diagnostic_has_field_class(
         &diagnostic,
         "error-field-path",
@@ -3758,7 +3767,7 @@ fn export_rewrites_scene_local_references_with_owner_instance_context() {
 }
 
 #[test]
-fn dangling_scene_local_reference_prevents_export_publication() {
+fn dangling_scene_local_reference_rejects_scene_spawn_before_export() {
     let registry = entity_link_registry();
     let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(scene_id("source"))
         .with_component(
@@ -3768,15 +3777,14 @@ fn dangling_scene_local_reference_prevents_export_publication() {
             }),
         )]);
     let mut world = World::new();
+    let before_entities = world.iter_entities().count();
     let spawn = spawn_scene(&mut world, &registry, &document);
-    assert!(!spawn.diagnostics.has_errors());
+    assert!(spawn.diagnostics.has_errors());
+    assert!(spawn.instance.is_none());
+    assert_eq!(world.iter_entities().count(), before_entities);
 
-    let export = export_scene(&world, &registry);
-
-    assert!(export.diagnostics.has_errors());
-    assert!(export.output().is_none());
-    assert!(export.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code().as_str() == "scene.export-entity-reference-rewrite-failed"
+    assert!(spawn.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.local-reference-invalid"
             && diagnostic_has_text_field(
                 diagnostic,
                 "rewrite-error-kind",

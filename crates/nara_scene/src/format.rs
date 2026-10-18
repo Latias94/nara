@@ -15,7 +15,10 @@ use nara_core::{
     decode_persistent_file_with_preflight, preflight_serde_shape,
 };
 use nara_diagnostic::DiagnosticReport;
-use nara_reflect::{ComponentRegistry, ComponentValueCost};
+use nara_reflect::{
+    ComponentDecodeContext, ComponentRegistry, ComponentValueCost,
+    ComponentValueMaterializationLimits,
+};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::{
@@ -78,6 +81,17 @@ impl Default for SceneFileLimits {
 }
 
 impl SceneFileLimits {
+    #[must_use]
+    pub(crate) const fn component_materialization_limits(
+        self,
+    ) -> ComponentValueMaterializationLimits {
+        ComponentValueMaterializationLimits::new(
+            self.component_value_nodes(),
+            self.component_value_bytes(),
+            self.shape().depth(),
+        )
+    }
+
     #[must_use]
     pub const fn encoded_bytes(self) -> ByteLimit {
         self.encoded_bytes
@@ -396,6 +410,7 @@ pub struct PrefabDocumentCandidate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanonicalSceneDocumentCandidate {
     document: SceneDocument,
+    limits: SceneFileLimits,
     source_upgrade_required: bool,
 }
 
@@ -427,12 +442,17 @@ impl CanonicalSceneDocumentCandidate {
         registry: &ComponentRegistry,
         database: Option<&ProjectAssetDatabase>,
     ) -> Result<PublishedSceneDocument, SceneFilePublicationError> {
-        let diagnostics = match database {
-            Some(database) => self
-                .document
-                .validate_authoring_with_asset_database(registry, database),
-            None => self.document.validate_authoring(registry),
-        };
+        let mut context = ComponentDecodeContext::new()
+            .with_materialization_limits(self.limits.component_materialization_limits());
+        if let Some(database) = database {
+            context = context.with_project_asset_database(database);
+        }
+        let diagnostics = crate::validation::preflight_authoring_scene_with_context(
+            &self.document,
+            registry,
+            &mut context,
+        )
+        .diagnostics;
         if diagnostics.has_errors() {
             return Err(SceneFilePublicationError::new(diagnostics));
         }
@@ -447,6 +467,7 @@ impl CanonicalSceneDocumentCandidate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CanonicalPrefabDocumentCandidate {
     document: PrefabDocument,
+    limits: SceneFileLimits,
     source_upgrade_required: bool,
 }
 
@@ -479,10 +500,17 @@ impl CanonicalPrefabDocumentCandidate {
         database: Option<&ProjectAssetDatabase>,
     ) -> Result<PublishedPrefabDocument, SceneFilePublicationError> {
         let document = self.document.instantiate();
-        let diagnostics = match database {
-            Some(database) => document.validate_authoring_with_asset_database(registry, database),
-            None => document.validate_authoring(registry),
-        };
+        let mut context = ComponentDecodeContext::new()
+            .with_materialization_limits(self.limits.component_materialization_limits());
+        if let Some(database) = database {
+            context = context.with_project_asset_database(database);
+        }
+        let diagnostics = crate::validation::preflight_authoring_scene_with_context(
+            &document,
+            registry,
+            &mut context,
+        )
+        .diagnostics;
         if diagnostics.has_errors() {
             return Err(SceneFilePublicationError::new(diagnostics));
         }
@@ -849,9 +877,11 @@ impl SceneDocumentCandidate {
         self,
         registry: &ComponentRegistry,
     ) -> Result<CanonicalSceneDocumentCandidate, SceneFilePublicationError> {
+        let limits = self.limits;
         let (document, source_upgrade_required) = self.into_canonical_document(registry)?;
         Ok(CanonicalSceneDocumentCandidate {
             document,
+            limits,
             source_upgrade_required,
         })
     }
@@ -880,9 +910,11 @@ impl PrefabDocumentCandidate {
         self,
         registry: &ComponentRegistry,
     ) -> Result<CanonicalPrefabDocumentCandidate, SceneFilePublicationError> {
+        let limits = self.limits;
         let (document, source_upgrade_required) = self.into_canonical_document(registry)?;
         Ok(CanonicalPrefabDocumentCandidate {
             document,
+            limits,
             source_upgrade_required,
         })
     }

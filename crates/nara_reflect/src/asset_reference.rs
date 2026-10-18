@@ -9,7 +9,7 @@ use crate::{
     ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldId,
     ComponentFieldPath, ComponentFieldPathError, ComponentFieldSchema, ComponentRegistry,
     ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
-    EntityReferenceTraversalLimits,
+    ComponentValueMaterializationLimits, EntityReferenceTraversalLimits, effective_component_value,
     entity_reference::{
         PresentReferenceLeaf, collect_present_field_reference_leaves,
         collect_present_reference_leaves,
@@ -82,6 +82,10 @@ pub enum DeclaredAssetReferenceError {
         path: ComponentFieldPath,
         source: StableAssetIdError,
     },
+    Materialization {
+        component: ComponentTypeId,
+        source: ComponentCodecError,
+    },
     Traversal {
         component: ComponentTypeId,
         source: ComponentEntityReferenceRewriteError<()>,
@@ -114,6 +118,9 @@ impl Display for DeclaredAssetReferenceError {
             Self::InvalidStableId { .. } => {
                 "declared asset reference contains an invalid stable ID"
             }
+            Self::Materialization { .. } => {
+                "declared asset reference default materialization rejected the effective value"
+            }
             Self::Traversal { .. } => {
                 "declared asset reference traversal rejected component structure"
             }
@@ -127,6 +134,7 @@ impl Error for DeclaredAssetReferenceError {
             Self::FieldPath { source, .. } => Some(source),
             Self::InvalidPath { source, .. } => Some(source),
             Self::InvalidStableId { source, .. } => Some(source),
+            Self::Materialization { source, .. } => Some(source),
             Self::RegistryNotFrozen
             | Self::UnknownComponent { .. }
             | Self::SchemaVersionMismatch { .. }
@@ -138,12 +146,31 @@ impl Error for DeclaredAssetReferenceError {
     }
 }
 
-/// Collects only values whose current schema fields explicitly opt into asset-reference semantics.
+/// Collects schema-declared effective asset values using the convenience interpretation limits.
 pub fn collect_declared_asset_references(
     registry: &ComponentRegistry,
     component: &ComponentTypeId,
     version: ComponentSchemaVersion,
     value: &ComponentValue,
+) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    collect_declared_asset_references_with_limits(
+        registry,
+        component,
+        version,
+        value,
+        ComponentValueMaterializationLimits::default(),
+        EntityReferenceTraversalLimits::default(),
+    )
+}
+
+/// Collects effective asset values with explicit expansion and reference-work budgets.
+pub fn collect_declared_asset_references_with_limits(
+    registry: &ComponentRegistry,
+    component: &ComponentTypeId,
+    version: ComponentSchemaVersion,
+    value: &ComponentValue,
+    materialization_limits: ComponentValueMaterializationLimits,
+    traversal_limits: EntityReferenceTraversalLimits,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
     if !registry.is_frozen() {
         return Err(DeclaredAssetReferenceError::RegistryNotFrozen);
@@ -161,7 +188,13 @@ pub fn collect_declared_asset_references(
         });
     }
 
-    collect_declared_asset_references_from_schema(schema, version, value)
+    collect_declared_asset_references_from_schema_with_limits(
+        schema,
+        version,
+        value,
+        materialization_limits,
+        traversal_limits,
+    )
 }
 
 /// Collects schema-declared asset references without requiring executable registry authority.
@@ -174,6 +207,26 @@ pub fn collect_declared_asset_references_from_schema(
     version: ComponentSchemaVersion,
     value: &ComponentValue,
 ) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    collect_declared_asset_references_from_schema_with_limits(
+        schema,
+        version,
+        value,
+        ComponentValueMaterializationLimits::default(),
+        EntityReferenceTraversalLimits::default(),
+    )
+}
+
+/// Interprets an authenticated current schema using separate expansion and reference-work limits.
+///
+/// This fills defaults but does not validate unrelated required fields or grant native authority.
+/// Returned references own their values; the caller's authored tree remains unchanged.
+pub fn collect_declared_asset_references_from_schema_with_limits(
+    schema: &ComponentSchema,
+    version: ComponentSchemaVersion,
+    value: &ComponentValue,
+    materialization_limits: ComponentValueMaterializationLimits,
+    traversal_limits: EntityReferenceTraversalLimits,
+) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
     let component = schema.id();
     if version != schema.version() {
         return Err(DeclaredAssetReferenceError::SchemaVersionMismatch {
@@ -183,17 +236,24 @@ pub fn collect_declared_asset_references_from_schema(
         });
     }
 
+    let effective =
+        effective_component_value(schema, value, materialization_limits).map_err(|source| {
+            DeclaredAssetReferenceError::Materialization {
+                component: component.clone(),
+                source,
+            }
+        })?;
     let leaves = collect_present_reference_leaves::<()>(
         schema,
-        value,
-        EntityReferenceTraversalLimits::default(),
+        effective.as_ref(),
+        traversal_limits,
         ComponentValueKind::AssetRef,
     )
     .map_err(|source| DeclaredAssetReferenceError::Traversal {
         component: component.clone(),
         source,
     })?;
-    materialize_asset_references(component, value, leaves, 0)
+    materialize_asset_references(component, effective.as_ref(), leaves, 0)
 }
 
 /// Collects references from an already selected field value, retaining component-relative paths.

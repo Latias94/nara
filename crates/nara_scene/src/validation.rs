@@ -1,16 +1,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
+use nara_reflect::__private::plan_declared_entity_references;
 use nara_reflect::{
-    ComponentCodecError, ComponentDecodeContext, ComponentMigrationError, ComponentRegistry,
-    ComponentTypeId, PreparedComponent, validate_component_value,
+    ComponentCodecError, ComponentDecodeContext, ComponentEntityReferenceRewriteError,
+    ComponentFieldId, ComponentMigrationError, ComponentRegistry, ComponentSchema, ComponentTypeId,
+    ComponentValue, ComponentValueMaterializationLimits, EntityReference,
+    EntityReferenceTraversalLimits, PreparedComponent, effective_component_value,
+    validate_component_value,
 };
 
 use crate::{
     SceneDocument, SceneEntityId, SceneEntityRecord,
     diagnostics::{
         error as diagnostic_error, push_with_operation_index, with_asset_ref, with_codec_error,
-        with_migration_error, with_public_locator,
+        with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
     },
 };
 
@@ -83,6 +88,7 @@ pub(crate) fn preflight_authoring_scene_for_patch(
         true,
         Some(operation_index),
         SceneValidationMode::Native,
+        true,
     )
 }
 
@@ -91,7 +97,21 @@ pub(crate) fn validate_patch_intermediate_scene(
     registry: &ComponentRegistry,
     operation_index: usize,
 ) -> DiagnosticReport {
-    let mut context = ComponentDecodeContext::new();
+    validate_patch_intermediate_scene_with_limits(
+        document,
+        registry,
+        operation_index,
+        ComponentValueMaterializationLimits::default(),
+    )
+}
+
+pub(crate) fn validate_patch_intermediate_scene_with_limits(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    operation_index: usize,
+    limits: ComponentValueMaterializationLimits,
+) -> DiagnosticReport {
+    let mut context = ComponentDecodeContext::new().with_materialization_limits(limits);
     preflight_scene_with_context_options(
         document,
         registry,
@@ -99,6 +119,7 @@ pub(crate) fn validate_patch_intermediate_scene(
         true,
         Some(operation_index),
         SceneValidationMode::Shape,
+        false,
     )
     .diagnostics
 }
@@ -115,6 +136,7 @@ pub(crate) fn preflight_scene_with_context(
         false,
         None,
         SceneValidationMode::Native,
+        true,
     )
 }
 
@@ -123,13 +145,23 @@ pub(crate) fn preflight_authoring_scene_with_context(
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
+    preflight_authoring_scene_with_context_at_operation(document, registry, context, None)
+}
+
+pub(crate) fn preflight_authoring_scene_with_context_at_operation(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+    operation_index: Option<usize>,
+) -> PreparedScene {
     preflight_scene_with_context_options(
         document,
         registry,
         context,
         true,
-        None,
+        operation_index,
         SceneValidationMode::Native,
+        true,
     )
 }
 
@@ -146,7 +178,113 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
         true,
         Some(operation_index),
         SceneValidationMode::Native,
+        true,
     )
+}
+
+pub(crate) fn preflight_authoring_scene_for_prefab_source(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+) -> PreparedScene {
+    let mut context = ComponentDecodeContext::new();
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        &mut context,
+        true,
+        None,
+        SceneValidationMode::Native,
+        false,
+    )
+}
+
+pub(crate) fn preflight_authoring_scene_with_context_for_prefab_source(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+) -> PreparedScene {
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        context,
+        true,
+        None,
+        SceneValidationMode::Native,
+        false,
+    )
+}
+
+pub(crate) fn preflight_authoring_scene_for_prefab_operation(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    operation_index: usize,
+) -> PreparedScene {
+    let mut context = ComponentDecodeContext::new();
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        &mut context,
+        true,
+        Some(operation_index),
+        SceneValidationMode::Native,
+        false,
+    )
+}
+
+pub(crate) fn preflight_authoring_scene_with_context_for_prefab_operation(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    context: &mut ComponentDecodeContext<'_>,
+    operation_index: usize,
+) -> PreparedScene {
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        context,
+        true,
+        Some(operation_index),
+        SceneValidationMode::Native,
+        false,
+    )
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SceneLocalTargetMissing;
+
+pub(crate) fn reference_traversal_limits(
+    limits: ComponentValueMaterializationLimits,
+) -> EntityReferenceTraversalLimits {
+    let overhead = ComponentFieldId::MAX_BYTES
+        .saturating_add(limits.depth().get().saturating_mul(size_of::<u32>()))
+        .saturating_add(20);
+    EntityReferenceTraversalLimits::new(
+        ItemLimit::new(limits.nodes().get().saturating_mul(2))
+            .expect("non-zero value limits produce non-zero reference work limits"),
+        ByteLimit::new(
+            limits
+                .bytes()
+                .get()
+                .saturating_mul(2)
+                .saturating_add(limits.nodes().get().saturating_mul(overhead)),
+        )
+        .expect("non-zero value limits produce non-zero reference byte limits"),
+        limits.depth(),
+    )
+}
+
+pub(crate) fn validate_effective_local_references(
+    schema: &ComponentSchema,
+    effective: &ComponentValue,
+    contains_entity: impl Fn(&SceneEntityId) -> bool,
+    limits: EntityReferenceTraversalLimits,
+) -> Result<(), ComponentEntityReferenceRewriteError<SceneLocalTargetMissing>> {
+    let plan = plan_declared_entity_references(schema, effective, limits)?;
+    plan.visit(effective, |_, reference| match reference {
+        EntityReference::SceneLocal { entity } if !contains_entity(entity) => {
+            Err(SceneLocalTargetMissing)
+        }
+        _ => Ok(()),
+    })
 }
 
 pub(crate) fn validate_scene_structure(document: &SceneDocument) -> DiagnosticReport {
@@ -169,6 +307,7 @@ fn preflight_scene_with_context_options(
     allow_prefab_instances: bool,
     operation_index: Option<usize>,
     mode: SceneValidationMode,
+    validate_local_references: bool,
 ) -> PreparedScene {
     let (placement, mut diagnostics) =
         validate_scene_structure_with_operation(document, operation_index);
@@ -229,6 +368,13 @@ fn preflight_scene_with_context_options(
     }
 
     let mut prepared_entities = Vec::new();
+    let namespace = document
+        .entities
+        .iter()
+        .map(|entity| &entity.id)
+        .collect::<BTreeSet<_>>();
+    let value_limits = context.materialization_limits();
+    let traversal_limits = reference_traversal_limits(value_limits);
     for entity in sorted_entities(document) {
         let mut prepared_components = Vec::new();
         for (component_id, component) in &entity.components {
@@ -330,6 +476,18 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
+            let effective = match effective_component_value(schema, &migrated.value, value_limits) {
+                Ok(effective) => effective,
+                Err(error) => {
+                    push_with_operation_index(
+                        &mut diagnostics,
+                        component_payload_diagnostic(entity.id.as_str(), component_id, &error),
+                        operation_index,
+                    );
+                    continue;
+                }
+            };
+
             if matches!(mode, SceneValidationMode::Shape) {
                 let validation = registry
                     .validate_whole_value_capabilities(
@@ -337,7 +495,7 @@ fn preflight_scene_with_context_options(
                         [nara_reflect::ComponentCapability::Scene],
                     )
                     .map_err(|error| ComponentCodecError::Message(error.to_string()))
-                    .and_then(|()| validate_component_value(schema, &migrated.value));
+                    .and_then(|()| validate_component_value(schema, &effective));
                 if let Err(error) = validation {
                     push_with_operation_index(
                         &mut diagnostics,
@@ -348,8 +506,38 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
-            match registry.preflight_component_with_context(component_id, &migrated.value, context)
+            if validate_local_references
+                && let Err(error) = validate_effective_local_references(
+                    schema,
+                    &effective,
+                    |target| namespace.contains(target),
+                    traversal_limits,
+                )
             {
+                push_with_operation_index(
+                    &mut diagnostics,
+                    with_entity_reference_rewrite_error(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.local-reference-invalid",
+                                    "Scene component references do not close over the document namespace",
+                                ),
+                                "entity-id",
+                                entity.id.as_str(),
+                            ),
+                            "component-id",
+                            component_id.as_str(),
+                        ),
+                        &error,
+                        |_| "scene-local-target-missing",
+                    ),
+                    operation_index,
+                );
+                continue;
+            }
+
+            match registry.preflight_component_with_context(component_id, &effective, context) {
                 Some(Ok(prepared)) => prepared_components.push(PreparedSceneComponent {
                     id: component_id.clone(),
                     prepared,

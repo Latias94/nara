@@ -168,6 +168,12 @@ executing provider code. `UnknownSchema` cannot distinguish ordinary strings/map
 so asset rename/delete/GC, entity remap, prefab flatten, dependency closure, Cook, and export reject
 rather than guessing.
 
+When a current authenticated schema is known but its native binding is unavailable, Inspector may
+project a bounded effective value by applying declared defaults through the schema-only Reflect
+owner. The projection is read-only and keeps authored omission, explicit Null, and undo/history
+source intact; it grants no codec, remap, or Runtime authority. Unknown, future, or mismatched
+records remain interpretation-free and do not receive fabricated defaults.
+
 For prefabs, an unavailable whole record may pass through an untouched source/instance projection.
 Any override, merge, migration, or remap that targets the record rejects atomically. Silent strip is
 never a fallback.

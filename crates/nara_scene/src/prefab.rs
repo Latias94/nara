@@ -9,26 +9,24 @@ use nara_diagnostic::DiagnosticReport;
 use nara_identity::EntityReference;
 use nara_reflect::__private::{DeclaredEntityReferencePlan, plan_declared_entity_references};
 use nara_reflect::{
-    ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentRegistry, ComponentValue,
-    ComponentValueCost, EntityReferenceTraversalLimits,
+    ComponentDecodeContext, ComponentEntityReferenceRewriteError, ComponentRegistry,
+    ComponentValue, ComponentValueCost, ComponentValueMaterializationLimits,
+    EntityReferenceTraversalLimits, effective_component_value_owned,
 };
 
 use crate::{
     PrefabProjectionPath, SceneDocument, SceneEntityId, SceneEntityProvenance, SceneEntityRecord,
     ScenePatchDocument, ScenePatchOperation,
     diagnostics::{
-        error as diagnostic_error, usize_to_u64, with_asset_ref,
+        error as diagnostic_error, usize_to_u64, with_asset_ref, with_codec_error,
         with_entity_reference_rewrite_error, with_migration_error, with_public_locator,
         with_public_u64,
     },
     patch::{
         scene_entities_source_value_cost, scene_entity_component_value_cost, scene_patch_value_cost,
     },
+    validation::{preflight_scene_with_context, reference_traversal_limits},
 };
-
-// Entity-reference traversal charges persistent UUIDs as 36 text bytes, while ComponentValue::cost
-// charges their 16-byte logical representation. Every persistent reference is one value node.
-const PERSISTENT_REFERENCE_TRAVERSAL_BYTE_OVERHEAD: usize = 20;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
@@ -623,10 +621,26 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
     }
 
     fn expand_entity(&mut self, entity: &SceneEntityRecord, output: &mut Vec<SceneEntityRecord>) {
-        if self.reserve_materialized_entity(entity).is_none() {
+        let Some(original_cost) = self.reserve_materialized_entity(entity) else {
             return;
-        }
+        };
         let mut anchor = entity.clone();
+        let Some(replacement_cost) =
+            self.normalize_entity_components(&mut anchor, original_cost, &entity.id)
+        else {
+            return;
+        };
+        let Some((nodes, bytes)) = self.preflight_materialized_value_cost(
+            original_cost.nodes(),
+            replacement_cost.nodes(),
+            original_cost.logical_bytes(),
+            replacement_cost.logical_bytes(),
+            &entity.id,
+        ) else {
+            return;
+        };
+        self.usage.materialized_value_nodes = nodes;
+        self.usage.materialized_value_bytes = bytes;
         let prefab_instance = anchor.prefab.take();
         if let Some(instance) = prefab_instance {
             let prefab_roots = self.expand_prefab_instance(&entity.id, instance, output, None);
@@ -744,19 +758,25 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         self.stack.push(source.clone());
 
         let mut source_document = prefab.instantiate();
-        let patch_report = match self.database {
-            Some(database) => overrides.apply_owned_to_unpublished_scene_with_asset_database(
-                &mut source_document,
-                self.registry,
-                database,
-            ),
-            None => overrides.apply_owned_to_unpublished_scene(&mut source_document, self.registry),
-        };
+        if !overrides.is_empty() {
+            let patch_report = match self.database {
+                Some(database) => overrides
+                    .apply_owned_to_unpublished_scene_for_prefab_with_asset_database(
+                        &mut source_document,
+                        self.registry,
+                        database,
+                    ),
+                None => overrides.apply_owned_to_unpublished_scene_for_prefab(
+                    &mut source_document,
+                    self.registry,
+                ),
+            };
 
-        if !patch_report.applied {
-            self.diagnostics.extend(patch_report.diagnostics);
-            self.stack.pop();
-            return Vec::new();
+            if !patch_report.applied {
+                self.diagnostics.extend(patch_report.diagnostics);
+                self.stack.pop();
+                return Vec::new();
+            }
         }
 
         let Some(entity_ids) = self.allocate_projected_entity_ids(&source_document, anchor_id)
@@ -849,7 +869,6 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
         let mut generated_bytes = 0_usize;
         let mut original_reference_bytes = 0_usize;
         let mut mapped_reference_bytes = 0_usize;
-        let mut replacement_value_cost = ComponentValueCost::ZERO;
         let mut reference_plans =
             Vec::<DeclaredEntityReferencePlan>::with_capacity(entity.components.len());
 
@@ -872,37 +891,11 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             }
         }
 
-        for (component_id, component) in &mut entity.components {
-            let value = std::mem::replace(&mut component.value, ComponentValue::Null);
-            let migrated = match self.registry.migrate_component_value_owned(
-                component_id,
-                component.version,
-                value,
-            ) {
-                Ok(migrated) => migrated,
-                Err(error) => {
-                    self.diagnostics.push(with_migration_error(
-                        with_public_locator(
-                            with_public_locator(
-                                diagnostic_error(
-                                    "scene.prefab-component-migration-failed",
-                                    "Prefab component migration failed before publication",
-                                ),
-                                "entity-id",
-                                entity.id.as_str(),
-                            ),
-                            "component-id",
-                            component_id.as_str(),
-                        ),
-                        &error,
-                    ));
-                    return;
-                }
-            };
-            component.version = migrated.version;
-            component.value = migrated.value;
-            replacement_value_cost = replacement_value_cost.saturating_add(component.value.cost());
-        }
+        let Some(replacement_value_cost) =
+            self.normalize_entity_components(&mut entity, original_value_cost, anchor_id)
+        else {
+            return;
+        };
 
         if self
             .preflight_materialized_value_cost(
@@ -1063,6 +1056,99 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
             SceneEntityProvenance::projected(source_entity_id, projection),
         );
         output.push(entity);
+    }
+
+    fn normalize_entity_components(
+        &mut self,
+        entity: &mut SceneEntityRecord,
+        original_cost: ComponentValueCost,
+        anchor_id: &SceneEntityId,
+    ) -> Option<ComponentValueCost> {
+        let limits = self.materialization_limits();
+        let mut replaced_cost = ComponentValueCost::ZERO;
+        let mut replacement_cost = ComponentValueCost::ZERO;
+        for (component_id, component) in &mut entity.components {
+            let value = std::mem::replace(&mut component.value, ComponentValue::Null);
+            replaced_cost = replaced_cost.saturating_add(value.cost());
+            let migrated = match self.registry.migrate_component_value_owned(
+                component_id,
+                component.version,
+                value,
+            ) {
+                Ok(migrated) => migrated,
+                Err(error) => {
+                    self.diagnostics.push(with_migration_error(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.prefab-component-migration-failed",
+                                    "Prefab component migration failed before publication",
+                                ),
+                                "entity-id",
+                                entity.id.as_str(),
+                            ),
+                            "component-id",
+                            component_id.as_str(),
+                        ),
+                        &error,
+                    ));
+                    return None;
+                }
+            };
+            let Some(schema) = self.registry.schema(component_id) else {
+                self.diagnostics.push(with_public_locator(
+                    with_public_locator(
+                        diagnostic_error(
+                            "scene.prefab-component-schema-missing",
+                            "Prefab component schema was unavailable before publication",
+                        ),
+                        "entity-id",
+                        entity.id.as_str(),
+                    ),
+                    "component-id",
+                    component_id.as_str(),
+                ));
+                return None;
+            };
+            let effective = match effective_component_value_owned(schema, migrated.value, limits) {
+                Ok(effective) => effective,
+                Err(error) => {
+                    self.diagnostics.push(with_codec_error(
+                        with_public_locator(
+                            with_public_locator(
+                                diagnostic_error(
+                                    "scene.prefab-default-materialization-failed",
+                                    "Prefab component defaults exceeded their admitted interpretation",
+                                ),
+                                "entity-id", entity.id.as_str(),
+                            ),
+                            "component-id", component_id.as_str(),
+                        ),
+                        &error,
+                    ));
+                    return None;
+                }
+            };
+            component.version = migrated.version;
+            component.value = effective;
+            replacement_cost = replacement_cost.saturating_add(component.value.cost());
+            let next_nodes = original_cost
+                .nodes()
+                .saturating_sub(replaced_cost.nodes())
+                .saturating_add(replacement_cost.nodes());
+            let next_bytes = original_cost
+                .logical_bytes()
+                .saturating_sub(replaced_cost.logical_bytes())
+                .saturating_add(replacement_cost.logical_bytes());
+            self.preflight_materialized_value_cost(
+                original_cost.nodes(),
+                next_nodes,
+                original_cost.logical_bytes(),
+                next_bytes,
+                anchor_id,
+            )?;
+        }
+        Some(replacement_cost)
     }
 
     fn reserve_materialized_entity(
@@ -1235,27 +1321,14 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
     }
 
     fn prefab_reference_traversal_limits(&self) -> EntityReferenceTraversalLimits {
-        let nodes = self.options.limits.materialized_value_nodes();
-        let depth = EntityReferenceTraversalLimits::default().depth();
-        let traversal_bytes = self
-            .options
-            .limits
-            .materialized_value_bytes()
-            .get()
-            .saturating_mul(2)
-            .saturating_add(
-                nodes.get().saturating_mul(
-                    ComponentFieldId::MAX_BYTES
-                        .saturating_add(depth.get().saturating_mul(size_of::<u32>()))
-                        .saturating_add(PERSISTENT_REFERENCE_TRAVERSAL_BYTE_OVERHEAD),
-                ),
-            );
-        EntityReferenceTraversalLimits::new(
-            ItemLimit::new(nodes.get().saturating_mul(2))
-                .expect("materialized value node limits produce a non-zero traversal work limit"),
-            ByteLimit::new(traversal_bytes)
-                .expect("materialized value limits always produce a non-zero traversal byte limit"),
-            depth,
+        reference_traversal_limits(self.materialization_limits())
+    }
+
+    fn materialization_limits(&self) -> ComponentValueMaterializationLimits {
+        ComponentValueMaterializationLimits::new(
+            self.options.limits.materialized_value_nodes(),
+            self.options.limits.materialized_value_bytes(),
+            EntityReferenceTraversalLimits::default().depth(),
         )
     }
 
@@ -1446,10 +1519,12 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
     }
 
     fn validate_document(&self, document: &SceneDocument) -> DiagnosticReport {
-        match self.database {
-            Some(database) => document.validate_with_asset_database(self.registry, database),
-            None => document.validate(self.registry),
+        let mut context = ComponentDecodeContext::new()
+            .with_materialization_limits(self.materialization_limits());
+        if let Some(database) = self.database {
+            context = context.with_project_asset_database(database);
         }
+        preflight_scene_with_context(document, self.registry, &mut context).diagnostics
     }
 }
 

@@ -24,6 +24,7 @@ use crate::{
         ComponentCodec, ComponentCodecError, ComponentDecodeContext, ComponentEncodeContext,
         FnComponentCodec,
     },
+    effective::{ComponentValueMaterializationLimits, effective_component_value},
     migration::{ComponentMigration, ComponentMigrationError, MigratedComponentValue},
     persistent_apply::{PreparedComponent, PreparedComponentCandidate},
     provider::{
@@ -1598,9 +1599,13 @@ impl ComponentRegistry {
                 .map_err(|error| ComponentCodecError::Message(error.to_string()))
                 .and_then(|()| {
                     let path_index = path_index.ok_or_else(missing_schema_path_index_error)?;
-                    validate_component_value_coverage(schema, path_index, value)
+                    let effective =
+                        effective_component_value(schema, value, context.materialization_limits())?;
+                    validate_component_value_coverage(schema, path_index, effective.as_ref())?;
+                    binding
+                        .codec
+                        .preflight_with_context(effective.as_ref(), context)
                 })
-                .and_then(|()| binding.codec.preflight_with_context(value, context))
                 .and_then(|prepared| {
                     prepared.bind(
                         id.clone(),
@@ -2478,18 +2483,38 @@ fn validate_component_field_default(
 
 /// Validates canonical field coverage, required paths, wire kinds and numeric domains.
 ///
-/// The schema must already have been admitted by its catalog owner. This performs no native
-/// codec calls or World operations; component-specific runtime invariants remain the native
-/// consumer's responsibility. The caller owns payload allocation and work admission. Persistent
-/// files, Prefab expansion, patches and reference traversal retain their independent value budgets;
-/// this structural check does not replace them or scan opaque payloads.
+/// Missing defaults use the native materialization policy. This performs no native codec calls
+/// or World operations. The caller owns raw payload admission and aggregate work; persistent
+/// files, Prefab expansion, patches and reference traversal retain their owner budgets.
 pub fn validate_component_value(
     schema: &ComponentSchema,
     value: &ComponentValue,
 ) -> Result<(), ComponentCodecError> {
+    validate_component_value_with_limits(
+        schema,
+        value,
+        ComponentValueMaterializationLimits::default(),
+    )
+}
+
+/// Validates one effective value using its owner's explicit default-expansion limits.
+///
+/// The schema must already have been admitted by its catalog owner. Missing defaults are checked
+/// before allocation, then the same effective candidate supplies presence and shape validation.
+/// No-insertion values retain their caller-owned raw admission and are not rescanned for cost.
+pub fn validate_component_value_with_limits(
+    schema: &ComponentSchema,
+    value: &ComponentValue,
+    limits: ComponentValueMaterializationLimits,
+) -> Result<(), ComponentCodecError> {
     validate_component_shape_budget(schema)
         .map_err(|(_, error)| ComponentCodecError::Message(error.to_string()))?;
-    validate_component_value_coverage(schema, &SchemaPathIndex::from_schema(schema), value)
+    let effective = effective_component_value(schema, value, limits)?;
+    validate_component_value_coverage(
+        schema,
+        &SchemaPathIndex::from_schema(schema),
+        effective.as_ref(),
+    )
 }
 
 fn validate_component_value_coverage(

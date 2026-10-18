@@ -14,6 +14,11 @@ struct TestLabel {
 struct HiddenLabel;
 
 #[derive(Clone, Debug, PartialEq, Component)]
+struct DefaultInspectorLabel {
+    text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Component)]
 struct MigratingPosition {
     x: i64,
 }
@@ -88,6 +93,72 @@ fn inspector_model_lists_scene_entities_schema_fields_and_live_snapshot() {
     let note = field(&component.fields, "note");
     assert_eq!(note.state, SceneInspectorFieldState::Missing);
     assert!(!note.required);
+}
+
+#[test]
+fn inspector_projects_defaulted_field_without_mutating_raw_undo_history() {
+    let registry = default_inspector_registry();
+    let player = scene_id("player");
+    let component = ComponentTypeId::new("nara.test.DefaultInspectorLabel");
+    let empty = SceneComponentRecord::new(
+        ComponentSchemaVersion::ONE,
+        ComponentValue::map([] as [(&str, ComponentValue); 0]),
+    );
+    let mut session =
+        SceneAuthoringSession::new(SceneDocument::from_ordered_roots([SceneEntityRecord::new(
+            player.clone(),
+        )
+        .with_component(component.clone(), empty.clone())]));
+    let inspector = SceneInspectorState::new();
+
+    let model = inspector.model_with_selection(&session, &registry, Some(&player), None);
+    let selected = model.selected_entity_view.as_ref().unwrap();
+    let defaulted = field(&selected.components[0].fields, "text");
+    assert_eq!(defaulted.state, SceneInspectorFieldState::Defaulted);
+    assert_eq!(
+        defaulted.value,
+        Some(ComponentValue::String("Default".to_owned()))
+    );
+    assert_eq!(
+        document_component(&session.document(), &player, &component).value,
+        empty.value
+    );
+
+    let report = inspector.apply_command(
+        &mut session,
+        &registry,
+        SceneInspectorCommand::SetField {
+            entity: player.clone(),
+            component: component.clone(),
+            component_version: ComponentSchemaVersion::ONE,
+            field: ComponentFieldId::new("text"),
+            value: ComponentValue::String("Edited".to_owned()),
+        },
+    );
+    assert!(report.applied);
+    assert_eq!(
+        document_component(session.document(), &player, &component)
+            .value
+            .field_str("text")
+            .unwrap(),
+        "Edited",
+    );
+    assert_eq!(session.history_status().undo_depth, 1);
+
+    let undo = session.undo(&registry);
+    assert!(undo.applied);
+    assert_eq!(
+        document_component(session.document(), &player, &component),
+        &empty
+    );
+    let model = inspector.model_with_selection(&session, &registry, Some(&player), None);
+    let selected = model.selected_entity_view.as_ref().unwrap();
+    let restored = field(&selected.components[0].fields, "text");
+    assert_eq!(restored.state, SceneInspectorFieldState::Defaulted);
+    assert_eq!(
+        restored.value,
+        Some(ComponentValue::String("Default".to_owned()))
+    );
 }
 
 #[test]
@@ -431,6 +502,43 @@ fn inspector_migrates_legacy_component_for_display_and_atomic_edit() {
 
 fn test_registry() -> ComponentRegistry {
     let mut registry = building_test_registry();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn default_inspector_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    let component = ComponentTypeId::new("nara.test.DefaultInspectorLabel");
+    let mut text = ComponentFieldSchema::required(
+        ComponentFieldId::new("text"),
+        "Text",
+        ComponentFieldPath::from_fields(["text"]),
+        ComponentValueKind::String,
+    )
+    .with_capabilities(ComponentCapability::SCENE_AUTHORING);
+    text.default_value = Some(ComponentValue::String("Default".to_owned()));
+    registry
+        .register_persistent_component_with_codec::<DefaultInspectorLabel, _, _>(
+            ComponentSchema::new(
+                component,
+                "Default inspector label",
+                ComponentSchemaVersion::ONE,
+            )
+            .with_capabilities(ComponentCapability::SCENE_AUTHORING)
+            .with_fields([text]),
+            |value| {
+                Ok(DefaultInspectorLabel {
+                    text: value.field_str("text")?.to_owned(),
+                })
+            },
+            |label| {
+                Ok(ComponentValue::map([(
+                    "text",
+                    ComponentValue::String(label.text.clone()),
+                )]))
+            },
+        )
+        .unwrap();
     registry.freeze().unwrap();
     registry
 }

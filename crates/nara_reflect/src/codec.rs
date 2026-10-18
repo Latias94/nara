@@ -12,7 +12,7 @@ use nara_asset::{
 use nara_ecs::{Entity, World};
 
 use crate::{
-    ComponentTypeId, ComponentValue, ComponentValueError,
+    ComponentTypeId, ComponentValue, ComponentValueError, ComponentValueMaterializationLimits,
     persistent_apply::{PersistentApplyRejection, PreparedComponentCandidate},
 };
 
@@ -149,6 +149,7 @@ pub struct ComponentDecodeContext<'a> {
     asset_server: Option<&'a mut AssetServer>,
     project_asset_database: Option<&'a ProjectAssetDatabase>,
     asset_server_touched: bool,
+    materialization_limits: ComponentValueMaterializationLimits,
 }
 
 impl<'a> ComponentDecodeContext<'a> {
@@ -163,7 +164,26 @@ impl<'a> ComponentDecodeContext<'a> {
             asset_server: Some(asset_server),
             project_asset_database: None,
             asset_server_touched: false,
+            materialization_limits: ComponentValueMaterializationLimits::default(),
         }
+    }
+
+    #[must_use]
+    pub const fn materialization_limits(&self) -> ComponentValueMaterializationLimits {
+        self.materialization_limits
+    }
+
+    pub fn set_materialization_limits(&mut self, limits: ComponentValueMaterializationLimits) {
+        self.materialization_limits = limits;
+    }
+
+    #[must_use]
+    pub const fn with_materialization_limits(
+        mut self,
+        limits: ComponentValueMaterializationLimits,
+    ) -> Self {
+        self.materialization_limits = limits;
+        self
     }
 
     #[must_use]

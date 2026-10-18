@@ -724,15 +724,13 @@ mod tests {
             "Diagnostic references",
             ComponentSchemaVersion::ONE,
         )
-        .with_fields([
-            ComponentFieldSchema::required(
-                ComponentFieldId::new("targets"),
-                "Targets",
-                ComponentFieldPath::from_fields(["targets"]),
-                ComponentValueShape::map(ComponentValueShape::EntityRef),
-            )
-            .with_capability(ComponentCapability::EntityRef),
-        ]);
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("targets"),
+            "Targets",
+            ComponentFieldPath::from_fields(["targets"]),
+            ComponentValueShape::map(ComponentValueShape::EntityRef),
+        )
+        .with_capability(ComponentCapability::EntityRef)]);
         let value = ComponentValue::map([(
             "targets",
             ComponentValue::map([(
@@ -820,7 +818,9 @@ mod tests {
         }
 
         let path_failure = value
-            .get_path(&ComponentFieldPath::from_fields(["weights", canary, canary]))
+            .get_path(&ComponentFieldPath::from_fields([
+                "weights", canary, canary,
+            ]))
             .unwrap_err();
         let diagnostic = with_component_field_path_error(
             error("scene.test-nested-path", "Scene test nested path failed"),

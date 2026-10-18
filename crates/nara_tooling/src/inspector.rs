@@ -6,7 +6,8 @@ use nara_identity::WorldEntityLocator;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind, ComponentValueShape,
+    ComponentValueKind, ComponentValueMaterializationLimits, ComponentValueShape,
+    effective_component_value,
 };
 use nara_scene::{
     AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, PrefabAuthoringSession,
@@ -347,6 +348,7 @@ pub struct SceneInspectorFieldView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SceneInspectorFieldState {
     Present,
+    Defaulted,
     Missing,
     InvalidPath(String),
 }
@@ -774,6 +776,46 @@ fn build_entity_view(
         .filter_map(|(component_id, component)| {
             if let Some(fact) = authoring_record_facts.get(&entity.id, component_id) {
                 if !fact.readiness().is_available() {
+                    if fact.readiness() == AuthoringRecordReadiness::KnownUnbound {
+                        if let Some(schema) =
+                            session.authoring_component_schema(&entity.id, component_id)
+                        {
+                            if component.version != schema.version()
+                                || !schema.has_capability(ComponentCapability::Inspect)
+                            {
+                                return Some(build_unavailable_component_view(
+                                    component_id,
+                                    component,
+                                    fact,
+                                ));
+                            }
+                            let effective = match effective_component_value(
+                                schema,
+                                &component.value,
+                                ComponentValueMaterializationLimits::default(),
+                            ) {
+                                Ok(effective) => effective,
+                                Err(error) => {
+                                    diagnostics.push(inspector_effective_value_diagnostic(
+                                        &entity.id,
+                                        component_id,
+                                        &error,
+                                    ));
+                                    return None;
+                                }
+                            };
+                            return Some(build_component_view(
+                                component_id,
+                                component,
+                                schema,
+                                &component.value,
+                                effective.as_ref(),
+                                SceneInspectorComponentAccess::read_only(
+                                    SceneInspectorReadOnlyReason::KnownUnbound,
+                                ),
+                            ));
+                        }
+                    }
                     return Some(build_unavailable_component_view(
                         component_id,
                         component,
@@ -782,11 +824,32 @@ fn build_entity_view(
                 }
                 if registry.is_none() {
                     let schema = session.authoring_component_schema(&entity.id, component_id)?;
-                    return schema
-                        .has_capability(ComponentCapability::Inspect)
-                        .then(|| {
-                            build_component_view(component_id, component, schema, &component.value)
-                        });
+                    if !schema.has_capability(ComponentCapability::Inspect) {
+                        return None;
+                    }
+                    let effective = match effective_component_value(
+                        schema,
+                        &component.value,
+                        ComponentValueMaterializationLimits::default(),
+                    ) {
+                        Ok(effective) => effective,
+                        Err(error) => {
+                            diagnostics.push(inspector_effective_value_diagnostic(
+                                &entity.id,
+                                component_id,
+                                &error,
+                            ));
+                            return None;
+                        }
+                    };
+                    return Some(build_component_view(
+                        component_id,
+                        component,
+                        schema,
+                        &component.value,
+                        effective.as_ref(),
+                        SceneInspectorComponentAccess::editable(),
+                    ));
                 }
             }
             let registry = registry.filter(|registry| registry.is_frozen())?;
@@ -811,12 +874,31 @@ fn build_entity_view(
                 component.version,
                 &component.value,
             ) {
-                Ok(migrated) => Some(build_component_view(
-                    component_id,
-                    component,
-                    schema,
-                    &migrated.value,
-                )),
+                Ok(migrated) => {
+                    let effective = match effective_component_value(
+                        schema,
+                        &migrated.value,
+                        ComponentValueMaterializationLimits::default(),
+                    ) {
+                        Ok(effective) => effective,
+                        Err(error) => {
+                            diagnostics.push(inspector_effective_value_diagnostic(
+                                &entity.id,
+                                component_id,
+                                &error,
+                            ));
+                            return None;
+                        }
+                    };
+                    Some(build_component_view(
+                        component_id,
+                        component,
+                        schema,
+                        &migrated.value,
+                        effective.as_ref(),
+                        SceneInspectorComponentAccess::editable(),
+                    ))
+                }
                 Err(_) => {
                     diagnostics.push(component_migration_diagnostic(
                         &entity.id,
@@ -877,15 +959,17 @@ fn build_component_view(
     component_id: &ComponentTypeId,
     component: &SceneComponentRecord,
     schema: &ComponentSchema,
-    current_value: &ComponentValue,
+    raw_value: &ComponentValue,
+    effective_value: &ComponentValue,
+    access: SceneInspectorComponentAccess,
 ) -> SceneInspectorComponentView {
     SceneInspectorComponentView {
         component: component_id.clone(),
         document_version: component.version,
         schema_version: schema.version,
-        access: SceneInspectorComponentAccess::editable(),
+        access,
         capabilities: schema.capabilities.clone(),
-        fields: build_field_views(schema, current_value),
+        fields: build_field_views(schema, raw_value, effective_value),
     }
 }
 
@@ -964,22 +1048,24 @@ fn component_migration_diagnostic(
 
 fn build_field_views(
     schema: &ComponentSchema,
-    value: &ComponentValue,
+    raw_value: &ComponentValue,
+    effective_value: &ComponentValue,
 ) -> Vec<SceneInspectorFieldView> {
     schema
         .fields
         .iter()
         .filter(|field| field.has_capability(ComponentCapability::Inspect))
-        .map(|field| build_field_view(field, value))
+        .map(|field| build_field_view(field, raw_value, effective_value))
         .collect()
 }
 
 fn build_field_view(
     field: &ComponentFieldSchema,
-    value: &ComponentValue,
+    raw_value: &ComponentValue,
+    effective_value: &ComponentValue,
 ) -> SceneInspectorFieldView {
-    match value.get_path(&field.path) {
-        Ok(value) => SceneInspectorFieldView {
+    match raw_value.get_path(&field.path) {
+        Ok(_) => SceneInspectorFieldView {
             id: field.id.clone(),
             aliases: field.aliases.clone(),
             path: field.path.clone(),
@@ -988,26 +1074,49 @@ fn build_field_view(
             required: field.required,
             capabilities: field.capabilities.clone(),
             default_value: field.default_value.clone(),
-            value: Some(value.clone()),
+            value: effective_value.get_path(&field.path).ok().cloned(),
             state: SceneInspectorFieldState::Present,
         },
-        Err(error) => SceneInspectorFieldView {
-            id: field.id.clone(),
-            aliases: field.aliases.clone(),
-            path: field.path.clone(),
-            value_kind: field.value_kind(),
-            shape: field.shape().clone(),
-            required: field.required,
-            capabilities: field.capabilities.clone(),
-            default_value: field.default_value.clone(),
-            value: None,
-            state: if field.required {
-                SceneInspectorFieldState::InvalidPath(error.to_string())
+        Err(raw_error) => {
+            let effective = effective_value.get_path(&field.path);
+            let state = if effective.is_ok() {
+                SceneInspectorFieldState::Defaulted
+            } else if field.required {
+                SceneInspectorFieldState::InvalidPath(raw_error.to_string())
             } else {
                 SceneInspectorFieldState::Missing
-            },
-        },
+            };
+            SceneInspectorFieldView {
+                id: field.id.clone(),
+                aliases: field.aliases.clone(),
+                path: field.path.clone(),
+                value_kind: field.value_kind(),
+                shape: field.shape().clone(),
+                required: field.required,
+                capabilities: field.capabilities.clone(),
+                default_value: field.default_value.clone(),
+                value: effective.ok().cloned(),
+                state,
+            }
+        }
     }
+}
+
+fn inspector_effective_value_diagnostic(
+    entity: &SceneEntityId,
+    component: &ComponentTypeId,
+    _error: &nara_reflect::ComponentCodecError,
+) -> Diagnostic {
+    diagnostic::with_component(
+        diagnostic::with_entity(
+            diagnostic::error(
+                "tooling.inspector-effective-value-failed",
+                "inspector could not materialize a component's effective defaults",
+            ),
+            entity,
+        ),
+        component,
+    )
 }
 
 fn document_has_entity(document: &SceneDocument, entity: &SceneEntityId) -> bool {

@@ -6,9 +6,9 @@ use nara_asset::{AssetRef, ProjectAssetDatabase};
 use nara_core::{ByteLimit, ItemLimit};
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
-    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
-    ComponentProjectionError, ComponentRegistry, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueCost, ComponentValueKind,
+    ComponentCapability, ComponentDecodeContext, ComponentFieldId, ComponentFieldPath,
+    ComponentFieldSchema, ComponentProjectionError, ComponentRegistry, ComponentSchemaVersion,
+    ComponentTypeId, ComponentValue, ComponentValueCost, ComponentValueKind,
 };
 
 use crate::{
@@ -17,7 +17,13 @@ use crate::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
     },
-    validation::validate_patch_intermediate_scene,
+    validation::{
+        preflight_authoring_scene_for_prefab_operation,
+        preflight_authoring_scene_for_prefab_source,
+        preflight_authoring_scene_with_context_for_prefab_operation,
+        preflight_authoring_scene_with_context_for_prefab_source,
+        validate_patch_intermediate_scene,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -319,11 +325,6 @@ impl ScenePatchDocument {
         })
     }
 
-    /// Consumes this patch into an unpublished candidate document without retaining an inverse.
-    ///
-    /// The caller must discard `document` when this returns an unapplied report: operations before
-    /// the failure may already have mutated it. Published authoring documents must use the public,
-    /// failure-atomic entry points instead.
     pub(crate) fn apply_owned_to_unpublished_scene(
         self,
         document: &mut SceneDocument,
@@ -342,11 +343,30 @@ impl ScenePatchDocument {
         )
     }
 
-    /// Consumes this patch into an unpublished candidate with project asset validation.
-    ///
-    /// The caller must discard `document` when this returns an unapplied report. This path never
-    /// retains or publishes an inverse patch and is intended for private, consumption-only work.
-    pub(crate) fn apply_owned_to_unpublished_scene_with_asset_database(
+    pub(crate) fn apply_owned_to_unpublished_scene_for_prefab(
+        self,
+        document: &mut SceneDocument,
+        registry: &ComponentRegistry,
+    ) -> ScenePatchReport {
+        self.apply_owned_to_unpublished_scene_with_validator(
+            document,
+            registry,
+            ScenePatchApplyLimits::default(),
+            |document, registry, operation_index| match operation_index {
+                Some(operation_index) => {
+                    preflight_authoring_scene_for_prefab_operation(
+                        document,
+                        registry,
+                        operation_index,
+                    )
+                    .diagnostics
+                }
+                None => preflight_authoring_scene_for_prefab_source(document, registry).diagnostics,
+            },
+        )
+    }
+
+    pub(crate) fn apply_owned_to_unpublished_scene_for_prefab_with_asset_database(
         self,
         document: &mut SceneDocument,
         registry: &ComponentRegistry,
@@ -357,12 +377,27 @@ impl ScenePatchDocument {
             registry,
             ScenePatchApplyLimits::default(),
             |document, registry, operation_index| match operation_index {
-                Some(operation_index) => document.validate_authoring_for_patch_with_asset_database(
-                    registry,
-                    database,
-                    operation_index,
-                ),
-                None => document.validate_authoring_with_asset_database(registry, database),
+                Some(operation_index) => {
+                    let mut context =
+                        ComponentDecodeContext::new().with_project_asset_database(database);
+                    preflight_authoring_scene_with_context_for_prefab_operation(
+                        document,
+                        registry,
+                        &mut context,
+                        operation_index,
+                    )
+                    .diagnostics
+                }
+                None => {
+                    let mut context =
+                        ComponentDecodeContext::new().with_project_asset_database(database);
+                    preflight_authoring_scene_with_context_for_prefab_source(
+                        document,
+                        registry,
+                        &mut context,
+                    )
+                    .diagnostics
+                }
             },
         )
     }

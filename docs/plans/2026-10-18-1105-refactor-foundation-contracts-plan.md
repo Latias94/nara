@@ -18,6 +18,20 @@ product_contract_source: docs/audits/2026-10-18-foundation-contract-audit.md
 - **Stop condition:** stop and ask when a proposed change alters product behavior outside this plan or requires changing an Accepted ADR's meaning without an explicit contract revision.
 - **Current baseline:** F01 Scene asset-context loss and F02 glyph-cache identity collision are already repaired in `ad97c1f` and `5ae2c83`; this plan treats them as closed baseline fixes.
 
+## Execution Checkpoint
+
+The goal remains active. This table records execution, not release authority; detailed results
+and remaining limits live in the audit validation register and immutable engineering records.
+
+| Units | Current evidence | Next gate |
+| --- | --- | --- |
+| U1, U6 | Transaction boundary `10efbdf`; executable thread ownership `722e3ee`; owning and real-consumer suites pass | Preserve their regressions during reference integration |
+| U5, U11, U14 | Incarnations `5d42599`, endpoint provenance `8a975db`, custom font owner `47d449d`; focused and real-consumer proof recorded | U13 adds durable-reference closure; no native Editor release claim |
+| U2 | Recursive schema/catalog v2 committed as `1a96a25`; 388 owning tests, independent Inspector/Prefab/export consumer, UI and reference-game checks pass; historical metadata preserved | Preserve recursive shape, lineage, budget and diagnostic privacy regressions during U3 |
+| U3 | Effective-value owner and cross-entry closure landed; 174 Reflect, 129 Scene/Prefab/Export, 47 tooling and 10 root Inspector tests pass | Preserve source omission, explicit Null, selected limits and private Prefab source namespace during U4/U13 |
+| U4, U13 | U3 prerequisites pass; final patch asset closure and durable residency policy remain | Integrate final candidate closure and live unloaded/deleted outcomes |
+| U7, U8, U9, U10, U12, U15 | Consumer and measurement research prepared; broader APIs remain unimplemented | Prove admitted workflows and measured triggers before generalization |
+
 ## Product Contract
 
 ### Problem Frame
@@ -225,6 +239,23 @@ Amend the owning schema clauses in ADRs 0011/0045/0081 and preserve ADR 0090 unk
 - Nested collection references are collected, remapped, exported, and bounded by the same visitor limits.
 
 **Verification:** a matrix test covers explicit/default, required/optional, local/asset references across all four admission paths. U13 adds the durable unloaded/deleted rows.
+
+**Implementation refinement:** the effective-value primitive only fills declared defaults. It
+does not reject unrelated missing required fields, validate complete components, resolve targets,
+or grant schema authority. Full validation remains a separate consumer so authenticated partial
+native records retain reference collection. No-insertion borrowed/owned paths avoid cloning and
+rescanning the raw payload. When expansion is needed, preflight combined values, shared missing
+ancestors, key bytes and depth before allocation; preserve explicit Null and reject sparse List
+holes. Use a finite explicit `ComponentValueMaterializationLimits` port, distinct from schema
+description limits and reference-path work limits. Retain selected `SceneFileLimits` through
+canonical publication and pass actual Scene/Prefab/Patch limits into existing decode contexts;
+convenience entry points name their finite default policy. Do not add a general budget framework.
+
+**Landed evidence:** `ComponentValueMaterializationLimits` now bounds default expansion separately
+from schema and reference-work budgets. The Reflect, Scene/Prefab/Export, tooling and root Inspector
+suites pass 174, 129, 47 and 10 tests respectively. Prefab source patching has a private
+source-namespace validation seam; public patch final validation retains local closure. U4 still
+owns final patch asset closure and U13 owns durable residency outcomes.
 
 ### U4. Integrate Final Reference Closure Into Patch and Authoring Publication
 
