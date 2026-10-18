@@ -13,6 +13,10 @@ accessibility are not established by that run. The earlier
 covers removal revocation, displayed-frame input, saved-source Restart admission and quiet external
 Play maintenance at `4589b5a`. Neither record extends an earlier run's toolkit or platform scope.
 
+The [2026-10-18 foundation audit and focused repairs](../../audits/2026-10-18-foundation-contract-audit.md)
+record stable-asset context preservation during advanced Scene replacement and atlas-owner isolation
+in the shared glyph cache. Its 264 scoped tests do not replace native Editor product qualification.
+
 Rows retain their own last-qualified source and scope. Some older broad decisions remain partial
 or proposed while narrower Accepted ADRs implement particular workflows. Read the relevant Accepted
 refinement before treating an older gap as the current product's behavior. Links are selected

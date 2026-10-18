@@ -38,6 +38,10 @@ their completion conditions do not automatically apply to later tasks.
 
 ## Background Designs
 
+The [2026-10-18 foundation audit](../audits/2026-10-18-foundation-contract-audit.md), with its
+[standalone HTML report](../audits/2026-10-18-foundation-contract-audit.html), records confirmed
+ownership repairs and proposed refactor dependencies. It does not change Accepted ADRs.
+
 The [UI foundation design](ui-foundation-design.md),
 [UI boundary study](ui-product-boundaries-editor-dogfood-and-porting-strategy.md), and
 [render pressure matrix](render-capability-pressure-matrix.md) provide design context when a task
