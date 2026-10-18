@@ -3,7 +3,9 @@ use std::{
     cell::RefCell,
     collections::{BTreeSet, VecDeque},
     fmt::{self, Debug, Display, Formatter},
+    marker::PhantomData,
     ops::{Deref, DerefMut},
+    rc::Rc,
     sync::{
         Arc, Mutex, MutexGuard, OnceLock,
         atomic::{AtomicU64, AtomicUsize, Ordering},
@@ -959,6 +961,9 @@ impl RuntimeCloseContext<'_> {
     }
 }
 
+/// Owns waitable cleanup driven on the thread that constructs the runtime's App.
+///
+/// The participant may own Send worker state; its callbacks remain on the runtime owner thread.
 pub trait RuntimeCloseParticipant: Send + 'static {
     fn begin_close(
         &mut self,
@@ -2219,6 +2224,10 @@ impl RuntimeStartFailure {
     }
 }
 
+/// Owns managed execution and retirement on the thread that constructs its App.
+///
+/// Transfer a replayable definition to another thread and construct a fresh App there instead of
+/// moving an existing runtime or its retirement owner.
 pub struct RuntimeInstance {
     owner: RuntimeOwner,
     generation: RuntimeGeneration,
@@ -2810,6 +2819,7 @@ pub(super) struct RuntimeOwner {
 }
 
 pub(super) struct RuntimeOwnerState {
+    _thread_affinity: PhantomData<Rc<()>>,
     pub(super) world: World,
     pub(super) schedules: Schedules,
     pub(super) plugins: Vec<InstalledPlugin>,
@@ -2928,6 +2938,7 @@ impl RuntimeOwnerState {
             );
 
         Self {
+            _thread_affinity: PhantomData,
             world,
             schedules,
             plugins: Vec::new(),

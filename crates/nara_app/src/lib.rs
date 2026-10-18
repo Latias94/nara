@@ -1138,6 +1138,10 @@ struct InstalledRuntimeAuthorityValidator {
     validator: Arc<runtime::__RuntimeAuthorityValidator>,
 }
 
+/// Configures one thread-bound World and its managed execution definition.
+///
+/// Build a fresh App on the thread that will drive and retire it. Replayable plugin definitions
+/// and immutable configuration can be transferred before App construction.
 pub struct App {
     owner: runtime::RuntimeOwner,
     plugin_entries: Vec<PluginPlanEntry>,

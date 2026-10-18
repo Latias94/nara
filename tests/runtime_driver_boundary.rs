@@ -4,6 +4,27 @@ use nara::app::{App, RuntimeInstance};
 use serde_json::Value;
 
 #[test]
+fn executable_owners_are_bound_to_their_construction_thread() {
+    use nara::app::{
+        ReadyRuntimeCandidate, RuntimeAdmissionFailure, RuntimeAdmissionRetirement,
+        RuntimeCandidate, RuntimeCandidateFailure, RuntimeInstance, RuntimePublicationFailure,
+        RuntimeRetirement, RuntimeStartFailure, SealedApp,
+    };
+
+    static_assertions::assert_not_impl_any!(App: Send, Sync);
+    static_assertions::assert_not_impl_any!(SealedApp: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeCandidate: Send, Sync);
+    static_assertions::assert_not_impl_any!(ReadyRuntimeCandidate: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeInstance: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeRetirement: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeAdmissionFailure: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeAdmissionRetirement: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeCandidateFailure: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimePublicationFailure: Send, Sync);
+    static_assertions::assert_not_impl_any!(RuntimeStartFailure: Send, Sync);
+}
+
+#[test]
 fn runtime_core_keeps_its_dependency_direction() {
     let output = Command::new(env!("CARGO"))
         .args([

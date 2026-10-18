@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-13
-**Last Revised**: 2026-08-02
+**Last Revised**: 2026-10-18
 **Owner**: `nara_app` and concrete executable hosts
 **Admission Trigger**: RGD-U2 through RGD-U6 replaced the plan/World behavior split, removed
 process-global runtime contention, and proved three-Host parity, external Runner authority, and
@@ -189,7 +189,24 @@ need it.
   contract, and cannot be replaced from a plugin hook. External candidates are not filtered by
   crate path or first-party ID.
 
-### Construction and Publication
+### Owner Thread And Transportable Definitions
+
+A configured `App` owns a World that can contain thread-affine or `NonSend` resources before
+runtime admission. The ownership-bearing App, sealed App, candidate, ready candidate, running
+instance, failure wrappers, and retirement custody therefore remain on their construction thread.
+They are neither `Send` nor `Sync`; sealing, promotion and retirement never grant thread mobility.
+The common World owner carries this property through temporary retirement guards and quarantine.
+Plugin shutdown, pollable close, and eventual World destruction execute on that owner thread.
+
+World-free immutable definitions, plugin plans, control values, fault reporters, admission route
+reservations, and transferable obligation descriptions retain their existing transportability.
+A host can send such a definition to another thread and construct, drive, and close a fresh App
+there. It cannot transfer an already configured World by sending its runtime wrapper. This does
+not change Bevy's World type, add a cross-thread executor, or make `RuntimeCloseParticipant`
+accept arbitrary `NonSend` SDK controllers; a concrete controller needing pollable close requires
+its own narrowly scoped owner-thread integration.
+
+### Construction And Publication Sequence
 
 On the integrated product path, ADR 0082 or an explicit successor supplies one lineage-compatible
 immutable project revision, resolved composition plan, replayable recipe, and immutable
