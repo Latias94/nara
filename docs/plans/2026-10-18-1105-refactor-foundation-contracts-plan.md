@@ -20,17 +20,27 @@ product_contract_source: docs/audits/2026-10-18-foundation-contract-audit.md
 
 ## Execution Checkpoint
 
-The goal remains active. This table records execution, not release authority; detailed results
-and remaining limits live in the audit validation register and immutable engineering records.
+The required implementation and consumer verification are complete within this plan's scope.
+All six P1 findings are repaired; ten of seventeen findings are fixed. The seven remaining P2
+items have concrete consumer or measurement triggers rather than speculative new APIs. This table
+records execution, not release authority; details and limits live in the audit validation register
+and immutable engineering records.
 
 | Units | Current evidence | Next gate |
 | --- | --- | --- |
-| U1, U6 | Transaction boundary `10efbdf`; executable thread ownership `722e3ee`; owning and real-consumer suites pass | Preserve their regressions during reference integration |
-| U5, U11, U14 | Incarnations `5d42599`, endpoint provenance `8a975db`, custom font owner `47d449d`; focused and real-consumer proof recorded | U13 adds durable-reference closure; no native Editor release claim |
-| U2 | Recursive schema/catalog v2 committed as `1a96a25`; 388 owning tests, independent Inspector/Prefab/export consumer, UI and reference-game checks pass; historical metadata preserved | Preserve recursive shape, lineage, budget and diagnostic privacy regressions during U3 |
-| U3 | Effective-value owner and cross-entry closure landed; 174 Reflect, 129 Scene/Prefab/Export, 47 tooling and 10 root Inspector tests pass | Preserve source omission, explicit Null, selected limits and private Prefab source namespace during U4/U13 |
-| U4, U13 | U3 prerequisites pass; final patch asset closure and durable residency policy remain | Integrate final candidate closure and live unloaded/deleted outcomes |
-| U7, U8, U9, U10, U12, U15 | Consumer and measurement research prepared; broader APIs remain unimplemented | Prove admitted workflows and measured triggers before generalization |
+| U1, U6 | Transaction boundary `10efbdf`; executable thread ownership `722e3ee`; owning and real-consumer suites pass | Retain transaction and thread-owner regressions for future domains |
+| U5, U11, U14 | Incarnations `5d42599`, endpoint provenance `8a975db`, custom font owner `47d449d`; focused and real-consumer proof recorded; U13 durable matrix passes | No native Editor release claim; future domains retain these owner contracts |
+| U2 | Recursive schema/catalog v2 committed as `1a96a25`; 388 owning tests, independent Inspector/Prefab/export consumer, UI and reference-game checks pass; historical metadata preserved | Retain recursive shape, lineage, budget and diagnostic privacy regressions |
+| U3 | Effective-value owner and cross-entry closure landed as `53586dc`; 174 Reflect, 129 Scene/Prefab/Export, 47 tooling and 10 root Inspector tests pass | Retain source omission, explicit Null, selected limits and private Prefab source namespace |
+| U4, U13 | Final closure, selected policy propagation, available source-authoring and typed durable residency outcomes landed as `784f4ab`; 361 Reflect/Scene, 7 independent durable-consumer and 53 root consumer tests pass. Final Editor authoring loop and 34 reference-game consumers pass | Preserve regressions; native Editor release qualification remains outside this slice |
+| U9 | Real Task/Image preparation plus hook-owned native consumer landed as `237997b` and passes 8 tests; three complementary root Host close/successor tests pass | Keep production physics/audio and broader successor compositions as named consumers; no universal coordinator |
+| U7, U8, U10, U15 | Source/consumer review retains current contracts with exact admission triggers; shared substeps/current-pose/pixel-canvas/device-profile APIs are not implemented. Concrete Surface extent defect is fixed as `4c0b49f`, with 107 WGPU tests passing | Reopen only for the real repeated-step, same-phase pose, shared logical-canvas or non-default capability consumer described in the audit |
+| U12 | Baselines and retained raw evidence landed as `f6f3901`: three hierarchy and one Transform timing processes pass correctness; a separate allocation process records 32 consistent windows with stable adjusted requested heap | F11 stays measured debt before large-world multi-producer admission. RSS, GPU memory, general leak safety and native frame qualification remain outside this baseline |
+
+Final integration passes `cargo check --locked --workspace --all-targets --all-features`, workspace
+and independent-consumer formatting, and whitespace checks. Reference-game authoring, desktop
+render and first-wave suites pass all 34 tests; the Editor authoring-loop check passes with its
+separate native qualification skipped. No additional native release claim follows from this closure.
 
 ## Product Contract
 
@@ -142,8 +152,8 @@ flowchart TB
 
 1. U1 establishes transaction characterization and the final-candidate validation boundary.
 2. U2 and U3 co-design recursive value shape and current scalar/local reference semantics; U5 then defines durable identity states, U13 integrates those states into the closure, and U4 completes patch publication against the resulting closure.
-3. U6 makes configured and admitted runtime ownership thread-safe before U7–U9 add independent execution or native owners.
-4. U7 closes the managed sub-schedule seam; U8 adds current-pose reads; U9 proves native reconciliation with two real owners.
+3. U6 enforces executable owner-thread semantics before U7–U9 add independent execution or native owners.
+4. U7/U8 require an actual consumer before extending managed sub-schedules or current-pose reads; U9 proves native reconciliation with two real owners.
 5. U10 and U11 close presentation/input/font seams as concrete runtime and Editor consumers require them.
 6. U12 measures hierarchy/transform cost and only then admits an incremental algorithm.
 
@@ -557,5 +567,6 @@ Cargo commands run serially with `CARGO_BUILD_JOBS=1`, reuse the existing `targe
 | F11, F12 | U12 | Required workload evidence; algorithm change only on trigger |
 | F13, F14 | U10, U15 | Fixed canvas consumer first; non-default capabilities only when used |
 | F15, F16 | U11, U14 | Required endpoint and custom-face integration repairs |
+| F17 | U15 source review | Concrete Surface extent admission fixed without a speculative device profile |
 
 Owning context is `STRATEGY.md`, `docs/architecture/README.md`, the audit origin and the Accepted ADRs named in each unit. Reference mechanisms are grounded in pinned local Bevy `85503941e488152711a4695bbe248e9ed9f453fc` and Godot `81ab961f91066a63bcbf3ec340962bb1a1ada558`; their architectures are evidence rather than templates to copy.

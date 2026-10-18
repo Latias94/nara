@@ -18,12 +18,18 @@ recipe with one managed runtime owner, persistent documents separated from nativ
 semantic Editor operations. The next investment should close owner, identity, value, and
 transaction seams before new domains make their assumptions expensive to change.
 
+Execution under the linked plan repairs all six P1 findings and ten of seventeen findings overall.
+The seven remaining P2 items are five consumer-gated extension decisions and two measured scale
+boundaries. F11 is the strongest next investigation before a large-world multi-producer consumer;
+the current admitted reference game does not require that expansion. Native Editor and cross-platform
+release qualification retain their separate scope.
+
 This is a foundation audit, not a backlog of missing Tilemap, save, animation, physics, or audio
 features. It does not promise an architecture without future debt. Proposed directions below are
 not new architecture decisions: changes that conflict with Accepted ADRs require an ADR revision
-before implementation. In particular, permanent identity claims are intentional today, strict
-lifecycle-free transactions remain valid until their consumers migrate, and native failure must
-not be disguised as a promise of arbitrary rollback.
+before implementation. Permanent persistent-identity claims at the audited baseline have now been
+replaced under the revised ADR 0058. Strict lifecycle-free transactions remain valid until their
+consumers migrate, and native failure must not be disguised as a promise of arbitrary rollback.
 
 ## Reading the findings
 
@@ -167,12 +173,15 @@ These are independent work lanes, not one mandatory linear rewrite.
   keeps closure while Prefab source patching uses a private source-namespace seam.
 - **Evidence:** Reflect 174 tests, Scene/Prefab/Export 129 tests, tooling 47 tests and root Inspector
   10 tests pass. Exact Export aggregate limits, canonical SceneFileLimits propagation, default asset
-  closure, repeated Prefab remap and omitted-default Export are covered. Durable unloaded/deleted
-  residency policy remains U13, and final patch asset closure remains U4.
+  closure, repeated Prefab remap and omitted-default Export are covered. U4 subsequently reproduces
+  and repairs selected-limit loss at patch/Session entries, nested/default asset membership omitted
+  by manual codecs, and available source-authoring local closure. U13's separately compiled matrix
+  preserves durable values across source/spawn/Prefab/patch entries while live operations distinguish
+  Missing, Unloaded, Deleted and StaleRuntime. Export remains an existence-requiring bake.
 - **Acceptance:** a matrix of explicit/default, required/optional, present/missing/local/external
   references produces consistent outcomes through spawn, export, prefab, and patches. Unloaded
-  durable references remain structurally distinct from invalid local references; U13 owns live
-  residency outcomes.
+  durable references remain structurally distinct from invalid local references; required presence
+  is not a live-residency requirement. See the execution register for U4/U13 results.
 
 ### F06 — Permanent identity claims couple durable identity to one runtime incarnation
 
@@ -186,7 +195,7 @@ These are independent work lanes, not one mandatory linear rewrite.
   U5 revises ADR 0058: persistent logical records have an independent bounded ledger, while exact
   runtime references/tokens carry a checked incarnation. Unloaded records may reactivate; Deleted
   is terminal. Existing Scene instance history claims and arbitrary-order restore remain bounded
-  by their original contract. U13 still owns durable-reference admission policy across entry points.
+  by their original contract. U13 adds the durable-value/live-operation matrix across entry points.
 - **Counterexample:** an NPC with a durable UUID is unloaded and later restored in the same world;
   rebinding the same semantic identity is rejected. Allocating fresh durable UUIDs instead breaks
   the identity expected by saved references.
@@ -222,6 +231,14 @@ These are independent work lanes, not one mandatory linear rewrite.
 - **Acceptance:** unloading/replacing/stopping with both domains releases each native owner once;
   pending work retains its owner; partial native failure is visible and retryable; stale entities
   cannot be reactivated accidentally. This is not a universal native rollback facility.
+- **Bounded proof:** U9 now composes actual TaskPlugin-owned IO, ImagePlugin import, ImagePrepare
+  snapshots and the external hook/RequiredComponents-owning native domain. Eight consumer tests
+  pass in `65465bef-c952-4b29-b962-1fc049668652`, covering latest accepted revision, explicit native
+  Retry, unload followed by late image completion, source removal, Stop/CloseIncomplete/RetryClose,
+  exact native cleanup and balanced transient work accounting. No new shared coordinator is needed
+  for this slice. Ordinary ImagePlugin work budgets do not measure all resident pixel memory;
+  Editor retained-pixel accounting is a separate policy. Production physics/audio and broader
+  project-host successor combinations still require their named evidence.
 
 ### F08 — Custom schedules have configuration but no managed execution path
 
@@ -301,7 +318,7 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F11 — Each ordinary hierarchy operation validates and copies the whole topology
 
-**P2 · Structural contract risk · Proposed · High confidence; cost established, budget unmeasured**
+**P2 · Structural contract risk · Budget gate · Measured independent-producer cost**
 
 - **Evidence:** [`nara_hierarchy/src/writer.rs:310`](../../crates/nara_hierarchy/src/writer.rs#L310)
   turns each single operation into a batch; [`:351`](../../crates/nara_hierarchy/src/writer.rs#L351)
@@ -320,6 +337,14 @@ These are independent work lanes, not one mandatory linear rewrite.
 - **Acceptance:** large-world small edits and independent command producers have a measured bounded
   cost; invalid operations remain atomic; raw mutation invalidates completion; ordered sibling
   behavior and scene/editor transactions remain correct.
+- **Measurement:** the [U12 baseline](../benchmarks/2026-10-18-foundation-scale.md) uses real leaf
+  reparenting and complete topology checks. At 4,096 members, eight independent transactions cost
+  4.41–5.13 ms P95 across three processes, versus 1.04–1.06 ms for the equivalent eight-operation
+  batch. The 65,536-member rows exceed the sampling cap. This is measured debt: require the next
+  large-world multi-producer consumer to settle transaction/candidate-copy cost before expansion.
+  Separate allocation windows request 1,487,768 bytes per batch-eight cycle versus 11,428,052 per
+  independent-eight cycle, with no adjusted retained growth over four blocks. It is not permission
+  to merge independent logical transactions silently.
 
 ### F12 — Transform work scales with all loaded transforms
 
@@ -342,6 +367,12 @@ These are independent work lanes, not one mandatory linear rewrite.
 - **Acceptance:** record loaded/active transforms, hierarchy depth, fixed steps, interpolation,
   allocations, and completion time; compare incremental output against baseline after reparent,
   remove, pause, and exact step. Do not claim an optimization from traversal counts alone.
+- **Measurement:** the [U12 baseline](../benchmarks/2026-10-18-foundation-scale.md) records one full
+  Transform process: 4,096 one-leaf P99 is 0.30 ms and half-tick interpolation P99 is 0.57 ms. The
+  65,536 one-leaf P99 is 3.10 ms. Separate warmed allocation windows observe zero allocation calls
+  for static and one-leaf work at all three populations, with stable requested heap over four
+  blocks. Retain the algorithm pending a real consumer's repeatable budget; RSS, GPU memory,
+  general leak safety and full native frame cost remain outside this measurement.
 
 ### F13 — Runtime/Editor rendering needs a shared multipass owner before a public graph
 
@@ -425,6 +456,35 @@ These are independent work lanes, not one mandatory linear rewrite.
 - **Acceptance:** a custom face shapes and presents through the same owner; incompatible runs fail
   before uploads; mixed faces, clone/reset, target reuse, and font retirement preserve cache identity.
 
+### F17 — Surface configuration omitted actual device extent admission
+
+**P2 · Confirmed defect · Fixed · Real-device boundary regression**
+
+- **Evidence:** `nara_render_wgpu/src/surface.rs` passed arbitrary extents to
+  `Surface::get_default_config` and then `Surface::configure`, which returns no recoverable Result.
+  A default device with maximum dimension 8,192 let 8,193 × 1 pass Nara's admission boundary.
+- **Resolution:** `4c0b49f` rejects empty or over-device-limit extents before surface lookup,
+  configuration or cached-state publication. It reuses `SurfaceUnsupported`; no capability
+  catalogue, new RHI or rendering stage is introduced.
+- **Evidence:** red `9e8d9721-8c85-4e8f-9a30-1204ebb2db84`; green all-feature WGPU run
+  `b963f04b-5672-41d2-a7dc-5e27672ff60a` passes 107 tests, with two native qualifications skipped.
+  The regression uses a real adapter/device, checks zero/both-axis overflow/minimum/exact limit,
+  and proves rejected inputs preserve all cached last-good fields.
+- **Limit:** exact-limit admission is tested without a live Surface or allocating a maximum-size
+  texture. This does not qualify native maximum-size swapchain configuration.
+
+## Conditional Extension Decisions
+
+| Unit / finding | Current decision | Concrete trigger before broader work |
+| --- | --- | --- |
+| U7 / F08 | Keep intentionally inert custom schedules; current gameplay uses the managed FixedUpdate graph. | A real independently extensible repeated domain step cannot be expressed by existing sets without repeating outer command/capture semantics. |
+| U8 / F10 | Keep immutable completed globals and transform-owned post-propagation readers. | A real same-phase ancestor write → current child read → authoritative local writeback requires a bounded Transform-owner helper and an explicit ADR 0100 revision. |
+| U10 / F13 | Retain current Runtime direct rendering and admitted Editor private-image/toolkit IntegerFit. The shared fixed pixel-canvas GPU stage is not implemented. | A named game requires one fixed logical render extent and identical composite/input mapping in standalone Runtime and Editor. Complete that shared owner before claiming the workflow. |
+| U15 / F14 | Current stages use default features/limits; the concrete Surface extent bug is fixed separately as F17. | A real rendering stage requires a non-default feature or limit; resolve required rejection/optional fallback before device/resource publication. |
+
+These are conditional P2 boundaries, not completed new APIs. No physics/audio backend, shared pixel
+canvas, general render graph, current-pose API or native release qualification is claimed.
+
 ## Boundaries to retain
 
 1. **Thin ECS access, domain-owned writes.** `nara_ecs` intentionally re-exports mature storage,
@@ -477,6 +537,15 @@ executed results below. Proposed acceptance bullets above are not execution evid
 
 | Check | Actual result | Evidence / remaining work |
 | --- | --- | --- |
+| U4/U13 final closure regressions | 4 U4 failures reproduced; 361 owning tests and 53 root consumer tests passed | U4 red `a1d1af15-69a1-4db2-8845-bb3ff6e50ad3`; owning green `8362d6f1-4356-4026-8ca8-a1f52b8d2047` covers all 176 Reflect and 185 Scene tests. Root green `482f8a6b-522c-41b0-af94-6c9427b952aa` covers authoring sessions, file workspace, patch atomicity, Inspector and stable identity. |
+| U13 durable value/live-operation matrix | 7 separately compiled consumer tests passed | `bfa5fc27-3050-4ff5-851c-b385a35bbe29` covers nested required/optional × explicit/default references through source publication, spawn, repeated Prefab, patch defaults, strict Export and logical unload/reload/delete; delayed commands use exact runtime incarnations. |
+| U9 real Image/native composition | 8 passed | `65465bef-c952-4b29-b962-1fc049668652`; real threaded TaskPlugin, PNG import/preparation, exact immutable snapshot, native hooks/Required state, accepted latest revision, Retry, unload/late completion and physical close retry. Initial new tests incorrectly assumed Editor retained-budget semantics for ordinary ImagePlugin; corrected without changing product code. |
+| F17 actual-device extent guard | Red reproduced; 107 WGPU tests passed, two native qualifications skipped | Red `9e8d9721-8c85-4e8f-9a30-1204ebb2db84`; green `b963f04b-5672-41d2-a7dc-5e27672ff60a`. Guard is committed in `4c0b49f`. No live maximum-size Surface claim. |
+| U12 hierarchy/Transform baseline | Three hierarchy timing processes, one Transform timing process and one isolated allocation process passed correctness | [Retained report, compressed raw samples and per-process summaries](../benchmarks/2026-10-18-foundation-scale.md). Allocation run `4b711344-1aff-4c2d-9616-badbb4164d5c`: 32 consistent windows with stable adjusted requested heap; no general memory/leak claim. F11's multi-producer investigation flag is exceeded; stress rows do not have complete P99. |
+| Final Editor authoring loop | 1 passed, 1 skipped | Run `d83abdc9-5340-4e8c-ac65-a0fe104ea495` exercises unsaved source and explicit Play lifecycle. The skipped native qualification is not claimed. |
+| Final reference-game consumers | 34 passed, 0 skipped | Run `ca80ff09-f007-4b14-8de2-7dbec1daea0b`: authoring, desktop render and first_wave, including current-tick parented weapon/enemy poses, stable-asset Retry and old-incarnation retirement. This is consumer regression evidence, not native release qualification. |
+| Complementary root Host close/successor consumers | 3 passed | Run `909aa131-5a26-4992-8a27-c73a478b7590` covers real image task close retry, retained close evidence and saved-source edit/save/restart/successor Play receipts. These are complementary Host tests; the new external Image/native fixture does not run inside every Host composition. |
+| Final workspace and hygiene | Passed | `cargo check --locked --workspace --all-targets --all-features` completed in 46.42 s after final source formatting. `cargo fmt --all`, independent-consumer formatting and `git diff --check` pass. Existing deprecation/dead-code warnings remain. This is a build check, not a claim that all workspace tests executed. |
 | F01 regression before repair | Failed, then repaired-owner and consumer suites passed | Red run `cc35e95f-47ee-4663-b933-4f0b15d5255d`; green run `f6bfd071-3de4-4453-9d91-34aeaa9b2e3a`. Root startup and real project Retry results are recorded below. |
 | F02 regression before repair | Failed, then focused repaired suite passed | Red run `e9caedac-3687-400d-8d49-56b32162015f`; same green run as F01. GPU scope recorded separately below. |
 | F03 coupled-field transaction | Reproduced, repaired; 3 focused tests passed | Both Scene and Prefab regressions rejected operation 0 before repair. Green run `319662ab-c409-4b28-ab4f-9a32b8172113` covers either field order, invalid-final atomicity, Undo, private candidate application and invalid intermediate shape rejection. |
@@ -503,11 +572,11 @@ executed results below. Proposed acceptance bullets above are not execution evid
 | WGPU ui-submitter library suite | 95 passed | Run `1c2384ef-5d72-43cf-aa50-47ca80449891`; Windows, `WGPU_BACKEND=dx12`, Rust 1.99.0, 12.664 s. Includes shared-cache GPU upload/replay and nonblank glyph readback; not complete native Editor qualification. |
 | Reference-game first_wave consumer suite | 21 passed | Run `69c2a08b-6b85-4386-8de7-fb22361fba7a`; Windows, Rust 1.99.0, 2.593 s. A guarded project copy uses a stable image UUID, retires the initial player, and successfully applies Retry with the same image handle after the loader snapshot has been released. |
 | Scoped code review and formatting | Passed | Independent Scene ownership/API and glyph/cache/Retry reviews found no blocking P1/P2 findings. Scoped reuse, quality, efficiency, test-value and comment checks required no further abstraction. `cargo fmt --all`, the excluded reference-game formatter, and `git diff --check` passed. |
-| Report paths and structure | Passed | Inline Python: all referenced local files exist; 119 HTML links checked after integration; 16 finding IDs match Markdown; no duplicate IDs or invalid in-page links; no external assets; default visibility and control labels checked. |
+| Report paths and structure | Passed | Inline Python: local link targets exist; all 17 HTML finding IDs match Markdown; no duplicate IDs or invalid in-page links; no external assets; default visibility and control labels checked. |
 | Report interaction logic | Passed, DOM harness only | Inline Node: severity/class/status conjunction, case-insensitive multiword search, empty/reset, matching navigation, and Escape/search shortcut handlers. Print-all CSS and no-JS fallback are present. |
-| Report visual browser / printed pages | Not executed | No browser is available in the current environment. Layout, native keyboard interaction and actual printed pages are not visually qualified. |
+| Report visual browser / printed pages | Not executed | Visual layout, native keyboard interaction and print pagination are not qualified by structural checks. |
 
-All four passing suites ran serially with `CARGO_BUILD_JOBS=1` and the existing root `target`:
+The original four passing suites ran serially with `CARGO_BUILD_JOBS=1` and the existing root `target`:
 
 ```powershell
 cargo nextest run --locked -p nara_scene -p nara_ui_render --lib --test-threads=1 --no-fail-fast
@@ -518,9 +587,10 @@ cargo nextest run --locked -p nara_render_wgpu --features ui-submitter --lib --t
 cargo nextest run --locked --manifest-path reference-game/Cargo.toml --test first_wave --test-threads=1 --no-fail-fast
 ```
 
-These 264 tests establish the selected repair scope. No MSRV, full workspace, native Editor
-qualification, cross-platform release, or large-world performance claim is added. The initial
-new consumer test had an optional-image fixture access compile error, corrected before its
+These 264 tests establish the original repair scope; later validation rows retain their separate
+scope. No MSRV, native Editor qualification, cross-platform release, or large-world performance
+qualification is added. The initial new consumer test had an optional-image fixture access compile
+error, corrected before its
 successful execution; no production failure is inferred from that test-authoring error.
 
 Accepted sources governing changes include [ADR 0058](../architecture/adr/0058-stable-runtime-identity-and-entity-references.md),

@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "f1fde87569e584c0f2c50659839325f68f470d29df366696264f8164ca62ea74"
+source_fingerprint: "e4da3d4714cdb5cd338480121edede8dddbbdd2f931102ee9425183dc7e691e6"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "f1fde87569e584c0f2c50659839325f68f470d29df366696264f8164ca6
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `f1fde87569e584c0f2c50659839325f68f470d29df366696264f8164ca62ea74`
-- Immutable records: 729
+- Source fingerprint: `e4da3d4714cdb5cd338480121edede8dddbbdd2f931102ee9425183dc7e691e6`
+- Immutable records: 730
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [Foundation contract refactor scoped completion](verification/2026-10/2026-10-18T064513Z-foundation-contract-refactor-scoped-completion-299571832cbc4aa28cc9d5d3743bd527.md) - Final closure, durable references, real multi-owner reconciliation and measured scale evidence complete the required foundation slice.
 - **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
 - **Work Progress**: [Foundation identity residency, input endpoint and font ownership repairs](progress/2026-10/2026-10-18T040444Z-foundation-identity-input-font-repairs.md) - U5, U11 and U14 code and consumer proof, remaining recursive-schema work, serial test evidence and limits.
 - **Work Progress**: [Foundation U1 transaction boundary and U6 owner-thread repair](progress/2026-10/2026-10-18T033610Z-foundation-u1-u6-transaction-and-thread-ownership.md) - Reproduced and repaired intermediate native validation and executable-owner mobility; serial owning-package and consumer evidence.
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Progress: IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO li](logs/2026-10/2026-10-17T134542Z-progress-ime-fixture08ba267d-passes-after-ordinary-prepare-frame-and-complete-focus-io-li-59c93b32eace43bd8a9eb90b13b3dcb7.md) - IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO lifecycle; GPU rejected-frame fixture now completes update_pla
 - **Memory Event**: [Verification: Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 lock](logs/2026-10/2026-10-17T134101Z-verification-independent-module-consumer-cohort-455d45a5-passes18-18-using-published0-21-lock-29b4d17cf24a4c088c25eea27cde2d20.md) - Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 locks. First Windows DX12 native run aeca2708 executes7:5 existi
 - **Memory Event**: [Verification: Dear 0.21 integration passes cargo check --workspace --all-features --all-target](logs/2026-10/2026-10-17T133203Z-verification-dear-0-21-integration-passes-cargo-check-workspace-all-features-all-target-2f9e6290d3e0481f9958ebbd9b925a46.md) - Dear 0.21 integration passes cargo check --workspace --all-features --all-targets --locked --offline after caller/test API migration. Render
-- **Memory Event**: [Progress: Dear 0.21 upgrade active ef15d6f0. Registry core/Winit/WGPU packages match upstr](logs/2026-10/2026-10-17T131134Z-progress-dear-0-21-upgrade-active-ef15d6f0-registry-core-winit-wgpu-packages-match-upstr-f47a701e3f5f4f72a842f820499c2943.md) - Dear 0.21 upgrade active ef15d6f0. Registry core/Winit/WGPU packages match upstream 58a44069; root, module-consumer and reference-game locks
 
 # Integration Notes
 
