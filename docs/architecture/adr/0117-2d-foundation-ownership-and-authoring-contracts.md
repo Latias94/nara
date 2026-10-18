@@ -56,6 +56,15 @@ their guards remain until affected consumers move to the new owning seam. Requir
 hooks are not simply enabled inside an existing rollback-protected mutation. The first proof uses
 the real Image pipeline and a hook-owning transient fixture, not a universal hydrator or physics SDK.
 
+The finite external consumer composes TaskPlugin-owned asynchronous image import, image preparation,
+and a hook/RequiredComponents-owning native object that retains the exact prepared image snapshot.
+It proves accepted-revision retry, no late-completion resurrection after unload, and physical
+Stop/CloseIncomplete/RetryClose ownership without a common coordination interface. Ordinary
+ImagePlugin import budgets end at publication; immutable resident pixels can remain owned after
+that work budget is released. Editor `commit_retained` accounting remains a separate policy.
+This evidence does not qualify production physics/audio, arbitrary native rollback or every
+project-host successor composition.
+
 ### Identity and resource state remain independently meaningful
 
 Logical asset UUID, content locator, derivation key, and process-local handle identify different facts.

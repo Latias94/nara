@@ -20,6 +20,13 @@ bevy_ecs = "0.20"
 nara_app = { path = "../../../crates/nara_app" }
 nara_asset = { path = "../../../crates/nara_asset", default-features = false, features = ["serde"] }
 nara_ecs = { path = "../../../crates/nara_ecs" }
+nara_core = { path = "../../../crates/nara_core" }
+nara_fs = { path = "../../../crates/nara_fs" }
+nara_hierarchy = { path = "../../../crates/nara_hierarchy" }
+nara_image = { path = "../../../crates/nara_image", features = ["render-prepare", "serde"] }
+nara_render = { path = "../../../crates/nara_render" }
+nara_tasks = { path = "../../../crates/nara_tasks" }
+nara_transform = { path = "../../../crates/nara_transform" }
 nara_identity = { path = "../../../crates/nara_identity", features = ["serde"] }
 nara_tooling = { path = "../../../crates/nara_tooling" }
 ron = "0.8"

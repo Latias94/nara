@@ -11,11 +11,16 @@ use nara_app::{
     PluginSchemaProviderId, PluginShutdownContext, RuntimeInstance, RuntimeStartFailure,
     StartupStage,
 };
+use nara_asset::Handle;
 use nara_ecs::{
     Component, Entity, Mut, Resource, World, error::BevyError, lifecycle::HookContext,
-    world::DeferredWorld,
+    schedule::IntoScheduleConfigs, world::DeferredWorld,
 };
 use nara_identity::EntityLookup;
+use nara_image::{
+    ImageAsset, ImageReloadStats, PreparedImageResource, PreparedImageSnapshot, image_resource_key,
+    prepare_images,
+};
 use nara_reflect::{
     ComponentRegistry, ComponentRegistryError, ComponentRegistryPlugin, ComponentSchemaCatalog,
     ComponentSchemaOwnerId, ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
@@ -23,6 +28,7 @@ use nara_reflect::{
     PersistentComponent, PersistentComponentProvider, component_registry,
     register_schema_provider_for_plugin,
 };
+use nara_render::PreparedRenderResources;
 use nara_scene::{
     SceneAuthoringRevision, SceneAuthoringSession, SceneComponentRecord, SceneDocument,
     SceneDocumentCandidate, SceneEntityId, SceneEntityRecord,
@@ -72,8 +78,12 @@ pub struct HookOwned {
 pub struct NativeState {
     pub revision: SceneAuthoringRevision,
     pub value: u64,
+    pub image: Option<PreparedImageSnapshot>,
     lease: NativeLease,
 }
+
+#[derive(Clone, Copy, Resource)]
+pub struct NativeImageSource(pub Handle<ImageAsset>);
 
 impl NativeState {
     pub fn allocation(&self) -> u64 {
@@ -230,6 +240,12 @@ impl Plugin for NativeDomainPlugin {
             })?
             .add_systems(StartupStage::Scene, start_domain)?
             .add_systems(CoreStage::Update, update_domain)?;
+        if app.world().contains_resource::<NativeImageSource>() {
+            app.add_systems(
+                CoreStage::Prepare,
+                reconcile_image_native_state.after(prepare_images),
+            )?;
+        }
         Ok(())
     }
 
@@ -241,14 +257,16 @@ impl Plugin for NativeDomainPlugin {
 
 pub fn start(control: &Control) -> Result<RuntimeInstance, RuntimeStartFailure> {
     let mut app = App::new();
-    app.add_plugins((
-        ComponentRegistryPlugin,
-        NativeDomainPlugin {
-            control: control.clone(),
-        },
-    ))
-    .unwrap();
+    app.add_plugin(ComponentRegistryPlugin).unwrap();
+    install(&mut app, control);
     RuntimeInstance::start(app)
+}
+
+pub fn install(app: &mut App, control: &Control) {
+    app.add_plugin(NativeDomainPlugin {
+        control: control.clone(),
+    })
+    .unwrap();
 }
 
 fn catalog() -> Result<ComponentSchemaCatalog, ComponentSchemaProviderSourceError> {
@@ -394,6 +412,20 @@ fn reconcile(
         domain.readiness = Readiness::Ready(revision);
         return;
     };
+    create_native_state(world, domain, control, entity);
+}
+
+fn create_native_state(world: &mut World, domain: &mut Domain, control: &Control, entity: Entity) {
+    let revision = domain.session.revision();
+    let image = if world.contains_resource::<NativeImageSource>() {
+        let Some(snapshot) = current_image_snapshot(world) else {
+            domain.readiness = Readiness::Pending(revision);
+            return;
+        };
+        Some(snapshot)
+    } else {
+        None
+    };
     let value = world.get::<Configuration>(entity).unwrap().value;
     if control.fail_creation.swap(false, Ordering::SeqCst) {
         control
@@ -416,6 +448,7 @@ fn reconcile(
     world.entity_mut(entity).insert(NativeState {
         revision,
         value,
+        image,
         lease: NativeLease {
             id: allocation,
             effects: Arc::clone(&control.effects),
@@ -423,6 +456,47 @@ fn reconcile(
     });
     world.flush();
     domain.readiness = Readiness::Ready(revision);
+}
+
+fn current_image_snapshot(world: &World) -> Option<PreparedImageSnapshot> {
+    if world.resource::<ImageReloadStats>().pending != 0 {
+        return None;
+    }
+    let handle = world.resource::<NativeImageSource>().0;
+    let record = world
+        .resource::<PreparedRenderResources<PreparedImageResource>>()
+        .get(image_resource_key(handle))?;
+    Some(PreparedImageSnapshot::new(
+        record.snapshot().clone(),
+        record.resource()?.clone(),
+    ))
+}
+
+fn reconcile_image_native_state(world: &mut World) {
+    let control = world.resource::<Control>().clone();
+    world.resource_scope(|world, mut domain: Mut<Domain>| {
+        if matches!(domain.readiness, Readiness::Unavailable(..)) {
+            return;
+        }
+        let Some(entity) = domain.session.live_instance().and_then(|instance| {
+            match instance.resolve(world, &local_id()) {
+                EntityLookup::Resolved(entity) => Some(entity),
+                _ => None,
+            }
+        }) else {
+            return;
+        };
+        let snapshot = current_image_snapshot(world);
+        let native = world.get::<NativeState>(entity);
+        match (native, snapshot) {
+            (Some(native), Some(snapshot)) if native.image.as_ref() == Some(&snapshot) => return,
+            (Some(_), None) if world.resource::<ImageReloadStats>().pending != 0 => return,
+            (Some(_), _) => retire_native_state(world),
+            (None, None) => return,
+            (None, Some(_)) => {}
+        }
+        create_native_state(world, &mut domain, &control, entity);
+    });
 }
 
 fn retire_native_state(world: &mut World) {
