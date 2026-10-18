@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-10-18
 **Refined By**: ADR 0042: Runtime Service and Backend Boundary; ADR 0095: Plugin-Owned Specialized
 Domains and Project Configuration;
 [ADR 0102](0102-renderer-neutral-ui-text-widget-and-presented-frame-topology.md): Renderer-Neutral
@@ -22,6 +23,11 @@ workspace-internal deep module for deterministic font admission, shaping, bidi/l
 measurement, glyph keys/raster requests, and diagnostics. Project fonts, localization, editable
 text, world text, replaceable providers, atlas allocation, and GPU residency remain outside this
 accepted slice.
+
+The foundation font repair admits one caller-selected immutable `FontFace` through the existing
+compiler and presentation workflow. Shaping and rasterization retain clones of that same validated
+face owner and content identity. Bundled-font defaults remain available. This is a code-configured
+single-face workflow; it does not admit project font assets, fallback sets or a mutable font service.
 
 ## Context
 

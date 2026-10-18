@@ -3,11 +3,12 @@ use std::{
     sync::Arc,
 };
 
-use nara_app::{App, Plugin, PluginError};
+use nara_app::{App, Plugin, PluginDefinition, PluginDefinitionId, PluginError};
 use nara_asset::AssetServer;
 use nara_ecs::{Mut, ResMut, Resource, World, system::SystemParam};
 use nara_image::{IMAGE_PREPARE_PLUGIN_ID, PreparedImageResource};
 use nara_render::{PreparedRenderResources, RenderTarget};
+use nara_text::FontFace;
 use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use nara_window::WindowId;
 use thiserror::Error;
@@ -947,8 +948,33 @@ fn take_backend_presentation_frame(
     })
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct UiRenderPlugin;
+#[derive(Debug, Default, Clone)]
+pub struct UiRenderPlugin {
+    font: Option<FontFace>,
+}
+
+impl UiRenderPlugin {
+    /// Selects the admitted font used to rasterize frames compiled with the same face.
+    #[must_use]
+    pub fn with_font(font: FontFace) -> Self {
+        Self { font: Some(font) }
+    }
+}
+
+const UI_RENDER_PLUGIN_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.ui-render.configured", 1);
+
+/// Creates a repeatable presentation plugin definition bound to one font content identity.
+#[must_use]
+pub fn plugin(font: FontFace) -> PluginDefinition {
+    let mut configuration = b"nara.ui-render.font.v1\0".to_vec();
+    configuration.extend_from_slice(font.id().as_bytes());
+    PluginDefinition::infallible::<UiRenderPlugin, _>(
+        UI_RENDER_PLUGIN_DEFINITION_ID,
+        configuration,
+        move || UiRenderPlugin::with_font(font.clone()),
+    )
+}
 
 pub const UI_RENDER_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui-render");
 const UI_RENDER_PLUGIN_REQUIREMENTS: &[nara_app::PluginId] =
@@ -966,11 +992,13 @@ impl Plugin for UiRenderPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
-        let planner = UiPresentationPlanner::new(Default::default()).map_err(|error| {
-            PluginError::SetupFailed {
-                plugin: UI_RENDER_PLUGIN_ID,
-                message: error.to_string(),
-            }
+        let planner = match self.font.clone() {
+            Some(font) => UiPresentationPlanner::with_font(font, Default::default()),
+            None => UiPresentationPlanner::new(Default::default()),
+        }
+        .map_err(|error| PluginError::SetupFailed {
+            plugin: UI_RENDER_PLUGIN_ID,
+            message: error.to_string(),
         })?;
         app.insert_resource(UiPresentationState(planner))?;
         app.init_resource::<UiPresentationRoutes>()?;

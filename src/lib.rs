@@ -28,13 +28,14 @@ pub mod identity {
     pub use nara_identity::{
         EntityIdentityAxis, EntityLookup, EntityReference, EntityReferenceRemap,
         IdentityAllocationError, IdentityDomainError, IdentityDomainStats, IdentityRemapError,
-        IdentityTombstone, IdentityTombstoneSubject, PersistentRuntimeId, PersistentRuntimeIdError,
-        PersistentRuntimeNamespaceId, PersistentRuntimeNamespaceIdError,
-        PersistentRuntimeReference, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
+        IdentityTombstone, IdentityTombstoneSubject, PersistentRetirementDisposition,
+        PersistentRuntimeId, PersistentRuntimeIdError, PersistentRuntimeNamespaceId,
+        PersistentRuntimeNamespaceIdError, PersistentRuntimeReference, RuntimeEntityIncarnation,
+        RuntimeEntityIncarnationError, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
         SceneIdentitySnapshot, SceneInstanceId, SpawnedSceneInstance, TombstoneCause,
         WorldEntityLocator, WorldEntityLocatorRemap, WorldEntityLocators, WorldEntityToken,
-        WorldIdentityDomain, WorldIdentityDomainId, WorldIdentityDomainSettings,
-        WorldIdentitySettingsError, resolve_in_world, spawn_identity_entity,
+        WorldIdentityDomain, WorldIdentityDomainId, WorldIdentityDomainSettings, resolve_in_world,
+        spawn_identity_entity,
     };
 }
 #[cfg(any(feature = "runtime-2d", feature = "presentation-ui"))]
@@ -78,7 +79,9 @@ pub use nara_ui as ui;
 pub mod ui_render {
     //! Runtime UI presentation product surface.
 
-    pub use nara_ui_render::{UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiRenderPlugin};
+    pub use nara_ui_render::{
+        UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiRenderPlugin, plugin,
+    };
 
     /// Explicit packet/compiler boundary for Host, backend, and product-verification integrations.
     pub mod advanced {

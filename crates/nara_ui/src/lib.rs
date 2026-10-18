@@ -12,8 +12,12 @@ mod interaction;
 mod runtime;
 mod style;
 
-use nara_app::{App, CoreStage, Plugin, PluginError, PluginPreflightContext};
+use nara_app::{
+    App, CoreStage, Plugin, PluginDefinition, PluginDefinitionId, PluginError,
+    PluginPreflightContext,
+};
 use nara_ecs::schedule::IntoScheduleConfigs;
+pub use nara_text::{FontFace, FontFaceError};
 
 pub use authoring::{
     UiButton, UiButtonVisuals, UiNode, UiRoot, UiRuntimeKey, UiSemantics, UiText, UiTheme, UiVisual,
@@ -39,8 +43,31 @@ pub use runtime::{
 };
 pub use style::*;
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct UiPlugin;
+#[derive(Debug, Default, Clone)]
+pub struct UiPlugin {
+    font: Option<FontFace>,
+}
+
+impl UiPlugin {
+    /// Selects one admitted font for every surface compiled by this plugin instance.
+    #[must_use]
+    pub fn with_font(font: FontFace) -> Self {
+        Self { font: Some(font) }
+    }
+}
+
+const UI_PLUGIN_DEFINITION_ID: PluginDefinitionId =
+    PluginDefinitionId::new("nara.ui.configured", 1);
+
+/// Creates a repeatable UI plugin definition whose identity includes the selected font content.
+#[must_use]
+pub fn plugin(font: FontFace) -> PluginDefinition {
+    let mut configuration = b"nara.ui.font.v1\0".to_vec();
+    configuration.extend_from_slice(font.id().as_bytes());
+    PluginDefinition::infallible::<UiPlugin, _>(UI_PLUGIN_DEFINITION_ID, configuration, move || {
+        UiPlugin::with_font(font.clone())
+    })
+}
 
 pub const UI_PLUGIN_ID: nara_app::PluginId = nara_app::PluginId::new("nara.ui");
 pub const UI_SCHEMA_PROVIDER_ID: nara_app::PluginSchemaProviderId =
@@ -99,6 +126,13 @@ impl Plugin for UiPlugin {
     }
 
     fn build(&self, app: &mut App) -> Result<(), PluginError> {
+        let font = match self.font.clone() {
+            Some(font) => font,
+            None => nara_text::bundled_font_face().map_err(|error| PluginError::SetupFailed {
+                plugin: UI_PLUGIN_ID,
+                message: error.to_string(),
+            })?,
+        };
         nara_reflect::register_schema_provider_for_plugin(
             app,
             UI_PLUGIN_ID,
@@ -108,12 +142,7 @@ impl Plugin for UiPlugin {
         if !app.world().contains_resource::<runtime::UiDefaultTheme>() {
             app.insert_resource(runtime::UiDefaultTheme(UiTheme::default()))?;
         }
-        app.insert_resource(runtime::UiRuntimeState::new().map_err(|message| {
-            PluginError::SetupFailed {
-                plugin: UI_PLUGIN_ID,
-                message,
-            }
-        })?)?;
+        app.insert_resource(runtime::UiRuntimeState::new(font))?;
         app.init_resource::<UiAdapterDiagnostics>()?;
         app.init_resource::<UiActionJournal>()?;
         app.init_resource::<UiRouteRejectionLog>()?;

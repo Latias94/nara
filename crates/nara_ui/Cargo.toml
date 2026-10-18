@@ -20,6 +20,7 @@ nara_ui_widgets.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+nara_image = { workspace = true, features = ["render-prepare"] }
 nara_render.workspace = true
 nara_transform.workspace = true
 nara_ui_render.workspace = true

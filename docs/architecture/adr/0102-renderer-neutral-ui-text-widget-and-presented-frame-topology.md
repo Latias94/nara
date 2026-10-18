@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-08-04
+**Last Revised**: 2026-10-18
 **Amended**: 2026-08-05 by the NUI-U8 post-decision checkpoint; 2026-08-06 by the NUI-U17 pre-implementation ownership checkpoint; 2026-08-07 by the NUI-U15A example-first interface-proof checkpoint; 2026-08-08 by the focused U15A focus-identity refreeze and UI Foundation rebaseline; 2026-08-10 by the UIF-U5 public-inventory and Host-authority audit; 2026-08-12 by the UIFD immutable dynamic-text projection correction
 **Owner**: UI authoring, text, widget behavior, input routing, presentation packets, and platform adapters
 **Refines**: [ADR 0012](0012-render-crate-boundaries.md),
@@ -142,6 +143,11 @@ flowchart LR
 - `nara_text` owns bounded deterministic font admission, shaping, bidi/line layout, measurement,
   glyph keys/raster requests, and diagnostics without system-font discovery. Atlas allocation and
   GPU residency remain presentation-owner responsibilities.
+- One immutable admitted `FontFace` is the source for both compiler shaping and presentation
+  rasterization. Code-configured UI and presentation plugins capture that face in their frozen
+  configuration identity; the bundled face is their convenience default. A planner rejects glyph
+  runs from a different face before staged atlas or packet publication, retaining its last-good
+  output. Packets remain resource-complete and do not consult a mutable font registry at submission.
 - Kernel routing owns capture/target/bubble, pointer capture, focus scopes, modal inertness,
   navigation, semantics, and geometry-coupled session state. `nara_ui_widgets` owns controlled
   behavior reducers and emits typed intents only.

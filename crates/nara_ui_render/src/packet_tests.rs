@@ -10,7 +10,7 @@ use nara_image::{
     PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
 };
 use nara_render::{RenderResourceKey, RenderResourceKind, RenderResourceSnapshot, RenderTarget};
-use nara_text::bundled_font_face;
+use nara_text::{FontFace, bundled_font_face};
 use nara_ui_kernel::{
     UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
     UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiSafeAreaInsets,
@@ -44,6 +44,15 @@ fn frame_with_environment(
     nodes: Vec<UiNode>,
     environment: UiEnvironment,
 ) -> Arc<nara_ui_kernel::UiFrame> {
+    frame_with_font(revision, nodes, environment, bundled_font_face().unwrap())
+}
+
+fn frame_with_font(
+    revision: u64,
+    nodes: Vec<UiNode>,
+    environment: UiEnvironment,
+    font: FontFace,
+) -> Arc<nara_ui_kernel::UiFrame> {
     let snapshot = UiAuthoringSnapshotBuilder::new(revision)
         .with_root(
             UiRoot::new(
@@ -60,7 +69,7 @@ fn frame_with_environment(
         UiThemePalette::default(),
     )
     .unwrap();
-    UiCompiler::new(bundled_font_face().unwrap(), Default::default())
+    UiCompiler::new(font, Default::default())
         .unwrap()
         .compile(&snapshot, environment, theme)
         .unwrap()
@@ -132,6 +141,101 @@ fn captured_image_snapshot_with_kind(kind: RenderResourceKind) -> PreparedImageS
         snapshot.identity().descriptor_hash(),
     );
     PreparedImageSnapshot::new(identity, snapshot.resource().clone())
+}
+
+#[test]
+fn custom_font_shapes_and_plans_nonblank_glyphs() {
+    let font = FontFace::from_bytes(
+        include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        0,
+    )
+    .unwrap();
+    assert_ne!(font.id(), bundled_font_face().unwrap().id());
+    let environment =
+        UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 320.0, 180.0, 1.0, 1, 1, 1, 1).unwrap();
+    let candidate = frame_with_font(
+        1,
+        vec![text_node("custom-label", "Nara mono", None)],
+        environment,
+        font.clone(),
+    );
+    let packet = UiPresentationPlanner::with_font(font, Default::default())
+        .unwrap()
+        .plan(
+            candidate,
+            RenderTarget::Window(WindowId::PRIMARY),
+            &UiPreparedImages::default(),
+        )
+        .expect("an admitted custom face must support ordinary glyph presentation");
+
+    assert!(
+        packet
+            .primitives()
+            .iter()
+            .any(|primitive| matches!(primitive, UiPacketPrimitive::Glyph { .. }))
+    );
+    assert!(
+        packet
+            .glyph_pages()
+            .iter()
+            .any(|page| page.pixels().iter().any(|coverage| *coverage != 0))
+    );
+}
+
+#[test]
+fn foreign_font_is_rejected_before_atlas_mutation_and_last_good_replay_survives() {
+    let custom = FontFace::from_bytes(
+        include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        0,
+    )
+    .unwrap();
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    let mut planner = UiPresentationPlanner::with_font(custom.clone(), Default::default()).unwrap();
+    let candidate = frame_with_font(
+        1,
+        vec![text_node("label", "Nara mono", None)],
+        UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 320.0, 180.0, 1.0, 1, 1, 1, 1).unwrap(),
+        custom.clone(),
+    );
+    let first = planner
+        .plan(Arc::clone(&candidate), target, &UiPreparedImages::default())
+        .unwrap();
+    let submission = crate::packet::UiPreparedBackendSubmission::new(
+        crate::UiPresentationAttemptId::new(1).unwrap(),
+        Arc::clone(&first),
+        crate::UiPresentationEpoch::new(1).unwrap(),
+        crate::UiPresentationRuntimeGeneration::new(1).unwrap(),
+        crate::UiPresentationCapabilityGeneration::new(1).unwrap(),
+    );
+    planner
+        .replace_backend_submissions(std::slice::from_ref(&submission), &[])
+        .unwrap();
+    planner.commit_presented(submission.identity(), Arc::clone(&first));
+    let error = planner
+        .plan(
+            frame(1, 2, vec![text_node("label", "Nara", None)]),
+            target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error,
+        UiPresentationContentError::FontFaceMismatch {
+            expected: custom.id(),
+            actual: bundled_font_face().unwrap().id(),
+        }
+    );
+    assert!(Arc::ptr_eq(&planner.planned(target).unwrap(), &first));
+    assert!(Arc::ptr_eq(
+        &planner.last_presented(target).unwrap(),
+        &first
+    ));
+
+    let replay = planner
+        .plan(candidate, target, &UiPreparedImages::default())
+        .unwrap();
+    assert_eq!(first.glyph_pages()[0].key(), replay.glyph_pages()[0].key());
+    assert!(first.glyph_pages()[0].shares_storage_with(&replay.glyph_pages()[0]));
 }
 
 #[test]

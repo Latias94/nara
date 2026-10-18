@@ -58,6 +58,11 @@ impl TextEngine {
         })
     }
 
+    #[must_use]
+    pub const fn font_face_id(&self) -> crate::FontFaceId {
+        self.face.id()
+    }
+
     pub fn layout(&mut self, request: &TextLayoutRequest) -> Result<TextLayout, TextLayoutError> {
         self.layout_with_glyph_limit(request, self.limits.max_glyphs)
     }

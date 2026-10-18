@@ -720,7 +720,7 @@ mod tests {
         #[cfg(feature = "ui-submitter")]
         app.add_plugins((
             nara_image::ImagePreparePlugin,
-            nara_ui_render::UiRenderPlugin,
+            nara_ui_render::UiRenderPlugin::default(),
         ))
         .unwrap();
         app.add_plugins(WgpuRenderPlugin).unwrap();
@@ -922,7 +922,7 @@ mod tests {
         install_render_foundation(&mut app, false);
         app.add_plugins((
             nara_image::ImagePreparePlugin,
-            nara_ui_render::UiRenderPlugin,
+            nara_ui_render::UiRenderPlugin::default(),
         ))
         .unwrap();
         app.add_plugins(WgpuRenderPlugin).unwrap();
@@ -992,7 +992,7 @@ mod tests {
         install_render_foundation(&mut app, false);
         app.add_plugins((
             nara_image::ImagePreparePlugin,
-            nara_ui_render::UiRenderPlugin,
+            nara_ui_render::UiRenderPlugin::default(),
         ))
         .unwrap();
         app.add_plugins(WgpuRenderPlugin).unwrap();

@@ -12,7 +12,7 @@ mod planner;
 pub use integration::{
     UI_RENDER_PLUGIN_DECLARATION, UI_RENDER_PLUGIN_ID, UiPaintCompileStats,
     UiPresentationIntegrationError, UiRenderPlugin, compile_ui_paint_packets,
-    drain_ui_presentation_outcomes,
+    drain_ui_presentation_outcomes, plugin,
 };
 pub use limits::{UiPresentationLimits, UiPresentationLimitsError};
 pub use packet::{

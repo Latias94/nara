@@ -100,10 +100,120 @@ fn ui_app() -> UiTestApp {
         ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
         nara_input::InputPlugin,
-        UiPlugin,
+        UiPlugin::default(),
     ))
     .expect("UI test plugins should install");
     UiTestApp::new(app)
+}
+
+#[test]
+fn custom_font_uses_ordinary_adapter_and_configured_presentation() {
+    fn compile_packets(world: &mut World) {
+        let frames = crate::latest_ui_frames(world).unwrap();
+        let stats = nara_ui_render::compile_ui_paint_packets(world, &frames).unwrap();
+        assert_eq!(stats.admitted_packets, 1);
+        assert_eq!(stats.rejected_packets, 0);
+    }
+
+    let font = nara_text::FontFace::from_bytes(
+        include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+        0,
+    )
+    .unwrap();
+    let bundled = nara_text::bundled_font_face().unwrap();
+    assert_ne!(font.id(), bundled.id());
+    assert_eq!(
+        crate::plugin(font.clone()).key(),
+        crate::plugin(font.clone()).key()
+    );
+    assert_ne!(
+        crate::plugin(font.clone()).key(),
+        crate::plugin(bundled.clone()).key()
+    );
+    assert_eq!(
+        nara_ui_render::plugin(font.clone()).key(),
+        nara_ui_render::plugin(font.clone()).key()
+    );
+    assert_ne!(
+        nara_ui_render::plugin(font.clone()).key(),
+        nara_ui_render::plugin(bundled).key()
+    );
+
+    let mut configuration = App::new();
+    configuration
+        .add_plugins((
+            ComponentRegistryPlugin,
+            nara_hierarchy::HierarchyPlugin,
+            nara_transform::TransformPlugin,
+            nara_input::InputPlugin,
+            (
+                nara_render::RenderComponentsPlugin,
+                nara_render::RenderPlugin,
+                nara_image::ImagePreparePlugin,
+            ),
+            crate::plugin(font.clone()),
+            nara_ui_render::plugin(font.clone()),
+        ))
+        .unwrap();
+    configuration
+        .add_systems(CoreStage::Queue, compile_packets)
+        .unwrap();
+    let world = configuration.world_mut().unwrap();
+    install_test_surface(world);
+    nara_ui_render::__private::replace_ui_presentation_routes(
+        world,
+        [nara_ui_render::__private::UiPresentationRoute::new(
+            surface_id(),
+            nara_window::WindowId::PRIMARY,
+        )
+        .unwrap()],
+    )
+    .unwrap();
+    let root = world
+        .spawn((
+            UiRoot::new(UiLayer::Base),
+            UiNode::new(UiStyle::fill()),
+            UiRuntimeKey::new(TEST_DOMAIN, "custom-font-root").unwrap(),
+        ))
+        .id();
+    let label = world
+        .spawn((
+            UiNode::new(UiStyle::absolute(8.0, 6.0, 180.0, 40.0)),
+            UiText::new("Nara mono", 18.0).unwrap(),
+            UiRuntimeKey::new(TEST_DOMAIN, "custom-font-label").unwrap(),
+        ))
+        .id();
+    place_ui_tree(world, root, &[label]);
+
+    let mut app = UiTestApp::new(configuration);
+    app.update().unwrap();
+    let frame = latest_ui_frame(app.world(), surface_id()).unwrap().unwrap();
+    let glyphs = frame
+        .paint()
+        .iter()
+        .filter_map(|primitive| match primitive {
+            UiPaintPrimitive::Text { layout, .. } => Some(layout.glyphs()),
+            _ => None,
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    assert!(!glyphs.is_empty());
+    assert!(
+        glyphs
+            .iter()
+            .all(|glyph| glyph.key().face_id() == font.id())
+    );
+    let (packets, _) = nara_ui_render::__private::snapshot_ui_paint_packets(app.world())
+        .unwrap()
+        .into_parts();
+    assert_eq!(packets.len(), 1);
+    assert!(Arc::ptr_eq(&packets[0].frame(), &frame));
+    assert!(
+        packets[0]
+            .glyph_pages()
+            .iter()
+            .any(|page| page.pixels().iter().any(|coverage| *coverage != 0))
+    );
 }
 
 fn commit_ui_presentation(

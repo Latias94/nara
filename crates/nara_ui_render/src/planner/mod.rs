@@ -1,7 +1,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use nara_render::{RenderResourceKey, RenderTarget};
-use nara_text::{TextEngine, TextEngineCreateError, TextLimits, bundled_font_face};
+use nara_text::{
+    FontFace, FontFaceId, TextEngine, TextEngineCreateError, TextLimits, bundled_font_face,
+};
 use nara_ui_kernel::{UiFrame, UiSurfaceId};
 use thiserror::Error;
 
@@ -37,15 +39,28 @@ pub struct UiPresentationPlanner {
 
 impl UiPresentationPlanner {
     pub fn new(limits: UiPresentationLimits) -> Result<Self, UiPresentationPlannerCreateError> {
-        let limits = limits.validate()?;
         let face = bundled_font_face()
             .map_err(|error| UiPresentationPlannerCreateError::BundledFont(error.to_string()))?;
+        Self::with_font(face, limits)
+    }
+
+    /// Shares an admitted immutable face with the caller's shaping engine.
+    pub fn with_font(
+        face: FontFace,
+        limits: UiPresentationLimits,
+    ) -> Result<Self, UiPresentationPlannerCreateError> {
+        let limits = limits.validate()?;
         let text = TextEngine::new(face, TextLimits::default())?;
         Ok(Self {
             limits,
             text,
             targets: HashMap::new(),
         })
+    }
+
+    #[must_use]
+    pub const fn font_face_id(&self) -> FontFaceId {
+        self.text.font_face_id()
     }
 
     pub fn plan(
@@ -79,6 +94,16 @@ impl UiPresentationPlanner {
             });
         }
         let preflight = preflight_content(&frame, images, self.limits)?;
+        if let Some(key) = preflight
+            .requested_glyphs()
+            .iter()
+            .find(|key| key.face_id() != self.text.font_face_id())
+        {
+            return Err(UiPresentationContentError::FontFaceMismatch {
+                expected: self.text.font_face_id(),
+                actual: key.face_id(),
+            });
+        }
         let current_atlas = self
             .targets
             .get(&target)
@@ -399,6 +424,11 @@ pub enum UiPresentationContentError {
     NewGlyphLimitExceeded { limit: usize },
     #[error("glyph rasterization failed: {message}")]
     GlyphRasterizationFailed { message: String },
+    #[error("UI frame glyph face {actual:?} does not match planner face {expected:?}")]
+    FontFaceMismatch {
+        expected: FontFaceId,
+        actual: FontFaceId,
+    },
     #[error("glyph raster {width}x{height} exceeds the {limit} pixel extent limit")]
     GlyphExtentLimitExceeded { width: u32, height: u32, limit: u32 },
     #[error("the glyph atlas exceeds its {limit} page limit")]

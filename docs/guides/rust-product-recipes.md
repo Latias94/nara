@@ -165,3 +165,25 @@ for the first-party desktop Host, or pass the recipe through
 `PluginDefinition`, raw slot edits, parallel provider lists, runtime candidates, and retirement
 ledgers remain advanced embedding APIs. Do not put file I/O, dynamic package lookup, runner
 selection, or process authority into a recipe.
+
+## One Custom Runtime UI Font
+
+With Runtime UI and UI presentation enabled, admit one immutable face and configure both plugin
+owners with clones of it. The public `nara::ui::FontFace` type validates the supplied bytes; no
+system-font lookup or project-font asset pipeline is implied. Default plugin groups use the
+bundled face.
+
+```rust
+use nara::app::PluginGroup;
+use nara::prelude::{PresentationUiPlugins, RuntimeUiPlugins};
+
+let face = nara::ui::FontFace::from_bytes(font_bytes, 0)?;
+let runtime_ui = RuntimeUiPlugins.edit().configure(nara::ui::plugin(face.clone()));
+let presentation_ui = PresentationUiPlugins.edit().configure(nara::ui_render::plugin(face));
+```
+
+Install these configured groups in the same composition as their required runtime/render domains.
+Each definition's identity includes the face content ID, so fresh runtime reconstruction selects
+the same face. Direct App composition can instead use `UiPlugin::with_font(face.clone())` and
+`UiRenderPlugin::with_font(face)`. A planner rejects a foreign face before replacing its retained
+packet; glyph packets own their atlas pixels through backend submission.

@@ -364,7 +364,7 @@ mod tests {
         PreparedImageResource, PreparedImageSnapshot, image_descriptor_hash, image_resource_key,
     };
     use nara_render::RenderResourceSnapshot;
-    use nara_text::bundled_font_face;
+    use nara_text::{FontFace, bundled_font_face};
     use nara_ui_kernel::{
         UiAuthoringSnapshotBuilder, UiBorder, UiBrush, UiColor, UiCompiler, UiCornerRadii,
         UiEnvironment, UiImageId, UiLayer, UiLocalKey, UiNode, UiRoot, UiRootKey, UiStyle,
@@ -469,6 +469,65 @@ mod tests {
             nonblank_pixels < (READBACK_EXTENT * READBACK_EXTENT) as usize,
             "the glyph must not fill the entire target"
         );
+    }
+
+    #[test]
+    fn custom_face_glyph_packet_renders_nonblank_gpu_pixels() {
+        let face = FontFace::from_bytes(
+            include_bytes!("../../nara_text/tests/fixtures/FiraMono-Medium.ttf").to_vec(),
+            0,
+        )
+        .unwrap();
+        let node = UiNode::new(UiStyle::absolute(4.0, 4.0, 56.0, 40.0))
+            .with_key(UiLocalKey::runtime("wgpu-custom-font", "label").unwrap())
+            .with_text(UiText::new("Nara", 20.0).unwrap());
+        let snapshot = UiAuthoringSnapshotBuilder::new(1)
+            .with_root(
+                UiRoot::new(
+                    UiRootKey::runtime("wgpu-custom-font", "root").unwrap(),
+                    UiLayer::Base,
+                    UiStyle::fill(),
+                )
+                .with_child(node),
+            )
+            .build()
+            .unwrap();
+        let environment = UiEnvironment::new(
+            UiSurfaceId::new(1).unwrap(),
+            READBACK_EXTENT as f32,
+            READBACK_EXTENT as f32,
+            1.0,
+            1,
+            1,
+            1,
+            1,
+        )
+        .unwrap();
+        let frame = UiCompiler::new(face.clone(), Default::default())
+            .unwrap()
+            .compile(&snapshot, environment, UiTheme::default())
+            .unwrap();
+        let target = RenderTarget::Window(WindowId::PRIMARY);
+        let packet = nara_ui_render::UiPresentationPlanner::with_font(face, Default::default())
+            .unwrap()
+            .plan(frame, target, &Default::default())
+            .unwrap();
+        let mut batches = collect_ui_quad_batches(
+            &[packet],
+            target,
+            Some(WindowId::PRIMARY),
+            readback_viewport(),
+        )
+        .unwrap();
+        batches.retain(|batch| matches!(&batch.texture, WgpuQuadTexture::Glyph(_)));
+        assert!(!batches.is_empty());
+        let pixels = render_batches_to_rgba(&batches).unwrap();
+        let nonblank = pixels
+            .chunks_exact(READBACK_BYTES_PER_PIXEL as usize)
+            .filter(|pixel| pixel[3] != 0)
+            .count();
+        assert!(nonblank > 0);
+        assert!(nonblank < (READBACK_EXTENT * READBACK_EXTENT) as usize);
     }
 
     #[test]

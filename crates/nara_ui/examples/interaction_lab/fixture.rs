@@ -54,7 +54,7 @@ pub(super) fn build_lab() -> Result<(App, LabEntities), Box<dyn Error>> {
         ComponentRegistryPlugin,
         nara_hierarchy::HierarchyPlugin,
         nara_input::InputPlugin,
-        UiPlugin,
+        UiPlugin::default(),
     ))?;
     let gameplay_action = InputActionId::new(GAMEPLAY_ACTION)?;
     app.world_mut()?

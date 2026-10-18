@@ -2503,6 +2503,7 @@ dependencies = [
  "nara_core",
  "nara_ecs",
  "nara_hierarchy",
+ "nara_image",
  "nara_input",
  "nara_reflect",
  "nara_render",

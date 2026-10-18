@@ -574,15 +574,15 @@ pub(crate) struct UiRuntimeState {
 }
 
 impl UiRuntimeState {
-    pub(crate) fn new() -> Result<Self, String> {
-        Ok(Self {
-            font: nara_text::bundled_font_face().map_err(|error| error.to_string())?,
+    pub(crate) fn new(font: FontFace) -> Self {
+        Self {
+            font,
             limits: UiLimits::default(),
             surfaces: BTreeMap::new(),
             targets: UiSurfaceTargetIndex::default(),
             identities: UiSurfaceIdentityLedger::default(),
             next_source_revision: 1,
-        })
+        }
     }
 
     pub(crate) fn surface_snapshot(
