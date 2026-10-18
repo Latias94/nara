@@ -1,10 +1,18 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use guillotiere::{AtlasAllocator, size2};
 use nara_text::{GlyphRaster, GlyphRasterKey, TextEngine};
 use thiserror::Error;
 
 use crate::{UiGlyphAtlasPageKey, UiGlyphAtlasPageSnapshot, UiPresentationLimits};
+
+static NEXT_GLYPH_ATLAS_INCARNATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct AtlasPage {
@@ -49,6 +57,7 @@ pub(crate) enum GlyphSlot {
 
 #[derive(Clone, Default)]
 pub(crate) struct GlyphAtlas {
+    incarnation: u64,
     font_revision: Option<u64>,
     pages: Vec<AtlasPage>,
     glyphs: HashMap<GlyphRasterKey, GlyphSlot>,
@@ -66,7 +75,13 @@ impl GlyphAtlas {
         let mut staged = if self.font_revision == Some(font_revision) {
             self.clone()
         } else {
+            let incarnation = NEXT_GLYPH_ATLAS_INCARNATION
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+                    current.checked_add(1)
+                })
+                .map_err(|_| UiAtlasPlanError::GenerationExhausted)?;
             Self {
+                incarnation,
                 font_revision: Some(font_revision),
                 next_generation: 1,
                 ..Self::default()
@@ -151,7 +166,12 @@ impl GlyphAtlas {
         let extent = u32::try_from(page.allocator.size().width)
             .map_err(|_| UiAtlasPlanError::ArithmeticOverflow)?;
         Ok(UiGlyphAtlasPageSnapshot::new(
-            UiGlyphAtlasPageKey::new(self.font_revision.unwrap_or(1), page_index, page.generation),
+            UiGlyphAtlasPageKey::new(
+                self.incarnation,
+                self.font_revision.unwrap_or(1),
+                page_index,
+                page.generation,
+            ),
             extent,
             extent,
             Arc::clone(&page.pixels),

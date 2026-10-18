@@ -177,17 +177,27 @@ impl UiPacketUv {
     }
 }
 
-/// Stable identity of one immutable CPU glyph-atlas page generation.
+/// Process-local identity of one immutable CPU glyph-atlas page generation.
+///
+/// The atlas incarnation keeps independent or reconstructed atlas owners distinct even when
+/// their font revision, page index and local generation are equal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UiGlyphAtlasPageKey {
+    atlas_incarnation: u64,
     font_revision: u64,
     page_index: u16,
     generation: u64,
 }
 
 impl UiGlyphAtlasPageKey {
-    pub(crate) const fn new(font_revision: u64, page_index: u16, generation: u64) -> Self {
+    pub(crate) const fn new(
+        atlas_incarnation: u64,
+        font_revision: u64,
+        page_index: u16,
+        generation: u64,
+    ) -> Self {
         Self {
+            atlas_incarnation,
             font_revision,
             page_index,
             generation,

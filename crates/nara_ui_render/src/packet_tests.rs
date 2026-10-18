@@ -463,6 +463,11 @@ fn target_private_state_is_isolated_and_released_only_by_explicit_retirement() {
         )
         .unwrap();
 
+    assert_ne!(
+        first.glyph_pages()[0].pixels(),
+        second.glyph_pages()[0].pixels()
+    );
+    assert_ne!(first.glyph_pages()[0].key(), second.glyph_pages()[0].key());
     assert!(Arc::ptr_eq(&planner.planned(first_target).unwrap(), &first));
     assert!(Arc::ptr_eq(
         &planner.planned(second_target).unwrap(),
@@ -477,6 +482,88 @@ fn target_private_state_is_isolated_and_released_only_by_explicit_retirement() {
         &planner.planned(second_target).unwrap(),
         &second
     ));
+
+    let replacement = planner
+        .plan(
+            frame(1, 1, vec![text_node("replacement", "B", None)]),
+            first_target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    assert_ne!(
+        first.glyph_pages()[0].pixels(),
+        replacement.glyph_pages()[0].pixels()
+    );
+    assert_ne!(
+        first.glyph_pages()[0].key(),
+        replacement.glyph_pages()[0].key()
+    );
+}
+
+#[test]
+fn independent_planners_do_not_alias_glyph_pages_for_the_same_target() {
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    let mut first_planner = UiPresentationPlanner::default();
+    let mut second_planner = UiPresentationPlanner::default();
+    let first = first_planner
+        .plan(
+            frame(1, 1, vec![text_node("label", "A", None)]),
+            target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    let second = second_planner
+        .plan(
+            frame(1, 1, vec![text_node("label", "B", None)]),
+            target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+
+    assert_ne!(
+        first.glyph_pages()[0].pixels(),
+        second.glyph_pages()[0].pixels()
+    );
+    assert_ne!(first.glyph_pages()[0].key(), second.glyph_pages()[0].key());
+}
+
+#[test]
+fn font_revision_replacement_does_not_alias_retained_glyph_pages() {
+    let target = RenderTarget::Window(WindowId::PRIMARY);
+    let mut planner = UiPresentationPlanner::default();
+    let first = planner
+        .plan(
+            frame(1, 1, vec![text_node("label", "A", None)]),
+            target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    let changed_environment =
+        UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 320.0, 180.0, 1.0, 2, 1, 1, 2).unwrap();
+    let changed = planner
+        .plan(
+            frame_with_environment(2, vec![text_node("label", "B", None)], changed_environment),
+            target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    assert_eq!(changed.glyph_pages()[0].key().font_revision(), 2);
+
+    let replacement = planner
+        .plan(
+            frame(1, 3, vec![text_node("label", "B", None)]),
+            target,
+            &UiPreparedImages::default(),
+        )
+        .unwrap();
+    assert_ne!(
+        first.glyph_pages()[0].pixels(),
+        replacement.glyph_pages()[0].pixels()
+    );
+    assert_ne!(
+        first.glyph_pages()[0].key(),
+        replacement.glyph_pages()[0].key()
+    );
 }
 
 #[test]

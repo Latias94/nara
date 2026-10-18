@@ -739,6 +739,75 @@ mod tests {
         assert_eq!(cache.logical_texture_bytes(), 0);
     }
 
+    #[cfg(feature = "ui-submitter")]
+    #[test]
+    fn independent_glyph_atlases_upload_separately_and_replay_reuses_the_same_page() {
+        use nara_render::RenderTarget;
+        use nara_ui_kernel::{
+            UiAuthoringSnapshotBuilder, UiCompiler, UiEnvironment, UiLayer, UiLocalKey, UiNode,
+            UiRoot, UiRootKey, UiStyle, UiSurfaceId, UiText, UiTheme,
+        };
+        use nara_ui_render::{UiPreparedImages, UiPresentationPlanner};
+        use nara_window::WindowId;
+
+        let plan_page = |text: &str| {
+            let snapshot = UiAuthoringSnapshotBuilder::new(1)
+                .with_root(
+                    UiRoot::new(
+                        UiRootKey::runtime("glyph-cache", "root").unwrap(),
+                        UiLayer::Base,
+                        UiStyle::fill(),
+                    )
+                    .with_child(
+                        UiNode::new(UiStyle::absolute(4.0, 4.0, 56.0, 40.0))
+                            .with_key(UiLocalKey::runtime("glyph-cache", "label").unwrap())
+                            .with_text(UiText::new(text, 20.0).unwrap()),
+                    ),
+                )
+                .build()
+                .unwrap();
+            let environment =
+                UiEnvironment::new(UiSurfaceId::new(1).unwrap(), 64.0, 64.0, 1.0, 1, 1, 1, 1)
+                    .unwrap();
+            let frame =
+                UiCompiler::new(nara_text::bundled_font_face().unwrap(), Default::default())
+                    .unwrap()
+                    .compile(&snapshot, environment, UiTheme::default())
+                    .unwrap();
+            UiPresentationPlanner::default()
+                .plan(
+                    frame,
+                    RenderTarget::Window(WindowId::PRIMARY),
+                    &UiPreparedImages::default(),
+                )
+                .unwrap()
+                .glyph_pages()[0]
+                .clone()
+        };
+        let first = plan_page("A");
+        let second = plan_page("B");
+        assert_ne!(first.pixels(), second.pixels());
+        assert_ne!(first.key(), second.key());
+
+        let (_, cache) = crate::readback_tests::render_to_rgba(|device, queue, _, _, _| {
+            let mut cache = WgpuSpriteTextureCache::default();
+            cache.begin_frame(1);
+            cache.ensure_glyph_page(device, queue, &first, 1).unwrap();
+            cache.ensure_glyph_page(device, queue, &second, 1).unwrap();
+            assert_eq!(cache.glyph_pages.len(), 2);
+            assert_eq!(cache.stats().uploaded_glyph_pages, 2);
+            assert_eq!(cache.stats().reused_glyph_pages, 0);
+
+            cache.ensure_glyph_page(device, queue, &first, 1).unwrap();
+            assert_eq!(cache.glyph_pages.len(), 2);
+            assert_eq!(cache.stats().uploaded_glyph_pages, 2);
+            assert_eq!(cache.stats().reused_glyph_pages, 1);
+            Ok(cache)
+        })
+        .unwrap();
+        assert_eq!(cache.stats().glyph_textures, 2);
+    }
+
     #[test]
     fn image_upload_observes_prior_shared_upload_work() {
         let key = RenderResourceKey::new(AssetId::from_raw(7), RenderResourceKind::IMAGE_2D);
