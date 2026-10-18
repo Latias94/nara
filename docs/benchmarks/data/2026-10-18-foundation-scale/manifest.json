@@ -1,0 +1,32 @@
+[
+  {
+    "file": "hierarchy-run-1.jsonl.gz",
+    "raw_sha256": "f3574dfe88e5851603a85198a0f6c25a7b0942ce3638add272ee904a9fef9af8",
+    "raw_bytes": 2416343,
+    "compressed_bytes": 63259
+  },
+  {
+    "file": "hierarchy-run-2.jsonl.gz",
+    "raw_sha256": "e2b80c0dba656a986371b105163d358acec6e1e08b81d9b071b3ee995459df95",
+    "raw_bytes": 2418251,
+    "compressed_bytes": 63025
+  },
+  {
+    "file": "hierarchy-run-3.jsonl.gz",
+    "raw_sha256": "2f0bb7b49fe171bbce04cc0ec3ab0ebdd1879c01f7ca569e16a3e5b4f4e4164f",
+    "raw_bytes": 2384916,
+    "compressed_bytes": 61551
+  },
+  {
+    "file": "transform-run-1.jsonl.gz",
+    "raw_sha256": "76d64e3dee259fe5b27a4f58bf08285b86899a599809cb4de4e0406afd98743f",
+    "raw_bytes": 3202055,
+    "compressed_bytes": 60914
+  },
+  {
+    "file": "allocation-run-1.jsonl.gz",
+    "raw_sha256": "4a434811a175722abaa0e74cc0066dd77a5b6a74c7ef9acd47d1668cbc681671",
+    "raw_bytes": 17155,
+    "compressed_bytes": 1065
+  }
+]
