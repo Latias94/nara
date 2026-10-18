@@ -2377,9 +2377,7 @@ fn identity_claim_failure_preserves_world_assets_ticks_and_allocator() {
             asset_link_record(AssetRef::path("textures/generated.png").unwrap()),
         )]);
     let mut world = World::new();
-    let settings =
-        WorldIdentityDomainSettings::new(ItemLimit::new(1).unwrap(), ItemLimit::new(1).unwrap())
-            .unwrap();
+    let settings = WorldIdentityDomainSettings::new(ItemLimit::ONE, ItemLimit::ONE, ItemLimit::ONE);
     let domain = WorldIdentityDomain::new(&world, settings).unwrap();
     world.insert_resource(domain);
     let mut asset_server = AssetServer::new();
@@ -2557,9 +2555,11 @@ fn authoring_replacement_failure_keeps_the_previous_projection() {
     let registry = test_registry();
     let id = scene_id("player");
     let mut world = World::new();
-    let settings =
-        WorldIdentityDomainSettings::new(ItemLimit::new(3).unwrap(), ItemLimit::new(3).unwrap())
-            .unwrap();
+    let settings = WorldIdentityDomainSettings::new(
+        ItemLimit::new(3).unwrap(),
+        ItemLimit::ONE,
+        ItemLimit::new(3).unwrap(),
+    );
     let domain = WorldIdentityDomain::new(&world, settings).unwrap();
     world.insert_resource(domain);
     let mut session =

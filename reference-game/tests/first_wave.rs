@@ -1761,15 +1761,13 @@ fn player_scene_identity(world: &World) -> (Entity, RuntimeEntityReference) {
     world
         .iter_entities()
         .find_map(|entity| {
-            let source = entity.get::<SceneEntitySource>()?;
-            (entity.contains::<PlayerRole>() && registered_scene_entity(world, entity.id())).then(
-                || {
-                    (
-                        entity.id(),
-                        RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
-                    )
-                },
-            )
+            entity.get::<SceneEntitySource>()?;
+            let locators = world
+                .resource::<WorldIdentityDomain>()
+                .locators_for_entity(world, entity.id())
+                .ok()??;
+            (entity.contains::<PlayerRole>() && registered_scene_entity(world, entity.id()))
+                .then(|| (entity.id(), locators.scene().unwrap().entity().clone()))
         })
         .expect("the wave should expose one scene-managed player")
 }
@@ -1778,10 +1776,13 @@ fn registered_scene_entity(world: &World, entity: Entity) -> bool {
     let Some(source) = world.get::<SceneEntitySource>(entity) else {
         return false;
     };
-    world.resource::<WorldIdentityDomain>().lookup(
-        world,
-        &RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
-    ) == EntityLookup::Resolved(entity)
+    let reference = nara::identity::EntityReference::SceneLocal {
+        entity: source.entity_id.clone(),
+    };
+    world
+        .resource::<WorldIdentityDomain>()
+        .resolve_entity_reference(world, &reference, Some(source.instance_id))
+        == EntityLookup::Resolved(entity)
 }
 
 fn is_first_enemy_source(source: &SceneEntitySource) -> bool {

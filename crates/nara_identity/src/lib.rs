@@ -8,15 +8,16 @@ mod types;
 pub use allocator::IdentityAllocationError;
 pub use domain::{
     EntityIdentityAxis, EntityLookup, IdentityDomainError, IdentityDomainStats, IdentityTombstone,
-    IdentityTombstoneSubject, SceneIdentitySnapshot, SpawnedSceneInstance, TombstoneCause,
-    WorldEntityLocators, WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
-    WorldIdentitySettingsError, resolve_in_world, spawn_identity_entity,
+    IdentityTombstoneSubject, PersistentRetirementDisposition, SceneIdentitySnapshot,
+    SpawnedSceneInstance, TombstoneCause, WorldEntityLocators, WorldEntityToken,
+    WorldIdentityDomain, WorldIdentityDomainSettings, resolve_in_world, spawn_identity_entity,
 };
 pub use remap::{EntityReferenceRemap, IdentityRemapError, WorldEntityLocatorRemap};
 pub use types::{
     EntityReference, PersistentRuntimeId, PersistentRuntimeIdError, PersistentRuntimeNamespaceId,
-    PersistentRuntimeNamespaceIdError, PersistentRuntimeReference, RuntimeEntityReference,
-    SceneEntityId, SceneEntityIdError, SceneInstanceId, WorldEntityLocator, WorldIdentityDomainId,
+    PersistentRuntimeNamespaceIdError, PersistentRuntimeReference, RuntimeEntityIncarnation,
+    RuntimeEntityIncarnationError, RuntimeEntityReference, SceneEntityId, SceneEntityIdError,
+    SceneInstanceId, WorldEntityLocator, WorldIdentityDomainId,
 };
 
 /// Workspace-internal Scene identity transaction support.

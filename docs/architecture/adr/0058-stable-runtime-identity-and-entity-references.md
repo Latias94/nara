@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-11
+**Last Revised**: 2026-10-18
 **Refines**: ADR 0034: Editor Play Mode World Boundary; ADR 0038: Scene/Prefab Authoring
 Identity and Provenance; ADR 0056: Headless Runtime and Dedicated Server Readiness
 **Refined By**: ADR 0076: Play Runtime Debug Control and Observation
@@ -49,7 +50,8 @@ runtime identity type.
 | `PersistentRuntimeReference` | Namespace plus persistent runtime ID | Allowed where the owning format grants entity-reference capability | World identity domain plus persistence restore/remap policy |
 | `EntityReference` | Durable semantic reference: document-local scene entity or persistent runtime entity | Allowed in component/document values; never contains a runtime instance or `Entity` | Requires document/spawn context or persistent lookup |
 | `SceneInstanceId` | Non-zero, monotonic, never-reused value inside one `WorldIdentityDomain` lifetime | Runtime/replay records only; forbidden in project documents | World identity domain |
-| `RuntimeEntityReference` | Resolvable scene-instance/entity pair or persistent runtime ID | Allowed in command/replay records that explicitly belong to one runtime timeline; forbidden as project authoring data | World identity domain |
+| `RuntimeEntityIncarnation` | Checked process-unique nonzero identity for one live entity activation | Runtime/replay admission only; not durable project identity | Identity token minting |
+| `RuntimeEntityReference` | Scene-instance/entity or persistent logical key plus exact incarnation | Allowed in command/replay records that explicitly belong to one runtime timeline; forbidden as project authoring data | World identity domain |
 | `WorldIdentityDomainId` | Process-unique opaque ID for one world identity domain | Observation/session records only; not project identity | Owning world resource |
 | `WorldEntityLocator` | World domain ID plus `RuntimeEntityReference` | Observation/session records only | Matching world identity domain |
 | `WorldEntityToken` | Opaque capability for one entity minted by its bound world identity domain | Never serialized | Matching bound world plus private identity marker |
@@ -75,13 +77,14 @@ resource owns:
 - the sole scene-instance allocator for that world;
 - active scene-reference and persistent-reference indexes;
 - an entity-to-identity reverse index that may carry both axes for one entity;
-- bounded lifetime claim sets for instance IDs and entity-reference axes that prevent reuse;
+- bounded lifetime claim sets for scene-instance IDs and scene-reference axes that prevent reuse;
+- a separately bounded persistent logical-record ledger with active, unloaded and deleted states;
 - a bounded recent-tombstone detail window and monotonic retirement sequence.
 
 Identity-aware spawn mints an opaque, non-serializable `WorldEntityToken` and attaches a crate-private
 domain marker to the entity. Registration accepts the token plus the target `World`, never a bare
 `Entity`, and validates the world binding, token domain, current entity generation, and private
-marker before consuming a claim. Equal entity allocator bits, a moved domain resource, a dead token,
+marker and matching incarnation before consuming a claim. Equal entity allocator bits, a moved domain resource, a dead token,
 or an unrelated replacement entity therefore cannot acquire another world's identity.
 
 Creating a `SceneSpawner` never creates an allocator. Every spawn entry point obtains the allocator
@@ -101,21 +104,41 @@ forward or reverse index. Input collection stops at the remaining lifetime-claim
 of materializing an unbounded rejected batch. An entity may have one scene identity and one
 persistent identity, but never two identities on the same axis.
 
-### Claims, tombstones, and lookup
+### Claims, logical residency, tombstones, and lookup
 
-The domain has two related budgets:
+The domain has three independent budgets:
 
 1. A lifetime claim budget charges one item for each scene-instance claim and one item for each
-   scene or persistent entity-reference axis accepted by the domain. Claims are not evicted, which
+   scene entity-reference axis accepted by the domain. Claims are not evicted, which
    makes no-reuse exact. An empty scene still costs one instance claim. Once exhausted, allocation,
    restore, or registration that would add claims fails atomically.
-2. A recent tombstone-detail budget bounds retained cause/sequence metadata. Older details may be
-   evicted, but their claims remain and lookup still returns `Tombstoned` rather than `Missing`.
+2. A persistent logical-record budget charges each distinct namespace/UUID once. Its state follows
+   `Unclaimed -> Active(N) -> Unloaded(last N) -> Active(N+1)`, with an explicit terminal `Deleted`
+   disposition from active or unloaded. Reactivation updates the same record and does not consume
+   a history-sized claim. Records are retained until domain retirement; a full ledger rejects new
+   distinct keys atomically. There is no implicit deletion resurrection or logical-record forgetting.
+3. A recent tombstone-detail budget bounds retained cause/sequence metadata. Older details may be
+   evicted, but scene claims and persistent Unloaded/Deleted states remain authoritative.
+
+A successful entity adoption mints an incarnation through checked process-global allocation; it
+never wraps or recycles. The token, private marker, active reverse binding and both runtime-reference
+variants carry it. Repeated adoption while a binding is current is idempotent. Identity-only
+retirement revokes the marker under exclusive World access before the surviving Entity can be
+adopted again. The existing lifecycle-free teardown tail may instead invalidate ownership by its
+guaranteed despawn. Marker mutation must satisfy the owning ECS lifecycle checks before publication.
+Old tokens cannot retire or register a later activation of the same Entity.
+
+The allocator's uniqueness scope is the running process. Cross-process checkpoint/replay still
+requires explicit timeline admission and complete remapping; serialized runtime records are not
+durable save identities. Repeatedly creating new Scene instances retains the existing independent
+scene lifetime budget and arbitrary-order explicit restore contract.
 
 Lookup always receives the target `World` and returns a typed outcome:
 
 - `Resolved(Entity)` when the reference is active;
 - `Tombstoned` with optional recent detail when the reference existed and retired;
+- `Unloaded` or `Deleted` for the persistent logical record's explicit residency/disposition;
+- `StaleRuntime` when a runtime reference expects a different incarnation than its logical binding;
 - `Missing` when the domain has never claimed the reference.
 - `WrongWorldBinding` when the installed domain resource belongs to another Bevy world;
 - `StaleRegistration` when the registered entity generation or private ownership marker is absent.
@@ -126,8 +149,11 @@ return `WrongDomain`, `WrongWorldBinding`, or `StaleRegistration` without collap
 unless the caller supplies its owning scene instance; the domain never guesses by scanning for a
 matching local ID.
 
-Retirement removes every active axis for an entity atomically, records tombstones, and never makes
-the claims reusable. Callers retire identity before or as part of despawn/unload. Direct external
+Retirement removes every active axis for an entity atomically and records bounded details. Scene
+claims remain non-reusable; persistent logical identity survives unload and may activate with a
+fresh incarnation. Physical cause (`Despawned`, `Unloaded`, `Replaced`) is distinct from explicit
+logical deletion. Durable references resolve the current logical binding, while old runtime
+references never follow a reactivation. Callers retire identity before or as part of despawn/unload. Direct external
 despawn that bypasses the identity domain is detectable as a stale registration and must be
 reconciled diagnostically; it is not silently treated as a valid entity.
 
@@ -146,9 +172,10 @@ reconciled diagnostically; it is not silently treated as a valid entity.
 - A same-timeline checkpoint restore creates a new world identity domain ID and fresh Bevy
   entities. It uses the same preflight/remap/commit transaction while reserving the recorded scene
   instance ID. It explicitly preserves or rewrites semantic `RuntimeEntityReference` values before
-  command replay resumes and publishes a locator remap that replaces the old domain ID. The source
-  and restored worlds may coexist without locator aliasing. Recorded commands resolve through the
-  restored domain, never through recorded `Entity` bits.
+  command replay resumes and publishes a complete locator remap replacing the old domain ID and
+  incarnations. Unrewritten runtime command targets are stale; only targets rewritten through this
+  complete remap resolve the restored bindings. The source and restored worlds may coexist without
+  locator aliasing. Recorded commands never resolve through recorded `Entity` bits.
 - Persistent IDs are preserved only for an authoritative fork/restore policy. Duplicated content
   must allocate or receive new persistent IDs and publish the remap.
 
@@ -283,8 +310,8 @@ server commands and tooling without raw entities, and makes fork/restore remaps 
 | Allocation safety | Zero, exhaustion, and all collision paths are failure-atomic; no wrap/saturation reuse | `nara_identity` unit tests |
 | World isolation | Equal Bevy entity bits in two worlds never yield equal observation locators | two-world tests |
 | Spawn authority | Independent spawners and convenience calls share one world allocator/index | scene integration tests |
-| Fork/restore | Parallel fork remaps a complete group; same-timeline restore resolves recorded references to fresh entity slots | identity/scene tests |
-| Retirement | Unloaded identities remain typed tombstones and can never be reused within the domain budget | identity tests |
+| Fork/restore | Complete remaps rewrite recorded references to fresh incarnations; unrewritten targets stay stale | identity/scene tests |
+| Retirement | Persistent logical identity rematerializes without growing history; old tokens/commands stay stale and Deleted stays terminal | identity tests |
 | Persistent safety | Serialized component, command, and observation shapes contain no `Entity` or `AssetId` | serde boundary tests |
 | Tooling safety | Runtime-only entities are bounded count-only; stable observations are domain-scoped | tooling tests |
 | Vocabulary convergence | No duplicate `SceneStableId`, `PersistentRuntimeId`, or raw `SceneEntityMap` authority remains | dependency-boundary searches |

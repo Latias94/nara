@@ -17,36 +17,36 @@ use thiserror::Error;
 
 use crate::{
     EntityReference, IdentityAllocationError, IdentityRemapError, PersistentRuntimeReference,
-    RuntimeEntityReference, SceneEntityId, SceneInstanceId, WorldEntityLocator,
-    WorldEntityLocatorRemap, WorldIdentityDomainId, allocator::MonotonicNonZeroU64Allocator,
+    RuntimeEntityIncarnation, RuntimeEntityReference, SceneEntityId, SceneInstanceId,
+    WorldEntityLocator, WorldEntityLocatorRemap, WorldIdentityDomainId,
+    allocator::MonotonicNonZeroU64Allocator,
 };
 
 const DEFAULT_LIFETIME_CLAIMS: usize = 1_048_576;
+const DEFAULT_PERSISTENT_LOGICAL_RECORDS: usize = 1_048_576;
 const DEFAULT_RECENT_TOMBSTONES: usize = 4_096;
 
 static NEXT_WORLD_IDENTITY_DOMAIN_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_RUNTIME_ENTITY_INCARNATION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorldIdentityDomainSettings {
     lifetime_claims: ItemLimit,
+    persistent_logical_records: ItemLimit,
     recent_tombstones: ItemLimit,
 }
 
 impl WorldIdentityDomainSettings {
-    pub fn new(
+    pub const fn new(
         lifetime_claims: ItemLimit,
+        persistent_logical_records: ItemLimit,
         recent_tombstones: ItemLimit,
-    ) -> Result<Self, WorldIdentitySettingsError> {
-        if recent_tombstones > lifetime_claims {
-            return Err(WorldIdentitySettingsError::TombstonesExceedClaims {
-                tombstones: recent_tombstones.get(),
-                claims: lifetime_claims.get(),
-            });
-        }
-        Ok(Self {
+    ) -> Self {
+        Self {
             lifetime_claims,
+            persistent_logical_records,
             recent_tombstones,
-        })
+        }
     }
 
     #[must_use]
@@ -58,6 +58,11 @@ impl WorldIdentityDomainSettings {
     pub const fn recent_tombstones(self) -> ItemLimit {
         self.recent_tombstones
     }
+
+    #[must_use]
+    pub const fn persistent_logical_records(self) -> ItemLimit {
+        self.persistent_logical_records
+    }
 }
 
 impl Default for WorldIdentityDomainSettings {
@@ -65,16 +70,12 @@ impl Default for WorldIdentityDomainSettings {
         Self {
             lifetime_claims: ItemLimit::new(DEFAULT_LIFETIME_CLAIMS)
                 .expect("default identity claim limit is non-zero"),
+            persistent_logical_records: ItemLimit::new(DEFAULT_PERSISTENT_LOGICAL_RECORDS)
+                .expect("default persistent logical record limit is non-zero"),
             recent_tombstones: ItemLimit::new(DEFAULT_RECENT_TOMBSTONES)
                 .expect("default identity tombstone limit is non-zero"),
         }
     }
-}
-
-#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
-pub enum WorldIdentitySettingsError {
-    #[error("recent tombstone limit cannot exceed the lifetime claim limit")]
-    TombstonesExceedClaims { tombstones: usize, claims: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +89,12 @@ pub enum TombstoneCause {
     Despawned,
     Unloaded,
     Replaced,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistentRetirementDisposition {
+    Unload,
+    Delete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -118,6 +125,9 @@ impl IdentityTombstone {
 pub enum EntityLookup {
     Resolved(Entity),
     Tombstoned(Option<IdentityTombstone>),
+    Unloaded,
+    Deleted,
+    StaleRuntime,
     Missing,
     ContextRequired,
     DomainUnavailable,
@@ -136,6 +146,9 @@ pub struct IdentityDomainStats {
     pub active_scene_instances: usize,
     pub active_scene_entities: usize,
     pub active_persistent_entities: usize,
+    pub persistent_logical_records: usize,
+    pub unloaded_persistent_entities: usize,
+    pub deleted_persistent_entities: usize,
     pub registered_entities: usize,
     pub recent_tombstones: usize,
 }
@@ -148,11 +161,13 @@ pub struct IdentityDomainStats {
 pub struct WorldEntityToken {
     domain: WorldIdentityDomainId,
     entity: Entity,
+    incarnation: RuntimeEntityIncarnation,
 }
 
 #[derive(Debug, Component)]
 struct IdentityEntityMarker {
     domain: WorldIdentityDomainId,
+    incarnation: RuntimeEntityIncarnation,
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -240,7 +255,12 @@ mod identity_support_topology_tests {
             .expect("identity domain must initialize");
         let domain_id = domain.id();
         world.insert_resource(domain);
-        let target = world.spawn(IdentityEntityMarker { domain: domain_id }).id();
+        let target = world
+            .spawn(IdentityEntityMarker {
+                domain: domain_id,
+                incarnation: allocate_runtime_entity_incarnation().unwrap(),
+            })
+            .id();
         let marker = world.component_id::<IdentityEntityMarker>().unwrap();
         world.spawn(
             Observer::new(|_: On<Despawn<()>>, mut canary: ResMut<SupportCanary>| canary.0 += 1)
@@ -279,6 +299,10 @@ mod identity_support_topology_tests {
 
 impl WorldEntityToken {
     #[must_use]
+    pub const fn incarnation(self) -> RuntimeEntityIncarnation {
+        self.incarnation
+    }
+    #[must_use]
     pub const fn domain_id(self) -> WorldIdentityDomainId {
         self.domain
     }
@@ -316,6 +340,7 @@ pub struct SpawnedSceneInstance {
     domain: WorldIdentityDomainId,
     instance: SceneInstanceId,
     entity_ids: Vec<SceneEntityId>,
+    incarnations: BTreeMap<SceneEntityId, RuntimeEntityIncarnation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,13 +384,6 @@ impl SceneIdentitySnapshot {
     pub(crate) fn references(&self, entity: &SceneEntityId) -> Option<&SceneIdentityReferences> {
         self.entities.get(entity)
     }
-
-    fn reference_count(&self) -> usize {
-        self.entities
-            .values()
-            .map(|references| 1 + usize::from(references.persistent.is_some()))
-            .fold(0, usize::saturating_add)
-    }
 }
 
 impl SpawnedSceneInstance {
@@ -401,8 +419,9 @@ impl SpawnedSceneInstance {
 
     #[must_use]
     pub fn runtime_reference(&self, entity: &SceneEntityId) -> Option<RuntimeEntityReference> {
-        self.contains(entity)
-            .then(|| RuntimeEntityReference::scene(self.instance, entity.clone()))
+        self.incarnations.get(entity).map(|incarnation| {
+            RuntimeEntityReference::scene(self.instance, entity.clone(), *incarnation)
+        })
     }
 
     #[must_use]
@@ -444,6 +463,31 @@ struct PreparedRetirement {
     identities: Vec<EntityIdentityAxes>,
     sequence_allocator: MonotonicNonZeroU64Allocator,
     tombstones: Vec<(IdentityTombstoneSubject, IdentityTombstone)>,
+    persistent_disposition: PersistentRetirementDisposition,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PersistentLogicalRecord {
+    Active {
+        entity: Entity,
+        incarnation: RuntimeEntityIncarnation,
+    },
+    Unloaded {
+        incarnation: RuntimeEntityIncarnation,
+    },
+    Deleted {
+        incarnation: RuntimeEntityIncarnation,
+    },
+}
+
+impl PersistentLogicalRecord {
+    fn incarnation(self) -> RuntimeEntityIncarnation {
+        match self {
+            Self::Active { incarnation, .. }
+            | Self::Unloaded { incarnation }
+            | Self::Deleted { incarnation } => incarnation,
+        }
+    }
 }
 
 /// Fully prevalidated identity registration for one unpublished Scene Instance candidate.
@@ -588,10 +632,12 @@ pub struct WorldIdentityDomain {
     scene_instance_allocator: MonotonicNonZeroU64Allocator,
     retirement_sequence: MonotonicNonZeroU64Allocator,
     claimed_scene_instances: BTreeSet<SceneInstanceId>,
-    active_scene_instances: BTreeMap<SceneInstanceId, BTreeSet<SceneEntityId>>,
+    active_scene_instances:
+        BTreeMap<SceneInstanceId, BTreeMap<SceneEntityId, RuntimeEntityIncarnation>>,
     claimed_references: BTreeSet<RuntimeEntityReference>,
     scene_entities: BTreeMap<RuntimeEntityReference, Entity>,
     persistent_entities: BTreeMap<RuntimeEntityReference, Entity>,
+    persistent_records: BTreeMap<PersistentRuntimeReference, PersistentLogicalRecord>,
     identities_by_entity: BTreeMap<Entity, EntityIdentityAxes>,
     recent_tombstones: BTreeMap<IdentityTombstoneSubject, IdentityTombstone>,
     tombstone_order: VecDeque<IdentityTombstoneSubject>,
@@ -615,6 +661,7 @@ impl WorldIdentityDomain {
             claimed_references: BTreeSet::new(),
             scene_entities: BTreeMap::new(),
             persistent_entities: BTreeMap::new(),
+            persistent_records: BTreeMap::new(),
             identities_by_entity: BTreeMap::new(),
             recent_tombstones: BTreeMap::new(),
             tombstone_order: VecDeque::new(),
@@ -639,6 +686,17 @@ impl WorldIdentityDomain {
             active_scene_instances: self.active_scene_instances.len(),
             active_scene_entities: self.scene_entities.len(),
             active_persistent_entities: self.persistent_entities.len(),
+            persistent_logical_records: self.persistent_records.len(),
+            unloaded_persistent_entities: self
+                .persistent_records
+                .values()
+                .filter(|record| matches!(record, PersistentLogicalRecord::Unloaded { .. }))
+                .count(),
+            deleted_persistent_entities: self
+                .persistent_records
+                .values()
+                .filter(|record| matches!(record, PersistentLogicalRecord::Deleted { .. }))
+                .count(),
             registered_entities: self.identities_by_entity.len(),
             recent_tombstones: self.recent_tombstones.len(),
         }
@@ -650,19 +708,28 @@ impl WorldIdentityDomain {
         entity: Entity,
     ) -> Result<WorldEntityToken, IdentityDomainError> {
         self.validate_world_binding(world)?;
+        validate_identity_support_topology(world, [entity])
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
         let mut entity_mut = world
             .get_entity_mut(entity)
             .map_err(|_| IdentityDomainError::EntityTokenNotAlive)?;
-        if let Some(marker) = entity_mut.get::<IdentityEntityMarker>() {
+        let incarnation = if let Some(marker) = entity_mut.get::<IdentityEntityMarker>() {
             if marker.domain != self.id {
                 return Err(IdentityDomainError::EntityTokenNotOwned);
             }
+            marker.incarnation
         } else {
-            entity_mut.insert(IdentityEntityMarker { domain: self.id });
-        }
+            let incarnation = allocate_runtime_entity_incarnation()?;
+            entity_mut.insert(IdentityEntityMarker {
+                domain: self.id,
+                incarnation,
+            });
+            incarnation
+        };
         Ok(WorldEntityToken {
             domain: self.id,
             entity,
+            incarnation,
         })
     }
 
@@ -748,21 +815,23 @@ impl WorldIdentityDomain {
             .active_scene_instances
             .get(&instance)
             .ok_or(IdentityDomainError::SceneInstanceNotActive { instance })?;
-        for entity_id in entity_ids {
-            let reference = RuntimeEntityReference::scene(instance, entity_id.clone());
+        for (entity_id, incarnation) in entity_ids {
+            let reference =
+                RuntimeEntityReference::scene(instance, entity_id.clone(), *incarnation);
             let entity = self
                 .scene_entities
                 .get(&reference)
                 .copied()
                 .ok_or(IdentityDomainError::SceneInstanceMembershipMismatch { instance })?;
-            if !self.is_live_owned_entity(world, entity) {
+            if !self.is_live_owned_incarnation(world, entity, *incarnation) {
                 return Err(IdentityDomainError::StaleRegistration);
             }
         }
         Ok(SpawnedSceneInstance {
             domain: self.id,
             instance,
-            entity_ids: entity_ids.iter().cloned().collect(),
+            entity_ids: entity_ids.keys().cloned().collect(),
+            incarnations: entity_ids.clone(),
         })
     }
 
@@ -899,12 +968,14 @@ impl WorldIdentityDomain {
                 return Err(IdentityDomainError::LifecycleConflict);
             }
         };
-        let replacement = domain.replace_scene_instance(
-            retirement.world(),
-            current,
-            entries.iter().cloned(),
-            cause,
-        );
+        let replacement = (|| {
+            let prepared =
+                domain.prepare_exact_scene_instance_registration(retirement.world(), entries)?;
+            let scene_retirement =
+                domain.prepare_scene_instance_retirement(retirement.world(), current, cause)?;
+            let retired = domain.commit_retirement(scene_retirement);
+            Ok::<_, IdentityDomainError>((prepared.commit(&mut domain), retired))
+        })();
         match replacement {
             Ok(replacement) => {
                 retirement.commit().insert_resource(domain);
@@ -919,7 +990,7 @@ impl WorldIdentityDomain {
 
     pub fn replace_scene_instance(
         &mut self,
-        world: &World,
+        world: &mut World,
         current: &SpawnedSceneInstance,
         entries: impl IntoIterator<Item = (SceneEntityId, WorldEntityToken)>,
         cause: TombstoneCause,
@@ -938,6 +1009,13 @@ impl WorldIdentityDomain {
         )?;
         self.preflight_scene_instance(world, instance, &entries)?;
         let retirement = self.prepare_scene_instance_retirement(world, current, cause)?;
+        if entries
+            .iter()
+            .any(|(_, token)| retirement.entities.contains(&token.entity()))
+        {
+            return Err(IdentityDomainError::LifecycleConflict);
+        }
+        self.revoke_retirement_markers(world, &retirement)?;
 
         let allocated = self
             .scene_instance_allocator
@@ -1007,10 +1085,8 @@ impl WorldIdentityDomain {
     ) -> Result<WorldEntityLocator, IdentityDomainError> {
         self.validate_live_token(world, token)?;
         let entity = token.entity();
-        let reference = RuntimeEntityReference::persistent(persistent);
-        if self.claimed_references.contains(&reference) {
-            return Err(IdentityDomainError::ReferenceAlreadyClaimed { reference });
-        }
+        let reference = RuntimeEntityReference::persistent(persistent.clone(), token.incarnation());
+        self.preflight_persistent_binding(&persistent, &reference)?;
         if self
             .identities_by_entity
             .get(&entity)
@@ -1020,9 +1096,13 @@ impl WorldIdentityDomain {
                 axis: EntityIdentityAxis::Persistent,
             });
         }
-        self.check_claim_capacity(1)?;
-
-        self.claimed_references.insert(reference.clone());
+        self.persistent_records.insert(
+            persistent,
+            PersistentLogicalRecord::Active {
+                entity,
+                incarnation: token.incarnation(),
+            },
+        );
         self.persistent_entities.insert(reference.clone(), entity);
         self.identities_by_entity
             .entry(entity)
@@ -1037,7 +1117,9 @@ impl WorldIdentityDomain {
             return EntityLookup::WrongWorldBinding;
         }
         match self.lookup_registered(reference) {
-            EntityLookup::Resolved(entity) if !self.is_live_owned_entity(world, entity) => {
+            EntityLookup::Resolved(entity)
+                if !self.is_live_owned_incarnation(world, entity, reference.incarnation()) =>
+            {
                 EntityLookup::StaleRegistration
             }
             result => result,
@@ -1045,6 +1127,34 @@ impl WorldIdentityDomain {
     }
 
     fn lookup_registered(&self, reference: &RuntimeEntityReference) -> EntityLookup {
+        if let RuntimeEntityReference::Persistent {
+            entity,
+            incarnation,
+        } = reference
+        {
+            return match self.persistent_records.get(entity).copied() {
+                Some(record) if record.incarnation() != *incarnation => EntityLookup::StaleRuntime,
+                Some(PersistentLogicalRecord::Active { entity, .. }) => {
+                    EntityLookup::Resolved(entity)
+                }
+                Some(PersistentLogicalRecord::Unloaded { .. }) => EntityLookup::Unloaded,
+                Some(PersistentLogicalRecord::Deleted { .. }) => EntityLookup::Deleted,
+                None => EntityLookup::Missing,
+            };
+        }
+        if let RuntimeEntityReference::Scene {
+            instance,
+            entity,
+            incarnation,
+        } = reference
+            && let Some(current) = self
+                .active_scene_instances
+                .get(instance)
+                .and_then(|entities| entities.get(entity))
+            && current != incarnation
+        {
+            return EntityLookup::StaleRuntime;
+        }
         if let Some(entity) = self.active_entity(reference) {
             return EntityLookup::Resolved(entity);
         }
@@ -1073,13 +1183,35 @@ impl WorldIdentityDomain {
                 let Some(instance) = scene_context else {
                     return EntityLookup::ContextRequired;
                 };
-                self.lookup(
-                    world,
-                    &RuntimeEntityReference::scene(instance, entity.clone()),
-                )
+                if let Some(incarnation) = self
+                    .active_scene_instances
+                    .get(&instance)
+                    .and_then(|entities| entities.get(entity))
+                {
+                    return self.lookup(
+                        world,
+                        &RuntimeEntityReference::scene(instance, entity.clone(), *incarnation),
+                    );
+                }
+                let first = RuntimeEntityReference::scene(
+                    instance,
+                    entity.clone(),
+                    RuntimeEntityIncarnation::from_non_zero(NonZeroU64::MIN),
+                );
+                self.claimed_references.range(first..).next().filter(|reference| matches!(reference, RuntimeEntityReference::Scene { instance: candidate, entity: candidate_entity, .. } if *candidate == instance && candidate_entity == entity)).map_or(EntityLookup::Missing, |reference| self.lookup(world, reference))
             }
             EntityReference::Persistent { entity } => {
-                self.lookup(world, &RuntimeEntityReference::persistent(entity.clone()))
+                self.persistent_records
+                    .get(entity)
+                    .map_or(EntityLookup::Missing, |record| {
+                        self.lookup(
+                            world,
+                            &RuntimeEntityReference::persistent(
+                                entity.clone(),
+                                record.incarnation(),
+                            ),
+                        )
+                    })
             }
         }
     }
@@ -1090,10 +1222,28 @@ impl WorldIdentityDomain {
         token: WorldEntityToken,
     ) -> Result<Option<WorldEntityLocators>, IdentityDomainError> {
         self.validate_live_token(world, token)?;
-        let entity = token.entity();
+        self.locators_for_entity(world, token.entity())
+    }
+
+    pub fn locators_for_entity(
+        &self,
+        world: &World,
+        entity: Entity,
+    ) -> Result<Option<WorldEntityLocators>, IdentityDomainError> {
+        self.validate_world_binding(world)?;
         let Some(identity) = self.identities_by_entity.get(&entity) else {
             return Ok(None);
         };
+        if identity
+            .scene
+            .iter()
+            .chain(identity.persistent.iter())
+            .any(|reference| {
+                !self.is_live_owned_incarnation(world, entity, reference.incarnation())
+            })
+        {
+            return Err(IdentityDomainError::StaleRegistration);
+        }
         Ok(Some(WorldEntityLocators {
             scene: identity
                 .scene
@@ -1138,7 +1288,7 @@ impl WorldIdentityDomain {
         };
         if active_ids.len() != instance.entity_ids.len()
             || active_ids
-                .iter()
+                .keys()
                 .zip(instance.entity_ids.iter())
                 .any(|(active, expected)| active != expected)
         {
@@ -1148,14 +1298,15 @@ impl WorldIdentityDomain {
         }
 
         let mut entities = BTreeMap::new();
-        for entity_id in active_ids {
-            let scene = RuntimeEntityReference::scene(instance.instance, entity_id.clone());
+        for (entity_id, incarnation) in active_ids {
+            let scene =
+                RuntimeEntityReference::scene(instance.instance, entity_id.clone(), *incarnation);
             let entity = self.scene_entities.get(&scene).copied().ok_or(
                 IdentityDomainError::SceneInstanceMembershipMismatch {
                     instance: instance.instance,
                 },
             )?;
-            if !self.is_live_owned_entity(world, entity) {
+            if !self.is_live_owned_incarnation(world, entity, *incarnation) {
                 return Err(IdentityDomainError::StaleRegistration);
             }
             let identity = self.identities_by_entity.get(&entity).ok_or(
@@ -1180,11 +1331,12 @@ impl WorldIdentityDomain {
 
     pub fn retire_scene_instance(
         &mut self,
-        world: &World,
+        world: &mut World,
         instance: &SpawnedSceneInstance,
         cause: TombstoneCause,
     ) -> Result<Vec<Entity>, IdentityDomainError> {
         let retirement = self.prepare_scene_instance_retirement(world, instance, cause)?;
+        self.revoke_retirement_markers(world, &retirement)?;
         Ok(self.commit_retirement(retirement))
     }
 
@@ -1207,7 +1359,7 @@ impl WorldIdentityDomain {
             });
         };
         if active_ids
-            .iter()
+            .keys()
             .any(|entity_id| !instance.contains(entity_id))
         {
             return Err(IdentityDomainError::SceneInstanceMembershipMismatch {
@@ -1217,8 +1369,12 @@ impl WorldIdentityDomain {
 
         let entities = active_ids
             .iter()
-            .map(|entity_id| {
-                let reference = RuntimeEntityReference::scene(instance.instance, entity_id.clone());
+            .map(|(entity_id, incarnation)| {
+                let reference = RuntimeEntityReference::scene(
+                    instance.instance,
+                    entity_id.clone(),
+                    *incarnation,
+                );
                 self.scene_entities.get(&reference).copied().ok_or(
                     IdentityDomainError::SceneInstanceMembershipMismatch {
                         instance: instance.instance,
@@ -1231,25 +1387,29 @@ impl WorldIdentityDomain {
 
     pub fn retire_entity(
         &mut self,
-        world: &World,
+        world: &mut World,
         token: WorldEntityToken,
         cause: TombstoneCause,
     ) -> Result<(), IdentityDomainError> {
-        self.validate_world_binding(world)?;
-        self.validate_token_domain(token)?;
-        self.retire_registered_entity(token.entity(), cause)
+        self.retire_entity_with_disposition(
+            world,
+            token,
+            cause,
+            PersistentRetirementDisposition::Unload,
+        )
     }
 
     /// Retires an entity only when the caller's semantic reference still names it.
     pub fn retire_entity_with_reference(
         &mut self,
-        world: &World,
+        world: &mut World,
         entity: Entity,
         reference: &RuntimeEntityReference,
         cause: TombstoneCause,
     ) -> Result<(), IdentityDomainError> {
         let retirement =
             self.prepare_entity_retirement_with_reference(world, entity, reference, cause)?;
+        self.revoke_retirement_markers(world, &retirement)?;
         self.commit_retirement(retirement);
         Ok(())
     }
@@ -1280,16 +1440,6 @@ impl WorldIdentityDomain {
         self.prepare_retirement(None, vec![entity], cause)
     }
 
-    fn retire_registered_entity(
-        &mut self,
-        entity: Entity,
-        cause: TombstoneCause,
-    ) -> Result<(), IdentityDomainError> {
-        let retirement = self.prepare_retirement(None, vec![entity], cause)?;
-        self.commit_retirement(retirement);
-        Ok(())
-    }
-
     fn preflight_scene_instance(
         &self,
         world: &World,
@@ -1309,7 +1459,8 @@ impl WorldIdentityDomain {
         for (entity_id, token) in entries {
             self.validate_live_token(world, *token)?;
             let entity = token.entity();
-            let reference = RuntimeEntityReference::scene(instance, entity_id.clone());
+            let reference =
+                RuntimeEntityReference::scene(instance, entity_id.clone(), token.incarnation());
             if self.claimed_references.contains(&reference) {
                 return Err(IdentityDomainError::ReferenceAlreadyClaimed { reference });
             }
@@ -1342,12 +1493,14 @@ impl WorldIdentityDomain {
         if self.claimed_scene_instances.contains(&instance) {
             return Err(IdentityDomainError::SceneInstanceAlreadyClaimed { instance });
         }
-        let additional = source.reference_count().checked_add(1).ok_or(
-            IdentityDomainError::LifetimeClaimLimit {
-                requested: usize::MAX,
-                maximum: self.settings.lifetime_claims.get(),
-            },
-        )?;
+        let additional =
+            source
+                .len()
+                .checked_add(1)
+                .ok_or(IdentityDomainError::LifetimeClaimLimit {
+                    requested: usize::MAX,
+                    maximum: self.settings.lifetime_claims.get(),
+                })?;
         self.check_claim_capacity(additional)?;
 
         let mut by_id = BTreeMap::new();
@@ -1383,17 +1536,18 @@ impl WorldIdentityDomain {
                 }
             }
 
-            let scene_reference = RuntimeEntityReference::scene(instance, entity_id.clone());
+            let scene_reference =
+                RuntimeEntityReference::scene(instance, entity_id.clone(), token.incarnation());
             if self.claimed_references.contains(&scene_reference) {
                 return Err(IdentityDomainError::ReferenceAlreadyClaimed {
                     reference: scene_reference,
                 });
             }
             if let Some(persistent) = &persistent {
-                let reference = RuntimeEntityReference::persistent(persistent.clone());
-                if self.claimed_references.contains(&reference)
-                    || !persistent_references.insert(reference.clone())
-                {
+                let reference =
+                    RuntimeEntityReference::persistent(persistent.clone(), token.incarnation());
+                self.preflight_persistent_binding(persistent, &reference)?;
+                if !persistent_references.insert(persistent.clone()) {
                     return Err(IdentityDomainError::ReferenceAlreadyClaimed { reference });
                 }
             }
@@ -1410,6 +1564,11 @@ impl WorldIdentityDomain {
         if !by_id.keys().eq(source.entity_ids()) {
             return Err(IdentityDomainError::IncompleteSceneFork);
         }
+        let new_persistent_records = persistent_references
+            .iter()
+            .filter(|reference| !self.persistent_records.contains_key(*reference))
+            .count();
+        self.check_persistent_capacity(new_persistent_records)?;
 
         let target_snapshot = SceneIdentitySnapshot {
             domain: self.id,
@@ -1420,11 +1579,17 @@ impl WorldIdentityDomain {
                     (
                         entry.entity_id.clone(),
                         SceneIdentityReferences {
-                            scene: RuntimeEntityReference::scene(instance, entry.entity_id.clone()),
-                            persistent: entry
-                                .persistent
-                                .clone()
-                                .map(RuntimeEntityReference::persistent),
+                            scene: RuntimeEntityReference::scene(
+                                instance,
+                                entry.entity_id.clone(),
+                                entry.token.incarnation(),
+                            ),
+                            persistent: entry.persistent.clone().map(|persistent| {
+                                RuntimeEntityReference::persistent(
+                                    persistent,
+                                    entry.token.incarnation(),
+                                )
+                            }),
                         },
                     )
                 })
@@ -1480,21 +1645,24 @@ impl WorldIdentityDomain {
     ) -> SpawnedSceneInstance {
         self.claimed_scene_instances.insert(instance);
         let mut entity_ids = Vec::with_capacity(entries.len());
-        let mut active_ids = BTreeSet::new();
+        let mut active_ids = BTreeMap::new();
         for (entity_id, token) in entries {
             let entity = token.entity();
-            let reference = RuntimeEntityReference::scene(instance, entity_id.clone());
+            let reference =
+                RuntimeEntityReference::scene(instance, entity_id.clone(), token.incarnation());
             self.claimed_references.insert(reference.clone());
             self.scene_entities.insert(reference.clone(), entity);
             self.identities_by_entity.entry(entity).or_default().scene = Some(reference);
-            active_ids.insert(entity_id.clone());
+            active_ids.insert(entity_id.clone(), token.incarnation());
             entity_ids.push(entity_id);
         }
-        self.active_scene_instances.insert(instance, active_ids);
+        self.active_scene_instances
+            .insert(instance, active_ids.clone());
         SpawnedSceneInstance {
             domain: self.id,
             instance,
             entity_ids,
+            incarnations: active_ids,
         }
     }
 
@@ -1505,30 +1673,45 @@ impl WorldIdentityDomain {
     ) -> SpawnedSceneInstance {
         self.claimed_scene_instances.insert(instance);
         let mut entity_ids = Vec::with_capacity(entries.len());
-        let mut active_ids = BTreeSet::new();
+        let mut active_ids = BTreeMap::new();
         for entry in entries {
             let entity = entry.token.entity();
-            let scene_reference = RuntimeEntityReference::scene(instance, entry.entity_id.clone());
+            let scene_reference = RuntimeEntityReference::scene(
+                instance,
+                entry.entity_id.clone(),
+                entry.token.incarnation(),
+            );
             self.claimed_references.insert(scene_reference.clone());
             self.scene_entities.insert(scene_reference.clone(), entity);
             let identity = self.identities_by_entity.entry(entity).or_default();
             identity.scene = Some(scene_reference);
 
             if let Some(persistent) = entry.persistent {
-                let persistent_reference = RuntimeEntityReference::persistent(persistent);
-                self.claimed_references.insert(persistent_reference.clone());
+                let persistent_reference = RuntimeEntityReference::persistent(
+                    persistent.clone(),
+                    entry.token.incarnation(),
+                );
+                self.persistent_records.insert(
+                    persistent,
+                    PersistentLogicalRecord::Active {
+                        entity,
+                        incarnation: entry.token.incarnation(),
+                    },
+                );
                 self.persistent_entities
                     .insert(persistent_reference.clone(), entity);
                 identity.persistent = Some(persistent_reference);
             }
-            active_ids.insert(entry.entity_id.clone());
+            active_ids.insert(entry.entity_id.clone(), entry.token.incarnation());
             entity_ids.push(entry.entity_id);
         }
-        self.active_scene_instances.insert(instance, active_ids);
+        self.active_scene_instances
+            .insert(instance, active_ids.clone());
         SpawnedSceneInstance {
             domain: self.id,
             instance,
             entity_ids,
+            incarnations: active_ids,
         }
     }
 
@@ -1581,6 +1764,7 @@ impl WorldIdentityDomain {
             identities,
             sequence_allocator,
             tombstones,
+            persistent_disposition: PersistentRetirementDisposition::Unload,
         })
     }
 
@@ -1591,6 +1775,7 @@ impl WorldIdentityDomain {
             identities,
             sequence_allocator,
             tombstones,
+            persistent_disposition,
         } = retirement;
         if let Some(instance) = instance {
             self.active_scene_instances.remove(&instance);
@@ -1602,6 +1787,7 @@ impl WorldIdentityDomain {
                     && let RuntimeEntityReference::Scene {
                         instance,
                         entity: entity_id,
+                        ..
                     } = reference
                     && let Some(active_ids) = self.active_scene_instances.get_mut(&instance)
                 {
@@ -1610,6 +1796,21 @@ impl WorldIdentityDomain {
             }
             if let Some(reference) = identity.persistent {
                 self.persistent_entities.remove(&reference);
+                if let RuntimeEntityReference::Persistent {
+                    entity,
+                    incarnation,
+                } = reference
+                {
+                    let record = match persistent_disposition {
+                        PersistentRetirementDisposition::Unload => {
+                            PersistentLogicalRecord::Unloaded { incarnation }
+                        }
+                        PersistentRetirementDisposition::Delete => {
+                            PersistentLogicalRecord::Deleted { incarnation }
+                        }
+                    };
+                    self.persistent_records.insert(entity, record);
+                }
             }
             self.identities_by_entity.remove(&entity);
         }
@@ -1649,6 +1850,122 @@ impl WorldIdentityDomain {
         Ok(())
     }
 
+    fn check_persistent_capacity(&self, additional: usize) -> Result<(), IdentityDomainError> {
+        let requested = self.persistent_records.len().saturating_add(additional);
+        let maximum = self.settings.persistent_logical_records.get();
+        if requested > maximum {
+            return Err(IdentityDomainError::PersistentLogicalRecordLimit { requested, maximum });
+        }
+        Ok(())
+    }
+
+    fn preflight_persistent_binding(
+        &self,
+        persistent: &PersistentRuntimeReference,
+        reference: &RuntimeEntityReference,
+    ) -> Result<(), IdentityDomainError> {
+        match self.persistent_records.get(persistent) {
+            Some(PersistentLogicalRecord::Active { .. }) => {
+                Err(IdentityDomainError::ReferenceAlreadyClaimed {
+                    reference: reference.clone(),
+                })
+            }
+            Some(PersistentLogicalRecord::Deleted { .. }) => {
+                Err(IdentityDomainError::PersistentIdentityDeleted {
+                    reference: persistent.clone(),
+                })
+            }
+            Some(PersistentLogicalRecord::Unloaded { .. }) => Ok(()),
+            None => self.check_persistent_capacity(1),
+        }
+    }
+
+    fn revoke_retirement_markers(
+        &self,
+        world: &mut World,
+        retirement: &PreparedRetirement,
+    ) -> Result<(), IdentityDomainError> {
+        let live_entities = retirement
+            .entities
+            .iter()
+            .copied()
+            .filter(|entity| world.get_entity(*entity).is_ok())
+            .collect::<Vec<_>>();
+        for (entity, identity) in retirement.entities.iter().zip(&retirement.identities) {
+            if world.get_entity(*entity).is_ok()
+                && identity
+                    .scene
+                    .iter()
+                    .chain(identity.persistent.iter())
+                    .any(|reference| {
+                        !self.is_live_owned_incarnation(world, *entity, reference.incarnation())
+                    })
+            {
+                return Err(IdentityDomainError::StaleRegistration);
+            }
+        }
+        validate_identity_support_topology(world, live_entities.iter().copied())
+            .map_err(|_| IdentityDomainError::LifecycleConflict)?;
+        for entity in live_entities {
+            world.entity_mut(entity).remove::<IdentityEntityMarker>();
+        }
+        Ok(())
+    }
+
+    pub fn retire_entity_with_disposition(
+        &mut self,
+        world: &mut World,
+        token: WorldEntityToken,
+        cause: TombstoneCause,
+        disposition: PersistentRetirementDisposition,
+    ) -> Result<(), IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        self.validate_token_domain(token)?;
+        let identity = self
+            .identities_by_entity
+            .get(&token.entity())
+            .ok_or(IdentityDomainError::EntityNotRegistered)?;
+        if identity
+            .scene
+            .iter()
+            .chain(identity.persistent.iter())
+            .any(|reference| reference.incarnation() != token.incarnation())
+        {
+            return Err(IdentityDomainError::StaleRegistration);
+        }
+        let mut retirement = self.prepare_retirement(None, vec![token.entity()], cause)?;
+        retirement.persistent_disposition = disposition;
+        self.revoke_retirement_markers(world, &retirement)?;
+        self.commit_retirement(retirement);
+        Ok(())
+    }
+
+    pub fn delete_unloaded_persistent(
+        &mut self,
+        world: &World,
+        reference: &PersistentRuntimeReference,
+    ) -> Result<(), IdentityDomainError> {
+        self.validate_world_binding(world)?;
+        match self.persistent_records.get(reference).copied() {
+            Some(PersistentLogicalRecord::Unloaded { incarnation }) => {
+                self.persistent_records.insert(
+                    reference.clone(),
+                    PersistentLogicalRecord::Deleted { incarnation },
+                );
+                Ok(())
+            }
+            Some(PersistentLogicalRecord::Deleted { .. }) => Ok(()),
+            Some(PersistentLogicalRecord::Active { .. }) => {
+                Err(IdentityDomainError::PersistentIdentityActive {
+                    reference: reference.clone(),
+                })
+            }
+            None => Err(IdentityDomainError::PersistentIdentityMissing {
+                reference: reference.clone(),
+            }),
+        }
+    }
+
     fn active_entity(&self, reference: &RuntimeEntityReference) -> Option<Entity> {
         match reference {
             RuntimeEntityReference::Scene { .. } => self.scene_entities.get(reference).copied(),
@@ -1685,17 +2002,22 @@ impl WorldIdentityDomain {
         if world.get_entity(token.entity()).is_err() {
             return Err(IdentityDomainError::EntityTokenNotAlive);
         }
-        if !self.is_live_owned_entity(world, token.entity()) {
+        if !self.is_live_owned_incarnation(world, token.entity(), token.incarnation()) {
             return Err(IdentityDomainError::EntityTokenNotOwned);
         }
         Ok(())
     }
 
-    fn is_live_owned_entity(&self, world: &World, entity: Entity) -> bool {
+    fn is_live_owned_incarnation(
+        &self,
+        world: &World,
+        entity: Entity,
+        incarnation: RuntimeEntityIncarnation,
+    ) -> bool {
         world.get_entity(entity).is_ok()
             && world
                 .get::<IdentityEntityMarker>(entity)
-                .is_some_and(|marker| marker.domain == self.id)
+                .is_some_and(|marker| marker.domain == self.id && marker.incarnation == incarnation)
     }
 
     #[cfg(test)]
@@ -1801,7 +2123,7 @@ pub fn validate_additional_retirement_identity_axes(
         world
             .get_entity(entity)
             .map_err(|_| AdditionalRetirementIdentityError::EntityMissing { entity })?;
-        if !domain.is_live_owned_entity(world, entity) {
+        if !domain.is_live_owned_incarnation(world, entity, token.incarnation()) {
             return Err(AdditionalRetirementIdentityError::EntityNotOwned { entity });
         }
         let Some(identity) = domain.identities_by_entity.get(&entity) else {
@@ -1844,8 +2166,18 @@ pub fn spawn_identity_entity(world: &mut World) -> Result<WorldEntityToken, Iden
         domain.validate_world_binding(world)?;
         domain.id()
     };
-    let entity = world.spawn(IdentityEntityMarker { domain }).id();
-    Ok(WorldEntityToken { domain, entity })
+    let incarnation = allocate_runtime_entity_incarnation()?;
+    let entity = world
+        .spawn(IdentityEntityMarker {
+            domain,
+            incarnation,
+        })
+        .id();
+    Ok(WorldEntityToken {
+        domain,
+        entity,
+        incarnation,
+    })
 }
 
 fn collect_scene_entries(
@@ -1876,6 +2208,23 @@ fn allocate_world_identity_domain_id() -> Result<WorldIdentityDomainId, Identity
     allocate_world_identity_domain_id_from(&NEXT_WORLD_IDENTITY_DOMAIN_ID)
 }
 
+fn allocate_runtime_entity_incarnation() -> Result<RuntimeEntityIncarnation, IdentityDomainError> {
+    allocate_runtime_entity_incarnation_from(&NEXT_RUNTIME_ENTITY_INCARNATION)
+}
+
+pub(crate) fn allocate_runtime_entity_incarnation_from(
+    allocator: &AtomicU64,
+) -> Result<RuntimeEntityIncarnation, IdentityDomainError> {
+    let raw = allocator
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            (current != 0).then(|| current.checked_add(1).unwrap_or(0))
+        })
+        .map_err(|_| IdentityDomainError::RuntimeEntityIncarnationExhausted)?;
+    Ok(RuntimeEntityIncarnation::from_non_zero(
+        NonZeroU64::new(raw).expect("incarnation allocation never returns zero"),
+    ))
+}
+
 pub(crate) fn allocate_world_identity_domain_id_from(
     allocator: &AtomicU64,
 ) -> Result<WorldIdentityDomainId, IdentityDomainError> {
@@ -1894,6 +2243,8 @@ pub(crate) fn allocate_world_identity_domain_id_from(
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum IdentityDomainError {
+    #[error("runtime entity incarnation allocation is exhausted")]
+    RuntimeEntityIncarnationExhausted,
     #[error("world identity domain id allocation is exhausted")]
     WorldDomainIdExhausted,
     #[error("world has no identity domain")]
@@ -1928,6 +2279,20 @@ pub enum IdentityDomainError {
     InvalidSceneRemap(#[source] Box<IdentityRemapError>),
     #[error("identity lifetime claim limit was exceeded")]
     LifetimeClaimLimit { requested: usize, maximum: usize },
+    #[error("persistent logical record limit was exceeded")]
+    PersistentLogicalRecordLimit { requested: usize, maximum: usize },
+    #[error("persistent identity has been deleted")]
+    PersistentIdentityDeleted {
+        reference: PersistentRuntimeReference,
+    },
+    #[error("persistent identity is still active")]
+    PersistentIdentityActive {
+        reference: PersistentRuntimeReference,
+    },
+    #[error("persistent identity is not registered")]
+    PersistentIdentityMissing {
+        reference: PersistentRuntimeReference,
+    },
     #[error("identity operation targets the wrong world domain")]
     WrongDomain {
         expected: WorldIdentityDomainId,

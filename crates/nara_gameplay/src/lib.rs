@@ -266,8 +266,9 @@ mod tests {
     use nara_ecs::{Res, ResMut, Resource, World, schedule::IntoScheduleConfigs};
     use nara_identity::{
         EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId,
-        PersistentRuntimeReference, SceneEntityId, SceneInstanceId, SpawnedSceneInstance,
-        TombstoneCause, WorldIdentityDomain, WorldIdentityDomainSettings, spawn_identity_entity,
+        PersistentRuntimeReference, RuntimeEntityIncarnation, SceneEntityId, SceneInstanceId,
+        SpawnedSceneInstance, TombstoneCause, WorldIdentityDomain, WorldIdentityDomainSettings,
+        spawn_identity_entity,
     };
     use nara_input::{
         ActionBinding, ActionContext, ActionId, ActionMap, ActionPhase, InputPlugin, KeyCode,
@@ -346,9 +347,9 @@ mod tests {
         let mut world = World::new();
         let settings = WorldIdentityDomainSettings::new(
             ItemLimit::new(64).unwrap(),
+            ItemLimit::new(64).unwrap(),
             ItemLimit::new(16).unwrap(),
-        )
-        .unwrap();
+        );
         let domain = WorldIdentityDomain::new(&world, settings).unwrap();
         world.insert_resource(domain);
         world
@@ -356,7 +357,7 @@ mod tests {
 
     fn with_identity_domain<T>(
         world: &mut World,
-        mutate: impl FnOnce(&World, &mut WorldIdentityDomain) -> T,
+        mutate: impl FnOnce(&mut World, &mut WorldIdentityDomain) -> T,
     ) -> T {
         let mut domain = world.remove_resource::<WorldIdentityDomain>().unwrap();
         let result = mutate(world, &mut domain);
@@ -762,10 +763,12 @@ mod tests {
             RuntimeEntityReference::scene(
                 SceneInstanceId::new(1).unwrap(),
                 scene_entity_id("player"),
+                RuntimeEntityIncarnation::new(1).unwrap(),
             ),
-            RuntimeEntityReference::persistent(persistent_reference(
-                "a1b2c3d4-e5f6-47a8-90ab-1234567890cd",
-            )),
+            RuntimeEntityReference::persistent(
+                persistent_reference("a1b2c3d4-e5f6-47a8-90ab-1234567890cd"),
+                RuntimeEntityIncarnation::new(1).unwrap(),
+            ),
         ];
         let mut command_map = ActionCommandMap::default();
 
@@ -1677,19 +1680,21 @@ mod tests {
         let scene = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
             SceneInstanceId::new(7).unwrap(),
             scene_entity_id("scene/player"),
+            RuntimeEntityIncarnation::new(1).unwrap(),
         ));
         let persistent = GameplayCommandTarget::Entity(RuntimeEntityReference::persistent(
             persistent_reference("A1B2C3D4-E5F6-47A8-90AB-1234567890CD"),
+            RuntimeEntityIncarnation::new(1).unwrap(),
         ));
 
         assert_eq!(named.logical_bytes(), Some(1 + "player".len()));
         assert_eq!(
             scene.logical_bytes(),
-            Some(1 + 1 + size_of::<u64>() + "scene/player".len())
+            Some(1 + 1 + 2 * size_of::<u64>() + "scene/player".len())
         );
         assert_eq!(
             persistent.logical_bytes(),
-            Some(1 + 1 + "runtime".len() + 36)
+            Some(1 + 1 + size_of::<u64>() + "runtime".len() + 36)
         );
     }
 
@@ -1708,6 +1713,7 @@ mod tests {
         let missing_target = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
             SceneInstanceId::new(99).unwrap(),
             player.clone(),
+            RuntimeEntityIncarnation::new(1).unwrap(),
         ));
         assert_eq!(
             missing_target.resolve_entity(&world),
@@ -1762,19 +1768,57 @@ mod tests {
         let _occupied = restored_world.spawn_empty().id();
         let restored_token = spawn_identity_entity(&mut restored_world).unwrap();
         assert_ne!(source_entity.to_bits(), restored_token.entity().to_bits());
-        with_identity_domain(&mut restored_world, |world, domain| {
+        let (_, remap) = with_identity_domain(&mut restored_world, |world, domain| {
             domain
                 .register_restored_scene_instance(
                     world,
                     &snapshot,
                     [(player, restored_token, None)],
                 )
-                .unwrap();
+                .unwrap()
         });
 
         assert_eq!(
             target.resolve_entity(&restored_world),
+            Some(EntityLookup::StaleRuntime)
+        );
+        let rewritten = target.remap_entity_reference(remap.references()).unwrap();
+        assert_eq!(
+            rewritten.resolve_entity(&restored_world),
             Some(EntityLookup::Resolved(restored_token.entity()))
+        );
+    }
+
+    #[test]
+    fn a_delayed_persistent_command_never_follows_a_reactivated_binding() {
+        let mut world = world_with_identity_domain();
+        let persistent = persistent_reference("11111111-1111-4111-8111-111111111111");
+        let first_token = spawn_identity_entity(&mut world).unwrap();
+        let first_locator = with_identity_domain(&mut world, |world, domain| {
+            let locator = domain
+                .register_persistent(world, first_token, persistent.clone())
+                .unwrap();
+            domain
+                .retire_entity(world, first_token, TombstoneCause::Unloaded)
+                .unwrap();
+            locator
+        });
+        assert!(world.despawn(first_token.entity()));
+        let replacement_token = spawn_identity_entity(&mut world).unwrap();
+        let replacement_locator = with_identity_domain(&mut world, |world, domain| {
+            domain
+                .register_persistent(world, replacement_token, persistent)
+                .unwrap()
+        });
+        let delayed = GameplayCommandTarget::Entity(first_locator.entity().clone());
+        let current = GameplayCommandTarget::Entity(replacement_locator.entity().clone());
+        assert_eq!(
+            delayed.resolve_entity(&world),
+            Some(EntityLookup::StaleRuntime)
+        );
+        assert_eq!(
+            current.resolve_entity(&world),
+            Some(EntityLookup::Resolved(replacement_token.entity()))
         );
     }
 
@@ -2022,9 +2066,11 @@ mod tests {
         let scene = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
             SceneInstanceId::new(7).unwrap(),
             scene_entity_id("scene/player"),
+            RuntimeEntityIncarnation::new(1).unwrap(),
         ));
         let persistent = GameplayCommandTarget::Entity(RuntimeEntityReference::persistent(
             persistent_reference("A1B2C3D4-E5F6-47A8-90AB-1234567890CD"),
+            RuntimeEntityIncarnation::new(1).unwrap(),
         ));
 
         assert_eq!(
@@ -2037,7 +2083,8 @@ mod tests {
                 "Entity": {
                     "kind": "scene",
                     "instance": 7,
-                    "entity": "scene/player"
+                    "entity": "scene/player",
+                    "incarnation": 1
                 }
             })
         );
@@ -2049,7 +2096,8 @@ mod tests {
                     "entity": {
                         "namespace": "runtime",
                         "entity": "a1b2c3d4-e5f6-47a8-90ab-1234567890cd"
-                    }
+                    },
+                    "incarnation": 1
                 }
             })
         );

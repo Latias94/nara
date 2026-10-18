@@ -178,7 +178,9 @@ pub fn export_scene_with_options(
         .cloned()
     {
         let (instance, authored_id) = match locator.entity() {
-            RuntimeEntityReference::Scene { instance, entity } => (*instance, entity.clone()),
+            RuntimeEntityReference::Scene {
+                instance, entity, ..
+            } => (*instance, entity.clone()),
             RuntimeEntityReference::Persistent { .. } => continue,
         };
         match domain.lookup(world, locator.entity()) {
@@ -455,13 +457,16 @@ fn rewrite_export_reference(
         reference,
         domain.resolve_entity_reference(world, reference, Some(owner_instance)),
     ) {
-        (EntityReference::SceneLocal { entity }, EntityLookup::Resolved(_)) => {
-            let locator = WorldEntityLocator::new(
-                domain.id(),
-                RuntimeEntityReference::scene(owner_instance, entity.clone()),
-            );
+        (EntityReference::SceneLocal { .. }, EntityLookup::Resolved(target)) => {
+            let locators = domain
+                .locators_for_entity(world, target)
+                .map_err(|_| ExportReferenceResolutionError::SceneLocalTargetStale)?
+                .ok_or(ExportReferenceResolutionError::SceneLocalTargetStale)?;
+            let locator = locators
+                .scene()
+                .ok_or(ExportReferenceResolutionError::SceneLocalTargetMissing)?;
             let entity = remap
-                .get(&locator)
+                .get(locator)
                 .cloned()
                 .ok_or(ExportReferenceResolutionError::SceneLocalTargetMissing)?;
             Ok(EntityReference::SceneLocal { entity })
@@ -475,10 +480,15 @@ fn rewrite_export_reference(
         (EntityReference::SceneLocal { .. }, EntityLookup::StaleRegistration) => {
             Err(ExportReferenceResolutionError::SceneLocalTargetStale)
         }
-        (EntityReference::Persistent { entity }, EntityLookup::Resolved(_)) => {
-            let runtime_reference = RuntimeEntityReference::persistent(entity.clone());
-            let locator = WorldEntityLocator::new(domain.id(), runtime_reference);
-            if let Some(entity) = remap.get(&locator) {
+        (EntityReference::Persistent { entity }, EntityLookup::Resolved(target)) => {
+            let locators = domain
+                .locators_for_entity(world, target)
+                .map_err(|_| ExportReferenceResolutionError::PersistentTargetStale)?
+                .ok_or(ExportReferenceResolutionError::PersistentTargetStale)?;
+            let locator = locators
+                .persistent()
+                .ok_or(ExportReferenceResolutionError::PersistentTargetStale)?;
+            if let Some(entity) = remap.get(locator) {
                 return Ok(EntityReference::SceneLocal {
                     entity: entity.clone(),
                 });
@@ -496,12 +506,18 @@ fn rewrite_export_reference(
         (EntityReference::Persistent { .. }, EntityLookup::StaleRegistration) => {
             Err(ExportReferenceResolutionError::PersistentTargetStale)
         }
+        (EntityReference::Persistent { .. }, EntityLookup::Unloaded | EntityLookup::Deleted) => {
+            Err(ExportReferenceResolutionError::PersistentTargetTombstoned)
+        }
         (
             _,
             EntityLookup::ContextRequired
             | EntityLookup::DomainUnavailable
             | EntityLookup::WrongWorldBinding
-            | EntityLookup::WrongDomain { .. },
+            | EntityLookup::WrongDomain { .. }
+            | EntityLookup::StaleRuntime
+            | EntityLookup::Unloaded
+            | EntityLookup::Deleted,
         ) => Err(ExportReferenceResolutionError::InvalidIdentityState),
     }
 }

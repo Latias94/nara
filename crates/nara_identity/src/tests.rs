@@ -21,10 +21,10 @@ use crate::domain::{
 use crate::{
     EntityLookup, EntityReference, EntityReferenceRemap, IdentityAllocationError,
     IdentityDomainError, IdentityRemapError, MonotonicNonZeroU64Allocator, PersistentRuntimeId,
-    PersistentRuntimeNamespaceId, PersistentRuntimeReference, RuntimeEntityReference,
-    SceneEntityId, SceneInstanceId, TombstoneCause, WorldEntityLocator, WorldEntityToken,
-    WorldIdentityDomain, WorldIdentityDomainSettings, allocate_world_identity_domain_id_from,
-    resolve_in_world, spawn_identity_entity,
+    PersistentRuntimeNamespaceId, PersistentRuntimeReference, RuntimeEntityIncarnation,
+    RuntimeEntityReference, SceneEntityId, SceneInstanceId, TombstoneCause, WorldEntityLocator,
+    WorldEntityToken, WorldIdentityDomain, WorldIdentityDomainSettings,
+    allocate_world_identity_domain_id_from, resolve_in_world, spawn_identity_entity,
 };
 
 fn scene_id(value: &str) -> SceneEntityId {
@@ -41,9 +41,9 @@ fn persistent_ref(value: &str) -> PersistentRuntimeReference {
 fn settings(claims: usize, tombstones: usize) -> WorldIdentityDomainSettings {
     WorldIdentityDomainSettings::new(
         ItemLimit::new(claims).unwrap(),
+        ItemLimit::new(claims).unwrap(),
         ItemLimit::new(tombstones).unwrap(),
     )
-    .unwrap()
 }
 
 fn world_with_domain(claims: usize, tombstones: usize) -> World {
@@ -59,7 +59,7 @@ fn spawn_token(world: &mut World) -> WorldEntityToken {
 
 fn with_domain<T>(
     world: &mut World,
-    mutate: impl FnOnce(&World, &mut WorldIdentityDomain) -> T,
+    mutate: impl FnOnce(&mut World, &mut WorldIdentityDomain) -> T,
 ) -> T {
     let mut domain = world.remove_resource::<WorldIdentityDomain>().unwrap();
     let result = mutate(world, &mut domain);
@@ -222,6 +222,24 @@ fn world_domain_allocator_issues_the_last_id_once_then_fails_atomically() {
 }
 
 #[test]
+fn runtime_incarnation_allocator_never_wraps_or_reuses_its_last_value() {
+    let allocator = AtomicU64::new(u64::MAX);
+    assert_eq!(
+        crate::domain::allocate_runtime_entity_incarnation_from(&allocator)
+            .unwrap()
+            .get(),
+        u64::MAX
+    );
+    assert_eq!(allocator.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        crate::domain::allocate_runtime_entity_incarnation_from(&allocator),
+        Err(IdentityDomainError::RuntimeEntityIncarnationExhausted)
+    );
+    assert_eq!(allocator.load(Ordering::Relaxed), 0);
+    assert!(RuntimeEntityIncarnation::new(0).is_err());
+}
+
+#[test]
 fn scene_instance_allocator_issues_the_last_id_once_then_fails_atomically() {
     let mut world = world_with_domain(3, 1);
     with_domain(&mut world, |world, domain| {
@@ -259,7 +277,7 @@ fn bidirectional_registration_rejects_both_collision_directions_atomically() {
         assert_eq!(
             domain.lookup(
                 world,
-                &RuntimeEntityReference::persistent(first_ref.clone()),
+                &RuntimeEntityReference::persistent(first_ref.clone(), first.incarnation()),
             ),
             EntityLookup::Resolved(first.entity())
         );
@@ -270,7 +288,10 @@ fn bidirectional_registration_rejects_both_collision_directions_atomically() {
         ));
         assert_eq!(domain.stats(), before);
         assert_eq!(
-            domain.lookup(world, &RuntimeEntityReference::persistent(second_ref)),
+            domain.lookup(
+                world,
+                &RuntimeEntityReference::persistent(second_ref, second.incarnation())
+            ),
             EntityLookup::Missing
         );
     });
@@ -374,6 +395,12 @@ fn equal_entity_bits_in_two_worlds_never_alias_and_scene_local_requires_context(
 
     let first_locator = first_instance.locator(&scene_id("player")).unwrap();
     let second_locator = second_instance.locator(&scene_id("player")).unwrap();
+    assert_eq!(
+        second_world
+            .resource::<WorldIdentityDomain>()
+            .lookup(&second_world, first_locator.entity()),
+        EntityLookup::StaleRuntime
+    );
     assert_ne!(first_locator, second_locator);
     assert!(matches!(
         resolve_in_world(&second_world, &first_locator),
@@ -566,11 +593,17 @@ fn persistent_uuid_identity_is_scoped_by_namespace() {
             .register_persistent(world, second_entity, second.clone())
             .unwrap();
         assert_eq!(
-            domain.lookup(world, &RuntimeEntityReference::persistent(first)),
+            domain.lookup(
+                world,
+                &RuntimeEntityReference::persistent(first, first_entity.incarnation())
+            ),
             EntityLookup::Resolved(first_entity.entity())
         );
         assert_eq!(
-            domain.lookup(world, &RuntimeEntityReference::persistent(second)),
+            domain.lookup(
+                world,
+                &RuntimeEntityReference::persistent(second, second_entity.incarnation())
+            ),
             EntityLookup::Resolved(second_entity.entity())
         );
     });
@@ -717,7 +750,10 @@ fn scene_snapshot_remap_covers_persistent_axes_or_fails_as_incomplete() {
     assert_eq!(target.instance_id().get(), 1);
     let target_persistent_locator = WorldEntityLocator::new(
         target.domain_id(),
-        RuntimeEntityReference::persistent(target_persistent_reference.clone()),
+        RuntimeEntityReference::persistent(
+            target_persistent_reference.clone(),
+            target_token.incarnation(),
+        ),
     );
 
     assert_eq!(
@@ -798,7 +834,8 @@ fn retirement_remains_typed_after_detail_eviction_and_identity_is_never_reused()
                 world,
                 &RuntimeEntityReference::scene(
                     SceneInstanceId::new(99).unwrap(),
-                    scene_id("missing")
+                    scene_id("missing"),
+                    RuntimeEntityIncarnation::new(1).unwrap()
                 ),
             ),
             EntityLookup::Missing
@@ -1318,26 +1355,31 @@ fn scene_instance_can_retire_after_one_member_was_already_despawned() {
         ));
         assert!(matches!(
             domain.lookup(world, persistent_locator.entity()),
-            EntityLookup::Tombstoned(_)
+            EntityLookup::Unloaded
         ));
     });
 }
 
 #[test]
-fn lifetime_claim_budget_charges_instances_and_entity_axes_atomically() {
+fn scene_lifetime_claim_budget_is_independent_of_persistent_records() {
     let mut world = world_with_domain(2, 1);
     let scene_entity = spawn_token(&mut world);
     with_domain(&mut world, |world, domain| {
         domain
             .register_new_scene_instance(world, [(scene_id("only"), scene_entity)])
             .unwrap();
-        let before = domain.stats();
-        assert!(matches!(
-            domain.register_persistent(
+        domain
+            .register_persistent(
                 world,
                 scene_entity,
-                persistent_ref("33333333-3333-4333-8333-333333333333")
-            ),
+                persistent_ref("33333333-3333-4333-8333-333333333333"),
+            )
+            .unwrap();
+        assert_eq!(domain.stats().lifetime_claims, 2);
+        assert_eq!(domain.stats().persistent_logical_records, 1);
+        let before = domain.stats();
+        assert!(matches!(
+            domain.register_new_scene_instance(world, []),
             Err(IdentityDomainError::LifetimeClaimLimit { .. })
         ));
         assert_eq!(domain.stats(), before);
@@ -1454,9 +1496,16 @@ fn registered_locators_are_sorted_by_semantic_identity() {
 
 #[test]
 fn explicit_reference_remap_rejects_an_incomplete_source_set() {
-    let first = RuntimeEntityReference::scene(SceneInstanceId::new(1).unwrap(), scene_id("first"));
-    let second =
-        RuntimeEntityReference::scene(SceneInstanceId::new(1).unwrap(), scene_id("second"));
+    let first = RuntimeEntityReference::scene(
+        SceneInstanceId::new(1).unwrap(),
+        scene_id("first"),
+        RuntimeEntityIncarnation::new(1).unwrap(),
+    );
+    let second = RuntimeEntityReference::scene(
+        SceneInstanceId::new(1).unwrap(),
+        scene_id("second"),
+        RuntimeEntityIncarnation::new(2).unwrap(),
+    );
 
     assert_eq!(
         EntityReferenceRemap::complete([first.clone(), second], [(first.clone(), first)],),
@@ -1499,8 +1548,11 @@ fn durable_and_runtime_references_roundtrip_without_runtime_entity_bits() {
         durable
     );
 
-    let runtime =
-        RuntimeEntityReference::scene(SceneInstanceId::new(7).unwrap(), scene_id("root/player"));
+    let runtime = RuntimeEntityReference::scene(
+        SceneInstanceId::new(7).unwrap(),
+        scene_id("root/player"),
+        RuntimeEntityIncarnation::new(3).unwrap(),
+    );
     let encoded = serde_json::to_string(&runtime).unwrap();
     assert!(!encoded.contains("Entity"));
     assert_eq!(

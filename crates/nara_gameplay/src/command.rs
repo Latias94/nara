@@ -176,8 +176,10 @@ impl GameplayCommandTarget {
         let value_bytes = match self {
             Self::Entity(RuntimeEntityReference::Scene { entity, .. }) => VARIANT_TAG_BYTES
                 .checked_add(U64_BYTES)?
+                .checked_add(U64_BYTES)?
                 .checked_add(entity.as_str().len())?,
-            Self::Entity(RuntimeEntityReference::Persistent { entity }) => VARIANT_TAG_BYTES
+            Self::Entity(RuntimeEntityReference::Persistent { entity, .. }) => VARIANT_TAG_BYTES
+                .checked_add(U64_BYTES)?
                 .checked_add(entity.namespace.as_str().len())?
                 .checked_add(UUID_HYPHENATED_BYTES)?,
             Self::Named(id) => id.as_str().len(),

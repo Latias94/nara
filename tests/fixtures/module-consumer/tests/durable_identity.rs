@@ -4,9 +4,9 @@ mod support;
 use bevy_ecs::{component::Component, entity::Entity, world::World};
 use nara_asset::{AssetDatabaseError, AssetRef};
 use nara_identity::{
-    EntityLookup, PersistentRuntimeId, PersistentRuntimeNamespaceId, PersistentRuntimeReference,
-    RuntimeEntityReference, SceneEntityId, SpawnedSceneInstance, WorldIdentityDomain,
-    spawn_identity_entity,
+    EntityLookup, EntityReference, PersistentRuntimeId, PersistentRuntimeNamespaceId,
+    PersistentRuntimeReference, SceneEntityId, SpawnedSceneInstance, TombstoneCause,
+    WorldIdentityDomain, spawn_identity_entity,
 };
 use nara_scene::{
     InMemoryPrefabSourceResolver, Name, SceneDocumentCandidate, SceneEntitySource,
@@ -239,10 +239,16 @@ fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_chan
     );
     assert_ne!(original_alpha.instance_id(), restored_alpha.instance_id());
     assert_eq!(original_alpha.instance_id(), restored_beta.instance_id());
-    let EntityLookup::Resolved(owner_entity) = restored.resource::<WorldIdentityDomain>().lookup(
-        &restored,
-        &RuntimeEntityReference::persistent(saved.instance_owner),
-    ) else {
+    let EntityLookup::Resolved(owner_entity) = restored
+        .resource::<WorldIdentityDomain>()
+        .resolve_entity_reference(
+            &restored,
+            &EntityReference::Persistent {
+                entity: saved.instance_owner,
+            },
+            None,
+        )
+    else {
         panic!("the saved instance owner UUID must resolve");
     };
     let selected = &restored.get::<InstanceOwner>(owner_entity).unwrap().0;
@@ -251,6 +257,116 @@ fn a_saved_authored_binding_selects_one_restored_instance_after_spawn_order_chan
     assert_eq!(target, restored_alpha.resolve(&restored, &local));
     assert_ne!(target, restored_beta.resolve(&restored, &local));
     assert!(matches!(target, EntityLookup::Resolved(_)));
+}
+
+#[derive(Debug, Component, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct NpcState {
+    visits: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SavedNpc {
+    identity: PersistentRuntimeReference,
+    state: NpcState,
+}
+
+#[test]
+fn a_persistent_npc_rematerializes_without_reloading_its_scene_owner() {
+    let registry = frozen_scene_registry().unwrap();
+    let database = merged_database();
+    let scene = stable_scene(&registry, &database);
+    let resolver = prefab_resolver(&database, &registry);
+    let mut world = World::new();
+    let instance = spawn_owned_instance(
+        &mut world,
+        &registry,
+        &scene,
+        &resolver,
+        &database,
+        persistent_owner("11111111-1111-4111-8111-111111111111"),
+    );
+    let scene_claims = world
+        .resource::<WorldIdentityDomain>()
+        .stats()
+        .lifetime_claims;
+    let mut saved = SavedNpc {
+        identity: persistent_owner("33333333-3333-4333-8333-333333333333"),
+        state: NpcState { visits: 0 },
+    };
+    let mut previous_runtime = None;
+
+    for expected_visit in 0..32 {
+        let saved_bytes = ron::ser::to_string(&saved).unwrap();
+        assert!(!saved_bytes.contains("incarnation"));
+        saved = ron::from_str(&saved_bytes).unwrap();
+        let token = spawn_identity_entity(&mut world).unwrap();
+        world.entity_mut(token.entity()).insert(saved.state.clone());
+        let locator = world.resource_scope(
+            |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                let locator = domain
+                    .register_persistent(world, token, saved.identity.clone())
+                    .unwrap();
+                if let Some(previous) = &previous_runtime {
+                    assert_eq!(domain.lookup(world, previous), EntityLookup::StaleRuntime);
+                }
+                assert_eq!(domain.stats().persistent_logical_records, 2);
+                assert_eq!(domain.stats().lifetime_claims, scene_claims);
+                assert_eq!(
+                    domain.resolve_entity_reference(
+                        world,
+                        &EntityReference::Persistent {
+                            entity: saved.identity.clone()
+                        },
+                        None
+                    ),
+                    EntityLookup::Resolved(token.entity())
+                );
+                locator
+            },
+        );
+        assert!(matches!(
+            instance.resolve(&world, &SceneEntityId::new("actor-instance").unwrap()),
+            EntityLookup::Resolved(_)
+        ));
+        let mut state = world.get_mut::<NpcState>(token.entity()).unwrap();
+        assert_eq!(state.visits, expected_visit);
+        state.visits += 1;
+        saved.state = state.clone();
+        world.resource_scope(
+            |world, mut domain: bevy_ecs::change_detection::Mut<WorldIdentityDomain>| {
+                domain
+                    .retire_entity(world, token, TombstoneCause::Unloaded)
+                    .unwrap();
+                assert_eq!(
+                    domain.resolve_entity_reference(
+                        world,
+                        &EntityReference::Persistent {
+                            entity: saved.identity.clone()
+                        },
+                        None
+                    ),
+                    EntityLookup::Unloaded
+                );
+            },
+        );
+        assert!(world.despawn(token.entity()));
+        previous_runtime = Some(locator.entity().clone());
+    }
+    assert_eq!(saved.state.visits, 32);
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .stats()
+            .persistent_logical_records,
+        2
+    );
+    assert_eq!(
+        world
+            .resource::<WorldIdentityDomain>()
+            .stats()
+            .lifetime_claims,
+        scene_claims
+    );
 }
 
 fn persistent_owner(id: &str) -> PersistentRuntimeReference {

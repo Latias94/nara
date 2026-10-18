@@ -17,7 +17,7 @@ use nara::{
     core::Color,
     ecs::Entity,
     hierarchy::Parent,
-    identity::{EntityLookup, RuntimeEntityReference, WorldIdentityDomain},
+    identity::{EntityLookup, WorldIdentityDomain},
     input::{ButtonDriverInput, KeyCode, apply_keyboard_driver_input},
     material::SamplerDescriptor,
     prelude::{Component, FixedTime, Sprite, Vec2, World},
@@ -566,10 +566,13 @@ fn registered_scene_entity(world: &World, entity: Entity) -> bool {
     let Some(source) = world.get::<SceneEntitySource>(entity) else {
         return false;
     };
-    world.resource::<WorldIdentityDomain>().lookup(
-        world,
-        &RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
-    ) == EntityLookup::Resolved(entity)
+    let reference = nara::identity::EntityReference::SceneLocal {
+        entity: source.entity_id.clone(),
+    };
+    world
+        .resource::<WorldIdentityDomain>()
+        .resolve_entity_reference(world, &reference, Some(source.instance_id))
+        == EntityLookup::Resolved(entity)
 }
 
 fn assert_extracted_sprite_matches_global(world: &World, entity: Entity) -> Vec2 {

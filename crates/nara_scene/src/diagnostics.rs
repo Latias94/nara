@@ -461,6 +461,11 @@ pub(crate) fn with_identity_error(
     error: &IdentityDomainError,
 ) -> Diagnostic {
     match error {
+        IdentityDomainError::RuntimeEntityIncarnationExhausted => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "runtime-entity-incarnation-exhausted",
+        ),
         IdentityDomainError::WorldDomainIdExhausted => with_public_identifier(
             diagnostic,
             "identity-error-kind",
@@ -566,6 +571,36 @@ pub(crate) fn with_identity_error(
             ),
             "maximum-claims",
             usize_to_u64(*maximum),
+        ),
+        IdentityDomainError::PersistentLogicalRecordLimit { requested, maximum } => {
+            with_public_u64(
+                with_public_u64(
+                    with_public_identifier(
+                        diagnostic,
+                        "identity-error-kind",
+                        "persistent-logical-record-limit",
+                    ),
+                    "requested-records",
+                    usize_to_u64(*requested),
+                ),
+                "maximum-records",
+                usize_to_u64(*maximum),
+            )
+        }
+        IdentityDomainError::PersistentIdentityDeleted { .. } => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "persistent-identity-deleted",
+        ),
+        IdentityDomainError::PersistentIdentityActive { .. } => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "persistent-identity-active",
+        ),
+        IdentityDomainError::PersistentIdentityMissing { .. } => with_public_identifier(
+            diagnostic,
+            "identity-error-kind",
+            "persistent-identity-missing",
         ),
         IdentityDomainError::WrongDomain { expected, actual } => with_public_u64(
             with_public_u64(

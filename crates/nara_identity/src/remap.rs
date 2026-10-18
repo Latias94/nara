@@ -176,7 +176,7 @@ fn durable_reference(reference: &RuntimeEntityReference) -> EntityReference {
         RuntimeEntityReference::Scene { entity, .. } => EntityReference::SceneLocal {
             entity: entity.clone(),
         },
-        RuntimeEntityReference::Persistent { entity } => EntityReference::Persistent {
+        RuntimeEntityReference::Persistent { entity, .. } => EntityReference::Persistent {
             entity: entity.clone(),
         },
     }

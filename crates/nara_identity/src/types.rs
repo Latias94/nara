@@ -351,6 +351,32 @@ pub enum EntityReference {
     Persistent { entity: PersistentRuntimeReference },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct RuntimeEntityIncarnation(NonZeroU64);
+
+impl RuntimeEntityIncarnation {
+    pub fn new(value: u64) -> Result<Self, RuntimeEntityIncarnationError> {
+        NonZeroU64::new(value)
+            .map(Self)
+            .ok_or(RuntimeEntityIncarnationError)
+    }
+
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0.get()
+    }
+
+    pub(crate) const fn from_non_zero(value: NonZeroU64) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
+#[error("runtime entity incarnation cannot be zero")]
+pub struct RuntimeEntityIncarnationError;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
@@ -361,21 +387,44 @@ pub enum RuntimeEntityReference {
     Scene {
         instance: SceneInstanceId,
         entity: SceneEntityId,
+        incarnation: RuntimeEntityIncarnation,
     },
     Persistent {
         entity: PersistentRuntimeReference,
+        incarnation: RuntimeEntityIncarnation,
     },
 }
 
 impl RuntimeEntityReference {
     #[must_use]
-    pub const fn scene(instance: SceneInstanceId, entity: SceneEntityId) -> Self {
-        Self::Scene { instance, entity }
+    pub const fn scene(
+        instance: SceneInstanceId,
+        entity: SceneEntityId,
+        incarnation: RuntimeEntityIncarnation,
+    ) -> Self {
+        Self::Scene {
+            instance,
+            entity,
+            incarnation,
+        }
     }
 
     #[must_use]
-    pub const fn persistent(entity: PersistentRuntimeReference) -> Self {
-        Self::Persistent { entity }
+    pub const fn persistent(
+        entity: PersistentRuntimeReference,
+        incarnation: RuntimeEntityIncarnation,
+    ) -> Self {
+        Self::Persistent {
+            entity,
+            incarnation,
+        }
+    }
+
+    #[must_use]
+    pub const fn incarnation(&self) -> RuntimeEntityIncarnation {
+        match self {
+            Self::Scene { incarnation, .. } | Self::Persistent { incarnation, .. } => *incarnation,
+        }
     }
 }
 

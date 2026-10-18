@@ -1527,9 +1527,30 @@ pub fn retire_and_despawn_scene_entity(
             IdentityDomainError::WorldDomainUnavailable,
         ));
     }
-    let reference = RuntimeEntityReference::scene(source.instance_id, source.entity_id);
+    let domain = world
+        .get_resource::<WorldIdentityDomain>()
+        .expect("scene entity retirement requires its identity domain");
+    let locators = domain
+        .locators_for_entity(world, entity)
+        .map_err(SceneEntityRetirementError::Identity)?
+        .ok_or(SceneEntityRetirementError::Identity(
+            IdentityDomainError::EntityNotRegistered,
+        ))?;
+    let reference = locators
+        .scene()
+        .filter(|locator| {
+            matches!(
+                locator.entity(),
+                RuntimeEntityReference::Scene { instance, entity, .. }
+                    if *instance == source.instance_id && *entity == source.entity_id
+            )
+        })
+        .ok_or(SceneEntityRetirementError::Identity(
+            IdentityDomainError::StaleRegistration,
+        ))?
+        .entity();
     let prepared_identity =
-        prepare_exact_entity_retirement(world, entity, &reference, TombstoneCause::Despawned)
+        prepare_exact_entity_retirement(world, entity, reference, TombstoneCause::Despawned)
             .map_err(SceneEntityRetirementError::Identity)?;
     let hierarchy = prepare_scene_hierarchy_retirement(world, &[entity])
         .map_err(|_| SceneEntityRetirementError::Hierarchy)?;

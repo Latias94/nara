@@ -62,11 +62,12 @@ fn scene_commands_and_tooling_share_one_world_scoped_identity_contract() {
 #[cfg(feature = "serde")]
 #[test]
 fn command_target_serialization_contains_stable_timeline_identity_only() {
-    use nara::identity::{RuntimeEntityReference, SceneInstanceId};
+    use nara::identity::{RuntimeEntityIncarnation, RuntimeEntityReference, SceneInstanceId};
 
     let target = GameplayCommandTarget::Entity(RuntimeEntityReference::scene(
         SceneInstanceId::new(7).unwrap(),
         SceneEntityId::new("player").unwrap(),
+        RuntimeEntityIncarnation::new(13).unwrap(),
     ));
 
     assert_eq!(
@@ -75,7 +76,8 @@ fn command_target_serialization_contains_stable_timeline_identity_only() {
             "Entity": {
                 "kind": "scene",
                 "instance": 7,
-                "entity": "player"
+                "entity": "player",
+                "incarnation": 13
             }
         })
     );

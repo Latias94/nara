@@ -22,7 +22,7 @@ use nara::{
         Entity, Mut, Resource, With, lifecycle::Add, observer::On, schedule::IntoScheduleConfigs,
     },
     gameplay::{GameplayCommandBatch, GameplayCommandSet, add_local_gameplay_command_systems},
-    identity::{EntityLookup, RuntimeEntityReference, WorldIdentityDomain},
+    identity::{EntityLookup, WorldIdentityDomain},
     prelude::{App, Commands, FixedTime, Plugin, PluginError, Query, Res, ResMut, World},
     scene::SceneEntitySource,
     ui::latest_ui_frame,
@@ -483,10 +483,16 @@ fn install_retry_candidate_observer_after_terminal(world: &mut World) {
         .find_map(|entity| {
             let source = entity.get::<SceneEntitySource>()?;
             (entity.contains::<PlayerRole>()
-                && world.resource::<WorldIdentityDomain>().lookup(
-                    world,
-                    &RuntimeEntityReference::scene(source.instance_id, source.entity_id.clone()),
-                ) == EntityLookup::Resolved(entity.id()))
+                && world
+                    .resource::<WorldIdentityDomain>()
+                    .resolve_entity_reference(
+                        world,
+                        &nara::identity::EntityReference::SceneLocal {
+                            entity: source.entity_id.clone(),
+                        },
+                        Some(source.instance_id),
+                    )
+                    == EntityLookup::Resolved(entity.id()))
             .then_some(entity.id())
         })
         .expect("the terminal run must retain its exact registered player");
