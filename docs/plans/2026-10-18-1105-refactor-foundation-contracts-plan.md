@@ -35,11 +35,11 @@ and immutable engineering records.
 | U4, U13 | Final closure, selected policy propagation, available source-authoring and typed durable residency outcomes landed as `784f4ab`; 361 Reflect/Scene, 7 independent durable-consumer and 53 root consumer tests pass. Final Editor authoring loop and 34 reference-game consumers pass | Preserve regressions; native Editor release qualification remains outside this slice |
 | U9 | Real Task/Image preparation plus hook-owned native consumer landed as `237997b` and passes 8 tests; three complementary root Host close/successor tests pass | Keep production physics/audio and broader successor compositions as named consumers; no universal coordinator |
 | U7, U8, U10, U15 | Source/consumer review retains current contracts with exact admission triggers; shared substeps/current-pose/pixel-canvas/device-profile APIs are not implemented. Concrete Surface extent defect is fixed as `4c0b49f`, with 107 WGPU tests passing | Reopen only for the real repeated-step, same-phase pose, shared logical-canvas or non-default capability consumer described in the audit |
-| U12 | Baselines and retained raw evidence landed as `f6f3901`: three hierarchy and one Transform timing processes pass correctness; a separate allocation process records 32 consistent windows with stable adjusted requested heap | F11 stays measured debt before large-world multi-producer admission. RSS, GPU memory, general leak safety and native frame qualification remain outside this baseline |
+| U12 / F11 | Hierarchy candidate overlay, private trusted baseline epoch and raw-dirty fallback land in the current F11 slice; three trusted timing processes pass the 4,096 independent-eight P95 <1 ms investigation target, and 32 trusted allocation windows remain counter-consistent | Retain full validation for raw escapes, retirement and private Scene preparation. RSS, GPU memory, general leak safety and native frame qualification remain outside this baseline; a future prepared consumer must preserve its owner-controlled no-flush window |
 
 Final integration passes `cargo check --locked --workspace --all-targets --all-features`, workspace
 and independent-consumer formatting, and whitespace checks. Reference-game authoring, desktop
-render and first-wave suites pass all 34 tests; the Editor authoring-loop check passes with its
+render and first-wave suites pass all 34 tests (run `d2a6ab99-69b6-4d84-b932-6bc520dfe27c`); the Editor authoring-loop check passes with its
 separate native qualification skipped. No additional native release claim follows from this closure.
 
 ## Product Contract

@@ -1,4 +1,16 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use nara_ecs::{Component, Entity, Resource, entity::EntityHashMap};
+
+static NEXT_ROOT_EPOCH: AtomicU64 = AtomicU64::new(1);
+
+fn next_root_epoch() -> u64 {
+    NEXT_ROOT_EPOCH
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |epoch| {
+            epoch.checked_add(1)
+        })
+        .expect("hierarchy root epoch space exhausted")
+}
 
 /// Tracks lifetime invalidation for every placed entity, including childless roots.
 #[derive(Debug, Component)]
@@ -11,54 +23,76 @@ pub(crate) struct HierarchyMember;
 /// list of every parentless ECS entity: runtime domains opt entities into the structural closure
 /// explicitly, and consumers read this sequence instead of reconstructing root order from queries
 /// or entity allocation.
-#[derive(Debug, PartialEq, Eq, Resource)]
-pub struct HierarchyRoots(Vec<Entity>);
+#[derive(Debug, Resource)]
+pub struct HierarchyRoots {
+    values: Vec<Entity>,
+    epoch: u64,
+}
+
+impl PartialEq for HierarchyRoots {
+    fn eq(&self, other: &Self) -> bool {
+        self.values == other.values
+    }
+}
+
+impl Eq for HierarchyRoots {}
 
 impl HierarchyRoots {
-    pub(crate) const fn new() -> Self {
-        Self(Vec::new())
+    pub(crate) fn new() -> Self {
+        Self {
+            values: Vec::new(),
+            epoch: next_root_epoch(),
+        }
+    }
+
+    pub(crate) const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    pub(crate) fn advance_epoch(&mut self) {
+        self.epoch = next_root_epoch();
     }
 
     pub(crate) fn insert(&mut self, index: usize, entity: Entity) {
-        self.0.insert(index, entity);
+        self.values.insert(index, entity);
     }
 
     pub(crate) fn remove(&mut self, entity: Entity) {
         let index = self
-            .0
+            .values
             .iter()
             .position(|candidate| *candidate == entity)
             .expect("prepared hierarchy root must remain registered through commit");
-        self.0.remove(index);
+        self.values.remove(index);
     }
 
     /// Iterates registered roots in structural order.
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Entity> + DoubleEndedIterator + '_ {
-        self.0.iter().copied()
+        self.values.iter().copied()
     }
 
     /// Returns registered roots as a read-only slice.
     #[must_use]
     pub fn as_slice(&self) -> &[Entity] {
-        &self.0
+        &self.values
     }
 
     /// Returns the number of registered roots.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.values.len()
     }
 
     /// Returns whether no runtime roots are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.values.is_empty()
     }
 
     /// Returns whether `entity` is a registered root.
     #[must_use]
     pub fn contains(&self, entity: Entity) -> bool {
-        self.0.contains(&entity)
+        self.values.contains(&entity)
     }
 }
 
@@ -69,14 +103,22 @@ impl HierarchyRoots {
 #[derive(Debug, Default, PartialEq, Eq, Resource)]
 pub struct HierarchyOrder {
     generation: u64,
+    root_epoch: Option<u64>,
     roots: Vec<Entity>,
     entities: Vec<Entity>,
     indices: EntityHashMap<usize>,
 }
 
 impl HierarchyOrder {
-    pub(crate) fn replace(&mut self, generation: u64, roots: Vec<Entity>, entities: Vec<Entity>) {
+    pub(crate) fn replace(
+        &mut self,
+        generation: u64,
+        root_epoch: Option<u64>,
+        roots: Vec<Entity>,
+        entities: Vec<Entity>,
+    ) {
         self.generation = generation;
+        self.root_epoch = root_epoch;
         self.roots = roots;
         self.entities = entities;
         self.indices.clear();
@@ -94,6 +136,10 @@ impl HierarchyOrder {
     #[must_use]
     pub const fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub(crate) const fn root_epoch(&self) -> Option<u64> {
+        self.root_epoch
     }
 
     /// Returns registered roots in their validated order.

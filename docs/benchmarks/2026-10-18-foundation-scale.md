@@ -5,22 +5,23 @@ a native frame-time qualification, or evidence for an incremental implementation
 
 ## Decision
 
-Retain the current correct Transform implementation for the admitted consumers. Investigate the
-Hierarchy writer before admitting a consumer with thousands of hierarchy members and several
-independent mutation producers: the 4,096-member experiment exceeds the pre-recorded 1 ms P95
-investigation flag in all three processes. An eight-operation atomic batch is materially cheaper
-than eight independent transactions. Combining different producers must preserve their transaction
-semantics; this measurement does not authorize silently merging them.
+Retain the current correct Transform implementation for the admitted consumers. F11's first
+candidate overlay removed whole-topology candidate copying, then a private hierarchy baseline
+epoch allowed ordinary owner-controlled writer batches to reuse a validated structural baseline.
+The complete trusted-generation result is below 1 ms P95 for 4,096 members in three independent
+processes, including eight independent transactions. The old baseline remains below for comparison.
+Combining different producers is still forbidden; each transaction remains atomic and ordered.
 
-The 65,536-member hierarchy experiment exceeds the 15-second sampling cap. It establishes a stress
-boundary, not a usable P99 or a reason to copy Bevy's parallel/unsafe traversal. No current reference
-game consumer establishes this population as a product requirement. F11 remains measured technical
-debt with a concrete admission trigger; F12 retains a measured consumer gate.
+The 65,536-member trusted-generation rows now complete 1,000 samples within the cap, but remain a
+stress measurement rather than a supported entity-count promise. No current reference-game consumer
+establishes that population as a product requirement. F12 retains a measured consumer gate.
 
 ## Subject And Protocol
 
-- Timing source: `327b86f`, after U2/U3. Allocation evidence follows `784f4ab`; the measured
-  Hierarchy/Transform algorithms are unchanged. Instrumentation lives only in ignored test targets.
+- Old timing source: `327b86f`, after U2/U3. Trusted-generation source follows the F11 working tree
+  after `e48b4b3`; allocation evidence is isolated in ignored test targets. Hierarchy semantics and
+  full validation remain the correctness oracle; only private candidate storage and owner-controlled
+  baseline reuse changed.
 - Windows 11 Pro build 26300; Intel Core i9-13900KF, 24 cores / 32 logical processors; 68,400,455,680
   bytes installed memory; Lenovo default power scheme. No process affinity or machine isolation.
   Other desktop/background work may affect tails.
@@ -61,6 +62,32 @@ They must not be pooled to manufacture a complete P99. The three hierarchy nexte
 `619fcfc8-e756-4c2d-b73d-1b6a11e0a9a5`, `c9ce1851-c3d1-44bd-9bda-2a249bd5b70b`, and
 `10bf07b7-550b-43d1-b506-a132dcd3fe84`; all correctness checks passed.
 
+## F11 Trusted-Generation Results
+
+The trusted path keeps full validation for the private Scene retirement/construction preparation
+surface and for any raw-dirty or uninitialized World. Ordinary `HierarchyWriter` batches reuse a
+private baseline only after a successful owned commit; immutable relation hooks invalidate it, and
+the root resource carries a private epoch so raw remove/replacement cannot reuse the old proof.
+The candidate itself is a World-borrowing, touched-owner copy-on-write overlay. It is dropped before
+`PreparedHierarchyBatch` is returned, so no borrowed World crosses the prepare/commit boundary.
+
+Each row has 1,000 samples per process. Figures are milliseconds, nearest-rank percentiles.
+
+| Population / work | Trusted run 1 P95 / P99 | Trusted run 2 P95 / P99 | Trusted run 3 P95 / P99 |
+| --- | --- | --- | --- |
+| 4,096 / batch 1 | 0.48 / 0.59 | 0.50 / 0.64 | 0.52 / 0.76 |
+| 4,096 / batch 8 | 0.47 / 0.56 | 0.58 / 0.76 | 0.49 / 0.61 |
+| 4,096 / batch 32 | 0.48 / 0.61 | 0.58 / 0.72 | 0.51 / 0.63 |
+| 4,096 / independent 8 | 0.49 / 0.58 | 0.53 / 0.66 | 0.51 / 0.61 |
+| 65,536 / batch 8 | 13.61 / 15.35 | 13.98 / 15.39 | 13.19 / 14.11 |
+| 65,536 / independent 8 | 13.12 / 14.51 | 11.89 / 13.90 | 13.50 / 14.76 |
+
+The three trusted runs are `bfe2b03c-f1af-4bd8-ac3d-26c3178a1e12`,
+`e6bdfb59-4d75-475f-862c-e834f3f5f735`, and `aa1eb6c0-adee-43ea-8499-985c50c4d707`.
+All hierarchy correctness oracles passed. This satisfies the local investigation target for the
+admitted 4,096-member workload; it is not a cross-machine frame SLA or a promise for arbitrary
+world size. The existing full validator remains available for raw mutation and diagnostic paths.
+
 ## Transform Results
 
 The first complete process has 1,000 samples per row, including stress. Figures are milliseconds.
@@ -83,7 +110,8 @@ two-of-three Transform investigation threshold. The full summaries retain unroun
 
 A separate executable delegates to Rust's `System` allocator and counts successful `GlobalAlloc`
 requests. The original timing executable has no instrumented allocator; these samples cannot be
-mixed with its latency population. Run `4b711344-1aff-4c2d-9616-badbb4164d5c` passed one explicitly
+mixed with its latency population. The first overlay-only run is `406645c7-f7e6-4235-8998-b5cc9a8009df`;
+the trusted-generation run is `20f1da15-9225-449e-82b6-84c8692ef014`. Each passed one explicitly
 selected allocation test, with the two imported timing tests skipped.
 
 Each scenario has 120 warm-up cycles followed by four blocks of 64 cycles. Fixture construction,
@@ -96,15 +124,20 @@ The following per-cycle figures are identical across all four blocks; calls incl
 | 64 / static or one leaf | 0 | 0 | 0 | 0 |
 | 4,096 / static or one leaf | 0 | 0 | 0 | 0 |
 | 65,536 / static or one leaf | 0 | 0 | 0 | 0 |
-| 4,096 / batch 8 reparent | 1,212.5 | 1,487,768 | 0 | 553,952 bytes |
-| 4,096 / independent 8 reparent | 9,441.5 | 11,428,052 | 0 | 554,008 bytes |
+| 4,096 / batch 8 reparent, old full candidate | 1,212.5 | 1,487,768 | 0 | 553,952 bytes |
+| 4,096 / independent 8 reparent, old full candidate | 9,441.5 | 11,428,052 | 0 | 554,008 bytes |
+| 4,096 / batch 8 reparent, trusted baseline | 30.5 | 68,052 | 0 | 32,592 bytes |
+| 4,096 / independent 8 reparent, trusted baseline | 95.5 | 72,884 | 0 | 32,592 bytes |
 
 All 32 windows have matching requested-traffic and live-counter deltas. Each scenario's end-of-block
 live requested bytes remain identical over its four blocks. Hierarchy consumes and drops 30,208
 bytes of inputs allocated before each window; its raw live delta is therefore -30,208 bytes.
 Adding back that transferred input produces the zero adjusted delta above. This is finite churn
 and short-window retention evidence, not an engine memory optimization or a leak proof. Independent
-transactions amplify allocation traffic as well as CPU cost, strengthening F11's admission trigger.
+The overlay-only run reduced candidate traffic by about 30%. Trusted baseline reuse reduced the
+measured writer traffic by about 95–99% against the old full-candidate rows. These are requested
+heap observations for this harness, not a claim that different logical transactions should be
+merged.
 
 The counters are process-wide and do not filter activity by thread. Requested Rust heap bytes are
 not allocator usable bytes, resident working set, GPU memory, or a total engine-memory bound. No
@@ -136,9 +169,10 @@ process-memory or leak qualification. GPU memory, startup cost, dense motion, wi
 and native presentation are outside this experiment.
 
 The next real large-map/attachment/streaming consumer must specify its loaded members, independent
-producer count, active ratio, CPU and memory budgets before proceeding. Reproduce and attribute
-the hierarchy threshold, then replace candidate copying only under the existing mutation authority
-and invalidation contracts, retaining full validation as the correctness oracle. A real Transform
-consumer exceeding 2 ms P99 at 4,096 sparse participants in two of three complete processes triggers
-its own attribution and incremental-propagation investigation. Neither threshold is a retroactive
+producer count, active ratio, CPU and memory budgets before proceeding. Any new prepared-batch
+consumer must retain the owner-controlled no-flush/no-hierarchy-mutation window between preparation
+and commit; the trusted fast path does not make `PreparedHierarchyBatch` a stale-world-safe token.
+The full validator remains the oracle for raw escapes and retirement. A real Transform consumer
+exceeding 2 ms P99 at 4,096 sparse participants in two of three complete processes triggers its
+own attribution and incremental-propagation investigation. Neither threshold is a retroactive
 production SLA.

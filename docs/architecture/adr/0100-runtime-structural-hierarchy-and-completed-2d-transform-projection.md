@@ -73,6 +73,11 @@ flowchart LR
   including advanced raw component replacement or removal. A missing or divergent root resource
   also withholds completion. Direct reverse-collection mutation is unavailable; raw despawn never
   cascades and leaves the hierarchy fail-closed until its owning placement transaction runs.
+- Ordinary owner-controlled writer batches may reuse a private validated baseline and resolve through
+  a sparse touched-owner copy-on-write overlay. The baseline is invalidated by relation hooks and a
+  private root-resource epoch; raw escapes and diagnostic/private construction paths retain complete
+  validation. The overlay is dropped before a prepared batch crosses its prepare/commit boundary.
+  Prepared batches still require the enclosing owner's no-flush/no-hierarchy-mutation window.
 - Structural ancestry never defines a retirement closure. Existing lifecycle owners must adapt
   their owned teardown paths to the hierarchy projection and continue retiring only their explicit
   memberships. This ADR does not accept a scene-session, scene-travel, candidate-initialization,

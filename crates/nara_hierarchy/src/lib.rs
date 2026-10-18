@@ -82,7 +82,9 @@ pub mod __private {
         let order = world.get_resource::<HierarchyOrder>()?;
         let roots = world.get_resource::<HierarchyRoots>()?;
         (state.completed_generation == Some(completed.generation())
-            && state.topology_generation == completed.generation())
+            && state.topology_generation == completed.generation()
+            && state.baseline_root_epoch == Some(roots.epoch())
+            && order.root_epoch() == Some(roots.epoch()))
         .then_some(())
         .filter(|_| order.generation() == completed.generation())
         .filter(|_| order.roots() == roots.as_slice())
@@ -123,6 +125,8 @@ use __private::HierarchySet;
 struct HierarchyGenerationState {
     topology_generation: u64,
     completed_generation: Option<u64>,
+    baseline_valid: bool,
+    baseline_root_epoch: Option<u64>,
     #[cfg(test)]
     validation_scans: u64,
 }
@@ -131,7 +135,9 @@ impl Default for HierarchyGenerationState {
     fn default() -> Self {
         Self {
             topology_generation: 0,
-            completed_generation: Some(0),
+            completed_generation: None,
+            baseline_valid: false,
+            baseline_root_epoch: None,
             #[cfg(test)]
             validation_scans: 0,
         }
@@ -145,11 +151,31 @@ impl HierarchyGenerationState {
     fn mark_dirty(&mut self) {
         self.topology_generation = self.topology_generation.saturating_add(1);
         self.completed_generation = None;
+        self.baseline_valid = false;
     }
 
     fn needs_validation(&self) -> bool {
         self.completed_generation != Some(self.topology_generation)
     }
+}
+
+pub(crate) fn hierarchy_baseline_is_valid(world: &World) -> bool {
+    let Some(state) = world.get_resource::<HierarchyGenerationState>() else {
+        return false;
+    };
+    state.baseline_valid
+        && world
+            .get_resource::<HierarchyRoots>()
+            .is_some_and(|roots| Some(roots.epoch()) == state.baseline_root_epoch)
+}
+
+pub(crate) fn mark_hierarchy_baseline_valid(world: &mut World) {
+    let root_epoch = world
+        .get_resource::<HierarchyRoots>()
+        .map(HierarchyRoots::epoch);
+    let mut state = world.get_resource_or_init::<HierarchyGenerationState>();
+    state.baseline_valid = true;
+    state.baseline_root_epoch = root_epoch;
 }
 
 pub const HIERARCHY_PLUGIN_ID: PluginId = PluginId::new("nara.hierarchy");
@@ -215,6 +241,23 @@ fn hierarchy_component_changed(mut world: DeferredWorld<'_>, _context: HookConte
 fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
     world.get_resource_or_init::<HierarchyGenerationState>();
 
+    let root_epoch = world
+        .get_resource::<HierarchyRoots>()
+        .map(HierarchyRoots::epoch);
+    let order_epoch = world
+        .get_resource::<HierarchyOrder>()
+        .and_then(HierarchyOrder::root_epoch);
+    {
+        let mut state = world.resource_mut::<HierarchyGenerationState>();
+        if state.baseline_valid && state.baseline_root_epoch != root_epoch {
+            state.mark_dirty();
+        } else if state.completed_generation == Some(state.topology_generation)
+            && order_epoch != root_epoch
+        {
+            state.mark_dirty();
+        }
+    }
+
     let generation = {
         let state = world.resource::<HierarchyGenerationState>();
         if !state.needs_validation() {
@@ -238,6 +281,7 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
     );
     validation.map_err(BevyError::error)?;
     world.init_resource::<HierarchyOrder>();
+    let root_epoch = world.resource::<HierarchyRoots>().epoch();
     let roots = world.resource::<HierarchyRoots>().as_slice().to_vec();
     let mut entities = Vec::new();
     let mut pending = roots.iter().rev().copied().collect::<Vec<_>>();
@@ -248,11 +292,12 @@ fn validate_dirty_hierarchy(world: &mut World) -> Result<(), BevyError> {
         }
     }
     world.resource_scope(|_world, mut order: Mut<HierarchyOrder>| {
-        order.replace(generation, roots, entities);
+        order.replace(generation, Some(root_epoch), roots, entities);
     });
     world
         .resource_mut::<HierarchyGenerationState>()
         .completed_generation = Some(generation);
+    mark_hierarchy_baseline_valid(world);
     world.insert_resource(__private::CompletedHierarchyProjection::new(generation));
     Ok(())
 }

@@ -28,5 +28,35 @@
     "raw_sha256": "4a434811a175722abaa0e74cc0066dd77a5b6a74c7ef9acd47d1668cbc681671",
     "raw_bytes": 17155,
     "compressed_bytes": 1065
+  },
+  {
+    "file": "hierarchy-trusted-run-1.jsonl.gz",
+    "raw_sha256": "a4d485ae9f2d1f41bb2f3d1005d7365b0099b68a45c9bb07e7121a9708082784",
+    "raw_bytes": 2743235,
+    "compressed_bytes": 69953
+  },
+  {
+    "file": "hierarchy-trusted-run-2.jsonl.gz",
+    "raw_sha256": "d7a6deaaaca80a3c1cd1d7f1a49d301378aafc3f005561fff03858beb7de9aed",
+    "raw_bytes": 2743248,
+    "compressed_bytes": 70485
+  },
+  {
+    "file": "hierarchy-trusted-run-3.jsonl.gz",
+    "raw_sha256": "f9673d17124d325d4d492b560355d2911ade646e2fe6148e94e22051fae8c4c3",
+    "raw_bytes": 2743500,
+    "compressed_bytes": 70660
+  },
+  {
+    "file": "allocation-trusted-run-1.jsonl.gz",
+    "raw_sha256": "aa0d62036949c946bc8f2fd0da7990fc050421d6c5a15f2f1357953a726a0661",
+    "raw_bytes": 17087,
+    "compressed_bytes": 1037
+  },
+  {
+    "file": "trusted-summary.jsonl",
+    "raw_sha256": "baa1e8e57d10d6d4707da278dd8fcd805a7a5f3c2c562cb14b075744580444c8",
+    "raw_bytes": 13056,
+    "compressed_bytes": 13056
   }
 ]

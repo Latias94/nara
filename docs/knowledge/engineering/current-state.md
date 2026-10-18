@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "e4da3d4714cdb5cd338480121edede8dddbbdd2f931102ee9425183dc7e691e6"
+source_fingerprint: "8997855501e4689e38e8c89e67efac785a4f1ccf600c909460f64f94f8dcb774"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "e4da3d4714cdb5cd338480121edede8dddbbdd2f931102ee9425183dc7e
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `e4da3d4714cdb5cd338480121edede8dddbbdd2f931102ee9425183dc7e691e6`
-- Immutable records: 730
+- Source fingerprint: `8997855501e4689e38e8c89e67efac785a4f1ccf600c909460f64f94f8dcb774`
+- Immutable records: 731
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,7 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Verification Evidence**: [F11 hierarchy candidate cost refactor](verification/2026-10/2026-10-18T095114Z-f11-hierarchy-candidate-cost-refactor-8570db0da1ef433dbab5368a9d0f59e6.md) - Sparse candidate overlay and private validated baseline reduce measured hierarchy transaction cost while preserving raw-dirty and lifecycle contracts.
 - **Verification Evidence**: [Foundation contract refactor scoped completion](verification/2026-10/2026-10-18T064513Z-foundation-contract-refactor-scoped-completion-299571832cbc4aa28cc9d5d3743bd527.md) - Final closure, durable references, real multi-owner reconciliation and measured scale evidence complete the required foundation slice.
 - **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
 - **Work Progress**: [Foundation identity residency, input endpoint and font ownership repairs](progress/2026-10/2026-10-18T040444Z-foundation-identity-input-font-repairs.md) - U5, U11 and U14 code and consumer proof, remaining recursive-schema work, serial test evidence and limits.
@@ -58,7 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repain](logs/2026-10/2026-10-17T134739Z-verification-red-run755cd0d8-proves-real-on-demand-ime-defect-programmatic-text-focus-repain-30e2165bd7c841b582bd1ad12cdcdaf9.md) - Red run755cd0d8 proves real on-demand IME defect: programmatic_text_focus_repaints_until_ime_intent_catches_up_then_becomes_idle fails IO.wa
 - **Memory Event**: [Progress: IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO li](logs/2026-10/2026-10-17T134542Z-progress-ime-fixture08ba267d-passes-after-ordinary-prepare-frame-and-complete-focus-io-li-59c93b32eace43bd8a9eb90b13b3dcb7.md) - IME fixture08ba267d passes after ordinary prepare_frame and complete focus/IO lifecycle; GPU rejected-frame fixture now completes update_pla
 - **Memory Event**: [Verification: Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 lock](logs/2026-10/2026-10-17T134101Z-verification-independent-module-consumer-cohort-455d45a5-passes18-18-using-published0-21-lock-29b4d17cf24a4c088c25eea27cde2d20.md) - Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 locks. First Windows DX12 native run aeca2708 executes7:5 existi
-- **Memory Event**: [Verification: Dear 0.21 integration passes cargo check --workspace --all-features --all-target](logs/2026-10/2026-10-17T133203Z-verification-dear-0-21-integration-passes-cargo-check-workspace-all-features-all-target-2f9e6290d3e0481f9958ebbd9b925a46.md) - Dear 0.21 integration passes cargo check --workspace --all-features --all-targets --locked --offline after caller/test API migration. Render
 
 # Integration Notes
 

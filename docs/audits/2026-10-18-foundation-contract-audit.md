@@ -20,9 +20,9 @@ transaction seams before new domains make their assumptions expensive to change.
 
 Execution under the linked plan repairs all six P1 findings and ten of seventeen findings overall.
 The seven remaining P2 items are five consumer-gated extension decisions and two measured scale
-boundaries. F11 is the strongest next investigation before a large-world multi-producer consumer;
-the current admitted reference game does not require that expansion. Native Editor and cross-platform
-release qualification retain their separate scope.
+boundaries. F11's local 4,096-member budget gate is now satisfied; F12 remains the next measured
+Transform consumer boundary. The current admitted reference game does not require larger-world
+expansion. Native Editor and cross-platform release qualification retain their separate scope.
 
 This is a foundation audit, not a backlog of missing Tilemap, save, animation, physics, or audio
 features. It does not promise an architecture without future debt. Proposed directions below are
@@ -328,23 +328,25 @@ These are independent work lanes, not one mandatory linear rewrite.
 - **Counterexample:** independent audio, attachment, and streaming systems each issue normal
   single-operation commands. K operations can cost O(KH) over a hierarchy of H members despite
   touching small local branches. `apply_batch` mitigates one owner's batch, not all plugin writes.
-- **Direction:** retain failure-atomic ordered batches, but use an owned/validated generation plus
-  a candidate overlay for affected edges and ancestor chains. Keep full validation for raw dirty
-  boundaries and diagnostics rather than every ordinary write.
+- **Resolution:** retain failure-atomic ordered batches, use a World-borrowing touched-owner
+  copy-on-write candidate overlay, and add a private owner-controlled validated baseline with a
+  private `HierarchyRoots` epoch. Relation hooks and root-resource epoch changes invalidate the
+  baseline; full validation remains the raw-dirty/diagnostic oracle. Private Scene preparation keeps
+  the full validation path and its existing no-flush commit window.
 - **Migration:** hierarchy writer/validation/completion, scene hierarchy transactions, Editor
   hierarchy changes, and invalidation tests. Keep Parent/Children ownership and serialized shape.
 - **Prerequisite:** trustworthy mutation authority and invalidation; do not remove validation first.
 - **Acceptance:** large-world small edits and independent command producers have a measured bounded
-  cost; invalid operations remain atomic; raw mutation invalidates completion; ordered sibling
-  behavior and scene/editor transactions remain correct.
-- **Measurement:** the [U12 baseline](../benchmarks/2026-10-18-foundation-scale.md) uses real leaf
-  reparenting and complete topology checks. At 4,096 members, eight independent transactions cost
-  4.41–5.13 ms P95 across three processes, versus 1.04–1.06 ms for the equivalent eight-operation
-  batch. The 65,536-member rows exceed the sampling cap. This is measured debt: require the next
-  large-world multi-producer consumer to settle transaction/candidate-copy cost before expansion.
-  Separate allocation windows request 1,487,768 bytes per batch-eight cycle versus 11,428,052 per
-  independent-eight cycle, with no adjusted retained growth over four blocks. It is not permission
-  to merge independent logical transactions silently.
+  cost; invalid operations remain atomic; raw mutation invalidates the trusted baseline and
+  completion; ordered sibling behavior and Scene/editor transactions remain correct.
+- **Measurement:** the [U12 baseline](../benchmarks/2026-10-18-foundation-scale.md) retains the old
+  full-candidate comparison (4,096 independent-eight P95 4.41–5.13 ms and 11.43 MB requested
+  bytes per cycle). The trusted-generation implementation passes three complete
+  processes at 0.49–0.53 ms P95 / 0.58–0.66 ms P99 for independent-eight, with 72,884 requested
+  bytes per cycle and stable adjusted live bytes. Batch-eight is 0.47–0.58 ms P95. The 65,536
+  rows complete under the cap but remain stress evidence, not a supported capacity promise. This
+  satisfies the local investigation target; it does not authorize silently merging transactions
+  or claim a cross-machine frame SLA.
 
 ### F12 — Transform work scales with all loaded transforms
 
@@ -541,9 +543,10 @@ executed results below. Proposed acceptance bullets above are not execution evid
 | U13 durable value/live-operation matrix | 7 separately compiled consumer tests passed | `bfa5fc27-3050-4ff5-851c-b385a35bbe29` covers nested required/optional × explicit/default references through source publication, spawn, repeated Prefab, patch defaults, strict Export and logical unload/reload/delete; delayed commands use exact runtime incarnations. |
 | U9 real Image/native composition | 8 passed | `65465bef-c952-4b29-b962-1fc049668652`; real threaded TaskPlugin, PNG import/preparation, exact immutable snapshot, native hooks/Required state, accepted latest revision, Retry, unload/late completion and physical close retry. Initial new tests incorrectly assumed Editor retained-budget semantics for ordinary ImagePlugin; corrected without changing product code. |
 | F17 actual-device extent guard | Red reproduced; 107 WGPU tests passed, two native qualifications skipped | Red `9e8d9721-8c85-4e8f-9a30-1204ebb2db84`; green `b963f04b-5672-41d2-a7dc-5e27672ff60a`. Guard is committed in `4c0b49f`. No live maximum-size Surface claim. |
-| U12 hierarchy/Transform baseline | Three hierarchy timing processes, one Transform timing process and one isolated allocation process passed correctness | [Retained report, compressed raw samples and per-process summaries](../benchmarks/2026-10-18-foundation-scale.md). Allocation run `4b711344-1aff-4c2d-9616-badbb4164d5c`: 32 consistent windows with stable adjusted requested heap; no general memory/leak claim. F11's multi-producer investigation flag is exceeded; stress rows do not have complete P99. |
+| U12 hierarchy/Transform baseline | Three old baseline processes, three trusted-generation hierarchy processes, one Transform process and two isolated allocation processes passed correctness | [Retained report, compressed raw samples and per-process summaries](../benchmarks/2026-10-18-foundation-scale.md). Trusted runs `bfe2b03c-f1af-4bd8-ac3d-26c3178a1e12`, `e6bdfb59-4d75-475f-862c-e834f3f5f735`, `aa1eb6c0-adee-43ea-8499-985c50c4d707`; trusted allocation `20f1da15-9225-449e-82b6-84c8692ef014`. All 32 trusted windows are counter-consistent with stable adjusted requested heap. No general memory/leak claim. |
+| Hierarchy owner regressions | 31 passed | Run `d941f6`: overlay empty-owner tombstone, same-owner anchor matrix, raw relation revalidation, root-resource epoch replacement/cross-World mutation, foreign completed-order rejection, lifecycle observer rejection, ordered batches, retirement and existing atomicity/cycle/deferred cases. |
 | Final Editor authoring loop | 1 passed, 1 skipped | Run `d83abdc9-5340-4e8c-ac65-a0fe104ea495` exercises unsaved source and explicit Play lifecycle. The skipped native qualification is not claimed. |
-| Final reference-game consumers | 34 passed, 0 skipped | Run `ca80ff09-f007-4b14-8de2-7dbec1daea0b`: authoring, desktop render and first_wave, including current-tick parented weapon/enemy poses, stable-asset Retry and old-incarnation retirement. This is consumer regression evidence, not native release qualification. |
+| Final reference-game consumers | 34 passed, 0 skipped | Run `d2a6ab99-69b6-4d84-b932-6bc520dfe27c`: authoring, desktop render and first_wave, including current-tick parented weapon/enemy poses, stable-asset Retry and old-incarnation retirement. This is consumer regression evidence, not native release qualification. An earlier full run had one transient 30-second desktop probe timeout; the focused retry and this complete rerun passed. |
 | Complementary root Host close/successor consumers | 3 passed | Run `909aa131-5a26-4992-8a27-c73a478b7590` covers real image task close retry, retained close evidence and saved-source edit/save/restart/successor Play receipts. These are complementary Host tests; the new external Image/native fixture does not run inside every Host composition. |
 | Final workspace and hygiene | Passed | `cargo check --locked --workspace --all-targets --all-features` completed in 46.42 s after final source formatting. `cargo fmt --all`, independent-consumer formatting and `git diff --check` pass. Existing deprecation/dead-code warnings remain. This is a build check, not a claim that all workspace tests executed. |
 | F01 regression before repair | Failed, then repaired-owner and consumer suites passed | Red run `cc35e95f-47ee-4663-b933-4f0b15d5255d`; green run `f6bfd071-3de4-4453-9d91-34aeaa9b2e3a`. Root startup and real project Retry results are recorded below. |

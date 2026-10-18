@@ -372,6 +372,150 @@ fn removal_requires_a_childless_exact_placement() {
 }
 
 #[test]
+fn candidate_keeps_empty_child_overrides_after_remove_and_replace() {
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    let old_child = world.spawn_empty().id();
+    let new_child = world.spawn_empty().id();
+    HierarchyWriter::new(&mut world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: root,
+                placement: root_last(),
+            },
+            HierarchyOperation::Place {
+                entity: old_child,
+                placement: child_last(root),
+            },
+        ])
+        .unwrap();
+
+    HierarchyWriter::new(&mut world)
+        .apply_batch(&[
+            HierarchyOperation::Remove {
+                entity: old_child,
+                from: child_last(root),
+            },
+            HierarchyOperation::Remove {
+                entity: root,
+                from: root_last(),
+            },
+            HierarchyOperation::Place {
+                entity: root,
+                placement: root_last(),
+            },
+            HierarchyOperation::Place {
+                entity: new_child,
+                placement: child_last(root),
+            },
+        ])
+        .unwrap();
+
+    assert_eq!(world.get::<Children>(root).unwrap().as_slice(), [new_child]);
+    validate_hierarchy(&world).unwrap();
+}
+
+#[test]
+fn same_owner_anchor_positions_match_removed_entity_order() {
+    for actor_index in 0..4 {
+        for anchor_index in 0..4 {
+            if actor_index == anchor_index {
+                continue;
+            }
+            for insert_after in [false, true] {
+                let mut world = World::new();
+                let root = world.spawn_empty().id();
+                let children = (0..4).map(|_| world.spawn_empty().id()).collect::<Vec<_>>();
+                let mut operations = vec![HierarchyOperation::Place {
+                    entity: root,
+                    placement: root_last(),
+                }];
+                operations.extend(children.iter().map(|entity| HierarchyOperation::Place {
+                    entity: *entity,
+                    placement: child_last(root),
+                }));
+                HierarchyWriter::new(&mut world)
+                    .apply_batch(&operations)
+                    .unwrap();
+                let owner = HierarchyPlacementOwner::Parent { parent: root };
+                let actor = children[actor_index];
+                let anchor = children[anchor_index];
+                let from = HierarchyPlacement::current(&world, actor).unwrap();
+                let target = if insert_after {
+                    HierarchyPlacement::after(owner, anchor)
+                } else {
+                    HierarchyPlacement::before(owner, anchor)
+                };
+                let mut expected = children;
+                expected.remove(actor_index);
+                let insertion = expected
+                    .iter()
+                    .position(|entity| *entity == anchor)
+                    .unwrap()
+                    + usize::from(insert_after);
+                expected.insert(insertion, actor);
+
+                HierarchyWriter::new(&mut world)
+                    .move_entity(actor, from, target)
+                    .unwrap();
+
+                assert_eq!(world.get::<Children>(root).unwrap().as_slice(), expected);
+                validate_hierarchy(&world).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn candidate_cycle_uses_earlier_moves_without_publishing_them() {
+    let mut world = World::new();
+    let first = world.spawn_empty().id();
+    let second = world.spawn_empty().id();
+    place_root(&mut world, first);
+    place_root(&mut world, second);
+    validate_dirty_hierarchy(&mut world).unwrap();
+    let completed = __private::completed_topology_generation(&world);
+
+    let result = HierarchyWriter::new(&mut world).apply_batch(&[
+        HierarchyOperation::Move {
+            entity: first,
+            from: HierarchyPlacement::first(HierarchyPlacementOwner::Root),
+            to: child_last(second),
+        },
+        HierarchyOperation::Move {
+            entity: second,
+            from: root_last(),
+            to: child_last(first),
+        },
+    ]);
+
+    assert_eq!(result, Err(HierarchyError::Cycle { entity: second }));
+    assert_eq!(
+        world.resource::<HierarchyRoots>().as_slice(),
+        [first, second]
+    );
+    assert!(world.get::<Parent>(first).is_none());
+    assert_eq!(__private::completed_topology_generation(&world), completed);
+    validate_hierarchy(&world).unwrap();
+}
+
+#[test]
+fn valid_baseline_cannot_bypass_new_lifecycle_observers() {
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    let child = world.spawn_empty().id();
+    place_root(&mut world, root);
+    world.add_observer(|_: nara_ecs::observer::On<nara_ecs::lifecycle::Insert<Parent>>| {});
+
+    let result = HierarchyWriter::new(&mut world).place(child, child_last(root));
+
+    assert_eq!(result, Err(HierarchyError::LifecycleWork));
+    assert!(world.get::<Parent>(child).is_none());
+    assert!(world.get::<Children>(root).is_none());
+    validate_hierarchy(&world).unwrap();
+}
+
+#[test]
 fn deep_and_wide_ordered_batches_are_iterative() {
     let mut deep_world = World::new();
     let deep_entities = (0..DEEP_HIERARCHY_DEPTH)
@@ -439,7 +583,7 @@ fn unchanged_generation_skips_full_validation_scans() {
         world
             .resource::<HierarchyGenerationState>()
             .validation_scans,
-        0
+        1
     );
 
     let root = world.spawn_empty().id();
@@ -449,7 +593,7 @@ fn unchanged_generation_skips_full_validation_scans() {
     let state = world.resource::<HierarchyGenerationState>();
     assert_eq!(state.topology_generation, 1);
     assert_eq!(state.completed_generation, Some(1));
-    assert_eq!(state.validation_scans, 1);
+    assert_eq!(state.validation_scans, 2);
 }
 
 #[test]
@@ -837,6 +981,129 @@ fn advanced_component_or_root_removal_invalidates_completion_immediately() {
     assert!(__private::completed_topology_generation(&roots_world).is_some());
     roots_world.remove_resource::<HierarchyRoots>();
     assert_eq!(__private::completed_topology_generation(&roots_world), None);
+}
+
+#[test]
+fn replacing_root_resource_cannot_reuse_completed_generation() {
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    place_root(&mut world, root);
+    validate_dirty_hierarchy(&mut world).unwrap();
+    assert!(__private::completed_topology_generation(&world).is_some());
+
+    let _removed = world.remove_resource::<HierarchyRoots>().unwrap();
+    world.insert_resource(HierarchyRoots::new());
+
+    assert_eq!(__private::completed_topology_generation(&world), None);
+    assert!(validate_dirty_hierarchy(&mut world).is_err());
+}
+
+#[test]
+fn writer_revalidates_after_raw_relation_mutation() {
+    let mut world = World::new();
+    let root = world.spawn_empty().id();
+    let child = world.spawn_empty().id();
+    let replacement = world.spawn_empty().id();
+    HierarchyWriter::new(&mut world)
+        .apply_batch(&[
+            HierarchyOperation::Place {
+                entity: root,
+                placement: root_last(),
+            },
+            HierarchyOperation::Place {
+                entity: child,
+                placement: child_last(root),
+            },
+        ])
+        .unwrap();
+
+    world.entity_mut(child).remove::<Parent>();
+
+    assert!(
+        HierarchyWriter::new(&mut world)
+            .place(replacement, root_last())
+            .is_err()
+    );
+    assert!(world.get::<Parent>(child).is_none());
+    assert_eq!(world.get::<Children>(root).unwrap().as_slice(), [child]);
+}
+
+#[test]
+fn root_resource_modified_in_another_world_cannot_restore_an_old_baseline() {
+    let mut original = World::new();
+    let mut foreign = World::new();
+    let original_entities = (0..3)
+        .map(|_| original.spawn_empty().id())
+        .collect::<Vec<_>>();
+    let foreign_entities = (0..3)
+        .map(|_| foreign.spawn_empty().id())
+        .collect::<Vec<_>>();
+    assert_eq!(original_entities, foreign_entities);
+    place_root(&mut original, original_entities[0]);
+    place_root(&mut foreign, foreign_entities[0]);
+
+    let original_roots = original.remove_resource::<HierarchyRoots>().unwrap();
+    foreign.insert_resource(original_roots);
+    place_root(&mut foreign, foreign_entities[1]);
+    let modified_roots = foreign.remove_resource::<HierarchyRoots>().unwrap();
+    original.insert_resource(modified_roots);
+
+    assert_eq!(
+        HierarchyWriter::new(&mut original).place(original_entities[2], root_last()),
+        Err(HierarchyError::MembershipMissing {
+            entity: original_entities[1],
+        })
+    );
+    assert!(
+        !original
+            .resource::<HierarchyRoots>()
+            .contains(original_entities[2])
+    );
+}
+
+#[test]
+fn foreign_completed_order_cannot_replace_the_worlds_structural_order() {
+    let mut original = World::new();
+    let mut foreign = World::new();
+    let original_entities = (0..3)
+        .map(|_| original.spawn_empty().id())
+        .collect::<Vec<_>>();
+    let foreign_entities = (0..3)
+        .map(|_| foreign.spawn_empty().id())
+        .collect::<Vec<_>>();
+    assert_eq!(original_entities, foreign_entities);
+    for (world, entities, reverse) in [
+        (&mut original, &original_entities, false),
+        (&mut foreign, &foreign_entities, true),
+    ] {
+        let ordered_children = if reverse {
+            [entities[2], entities[1]]
+        } else {
+            [entities[1], entities[2]]
+        };
+        let mut operations = vec![HierarchyOperation::Place {
+            entity: entities[0],
+            placement: root_last(),
+        }];
+        operations.extend(ordered_children.map(|entity| HierarchyOperation::Place {
+            entity,
+            placement: child_last(entities[0]),
+        }));
+        HierarchyWriter::new(world)
+            .apply_batch(&operations)
+            .unwrap();
+        validate_dirty_hierarchy(world).unwrap();
+    }
+    let foreign_order = foreign.remove_resource::<HierarchyOrder>().unwrap();
+    original.insert_resource(foreign_order);
+
+    assert_eq!(__private::completed_topology_generation(&original), None);
+    validate_dirty_hierarchy(&mut original).unwrap();
+    assert_eq!(
+        original.resource::<HierarchyOrder>().as_slice(),
+        original_entities
+    );
+    assert!(__private::completed_topology_generation(&original).is_some());
 }
 
 #[test]
