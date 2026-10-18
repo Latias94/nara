@@ -316,6 +316,10 @@ pub(crate) fn configure_surface(
     present_mode: PresentMode,
     size: Extent2d,
 ) -> Result<(), WgpuRenderError> {
+    let maximum = device.limits().max_texture_dimension_2d;
+    if size.is_empty() || size.width > maximum || size.height > maximum {
+        return Err(WgpuRenderError::SurfaceUnsupported { window_id });
+    }
     let surface = surface_state.surface(window_id)?;
     let capabilities = surface.get_capabilities(adapter);
     let Some(mut config) = surface.get_default_config(adapter, size.width, size.height) else {
@@ -335,6 +339,115 @@ pub(crate) fn configure_surface(
 #[cfg(test)]
 mod configuration_tests {
     use super::*;
+
+    #[test]
+    fn surface_configuration_rejects_out_of_device_bounds_without_mutating_last_good() {
+        let instance = wgpu::Instance::default();
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+            ..Default::default()
+        }))
+        .or_else(|_| {
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: None,
+                force_fallback_adapter: true,
+                ..Default::default()
+            }))
+        })
+        .expect("surface extent admission requires a wgpu adapter");
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+                .expect("surface extent admission requires a wgpu device");
+        let maximum = device.limits().max_texture_dimension_2d;
+        let over = maximum
+            .checked_add(1)
+            .expect("device dimension has a successor");
+        let window_id = WindowId::new(17);
+        let original_size = Extent2d::new(320, 180).unwrap();
+        let original_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width: original_size.width,
+            height: original_size.height,
+            present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Opaque,
+            view_formats: vec![],
+        };
+        let mut state = WgpuSurfaceState {
+            live: None,
+            config: Some(original_config.clone()),
+            requested_present_mode: Some(PresentMode::Fifo),
+            size: original_size,
+            dirty: true,
+        };
+
+        for (size, expected) in [
+            (
+                Extent2d {
+                    width: 1,
+                    height: 1,
+                },
+                WgpuRenderError::SurfaceMissing { window_id },
+            ),
+            (
+                Extent2d {
+                    width: maximum,
+                    height: maximum,
+                },
+                WgpuRenderError::SurfaceMissing { window_id },
+            ),
+            (
+                Extent2d {
+                    width: over,
+                    height: 1,
+                },
+                WgpuRenderError::SurfaceUnsupported { window_id },
+            ),
+            (
+                Extent2d {
+                    width: 1,
+                    height: over,
+                },
+                WgpuRenderError::SurfaceUnsupported { window_id },
+            ),
+            (
+                Extent2d {
+                    width: 0,
+                    height: 1,
+                },
+                WgpuRenderError::SurfaceUnsupported { window_id },
+            ),
+            (
+                Extent2d {
+                    width: 1,
+                    height: 0,
+                },
+                WgpuRenderError::SurfaceUnsupported { window_id },
+            ),
+        ] {
+            assert_eq!(
+                configure_surface(
+                    &mut state,
+                    &adapter,
+                    &device,
+                    window_id,
+                    PresentMode::Immediate,
+                    size
+                ),
+                Err(expected),
+                "surface extent {size:?} must be admitted before surface access"
+            );
+            assert_eq!(state.size, original_size);
+            assert_eq!(state.config, Some(original_config.clone()));
+            assert_eq!(state.requested_present_mode, Some(PresentMode::Fifo));
+            assert!(state.dirty);
+        }
+    }
 
     #[test]
     fn same_size_mode_change_configures_once_and_retains_selected_fallback() {
