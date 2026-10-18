@@ -164,13 +164,17 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F06 — Permanent identity claims couple durable identity to one runtime incarnation
 
-**P1 · Structural contract risk · Proposed · High confidence; intentional current contract**
+**P1 · Structural contract risk · Fixed · Explicit ADR revision and residency regressions**
 
 - **Evidence:** [Accepted ADR 0058](../architecture/adr/0058-stable-runtime-identity-and-entity-references.md)
-  requires permanent claims. [`nara_identity/src/domain.rs:1011`](../../crates/nara_identity/src/domain.rs#L1011)
+  required permanent claims at the baseline. [`nara_identity/src/domain.rs:1011`](../../crates/nara_identity/src/domain.rs#L1011)
   rejects previously claimed references; retirement around
   [`:1611`](../../crates/nara_identity/src/domain.rs#L1611) does not reclaim them. Claim capacity
   measures world history, with a default near one million claims, rather than active residency.
+  U5 revises ADR 0058: persistent logical records have an independent bounded ledger, while exact
+  runtime references/tokens carry a checked incarnation. Unloaded records may reactivate; Deleted
+  is terminal. Existing Scene instance history claims and arbitrary-order restore remain bounded
+  by their original contract. U13 still owns durable-reference admission policy across entry points.
 - **Counterexample:** an NPC with a durable UUID is unloaded and later restored in the same world;
   rebinding the same semantic identity is rejected. Allocating fresh durable UUIDs instead breaks
   the identity expected by saved references.
@@ -365,13 +369,17 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F15 — Input endpoints are lost when raw input becomes gameplay state
 
-**P2 · Structural contract risk · Proposed · High confidence**
+**P2 · Confirmed defect · Fixed · Endpoint and mixed-origin regressions**
 
 - **Evidence:** `nara_input` preserves window/seat/pointer identity in InputTimeline, but its
   ButtonInput, PointerState, and [`ActionOutcome` at lib.rs:874](../../crates/nara_input/src/lib.rs#L874)
   projection does not retain the complete endpoint. The ownership seam is
   [`project_timeline_input:987`](../../crates/nara_input/src/lib.rs#L987) and
   [`entry.action_transition:1064`](../../crates/nara_input/src/lib.rs#L1064).
+  U11 now retains physical endpoint membership in ButtonInput and event/press sequence plus route
+  in ActionOutcome. Synthetic direct input is distinct from the default timeline endpoint.
+  PointerState remains a single-pointer convenience position; canonical pointer events retain their
+  endpoint-stamped positions in the timeline. No multi-pointer aiming or gamepad action API is claimed.
 - **Counterexample:** two seats press the same key; releasing one seat can conflict with the
   other seat's held action after projection has merged their identity. Routing cannot recover an
   endpoint that the state layer has discarded.
@@ -386,20 +394,22 @@ These are independent work lanes, not one mandatory linear rewrite.
 
 ### F16 — Custom font ownership does not close shaping through rasterization
 
-**P2 · Structural contract risk · Proposed · High confidence**
+**P2 · Confirmed defect · Fixed · Ordinary adapter and real GPU readback verified**
 
 - **Evidence:** [`nara_ui_kernel/src/compiler.rs:36`](../../crates/nara_ui_kernel/src/compiler.rs#L36)
   accepts a FontFace, while [`nara_ui_render/src/planner/mod.rs:41`](../../crates/nara_ui_render/src/planner/mod.rs#L41)
   constructs the bundled face. [`nara_text/src/raster.rs:57`](../../crates/nara_text/src/raster.rs#L57)
   rejects a glyph run whose face differs from the raster face.
+  U14 now captures one immutable FontFace in both owners, including its content ID in replayable
+  plugin configuration. Foreign glyph runs reject before staged atlas/packet publication.
 - **Counterexample:** a consumer successfully shapes UI with a custom face, then the default
   presentation planner cannot rasterize its glyphs.
-- **Direction:** share an immutable FontSet owner across shaping, presentation, rasterization,
+- **Direction:** share an immutable FontFace owner across shaping, presentation, rasterization,
   atlas identity, and retirement. Increasing glyph budgets cannot repair face identity.
 - **Migration:** text/FontFace ownership, UI compiler and planner construction, atlas/cache keys,
   and runtime/Editor presentation composition. Preserve convenient bundled-font defaults.
-- **Prerequisite:** F02 cache ownership fix; a custom-font consumer defines the necessary FontSet
-  surface. Avoid a speculative dynamic font-provider framework.
+- **Prerequisite:** F02 cache ownership fix; a single-face custom-font consumer proves the current
+  surface. Fallback sets and dynamic font providers remain separate consumer-gated work.
 - **Acceptance:** a custom face shapes and presents through the same owner; incompatible runs fail
   before uploads; mixed faces, clone/reset, target reuse, and font retirement preserve cache identity.
 
@@ -463,6 +473,12 @@ executed results below. Proposed acceptance bullets above are not execution evid
 | U1/U6 owning packages | 269 passed | Run `4eb263a3-5fba-4eb1-be23-65f4a513ca70`; `nara_app` plus `nara_scene` with `nara_scene/serde`, serial. The initial featureless full-suite invocation failed to compile existing serde-only integration targets; the supported feature-enabled suite passed. |
 | U1/U6 root consumers | 107 passed | Run `f0100cd7-16b0-48f3-b009-34765a8383d0`: runtime driver compile-fail boundary, runtime instance, scene transactions and authoring session, including exact validation-budget boundaries. |
 | U1/U6 reference-game | 21 passed | Run `792a73b8-f677-4166-bcb0-a94a6a089099`: first_wave, including stable asset Retry and old identity retirement. Existing target reused, serial build. |
+| U5 identity and command semantics | 89 passed | Red run `3fbf460b-3934-4b68-87d8-4238d65b19b8` reproduced permanent rebind rejection and token reuse. Green run `b3fc895c-c2d7-40d3-9e9d-0409492ed24c` covers exact incarnations, logical bounds, terminal deletion, lifecycle rejection and delayed commands. |
+| U5 independent persistent consumer | 6 passed | Run `a5a9a504-24b5-4e2e-9148-7fb68194caae`: separately compiled module consumer retains one Scene owner and saves/reloads NPC state through 32 residency cycles, without growing logical records or Scene claims. |
+| U5 Scene and root consumers | 169 + 56 passed | Scene serde run `a452815e-e8b8-4626-857f-8150b88a8d0c`; startup/project-host/runtime identity run `c4f71e59-22a8-4330-a9e8-4df533e92730`. Existing rollback, explicit restore, export and publication cases pass. |
+| U5/U11/U14 reference-game | 21 passed | Run `ceb5af28-26dc-4618-9594-35617ddbb413`: first_wave including Retry, stable assets and old-incarnation isolation. |
+| U11 endpoint projection | Reproduced and repaired; 51 passed | Red run `78369b5b-7bcd-4fb2-8ccc-3e665c489e77` failed both seat/pointer cases. Green serde run `d84c0dc0-9be0-4df6-b459-20f15138efca` additionally covers synthetic/default-driver mixed input, paused delivery and exact steps. |
+| U14 custom-face presentation | Reproduced and repaired; 14 + 114 + 96 passed | Red `11047982-81c7-419c-b0d7-03d46b0b5e6a`; text `7d428a72-5fa7-46fa-b067-83461cf50333`; UI/planner `55958beb-4561-4e24-9ff7-147bb8bbf6c0`; real WGPU readback `cd5139bb-ca84-493d-9157-34b81ea038be`. Ordinary adapter and GPU paths have complementary tests, not one native Editor end-to-end qualification. |
 | Focused repaired-owner suites | 144 passed | Green run above: nara_scene 114 + nara_ui_render 30 library tests; Windows, Rust 1.99.0, 7.722 s. This does not qualify GPU or all public consumers. |
 | Root startup source consumers | 4 passed | Run `8ab2683b-0009-4fef-96d6-308b6cbb1afd`; focused startup_scene checks only, not native Editor or full product qualification. |
 | WGPU ui-submitter library suite | 95 passed | Run `1c2384ef-5d72-43cf-aa50-47ca80449891`; Windows, `WGPU_BACKEND=dx12`, Rust 1.99.0, 12.664 s. Includes shared-cache GPU upload/replay and nonblank glyph readback; not complete native Editor qualification. |

@@ -40,6 +40,12 @@ The reservation exists so capacity failure happens before a caller transfers a s
 ledger. An admission or startup failure retains a retryable retirement owner; drive that retirement
 to its truthful terminal state rather than treating a dropped value as a clean stop.
 
+Construct the App on the thread that will drive and retire it. App, sealed candidates, runtime
+instances and failure/retirement owners are non-Send/non-Sync because their World may retain
+thread-affine or NonSend state. Transfer a replayable recipe or definition to another thread and
+construct a fresh App there. Reservations, control values and fault reporters remain transportable;
+they do not transfer executable ownership. Drain quarantine on the constructing thread.
+
 ## Control And Shutdown
 
 Use `request_control` and `drive` for pause, resume, exact fixed-tick stepping, Stop, and retryable
