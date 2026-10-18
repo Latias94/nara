@@ -4,8 +4,10 @@ use nara_core::ItemLimit;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleError, AuthoringSchemaBundleLimits,
     AuthoringSchemaBundleOwner, ComponentCatalogFileBudgetKind, ComponentCatalogFileLimits,
+    ComponentFieldId, ComponentFieldPath, ComponentFieldSchema, ComponentRegistryError,
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion,
-    ComponentTypeId, PersistentComponentSchemaOwnerId,
+    ComponentShapeErrorKind, ComponentTypeId, ComponentValueKind, ComponentValueShape,
+    PersistentComponentSchemaOwnerId,
 };
 use serde_json::{Value, json};
 
@@ -18,6 +20,34 @@ fn component_catalog(id: &str, alias: &str, version: u32) -> ComponentSchemaCata
         )],
         ..ComponentSchemaCatalog::default()
     }
+}
+
+#[test]
+fn bundle_admission_rejects_deep_caller_shape_before_canonical_snapshot() {
+    let mut catalog = component_catalog("nara.test.DeepBundle", "Deep bundle", 1);
+    let mut shape = ComponentValueShape::scalar(ComponentValueKind::Bool);
+    for _depth in 0..512 {
+        shape = ComponentValueShape::list(shape);
+    }
+    catalog.components[0].fields = vec![ComponentFieldSchema::required(
+        ComponentFieldId::new("data"),
+        "Data",
+        ComponentFieldPath::from_fields(["data"]),
+        shape,
+    )];
+    let error = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
+        PersistentComponentSchemaOwnerId::try_new("nara.test.deep-bundle").unwrap(),
+        catalog,
+        None,
+    )])
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        AuthoringSchemaBundleError::Catalog { source, .. }
+            if matches!(source.downcast_ref::<ComponentRegistryError>(), Some(
+                ComponentRegistryError::InvalidComponentFieldShape { source, .. }
+            ) if source.kind == ComponentShapeErrorKind::DepthLimit)
+    ));
 }
 
 fn successor_of(predecessor: &ComponentSchemaCatalog) -> ComponentSchemaCatalog {
@@ -36,7 +66,7 @@ fn successor_of(predecessor: &ComponentSchemaCatalog) -> ComponentSchemaCatalog 
 fn envelope(owners: Vec<Value>) -> Vec<u8> {
     serde_json::to_vec(&json!({
         "kind": "authoring_schema_bundle",
-        "format_version": 1,
+        "format_version": 2,
         "engine_min_version": "0.1.0",
         "generator": {
             "name": "nara",
@@ -88,7 +118,7 @@ fn canonical_multi_owner_json_roundtrip_derives_composition_fingerprint() {
     assert_eq!(bundle.owners()[1].predecessor().unwrap().generation(), 1);
     assert_eq!(
         bundle.fingerprint().to_hex(),
-        "49c429748369d9bdee89d4c3798146fdb9d984d0a293b93f347056869a1d4a09"
+        "336e13f6c6df7e72a5cce2e55c0ac0c2d7fed7e3293d3569e444a14ddca0991f"
     );
     assert_eq!(
         bundle.owners()[0]
@@ -203,6 +233,14 @@ fn unsupported_bundle_envelope_is_rejected_before_payload_publication() {
         None,
     )]))
     .unwrap();
+    for version in [1, 3] {
+        encoded["format_version"] = Value::from(version);
+        assert!(matches!(
+            AuthoringSchemaBundle::from_json_bytes(&serde_json::to_vec(&encoded).unwrap()),
+            Err(AuthoringSchemaBundleError::Contract(_))
+        ));
+    }
+    encoded["format_version"] = Value::from(2);
     encoded["kind"] = Value::String("future_authoring_bundle".to_owned());
     let encoded = serde_json::to_vec(&encoded).unwrap();
 

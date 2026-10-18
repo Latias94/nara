@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -32,7 +32,10 @@
                 "value": "removed"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -51,7 +54,10 @@
                 "value": "value"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",

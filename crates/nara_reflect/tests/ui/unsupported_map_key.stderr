@@ -1,0 +1,52 @@
+error[E0277]: the trait bound `BTreeMap<u32, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
+  --> tests/ui/unsupported_map_key.rs:16:13
+   |
+16 |     values: BTreeMap<u32, i64>,
+   |             ^^^^^^^^^^^^^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `BTreeMap<u32, i64>`
+   |
+help: the trait `nara_reflect::__macro_support::PersistentFieldCodec` is implemented for `BTreeMap<std::string::String, T>`
+  --> src/authoring.rs
+   |
+   | impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0277]: the trait bound `BTreeMap<u32, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
+  --> tests/ui/unsupported_map_key.rs:16:13
+   |
+16 |     values: BTreeMap<u32, i64>,
+   |             ^^^^^^^^^^^^^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `BTreeMap<u32, i64>`
+   |
+help: the trait `nara_reflect::__macro_support::PersistentFieldCodec` is implemented for `BTreeMap<std::string::String, T>`
+  --> src/authoring.rs
+   |
+   | impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `nara_reflect::__macro_support::decode_persistent_field`
+  --> src/authoring.rs
+   |
+   | pub fn decode_persistent_field<T>(
+   |        ----------------------- required by a bound in this function
+...
+   |     T: PersistentFieldCodec,
+   |        ^^^^^^^^^^^^^^^^^^^^ required by this bound in `decode_persistent_field`
+
+error[E0277]: the trait bound `BTreeMap<u32, i64>: nara_reflect::__macro_support::PersistentFieldCodec` is not satisfied
+ --> tests/ui/unsupported_map_key.rs:6:21
+  |
+6 | #[derive(Component, PersistentComponent)]
+  |                     ^^^^^^^^^^^^^^^^^^^ the trait `nara_reflect::__macro_support::PersistentFieldCodec` is not implemented for `BTreeMap<u32, i64>`
+  |
+help: the trait `nara_reflect::__macro_support::PersistentFieldCodec` is implemented for `BTreeMap<std::string::String, T>`
+ --> src/authoring.rs
+  |
+  | impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `nara_reflect::__macro_support::encode_persistent_field`
+ --> src/authoring.rs
+  |
+  | pub fn encode_persistent_field<T>(value: &T) -> Result<ComponentValue, ComponentCodecError>
+  |        ----------------------- required by a bound in this function
+  | where
+  |     T: PersistentFieldCodec,
+  |        ^^^^^^^^^^^^^^^^^^^^ required by this bound in `encode_persistent_field`
+  = note: this error originates in the derive macro `PersistentComponent` (in Nightly builds, run with -Z macro-backtrace for more info)

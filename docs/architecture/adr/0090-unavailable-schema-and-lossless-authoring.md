@@ -52,6 +52,20 @@ Authoring availability does not imply a native preview binding. The typed previe
 omits data-only records with an explicit reason while retaining their complete source
 record. This refinement never adds a native binding or executes project codecs.
 
+## Recursive schema refinement (2026-10-18)
+
+The separately compiled nested-reference component extends the engine-owned data Adapter
+to bounded closed records, typed lists, string-keyed maps, optional values, and declared
+entity/asset reference leaves under ADRs 0011/0045/0081. A component is eligible only when
+every field has a supported closed shape; opaque collections retain `KnownUnbound` without
+a native Adapter. Complete recursive shape validation applies before availability and after
+each final edit candidate. This adds no project-code execution or native preview binding.
+
+Generic field writes accept editable closed shapes through the same bounded transaction
+port. Entity-reference-containing field writes remain denied until the complete target and
+remap closure is admitted. Reading declared references and native Prefab remapping use the
+shared recursive visitor; their availability does not authorize reference-closure mutation.
+
 ## Decision
 
 [ADR 0118](0118-editor-workspaces-frontends-and-creation-templates.md) admits a finite generic structural successor: empty-entity insertion and adding/removing current data-editable components, with complete unavailable-manifest preservation through forward and inverse operations.

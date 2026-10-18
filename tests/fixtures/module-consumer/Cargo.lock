@@ -1983,6 +1983,7 @@ dependencies = [
  "nara_identity",
  "nara_reflect",
  "nara_scene",
+ "nara_tooling",
  "ron",
  "serde",
 ]

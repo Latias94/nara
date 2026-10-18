@@ -93,13 +93,6 @@ struct PersistentField {
     initial: Option<Expr>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PersistentFieldKind {
-    Scalar,
-    Vec2,
-    EntityReference,
-}
-
 fn expand_persistent_component(input: DeriveInput) -> Result<TokenStream2> {
     if !input.generics.params.is_empty() || input.generics.where_clause.is_some() {
         return Err(Error::new_spanned(
@@ -378,7 +371,6 @@ fn parse_field(
             "configuration-dependent persistent fields are not supported",
         ));
     }
-    let kind = classify_field_type(&field.ty)?;
     let ident = field
         .ident
         .ok_or_else(|| Error::new_spanned(&field.ty, "persistent field must be named"))?;
@@ -422,14 +414,7 @@ fn parse_field(
         .capabilities
         .unwrap_or_else(|| default_capabilities.to_vec());
     validate_field_subset(&capabilities, component_capabilities, ident.span())?;
-    validate_type_capabilities(&field.ty, kind, &capabilities)?;
     if let Some(initial) = &args.initial {
-        if kind != PersistentFieldKind::Scalar {
-            return Err(Error::new_spanned(
-                initial,
-                "creation literals support scalar fields only",
-            ));
-        }
         validate_initial_literal(initial)?;
     }
     Ok(PersistentField {
@@ -527,57 +512,6 @@ fn validate_field_subset(field: &[Capability], component: &[Capability], span: S
     Ok(())
 }
 
-fn validate_type_capabilities(
-    ty: &Type,
-    kind: PersistentFieldKind,
-    capabilities: &[Capability],
-) -> Result<()> {
-    let has_entity_ref = capabilities.contains(&Capability::EntityRef);
-    if matches!(kind, PersistentFieldKind::EntityReference) != has_entity_ref {
-        return Err(Error::new_spanned(
-            ty,
-            "EntityReference fields must declare entity_ref, and other fields must not",
-        ));
-    }
-    if capabilities.contains(&Capability::AssetRef) {
-        return Err(Error::new_spanned(
-            ty,
-            "asset_ref fields are not supported by the current authoring tracer",
-        ));
-    }
-    Ok(())
-}
-
-fn classify_field_type(ty: &Type) -> Result<PersistentFieldKind> {
-    let Type::Path(path) = ty else {
-        return Err(Error::new_spanned(ty, "unsupported persistent field type"));
-    };
-    if path.qself.is_some() {
-        return Err(Error::new_spanned(ty, "unsupported persistent field type"));
-    }
-    let segment = path
-        .path
-        .segments
-        .last()
-        .ok_or_else(|| Error::new_spanned(ty, "unsupported persistent field type"))?;
-    if !matches!(segment.arguments, syn::PathArguments::None) {
-        return Err(Error::new_spanned(
-            ty,
-            "unsupported persistent field type; collection and generic fields are deferred",
-        ));
-    }
-    match segment.ident.to_string().as_str() {
-        "bool" | "String" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32"
-        | "u64" => Ok(PersistentFieldKind::Scalar),
-        "Vec2" => Ok(PersistentFieldKind::Vec2),
-        "EntityReference" => Ok(PersistentFieldKind::EntityReference),
-        _ => Err(Error::new_spanned(
-            ty,
-            "unsupported persistent field type; use an admitted scalar, Vec2, or EntityReference",
-        )),
-    }
-}
-
 fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2 {
     let ty = &field.ty;
     let id = &field.id;
@@ -592,9 +526,8 @@ fn field_schema(field: &PersistentField, support: &TokenStream2) -> TokenStream2
             #support::ComponentFieldId::new(#id),
             #primary_alias,
             #support::ComponentFieldPath::from_fields([#id]),
-            <#ty as #support::PersistentFieldCodec>::VALUE_KIND,
+            <#ty as #support::PersistentFieldCodec>::value_shape(),
         )
-        .with_numeric_domain(<#ty as #support::PersistentFieldCodec>::NUMERIC_DOMAIN)
         #additional_aliases
         .with_capabilities([#(#capability_tokens),*])
     }

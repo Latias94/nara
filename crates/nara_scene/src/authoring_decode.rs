@@ -13,7 +13,7 @@ use nara_diagnostic::DiagnosticReport;
 use nara_reflect::{
     AuthoringSchemaBundle, AuthoringSchemaBundleOwner, CatalogFingerprint, ComponentCapability,
     ComponentFieldId, ComponentSchema, ComponentSchemaContributionReceipt, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind, DeclaredAssetReference, EntityReference,
+    ComponentTypeId, ComponentValue, ComponentValueShape, DeclaredAssetReference, EntityReference,
     PersistentComponentSchemaOwnerId, collect_declared_asset_references_from_schema,
 };
 
@@ -781,21 +781,33 @@ fn supports_data_authoring(schema: &ComponentSchema) -> bool {
     schema.has_capability(ComponentCapability::Scene)
         && schema.has_capability(ComponentCapability::Inspect)
         && !schema.fields.is_empty()
-        && schema.fields.iter().all(|field| {
-            if field.has_capability(ComponentCapability::EntityRef) {
-                return false;
+        && schema
+            .fields
+            .iter()
+            .all(|field| supports_data_shape(field.shape()))
+}
+
+fn supports_data_shape(shape: &ComponentValueShape) -> bool {
+    if shape.validate().is_err() {
+        return false;
+    }
+    let mut pending = vec![shape];
+    while let Some(shape) = pending.pop() {
+        match shape {
+            ComponentValueShape::Opaque { .. } => return false,
+            ComponentValueShape::Record { members } => {
+                pending.extend(members.iter().map(|member| &member.shape));
             }
-            match field.value_kind() {
-                ComponentValueKind::Bool
-                | ComponentValueKind::I64
-                | ComponentValueKind::U64
-                | ComponentValueKind::F64
-                | ComponentValueKind::String => {
-                    !field.has_capability(ComponentCapability::AssetRef)
-                }
-                _ => false,
+            ComponentValueShape::List { item } => pending.push(item),
+            ComponentValueShape::Map { value } | ComponentValueShape::Optional { value } => {
+                pending.push(value);
             }
-        })
+            ComponentValueShape::Scalar { .. }
+            | ComponentValueShape::EntityRef
+            | ComponentValueShape::AssetRef => {}
+        }
+    }
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2461,28 +2473,10 @@ fn authoring_field_write_is_preservation_safe(
     field: &nara_reflect::ComponentFieldSchema,
     value: &ComponentValue,
 ) -> bool {
-    if !field.has_capability(ComponentCapability::Edit)
-        || field.has_capability(ComponentCapability::EntityRef)
-    {
-        return false;
-    }
-    match field.value_kind() {
-        ComponentValueKind::Bool
-        | ComponentValueKind::I64
-        | ComponentValueKind::U64
-        | ComponentValueKind::F64
-        | ComponentValueKind::String => {
-            !field.has_capability(ComponentCapability::AssetRef) && field.accepts_value(value)
-        }
-        ComponentValueKind::AssetRef => {
-            field.has_capability(ComponentCapability::AssetRef)
-                && crate::patch::field_value_matches(field, value)
-        }
-        ComponentValueKind::Null
-        | ComponentValueKind::List
-        | ComponentValueKind::Map
-        | ComponentValueKind::EntityRef => false,
-    }
+    field.has_capability(ComponentCapability::Edit)
+        && !field.has_capability(ComponentCapability::EntityRef)
+        && supports_data_shape(field.shape())
+        && field.accepts_value(value)
 }
 
 fn field_edit_rejection(

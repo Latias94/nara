@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
+**Last Revised**: 2026-10-18
 **Amended**: 2026-07-12 by RGF-U1 for stable field identity and registry freeze
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0045: Component
 Schema Capability Metadata; ADR 0049: Untrusted Project Input and Parse Budget Policy; ADR 0051:
@@ -25,6 +26,13 @@ Rules:
   bindings, codecs, reflection metadata, and migration functions.
 - Migrations are registered per component type and version.
 - Runtime-only components can opt out of serialization/schema.
+- A persistent field owns one bounded recursive value shape. Scalar numeric domains, closed
+  records, lists, string-key maps, optional values and typed reference leaves share that authority.
+  Opaque Map/List leaves explicitly retain manual-codec semantics without declaring nested
+  reference authority. Enum/tuple shapes and a general Rust reflection/type registry are deferred.
+- Stable identity belongs to root fields. Record member names, map keys and list indices are
+  current value locators within that field, not new durable IDs. Root field capabilities govern
+  their descendants. A nested shape change follows the existing component-version/migration rules.
 
 ```mermaid
 flowchart TD

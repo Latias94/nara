@@ -398,12 +398,21 @@ pub struct PersistentFileContract {
 
 impl PersistentFileContract {
     #[must_use]
-    pub fn canonical_v1(expected_kind: FormatKind, current_engine_version: EngineVersion) -> Self {
+    pub fn new(
+        expected_kind: FormatKind,
+        supported_version: FormatVersion,
+        current_engine_version: EngineVersion,
+    ) -> Self {
         Self {
             expected_kind,
-            supported_version: FormatVersion::ONE,
+            supported_version,
             current_engine_version,
         }
+    }
+
+    #[must_use]
+    pub fn canonical_v1(expected_kind: FormatKind, current_engine_version: EngineVersion) -> Self {
+        Self::new(expected_kind, FormatVersion::ONE, current_engine_version)
     }
 
     #[must_use]
@@ -594,19 +603,36 @@ pub struct PersistentFileEnvelope<T> {
 
 impl<T> PersistentFileEnvelope<T> {
     #[must_use]
-    pub fn canonical_v1(
+    pub fn new(
         kind: FormatKind,
+        format_version: FormatVersion,
         engine_min_version: EngineVersion,
         generator: FormatGenerator,
         payload: T,
     ) -> Self {
         Self {
             kind,
-            format_version: FormatVersion::ONE,
+            format_version,
             engine_min_version,
             generator,
             payload,
         }
+    }
+
+    #[must_use]
+    pub fn canonical_v1(
+        kind: FormatKind,
+        engine_min_version: EngineVersion,
+        generator: FormatGenerator,
+        payload: T,
+    ) -> Self {
+        Self::new(
+            kind,
+            FormatVersion::ONE,
+            engine_min_version,
+            generator,
+            payload,
+        )
     }
 
     #[must_use]

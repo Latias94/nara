@@ -2590,7 +2590,7 @@ fn set_asset_ref_field<D: EntityDocument>(
         operation_index,
         entity,
     )?;
-    if field_schema.value_kind != ComponentValueKind::AssetRef {
+    if field_schema.value_kind() != ComponentValueKind::AssetRef {
         return Err(with_component_field_id(
             patch_diagnostic(
                 operation_index,
@@ -2646,7 +2646,7 @@ fn set_asset_ref_field_without_inverse<D: EntityDocument>(
         operation_index,
         entity,
     )?;
-    if field_schema.value_kind != ComponentValueKind::AssetRef {
+    if field_schema.value_kind() != ComponentValueKind::AssetRef {
         return Err(with_component_field_id(
             patch_diagnostic(
                 operation_index,

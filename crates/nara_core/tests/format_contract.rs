@@ -61,6 +61,33 @@ fn decode_counted_json(
 }
 
 #[test]
+fn explicit_format_versions_are_independent_of_v1_convenience_contracts() {
+    let kind = FormatKind::new("component_schema_catalog").unwrap();
+    let engine = EngineVersion::parse("0.1.0").unwrap();
+    let version = FormatVersion::new(2).unwrap();
+    let contract = PersistentFileContract::new(kind.clone(), version, engine.clone());
+    let envelope = PersistentFileEnvelope::new(
+        kind,
+        version,
+        engine.clone(),
+        FormatGenerator::new("nara", engine).unwrap(),
+        Payload { value: 7 },
+    );
+    let encoded = serde_json::to_vec(&envelope).unwrap();
+    let header = serde_json::from_slice::<PersistentFileHeader>(&encoded).unwrap();
+    assert_eq!(contract.validate_header(&header), Ok(()));
+    assert_eq!(header.format_version(), version);
+    let v1 = PersistentFileContract::canonical_v1(
+        FormatKind::new("component_schema_catalog").unwrap(),
+        EngineVersion::parse("0.1.0").unwrap(),
+    );
+    assert!(matches!(
+        v1.validate_header(&header),
+        Err(PersistentFileContractError::UnsupportedFormatVersion { .. })
+    ));
+}
+
+#[test]
 fn persistent_file_envelope_has_one_strict_canonical_shape() {
     let envelope = PersistentFileEnvelope::canonical_v1(
         FormatKind::new("scene").unwrap(),

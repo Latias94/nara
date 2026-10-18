@@ -9,8 +9,8 @@ use nara_diagnostic::DiagnosticReport;
 use nara_identity::EntityReference;
 use nara_reflect::__private::{DeclaredEntityReferencePlan, plan_declared_entity_references};
 use nara_reflect::{
-    ComponentEntityReferenceRewriteError, ComponentRegistry, ComponentValue, ComponentValueCost,
-    EntityReferenceTraversalLimits,
+    ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentRegistry, ComponentValue,
+    ComponentValueCost, EntityReferenceTraversalLimits,
 };
 
 use crate::{
@@ -1236,21 +1236,26 @@ impl<'a, R: PrefabSourceResolver + ?Sized> PrefabExpansionContext<'a, R> {
 
     fn prefab_reference_traversal_limits(&self) -> EntityReferenceTraversalLimits {
         let nodes = self.options.limits.materialized_value_nodes();
+        let depth = EntityReferenceTraversalLimits::default().depth();
         let traversal_bytes = self
             .options
             .limits
             .materialized_value_bytes()
             .get()
+            .saturating_mul(2)
             .saturating_add(
-                nodes
-                    .get()
-                    .saturating_mul(PERSISTENT_REFERENCE_TRAVERSAL_BYTE_OVERHEAD),
+                nodes.get().saturating_mul(
+                    ComponentFieldId::MAX_BYTES
+                        .saturating_add(depth.get().saturating_mul(size_of::<u32>()))
+                        .saturating_add(PERSISTENT_REFERENCE_TRAVERSAL_BYTE_OVERHEAD),
+                ),
             );
         EntityReferenceTraversalLimits::new(
-            nodes,
+            ItemLimit::new(nodes.get().saturating_mul(2))
+                .expect("materialized value node limits produce a non-zero traversal work limit"),
             ByteLimit::new(traversal_bytes)
                 .expect("materialized value limits always produce a non-zero traversal byte limit"),
-            EntityReferenceTraversalLimits::default().depth(),
+            depth,
         )
     }
 

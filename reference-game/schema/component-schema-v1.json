@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -32,7 +32,10 @@
                 "value": "hit-points"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -51,7 +54,10 @@
                 "value": "position"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -70,7 +76,9 @@
                 "value": "target"
               }
             ],
-            "value_kind": "entity_ref",
+            "shape": {
+              "shape": "entity_ref"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -90,7 +98,10 @@
                 "value": "velocity"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -124,7 +135,10 @@
                 "value": "hit-points"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -143,7 +157,10 @@
                 "value": "position"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -162,7 +179,10 @@
                 "value": "velocity"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -196,7 +216,10 @@
                 "value": "damage"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -215,7 +238,10 @@
                 "value": "position"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -234,7 +260,10 @@
                 "value": "ttl-ticks"
               }
             ],
-            "value_kind": "u64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "u64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -253,7 +282,10 @@
                 "value": "velocity"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -287,7 +319,10 @@
                 "value": "cooldown-ticks"
               }
             ],
-            "value_kind": "u64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "u64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -306,7 +341,10 @@
                 "value": "damage"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -325,7 +363,10 @@
                 "value": "remaining-ticks"
               }
             ],
-            "value_kind": "u64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "u64"
+            },
             "required": true,
             "capabilities": [
               "scene",

@@ -7,7 +7,7 @@ use std::{
 };
 
 use nara_core::{
-    ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
+    ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, FormatVersion, ItemLimit,
     PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits,
     decode_persistent_file_with_preflight, preflight_serde_shape,
@@ -21,11 +21,11 @@ use crate::{
         ComponentCatalogCounts, ComponentCatalogFileBudgetError, ComponentCatalogFileLimits,
         ComponentSchemaCatalogWire, accumulate_catalog_budget,
     },
-    registry::prepare_owner_catalogs,
+    registry::{prepare_owner_catalogs, validate_catalog_contents},
 };
 
 const AUTHORING_SCHEMA_BUNDLE_KIND: &str = "authoring_schema_bundle";
-const CANONICAL_V1_ENGINE_MIN_VERSION: &str = "0.1.0";
+const CANONICAL_ENGINE_MIN_VERSION: &str = "0.1.0";
 const FORMAT_GENERATOR_NAME: &str = "nara";
 
 /// Allocation and validation-work limits for an authoring schema bundle file.
@@ -239,9 +239,10 @@ impl AuthoringSchemaBundle {
                 .map(AuthoringSchemaBundleOwnerRef::from)
                 .collect(),
         };
-        let envelope = PersistentFileEnvelope::canonical_v1(
+        let envelope = PersistentFileEnvelope::new(
             format_kind()?,
-            engine_version(CANONICAL_V1_ENGINE_MIN_VERSION)?,
+            FormatVersion::new(2).expect("bundle format version is non-zero"),
+            engine_version(CANONICAL_ENGINE_MIN_VERSION)?,
             FormatGenerator::new(
                 FORMAT_GENERATOR_NAME,
                 engine_version(env!("CARGO_PKG_VERSION"))?,
@@ -525,16 +526,33 @@ fn finish_bundle(
         if let Some(predecessor) = owner.predecessor() {
             accumulate_catalog_budget(predecessor, limits.catalogs(), &mut counts)?;
         }
-
-        let original_current = owner.current.clone();
-        let original_predecessor = owner.predecessor.clone();
+        validate_catalog_contents(owner.current()).map_err(|source| {
+            AuthoringSchemaBundleError::Catalog {
+                owner: owner.owner_id.clone(),
+                source: Box::new(source),
+            }
+        })?;
+        if let Some(predecessor) = owner.predecessor() {
+            validate_catalog_contents(predecessor).map_err(|source| {
+                AuthoringSchemaBundleError::Catalog {
+                    owner: owner.owner_id.clone(),
+                    source: Box::new(source),
+                }
+            })?;
+        }
+        let original = match input_ordering {
+            InputOrdering::RequireCanonical => {
+                Some((owner.current.clone(), owner.predecessor.clone()))
+            }
+            InputOrdering::Canonicalize => None,
+        };
         let (current, predecessor) =
             prepare_owner_catalogs(std::mem::take(&mut owner.current), owner.predecessor.take())
                 .map_err(|source| AuthoringSchemaBundleError::Catalog {
                     owner: owner.owner_id.clone(),
                     source: Box::new(source),
                 })?;
-        if matches!(input_ordering, InputOrdering::RequireCanonical)
+        if let Some((original_current, original_predecessor)) = original
             && (current != original_current || predecessor != original_predecessor)
         {
             return Err(AuthoringSchemaBundleError::NonCanonicalCatalog {
@@ -662,8 +680,9 @@ where
 }
 
 fn file_contract() -> Result<PersistentFileContract, AuthoringSchemaBundleError> {
-    Ok(PersistentFileContract::canonical_v1(
+    Ok(PersistentFileContract::new(
         format_kind()?,
+        FormatVersion::new(2).expect("bundle format version is non-zero"),
         engine_version(env!("CARGO_PKG_VERSION"))?,
     ))
 }

@@ -6,7 +6,7 @@ use nara_identity::WorldEntityLocator;
 use nara_reflect::{
     ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentRegistry, ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::{
     AuthoringRecordFact, AuthoringRecordLocation, AuthoringRecordReadiness, PrefabAuthoringSession,
@@ -336,6 +336,7 @@ pub struct SceneInspectorFieldView {
     pub aliases: Vec<String>,
     pub path: ComponentFieldPath,
     pub value_kind: ComponentValueKind,
+    pub shape: ComponentValueShape,
     pub required: bool,
     pub capabilities: BTreeSet<ComponentCapability>,
     pub default_value: Option<ComponentValue>,
@@ -982,7 +983,8 @@ fn build_field_view(
             id: field.id.clone(),
             aliases: field.aliases.clone(),
             path: field.path.clone(),
-            value_kind: field.value_kind,
+            value_kind: field.value_kind(),
+            shape: field.shape().clone(),
             required: field.required,
             capabilities: field.capabilities.clone(),
             default_value: field.default_value.clone(),
@@ -993,7 +995,8 @@ fn build_field_view(
             id: field.id.clone(),
             aliases: field.aliases.clone(),
             path: field.path.clone(),
-            value_kind: field.value_kind,
+            value_kind: field.value_kind(),
+            shape: field.shape().clone(),
             required: field.required,
             capabilities: field.capabilities.clone(),
             default_value: field.default_value.clone(),

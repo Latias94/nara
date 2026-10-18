@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -8,7 +8,7 @@
   },
   "payload": {
     "generation": 4,
-    "predecessor": "71ac105c6ec2ac6336469a32c456bc236ab2fc9edeb2444f5e6aeb77f0e2a3df",
+    "predecessor": "e30afbb3600e1d9783145fc8a249d528cb94df84ea5ce40b4b74e6ac58ebd575",
     "components": [
       {
         "id": "reference_game.EnemyRole",
@@ -47,7 +47,10 @@
                 "value": "hit-points"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -81,7 +84,10 @@
                 "value": "velocity"
               }
             ],
-            "value_kind": "map",
+            "shape": {
+              "shape": "opaque",
+              "kind": "map"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -129,7 +135,10 @@
                 "value": "tick"
               }
             ],
-            "value_kind": "u64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "u64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -163,7 +172,10 @@
                 "value": "cooldown-ticks"
               }
             ],
-            "value_kind": "u64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "u64"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -182,7 +194,10 @@
                 "value": "damage"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",

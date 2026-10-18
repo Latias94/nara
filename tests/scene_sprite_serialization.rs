@@ -113,8 +113,8 @@ fn unknown_sprite_stable_asset_id_fails_without_world_mutation() {
             && diagnostic_has_field(
                 diagnostic,
                 "field-path",
-                DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Identifier("material.image.value"),
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
             )
             && diagnostic_has_field(
                 diagnostic,
@@ -227,8 +227,8 @@ fn unknown_sprite_path_asset_ref_fails_with_project_database_without_world_mutat
             && diagnostic_has_field(
                 diagnostic,
                 "field-path",
-                DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Identifier("material.image.value"),
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
             )
             && diagnostic_has_field(
                 diagnostic,
@@ -345,8 +345,8 @@ fn prefab_patch_invalid_asset_ref_fails_before_world_mutation() {
             && diagnostic_has_field(
                 diagnostic,
                 "field-path",
-                DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Identifier("material.image.value"),
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
             )
             && diagnostic_has_field(
                 diagnostic,

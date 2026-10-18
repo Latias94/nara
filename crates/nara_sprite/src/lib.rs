@@ -1327,7 +1327,7 @@ mod tests {
         let mut fields = schema
             .fields
             .iter()
-            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .map(|field| (field.path.to_string(), field.value_kind(), field.required))
             .collect::<Vec<_>>();
         fields.sort_by(|left, right| left.0.cmp(&right.0));
 

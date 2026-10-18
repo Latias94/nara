@@ -206,6 +206,8 @@ fn optional_null_scalar_edits_have_reversible_scene_and_prefab_history() {
     let required = bundle();
     let mut catalog = required.owners()[0].current().clone();
     catalog.components[0].fields[0].required = false;
+    catalog.components[0].fields[0].shape =
+        nara_reflect::ComponentValueShape::optional(catalog.components[0].fields[0].shape.clone());
     let bundle = AuthoringSchemaBundle::new([AuthoringSchemaBundleOwner::new(
         required.owners()[0].owner_id().clone(),
         catalog,

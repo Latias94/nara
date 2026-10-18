@@ -240,7 +240,7 @@ fn scene_diagnostics_redact_legacy_codec_text_and_sensitive_locators() {
 }
 
 #[test]
-fn component_field_paths_lower_from_structure_with_explicit_bounds() {
+fn component_field_paths_redact_unproven_content_and_keep_depth() {
     let root = ComponentFieldPath::empty();
     let root_diagnostic = crate::diagnostics::with_component_field_path(
         crate::diagnostics::error(
@@ -251,15 +251,11 @@ fn component_field_paths_lower_from_structure_with_explicit_bounds() {
         "field-path-depth",
         &root,
     );
-    assert!(diagnostic_has_text_field(
-        &root_diagnostic,
-        "field-path",
-        "root",
-    ));
+    assert!(diagnostic_has_redacted_field(&root_diagnostic, "field-path"));
     assert!(diagnostic_has_field_class(
         &root_diagnostic,
         "field-path",
-        DiagnosticFieldClass::Public,
+        DiagnosticFieldClass::Sensitive,
     ));
     assert!(diagnostic_has_u64_field(
         &root_diagnostic,
@@ -280,15 +276,11 @@ fn component_field_paths_lower_from_structure_with_explicit_bounds() {
         "field-path-depth",
         &indexed,
     );
-    assert!(diagnostic_has_text_field(
-        &indexed_diagnostic,
-        "field-path",
-        "f_items/i_7",
-    ));
+    assert!(diagnostic_has_redacted_field(&indexed_diagnostic, "field-path"));
     assert!(diagnostic_has_field_class(
         &indexed_diagnostic,
         "field-path",
-        DiagnosticFieldClass::Public,
+        DiagnosticFieldClass::Sensitive,
     ));
     assert!(diagnostic_has_u64_field(
         &indexed_diagnostic,
@@ -360,10 +352,11 @@ fn component_field_path_errors_publish_stable_reason_and_numeric_bounds() {
         "path-error-kind",
         "index-out-of-bounds",
     ));
-    assert!(diagnostic_has_text_field(
+    assert!(diagnostic_has_redacted_field(&diagnostic, "error-field-path"));
+    assert!(diagnostic_has_field_class(
         &diagnostic,
         "error-field-path",
-        "f_items/i_7",
+        DiagnosticFieldClass::Sensitive,
     ));
     assert!(diagnostic_has_u64_field(
         &diagnostic,
@@ -3391,7 +3384,8 @@ fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() 
         diagnostic.code().as_str() == "scene.invalid-component-payload"
             && diagnostic_has_text_field(diagnostic, "entity-id", "player")
             && diagnostic_has_text_field(diagnostic, "component-id", expected_component_id.as_str())
-            && diagnostic_has_text_field(diagnostic, "field-path", "asset.value")
+            && diagnostic_has_redacted_field(diagnostic, "field-path")
+            && diagnostic_has_field_class(diagnostic, "field-path", DiagnosticFieldClass::Sensitive)
             && diagnostic_has_redacted_field(diagnostic, "asset-ref")
             && diagnostic_has_field_class(diagnostic, "asset-ref", DiagnosticFieldClass::Sensitive)
     }));
@@ -4585,7 +4579,7 @@ fn scene_component_schemas_expose_scalar_fields() {
         name_schema
             .fields
             .iter()
-            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .map(|field| (field.path.to_string(), field.value_kind(), field.required))
             .collect::<Vec<_>>(),
         vec![("<root>".to_string(), ComponentValueKind::String, true)]
     );
@@ -4593,7 +4587,7 @@ fn scene_component_schemas_expose_scalar_fields() {
         visibility_schema
             .fields
             .iter()
-            .map(|field| (field.path.to_string(), field.value_kind, field.required))
+            .map(|field| (field.path.to_string(), field.value_kind(), field.required))
             .collect::<Vec<_>>(),
         vec![("<root>".to_string(), ComponentValueKind::String, true)]
     );

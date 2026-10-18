@@ -1,6 +1,6 @@
 {
   "kind": "authoring_schema_bundle",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -12,7 +12,7 @@
         "owner": "nara.scene.hierarchy.components",
         "current": {
           "generation": 2,
-          "predecessor": "2144b2bfe6109d7b8dd590aa7bef764902794d05ae2ab85c68c91ce4d48b39e6",
+          "predecessor": "bd55e114e38abc9211918c152f497a176323e02fd2432c1fdd38d03a8691dd27",
           "components": [
             {
               "id": "nara.scene.Name",
@@ -32,7 +32,10 @@
                     "Name"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -65,7 +68,10 @@
                     "Visibility"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -104,7 +110,10 @@
                     "Name"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -133,7 +142,10 @@
                     "Visibility"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -176,7 +188,10 @@
                       "value": "amplitude"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "opaque",
+                    "kind": "map"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",

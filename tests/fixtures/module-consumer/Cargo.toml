@@ -21,5 +21,6 @@ nara_app = { path = "../../../crates/nara_app" }
 nara_asset = { path = "../../../crates/nara_asset", default-features = false, features = ["serde"] }
 nara_ecs = { path = "../../../crates/nara_ecs" }
 nara_identity = { path = "../../../crates/nara_identity", features = ["serde"] }
+nara_tooling = { path = "../../../crates/nara_tooling" }
 ron = "0.8"
 serde = { version = "1", features = ["derive"] }

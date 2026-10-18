@@ -1392,8 +1392,8 @@ fn root_entity_reference_rewrite_accepts_exact_traversal_limits() {
     ]);
     let original = ComponentValue::EntityReference(scene_reference("target"));
     let exact = EntityReferenceTraversalLimits::new(
-        ItemLimit::new(1).unwrap(),
-        ByteLimit::new("target".len()).unwrap(),
+        ItemLimit::new(2).unwrap(),
+        ByteLimit::new("target".len() + "root".len()).unwrap(),
         DepthLimit::new(1).unwrap(),
     );
 
@@ -1418,15 +1418,15 @@ fn root_entity_reference_rewrite_accepts_exact_traversal_limits() {
         &schema,
         &original,
         EntityReferenceTraversalLimits::new(
-            ItemLimit::new(1).unwrap(),
-            ByteLimit::new("target".len() - 1).unwrap(),
+            ItemLimit::new(2).unwrap(),
+            ByteLimit::new("target".len() + "root".len() - 1).unwrap(),
             DepthLimit::new(1).unwrap(),
         ),
         |_path, reference| Ok::<_, ()>(reference.clone()),
     );
     assert!(matches!(
         too_small,
-        Err(ComponentEntityReferenceRewriteError::ByteLimit { maximum: 5 })
+        Err(ComponentEntityReferenceRewriteError::ByteLimit { maximum: 9 })
     ));
 }
 

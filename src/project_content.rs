@@ -31,7 +31,7 @@ use nara_reflect::__private::{
 };
 use nara_reflect::{
     ComponentRegistrySnapshot, DeclaredAssetReferenceError, SchemaCompositionFingerprint,
-    collect_declared_asset_references,
+    collect_declared_asset_references, collect_declared_field_asset_references,
 };
 use nara_scene::{
     PrefabDocument, PrefabDocumentCandidate, PrefabSourceResolver, SceneDocument,
@@ -1406,21 +1406,24 @@ impl<'a> LoadContext<'a> {
                     value,
                     ..
                 } => {
-                    let stable_asset = self
-                        .validation
-                        .registry()
-                        .schema(component)
-                        .and_then(|schema| {
-                            schema
-                                .fields()
-                                .iter()
-                                .find(|candidate| candidate.id() == field)
-                        })
-                        .is_some_and(|field| {
-                            field.value_kind() == nara_reflect::ComponentValueKind::AssetRef
-                                && field.has_capability(nara_reflect::ComponentCapability::AssetRef)
-                        })
-                        && matches!(value.get("kind"), Some(nara_reflect::ComponentValue::String(kind)) if kind == "stable_id");
+                    let field_schema =
+                        self.validation
+                            .registry()
+                            .schema(component)
+                            .and_then(|schema| {
+                                schema
+                                    .fields()
+                                    .iter()
+                                    .find(|candidate| candidate.id() == field)
+                            });
+                    let stable_asset = if let Some(field_schema) = field_schema {
+                        collect_declared_field_asset_references(component, field_schema, value)
+                            .map_err(map_asset_reference_error)?
+                            .iter()
+                            .any(|reference| matches!(reference.asset_ref(), AssetRef::StableId(_)))
+                    } else {
+                        false
+                    };
                     if stable_asset {
                         self.ensure_reference_catalogue()?;
                     }

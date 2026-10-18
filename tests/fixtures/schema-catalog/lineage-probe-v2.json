@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -8,7 +8,7 @@
   },
   "payload": {
     "generation": 2,
-    "predecessor": "d75577f2048ca250ea6a1c86aac9e8df351eeab9e73b885388b0870399823a0b",
+    "predecessor": "a45f4b152afe0723b92d1a71c309ebdb39ea515662b36d06afef5febb36790c9",
     "components": [
       {
         "id": "nara.test.LineageProbe",
@@ -33,7 +33,10 @@
                 "value": "value"
               }
             ],
-            "value_kind": "i64",
+            "shape": {
+              "shape": "scalar",
+              "kind": "i64"
+            },
             "required": true,
             "capabilities": [
               "scene",

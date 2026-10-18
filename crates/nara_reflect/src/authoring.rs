@@ -1,12 +1,15 @@
 //! Persistent Rust component authoring support.
 
+use std::collections::BTreeMap;
+
+use nara_asset::AssetRef;
 use nara_core::Vec2;
 use nara_ecs::Component;
 use nara_identity::EntityReference;
 
 use crate::{
     ComponentCodecError, ComponentNumericDomain, ComponentSchema, ComponentValue,
-    ComponentValueKind,
+    ComponentValueKind, ComponentValueShape,
 };
 
 pub trait PersistentComponentProvider: Component + Sized + 'static {
@@ -21,8 +24,7 @@ pub trait PersistentComponentProvider: Component + Sized + 'static {
 
 #[doc(hidden)]
 pub trait PersistentFieldCodec: private::Sealed + Sized + 'static {
-    const VALUE_KIND: ComponentValueKind;
-    const NUMERIC_DOMAIN: Option<ComponentNumericDomain> = None;
+    fn value_shape() -> ComponentValueShape;
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError>;
 
@@ -49,7 +51,9 @@ where
 }
 
 impl PersistentFieldCodec for bool {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::Bool;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::scalar(ComponentValueKind::Bool)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         value
@@ -63,7 +67,9 @@ impl PersistentFieldCodec for bool {
 }
 
 impl PersistentFieldCodec for String {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::String;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::scalar(ComponentValueKind::String)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         value
@@ -80,9 +86,10 @@ impl PersistentFieldCodec for String {
 macro_rules! narrow_integer_codec {
     ($ty:ty, $kind:ident, $getter:ident, $wire:ty, $domain:ident) => {
         impl PersistentFieldCodec for $ty {
-            const VALUE_KIND: ComponentValueKind = ComponentValueKind::$kind;
-            const NUMERIC_DOMAIN: Option<ComponentNumericDomain> =
-                Some(ComponentNumericDomain::$domain);
+            fn value_shape() -> ComponentValueShape {
+                ComponentValueShape::scalar(ComponentValueKind::$kind)
+                    .with_numeric_domain(ComponentNumericDomain::$domain)
+            }
 
             fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
                 value
@@ -106,8 +113,10 @@ narrow_integer_codec!(u16, U64, as_u64, u64, U16);
 narrow_integer_codec!(u32, U64, as_u64, u64, U32);
 
 impl PersistentFieldCodec for f32 {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::F64;
-    const NUMERIC_DOMAIN: Option<ComponentNumericDomain> = Some(ComponentNumericDomain::F32);
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::scalar(ComponentValueKind::F64)
+            .with_numeric_domain(ComponentNumericDomain::F32)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         match value {
@@ -125,7 +134,9 @@ impl PersistentFieldCodec for f32 {
 }
 
 impl PersistentFieldCodec for f64 {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::F64;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::scalar(ComponentValueKind::F64)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         value
@@ -139,7 +150,9 @@ impl PersistentFieldCodec for f64 {
 }
 
 impl PersistentFieldCodec for i64 {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::I64;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::scalar(ComponentValueKind::I64)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         value
@@ -153,7 +166,9 @@ impl PersistentFieldCodec for i64 {
 }
 
 impl PersistentFieldCodec for u64 {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::U64;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::scalar(ComponentValueKind::U64)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         value
@@ -167,7 +182,9 @@ impl PersistentFieldCodec for u64 {
 }
 
 impl PersistentFieldCodec for Vec2 {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::Map;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::opaque(ComponentValueKind::Map)
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         let x = decode_f32_component(value, field, "x")?;
@@ -184,7 +201,9 @@ impl PersistentFieldCodec for Vec2 {
 }
 
 impl PersistentFieldCodec for EntityReference {
-    const VALUE_KIND: ComponentValueKind = ComponentValueKind::EntityRef;
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::EntityRef
+    }
 
     fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
         value
@@ -198,6 +217,99 @@ impl PersistentFieldCodec for EntityReference {
     }
 }
 
+impl PersistentFieldCodec for AssetRef {
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::AssetRef
+    }
+
+    fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
+        crate::decode_asset_reference_value(value)
+            .map_err(|_| ComponentCodecError::invalid_field(field, "canonical asset reference"))
+    }
+
+    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+        let (kind, value) = match self {
+            Self::Path(path) => ("path", path.as_str().to_owned()),
+            Self::StableId(id) => ("stable_id", id.to_string()),
+        };
+        Ok(ComponentValue::map([
+            ("kind", ComponentValue::String(kind.to_owned())),
+            ("value", ComponentValue::String(value)),
+        ]))
+    }
+}
+
+impl<T: PersistentFieldCodec> PersistentFieldCodec for Vec<T> {
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::list(T::value_shape())
+    }
+
+    fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
+        let ComponentValue::List(items) = value else {
+            return Err(ComponentCodecError::invalid_field(field, "list"));
+        };
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| T::decode(item, &format!("{field}[{index}]")))
+            .collect()
+    }
+
+    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+        self.iter()
+            .map(PersistentFieldCodec::encode)
+            .collect::<Result<Vec<_>, _>>()
+            .map(ComponentValue::List)
+    }
+}
+
+impl<T: PersistentFieldCodec> PersistentFieldCodec for BTreeMap<String, T> {
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::map(T::value_shape())
+    }
+
+    fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
+        let ComponentValue::Map(entries) = value else {
+            return Err(ComponentCodecError::invalid_field(field, "string-key map"));
+        };
+        entries
+            .iter()
+            .map(|(key, entry)| {
+                T::decode(entry, &format!("{field}[{key:?}]")).map(|decoded| (key.clone(), decoded))
+            })
+            .collect()
+    }
+
+    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+        self.iter()
+            .map(|(key, entry)| entry.encode().map(|encoded| (key.clone(), encoded)))
+            .collect::<Result<BTreeMap<_, _>, _>>()
+            .map(ComponentValue::Map)
+    }
+}
+
+impl<T: PersistentFieldCodec> PersistentFieldCodec for Option<T> {
+    fn value_shape() -> ComponentValueShape {
+        ComponentValueShape::Optional {
+            value: Box::new(T::value_shape()),
+        }
+    }
+
+    fn decode(value: &ComponentValue, field: &str) -> Result<Self, ComponentCodecError> {
+        match value {
+            ComponentValue::Null => Ok(None),
+            value => T::decode(value, field).map(Some),
+        }
+    }
+
+    fn encode(&self) -> Result<ComponentValue, ComponentCodecError> {
+        match self {
+            None => Ok(ComponentValue::Null),
+            Some(value) => value.encode(),
+        }
+    }
+}
+
 fn decode_f32_component(
     value: &ComponentValue,
     field: &str,
@@ -208,6 +320,9 @@ fn decode_f32_component(
 }
 
 mod private {
+    use std::collections::BTreeMap;
+
+    use nara_asset::AssetRef;
     use nara_core::Vec2;
     use nara_identity::EntityReference;
 
@@ -227,4 +342,8 @@ mod private {
     impl Sealed for u64 {}
     impl Sealed for Vec2 {}
     impl Sealed for EntityReference {}
+    impl Sealed for AssetRef {}
+    impl<T: super::PersistentFieldCodec> Sealed for Vec<T> {}
+    impl<T: super::PersistentFieldCodec> Sealed for BTreeMap<String, T> {}
+    impl<T: super::PersistentFieldCodec> Sealed for Option<T> {}
 }

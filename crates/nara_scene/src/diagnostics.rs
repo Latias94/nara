@@ -8,11 +8,9 @@ use nara_identity::{
 };
 use nara_reflect::{
     ComponentCapability, ComponentCodecError, ComponentEntityReferenceRewriteError,
-    ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
-    ComponentMigrationError, ComponentValueKind, PersistentApplyRejection,
+    ComponentFieldPath, ComponentFieldPathError, ComponentMigrationError, ComponentValueKind,
+    PersistentApplyRejection,
 };
-
-const MAX_SCENE_FIELD_PATH_LOCATOR_BYTES: usize = 96;
 
 pub(crate) fn error(code: &'static str, summary: &'static str) -> Diagnostic {
     Diagnostic::error(diagnostic_code(code), safe_summary(summary))
@@ -79,13 +77,10 @@ pub(crate) fn with_component_field_path(
     depth_key: &'static str,
     path: &ComponentFieldPath,
 ) -> Diagnostic {
-    let diagnostic = with_public_u64(diagnostic, depth_key, usize_to_u64(path.segments().len()));
-    let key = field_key(key);
-    let field = match lower_component_field_path(path) {
-        Some(value) => DiagnosticField::public_identifier(key, value),
-        None => DiagnosticField::sensitive(key),
-    };
-    with_field(diagnostic, field)
+    with_sensitive(
+        with_public_u64(diagnostic, depth_key, usize_to_u64(path.segments().len())),
+        key,
+    )
 }
 
 pub(crate) fn with_component_field_path_error(
@@ -108,7 +103,7 @@ pub(crate) fn with_component_field_path_error(
             "error-field-path-depth",
             path,
         ),
-        ComponentFieldPathError::MissingField { path, field } => with_public_field_segment(
+        ComponentFieldPathError::MissingField { path, .. } => with_sensitive(
             with_component_field_path(
                 with_public_identifier(diagnostic, "path-error-kind", "missing-field"),
                 "error-field-path",
@@ -116,7 +111,6 @@ pub(crate) fn with_component_field_path_error(
                 path,
             ),
             "missing-field",
-            field,
         ),
         ComponentFieldPathError::IndexOutOfBounds { path, index, len } => with_public_u64(
             with_public_u64(
@@ -177,6 +171,16 @@ pub(crate) fn with_entity_reference_rewrite_error<E>(
                     diagnostic,
                     "rewrite-error-kind",
                     "missing-entity-ref-capability",
+                ),
+                path,
+            )
+        }
+        ComponentEntityReferenceRewriteError::MissingAssetRefCapability { path } => {
+            with_reference_rewrite_path(
+                with_public_identifier(
+                    diagnostic,
+                    "rewrite-error-kind",
+                    "missing-asset-ref-capability",
                 ),
                 path,
             )
@@ -282,25 +286,22 @@ pub(crate) fn with_asset_ref(
 
 pub(crate) fn with_codec_error(diagnostic: Diagnostic, error: &ComponentCodecError) -> Diagnostic {
     match error {
-        ComponentCodecError::MissingField { field } => with_public_locator(
+        ComponentCodecError::MissingField { .. } => with_sensitive(
             with_public_identifier(diagnostic, "codec-error-kind", "missing-field"),
             "field-path",
-            field,
         ),
-        ComponentCodecError::InvalidField { field, .. } => with_secret(
-            with_public_locator(
+        ComponentCodecError::InvalidField { .. } => with_secret(
+            with_sensitive(
                 with_public_identifier(diagnostic, "codec-error-kind", "invalid-field"),
                 "field-path",
-                field,
             ),
             "codec-detail",
         ),
-        ComponentCodecError::InvalidAssetRef { field, .. } => with_secret(
+        ComponentCodecError::InvalidAssetRef { .. } => with_secret(
             with_sensitive(
-                with_public_locator(
+                with_sensitive(
                     with_public_identifier(diagnostic, "codec-error-kind", "invalid-asset-ref"),
                     "field-path",
-                    field,
                 ),
                 "asset-ref",
             ),
@@ -660,61 +661,6 @@ pub(crate) fn usize_to_u64(value: usize) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-fn with_public_field_segment(diagnostic: Diagnostic, key: &'static str, value: &str) -> Diagnostic {
-    let key = field_key(key);
-    let field = match validate_public_field_segment(value) {
-        Some(value) => DiagnosticField::public_identifier(key, value),
-        None => DiagnosticField::sensitive(key),
-    };
-    with_field(diagnostic, field)
-}
-
-fn lower_component_field_path(path: &ComponentFieldPath) -> Option<PublicDiagnosticIdentifier> {
-    if path.is_empty() {
-        return PublicDiagnosticIdentifier::new("root").ok();
-    }
-
-    let mut lowered = String::with_capacity(MAX_SCENE_FIELD_PATH_LOCATOR_BYTES);
-    for segment in path.segments() {
-        if !lowered.is_empty() {
-            push_bounded(&mut lowered, "/")?;
-        }
-        match segment {
-            ComponentFieldPathSegment::Field(field) => {
-                validate_public_field_segment(field)?;
-                push_bounded(&mut lowered, "f_")?;
-                push_bounded(&mut lowered, field)?;
-            }
-            ComponentFieldPathSegment::Index(index) => {
-                push_bounded(&mut lowered, "i_")?;
-                push_bounded(&mut lowered, &index.to_string())?;
-            }
-        }
-    }
-    PublicDiagnosticIdentifier::new(&lowered).ok()
-}
-
-fn validate_public_field_segment(value: &str) -> Option<PublicDiagnosticIdentifier> {
-    if value.is_empty()
-        || value.len() > MAX_SCENE_FIELD_PATH_LOCATOR_BYTES
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        return None;
-    }
-    PublicDiagnosticIdentifier::new(value).ok()
-}
-
-fn push_bounded(target: &mut String, value: &str) -> Option<()> {
-    let next_len = target.len().checked_add(value.len())?;
-    if next_len > MAX_SCENE_FIELD_PATH_LOCATOR_BYTES {
-        return None;
-    }
-    target.push_str(value);
-    Some(())
-}
-
 fn diagnostic_code(value: &'static str) -> DiagnosticCode {
     DiagnosticCode::new(value).expect("scene diagnostic code literals must be valid")
 }
@@ -731,4 +677,169 @@ fn with_field(diagnostic: Diagnostic, field: DiagnosticField) -> Diagnostic {
     diagnostic
         .try_with_field(field)
         .expect("scene diagnostics use unique fields below the hard field limit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nara_diagnostic::{DiagnosticFieldClass, DiagnosticValueRef};
+    use nara_identity::{EntityReference, SceneEntityId};
+    use nara_reflect::{
+        ComponentFieldId, ComponentFieldSchema, ComponentNumericDomain, ComponentSchema,
+        ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueShape,
+        EntityReferenceTraversalLimits, rewrite_declared_entity_references,
+        validate_component_value,
+    };
+
+    fn assert_redacted(diagnostic: &Diagnostic, key: &str) {
+        let field = diagnostic
+            .fields()
+            .iter()
+            .find(|field| field.key().as_str() == key)
+            .expect("diagnostic field should be retained");
+        assert_eq!(field.class(), DiagnosticFieldClass::Sensitive);
+        assert_eq!(field.value(), DiagnosticValueRef::Redacted);
+    }
+
+    fn assert_identifier(diagnostic: &Diagnostic, key: &str, expected: &str) {
+        assert!(diagnostic.fields().iter().any(|field| {
+            field.key().as_str() == key
+                && field.class() == DiagnosticFieldClass::Public
+                && field.value() == DiagnosticValueRef::Identifier(expected)
+        }));
+    }
+
+    fn assert_canary_absent(diagnostic: &Diagnostic, canary: &str) {
+        assert!(!format!("{diagnostic:?}").contains(canary));
+        #[cfg(feature = "serde")]
+        assert!(!serde_json::to_string(diagnostic).unwrap().contains(canary));
+    }
+
+    #[test]
+    fn reference_rewrite_diagnostics_redact_dynamic_map_keys() {
+        let canary = "qvM7k2p8Nx4J";
+        assert!(PublicDiagnosticIdentifier::new(canary).is_ok());
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("nara.test.DiagnosticReferences"),
+            "Diagnostic references",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([
+            ComponentFieldSchema::required(
+                ComponentFieldId::new("targets"),
+                "Targets",
+                ComponentFieldPath::from_fields(["targets"]),
+                ComponentValueShape::map(ComponentValueShape::EntityRef),
+            )
+            .with_capability(ComponentCapability::EntityRef),
+        ]);
+        let value = ComponentValue::map([(
+            "targets",
+            ComponentValue::map([(
+                canary,
+                ComponentValue::EntityReference(EntityReference::SceneLocal {
+                    entity: SceneEntityId::new("missing").unwrap(),
+                }),
+            )]),
+        )]);
+        let failure = rewrite_declared_entity_references(
+            &schema,
+            &value,
+            EntityReferenceTraversalLimits::default(),
+            |_, _| Err::<EntityReference, ()>(()),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            &failure,
+            ComponentEntityReferenceRewriteError::Rewrite { path, .. }
+                if path == &ComponentFieldPath::from_fields(["targets", canary])
+        ));
+
+        let diagnostic = with_entity_reference_rewrite_error(
+            error(
+                "scene.test-reference-rewrite",
+                "Scene test reference rewrite failed",
+            ),
+            &failure,
+            |_| "missing-source-entity",
+        );
+
+        assert_redacted(&diagnostic, "reference-field-path");
+        assert_identifier(&diagnostic, "rewrite-error-kind", "missing-source-entity");
+        assert!(diagnostic.fields().iter().any(|field| {
+            field.key().as_str() == "reference-field-path-depth"
+                && field.value() == DiagnosticValueRef::Unsigned(2)
+        }));
+        assert_canary_absent(&diagnostic, canary);
+    }
+
+    #[test]
+    fn codec_diagnostics_redact_nested_map_keys_and_unproven_field_text() {
+        let canary = "qvM7k2p8Nx4J";
+        assert!(PublicDiagnosticIdentifier::new(canary).is_ok());
+        let schema = ComponentSchema::new(
+            ComponentTypeId::new("nara.test.DiagnosticValues"),
+            "Diagnostic values",
+            ComponentSchemaVersion::ONE,
+        )
+        .with_fields([ComponentFieldSchema::required(
+            ComponentFieldId::new("weights"),
+            "Weights",
+            ComponentFieldPath::from_fields(["weights"]),
+            ComponentValueShape::map(
+                ComponentValueShape::scalar(ComponentValueKind::U64)
+                    .with_numeric_domain(ComponentNumericDomain::U8),
+            ),
+        )]);
+        let value = ComponentValue::map([(
+            "weights",
+            ComponentValue::map([(canary, ComponentValue::U64(256))]),
+        )]);
+        let failure = validate_component_value(&schema, &value).unwrap_err();
+        assert!(matches!(
+            &failure,
+            ComponentCodecError::InvalidField { field, .. } if field.contains(canary)
+        ));
+
+        for (failure, expected_kind) in [
+            (failure, "invalid-field"),
+            (ComponentCodecError::missing_field(canary), "missing-field"),
+            (
+                ComponentCodecError::invalid_asset_ref(canary, canary, canary),
+                "invalid-asset-ref",
+            ),
+        ] {
+            let diagnostic = with_codec_error(
+                error("scene.test-codec-error", "Scene test codec failed"),
+                &failure,
+            );
+
+            assert_redacted(&diagnostic, "field-path");
+            assert_identifier(&diagnostic, "codec-error-kind", expected_kind);
+            assert_canary_absent(&diagnostic, canary);
+        }
+
+        let path_failure = value
+            .get_path(&ComponentFieldPath::from_fields(["weights", canary, canary]))
+            .unwrap_err();
+        let diagnostic = with_component_field_path_error(
+            error("scene.test-nested-path", "Scene test nested path failed"),
+            &path_failure,
+        );
+        assert_redacted(&diagnostic, "error-field-path");
+        assert_identifier(&diagnostic, "path-error-kind", "expected-map");
+        assert_canary_absent(&diagnostic, canary);
+
+        let path_failure = value
+            .get_path(&ComponentFieldPath::from_fields([canary]))
+            .unwrap_err();
+        let diagnostic = with_component_field_path_error(
+            error("scene.test-missing-path", "Scene test map key was missing"),
+            &path_failure,
+        );
+        assert_redacted(&diagnostic, "error-field-path");
+        assert_redacted(&diagnostic, "missing-field");
+        assert_identifier(&diagnostic, "path-error-kind", "missing-field");
+        assert_canary_absent(&diagnostic, canary);
+    }
 }

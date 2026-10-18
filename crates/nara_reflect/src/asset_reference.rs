@@ -6,13 +6,20 @@ use std::{
 use nara_asset::{AssetPathError, AssetRef, StableAssetIdError};
 
 use crate::{
-    ComponentCapability, ComponentFieldId, ComponentFieldPathError, ComponentRegistry,
+    ComponentCodecError, ComponentEntityReferenceRewriteError, ComponentFieldId,
+    ComponentFieldPath, ComponentFieldPathError, ComponentFieldSchema, ComponentRegistry,
     ComponentSchema, ComponentSchemaVersion, ComponentTypeId, ComponentValue, ComponentValueKind,
+    EntityReferenceTraversalLimits,
+    entity_reference::{
+        PresentReferenceLeaf, collect_present_field_reference_leaves,
+        collect_present_reference_leaves,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredAssetReference {
     field_id: ComponentFieldId,
+    path: ComponentFieldPath,
     asset_ref: AssetRef,
 }
 
@@ -20,6 +27,11 @@ impl DeclaredAssetReference {
     #[must_use]
     pub const fn field_id(&self) -> &ComponentFieldId {
         &self.field_id
+    }
+
+    #[must_use]
+    pub const fn path(&self) -> &ComponentFieldPath {
+        &self.path
     }
 
     #[must_use]
@@ -51,20 +63,28 @@ pub enum DeclaredAssetReferenceError {
     InvalidValueShape {
         component: ComponentTypeId,
         field: ComponentFieldId,
+        path: ComponentFieldPath,
     },
     InvalidKind {
         component: ComponentTypeId,
         field: ComponentFieldId,
+        path: ComponentFieldPath,
     },
     InvalidPath {
         component: ComponentTypeId,
         field: ComponentFieldId,
+        path: ComponentFieldPath,
         source: AssetPathError,
     },
     InvalidStableId {
         component: ComponentTypeId,
         field: ComponentFieldId,
+        path: ComponentFieldPath,
         source: StableAssetIdError,
+    },
+    Traversal {
+        component: ComponentTypeId,
+        source: ComponentEntityReferenceRewriteError<()>,
     },
 }
 
@@ -94,6 +114,9 @@ impl Display for DeclaredAssetReferenceError {
             Self::InvalidStableId { .. } => {
                 "declared asset reference contains an invalid stable ID"
             }
+            Self::Traversal { .. } => {
+                "declared asset reference traversal rejected component structure"
+            }
         })
     }
 }
@@ -109,7 +132,8 @@ impl Error for DeclaredAssetReferenceError {
             | Self::SchemaVersionMismatch { .. }
             | Self::RequiredFieldIsNull { .. }
             | Self::InvalidValueShape { .. }
-            | Self::InvalidKind { .. } => None,
+            | Self::InvalidKind { .. }
+            | Self::Traversal { .. } => None,
         }
     }
 }
@@ -159,34 +183,69 @@ pub fn collect_declared_asset_references_from_schema(
         });
     }
 
-    let mut references = Vec::new();
-    for field in schema.fields().iter().filter(|field| {
-        field.value_kind() == ComponentValueKind::AssetRef
-            && field.has_capability(ComponentCapability::AssetRef)
-    }) {
-        let field_value = match value.get_path(field.path()) {
-            Ok(value) => value,
-            Err(ComponentFieldPathError::MissingField { .. }) if !field.is_required() => continue,
-            Err(source) => {
-                return Err(DeclaredAssetReferenceError::FieldPath {
+    let leaves = collect_present_reference_leaves::<()>(
+        schema,
+        value,
+        EntityReferenceTraversalLimits::default(),
+        ComponentValueKind::AssetRef,
+    )
+    .map_err(|source| DeclaredAssetReferenceError::Traversal {
+        component: component.clone(),
+        source,
+    })?;
+    materialize_asset_references(component, value, leaves, 0)
+}
+
+/// Collects references from an already selected field value, retaining component-relative paths.
+///
+/// The caller supplies the actual field subtree, as a SetField operation does. Missing defaults
+/// and reference target existence remain the owning transaction's responsibility.
+pub fn collect_declared_field_asset_references(
+    component: &ComponentTypeId,
+    field: &ComponentFieldSchema,
+    value: &ComponentValue,
+) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    let leaves = collect_present_field_reference_leaves::<()>(
+        field,
+        value,
+        EntityReferenceTraversalLimits::default(),
+        ComponentValueKind::AssetRef,
+    )
+    .map_err(|source| DeclaredAssetReferenceError::Traversal {
+        component: component.clone(),
+        source,
+    })?;
+    materialize_asset_references(component, value, leaves, field.path().segments().len())
+}
+
+fn materialize_asset_references(
+    component: &ComponentTypeId,
+    value: &ComponentValue,
+    leaves: Vec<PresentReferenceLeaf<'_>>,
+    root_segments: usize,
+) -> Result<Vec<DeclaredAssetReference>, DeclaredAssetReferenceError> {
+    let mut references = Vec::with_capacity(leaves.len());
+    for leaf in leaves {
+        let relative =
+            ComponentFieldPath::new(leaf.path.segments()[root_segments..].iter().cloned());
+        let field_value =
+            value
+                .get_path(&relative)
+                .map_err(|source| DeclaredAssetReferenceError::FieldPath {
                     component: component.clone(),
-                    field: field.id().clone(),
+                    field: leaf.field.id().clone(),
                     source,
-                });
-            }
-        };
+                })?;
         if matches!(field_value, ComponentValue::Null) {
-            if field.is_required() {
-                return Err(DeclaredAssetReferenceError::RequiredFieldIsNull {
-                    component: component.clone(),
-                    field: field.id().clone(),
-                });
-            }
-            continue;
+            return Err(DeclaredAssetReferenceError::RequiredFieldIsNull {
+                component: component.clone(),
+                field: leaf.field.id().clone(),
+            });
         }
-        let asset_ref = parse_asset_reference(component, field.id(), field_value)?;
+        let asset_ref = parse_asset_reference(component, leaf.field.id(), &leaf.path, field_value)?;
         references.push(DeclaredAssetReference {
-            field_id: field.id().clone(),
+            field_id: leaf.field.id().clone(),
+            path: leaf.path,
             asset_ref,
         });
     }
@@ -196,41 +255,64 @@ pub fn collect_declared_asset_references_from_schema(
 fn parse_asset_reference(
     component: &ComponentTypeId,
     field: &ComponentFieldId,
+    path: &ComponentFieldPath,
     value: &ComponentValue,
 ) -> Result<AssetRef, DeclaredAssetReferenceError> {
-    let Some((kind, value)) = asset_reference_parts(value) else {
-        return Err(DeclaredAssetReferenceError::InvalidValueShape {
+    decode_asset_reference(value).map_err(|error| match error {
+        AssetReferenceValueError::Shape => DeclaredAssetReferenceError::InvalidValueShape {
             component: component.clone(),
             field: field.clone(),
-        });
-    };
-    match kind {
-        "path" => {
-            AssetRef::path(value).map_err(|source| DeclaredAssetReferenceError::InvalidPath {
-                component: component.clone(),
-                field: field.clone(),
-                source,
-            })
-        }
-        "stable_id" => AssetRef::stable_id(value).map_err(|source| {
+            path: path.clone(),
+        },
+        AssetReferenceValueError::Kind => DeclaredAssetReferenceError::InvalidKind {
+            component: component.clone(),
+            field: field.clone(),
+            path: path.clone(),
+        },
+        AssetReferenceValueError::Path(source) => DeclaredAssetReferenceError::InvalidPath {
+            component: component.clone(),
+            field: field.clone(),
+            path: path.clone(),
+            source,
+        },
+        AssetReferenceValueError::StableId(source) => {
             DeclaredAssetReferenceError::InvalidStableId {
                 component: component.clone(),
                 field: field.clone(),
+                path: path.clone(),
                 source,
             }
-        }),
-        _ => Err(DeclaredAssetReferenceError::InvalidKind {
-            component: component.clone(),
-            field: field.clone(),
-        }),
+        }
+    })
+}
+
+#[derive(Debug)]
+enum AssetReferenceValueError {
+    Shape,
+    Kind,
+    Path(AssetPathError),
+    StableId(StableAssetIdError),
+}
+
+fn decode_asset_reference(value: &ComponentValue) -> Result<AssetRef, AssetReferenceValueError> {
+    let (kind, payload) = asset_reference_parts(value).ok_or(AssetReferenceValueError::Shape)?;
+    match kind {
+        "path" => AssetRef::path(payload).map_err(AssetReferenceValueError::Path),
+        "stable_id" => AssetRef::stable_id(payload).map_err(AssetReferenceValueError::StableId),
+        _ => Err(AssetReferenceValueError::Kind),
     }
 }
 
+pub(crate) fn decode_asset_reference_value(
+    value: &ComponentValue,
+) -> Result<AssetRef, ComponentCodecError> {
+    decode_asset_reference(value).map_err(|_| {
+        ComponentCodecError::invalid_field("<asset-ref>", "a canonical admitted asset reference")
+    })
+}
+
 pub(crate) fn is_asset_reference_value(value: &ComponentValue) -> bool {
-    matches!(
-        asset_reference_parts(value),
-        Some(("path" | "stable_id", _))
-    )
+    decode_asset_reference(value).is_ok()
 }
 
 fn asset_reference_parts(value: &ComponentValue) -> Option<(&str, &str)> {

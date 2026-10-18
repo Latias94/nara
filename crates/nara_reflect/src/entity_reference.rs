@@ -6,8 +6,9 @@ use nara_core::{ByteLimit, DepthLimit, ItemLimit};
 use nara_identity::{EntityReference, EntityReferenceRemap, IdentityRemapError};
 
 use crate::{
-    ComponentCapability, ComponentFieldPath, ComponentFieldPathError, ComponentFieldPathSegment,
-    ComponentSchema, ComponentValue, ComponentValueKind,
+    ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldPathError,
+    ComponentFieldPathSegment, ComponentFieldSchema, ComponentSchema, ComponentShapeMember,
+    ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 
 const DEFAULT_ENTITY_REFERENCE_TRAVERSAL_NODES: usize = 16_384;
@@ -61,7 +62,7 @@ impl Default for EntityReferenceTraversalLimits {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentEntityReferenceRewriteError<E> {
     NodeLimit {
         maximum: usize,
@@ -80,6 +81,9 @@ pub enum ComponentEntityReferenceRewriteError<E> {
         path: ComponentFieldPath,
     },
     MissingEntityRefCapability {
+        path: ComponentFieldPath,
+    },
+    MissingAssetRefCapability {
         path: ComponentFieldPath,
     },
     RequiredReferenceMissing {
@@ -101,6 +105,7 @@ pub enum ComponentEntityReferenceRewriteError<E> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PlannedEntityReference {
+    field_id: ComponentFieldId,
     path: ComponentFieldPath,
     required: bool,
 }
@@ -114,13 +119,22 @@ struct PlannedEntityReference {
 /// candidate. Changing a planned path can make the plan stale;
 /// [`DeclaredEntityReferencePlan::visit`] and
 /// [`DeclaredEntityReferencePlan::rewrite_in_place`] report that through the existing typed
-/// path/value errors.
+/// path/value errors. Adding references, changing collection membership, or changing an optional
+/// leaf from Null to a reference requires a new plan; path-only visits do not rescan for new leaves.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeclaredEntityReferencePlan {
     references: Vec<PlannedEntityReference>,
 }
 
 impl DeclaredEntityReferencePlan {
+    #[must_use]
+    pub fn root_field_id(&self, path: &ComponentFieldPath) -> Option<&ComponentFieldId> {
+        self.references
+            .iter()
+            .find(|reference| &reference.path == path)
+            .map(|reference| &reference.field_id)
+    }
+
     /// Visits every reference captured by this plan without rescanning the complete value tree.
     ///
     /// All planned paths are validated before the first callback is invoked.
@@ -186,81 +200,15 @@ pub fn plan_declared_entity_references<E>(
     value: &ComponentValue,
     limits: EntityReferenceTraversalLimits,
 ) -> Result<DeclaredEntityReferencePlan, ComponentEntityReferenceRewriteError<E>> {
-    let mut fields = schema.fields.iter().collect::<Vec<_>>();
-    fields.sort_by(|left, right| left.path.cmp(&right.path));
-    let declared_paths = fields
-        .iter()
-        .copied()
-        .filter(|field| matches!(field.value_kind, ComponentValueKind::EntityRef))
-        .map(|field| field.path.clone())
-        .collect::<BTreeSet<_>>();
-    let undeclared_path = find_undeclared_reference_path(value, limits, &declared_paths)?;
-
-    if let Some(duplicate) = fields.windows(2).find(|pair| pair[0].path == pair[1].path) {
-        return Err(
-            ComponentEntityReferenceRewriteError::DuplicateDeclaredPath {
-                path: duplicate[0].path.clone(),
-            },
-        );
-    }
-    if let Some(path) = undeclared_path {
-        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
-    }
-
-    let mut references = Vec::new();
-    for field in fields
-        .into_iter()
-        .filter(|field| matches!(field.value_kind, ComponentValueKind::EntityRef))
-    {
-        if !field.has_capability(ComponentCapability::EntityRef) {
-            return Err(
-                ComponentEntityReferenceRewriteError::MissingEntityRefCapability {
-                    path: field.path.clone(),
-                },
-            );
-        }
-
-        let field_value = match value.get_path(&field.path) {
-            Ok(value) => value,
-            Err(error)
-                if !field.required
-                    && matches!(
-                        error,
-                        ComponentFieldPathError::MissingField { .. }
-                            | ComponentFieldPathError::IndexOutOfBounds { .. }
-                    ) =>
-            {
-                continue;
-            }
-            Err(error) => {
-                return Err(ComponentEntityReferenceRewriteError::InvalidPath {
-                    path: field.path.clone(),
-                    error,
-                });
-            }
-        };
-        if !field.required && matches!(field_value, ComponentValue::Null) {
-            continue;
-        }
-        if !matches!(field_value, ComponentValue::EntityReference(_)) {
-            return Err(
-                if field.required && matches!(field_value, ComponentValue::Null) {
-                    ComponentEntityReferenceRewriteError::RequiredReferenceMissing {
-                        path: field.path.clone(),
-                    }
-                } else {
-                    ComponentEntityReferenceRewriteError::InvalidReferenceValue {
-                        path: field.path.clone(),
-                        actual: field_value.kind(),
-                    }
-                },
-            );
-        }
-        references.push(PlannedEntityReference {
-            path: field.path.clone(),
-            required: field.required,
-        });
-    }
+    let references =
+        collect_present_reference_leaves(schema, value, limits, ComponentValueKind::EntityRef)?
+            .into_iter()
+            .map(|reference| PlannedEntityReference {
+                field_id: reference.field.id().clone(),
+                path: reference.path,
+                required: reference.required,
+            })
+            .collect();
 
     Ok(DeclaredEntityReferencePlan { references })
 }
@@ -341,20 +289,375 @@ fn invalid_planned_reference<E>(
     }
 }
 
+pub(crate) struct PresentReferenceLeaf<'schema> {
+    pub(crate) field: &'schema ComponentFieldSchema,
+    pub(crate) path: ComponentFieldPath,
+    required: bool,
+}
+
+pub(crate) fn collect_present_reference_leaves<'schema, E>(
+    schema: &'schema ComponentSchema,
+    value: &ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+) -> Result<Vec<PresentReferenceLeaf<'schema>>, ComponentEntityReferenceRewriteError<E>> {
+    let _ = find_undeclared_reference_path(
+        value,
+        limits,
+        &BTreeSet::new(),
+        0,
+        0,
+        &ComponentFieldPath::empty(),
+    )?;
+    if schema.fields.len() > limits.nodes().get() {
+        return Err(ComponentEntityReferenceRewriteError::NodeLimit {
+            maximum: limits.nodes().get(),
+        });
+    }
+    let mut fields = schema.fields.iter().collect::<Vec<_>>();
+    fields.sort_by(|left, right| left.path.cmp(&right.path));
+    if let Some(duplicate) = fields.windows(2).find(|pair| pair[0].path == pair[1].path) {
+        return Err(
+            ComponentEntityReferenceRewriteError::DuplicateDeclaredPath {
+                path: duplicate[0].path.clone(),
+            },
+        );
+    }
+
+    let mut traversal = PresentReferenceTraversal::new(limits, reference_kind);
+    for field in fields {
+        if !field.shape.contains_kind(ComponentValueKind::EntityRef)
+            && !field.shape.contains_kind(ComponentValueKind::AssetRef)
+            && !field.has_capability(ComponentCapability::EntityRef)
+            && !field.has_capability(ComponentCapability::AssetRef)
+        {
+            continue;
+        }
+        let field_value = match value.get_path(field.path()) {
+            Ok(value) => value,
+            Err(error)
+                if !field.is_required()
+                    && matches!(
+                        error,
+                        ComponentFieldPathError::MissingField { .. }
+                            | ComponentFieldPathError::IndexOutOfBounds { .. }
+                    ) =>
+            {
+                continue;
+            }
+            Err(error) => {
+                return Err(ComponentEntityReferenceRewriteError::InvalidPath {
+                    path: field.path.clone(),
+                    error,
+                });
+            }
+        };
+        traversal.visit_field(field, field_value)?;
+    }
+    let undeclared = find_undeclared_reference_path(
+        value,
+        limits,
+        &traversal.entity_paths,
+        traversal.result_nodes,
+        traversal.result_bytes,
+        &ComponentFieldPath::empty(),
+    )?;
+    if let Some(path) = undeclared {
+        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
+    }
+    Ok(traversal.references)
+}
+
+pub(crate) fn collect_present_field_reference_leaves<'schema, E>(
+    field: &'schema ComponentFieldSchema,
+    value: &ComponentValue,
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+) -> Result<Vec<PresentReferenceLeaf<'schema>>, ComponentEntityReferenceRewriteError<E>> {
+    let _ = find_undeclared_reference_path(value, limits, &BTreeSet::new(), 0, 0, field.path())?;
+    let mut traversal = PresentReferenceTraversal::new(limits, reference_kind);
+    traversal.visit_field(field, value)?;
+    if let Some(path) = find_undeclared_reference_path(
+        value,
+        limits,
+        &traversal.entity_paths,
+        traversal.result_nodes,
+        traversal.result_bytes,
+        field.path(),
+    )? {
+        return Err(ComponentEntityReferenceRewriteError::UndeclaredReference { path });
+    }
+    Ok(traversal.references)
+}
+
+fn path_depth(path: &ComponentFieldPath) -> usize {
+    path.segments().len().saturating_add(1)
+}
+
+struct PresentReferenceTraversal<'schema> {
+    limits: EntityReferenceTraversalLimits,
+    reference_kind: ComponentValueKind,
+    shape_nodes: usize,
+    result_nodes: usize,
+    result_bytes: usize,
+    entity_paths: BTreeSet<ComponentFieldPath>,
+    references: Vec<PresentReferenceLeaf<'schema>>,
+}
+
+impl<'schema> PresentReferenceTraversal<'schema> {
+    fn new(limits: EntityReferenceTraversalLimits, reference_kind: ComponentValueKind) -> Self {
+        Self {
+            limits,
+            reference_kind,
+            shape_nodes: 0,
+            result_nodes: 0,
+            result_bytes: 0,
+            entity_paths: BTreeSet::new(),
+            references: Vec::new(),
+        }
+    }
+
+    fn visit_field<E>(
+        &mut self,
+        field: &'schema ComponentFieldSchema,
+        value: &ComponentValue,
+    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        field.shape.validate().map_err(|_| {
+            ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                path: field.path.clone(),
+                actual: value.kind(),
+            }
+        })?;
+        for (kind, capability) in [
+            (
+                ComponentValueKind::EntityRef,
+                ComponentCapability::EntityRef,
+            ),
+            (ComponentValueKind::AssetRef, ComponentCapability::AssetRef),
+        ] {
+            if field.shape.contains_kind(kind) && !field.has_capability(capability) {
+                return Err(match capability {
+                    ComponentCapability::EntityRef => {
+                        ComponentEntityReferenceRewriteError::MissingEntityRefCapability {
+                            path: field.path.clone(),
+                        }
+                    }
+                    _ => ComponentEntityReferenceRewriteError::MissingAssetRefCapability {
+                        path: field.path.clone(),
+                    },
+                });
+            }
+        }
+        let mut path = field.path.segments().to_vec();
+        self.visit(
+            field,
+            &field.shape,
+            value,
+            &mut path,
+            path_depth(field.path()),
+        )
+    }
+
+    fn visit<E>(
+        &mut self,
+        field: &'schema ComponentFieldSchema,
+        mut shape: &ComponentValueShape,
+        value: &ComponentValue,
+        path: &mut Vec<ComponentFieldPathSegment>,
+        depth: usize,
+    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        if depth > self.limits.depth().get() {
+            return Err(ComponentEntityReferenceRewriteError::DepthLimit {
+                maximum: self.limits.depth().get(),
+            });
+        }
+        loop {
+            self.shape_nodes = self.shape_nodes.saturating_add(1);
+            if self.shape_nodes > self.limits.nodes().get() {
+                return Err(ComponentEntityReferenceRewriteError::NodeLimit {
+                    maximum: self.limits.nodes().get(),
+                });
+            }
+            match shape {
+                ComponentValueShape::Optional { .. } if matches!(value, ComponentValue::Null) => {
+                    return Ok(());
+                }
+                ComponentValueShape::Optional { value } => shape = value,
+                _ => break,
+            }
+        }
+        match (shape, value) {
+            (
+                ComponentValueShape::Scalar {
+                    kind,
+                    numeric_domain,
+                },
+                value,
+            ) if value.kind() == *kind
+                && numeric_domain.is_none_or(|domain| domain.accepts_value(value)) => {}
+            (ComponentValueShape::EntityRef, ComponentValue::EntityReference(_)) => {
+                self.record(field, path, ComponentValueKind::EntityRef)?;
+            }
+            (ComponentValueShape::AssetRef, value) => {
+                if self.reference_kind != ComponentValueKind::AssetRef
+                    && !crate::asset_reference::is_asset_reference_value(value)
+                {
+                    return Err(
+                        ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                            path: ComponentFieldPath::new(path.iter().cloned()),
+                            actual: value.kind(),
+                        },
+                    );
+                }
+                if let Some(payload) = value.get("value").and_then(ComponentValue::as_str) {
+                    self.result_bytes = self.result_bytes.saturating_add(payload.len());
+                }
+                self.record(field, path, ComponentValueKind::AssetRef)?;
+            }
+            (ComponentValueShape::Record { members }, ComponentValue::Map(values)) => {
+                self.visit_record(field, members, values, path, depth)?;
+            }
+            (ComponentValueShape::List { item }, ComponentValue::List(values)) => {
+                for (index, value) in values.iter().enumerate() {
+                    let index = u32::try_from(index)
+                        .map_err(|_| ComponentEntityReferenceRewriteError::PathIndexOverflow)?;
+                    path.push(ComponentFieldPathSegment::index(index));
+                    self.visit(field, item, value, path, depth.saturating_add(1))?;
+                    path.pop();
+                }
+            }
+            (ComponentValueShape::Map { value: shape }, ComponentValue::Map(values)) => {
+                for (name, value) in values {
+                    path.push(ComponentFieldPathSegment::field(name));
+                    self.visit(field, shape, value, path, depth.saturating_add(1))?;
+                    path.pop();
+                }
+            }
+            (ComponentValueShape::Opaque { kind }, value) if value.kind() == *kind => {}
+            (_, value) => {
+                let path = ComponentFieldPath::new(path.iter().cloned());
+                return Err(
+                    if matches!(shape, ComponentValueShape::EntityRef)
+                        && matches!(value, ComponentValue::Null)
+                    {
+                        ComponentEntityReferenceRewriteError::RequiredReferenceMissing { path }
+                    } else {
+                        ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                            path,
+                            actual: value.kind(),
+                        }
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn visit_record<E>(
+        &mut self,
+        field: &'schema ComponentFieldSchema,
+        members: &[ComponentShapeMember],
+        values: &std::collections::BTreeMap<String, ComponentValue>,
+        path: &mut Vec<ComponentFieldPathSegment>,
+        depth: usize,
+    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        let names = members
+            .iter()
+            .map(|member| member.name.as_str())
+            .collect::<BTreeSet<_>>();
+        for member in members {
+            path.push(ComponentFieldPathSegment::field(&member.name));
+            let value = values.get(&member.name).ok_or_else(|| {
+                let path = ComponentFieldPath::new(path.iter().cloned());
+                ComponentEntityReferenceRewriteError::InvalidPath {
+                    error: ComponentFieldPathError::MissingField {
+                        path: path.clone(),
+                        field: member.name.clone(),
+                    },
+                    path,
+                }
+            })?;
+            self.visit(field, &member.shape, value, path, depth.saturating_add(1))?;
+            path.pop();
+        }
+        if let Some(name) = values.keys().find(|name| !names.contains(name.as_str())) {
+            path.push(ComponentFieldPathSegment::field(name));
+            return Err(
+                ComponentEntityReferenceRewriteError::InvalidReferenceValue {
+                    path: ComponentFieldPath::new(path.iter().cloned()),
+                    actual: values[name].kind(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn record<E>(
+        &mut self,
+        field: &'schema ComponentFieldSchema,
+        path: &[ComponentFieldPathSegment],
+        kind: ComponentValueKind,
+    ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
+        if kind != ComponentValueKind::EntityRef && kind != self.reference_kind {
+            return Ok(());
+        }
+        self.result_nodes = self.result_nodes.saturating_add(1);
+        if self.result_nodes > self.limits.nodes().get() {
+            return Err(ComponentEntityReferenceRewriteError::NodeLimit {
+                maximum: self.limits.nodes().get(),
+            });
+        }
+        self.result_bytes = self.result_bytes.saturating_add(field.id().as_str().len());
+        for segment in path {
+            self.result_bytes = self.result_bytes.saturating_add(match segment {
+                ComponentFieldPathSegment::Field(name) => name.len(),
+                ComponentFieldPathSegment::Index(_) => size_of::<u32>(),
+            });
+        }
+        if self.result_bytes > self.limits.bytes().get() {
+            return Err(ComponentEntityReferenceRewriteError::ByteLimit {
+                maximum: self.limits.bytes().get(),
+            });
+        }
+        let path = ComponentFieldPath::new(path.iter().cloned());
+        if kind == ComponentValueKind::EntityRef {
+            self.entity_paths.insert(path.clone());
+        }
+        if kind == self.reference_kind {
+            self.references.push(PresentReferenceLeaf {
+                field,
+                path,
+                required: true,
+            });
+        }
+        Ok(())
+    }
+}
+
 fn find_undeclared_reference_path<E>(
     value: &ComponentValue,
     limits: EntityReferenceTraversalLimits,
     declared_paths: &BTreeSet<ComponentFieldPath>,
+    result_nodes: usize,
+    result_bytes: usize,
+    root_path: &ComponentFieldPath,
 ) -> Result<Option<ComponentFieldPath>, ComponentEntityReferenceRewriteError<E>> {
     let mut traversal = ReferencePathTraversal {
         limits,
         declared_paths,
-        path: Vec::new(),
-        observed_nodes: 0,
-        observed_bytes: 0,
+        path: root_path
+            .segments()
+            .iter()
+            .map(|segment| match segment {
+                ComponentFieldPathSegment::Field(name) => TraversalPathSegment::Field(name),
+                ComponentFieldPathSegment::Index(index) => TraversalPathSegment::Index(*index),
+            })
+            .collect(),
+        observed_nodes: result_nodes,
+        observed_bytes: result_bytes,
         first_undeclared_path: None,
     };
-    traversal.visit(value)?;
+    traversal.visit(value, path_depth(root_path))?;
     Ok(traversal.first_undeclared_path)
 }
 
@@ -402,10 +705,11 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
     fn visit<E>(
         &mut self,
         root: &'value ComponentValue,
+        depth: usize,
     ) -> Result<(), ComponentEntityReferenceRewriteError<E>> {
         let mut stack = vec![ReferenceTraversalFrame::Visit {
             value: root,
-            depth: 1,
+            depth,
             segment: None,
         }];
         while let Some(frame) = stack.pop() {
@@ -429,6 +733,12 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
                 }
                 ReferenceTraversalFrame::ContinueMap { mut fields, depth } => {
                     if let Some((field, value)) = fields.next() {
+                        self.observed_bytes = self.observed_bytes.saturating_add(field.len());
+                        if self.observed_bytes > self.limits.bytes().get() {
+                            return Err(ComponentEntityReferenceRewriteError::ByteLimit {
+                                maximum: self.limits.bytes().get(),
+                            });
+                        }
                         stack.push(ReferenceTraversalFrame::ContinueMap { fields, depth });
                         stack.push(ReferenceTraversalFrame::Visit {
                             value,
@@ -524,9 +834,6 @@ impl<'value, 'declared> ReferencePathTraversal<'value, 'declared> {
 fn dynamic_value_bytes(value: &ComponentValue) -> Option<usize> {
     match value {
         ComponentValue::String(value) => Some(value.len()),
-        ComponentValue::Map(fields) => fields
-            .keys()
-            .try_fold(0_usize, |total, field| total.checked_add(field.len())),
         ComponentValue::EntityReference(EntityReference::SceneLocal { entity }) => {
             Some(entity.as_str().len())
         }
@@ -540,6 +847,7 @@ fn dynamic_value_bytes(value: &ComponentValue) -> Option<usize> {
         | ComponentValue::I64(_)
         | ComponentValue::U64(_)
         | ComponentValue::F64(_)
-        | ComponentValue::List(_) => Some(0),
+        | ComponentValue::List(_)
+        | ComponentValue::Map(_) => Some(0),
     }
 }

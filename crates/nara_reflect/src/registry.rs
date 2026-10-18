@@ -35,7 +35,9 @@ use crate::{
     schema::{
         AliasError, CatalogFingerprint, ComponentCapability, ComponentFieldId,
         ComponentFieldSchema, ComponentNumericDomain, ComponentSchema, ComponentSchemaCatalog,
-        ComponentSchemaVersion, ComponentTypeId, ComponentValueKind, validate_alias,
+        ComponentSchemaVersion, ComponentShapeError, ComponentShapeErrorKind, ComponentTypeId,
+        ComponentValueKind, MAX_SHAPE_DEPTH, validate_alias, validate_component_shape_budget,
+        validate_component_value_budget,
     },
 };
 
@@ -145,6 +147,16 @@ pub enum ComponentRegistryError {
         path: ComponentFieldPath,
         expected: ComponentValueKind,
         actual: ComponentValueKind,
+    },
+    InvalidComponentFieldShape {
+        component_id: ComponentTypeId,
+        field_id: ComponentFieldId,
+        source: ComponentShapeError,
+    },
+    InvalidComponentFieldDefaultShape {
+        component_id: ComponentTypeId,
+        path: ComponentFieldPath,
+        source: ComponentShapeError,
     },
     InvalidComponentFieldNumericDomain {
         component_id: ComponentTypeId,
@@ -400,6 +412,22 @@ impl Display for ComponentRegistryError {
                 formatter,
                 "component ID '{component_id}' field '{path}' default has kind {actual:?}, expected {expected:?}"
             ),
+            Self::InvalidComponentFieldShape {
+                component_id,
+                field_id,
+                source,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field ID '{field_id}' has invalid shape: {source}"
+            ),
+            Self::InvalidComponentFieldDefaultShape {
+                component_id,
+                path,
+                source,
+            } => write!(
+                formatter,
+                "component ID '{component_id}' field '{path}' default has invalid shape: {source}"
+            ),
             Self::InvalidComponentFieldNumericDomain {
                 component_id,
                 field_id,
@@ -519,6 +547,8 @@ impl Error for ComponentRegistryError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::InvalidComponentAuthoringInitialValue { source, .. } => Some(source),
+            Self::InvalidComponentFieldShape { source, .. }
+            | Self::InvalidComponentFieldDefaultShape { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -1950,8 +1980,17 @@ pub(crate) fn prepare_catalog_candidate(
     mut catalog: ComponentSchemaCatalog,
     previous: Option<&ComponentSchemaCatalog>,
 ) -> Result<ComponentSchemaCatalog, ComponentRegistryError> {
+    validate_catalog_shapes(&catalog)?;
     catalog.canonicalize();
-    validate_catalog(&catalog, previous)?;
+    let previous = previous
+        .map(|previous| {
+            validate_catalog_contents(previous)?;
+            let mut previous = previous.clone();
+            previous.canonicalize();
+            Ok::<_, ComponentRegistryError>(previous)
+        })
+        .transpose()?;
+    validate_catalog(&catalog, previous.as_ref())?;
     Ok(catalog)
 }
 
@@ -1960,6 +1999,7 @@ pub(crate) fn prepare_owner_catalogs(
     mut predecessor: Option<ComponentSchemaCatalog>,
 ) -> Result<(ComponentSchemaCatalog, Option<ComponentSchemaCatalog>), ComponentRegistryError> {
     if let Some(predecessor) = predecessor.as_mut() {
+        validate_catalog_shapes(predecessor)?;
         predecessor.canonicalize();
         validate_catalog_contents(predecessor)?;
         match predecessor.generation() {
@@ -1982,6 +2022,7 @@ pub(crate) fn prepare_owner_catalogs(
         }
     }
 
+    validate_catalog_shapes(&current)?;
     current.canonicalize();
     validate_catalog(&current, predecessor.as_ref())?;
     Ok((current, predecessor))
@@ -2020,7 +2061,7 @@ fn validate_catalog(
     Ok(())
 }
 
-fn validate_catalog_contents(
+pub(crate) fn validate_catalog_contents(
     catalog: &ComponentSchemaCatalog,
 ) -> Result<(), ComponentRegistryError> {
     let mut active_types = BTreeSet::new();
@@ -2054,6 +2095,7 @@ fn validate_catalog_contents(
 }
 
 fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryError> {
+    validate_schema_shapes(schema)?;
     schema
         .id
         .validate()
@@ -2094,13 +2136,13 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
         }
         validate_aliases(&schema.id, Some(&field.id), &field.aliases)?;
         validate_field_capabilities(schema, field)?;
-        if let Some(numeric_domain) = field.numeric_domain {
-            if numeric_domain.value_kind() != field.value_kind {
+        if let Some(numeric_domain) = field.numeric_domain() {
+            if numeric_domain.value_kind() != field.value_kind() {
                 return Err(ComponentRegistryError::InvalidComponentFieldNumericDomain {
                     component_id: schema.id.clone(),
                     field_id: field.id.clone(),
                     numeric_domain,
-                    value_kind: field.value_kind,
+                    value_kind: field.value_kind(),
                 });
             }
         }
@@ -2131,6 +2173,12 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
         }
     }
     if let Some(value) = &schema.authoring_initial_value {
+        validate_component_value_budget(value).map_err(|source| {
+            ComponentRegistryError::InvalidComponentAuthoringInitialValue {
+                component_id: schema.id.clone(),
+                source: ComponentCodecError::Message(source.to_string()),
+            }
+        })?;
         validate_component_value_coverage_with_presence(schema, &path_index, value, true).map_err(
             |source| ComponentRegistryError::InvalidComponentAuthoringInitialValue {
                 component_id: schema.id.clone(),
@@ -2139,6 +2187,32 @@ fn validate_schema(schema: &ComponentSchema) -> Result<(), ComponentRegistryErro
         )?;
     }
     Ok(())
+}
+
+fn validate_catalog_shapes(catalog: &ComponentSchemaCatalog) -> Result<(), ComponentRegistryError> {
+    for schema in &catalog.components {
+        validate_schema_shapes(schema)?;
+    }
+    Ok(())
+}
+
+fn validate_schema_shapes(schema: &ComponentSchema) -> Result<(), ComponentRegistryError> {
+    validate_component_shape_budget(schema).map_err(|(field_id, source)| {
+        if let ComponentShapeErrorKind::InvalidNumericDomain { kind, domain } = &source.kind {
+            ComponentRegistryError::InvalidComponentFieldNumericDomain {
+                component_id: schema.id.clone(),
+                field_id,
+                numeric_domain: *domain,
+                value_kind: *kind,
+            }
+        } else {
+            ComponentRegistryError::InvalidComponentFieldShape {
+                component_id: schema.id.clone(),
+                field_id,
+                source,
+            }
+        }
+    })
 }
 
 fn validate_aliases(
@@ -2195,7 +2269,7 @@ fn validate_field_capabilities(
             ComponentCapability::EntityRef,
         ),
     ] {
-        if (field.value_kind == kind) != field.has_capability(capability) {
+        if field.shape.contains_kind(kind) != field.has_capability(capability) {
             return Err(ComponentRegistryError::InvalidFieldCapability {
                 component_id: schema.id.clone(),
                 field_id: field.id.clone(),
@@ -2311,8 +2385,7 @@ fn same_versioned_schema_semantics(current: &ComponentSchema, previous: &Compone
             .get(&previous_field.id)
             .is_some_and(|current_field| {
                 current_field.path == previous_field.path
-                    && current_field.value_kind == previous_field.value_kind
-                    && current_field.numeric_domain == previous_field.numeric_domain
+                    && current_field.shape == previous_field.shape
                     && current_field.required == previous_field.required
                     && current_field.capabilities == previous_field.capabilities
                     && current_field.default_value == previous_field.default_value
@@ -2364,11 +2437,18 @@ fn validate_component_field_default(
     let Some(default_value) = &field.default_value else {
         return Ok(());
     };
+    validate_component_value_budget(default_value).map_err(|source| {
+        ComponentRegistryError::InvalidComponentFieldDefaultShape {
+            component_id: component_id.clone(),
+            path: field.path.clone(),
+            source,
+        }
+    })?;
     if field.accepts_value(default_value) {
         return Ok(());
     }
-    if default_value.kind() == field.value_kind {
-        if let Some(numeric_domain) = field.numeric_domain {
+    if default_value.kind() == field.value_kind() {
+        if let Some(numeric_domain) = field.numeric_domain() {
             return Err(
                 ComponentRegistryError::ComponentFieldDefaultOutsideNumericDomain {
                     component_id: component_id.clone(),
@@ -2378,10 +2458,20 @@ fn validate_component_field_default(
             );
         }
     }
+    if default_value.kind() == field.value_kind() {
+        return Err(ComponentRegistryError::InvalidComponentFieldDefaultShape {
+            component_id: component_id.clone(),
+            path: field.path.clone(),
+            source: field
+                .shape
+                .validate_value(default_value)
+                .expect_err("rejected default has a shape error"),
+        });
+    }
     Err(ComponentRegistryError::InvalidComponentFieldDefault {
         component_id: component_id.clone(),
         path: field.path.clone(),
-        expected: field.value_kind,
+        expected: field.value_kind(),
         actual: default_value.kind(),
     })
 }
@@ -2390,11 +2480,15 @@ fn validate_component_field_default(
 ///
 /// The schema must already have been admitted by its catalog owner. This performs no native
 /// codec calls or World operations; component-specific runtime invariants remain the native
-/// consumer's responsibility.
+/// consumer's responsibility. The caller owns payload allocation and work admission. Persistent
+/// files, Prefab expansion, patches and reference traversal retain their independent value budgets;
+/// this structural check does not replace them or scan opaque payloads.
 pub fn validate_component_value(
     schema: &ComponentSchema,
     value: &ComponentValue,
 ) -> Result<(), ComponentCodecError> {
+    validate_component_shape_budget(schema)
+        .map_err(|(_, error)| ComponentCodecError::Message(error.to_string()))?;
     validate_component_value_coverage(schema, &SchemaPathIndex::from_schema(schema), value)
 }
 
@@ -2420,15 +2514,18 @@ fn validate_component_value_coverage_with_presence(
     for field in &schema.fields {
         match value.get_path(&field.path) {
             Ok(value) => {
-                if !field.accepts_value(value) {
+                if let Err(error) = field.shape.validate_value(value) {
+                    let path = ComponentFieldPath::new(
+                        field
+                            .path
+                            .segments()
+                            .iter()
+                            .chain(error.path.segments())
+                            .cloned(),
+                    );
                     return Err(ComponentCodecError::invalid_field(
-                        field.path.to_string(),
-                        match field.numeric_domain {
-                            Some(domain) => {
-                                format!("schema kind {:?} within {domain:?}", field.value_kind)
-                            }
-                            None => format!("schema kind {:?}", field.value_kind),
-                        },
+                        path.to_string(),
+                        error.to_string(),
                     ));
                 }
             }
@@ -2459,9 +2556,19 @@ fn validate_value_node_coverage(
     value: &ComponentValue,
     path: &mut Vec<ComponentFieldPathSegment>,
 ) -> Result<(), ComponentCodecError> {
+    if path.len() > MAX_SHAPE_DEPTH {
+        return Err(ComponentCodecError::Message(
+            "component value coverage exceeds the schema path depth limit".to_owned(),
+        ));
+    }
     let relation = path_index.relation(schema, path);
     if relation == SchemaPathRelation::Exact {
         return Ok(());
+    }
+    if path.len() == MAX_SHAPE_DEPTH {
+        return Err(component_value_not_declared_error(
+            &ComponentFieldPath::new(path.iter().cloned()),
+        ));
     }
 
     match value {

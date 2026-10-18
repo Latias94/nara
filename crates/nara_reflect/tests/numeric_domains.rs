@@ -2,7 +2,7 @@ use nara_reflect::{
     ComponentCodecError, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
     ComponentNumericDomain, ComponentRegistry, ComponentRegistryError, ComponentSchema,
     ComponentSchemaCatalog, ComponentSchemaOwnerId, ComponentSchemaVersion, ComponentTypeId,
-    ComponentValue, ComponentValueKind, validate_component_value,
+    ComponentValue, ComponentValueKind, ComponentValueShape, validate_component_value,
 };
 
 fn field(kind: ComponentValueKind, domain: Option<ComponentNumericDomain>) -> ComponentFieldSchema {
@@ -105,6 +105,7 @@ fn numeric_defaults_are_checked_before_catalog_admission() {
     bounded.default_value = Some(ComponentValue::U64(255));
     admit(catalog(bounded.clone())).unwrap();
     bounded.required = false;
+    bounded.shape = ComponentValueShape::optional(bounded.shape);
     bounded.default_value = Some(ComponentValue::Null);
     admit(catalog(bounded)).unwrap();
 
@@ -184,6 +185,7 @@ fn data_validation_shares_required_paths_kinds_domains_and_unknown_leaf_coverage
 
     let mut optional = schema;
     optional.fields[0].required = false;
+    optional.fields[0].shape = ComponentValueShape::optional(optional.fields[0].shape.clone());
     validate_component_value(&optional, &value(ComponentValue::Null)).unwrap();
     validate_component_value(&optional, &ComponentValue::Map(Default::default())).unwrap();
     assert!(
@@ -197,7 +199,7 @@ fn data_validation_shares_required_paths_kinds_domains_and_unknown_leaf_coverage
 
 #[cfg(feature = "serde")]
 #[test]
-fn numeric_domain_metadata_round_trips_and_absence_keeps_legacy_wire() {
+fn numeric_domain_metadata_round_trips_inside_the_authoritative_shape() {
     let legacy = catalog(field(ComponentValueKind::F64, None));
     let legacy_json = legacy.to_json_string().unwrap();
     assert!(!legacy_json.contains("numeric_domain"));

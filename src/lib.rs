@@ -200,7 +200,8 @@ pub mod prelude {
     pub use nara_reflect::{
         ComponentCapability, ComponentFieldId, ComponentFieldPath, ComponentFieldSchema,
         ComponentRegistry, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-        ComponentTypeId, ComponentValue, PersistentComponent, PersistentComponentProvider,
+        ComponentTypeId, ComponentValue, ComponentValueShape, PersistentComponent,
+        PersistentComponentProvider,
     };
     pub use nara_scene::{
         Name, PrefabDocument, SceneAuthoringSession, SceneComponentRecord, SceneDocument,

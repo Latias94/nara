@@ -193,10 +193,10 @@ Capabilities are explicit eligibility gates, not behavior implementations:
 - `scene`: eligible for scene/prefab documents and patches;
 - `inspect`: eligible for local tooling inspection;
 - `edit`: eligible for editor or authoring commands;
-- `entity_ref`: required on an `EntityReference` field.
+- `entity_ref`: required exactly when the field's recursive shape contains `EntityReference`;
+- `asset_ref`: required exactly when the field's recursive shape contains `AssetRef`.
 
-`asset_ref` is part of the canonical catalog vocabulary but is not admitted by the current derive
-tracer. Save, animation, replication, scripting, diagnostics, and remote disclosure remain
+Save, animation, replication, scripting, diagnostics, and remote disclosure remain
 domain-owned contracts and are not inferred from these capabilities.
 
 ## Supported Field Types
@@ -208,15 +208,36 @@ The current native Rust authoring slice supports:
 - `u8`, `u16`, `u32`, and `u64`;
 - finite `f32` and `f64`;
 - `Vec2`;
-- `EntityReference`, with the `entity_ref` field capability.
+- `EntityReference`, with the `entity_ref` field capability;
+- `AssetRef`, with the `asset_ref` field capability;
+- recursive `Vec<T>`, `BTreeMap<String, T>`, and `Option<T>` over these supported types.
 
 Narrow integer codecs check their declared range before conversion. Float codecs reject non-finite
 values and `f32` overflow; ordinary finite `f32` rounding is allowed. Integer wire kinds remain
 `I64` and `U64`, and both float types use the finite `F64` wire kind.
 
-Generic fields, collections, enums, tuple structs, `asset_ref`, and arbitrary nested Rust types are
-rejected with compile-time diagnostics until a production consumer admits their schema and codec
-contract.
+Type aliases and qualified type paths use ordinary Rust trait resolution. `Option<T>` has a
+required stored root and encodes `None` as explicit `Null`; it does not permit an absent root.
+Nested numeric domains apply to each element. Reference capabilities belong to the stable root
+field, while traversal reports the concrete nested value path. `Vec2` retains its existing opaque
+map schema and native codec; its member layout is not inferred from example values.
+
+`HashMap`, non-string map keys, enums, tuple structs, and arbitrary nested Rust structs remain
+unsupported. Manual schemas can declare closed records with `ComponentValueShape::record`:
+every declared member must be present, optional members encode `Null`, and extra members reject.
+The catalog and authoring-bundle envelopes use version 2; Scene, Prefab, and Patch formats retain
+their own versions. Historical component versions, stable IDs, and migration chains remain intact.
+
+Schema-description limits bound metadata; Scene, Prefab, Patch, and reference traversal own the
+runtime value work budgets. Direct in-memory validation does not grant file-ingest or allocation
+admission. Opaque collections retain their native semantics and do not acquire a hidden 16K-item
+limit from the schema description.
+
+Prefab materialized-value limits count the resulting product. Its private reference-work allowance
+also accounts for retained root IDs and paths: at most twice the configured value-node allowance,
+and twice its byte allowance plus a per-node allowance for one root ID, depth-bounded indices,
+and persistent UUID text. Repeated long map-key prefixes can exceed this work ceiling even when
+the product fits; traversal rejects before publishing a remap or invoking rewrite callbacks.
 
 Data-only Add Component creation is an explicit opt-in, separate from decoding existing data.
 Add `authoring_initial` to the component's `#[nara(...)]` declaration and an

@@ -6,7 +6,7 @@ use std::{
 };
 
 use nara_core::{
-    ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, ItemLimit,
+    ByteLimit, DepthLimit, EngineVersion, FormatGenerator, FormatKind, FormatVersion, ItemLimit,
     PersistentFileContract, PersistentFileContractError, PersistentFileDecodeError,
     PersistentFileEnvelope, PersistentFileHeader, SerdeShapeLimits,
     decode_persistent_file_with_preflight, preflight_serde_shape,
@@ -14,7 +14,8 @@ use nara_core::{
 
 use crate::{
     CatalogFingerprint, ComponentRegistryError, ComponentSchema, ComponentSchemaCatalog,
-    ComponentTypeId, registry::prepare_catalog_candidate,
+    ComponentTypeId, ComponentValueShape,
+    registry::{prepare_catalog_candidate, validate_catalog_contents},
 };
 
 #[derive(serde::Deserialize)]
@@ -40,7 +41,7 @@ impl From<ComponentSchemaCatalogWire> for ComponentSchemaCatalog {
 }
 
 const COMPONENT_SCHEMA_CATALOG_KIND: &str = "component_schema_catalog";
-const CANONICAL_V1_ENGINE_MIN_VERSION: &str = "0.1.0";
+const CANONICAL_ENGINE_MIN_VERSION: &str = "0.1.0";
 const FORMAT_GENERATOR_NAME: &str = "nara";
 
 /// Allocation and validation-work limits for persistent component schema catalogs.
@@ -182,6 +183,7 @@ pub enum ComponentCatalogFileBudgetKind {
     Aliases,
     Tombstones,
     DiagnosticSources,
+    ShapeNodes,
 }
 
 impl Display for ComponentCatalogFileBudgetKind {
@@ -192,6 +194,7 @@ impl Display for ComponentCatalogFileBudgetKind {
             Self::Aliases => formatter.write_str("aliases"),
             Self::Tombstones => formatter.write_str("tombstones"),
             Self::DiagnosticSources => formatter.write_str("diagnostic sources"),
+            Self::ShapeNodes => formatter.write_str("shape nodes"),
         }
     }
 }
@@ -408,10 +411,15 @@ fn canonical_envelope(
     predecessor: Option<&ComponentSchemaCatalog>,
     limits: ComponentCatalogFileLimits,
 ) -> Result<PersistentFileEnvelope<ComponentSchemaCatalog>, ComponentCatalogFileError> {
-    let catalog = finish_catalog(catalog.clone(), predecessor, limits)?;
-    Ok(PersistentFileEnvelope::canonical_v1(
+    let mut counts = ComponentCatalogCounts::default();
+    accumulate_catalog_budget(catalog, limits, &mut counts)?;
+    validate_catalog_contents(catalog).map_err(ComponentCatalogFileError::Catalog)?;
+    let catalog = prepare_catalog_candidate(catalog.clone(), predecessor)
+        .map_err(ComponentCatalogFileError::Catalog)?;
+    Ok(PersistentFileEnvelope::new(
         format_kind()?,
-        engine_version(CANONICAL_V1_ENGINE_MIN_VERSION)?,
+        FormatVersion::new(2).expect("catalog format version is non-zero"),
+        engine_version(CANONICAL_ENGINE_MIN_VERSION)?,
         FormatGenerator::new(
             FORMAT_GENERATOR_NAME,
             engine_version(env!("CARGO_PKG_VERSION"))?,
@@ -515,6 +523,7 @@ pub(crate) fn accumulate_catalog_budget(
                 limits.aliases(),
                 ComponentCatalogFileBudgetKind::Aliases,
             )?;
+            accumulate_shape_budget(&field.shape, limits, counts)?;
         }
         increase(
             &mut counts.tombstones,
@@ -538,6 +547,42 @@ pub(crate) fn accumulate_catalog_budget(
     Ok(())
 }
 
+fn accumulate_shape_budget(
+    shape: &ComponentValueShape,
+    limits: ComponentCatalogFileLimits,
+    counts: &mut ComponentCatalogCounts,
+) -> Result<(), ComponentCatalogFileBudgetError> {
+    let mut pending = vec![shape];
+    while let Some(shape) = pending.pop() {
+        increase(
+            &mut counts.shape_nodes,
+            1,
+            limits.fields(),
+            ComponentCatalogFileBudgetKind::ShapeNodes,
+        )?;
+        match shape {
+            ComponentValueShape::Record { members } => {
+                increase(
+                    &mut counts.fields,
+                    members.len(),
+                    limits.fields(),
+                    ComponentCatalogFileBudgetKind::Fields,
+                )?;
+                for member in members {
+                    counts.observe_diagnostic_source(limits)?;
+                    pending.push(&member.shape);
+                }
+            }
+            ComponentValueShape::List { item } => pending.push(item),
+            ComponentValueShape::Map { value } | ComponentValueShape::Optional { value } => {
+                pending.push(value)
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 pub(crate) struct ComponentCatalogCounts {
     components: usize,
@@ -545,6 +590,7 @@ pub(crate) struct ComponentCatalogCounts {
     aliases: usize,
     tombstones: usize,
     diagnostic_sources: usize,
+    shape_nodes: usize,
 }
 
 impl ComponentCatalogCounts {
@@ -620,8 +666,9 @@ where
 }
 
 fn file_contract() -> Result<PersistentFileContract, ComponentCatalogFileError> {
-    Ok(PersistentFileContract::canonical_v1(
+    Ok(PersistentFileContract::new(
         format_kind()?,
+        FormatVersion::new(2).expect("catalog format version is non-zero"),
         engine_version(env!("CARGO_PKG_VERSION"))?,
     ))
 }

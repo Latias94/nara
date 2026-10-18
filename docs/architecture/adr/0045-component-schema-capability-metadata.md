@@ -2,6 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-09
+**Last Revised**: 2026-10-18
 **Implemented Slice**: RGF-U1 canonical-v1 vocabulary on 2026-07-12
 **Refines**: ADR 0004, ADR 0011, ADR 0015, ADR 0021, ADR 0027, ADR 0028, ADR 0029
 **Refined By**: ADR 0051: Persistent File Envelope, Migration, and Golden Fixtures;
@@ -59,6 +60,31 @@ The capability contract is:
   format-version decision; v1 never silently ignores an unsupported capability.
 - Capabilities do not replace validation. Component codecs and domain systems still enforce value
   ranges, references, permissions, and runtime invariants.
+- Root field reference capabilities describe the reference leaves contained anywhere in its
+  recursive shape. The root markers must match that containment in both directions; descendants
+  do not acquire independent permission tables. Visitors emit concrete current Field/Index paths
+  with the owning root field identity. Opaque data cannot hide a typed EntityReference and then
+  claim remap closure without a declared reference shape.
+
+## Recursive Shape And Presence
+
+The recursive catalog stores one shape per root field rather than independently mutable wire-kind
+and numeric-domain metadata. `required` controls key presence, while `Optional(shape)` controls
+explicit Null. A required root with a default retains its existing effective-missing semantics.
+Closed Record members are all present and reject unknown keys; an Optional member still has a key.
+String-key Map and List describe their item shape. Directly nested Optional and Optional(Null) are
+rejected because the existing value wire cannot distinguish their states losslessly.
+
+Mechanical catalog migration preserves accepted values: legacy optional fields lift to nullable
+shapes, and generic Map/List fields lift to explicit opaque leaves. Tightening an old opaque field
+into a closed typed shape requires a component successor/migration. New typed consumers may use
+recursive shapes immediately. Declared shape depth, nodes and bytes are bounded at Rust registration,
+catalog admission and direct shape validation. Catalog defaults and creation templates retain their
+catalog value budgets. Runtime value counts and bytes belong to the admitting Scene/Prefab/Patch
+or reference visitor; schema-description limits must not silently replace a caller's larger data
+budget. Shape validation walks declared structure, leaves opaque payloads to their owning codec,
+and bounds undeclared-path recursion. Direct in-memory callers own allocation/work admission under
+ADR 0049; reference visitors still scan complete values under explicit traversal limits.
 
 ## Canonical Version-1 Vocabulary
 

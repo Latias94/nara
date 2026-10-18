@@ -20,9 +20,10 @@ mod registry;
 mod schema;
 mod value;
 
+pub(crate) use asset_reference::decode_asset_reference_value;
 pub use asset_reference::{
     DeclaredAssetReference, DeclaredAssetReferenceError, collect_declared_asset_references,
-    collect_declared_asset_references_from_schema,
+    collect_declared_asset_references_from_schema, collect_declared_field_asset_references,
 };
 pub use authoring::PersistentComponentProvider;
 #[cfg(feature = "serde")]
@@ -73,7 +74,8 @@ pub use schema::{
     AliasError, CatalogFingerprint, CatalogFingerprintParseError, ComponentCapability,
     ComponentCatalogGenerationError, ComponentFieldId, ComponentFieldIdError, ComponentFieldSchema,
     ComponentNumericDomain, ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion,
-    ComponentTypeId, ComponentTypeIdError, ComponentValueKind,
+    ComponentShapeError, ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId,
+    ComponentTypeIdError, ComponentValueKind, ComponentValueShape,
 };
 pub use value::{ComponentFloat, ComponentValue, ComponentValueCost, ComponentValueError};
 
@@ -82,7 +84,7 @@ pub mod __macro_support {
     pub use crate::{
         ComponentCapability, ComponentCodecError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, PersistentComponentProvider,
+        ComponentValue, ComponentValueShape, PersistentComponentProvider,
         authoring::{PersistentFieldCodec, decode_persistent_field, encode_persistent_field},
     };
 }
@@ -139,8 +141,9 @@ pub mod prelude {
         ComponentEntityReferenceRewriteError, ComponentFieldId, ComponentFieldPath,
         ComponentFieldPathError, ComponentFieldPathSegment, ComponentFieldSchema, ComponentFloat,
         ComponentMigrationError, ComponentNumericDomain, ComponentRegistry, ComponentRegistryError,
-        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentTypeId,
-        ComponentValue, ComponentValueError, ComponentValueKind, DeclaredAssetReference,
+        ComponentSchema, ComponentSchemaCatalog, ComponentSchemaVersion, ComponentShapeError,
+        ComponentShapeErrorKind, ComponentShapeMember, ComponentTypeId, ComponentValue,
+        ComponentValueError, ComponentValueKind, ComponentValueShape, DeclaredAssetReference,
         DeclaredAssetReferenceError, EntityReference, EntityReferenceTraversalLimits,
         MigratedComponentValue, PersistentComponent, PersistentComponentProvider,
         PreparedComponent, PreparedComponentCandidate, collect_declared_asset_references,

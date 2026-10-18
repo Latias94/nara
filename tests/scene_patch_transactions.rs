@@ -260,8 +260,8 @@ fn stale_patch_component_schema_version_fails_before_mutating_document() {
             && diagnostic_has_field(
                 diagnostic,
                 "field-path",
-                DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Identifier("f_x"),
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
             )
     }));
 }
@@ -296,8 +296,8 @@ fn set_field_without_edit_capability_fails_before_mutating_document() {
             && diagnostic_has_field(
                 diagnostic,
                 "field-path",
-                DiagnosticFieldClass::Public,
-                DiagnosticValueRef::Identifier("f_x"),
+                DiagnosticFieldClass::Sensitive,
+                DiagnosticValueRef::Redacted,
             )
     }));
 }

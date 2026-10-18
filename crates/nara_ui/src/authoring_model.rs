@@ -8,7 +8,7 @@ use std::{
 use nara_asset::AssetRef;
 use nara_reflect::{
     ComponentFieldId, ComponentFieldSchema, ComponentSchema, ComponentSchemaVersion,
-    ComponentTypeId, ComponentValue, ComponentValueKind,
+    ComponentTypeId, ComponentValue, ComponentValueKind, ComponentValueShape,
 };
 use nara_scene::{
     PrefabDocument, SceneComponentRecord, SceneEntityId, SceneEntityRecord, ScenePatchDocument,
@@ -255,7 +255,7 @@ pub enum UiAuthoringFieldValue {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiAuthoringFieldMember {
     field: ComponentFieldId,
-    value_kind: ComponentValueKind,
+    shape: ComponentValueShape,
     optional: bool,
     value: ComponentValue,
 }
@@ -267,8 +267,8 @@ impl UiAuthoringFieldMember {
     }
 
     #[must_use]
-    pub const fn value_kind(&self) -> ComponentValueKind {
-        self.value_kind
+    pub fn value_kind(&self) -> ComponentValueKind {
+        self.shape.value_kind()
     }
 
     #[must_use]
@@ -415,8 +415,7 @@ impl UiAuthoringFieldDescriptor {
                     || component != &self.key.component
                     || *component_version != self.component_version
                     || field != &member.field
-                    || (!component_value_matches_schema_kind(value, member.value_kind)
-                        && !(member.optional && matches!(value, ComponentValue::Null)))
+                    || !member.shape.accepts_value(value)
                 {
                     return Err(UiAuthoringEditError::DescriptorMismatch);
                 }
@@ -1066,10 +1065,7 @@ impl UiAuthoringProjection {
                 .iter()
                 .find(|candidate| candidate.id == *field)
                 .ok_or(UiAuthoringEditError::DescriptorMismatch)?;
-            if *component_version != schema.version
-                || (!component_value_matches_schema_kind(value, field.value_kind)
-                    && (field.required || !matches!(value, ComponentValue::Null)))
-            {
+            if *component_version != schema.version || !field.accepts_value(value) {
                 return Err(UiAuthoringEditError::DescriptorMismatch);
             }
             candidate
@@ -1533,7 +1529,7 @@ fn build_descriptor(
                 .cloned()
                 .map(|value| UiAuthoringFieldMember {
                     field: field.id.clone(),
-                    value_kind: field.value_kind,
+                    shape: field.shape().clone(),
                     optional: !field.required,
                     value,
                 })
@@ -2080,16 +2076,6 @@ fn project_asset_path(value: &ComponentValue) -> Option<String> {
         .ok()?
         .as_path()
         .map(|path| path.as_str().to_owned())
-}
-
-fn component_value_matches_schema_kind(
-    value: &ComponentValue,
-    expected: ComponentValueKind,
-) -> bool {
-    match expected {
-        ComponentValueKind::AssetRef => codec::read_asset_ref(value, "asset reference").is_ok(),
-        _ => value.kind() == expected,
-    }
 }
 
 fn lower_color(

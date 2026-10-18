@@ -1,6 +1,6 @@
 {
   "kind": "authoring_schema_bundle",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -12,7 +12,7 @@
         "owner": "collect-game",
         "current": {
           "generation": 2,
-          "predecessor": "64daa30393557530a610c421a157a3bb62431195f837308c21ce2a8783147aa5",
+          "predecessor": "f2fca7fff0d88e6e8f9bfea3f174da5929449fe0b2b8d8a96260f091d224662b",
           "components": [
             {
               "id": "collect-game.Collectible",
@@ -37,8 +37,11 @@
                       "value": "radius"
                     }
                   ],
-                  "value_kind": "f64",
-                  "numeric_domain": "f32",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64",
+                    "numeric_domain": "f32"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -81,8 +84,11 @@
                       "value": "speed"
                     }
                   ],
-                  "value_kind": "f64",
-                  "numeric_domain": "f32",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64",
+                    "numeric_domain": "f32"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -131,8 +137,11 @@
                       "value": "radius"
                     }
                   ],
-                  "value_kind": "f64",
-                  "numeric_domain": "f32",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64",
+                    "numeric_domain": "f32"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -166,8 +175,11 @@
                       "value": "speed"
                     }
                   ],
-                  "value_kind": "f64",
-                  "numeric_domain": "f32",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64",
+                    "numeric_domain": "f32"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -210,7 +222,13 @@
                       "value": "clear_color"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -232,7 +250,13 @@
                       "value": "order"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -255,7 +279,13 @@
                       "value": "target"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -278,7 +308,13 @@
                       "value": "viewport"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -300,7 +336,10 @@
                       "value": "viewport_height"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -319,7 +358,7 @@
         "owner": "nara.scene.hierarchy.components",
         "current": {
           "generation": 2,
-          "predecessor": "2144b2bfe6109d7b8dd590aa7bef764902794d05ae2ab85c68c91ce4d48b39e6",
+          "predecessor": "bd55e114e38abc9211918c152f497a176323e02fd2432c1fdd38d03a8691dd27",
           "components": [
             {
               "id": "nara.scene.Name",
@@ -339,7 +378,10 @@
                     "Name"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -372,7 +414,10 @@
                     "Visibility"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -411,7 +456,10 @@
                     "Name"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -440,7 +488,10 @@
                     "Visibility"
                   ],
                   "path": [],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "string"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -459,7 +510,7 @@
         "owner": "nara.sprite.components",
         "current": {
           "generation": 2,
-          "predecessor": "a5d7e7d64afc7c9ab4cbec06800e305b2eb887801628e04561a9fe666999852c",
+          "predecessor": "1ad5864b87458d51e4e7c4442bfe889988c2f92ab90d21d3d16a5283b2de29dc",
           "components": [
             {
               "id": "nara.sprite.Sprite",
@@ -488,7 +539,13 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "f64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -515,7 +572,13 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "f64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -538,7 +601,13 @@
                       "value": "layer"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -565,7 +634,13 @@
                       "value": "alpha_mode"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -592,7 +667,12 @@
                       "value": "image"
                     }
                   ],
-                  "value_kind": "asset_ref",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "asset_ref"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -623,7 +703,13 @@
                       "value": "address_mode_u"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -654,7 +740,13 @@
                       "value": "address_mode_v"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -685,7 +777,13 @@
                       "value": "mag_filter"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -716,7 +814,13 @@
                       "value": "min_filter"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -747,7 +851,13 @@
                       "value": "mipmap_filter"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -778,7 +888,10 @@
                       "value": "a"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -805,7 +918,10 @@
                       "value": "b"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -832,7 +948,10 @@
                       "value": "g"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -859,7 +978,10 @@
                       "value": "r"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -882,7 +1004,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -905,7 +1030,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -924,7 +1052,13 @@
                       "value": "sort_key"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -947,7 +1081,13 @@
                       "value": "texture_region"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -969,7 +1109,13 @@
                       "value": "y_sort_anchor"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1119,7 +1265,13 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "f64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1146,7 +1298,13 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "f64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1169,7 +1327,13 @@
                       "value": "layer"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1196,7 +1360,13 @@
                       "value": "alpha_mode"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1223,7 +1393,12 @@
                       "value": "image"
                     }
                   ],
-                  "value_kind": "asset_ref",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "asset_ref"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1254,7 +1429,13 @@
                       "value": "address_mode_u"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1285,7 +1466,13 @@
                       "value": "address_mode_v"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1316,7 +1503,13 @@
                       "value": "mag_filter"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1347,7 +1540,13 @@
                       "value": "min_filter"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1378,7 +1577,13 @@
                       "value": "mipmap_filter"
                     }
                   ],
-                  "value_kind": "string",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "string"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1409,7 +1614,10 @@
                       "value": "a"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1436,7 +1644,10 @@
                       "value": "b"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1463,7 +1674,10 @@
                       "value": "g"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1490,7 +1704,10 @@
                       "value": "r"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1513,7 +1730,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1536,7 +1756,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1555,7 +1778,13 @@
                       "value": "sort_key"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1578,7 +1807,13 @@
                       "value": "texture_region"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1600,7 +1835,13 @@
                       "value": "y_sort_anchor"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1646,7 +1887,13 @@
                       "value": "cells"
                     }
                   ],
-                  "value_kind": "list",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "list"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1669,7 +1916,13 @@
                       "value": "layer"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1692,7 +1945,13 @@
                       "value": "sort_key"
                     }
                   ],
-                  "value_kind": "i64",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "scalar",
+                      "kind": "i64"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1719,7 +1978,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1742,7 +2004,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1761,7 +2026,12 @@
                       "value": "tileset"
                     }
                   ],
-                  "value_kind": "asset_ref",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "asset_ref"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1784,7 +2054,13 @@
                       "value": "y_sort_anchor"
                     }
                   ],
-                  "value_kind": "map",
+                  "shape": {
+                    "shape": "optional",
+                    "value": {
+                      "shape": "opaque",
+                      "kind": "map"
+                    }
+                  },
                   "required": false,
                   "capabilities": [
                     "scene",
@@ -1806,7 +2082,7 @@
         "owner": "nara.transform.components",
         "current": {
           "generation": 2,
-          "predecessor": "da94aa4ba2ad7220fa7c6d647dddf64307bfbd92005fc7d356d0b4091f3a341c",
+          "predecessor": "a75329b11ae0956d1c5d66db1b874ea57b74170a7d21a779880d2c90970482fe",
           "components": [
             {
               "id": "nara.transform.Transform2d",
@@ -1831,7 +2107,10 @@
                       "value": "rotation"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1854,7 +2133,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1877,7 +2159,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1900,7 +2185,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1923,7 +2211,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -1998,7 +2289,10 @@
                       "value": "rotation"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -2021,7 +2315,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -2044,7 +2341,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -2067,7 +2367,10 @@
                       "value": "x"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",
@@ -2090,7 +2393,10 @@
                       "value": "y"
                     }
                   ],
-                  "value_kind": "f64",
+                  "shape": {
+                    "shape": "scalar",
+                    "kind": "f64"
+                  },
                   "required": true,
                   "capabilities": [
                     "scene",

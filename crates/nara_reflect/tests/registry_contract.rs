@@ -6,8 +6,206 @@ use nara_reflect::{
     ComponentSchema, ComponentSchemaCatalog, ComponentSchemaOwnerId,
     ComponentSchemaProviderBindingId, ComponentSchemaProviderDefinition,
     ComponentSchemaProviderSourceError, ComponentSchemaVersion, ComponentTypeId, ComponentValue,
-    ComponentValueKind,
+    ComponentValueKind, ComponentValueShape, validate_component_value,
 };
+
+#[test]
+fn typed_list_shape_validates_each_nested_record_while_kind_only_lists_stay_opaque() {
+    let typed = ComponentSchema::new(
+        ComponentTypeId::new("nara.test.TypedInventory"),
+        "Typed inventory",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("entries"),
+        "Entries",
+        ComponentFieldPath::from_fields(["entries"]),
+        ComponentValueShape::list(ComponentValueShape::record([(
+            "count".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::U64),
+        )])),
+    )]);
+    let valid = ComponentValue::map([(
+        "entries",
+        ComponentValue::List(vec![ComponentValue::map([(
+            "count",
+            ComponentValue::U64(2),
+        )])]),
+    )]);
+    let invalid = ComponentValue::map([(
+        "entries",
+        ComponentValue::List(vec![ComponentValue::map([(
+            "count",
+            ComponentValue::String("two".to_owned()),
+        )])]),
+    )]);
+    assert!(validate_component_value(&typed, &valid).is_ok());
+    assert!(validate_component_value(&typed, &invalid).is_err());
+
+    let opaque = ComponentSchema::new(
+        ComponentTypeId::new("nara.test.OpaqueInventory"),
+        "Opaque inventory",
+        ComponentSchemaVersion::ONE,
+    )
+    .with_fields([ComponentFieldSchema::required(
+        ComponentFieldId::new("entries"),
+        "Entries",
+        ComponentFieldPath::from_fields(["entries"]),
+        ComponentValueKind::List,
+    )]);
+    assert!(validate_component_value(&opaque, &invalid).is_ok());
+}
+
+fn shaped_catalog(shape: ComponentValueShape) -> ComponentSchemaCatalog {
+    ComponentSchemaCatalog {
+        components: vec![
+            ComponentSchema::new(
+                ComponentTypeId::new("nara.test.Shaped"),
+                "Shaped",
+                ComponentSchemaVersion::ONE,
+            )
+            .with_fields([ComponentFieldSchema::required(
+                ComponentFieldId::new("data"),
+                "Data",
+                ComponentFieldPath::from_fields(["data"]),
+                shape,
+            )]),
+        ],
+        ..ComponentSchemaCatalog::default()
+    }
+}
+
+#[test]
+fn recursive_shape_fingerprints_canonicalize_members_and_track_nested_semantics() {
+    let first = shaped_catalog(ComponentValueShape::record([
+        (
+            "beta".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::U64),
+        ),
+        (
+            "alpha".to_owned(),
+            ComponentValueShape::list(ComponentValueShape::scalar(ComponentValueKind::String)),
+        ),
+    ]));
+    let reordered = shaped_catalog(ComponentValueShape::record([
+        (
+            "alpha".to_owned(),
+            ComponentValueShape::list(ComponentValueShape::scalar(ComponentValueKind::String)),
+        ),
+        (
+            "beta".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::U64),
+        ),
+    ]));
+    assert_eq!(first.fingerprint(), reordered.fingerprint());
+    let changed = shaped_catalog(ComponentValueShape::record([
+        (
+            "alpha".to_owned(),
+            ComponentValueShape::list(ComponentValueShape::scalar(ComponentValueKind::I64)),
+        ),
+        (
+            "beta".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::U64),
+        ),
+    ]));
+    assert_ne!(first.fingerprint(), changed.fingerprint());
+    let mut successor = ComponentSchemaCatalog::successor_of(&first).unwrap();
+    successor.components = changed.components;
+    assert!(
+        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, successor, Some(first))
+            .is_err()
+    );
+}
+
+#[test]
+fn recursive_shape_admission_rejects_duplicates_and_trusted_input_budgets() {
+    let duplicate = shaped_catalog(ComponentValueShape::record([
+        (
+            "same".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::U64),
+        ),
+        (
+            "same".to_owned(),
+            ComponentValueShape::scalar(ComponentValueKind::Bool),
+        ),
+    ]));
+    assert!(matches!(
+        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, duplicate, None),
+        Err(ComponentRegistryError::InvalidComponentFieldShape { .. })
+    ));
+    let mut deep = ComponentValueShape::scalar(ComponentValueKind::U64);
+    for _depth in 0..65 {
+        deep = ComponentValueShape::list(deep);
+    }
+    assert!(matches!(
+        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, shaped_catalog(deep), None),
+        Err(ComponentRegistryError::InvalidComponentFieldShape { .. })
+    ));
+    let wide = ComponentValueShape::record((0..16_384).map(|index| {
+        (
+            format!("field_{index}"),
+            ComponentValueShape::scalar(ComponentValueKind::Bool),
+        )
+    }));
+    assert!(matches!(
+        ComponentRegistry::from_owner_catalog_candidate(TEST_OWNER_ID, shaped_catalog(wide), None),
+        Err(ComponentRegistryError::InvalidComponentFieldShape { .. })
+    ));
+    let opaque = shaped_catalog(ComponentValueKind::List.into());
+    let huge = ComponentValue::map([(
+        "data",
+        ComponentValue::List((0..16_384).map(|_| ComponentValue::Bool(true)).collect()),
+    )]);
+    assert!(validate_component_value(&opaque.components[0], &huge).is_ok());
+}
+
+#[test]
+fn optional_shape_and_field_presence_remain_independent() {
+    let optional_value = ComponentFieldSchema::required(
+        ComponentFieldId::new("data"),
+        "Data",
+        ComponentFieldPath::from_fields(["data"]),
+        ComponentValueShape::optional(ComponentValueShape::scalar(ComponentValueKind::String)),
+    );
+    let mut schema = shaped_catalog(ComponentValueShape::scalar(ComponentValueKind::String))
+        .components
+        .remove(0);
+    schema.fields[0] = optional_value;
+    assert!(
+        validate_component_value(
+            &schema,
+            &ComponentValue::map([("data", ComponentValue::Null)])
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_component_value(
+            &schema,
+            &ComponentValue::map(std::iter::empty::<(String, ComponentValue)>())
+        )
+        .is_err()
+    );
+    schema.fields[0] = ComponentFieldSchema::optional(
+        ComponentFieldId::new("data"),
+        "Data",
+        ComponentFieldPath::from_fields(["data"]),
+        ComponentValueKind::String,
+    );
+    assert!(
+        validate_component_value(
+            &schema,
+            &ComponentValue::map([("data", ComponentValue::Null)])
+        )
+        .is_ok()
+    );
+    assert!(
+        validate_component_value(
+            &schema,
+            &ComponentValue::map(std::iter::empty::<(String, ComponentValue)>())
+        )
+        .is_ok()
+    );
+}
 
 #[derive(Clone, Component)]
 struct Position {
@@ -1059,7 +1257,7 @@ fn catalog_lineage_rejects_same_version_semantic_drift() {
     changed_schemas.push(changed_path);
 
     let mut changed_kind = position_schema("x", "Position X");
-    changed_kind.fields[0].value_kind = ComponentValueKind::I64;
+    changed_kind.fields[0].shape = ComponentValueShape::scalar(ComponentValueKind::I64);
     changed_schemas.push(changed_kind);
 
     let mut changed_default = position_schema("x", "Position X");

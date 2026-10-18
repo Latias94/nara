@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-18",
+  "source_commit": "961fd30",
+  "catalog_envelope": {
+    "previous": 1,
+    "current": 2
+  },
+  "bundle_envelope": {
+    "previous": 1,
+    "current": 2
+  },
+  "catalog_positions": 55,
+  "predecessor_edges": 24,
+  "component_semantics_preserved": true,
+  "public_format_admission_validated": true,
+  "canonical_output_metadata_unchanged": true,
+  "verification_run": "6ea790a5-a050-4817-bb0c-0db7aa4598d9",
+  "artifacts": [
+    "reference-game/schema/component-schema-v1.json",
+    "reference-game/schema/component-schema-v2.json",
+    "reference-game/schema/component-schema-v3.json",
+    "reference-game/schema/component-schema-v4.json",
+    "samples/collect-game/gameplay-plugin/schema/component-schema-generation-1.json",
+    "tests/fixtures/formats/v1/component_schema_catalog.json",
+    "tests/fixtures/formats/v1/component_schema_catalog.ron",
+    "tests/fixtures/schema-catalog/lineage-probe-v1.json",
+    "tests/fixtures/schema-catalog/lineage-probe-v2.json",
+    "reference-game/schema/authoring.bundle.json",
+    "samples/collect-game/schema/authoring.bundle.json",
+    "tests/fixtures/generic-editor/image-import/schema/authoring.bundle.json",
+    "tests/fixtures/generic-editor/known-unbound/catalogs/authoring.bundle.json",
+    "tests/fixtures/runtime-runner/renamed-root/project/schema/authoring.bundle.json"
+  ],
+  "fingerprints": {
+    "07c1e92a5a576dd1f0701a70b983abcdfd133562bd8942f8cb394e13939bcb71": "4d6a78ab8359a8e1736dd9dccb6a90ecba2337b77487acb4a3a989183c736ea3",
+    "0d08ab7365c6b4a186a3ab3c01369fe2539d927019a24b09f9f8afd206f1e06f": "67c6a86ac3fa3bbcde957fae94cf12c0ffe4ec9f2f4e264d92424ad4b8a5802c",
+    "0f74947800a0a4f4e0ff0f8ef77e619d96146410f3567c76c0fd3949cc43d11b": "f2b0783f1aa0005a25085c4367c5487a3aa0829607040696dd0526a46f394cee",
+    "2144b2bfe6109d7b8dd590aa7bef764902794d05ae2ab85c68c91ce4d48b39e6": "bd55e114e38abc9211918c152f497a176323e02fd2432c1fdd38d03a8691dd27",
+    "33996c71537e9177d73095c97b4a74ddbf3cca7e9864befd94f6d2ebbef830bf": "43385da9a74ee729e87e82426a77b539c89ae15a4b25458a47572da29df4a15f",
+    "40eb0ed6455bc4357f4117adcae5cbfed04d101e4a2626f88e2bf0b3a0d280c1": "806b58c4cbd3679e6d599e771c297cc9686b4740899cf371fc4db2bfbbad5288",
+    "4ee99c6f3ea1b0f49669c581a981016838ff279bd9577a1ef2f0fdfa4a9e1883": "a86e46a9403f2b27f5c7402f0695fd003fe7ea1b7fae3232b6d9f290c577f843",
+    "5afe6381f68d38b9c21c292d8cb8419e6dca678a67d62bc6fd7f8962c5951997": "92899c375434ec23bb7d67875275f51393073c3390af28d6f06231894d00ab49",
+    "64daa30393557530a610c421a157a3bb62431195f837308c21ce2a8783147aa5": "f2fca7fff0d88e6e8f9bfea3f174da5929449fe0b2b8d8a96260f091d224662b",
+    "687c583ee69b24bb4e5a9bc190ec90782fb34c8ce15030aa43b6e2a1682c146e": "62852f08c1c049c5b36fdee5efd988cc46ae4c5fdd1f7eb284dd42e84fe9df8f",
+    "6955e842a05279c353eb4f817a62ffbc2c3bb100b3e14d228011b549db8a2abd": "d5138fb719185c40ca336608fb0057a71c74d6c3a48e4e2dc9dc48a27825da89",
+    "71ac105c6ec2ac6336469a32c456bc236ab2fc9edeb2444f5e6aeb77f0e2a3df": "e30afbb3600e1d9783145fc8a249d528cb94df84ea5ce40b4b74e6ac58ebd575",
+    "a5d7e7d64afc7c9ab4cbec06800e305b2eb887801628e04561a9fe666999852c": "1ad5864b87458d51e4e7c4442bfe889988c2f92ab90d21d3d16a5283b2de29dc",
+    "c00e73a2323f50a47afe026540130f3a25849487c0e16c7c237605890f1e3790": "52c020e6f3ffe6ecfff14cd9d70f8846a57c2f1edcda3df7cd9dfb756ad3b4da",
+    "d75577f2048ca250ea6a1c86aac9e8df351eeab9e73b885388b0870399823a0b": "a45f4b152afe0723b92d1a71c309ebdb39ea515662b36d06afef5febb36790c9",
+    "da94aa4ba2ad7220fa7c6d647dddf64307bfbd92005fc7d356d0b4091f3a341c": "a75329b11ae0956d1c5d66db1b874ea57b74170a7d21a779880d2c90970482fe",
+    "db7507d2221cd110d8274bdcfc7a11af399b7f2763ebec5d70037cb8eefde416": "f58cef4f2f2454165b7067beba3d7df2f1a3997a0b1664398ff851cdc8b470f5",
+    "e2c4ef6e6d6d9246007fc036434495e3e36fc58e437fa15b670855ee079d155d": "5b075b278be5ac42f6e4617d74158de16b26afd1257101f31436d2d829538e94",
+    "e3972879bb96a055d47253fc22473296840441b255326529fb3a4ef5550c2faa": "d7468da88c3ad3ca5e92d1a02e00e2a3d091037773abcec0bb552f19da626238",
+    "e4f8b40e920312c55266a158538045b96fbf4d97d64cbf1773f137b76cddac80": "35799e44bcfb03be698e3ca3a5d055686e66352747a826acccf9fdfe427897ee",
+    "ee6c5f9ac3fa2a46f74feb209fc5d58890a8b7b1639b788e7b0def2a6b241e8a": "74e8c46178e9b40bbde2a61d6590ad886ec75a43f390508013b84e5f75104909"
+  }
+}

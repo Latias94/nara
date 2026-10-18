@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use nara_ecs::Component;
 use nara_reflect::PersistentComponent;
 
@@ -11,7 +13,7 @@ use nara_reflect::PersistentComponent;
 )]
 struct UnsupportedFieldType {
     #[nara(id = "values", alias = "Values")]
-    values: Vec<i64>,
+    values: HashMap<String, i64>,
 }
 
 fn main() {}

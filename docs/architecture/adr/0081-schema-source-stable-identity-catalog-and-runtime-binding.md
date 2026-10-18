@@ -1,6 +1,7 @@
 # ADR 0081: Schema Source, Stable Identity, Catalog, and Runtime Binding
 
 **Status**: Accepted
+**Last Revised**: 2026-10-18
 **Date**: 2026-07-12
 **Last Revised**: 2026-10-16
 **Implemented Slices**: RGF-U1 canonical catalog and native binding boundary on 2026-07-12; RGF-U2
@@ -113,12 +114,24 @@ The persistent catalog contains only stable semantic data:
 
 - catalog format version and a separate catalog generation/fingerprint seam;
 - type IDs, aliases, schema versions, roles, and capabilities;
-- field IDs, aliases, current value locators, value kinds, defaults, and capabilities;
+- field IDs, aliases, current value locators, recursive value shapes, defaults, and capabilities;
 - retained type and field tombstones needed to prove non-reuse.
 
 The catalog must not contain Rust `TypeId`, `rust_type_path`, Bevy `ComponentId`, codec closures,
 function pointers, VM handles, or backend-native values. Rust paths may remain non-persistent debug
 metadata on a native binding.
+
+The unshipped catalog envelope and the authoring bundle embedding it move to canonical version 2
+for recursive shapes. Version-1 catalog/bundle input rejects explicitly; no automatic flat-format
+compatibility reader is retained. Component schema versions, stable IDs, tombstones and lineage
+remain distinct from this envelope reset. Fixtures preserve their component histories and rewrite
+fingerprints/predecessor links using the new canonical recursive encoding. Unrelated Scene,
+Prefab, patch and asset envelope versions remain unchanged.
+
+Shape fingerprints include recursive tags, member/key ordering, scalar numeric domains,
+presence/default semantics and reference capabilities. Editor-only presentation remains separate
+from persistent semantic compatibility. Derive obtains finite field shapes through Rust codec
+traits, allowing rustc to resolve aliases and container arguments instead of a macro name resolver.
 
 The first RGF-U1 catalog contains only component-role declarations. Plain values, data assets,
 commands, and events may later reuse the same stable identity discipline when a real persistent

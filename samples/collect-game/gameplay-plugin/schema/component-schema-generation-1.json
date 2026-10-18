@@ -1,6 +1,6 @@
 {
   "kind": "component_schema_catalog",
-  "format_version": 1,
+  "format_version": 2,
   "engine_min_version": "0.1.0",
   "generator": {
     "name": "nara",
@@ -32,8 +32,11 @@
                 "value": "radius"
               }
             ],
-            "value_kind": "f64",
-            "numeric_domain": "f32",
+            "shape": {
+              "shape": "scalar",
+              "kind": "f64",
+              "numeric_domain": "f32"
+            },
             "required": true,
             "capabilities": [
               "scene",
@@ -67,8 +70,11 @@
                 "value": "speed"
               }
             ],
-            "value_kind": "f64",
-            "numeric_domain": "f32",
+            "shape": {
+              "shape": "scalar",
+              "kind": "f64",
+              "numeric_domain": "f32"
+            },
             "required": true,
             "capabilities": [
               "scene",
