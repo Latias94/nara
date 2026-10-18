@@ -2,7 +2,7 @@
 
 **Status**: Accepted
 **Date**: 2026-07-08
-**Last Revised**: 2026-08-15
+**Last Revised**: 2026-10-18
 **Amended**: 2026-08-15 to require exact mutation preconditions and independently bounded,
 branch-aware authoring history
 **Refined By**: ADR 0043: Scene, Prefab, and Patch Document Migration Policy; ADR 0047:
@@ -91,6 +91,13 @@ Implementation notes as of 2026-07-08:
 
 - Patch apply is document-first and atomic: operations are applied to a scratch `SceneDocument`,
   validated, canonicalized, then committed only if the full transaction succeeds.
+- Operation-local path, schema, owner, version, capability, topology and work-budget checks apply
+  to each intermediate candidate. Component business invariants and native document preflight
+  apply to the canonical final candidate, allowing coupled field edits whose intermediate values
+  are temporarily inconsistent. A final rejection publishes no document, revision or history.
+- The same validation boundary applies to Scene and Prefab transactions. A private consumption-only
+  helper may mutate a disposable unpublished candidate before failure; it is not an alternative
+  mutation path for a published document or authoring session.
 - Patch diagnostics include operation index plus entity/component/field context when available.
 - Successful patch apply returns an inverse `ScenePatchDocument` for transaction-level undo.
 - Ordered add, move, remove, and restore operations share `ScenePlacement`; source placement is an

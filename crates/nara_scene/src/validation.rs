@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nara_diagnostic::{Diagnostic, DiagnosticReport};
 use nara_reflect::{
-    ComponentDecodeContext, ComponentMigrationError, ComponentRegistry, ComponentTypeId,
-    PreparedComponent,
+    ComponentCodecError, ComponentDecodeContext, ComponentMigrationError, ComponentRegistry,
+    ComponentTypeId, PreparedComponent, validate_component_value,
 };
 
 use crate::{
@@ -48,6 +48,12 @@ enum PlacementOwner {
     Parent(SceneEntityId),
 }
 
+#[derive(Clone, Copy)]
+enum SceneValidationMode {
+    Native,
+    Shape,
+}
+
 pub(crate) fn preflight_scene(
     document: &SceneDocument,
     registry: &ComponentRegistry,
@@ -76,7 +82,25 @@ pub(crate) fn preflight_authoring_scene_for_patch(
         &mut context,
         true,
         Some(operation_index),
+        SceneValidationMode::Native,
     )
+}
+
+pub(crate) fn validate_patch_intermediate_scene(
+    document: &SceneDocument,
+    registry: &ComponentRegistry,
+    operation_index: usize,
+) -> DiagnosticReport {
+    let mut context = ComponentDecodeContext::new();
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        &mut context,
+        true,
+        Some(operation_index),
+        SceneValidationMode::Shape,
+    )
+    .diagnostics
 }
 
 pub(crate) fn preflight_scene_with_context(
@@ -84,7 +108,14 @@ pub(crate) fn preflight_scene_with_context(
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    preflight_scene_with_context_options(document, registry, context, false, None)
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        context,
+        false,
+        None,
+        SceneValidationMode::Native,
+    )
 }
 
 pub(crate) fn preflight_authoring_scene_with_context(
@@ -92,7 +123,14 @@ pub(crate) fn preflight_authoring_scene_with_context(
     registry: &ComponentRegistry,
     context: &mut ComponentDecodeContext<'_>,
 ) -> PreparedScene {
-    preflight_scene_with_context_options(document, registry, context, true, None)
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        context,
+        true,
+        None,
+        SceneValidationMode::Native,
+    )
 }
 
 pub(crate) fn preflight_authoring_scene_with_context_for_patch(
@@ -101,7 +139,14 @@ pub(crate) fn preflight_authoring_scene_with_context_for_patch(
     context: &mut ComponentDecodeContext<'_>,
     operation_index: usize,
 ) -> PreparedScene {
-    preflight_scene_with_context_options(document, registry, context, true, Some(operation_index))
+    preflight_scene_with_context_options(
+        document,
+        registry,
+        context,
+        true,
+        Some(operation_index),
+        SceneValidationMode::Native,
+    )
 }
 
 pub(crate) fn validate_scene_structure(document: &SceneDocument) -> DiagnosticReport {
@@ -123,6 +168,7 @@ fn preflight_scene_with_context_options(
     context: &mut ComponentDecodeContext<'_>,
     allow_prefab_instances: bool,
     operation_index: Option<usize>,
+    mode: SceneValidationMode,
 ) -> PreparedScene {
     let (placement, mut diagnostics) =
         validate_scene_structure_with_operation(document, operation_index);
@@ -284,6 +330,24 @@ fn preflight_scene_with_context_options(
                 continue;
             }
 
+            if matches!(mode, SceneValidationMode::Shape) {
+                let validation = registry
+                    .validate_whole_value_capabilities(
+                        component_id,
+                        [nara_reflect::ComponentCapability::Scene],
+                    )
+                    .map_err(|error| ComponentCodecError::Message(error.to_string()))
+                    .and_then(|()| validate_component_value(schema, &migrated.value));
+                if let Err(error) = validation {
+                    push_with_operation_index(
+                        &mut diagnostics,
+                        component_payload_diagnostic(entity.id.as_str(), component_id, &error),
+                        operation_index,
+                    );
+                }
+                continue;
+            }
+
             match registry.preflight_component_with_context(component_id, &migrated.value, context)
             {
                 Some(Ok(prepared)) => prepared_components.push(PreparedSceneComponent {
@@ -291,21 +355,8 @@ fn preflight_scene_with_context_options(
                     prepared,
                 }),
                 Some(Err(error)) => {
-                    let diagnostic = with_codec_error(
-                        with_public_locator(
-                            with_public_locator(
-                                diagnostic_error(
-                                    "scene.invalid-component-payload",
-                                    "Component payload is invalid",
-                                ),
-                                "entity-id",
-                                entity.id.as_str(),
-                            ),
-                            "component-id",
-                            component_id.as_str(),
-                        ),
-                        &error,
-                    );
+                    let diagnostic =
+                        component_payload_diagnostic(entity.id.as_str(), component_id, &error);
                     push_with_operation_index(&mut diagnostics, diagnostic, operation_index);
                 }
                 None => push_with_operation_index(
@@ -339,6 +390,28 @@ fn preflight_scene_with_context_options(
         entities: prepared_entities,
         diagnostics,
     }
+}
+
+fn component_payload_diagnostic(
+    entity_id: &str,
+    component_id: &ComponentTypeId,
+    error: &ComponentCodecError,
+) -> Diagnostic {
+    with_codec_error(
+        with_public_locator(
+            with_public_locator(
+                diagnostic_error(
+                    "scene.invalid-component-payload",
+                    "Component payload is invalid",
+                ),
+                "entity-id",
+                entity_id,
+            ),
+            "component-id",
+            component_id.as_str(),
+        ),
+        error,
+    )
 }
 
 pub(crate) fn first_unavailable_hierarchy_projection_entity<'document>(

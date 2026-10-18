@@ -36,6 +36,12 @@ struct TestPosition {
 }
 
 #[derive(Clone, Debug, PartialEq, Component)]
+struct TestCoupledFields {
+    horizontal: i64,
+    vertical: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Component)]
 struct TestAssetLink {
     handle: Handle<TestAsset>,
 }
@@ -3959,6 +3965,120 @@ fn stale_persistent_reference_prevents_export_publication() {
 }
 
 #[test]
+fn coupled_field_scene_patch_validates_only_the_final_native_value() {
+    let registry = coupled_fields_registry();
+    for field_order in [["x", "y"], ["y", "x"]] {
+        let source = SceneDocument::from_ordered_roots([coupled_fields_entity(1, 1)]);
+        let mut session = SceneAuthoringSession::new(source.clone());
+        let revision = session.revision();
+        let history = session.history_status();
+        let invalid = coupled_fields_patch(field_order, 2, 3);
+
+        let rejected = session.apply_patch(&invalid, &registry);
+
+        assert!(!rejected.applied);
+        assert!(rejected.diagnostics.has_errors());
+        assert!(rejected.inverse.is_none());
+        assert_eq!(session.document(), &source);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_status(), history);
+
+        let patch = coupled_fields_patch(field_order, 2, 2);
+        let report = session.apply_patch(&patch, &registry);
+
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert!(report.inverse.is_some());
+        assert_eq!(
+            session.document(),
+            &SceneDocument::from_ordered_roots([coupled_fields_entity(2, 2)])
+        );
+        assert_ne!(session.revision(), revision);
+        assert!(session.undo(&registry).applied);
+        assert_eq!(session.document(), &source);
+
+        let mut unpublished = source.clone();
+        let report = patch.apply_owned_to_unpublished_scene(&mut unpublished, &registry);
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert!(report.inverse.is_none());
+        assert_eq!(
+            unpublished,
+            SceneDocument::from_ordered_roots([coupled_fields_entity(2, 2)])
+        );
+    }
+}
+
+#[test]
+fn coupled_field_prefab_patch_validates_only_the_final_native_value() {
+    let registry = coupled_fields_registry();
+    for field_order in [["x", "y"], ["y", "x"]] {
+        let source = PrefabDocument::from_ordered_roots([coupled_fields_entity(1, 1)]);
+        let mut session = PrefabAuthoringSession::new(source.clone());
+        let revision = session.revision();
+        let history = session.history_status();
+        let invalid = coupled_fields_patch(field_order, 2, 3);
+
+        let rejected = session.apply_patch(&invalid, &registry);
+
+        assert!(!rejected.applied);
+        assert!(rejected.diagnostics.has_errors());
+        assert!(rejected.inverse.is_none());
+        assert_eq!(session.document(), &source);
+        assert_eq!(session.revision(), revision);
+        assert_eq!(session.history_status(), history);
+
+        let report = session.apply_patch(&coupled_fields_patch(field_order, 2, 2), &registry);
+
+        assert!(report.applied, "{:?}", report.diagnostics);
+        assert!(report.inverse.is_some());
+        assert_eq!(
+            session.document(),
+            &PrefabDocument::from_ordered_roots([coupled_fields_entity(2, 2)])
+        );
+        assert_ne!(session.revision(), revision);
+        assert!(session.undo(&registry).applied);
+        assert_eq!(session.document(), &source);
+    }
+}
+
+#[test]
+fn coupled_field_patch_keeps_intermediate_component_shape_checks() {
+    let registry = coupled_fields_registry();
+    let source = SceneDocument::from_ordered_roots([coupled_fields_entity(1, 1)]);
+    let mut invalid_component = coupled_fields_entity(2, 2)
+        .components
+        .remove(&ComponentTypeId::new("nara.test.CoupledFields"))
+        .unwrap();
+    invalid_component
+        .value
+        .set_path(
+            &ComponentFieldPath::from_fields(["x"]),
+            ComponentValue::String("invalid".into()),
+        )
+        .unwrap();
+    let valid_component = coupled_fields_entity(2, 2)
+        .components
+        .remove(&ComponentTypeId::new("nara.test.CoupledFields"))
+        .unwrap();
+    let patch = ScenePatchDocument::new([invalid_component, valid_component].map(|value| {
+        ScenePatchOperation::ReplaceComponent {
+            entity: scene_id("coupled"),
+            component: ComponentTypeId::new("nara.test.CoupledFields"),
+            value,
+        }
+    }));
+    let mut document = source.clone();
+
+    let report = patch.apply_to_scene(&mut document, &registry);
+
+    assert!(!report.applied);
+    assert_eq!(document, source);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code().as_str() == "scene.invalid-component-payload"
+            && diagnostic_has_u64_field(diagnostic, "operation-index", 0)
+    }));
+}
+
+#[test]
 fn direct_prefab_spawn_applies_patch_field_overrides() {
     let registry = test_registry();
     let id = scene_id("enemy");
@@ -4477,6 +4597,74 @@ fn scene_component_schemas_expose_scalar_fields() {
             .collect::<Vec<_>>(),
         vec![("<root>".to_string(), ComponentValueKind::String, true)]
     );
+}
+
+fn coupled_fields_registry() -> ComponentRegistry {
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register_persistent_component_with_codec::<TestCoupledFields, _, _>(
+            test_component_schema(
+                ComponentTypeId::new("nara.test.CoupledFields"),
+                "Coupled fields",
+                ComponentSchemaVersion::ONE,
+                ["x", "y"].map(|field| {
+                    test_component_field(
+                        field,
+                        field,
+                        ComponentFieldPath::from_fields([field]),
+                        ComponentValueKind::I64,
+                        true,
+                    )
+                }),
+            ),
+            |value| {
+                let horizontal = value.field_i64("x")?;
+                let vertical = value.field_i64("y")?;
+                if horizontal != vertical {
+                    return Err(ComponentCodecError::invalid_field("y", "equal to x"));
+                }
+                Ok(TestCoupledFields {
+                    horizontal,
+                    vertical,
+                })
+            },
+            |fields| {
+                Ok(ComponentValue::map([
+                    ("x", ComponentValue::I64(fields.horizontal)),
+                    ("y", ComponentValue::I64(fields.vertical)),
+                ]))
+            },
+        )
+        .unwrap();
+    registry.freeze().unwrap();
+    registry
+}
+
+fn coupled_fields_entity(horizontal: i64, vertical: i64) -> SceneEntityRecord {
+    SceneEntityRecord::new(scene_id("coupled")).with_component(
+        ComponentTypeId::new("nara.test.CoupledFields"),
+        SceneComponentRecord::new(
+            ComponentSchemaVersion::ONE,
+            ComponentValue::map([
+                ("x", ComponentValue::I64(horizontal)),
+                ("y", ComponentValue::I64(vertical)),
+            ]),
+        ),
+    )
+}
+
+fn coupled_fields_patch(
+    field_order: [&str; 2],
+    horizontal: i64,
+    vertical: i64,
+) -> ScenePatchDocument {
+    ScenePatchDocument::new(field_order.map(|field| ScenePatchOperation::SetField {
+        entity: scene_id("coupled"),
+        component: ComponentTypeId::new("nara.test.CoupledFields"),
+        component_version: ComponentSchemaVersion::ONE,
+        field: ComponentFieldId::new(field),
+        value: ComponentValue::I64(if field == "x" { horizontal } else { vertical }),
+    }))
 }
 
 fn register_test_position(registry: &mut ComponentRegistry) -> Result<(), ComponentRegistryError> {

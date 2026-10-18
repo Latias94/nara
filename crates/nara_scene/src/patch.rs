@@ -17,6 +17,7 @@ use crate::{
         error as diagnostic_error, with_capability, with_component_field_path,
         with_component_field_path_error, with_public_locator, with_public_u64,
     },
+    validation::validate_patch_intermediate_scene,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -289,7 +290,12 @@ impl ScenePatchDocument {
                 });
             }
             validation_work = observed;
-            let validation = validate(&scratch, registry, Some(operation_index));
+            let validation = if operation_index + 1 == self.operations.len() {
+                scratch.canonicalize();
+                validate(&scratch, registry, Some(operation_index))
+            } else {
+                validate_patch_intermediate_scene(&scratch.instantiate(), registry, operation_index)
+            };
             if validation.has_errors() {
                 return Err(ScenePatchReport {
                     applied: false,
@@ -398,11 +404,12 @@ impl ScenePatchDocument {
                     Err(report) => return Err(*report),
                 };
             if let Err(report) = validate_applied_operation(
-                &scratch,
+                &mut scratch,
                 registry,
                 operation_index,
                 &mut validation_work,
                 limits,
+                operation_index + 1 == self.operations.len(),
                 &mut validate,
             ) {
                 return Err(*report);
@@ -448,6 +455,7 @@ impl ScenePatchDocument {
             };
         }
 
+        let final_operation_index = self.operations.len() - 1;
         let mut validation_work = source_work;
         for (operation_index, operation) in self.operations.into_iter().enumerate() {
             if let Err(diagnostic) =
@@ -467,6 +475,7 @@ impl ScenePatchDocument {
                 operation_index,
                 &mut validation_work,
                 limits,
+                operation_index == final_operation_index,
                 &mut validate,
             ) {
                 return *report;
@@ -1195,11 +1204,12 @@ fn apply_operation_for_patch(
 }
 
 fn validate_applied_operation(
-    document: &SceneDocument,
+    document: &mut SceneDocument,
     registry: &ComponentRegistry,
     operation_index: usize,
     validation_work: &mut SceneValidationWork,
     limits: ScenePatchApplyLimits,
+    final_operation: bool,
     validate: &mut impl FnMut(&SceneDocument, &ComponentRegistry, Option<usize>) -> DiagnosticReport,
 ) -> Result<(), Box<ScenePatchReport>> {
     let operation_work = scene_validation_work(document);
@@ -1217,7 +1227,12 @@ fn validate_applied_operation(
     }
     *validation_work = observed;
 
-    let validation = validate(document, registry, Some(operation_index));
+    let validation = if final_operation {
+        document.canonicalize();
+        validate(document, registry, Some(operation_index))
+    } else {
+        validate_patch_intermediate_scene(document, registry, operation_index)
+    };
     if validation.has_errors() {
         return Err(Box::new(ScenePatchReport {
             applied: false,
