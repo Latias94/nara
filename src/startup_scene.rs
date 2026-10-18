@@ -99,8 +99,7 @@ pub struct StartupSceneSource {
 /// alive. The move-only [`StartupSceneSource`] remains the only materialization input.
 #[derive(Clone)]
 pub struct StartupSceneSourceView {
-    document: Weak<SceneDocument>,
-    provenance: Weak<SceneEntityProvenanceMap>,
+    source: Weak<StartupSceneSource>,
     retained_bytes: usize,
 }
 
@@ -233,19 +232,30 @@ impl StartupSceneSourceView {
     /// Returns `None` after that authority has retired. The temporary strong reference is kept
     /// inside this method so the view cannot accidentally extend the retained allocation.
     pub fn with_document<R>(&self, inspect: impl FnOnce(&SceneDocument) -> R) -> Option<R> {
-        self.document
+        self.source
             .upgrade()
-            .map(|document| inspect(document.as_ref()))
+            .map(|source| inspect(source.document()))
     }
 
-    /// Borrows the exact expanded document and its immutable structured provenance together.
+    /// Borrows the exact expanded document, provenance, and admitted asset database together.
+    ///
+    /// All three values come from the same retained source owner. Direct sources have no project
+    /// database. Returns `None` after the root activation owner retires, even if another caller
+    /// still retains the underlying document.
     pub fn with_expanded_scene<R>(
         &self,
-        inspect: impl FnOnce(&SceneDocument, &SceneEntityProvenanceMap) -> R,
+        inspect: impl FnOnce(
+            &SceneDocument,
+            &SceneEntityProvenanceMap,
+            Option<&nara_asset::ProjectAssetDatabase>,
+        ) -> R,
     ) -> Option<R> {
-        let document = self.document.upgrade()?;
-        let provenance = self.provenance.upgrade()?;
-        Some(inspect(document.as_ref(), provenance.as_ref()))
+        let source = self.source.upgrade()?;
+        Some(inspect(
+            source.document(),
+            &source.provenance,
+            source.asset_database(),
+        ))
     }
 
     /// Returns the logical retained-byte charge owned by the root activation authority.
@@ -259,7 +269,7 @@ impl fmt::Debug for StartupSceneSourceView {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("StartupSceneSourceView")
-            .field("available", &(self.document.strong_count() > 0))
+            .field("available", &(self.source.strong_count() > 0))
             .field("retained_bytes", &self.retained_bytes())
             .finish_non_exhaustive()
     }
@@ -278,7 +288,7 @@ pub struct StartupSceneActivation<'w> {
 
 #[derive(Resource)]
 pub(crate) struct StartupSceneActivationOwner {
-    source: StartupSceneSource,
+    source: Arc<StartupSceneSource>,
     receipt: SpawnedSceneInstance,
 }
 
@@ -302,8 +312,7 @@ impl StartupSceneActivation<'_> {
     #[must_use]
     pub fn source_view(&self) -> StartupSceneSourceView {
         StartupSceneSourceView {
-            document: Arc::downgrade(&self.owner.source.document),
-            provenance: Arc::downgrade(&self.owner.source.provenance),
+            source: Arc::downgrade(&self.owner.source),
             retained_bytes: self.owner.source.retained_bytes(),
         }
     }
@@ -524,7 +533,7 @@ pub fn materialize_startup_scene(
         .take()
         .expect("successful scene spawning always publishes an instance receipt");
     world.insert_resource(StartupSceneActivationInput(StartupSceneActivationOwner {
-        source,
+        source: Arc::new(source),
         receipt,
     }));
     world
@@ -658,20 +667,33 @@ mod tests {
     #[test]
     fn source_view_cannot_extend_the_root_document_lifetime() {
         let document = Arc::new(SceneDocument::from_ordered_roots([]));
+        let source = Arc::new(
+            StartupSceneSource::direct(Arc::clone(&document), ByteLimit::new(1024).unwrap())
+                .unwrap(),
+        );
         let view = StartupSceneSourceView {
-            document: Arc::downgrade(&document),
-            provenance: Weak::new(),
-            retained_bytes: 17,
+            source: Arc::downgrade(&source),
+            retained_bytes: source.retained_bytes(),
         };
         let clone = view.clone();
 
-        assert_eq!(Arc::strong_count(&document), 1);
+        assert_eq!(Arc::strong_count(&source), 1);
         assert_eq!(view.with_document(|source| source.entities.len()), Some(0));
-        assert_eq!(clone.retained_bytes(), 17);
+        assert_eq!(clone.retained_bytes(), source.retained_bytes());
+        assert_eq!(
+            view.with_expanded_scene(|document, provenance, database| {
+                assert!(provenance.is_empty());
+                assert!(database.is_none());
+                document.entities.len()
+            }),
+            Some(0)
+        );
 
-        drop(document);
+        drop(source);
+        assert_eq!(Arc::strong_count(&document), 1);
         assert_eq!(view.with_document(|source| source.entities.len()), None);
         assert_eq!(clone.with_document(|source| source.entities.len()), None);
+        assert_eq!(view.with_expanded_scene(|_, _, _| ()), None);
     }
 
     #[test]

@@ -1,8 +1,11 @@
 #[path = "support/project_content_fixture.rs"]
 mod project_content_fixture;
+#[path = "support/reference_project_copy.rs"]
+mod reference_project_copy;
 
 use std::{
     collections::BTreeMap,
+    fs,
     num::NonZeroU32,
     sync::Arc,
     time::{Duration, Instant},
@@ -48,8 +51,9 @@ use nara_reference_game::{
 };
 use project_content_fixture::{
     headless_wave_candidate_plan_and_root, headless_wave_candidate_plan_and_root_with,
-    project_root_capability,
+    headless_wave_candidate_plan_and_root_with_at, project_root_capability, texture_stable_id,
 };
+use reference_project_copy::ReferenceProjectCopy;
 
 const TIE_SETUP_PLUGIN_ID: PluginId = PluginId::new("reference-game.test.tie-setup");
 const INVALID_TOPOLOGY_PLUGIN_ID: PluginId = PluginId::new("reference-game.test.invalid-topology");
@@ -1352,6 +1356,65 @@ fn current_receipt_excludes_foreign_same_shaped_actors_from_simulation_and_snaps
     assert_eq!(terminal.score, 300);
     assert!(runtime.world().get_entity(foreign_player).is_ok());
     assert!(runtime.world().get_entity(foreign_enemy).is_ok());
+    stop_adapter_retry_runtime(runtime);
+}
+
+#[test]
+fn retry_resolves_stable_assets_from_the_retained_project_source() {
+    let project = ReferenceProjectCopy::new("retry-stable-assets");
+    let scene_path = project.file("scenes/startup.scene.json");
+    let mut scene: serde_json::Value =
+        serde_json::from_slice(&fs::read(&scene_path).unwrap()).unwrap();
+    let player = scene["payload"]["entities"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|entity| entity["id"] == "player")
+        .unwrap();
+    let image = &mut player["components"]["nara.sprite.Sprite"]["value"]["value"]["material"]["value"]
+        ["image"]["value"];
+    assert_eq!(image["kind"]["value"], "path");
+    image["kind"]["value"] = "stable_id".into();
+    image["value"]["value"] = texture_stable_id().to_string().into();
+    fs::write(&scene_path, serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
+
+    let mut runtime = build_adapter_retry_runtime(headless_wave_candidate_plan_and_root_with_at(
+        project.path(),
+        run_initialization_audit_plugin(),
+    ));
+    let (old_player, _) = player_scene_identity(runtime.world());
+    let image = runtime
+        .world()
+        .get::<Sprite>(old_player)
+        .unwrap()
+        .material
+        .image;
+    assert_eq!(
+        runtime
+            .world()
+            .resource::<nara::asset::AssetServer>()
+            .stable_id(image.expect("the player has an authored image").id()),
+        Some(texture_stable_id())
+    );
+    drive_adapter_to_terminal(&mut runtime);
+    submit_retry_for_next_tick(&mut runtime, 2);
+    drive_adapter_to_run_generation(&mut runtime, 2);
+
+    let (new_player, _) = player_scene_identity(runtime.world());
+    assert_ne!(old_player, new_player);
+    assert_eq!(
+        runtime
+            .world()
+            .get::<Sprite>(new_player)
+            .unwrap()
+            .material
+            .image,
+        image
+    );
+    assert_eq!(
+        runtime.world().resource::<WaveRetryStatus>().phase(),
+        WaveRetryPhase::Applied
+    );
     stop_adapter_retry_runtime(runtime);
 }
 

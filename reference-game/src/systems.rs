@@ -461,43 +461,46 @@ fn apply_wave_reset(world: &mut World) -> Result<bool, BevyError> {
         let status = *world.resource::<WaveRetryStatus>();
         let last_rejection = status.last_rejection();
         let ui_action_sequence = status.pending_ui_action_sequence();
-        let replacement = owner.source().with_expanded_scene(|source, provenance| {
-            let prepared = prepare_reference_run(
-                source,
-                next_generation,
-                RunPublication::Retry {
-                    last_rejection,
-                    ui_action_sequence,
-                },
-            )?;
-            let limits = SceneProductTransactionLimits::new(
-                ItemLimit::new(MAX_WAVE_SCENE_ENTITIES.saturating_mul(3))
-                    .expect("the reference overlay limit is non-zero"),
-                ItemLimit::new(MAX_WAVE_PROJECTILES)
-                    .expect("the reference projectile limit is non-zero"),
-            );
-            let retirements = owner.projectile_tokens().to_vec();
-            let baseline = prepared.baseline.clone();
-            let report = replace_scene_with_product_and_provenance(
-                world,
-                &registry,
-                source,
-                provenance,
-                owner.receipt(),
-                limits,
-                &retirements,
-                |writer| {
-                    prepared.write_overlay(writer);
-                    writer
-                        .replace_resource(baseline.movement)
-                        .replace_resource(baseline.generation)
-                        .replace_resource(baseline.retry)
-                        .replace_resource(baseline.state.clone())
-                        .replace_resource(WaveSnapshot::default());
-                },
-            );
-            Ok::<_, ReferenceSimulationError>((prepared, report))
-        });
+        let replacement = owner
+            .source()
+            .with_expanded_scene(|source, provenance, database| {
+                let prepared = prepare_reference_run(
+                    source,
+                    next_generation,
+                    RunPublication::Retry {
+                        last_rejection,
+                        ui_action_sequence,
+                    },
+                )?;
+                let limits = SceneProductTransactionLimits::new(
+                    ItemLimit::new(MAX_WAVE_SCENE_ENTITIES.saturating_mul(3))
+                        .expect("the reference overlay limit is non-zero"),
+                    ItemLimit::new(MAX_WAVE_PROJECTILES)
+                        .expect("the reference projectile limit is non-zero"),
+                );
+                let retirements = owner.projectile_tokens().to_vec();
+                let baseline = prepared.baseline.clone();
+                let report = replace_scene_with_product_and_provenance(
+                    world,
+                    &registry,
+                    source,
+                    provenance,
+                    database,
+                    owner.receipt(),
+                    limits,
+                    &retirements,
+                    |writer| {
+                        prepared.write_overlay(writer);
+                        writer
+                            .replace_resource(baseline.movement)
+                            .replace_resource(baseline.generation)
+                            .replace_resource(baseline.retry)
+                            .replace_resource(baseline.state.clone())
+                            .replace_resource(WaveSnapshot::default());
+                    },
+                );
+                Ok::<_, ReferenceSimulationError>((prepared, report))
+            });
         let Some(replacement) = replacement else {
             world
                 .resource_mut::<WaveRetryStatus>()

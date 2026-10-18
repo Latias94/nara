@@ -1003,11 +1003,14 @@ impl SceneSpawner {
 /// authority for product-owned retirement. Receipt-owning product state can be held outside the
 /// World with `World::resource_scope` and updated from the successful report before the exclusive
 /// caller returns; a rejected replacement leaves that state unchanged.
+/// The asset database must come from the admitted source, as with initial spawning; `None` is
+/// appropriate only for sources that do not require project stable-asset resolution.
 #[must_use]
 pub fn replace_scene_with_product<F>(
     world: &mut World,
     registry: &ComponentRegistry,
     document: &SceneDocument,
+    database: Option<&ProjectAssetDatabase>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[WorldEntityToken],
@@ -1021,6 +1024,7 @@ where
         registry,
         document,
         &SceneEntityProvenanceMap::new(),
+        database,
         current,
         limits,
         additional_retirements,
@@ -1029,13 +1033,14 @@ where
 }
 
 /// Replaces one active Scene Instance while preserving the source provenance of an already
-/// expanded document.
+/// expanded document and its admitted asset-resolution context.
 #[must_use]
 pub fn replace_scene_with_product_and_provenance<F>(
     world: &mut World,
     registry: &ComponentRegistry,
     document: &SceneDocument,
     provenance: &SceneEntityProvenanceMap,
+    database: Option<&ProjectAssetDatabase>,
     current: &SpawnedSceneInstance,
     limits: SceneProductTransactionLimits,
     additional_retirements: &[WorldEntityToken],
@@ -1048,7 +1053,7 @@ where
         world,
         registry,
         document,
-        None,
+        database,
         SceneIdentityCommit::Replace(current),
         Some(SceneProductTransactionInput {
             limits,

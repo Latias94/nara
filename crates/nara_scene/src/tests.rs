@@ -3308,6 +3308,49 @@ fn stable_asset_ref_resolves_with_database_before_scene_spawn() {
 }
 
 #[test]
+fn product_replacement_preserves_stable_asset_resolution() {
+    let registry = test_asset_registry();
+    let stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
+    let database = test_database(stable_id, "textures/player.png");
+    let id = scene_id("player");
+    let document = SceneDocument::from_ordered_roots([SceneEntityRecord::new(id.clone())
+        .with_component(
+            asset_link_type_id(),
+            asset_link_record(AssetRef::StableId(stable_id)),
+        )]);
+    let mut world = World::new();
+    let initial = spawn_scene_with_asset_database(&mut world, &registry, &document, &database);
+    assert!(!initial.diagnostics.has_errors());
+    let old_entity = spawned_entity(&world, &initial, &id);
+
+    let replacement = crate::advanced::replace_scene_with_product(
+        &mut world,
+        &registry,
+        &document,
+        Some(&database),
+        initial.instance.as_ref().unwrap(),
+        crate::advanced::SceneProductTransactionLimits::new(
+            ItemLimit::new(1).unwrap(),
+            ItemLimit::new(1).unwrap(),
+        ),
+        &[],
+        |_| {},
+    );
+
+    assert!(
+        !replacement.diagnostics.has_errors(),
+        "replacement must use the same admitted asset database as initial spawn: {:?}",
+        replacement.diagnostics
+    );
+    assert!(world.get_entity(old_entity).is_err());
+    let entity = spawned_entity(&world, &replacement, &id);
+    let handle = world.get::<TestAssetLink>(entity).unwrap().handle;
+    let asset_server = world.resource::<AssetServer>();
+    assert_eq!(asset_server.path(handle.id()), Some("textures/player.png"));
+    assert_eq!(asset_server.stable_id(handle.id()), Some(stable_id));
+}
+
+#[test]
 fn unknown_stable_asset_ref_is_redacted_in_diagnostics_without_world_mutation() {
     let registry = test_asset_registry();
     let known_stable_id = stable_id("2f0d71c7-14fc-4ed4-b48b-1c61bba8b97f");
