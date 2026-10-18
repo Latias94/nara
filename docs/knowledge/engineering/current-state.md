@@ -3,7 +3,7 @@ type: "Current State"
 title: "Current Engineering State"
 description: "Derived summary of immutable engineering-memory shards."
 tags: ["engineering-memory", "derived"]
-source_fingerprint: "086c085803428c4d396f58a5b8a00fd5e94b2f5d30f6eaa13270d1801f7ce1a9"
+source_fingerprint: "f1fde87569e584c0f2c50659839325f68f470d29df366696264f8164ca62ea74"
 ---
 
 # Current State
@@ -12,8 +12,8 @@ source_fingerprint: "086c085803428c4d396f58a5b8a00fd5e94b2f5d30f6eaa13270d1801f7
 
 This file is derived from immutable shards. Record new facts in shards, then render during integration.
 
-- Source fingerprint: `086c085803428c4d396f58a5b8a00fd5e94b2f5d30f6eaa13270d1801f7ce1a9`
-- Immutable records: 725
+- Source fingerprint: `f1fde87569e584c0f2c50659839325f68f470d29df366696264f8164ca62ea74`
+- Immutable records: 729
 - Active lane heads: 0
 
 # Active Registrations
@@ -47,6 +47,10 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 
 # Recent Evidence
 
+- **Work Progress**: [Foundation U3 effective values and reference closure](progress/2026-10/2026-10-18T053959Z-u3-effective-closure.md) - Effective default materialization, scene/prefab/export closure, asset collection limits, and Inspector projection landed after U2.
+- **Work Progress**: [Foundation identity residency, input endpoint and font ownership repairs](progress/2026-10/2026-10-18T040444Z-foundation-identity-input-font-repairs.md) - U5, U11 and U14 code and consumer proof, remaining recursive-schema work, serial test evidence and limits.
+- **Work Progress**: [Foundation U1 transaction boundary and U6 owner-thread repair](progress/2026-10/2026-10-18T033610Z-foundation-u1-u6-transaction-and-thread-ownership.md) - Reproduced and repaired intermediate native validation and executable-owner mobility; serial owning-package and consumer evidence.
+- **Work Progress**: [Foundation fearless refactor goal and reviewed plan](progress/2026-10/2026-10-18T031900Z-foundation-refactor-goal-and-plan.md) - Reviewed dependency-ordered foundation plan, external HTML delivery, active goal and first implementation boundary.
 - **Decision**: [Agent workflow and design cleanup](decisions/2026-10/2026-10-17T152243Z-agent-workflow-and-design-cleanup-c85f611fef834769b7488de6e5ffcc15.md) - Keep engineering continuity while removing registration gates and retiring stale design entrances.
 - **Verification Evidence**: [Dear ImGui 0.21 published backend acceptance](verification/2026-10/2026-10-17T135132Z-dear-imgui-0-21-published-backend-acceptance-5cf11eaec8ea42a986d4953c4a4a00b8.md) - Published registry cohort, owned renderer mapping, native IME and Windows DX12 product qualification with bounded text-intent cadence.
 - **Memory Event**: [Verification: Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourte](logs/2026-10/2026-10-17T135008Z-verification-green-editor-run8d5467b0-passes132-132-with-bounded-text-intent-followup-fourte-01d5279ca83145e497911729d884cfef.md) - Green Editor run8d5467b0 passes132/132 with bounded text-intent followup; fourteen native cases remain outside ordinary suite. Independent i
@@ -55,10 +59,6 @@ This file is derived from immutable shards. Record new facts in shards, then ren
 - **Memory Event**: [Verification: Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 lock](logs/2026-10/2026-10-17T134101Z-verification-independent-module-consumer-cohort-455d45a5-passes18-18-using-published0-21-lock-29b4d17cf24a4c088c25eea27cde2d20.md) - Independent module-consumer cohort 455d45a5 passes18/18 using published0.21 locks. First Windows DX12 native run aeca2708 executes7:5 existi
 - **Memory Event**: [Verification: Dear 0.21 integration passes cargo check --workspace --all-features --all-target](logs/2026-10/2026-10-17T133203Z-verification-dear-0-21-integration-passes-cargo-check-workspace-all-features-all-target-2f9e6290d3e0481f9958ebbd9b925a46.md) - Dear 0.21 integration passes cargo check --workspace --all-features --all-targets --locked --offline after caller/test API migration. Render
 - **Memory Event**: [Progress: Dear 0.21 upgrade active ef15d6f0. Registry core/Winit/WGPU packages match upstr](logs/2026-10/2026-10-17T131134Z-progress-dear-0-21-upgrade-active-ef15d6f0-registry-core-winit-wgpu-packages-match-upstr-f47a701e3f5f4f72a842f820499c2943.md) - Dear 0.21 upgrade active ef15d6f0. Registry core/Winit/WGPU packages match upstream 58a44069; root, module-consumer and reference-game locks
-- **Verification Evidence**: [Foundation correctness closure U1-U5 verification](verification/2026-10/2026-10-17T115334Z-foundation-correctness-closure-u1-u5-verification-4490cc23b14742749a37e7a9cb1c7cbf.md) - Observed U1-U5 behavior regressions, exact renderer cohort and native Windows/DX12 acceptance, with serial checks and bounded platform claims.
-- **Memory Event**: [Progress: Foundation closure U1 committed187abda after red0eeafccb (Modified control pass,](logs/2026-10/2026-10-17T112422Z-progress-foundation-closure-u1-committed187abda-after-red0eeafccb-modified-control-pass-6844535470db48a787a8caa68c76a546.md) - Foundation closure U1 committed187abda after red0eeafccb (Modified control pass, Removed byte limit failed Some1vsNone) and Image redb1e1a33
-- **Memory Event**: [Verification: Foundation correctness plan review complete: feasibility, coherence, design, sco](logs/2026-10/2026-10-17T110059Z-verification-foundation-correctness-plan-review-complete-feasibility-coherence-design-sco-19e1cf997e7d44dea12d26614ccbb357.md) - Foundation correctness plan review complete: feasibility, coherence, design, scope and adversarial lenses across three read-only Codex conte
-- **Memory Event**: [Completion: Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4](logs/2026-10/2026-10-17T102708Z-completion-original-editor-foundation-full-u9-u1-u8-finite-acceptance-achieved-at-source-f4-5670eb0ad1fc4fba9d29b6cef0eff2f4.md) - Original Editor Foundation full U9/U1-U8 finite acceptance achieved at source f4ffdd18, final evidence b68c3a9f938a49b7ba63779f2849d0d9. Exa
 
 # Integration Notes
 
